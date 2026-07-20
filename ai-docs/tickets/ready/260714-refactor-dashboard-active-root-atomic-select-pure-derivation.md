@@ -408,6 +408,54 @@ and the live-dogfooding gate above.
   back into `260714-idea-...-fragility` (leave that idea ticket as the standing
   evidence log; do not delete it).
 
+### Result (none) - 2026-07-20
+
+Verification-only phase; no production code changed. Re-confirmed all three
+survey findings against the current tree rather than inventing busywork:
+
+- **Bullet 1 (dead-code sweep)**: grepped `lastActiveRootKey`,
+  `lastActiveRootServerId`, `resolveEffectiveActiveRootKey` across
+  `App.tsx`/`openRootLookup.ts` - zero live symbols, only the two historically
+  accurate comments (`openRootLookup.ts:229-230`, `App.tsx:1217`, `App.tsx:6026`)
+  already confirmed correct by Phase 1/2. Re-grepped
+  `setSelectedServerId`/`setSelectedId`/`selectedServerIdRef.current =` -
+  every call site is either inside `selectRoot` (`App.tsx:662-667`), the
+  `selectedServerId` mirror effect (`App.tsx:647`), or a legitimately
+  out-of-triple `selectedId`-only update (`App.tsx:800`, `806`, `1425`).
+  Nothing to delete; Phase 1/2 already resolved this bullet.
+- **Bullet 2 (optional D5 `lastNonNullResourcesByServer` state promotion)**:
+  SKIPPED, per lead decision. This is a low-risk cleanup pass; the promotion
+  is purely cosmetic (removes a render-time-mutation smell) with real risk of
+  introducing an infinite-render-loop bug if the "adjusting state during
+  render" pattern is mishandled, for no functional benefit. The ticket itself
+  (D5) leaves this optional and reviewer's/executor's call - the call is to
+  leave `lastNonNullResourcesByServerRef` as a ref.
+- **Bullet 3a (spec)**: re-read
+  `{#260714-ws-dashboard-cross-server-workbench-keepalive}`
+  (`ai-docs/spec/ws-web-dashboard/index.md:155-196`) - confirmed it is a pure
+  black-box behavioral contract naming no implementation detail this refactor
+  touched (no ref, no derivation function name, no watermark/flash wording).
+  No edit made; this refactor's stated goal across all three phases was
+  preserving this exact contract more robustly, not changing it.
+- **Bullet 3b (fold disposition back)**: real work, done. Appended a
+  `## Disposition` section to
+  `ai-docs/tickets/idea/260714-idea-dashboard-workbench-active-root-derivation-fragility.md`
+  (left in `idea/`, not moved/closed) summarizing that this actionable
+  ticket's Phases 1-3 answered the fragility diagnosis, pointing at this
+  ticket's own Traceability table rather than restating it.
+
+Verification: `npm run build` clean; `test:workbench`, `test:resource-model`,
+`test:commands`, `test:open-work-root` all exit 0 (unchanged from Phase 2 -
+no source edits in this phase to regress them).
+
+Deviations from plan: none. All three code-scope bullets (1, 2, 3a) confirmed
+already resolved or intentionally skipped exactly as the plan's survey
+anticipated; only the doc-scope bullet (3b) required an edit.
+
+With this Result recorded, all three phases of this ticket now have Results.
+Ticket-close (moving this file out of `ready/`) is a separate lead-owned step,
+not performed here.
+
 ## Migration risk, ordering, rollback
 
 - **Ordering is load-bearing.** Phase 1 must land the union AND the ref-deletion
