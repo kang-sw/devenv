@@ -1,6 +1,9 @@
 package wsdoc
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ticketChecklistAcceptedTypes mirrors TicketTemplate's accepted category set.
 var ticketChecklistAcceptedTypes = map[string]bool{
@@ -33,7 +36,7 @@ func TicketChecklist(typeStr, phase string) (string, error) {
 		return ticketChecklistContent, nil
 	case "intent":
 		items := []string{
-			"1. Re-read the written/edited ticket against the conversation and cross-ticket decision review, against the categories in **Apply Ticket Content**.",
+			"1. Re-read the written/edited ticket against the conversation and cross-ticket decision review, checking every settled decision, contract, agreed API/type/event/UI sketch, rejected alternative, constraint, forward-compatibility guardrail, and verification expectation, and confirming nothing unconfirmed was written.",
 			"2. Test: could a fresh implementer build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket? If yes, capture the missing settled decision.",
 			"3. Check that API/type/event/UI sketches were preserved literally, not prose-flattened.",
 			"4. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus \"Next\" line was written.",
@@ -51,11 +54,7 @@ func TicketChecklist(typeStr, phase string) (string, error) {
 			fmt.Sprintf("%d. Fix confirmed gaps in-place; return unconfirmed gaps to the Open Decision Queue instead of writing them.", next),
 			fmt.Sprintf("%d. Present a brief correction summary, or confirm nothing was missed.", next+1),
 		)
-		text := items[0]
-		for _, item := range items[1:] {
-			text += "\n" + item
-		}
-		return text, nil
+		return strings.Join(items, "\n"), nil
 	default:
 		return "", fmt.Errorf("unknown ticket checklist phase %q; accepted: content, intent", phase)
 	}
