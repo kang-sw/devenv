@@ -1,4 +1,5 @@
 import {
+  applySelectRoot,
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
   withOpenWorkRootKey,
@@ -250,4 +251,30 @@ assertDeepEqual(
   sameRefResult,
   { "key-a": refX },
   "withOpenWorkRootRef does not clobber an already-open root's ref",
+);
+
+// `applySelectRoot` - the pure core of the `selectRoot(serverId, entityId)`
+// atomic action (260714 Phase 2, D4). Asserts the `selectedServerId`/
+// `selectedId` pair advances together (atomically) for a work-root-shaped
+// `entityId`, and separately for a non-work-root `entityId` (server row /
+// workspace row id) - `selectRoot` never resolves or validates `entityId`
+// itself, so both cases return the exact same `{selectedServerId,
+// selectedId}` shape regardless of what kind of id `entityId` is.
+
+assertDeepEqual(
+  applySelectRoot({ serverId: "server-remote-1", entityId: "root-a" }),
+  { selectedServerId: "server-remote-1", selectedId: "root-a" },
+  "applySelectRoot commits the selectedServerId/selectedId pair atomically for a work-root-shaped entityId",
+);
+
+assertDeepEqual(
+  applySelectRoot({ serverId: "server-local", entityId: "server-local" }),
+  { selectedServerId: "server-local", selectedId: "server-local" },
+  "applySelectRoot commits selection unchanged for a non-work-root entityId (a server row), without inventing a mount",
+);
+
+assertDeepEqual(
+  applySelectRoot({ serverId: "server-local", entityId: "workspace-a" }),
+  { selectedServerId: "server-local", selectedId: "workspace-a" },
+  "applySelectRoot commits selection unchanged for a non-work-root entityId (a workspace row), without inventing a mount",
 );
