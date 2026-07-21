@@ -159,3 +159,20 @@ no-worktrees case. Do not change icon shape/glyph selection
 Success: a root-with-worktrees (`workspace`/`workRoot` presentation) and a
 single no-worktree root (`compactWorkRoot` presentation) render their main
 glyph in the same color; no other icon/color behavior changed.
+
+## Result (2026-07-21)
+
+Implemented as a single CSS color-token edit: `.resource-row-icon,
+.resource-kind-glyph` `color` changed `var(--ws-color-text-tertiary)` →
+`var(--ws-color-action)` in `ws-dashboard/frontend/src/styles.css` (line
+~2629), unifying the base-root-with-worktrees glyph color with the
+single-root glyph.
+
+No shape/glyph/badge/border logic changed; `App.tsx` untouched; the
+now-redundant `.resource-row-icon-compact` rule left in place per the narrow
+scope.
+
+Verification: `npm run build` passed (tsc + vite); no color-assertion tests
+exist. Single-scope review returned clean.
+
+Implementation commit: 8ffb60b7 (plan 9181b7b1).
