@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -500,15 +501,9 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 	}
 }
 
-// TestRenderGoldenShippedDelegateModelVarsPerHarness verifies the tier-derived
-// RoleModel var resolves to per-harness model strings on the REAL shipped delegate
-// playbooks. implementer declares {{.RoleModel}} (tier medium); reviewer declares
-// {{.RoleModel}} (tier large). An isolated empty CacheHome yields the built-in
-// default aliases (claude: medium→sonnet, large→opus; codex: medium→gpt-5.6-terra,
-// large→gpt-5.6-sol),
-// so the assertions are deterministic and config-independent. Closes 260611 Phase 1
-// gap 2 (260609 Edition 379ff5e5: tier model vars never surfaced on a shipped asset).
-func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
+// TestRenderGoldenShippedDelegatesContainNoModelAliases verifies concrete model
+// names are returned as render metadata, not self-reported in worker prompts.
+func TestRenderGoldenShippedDelegatesContainNoModelAliases(t *testing.T) {
 	rsrcRoot := shippedRsrcRootForTest()
 
 	render := func(t *testing.T, name, harness string) string {
@@ -525,31 +520,22 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 		return body
 	}
 
-	// implementer → RoleModel (tier medium): claude=sonnet, codex=gpt-5.6-terra (distinct per harness).
+	// Removing the RoleModel line makes the shared implementer body identical
+	// across harnesses.
 	implClaude := render(t, "implementer", "claude")
 	implCodex := render(t, "implementer", "codex")
-	if !strings.Contains(implClaude, "sonnet") {
-		t.Errorf("implementer (claude) body must surface RoleModel 'sonnet':\n%s", implClaude)
-	}
-	if !strings.Contains(implCodex, "gpt-5.6-terra") {
-		t.Errorf("implementer (codex) body must surface RoleModel 'gpt-5.6-terra':\n%s", implCodex)
-	}
-	if implClaude == implCodex {
-		t.Error("implementer render did not diverge per harness — model var not resolved per harness")
+	if implClaude != implCodex {
+		t.Error("implementer body must not vary by the removed model alias")
 	}
 
-	// reviewer → RoleModel (tier large): claude=opus.
-	revClaude := render(t, "reviewer", "claude")
-	if !strings.Contains(revClaude, "opus") {
-		t.Errorf("reviewer (claude) body must surface RoleModel 'opus':\n%s", revClaude)
-	}
-
-	// reference-discovery → RoleModel (tier small): claude=haiku. Anchors the small
-	// tier concretely so all three first-class tiers (small/medium/large) have a
-	// resolved-model assertion, not just placeholder-absence.
-	refDiscClaude := render(t, "reference-discovery", "claude")
-	if !strings.Contains(refDiscClaude, "haiku") {
-		t.Errorf("reference-discovery (claude) body must surface RoleModel 'haiku':\n%s", refDiscClaude)
+	for name, body := range map[string]string{
+		"implementer":         implCodex,
+		"reviewer":            render(t, "reviewer", "claude"),
+		"reference-discovery": render(t, "reference-discovery", "claude"),
+	} {
+		if strings.Contains(body, "Alias model for this role:") {
+			t.Errorf("%s still self-reports a model alias:\n%s", name, body)
+		}
 	}
 }
 
@@ -645,6 +631,66 @@ func TestWithRecommendedTier(t *testing.T) {
 	}
 	if got := withRecommendedTier("path", "large"); got != "path\nrecommended-tier: large" {
 		t.Errorf("withRecommendedTier path = %q", got)
+	}
+}
+
+func TestWithRecommendedRenderBinding(t *testing.T) {
+	cases := []struct {
+		name    string
+		harness string
+		setup   func(t *testing.T, cacheHome string)
+		want    string
+	}{
+		{
+			name:    "default codex model and effort",
+			harness: "codex",
+			want: "path\nrecommended-tier: medium\nrecommended-model: gpt-5.6-terra\n" +
+				"recommended-reasoning-effort: high",
+		},
+		{
+			name:    "codex local override",
+			harness: "codex",
+			setup: func(t *testing.T, cacheHome string) {
+				t.Helper()
+				if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cacheHome}, "medium", "codex", "local-model", "codex", "xhigh"); err != nil {
+					t.Fatalf("set codex override: %v", err)
+				}
+			},
+			want: "path\nrecommended-tier: medium\nrecommended-model: local-model\n" +
+				"recommended-reasoning-effort: xhigh",
+		},
+		{
+			name:    "claude omits effort",
+			harness: "claude",
+			want:    "path\nrecommended-tier: medium\nrecommended-model: sonnet",
+		},
+		{
+			name:    "resolver failure preserves tier",
+			harness: "codex",
+			setup: func(t *testing.T, cacheHome string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(cacheHome, "config.json"), []byte("{not valid json"), 0o644); err != nil {
+					t.Fatalf("write malformed config: %v", err)
+				}
+			},
+			want: "path\nrecommended-tier: medium",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheHome := t.TempDir()
+			if tc.setup != nil {
+				tc.setup(t, cacheHome)
+			}
+			got := withRecommendedRenderBinding("path", tc.harness, "medium", wsconfig.Options{CacheHome: cacheHome})
+			if got != tc.want {
+				t.Fatalf("render metadata = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := withRecommendedRenderBinding("path", "codex", "", wsconfig.Options{}); got != "path" {
+		t.Errorf("empty tier must not add render metadata, got %q", got)
 	}
 }
 

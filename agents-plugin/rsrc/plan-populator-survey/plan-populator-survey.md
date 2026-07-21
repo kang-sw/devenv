@@ -15,8 +15,6 @@ variables:
 
 You are turning an accepted target into a light implementation plan.
 
-Alias model for this role: {{.RoleModel}}.
-
 ## Render Inputs
 
 - Ticket path: `{{.ticket_path}}`

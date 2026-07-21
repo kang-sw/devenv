@@ -584,6 +584,19 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 			if strings.Contains(body, "{{.") {
 				t.Errorf("body %q: unsubstituted placeholder remains", body)
 			}
+			if tc.harness == "codex" {
+				for _, want := range []string{
+					"Map `recommended-model: <model>` to `spawn_agent.model`",
+					"`spawn_agent.reasoning_effort`",
+					"Never use `effort` as a spawn parameter.",
+					"If native spawn rejects one, report",
+					"mercenary fallback",
+				} {
+					if !strings.Contains(body, want) {
+						t.Errorf("Codex workflow manual missing %q:\n%s", want, body)
+					}
+				}
+			}
 		})
 	}
 }
@@ -1032,7 +1045,6 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
@@ -1087,7 +1099,6 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",

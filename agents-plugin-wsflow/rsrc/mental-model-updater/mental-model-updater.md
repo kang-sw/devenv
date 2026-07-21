@@ -11,8 +11,6 @@ variables:
 You are updating mental-model documents after code implementation. Identify
 affected domains and apply minimal, accurate updates.
 
-Alias model for this role: {{.RoleModel}}.
-
 ## Constraints
 
 - Apply the inclusion test and document format from `{{.McpNamespace}}/convention.read(name: "mental-model-conventions")` to every edit.

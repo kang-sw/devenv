@@ -301,6 +301,32 @@ func withRecommendedTier(payload, tier string) string {
 	return payload + "\nrecommended-tier: " + strings.TrimSpace(tier)
 }
 
+// withRecommendedRenderBinding appends config-resolved native spawn bindings to
+// a playbook.render payload. The stable path and recommended-tier lines remain
+// first; model and reasoning effort are additive, optional metadata. Resolver
+// failures intentionally preserve the tier-only contract so callers can still
+// choose a native default or the mercenary tier fallback.
+//
+// playbook.print deliberately continues to use withRecommendedTier only: its
+// tier-only return contract is host-neutral and unchanged by render bindings.
+func withRecommendedRenderBinding(payload, harness, tier string, configOpts wsconfig.Options) string {
+	payload = withRecommendedTier(payload, tier)
+	if strings.TrimSpace(tier) == "" {
+		return payload
+	}
+	_, model, effort, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, tier, "", "", harness)
+	if err != nil {
+		return payload
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		payload += "\nrecommended-model: " + model
+	}
+	if effort = strings.TrimSpace(effort); effort != "" {
+		payload += "\nrecommended-reasoning-effort: " + effort
+	}
+	return payload
+}
+
 // childRoleForPlaybookRole maps a playbook frontmatter role string to the child key scope.
 // Returns (scope, true) for delegate-eligible roles; ("", false) for non-eligible roles
 // (lead, empty, or unknown).

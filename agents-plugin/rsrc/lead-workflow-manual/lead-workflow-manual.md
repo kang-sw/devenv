@@ -1,5 +1,7 @@
 ---
 kind: print
+includes:
+  - native-spawn-binding
 variables:
   - WorkflowLang
   - ExploreAgent
@@ -101,8 +103,8 @@ general-purpose named agent; registration applies delegate orientation and the
 default tier mapping. Call the agent for each continuity turn.
 Bundled delegate prompts are not registered by stem — render them. Obtain a
 delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
-(the tier-derived model-hint var auto-injects; a lead key splices a child-key credential block and
-the call returns a `recommended-tier`). Hand the rendered prompt to a native
+(a lead key splices a child-key credential block and the call returns a
+`recommended-tier` plus any resolved native binding metadata). Hand the rendered prompt to a native
 subagent (default), or pass it as `system_prompt_text` with `tier:
 <recommended-tier>` to a mercenary `mercenary.register` + `mercenary.call`, then
 collect through `mercenary.result`. `reference-discovery` is such a delegate
