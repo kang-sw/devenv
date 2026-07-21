@@ -215,6 +215,54 @@ shortcut is suppressed (no save dialog, no browser find bar, no zoom, etc.)
 in both a plain browser tab and the Phase 1 installed PWA, while Ctrl+R
 still reloads.
 
+### Result
+
+#### Edition (9fe2cb4b) - 2026-07-21
+
+Delivered on branch `impl/pwa-keydown-suppression`.
+
+- Global capture-phase `document` keydown suppressor installed near `App()`
+  that `preventDefault()`s Class-A browser shortcuts via a new pure
+  predicate `shouldSuppressBrowserShortcut` in a new `keydownSuppression.ts`
+  module. Suppressed set: Ctrl/Cmd + S/P/F/G/D/O/U/J and zoom
+  (+ / = / - / _ / 0), plus Backspace when the event target is NOT
+  editable. Whitelisted (never suppressed): Ctrl+R (reload), Ctrl/Cmd +
+  C/V/X/A/Z/Y, all plain typing, and Backspace in editable targets
+  (input/textarea/contenteditable/select).
+- Terminal coexistence: confirmed safe by correctness review against
+  xterm.js source. The suppressor is capture-phase on `document` and never
+  calls `stopPropagation`; xterm's own capture-phase handler does not gate
+  on `defaultPrevented`, so all suppressed control bytes still forward to
+  the terminal, and terminal Backspace is treated as editable (not
+  suppressed). No terminal-input regression.
+- Class-B shortcuts (Ctrl+W/T/N/Tab/1-9) remain browser-reserved and
+  unaffected by design - the PWA-standalone install from Phase 1 is what
+  removes the tab strip those act on, not this handler.
+- Testability: the block/allow logic is a pure DOM-free predicate,
+  unit-tested via a new `test:keydown-suppression` script covering
+  uppercase/Shift casing, Ctrl+Backspace, Cmd/meta parity, clipboard-allow,
+  and editable-vs-not; `SUPPRESSED_CTRL_KEYS` is exported and iterated so
+  new keys auto-cover.
+- Commits: `9fe2cb4b` (implementation + spec) + `7bcdbcbd` (review relay:
+  test hardening + `<select>` editable alignment).
+- Review: partitioned correctness/fit/test review. Correctness clean
+  (terminal coexistence verified). Fit clean. Test findings
+  (casing/Backspace/meta coverage + dedup) relayed and re-reviewed
+  RESOLVED. Remaining minors accepted by design.
+- Spec: added anchor `260721-ws-dashboard-browser-shortcut-suppression` to
+  `ai-docs/spec/ws-web-dashboard/index.md`.
+- Plan: `ai-docs/.plans/2026-07/21-1847-260721-phase2-keydown-suppression.md`
+- Manual dogfood (real browser: confirm each suppressed shortcut no longer
+  fires its browser action, Ctrl+R still reloads, terminal input
+  unaffected) remains the user's step - no live daemon instance was
+  available in this implementing session.
+
+**Ticket closure**: Phases 1-2 are complete and reviewed. Phase 3 (Keyboard
+Lock API / Tauri) is intentionally deferred per this ticket's own
+Delivery-Mode Spectrum above - it is scoped as optional/deferred, to be
+picked up only if Phases 1-2 prove insufficient in practice. Closing this
+ticket now; reopen or spin a new ticket if that need materializes.
+
 ### Phase 3 (optional/deferred): Residual reserved keys
 
 Evaluate fullscreen + the Keyboard Lock API (`navigator.keyboard.lock()`)

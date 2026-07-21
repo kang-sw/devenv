@@ -24,7 +24,8 @@
     "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test",
     "test:open-work-root": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/openWorkRoot.test.js",
     "test:document-viewer": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/documentViewer.test.js && node ./node_modules/.tmp/route-tests/documentRawEditor.test.js",
-    "test:git": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/gitToolbar.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeAdd.test.js"
+    "test:git": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/gitToolbar.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeAdd.test.js",
+    "test:keydown-suppression": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/keydownSuppression.test.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

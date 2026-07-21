@@ -741,6 +741,24 @@ protected router's owner-auth check accepts a session cookie (in addition
 to a bearer token); a token-only auth boundary could not satisfy a
 browser-initiated manifest fetch this way.
 
+## Browser Shortcut Suppression {#260721-ws-dashboard-browser-shortcut-suppression}
+
+The dashboard installs one capture-phase `document`-level `keydown`
+listener at the top-level `App` component that calls `preventDefault()`
+for a fixed set of Class-A browser shortcuts (Ctrl/Cmd+S/P/F/G/D/O/U/J,
+zoom Ctrl/Cmd+Plus/Minus/Equals/Underscore/0, and Backspace-as-back-
+navigation when the focused target is not an editable field), while
+explicitly never suppressing Ctrl/Cmd+R (reload) or normal editing/
+clipboard combos (Ctrl+C/V/X/A/Z/Y). The block/allow decision is a pure,
+DOM-free predicate (`keydownSuppression.ts`) so the exact set is
+unit-tested without a browser DOM; the App effect only reads real event/
+target state into the predicate's input shape. This suppressor targets
+Class A shortcuts only (interceptable via page-level `keydown`) — Class B
+browser-chrome-reserved shortcuts (Ctrl+W/T/N/Tab/1-9) are not addressed
+here since they never reach page script in any served mode. It runs
+identically in a plain browser tab and the Phase 1 installed PWA
+(`260721-ws-dashboard-pwa-installability`).
+
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the
