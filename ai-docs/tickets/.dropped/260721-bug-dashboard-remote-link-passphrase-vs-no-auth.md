@@ -76,3 +76,17 @@ source-confirmed against `crates/daemon/src/servers.rs`,
 `crates/daemon/src/auth.rs`, `crates/daemon/src/server.rs`, and
 `frontend/src/App.tsx` — this is beyond hypothesis, but the fix direction
 is intentionally left open for triage.
+
+## Dropped (2026-07-21)
+
+Dropped per explicit user decision on 2026-07-21. The per-daemon-start
+ephemeral link passphrase — rotating on every restart, and independent of
+`--no-auth` — is judged desirable security behavior, not a defect: `--no-auth`
+is meant to disable direct dashboard/owner auth, not to bypass the
+gateway-to-remote link handshake. The user prefers fetching a fresh
+passphrase each time over any of the candidate directions that would pin,
+persist, or bypass it (WONTFIX on candidates (a)/(b); (c)/(d) UI-wording
+improvements are also not being pursued under this ticket). The operational
+procedure for reconnecting a linked remote (where to read the current
+passphrase, when it must be re-entered) is instead recorded as a local
+dogfooding note in `ai-docs/_index.local.md` (gitignored, machine-local).
