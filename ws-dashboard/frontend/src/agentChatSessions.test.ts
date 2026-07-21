@@ -528,3 +528,54 @@ assertEqual(
   "user-sent-abc-1",
   "reconcileOptimisticUserCursors does not mutate the input session's blocks in place",
 );
+
+// 6. Reviewer-confirmed regression: `beginRealStreamingTurn` resets its
+//    `lastSeenLength` cursor to 0 at the start of EVERY new turn, so the
+//    first poll of the 2nd+ user message in a session redelivers the ENTIRE
+//    transcript (index 0 onward) as the "delta" - not just the newly-sent
+//    block. A session with prior resolved blocks ["0" user "first", "1"
+//    agent "reply1"] plus one new optimistic block ("user-sent-x-2" ->
+//    "second") must reconcile the optimistic block to the NEWEST confirmed
+//    cursor ("2"), never to the oldest ("0") that positional matching alone
+//    would wrongly pick when the delta is a full-transcript redelivery.
+const priorHistoryPlusOnePending = sessionWithBlocks([
+  makeBlock({ cursor: "0", role: "user", text: "first" }),
+  makeBlock({ cursor: "1", role: "agent", text: "reply1" }),
+  makeBlock({ cursor: "user-sent-x-2", role: "user", text: "second" }),
+]);
+const fullTranscriptRedeliveryDelta = [
+  makeBlock({ cursor: "0", role: "user", text: "first" }),
+  makeBlock({ cursor: "1", role: "agent", text: "reply1" }),
+  makeBlock({ cursor: "2", role: "user", text: "second" }),
+];
+const reconciledAfterRedelivery = reconcileOptimisticUserCursors(
+  priorHistoryPlusOnePending,
+  fullTranscriptRedeliveryDelta,
+);
+assertEqual(
+  reconciledAfterRedelivery.transcript.blocks[2]!.cursor,
+  "2",
+  "on a full-transcript-redelivery poll delta, the newest optimistic block reconciles to the NEWEST confirmed cursor, not the oldest already-resolved one",
+);
+assertEqual(
+  reconciledAfterRedelivery.transcript.blocks[2]!.text,
+  "second",
+  "the reconciled block's text is not corrupted by an unrelated earlier message",
+);
+assertEqual(
+  reconciledAfterRedelivery.transcript.blocks[0]!.cursor,
+  "0",
+  "the pre-existing resolved block at cursor 0 is left untouched by the redelivery",
+);
+assert(
+  reconciledAfterRedelivery.transcript.blocks[0]!.text === "first",
+  "cursor 0's text is not overwritten as a side effect of reconciling the newer optimistic block",
+);
+const cursorsAfterRedelivery = reconciledAfterRedelivery.transcript.blocks.map(
+  (block) => block.cursor,
+);
+assertEqual(
+  new Set(cursorsAfterRedelivery).size,
+  cursorsAfterRedelivery.length,
+  "no cursor is duplicated across the reconciled transcript after a full-transcript-redelivery poll",
+);

@@ -227,6 +227,12 @@ function isOptimisticUserCursor(cursor: string): boolean {
  * matching, since minor text normalization between the optimistic echo and
  * the daemon's stored copy should not block reconciliation.
  *
+ * Only confirmed user blocks whose cursor is not already present as a
+ * resolved block elsewhere in the session are treated as candidates - a poll
+ * delta may redeliver the whole transcript (from index 0) on the first poll
+ * of a new turn, so positional matching alone would otherwise consume an
+ * old, already-resolved cursor for the newest optimistic block.
+ *
  * Pure: returns the same `session` reference (no-op) if there is nothing to
  * reconcile, or a new `AgentChatSessionView` with the same block count/order
  * otherwise — a reconciled block replaces its optimistic predecessor
@@ -237,8 +243,26 @@ export function reconcileOptimisticUserCursors(
   session: AgentChatSessionView,
   polledBlocks: readonly TranscriptBlock[],
 ): AgentChatSessionView {
+  // `beginRealStreamingTurn` (`activitySessionClient.ts`) resets its
+  // `lastSeenLength` cursor to 0 at the start of every new turn, so the
+  // first poll of each turn redelivers the *entire* transcript from index 0
+  // as `polledBlocks` - not just newly-confirmed blocks. Without filtering,
+  // already-resolved user blocks from earlier turns would be treated as
+  // "confirmed" candidates and matched positionally against the still-
+  // optimistic block(s), overwriting a later bubble's cursor/text/timestamp
+  // with an unrelated earlier message's data. Only a confirmed user block
+  // whose cursor is *not already present* as a resolved (non-optimistic)
+  // block in the session is a genuinely new arrival worth consuming here.
+  const alreadyResolvedCursors = new Set(
+    session.transcript.blocks
+      .filter((block) => !isOptimisticUserCursor(block.cursor))
+      .map((block) => block.cursor),
+  );
   const confirmedUserBlocks = polledBlocks.filter(
-    (block) => block.role === "user" && !isOptimisticUserCursor(block.cursor),
+    (block) =>
+      block.role === "user" &&
+      !isOptimisticUserCursor(block.cursor) &&
+      !alreadyResolvedCursors.has(block.cursor),
   );
   if (confirmedUserBlocks.length === 0) {
     return session;
