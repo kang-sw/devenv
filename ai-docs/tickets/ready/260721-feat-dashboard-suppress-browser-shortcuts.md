@@ -150,6 +150,54 @@ suggestion by listening for the `beforeinstallprompt` event.
 address bar; tab-management shortcuts (Ctrl+T, Ctrl+Tab, Ctrl+1..9) have
 nothing to act on; Ctrl+R still reloads the installed app.
 
+### Result
+
+#### Edition (5075f142) - 2026-07-21
+
+Delivered on branch `impl/pwa-installability`.
+
+- Dashboard is now PWA-installable: hand-rolled `manifest.webmanifest`
+  (name/short_name `ws-dashboard`, `display: standalone`, `start_url: "/"`,
+  theme/bg `#78a9ff`/`#0f1117` sourced from existing CSS tokens), 192/512 PNG
+  icons (flat glyph on palette colors), and a no-op passthrough service
+  worker (`sw.js` - its fetch listener never calls `respondWith`, so there is
+  no stale-asset risk and Ctrl+R reload is unaffected). `index.html` gained
+  manifest/icon links; `main.tsx` registers the SW and stashes
+  `beforeinstallprompt`. Four new daemon routes
+  (`/manifest.webmanifest`, `/sw.js`, `/icon-192.png`, `/icon-512.png`) were
+  added to `ws-dashboard/crates/daemon/src/router.rs` via a new
+  `serve_root_static_file` helper, staying inside the existing owner-auth
+  PROTECTED router block alongside `/assets`.
+- Auth interaction: `<link rel="manifest" crossorigin="use-credentials">` so
+  the browser's background manifest/icon fetch carries the owner-auth
+  session cookie (a default, no-credentials manifest fetch would 401
+  against this origin). Documented limitation: a token-only (no-cookie)
+  auth boundary could not satisfy a browser-initiated manifest fetch this
+  way, but every real browser reaching the shell already holds a
+  `/pair`-issued cookie, so this is not a practical gap.
+- Chosen approach: hand-rolled manifest/SW instead of `vite-plugin-pwa`, to
+  avoid Workbox's default precache, which would risk serving stale assets
+  and conflict with the dev-iteration/Ctrl+R concern from this ticket's
+  Background.
+- Commits: `5075f142` (implementation) + `75285f17` (review fit-fix:
+  `sw.js` content-type aligned to `application/javascript`).
+- Review: correctness/fit partitioned review. Correctness clean. Fit raised
+  1 Important (sw.js content-type divergence from house `.js` convention),
+  fixed in `75285f17`; remaining minors accepted by design.
+- Spec: added anchor `260721-ws-dashboard-pwa-installability` to
+  `ai-docs/spec/ws-web-dashboard/index.md`; updated the static-serving
+  bullet in the mental model.
+- Plan: `ai-docs/.plans/2026-07/21-1825-260721-phase1-pwa-installability.md`
+- Verification: frontend `npm run build`, `cargo build -p
+  ws-dashboard-daemon`, and `cargo test --test routes` (158 tests) all
+  green. Manual dogfood (real Chrome/Edge "Install app" against a running
+  daemon; confirm the standalone window has no tab strip and Ctrl+R still
+  reloads) remains the user's step - no live daemon instance was available
+  in this implementing session.
+- Remaining: Phase 2 (Class-A keydown suppression) is still pending; Phase
+  3 (Keyboard Lock) stays deferred per the Delivery-Mode Spectrum above.
+  Ticket stays in `ready/` until both are addressed.
+
 ### Phase 2: Class-A keydown suppression
 
 Add a global `keydown` interceptor (capture-phase, installed once near the
