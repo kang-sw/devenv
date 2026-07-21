@@ -289,6 +289,15 @@ import {
   type WorkRootView,
   type WorkspaceView,
 } from "./resourceModel";
+import {
+  applySiblingOrder,
+  loadWorkNavOrderSnapshot,
+  reorderSiblingIds,
+  saveWorkNavOrderSnapshot,
+  workNavSiblingDragMimeType,
+  type WorkNavSiblingDragPayload,
+  type WorkNavSiblingOrder,
+} from "./workNavOrder";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   createRootPickerDirectory,
@@ -476,6 +485,17 @@ export function App() {
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
   >({});
+  // Browser-local SIBLING work-nav display order (workspace rows under a
+  // server; worktree rows under a workspace), drag-reordered by the user.
+  // Purely a render-time ordering overlay applied via `applySiblingOrder` -
+  // never mutates the server-reported `resources` tree and is unrelated to
+  // the daemon-side `OpenedWorkRoots` registry. `workNavOrder` itself is the
+  // single in-memory source of truth (not merged from multiple roots like
+  // the dockview layout snapshot above), so its save effect below is a plain
+  // overwrite of the persisted blob.
+  const [workNavOrder, setWorkNavOrder] = useState<WorkNavSiblingOrder>(() =>
+    loadWorkNavOrderSnapshot(),
+  );
   // Session-lifetime snapshot of persisted per-work-root dockview layouts
   // (group membership, pane order, active pane, best-effort group size),
   // seeded once at mount and kept live for the rest of the browser session
@@ -1388,6 +1408,80 @@ export function App() {
     [],
   );
 
+  // Persist the browser-local work-nav sibling order whenever it changes.
+  // `workNavOrder` is the single in-memory source of truth (unlike the
+  // dockview layout snapshot, it is never merged from multiple concurrently-
+  // open roots), so a plain overwrite is sufficient here.
+  useEffect(() => {
+    saveWorkNavOrderSnapshot(workNavOrder);
+  }, [workNavOrder]);
+
+  const handleWorkspaceReorder = useCallback(
+    (serverId: string, sourceId: string, beforeId: string | undefined) => {
+      setWorkNavOrder((current) => {
+        const effectiveOrder = applySiblingOrder(
+          resourcesByServer[serverId]?.workspaces ?? [],
+          current.workspaceOrderByServer[serverId],
+        ).map((workspace) => workspace.id);
+        if (!effectiveOrder.includes(sourceId)) {
+          return current;
+        }
+        const nextOrder = reorderSiblingIds(
+          effectiveOrder,
+          sourceId,
+          beforeId,
+        );
+        return {
+          ...current,
+          workspaceOrderByServer: {
+            ...current.workspaceOrderByServer,
+            [serverId]: nextOrder,
+          },
+        };
+      });
+    },
+    [resourcesByServer],
+  );
+
+  const handleWorktreeReorder = useCallback(
+    (
+      serverId: string,
+      workspaceId: string,
+      sourceId: string,
+      beforeId: string | undefined,
+    ) => {
+      setWorkNavOrder((current) => {
+        const scopeKey = serverScopedIdentity(serverId, workspaceId);
+        const workspace = resourcesByServer[serverId]?.workspaces.find(
+          (candidate) => candidate.id === workspaceId,
+        );
+        const childWorkRoots = (workspace?.workRoots ?? []).filter(
+          isWorkspaceNavChildWorkRoot,
+        );
+        const effectiveOrder = applySiblingOrder(
+          childWorkRoots,
+          current.worktreeOrderByWorkspace[scopeKey],
+        ).map((root) => root.id);
+        if (!effectiveOrder.includes(sourceId)) {
+          return current;
+        }
+        const nextOrder = reorderSiblingIds(
+          effectiveOrder,
+          sourceId,
+          beforeId,
+        );
+        return {
+          ...current,
+          worktreeOrderByWorkspace: {
+            ...current.worktreeOrderByWorkspace,
+            [scopeKey]: nextOrder,
+          },
+        };
+      });
+    },
+    [resourcesByServer],
+  );
+
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
@@ -1414,6 +1508,9 @@ export function App() {
             onSelectServer={handleServerSelected}
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
+            workNavOrder={workNavOrder}
+            onWorkspaceReorder={handleWorkspaceReorder}
+            onWorktreeReorder={handleWorktreeReorder}
           />
           <GitWorktreeAddModal
             target={gitWorktreeTarget}
@@ -2903,6 +3000,9 @@ function ResourceNavigation({
   onSelectServer,
   onCommand,
   onOpenFile,
+  workNavOrder,
+  onWorkspaceReorder,
+  onWorktreeReorder,
 }: {
   resources: DashboardResourcesView | null;
   resourcesByServer: ResourcesByServer;
@@ -2926,6 +3026,18 @@ function ResourceNavigation({
     workRoot: WorkRootView,
     entry: WorkRootFileEntryView,
     gesture: ReadOnlyFileOpenGesture,
+  ) => void;
+  workNavOrder: WorkNavSiblingOrder;
+  onWorkspaceReorder: (
+    serverId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
+  onWorktreeReorder: (
+    serverId: string,
+    workspaceId: string,
+    sourceId: string,
+    beforeId: string | undefined,
   ) => void;
 }) {
   const selectedServer = servers.find(
@@ -2990,6 +3102,9 @@ function ResourceNavigation({
             onOpenServerAuth={onOpenServerAuth}
             onReconnectServer={onReconnectServer}
             onSelectServer={onSelectServer}
+            workNavOrder={workNavOrder}
+            onWorkspaceReorder={onWorkspaceReorder}
+            onWorktreeReorder={onWorktreeReorder}
           />
         ))}
         {!loading && !resources && selectedServer ? (
@@ -3024,6 +3139,9 @@ function ServerRows({
   onOpenServerAuth,
   onReconnectServer,
   onSelectServer,
+  workNavOrder,
+  onWorkspaceReorder,
+  onWorktreeReorder,
 }: {
   server: ServerConnectionView;
   selected: boolean;
@@ -3039,6 +3157,18 @@ function ServerRows({
   onOpenServerAuth: (server: ServerConnectionView) => void;
   onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
+  workNavOrder: WorkNavSiblingOrder;
+  onWorkspaceReorder: (
+    serverId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
+  onWorktreeReorder: (
+    serverId: string,
+    workspaceId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
 }) {
   const actions = server.actions.length > 0 ? server.actions : [];
   const isLocalServer = server.id === LOCAL_DASHBOARD_SERVER_ROUTE;
@@ -3111,7 +3241,10 @@ function ServerRows({
       </div>
       {isOn && resources ? (
         <div className="server-workspaces">
-          {resources.workspaces.map((workspace) => (
+          {applySiblingOrder(
+            resources.workspaces,
+            workNavOrder.workspaceOrderByServer[server.id],
+          ).map((workspace) => (
             <WorkspaceRows
               key={workspace.id}
               workspace={workspace}
@@ -3119,6 +3252,9 @@ function ServerRows({
               selectedId={selectedId}
               openWorkRootKeys={openWorkRootKeys}
               onCommand={onCommand}
+              worktreeOrderByWorkspace={workNavOrder.worktreeOrderByWorkspace}
+              onWorkspaceReorder={onWorkspaceReorder}
+              onWorktreeReorder={onWorktreeReorder}
             />
           ))}
         </div>
@@ -9432,17 +9568,34 @@ function WorkspaceRows({
   selectedId,
   openWorkRootKeys,
   onCommand,
+  worktreeOrderByWorkspace,
+  onWorkspaceReorder,
+  onWorktreeReorder,
 }: {
   workspace: WorkspaceView;
   serverId: string;
   selectedId: string | null;
   openWorkRootKeys: ReadonlySet<string>;
   onCommand: DashboardCommandDispatcher;
+  worktreeOrderByWorkspace: Readonly<Record<string, readonly string[]>>;
+  onWorkspaceReorder: (
+    serverId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
+  onWorktreeReorder: (
+    serverId: string,
+    workspaceId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
   const baseRoot = workspaceBaseWorkRoot(workspace);
-  const childWorkRoots = workspace.workRoots.filter(
-    isWorkspaceNavChildWorkRoot,
+  const worktreeScopeKey = serverScopedIdentity(serverId, workspace.id);
+  const childWorkRoots = applySiblingOrder(
+    workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+    worktreeOrderByWorkspace[worktreeScopeKey],
   );
   const selectedChildWorkRootIds = new Set(
     childWorkRoots.map((root) => root.id),
@@ -9512,6 +9665,10 @@ function WorkspaceRows({
         }
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
+        dragScopeKey={serverId}
+        onSiblingReorder={(sourceId, beforeId) =>
+          onWorkspaceReorder(serverId, sourceId, beforeId)
+        }
       />
       {childWorkRoots.map((root) => (
         <div key={root.id}>
@@ -9538,6 +9695,10 @@ function WorkspaceRows({
               `activation: ${root.activation}`,
             ]}
             onCommand={onCommand}
+            dragScopeKey={worktreeScopeKey}
+            onSiblingReorder={(sourceId, beforeId) =>
+              onWorktreeReorder(serverId, workspace.id, sourceId, beforeId)
+            }
           />
           {root.mainInstances.length > 0 ? (
             <div className="nav-secondary-context">
@@ -9550,6 +9711,18 @@ function WorkspaceRows({
     </div>
   );
 }
+
+// Transient in-memory record of the sibling-drag currently in flight, set on
+// `onDragStart` and cleared on `onDragEnd`/`onDrop`. `dataTransfer.getData()`
+// is unreadable during `dragover` in most browsers (only `dataTransfer.types`
+// is), so `onDragOver`'s same-scope check reads this module-local value
+// instead of the DOM drag event's payload; the event's own `dataTransfer`
+// entry (set alongside this in `onDragStart`) is kept only as a
+// standards-compliant mirror, not read at drop time. Safe as module state
+// (not React state) because at most one HTML5 drag gesture is ever in
+// flight in a single browser tab, and no render needs to react to its value
+// changing mid-drag - only the drop/dragover handlers read it, synchronously.
+let activeWorkNavDrag: WorkNavSiblingDragPayload | null = null;
 
 function ResourceRow({
   id,
@@ -9569,6 +9742,8 @@ function ResourceRow({
   closeWorkRootId = id,
   debugMeta,
   onCommand,
+  dragScopeKey,
+  onSiblingReorder,
 }: {
   id: string;
   title: string;
@@ -9587,6 +9762,14 @@ function ResourceRow({
   closeWorkRootId?: string;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
+  // SIBLING drag-reorder scope key (server.id for a workspace row,
+  // serverScopedIdentity(serverId, workspace.id) for a worktree row). Rows
+  // without a scope key (e.g. the compact-root presentation) render without
+  // any drag affordance - there is no sibling list to reorder for them.
+  dragScopeKey?: string;
+  // Called on a valid same-scope drop with (sourceId, beforeId === this
+  // row's own id). Cross-scope drops are rejected before this ever fires.
+  onSiblingReorder?: (sourceId: string, beforeId: string) => void;
 }) {
   const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
@@ -9600,13 +9783,15 @@ function ResourceRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
+  const [dragOver, setDragOver] = useState(false);
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(
     " · ",
   );
+  const draggable = Boolean(dragScopeKey && onSiblingReorder);
   return (
     <div
-      className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
+      className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}${draggable ? " resource-row-draggable" : ""}${dragOver ? " resource-row-drag-over" : ""}`}
       data-command-id="resource.select"
       data-resource-id={id}
       data-resource-presentation={presentation}
@@ -9615,6 +9800,72 @@ function ResourceRow({
       data-resource-availability={availability ?? ""}
       style={{ "--depth": depth } as CSSProperties}
       title={metadataTitle}
+      draggable={draggable}
+      onDragStart={
+        draggable
+          ? (event) => {
+              activeWorkNavDrag = { sourceId: id, scopeKey: dragScopeKey! };
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(
+                workNavSiblingDragMimeType,
+                JSON.stringify(activeWorkNavDrag),
+              );
+            }
+          : undefined
+      }
+      onDragEnd={
+        draggable
+          ? () => {
+              activeWorkNavDrag = null;
+              setDragOver(false);
+            }
+          : undefined
+      }
+      onDragOver={
+        draggable
+          ? (event) => {
+              const dragged = activeWorkNavDrag;
+              if (
+                dragged &&
+                dragged.scopeKey === dragScopeKey &&
+                dragged.sourceId !== id
+              ) {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (!dragOver) {
+                  setDragOver(true);
+                }
+              }
+            }
+          : undefined
+      }
+      onDragLeave={
+        draggable
+          ? () => {
+              if (dragOver) {
+                setDragOver(false);
+              }
+            }
+          : undefined
+      }
+      onDrop={
+        draggable
+          ? (event) => {
+              event.preventDefault();
+              setDragOver(false);
+              const payload = activeWorkNavDrag;
+              activeWorkNavDrag = null;
+              if (
+                !payload ||
+                payload.scopeKey !== dragScopeKey ||
+                payload.sourceId === id
+              ) {
+                return;
+              }
+              onSiblingReorder?.(payload.sourceId, id);
+            }
+          : undefined
+      }
     >
       <button
         aria-label={`Select ${resourcePresentationLabel(presentation)} ${title}`}
