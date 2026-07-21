@@ -145,3 +145,40 @@ fallback.
   so that closing the last/selected work root actually lands on this new
   empty placeholder instead of snapping back to the first root. This ticket
   remains in `ready/` until Phase 2 lands.
+
+## Phase 2 Result (2026-07-21)
+
+- Dropped the `!selected` gate on `canCloseWorkRoot`: the X now renders for
+  any open `workRoot`/`compactWorkRoot` row regardless of `selected`, so the
+  close control stays reachable on the row you are currently viewing.
+- Closing the selected root now selects the adjacent remaining OPEN work
+  root (next-in-order, else previous) via a new pure
+  `pickWorkRootSelectionAfterClose` helper in `resourceModel.ts`. The empty
+  placeholder from Phase 1 shows only when no OPEN work roots remain at all,
+  gated by a new close-scoped `closeEmptyWorkbench` flag: it defaults
+  `false`, is set only by the close-last-open-root branch, and is cleared by
+  any subsequent non-null selection routed through `selectRoot`.
+- Design decision: TAB semantics - the adjacency/emptiness scoping is over
+  OPEN work roots, not all tree entities. Chose option (b) from the
+  Constraints section (an explicit-empty flag) over changing
+  `resolveWorkbenchSelection`'s fallback-resolver behavior, to avoid
+  regressing initial-load selection and the existing D5 sticky-bridging
+  behavior.
+- Commits: `fac5cdba` (implementation: gate removal, adjacent-open-root
+  selection, `closeEmptyWorkbench` flag) and `c103d71e` (relay fix: route
+  `onCreated`/worktree-add selection through `selectRoot` so it also clears
+  the flag, instead of bypassing it).
+- Review: correctness/fit/test partitioned review. 1 Important finding
+  (`onCreated` selection path bypassed `selectRoot` and could leave the
+  `closeEmptyWorkbench` flag stuck set) - fixed in `c103d71e` and
+  re-reviewed RESOLVED. Remaining minors accepted by design: a raw-resolver
+  mismatch during the D5 bridge window, and per-current-server empty scoping
+  deferred to the separate `260714-feat-dashboard-multi-server-workbench-keepalive`
+  ticket.
+- Plan: `ai-docs/.plans/2026-07/21-1739-260714-phase2-close-selection.md`.
+- Verification: automated tests/build covered in review; live-dashboard
+  manual confirmation of the selected-row X and close-to-empty behavior
+  remains an open dogfood item for the user (no live instance available in
+  this implementing session).
+
+Both phases complete. Closing the ticket.

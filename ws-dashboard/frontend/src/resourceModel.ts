@@ -502,6 +502,33 @@ export function reconcileSelectedId(
   return preferredSelection(entities) ?? null;
 }
 
+// Post-close selection scoped to currently-OPEN roots (tab semantics).
+// Walks the resource tree in natural order, keeping only roots whose
+// serverScopedIdentity key is in `openRootKeys`; returns the next still-open
+// root after `closingRootId`, else the previous, else null when no open root
+// remains. Pure: the open set is passed in because this module has no access
+// to React `openWorkRootKeys` state.
+export function pickWorkRootSelectionAfterClose(
+  resources: DashboardResourcesView | null,
+  closingRootId: string,
+  openRootKeys: ReadonlySet<string>,
+): string | null {
+  if (!resources) return null;
+  const orderedOpenRootIds: string[] = [];
+  for (const workspace of resources.workspaces) {
+    for (const root of workspace.workRoots) {
+      const key = serverScopedIdentity(root.resourcePath.serverId, root.id);
+      if (openRootKeys.has(key)) orderedOpenRootIds.push(root.id);
+    }
+  }
+  const idx = orderedOpenRootIds.indexOf(closingRootId);
+  if (idx === -1) {
+    // Defensive/race: closing root not in the open set — first remaining.
+    return orderedOpenRootIds.find((id) => id !== closingRootId) ?? null;
+  }
+  return orderedOpenRootIds[idx + 1] ?? orderedOpenRootIds[idx - 1] ?? null;
+}
+
 // The workbench selection resolved against a resource tree: the workspace +
 // work root + main/selected instance that the current `selectedId` points at.
 // Relocated verbatim from `App.tsx` (260714 active-root derivation refactor
