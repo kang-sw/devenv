@@ -1,4 +1,7 @@
-import { shouldSuppressBrowserShortcut } from "./keydownSuppression.js";
+import {
+  shouldSuppressBrowserShortcut,
+  SUPPRESSED_CTRL_KEYS,
+} from "./keydownSuppression.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -9,11 +12,10 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 }
 
 // --- Each suppressed ctrl combo -> true ---
+// Sourced from the implementation's own exported set so adding a key there
+// automatically extends this coverage without a hand-duplicated list here.
 
-const suppressedKeys = [
-  "s", "p", "f", "g", "d", "o", "u", "j",
-  "+", "=", "-", "_", "0",
-];
+const suppressedKeys = [...SUPPRESSED_CTRL_KEYS];
 
 for (const key of suppressedKeys) {
   assertEqual(
@@ -142,5 +144,123 @@ assertEqual(
   false,
   "Ctrl+K (not in the suppressed set) is never suppressed",
 );
+
+// --- Uppercase / shift-cased `key` values -> still normalized via
+// toLowerCase() before the suppressed-set lookup and the R whitelist ---
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: true,
+    metaKey: false,
+    key: "S",
+    targetIsEditable: false,
+  }),
+  true,
+  "Ctrl+Shift+S (uppercase 'S') is still suppressed",
+);
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: true,
+    metaKey: false,
+    key: "P",
+    targetIsEditable: false,
+  }),
+  true,
+  "Ctrl+Shift+P (uppercase 'P') is still suppressed",
+);
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: true,
+    metaKey: false,
+    key: "R",
+    targetIsEditable: false,
+  }),
+  false,
+  "Ctrl+Shift+R (uppercase 'R') is still whitelisted (reload)",
+);
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: false,
+    metaKey: true,
+    key: "R",
+    targetIsEditable: false,
+  }),
+  false,
+  "Cmd+Shift+R (uppercase 'R') is still whitelisted (reload)",
+);
+
+// --- Ctrl/Cmd+Backspace: the ctrlOrMeta branch returns before the
+// Backspace branch is ever reached, so these are NOT suppressed regardless
+// of whether the target is editable. This pins that current interaction. ---
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: true,
+    metaKey: false,
+    key: "Backspace",
+    targetIsEditable: false,
+  }),
+  false,
+  "Ctrl+Backspace is not suppressed (modifier branch returns first)",
+);
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: false,
+    metaKey: true,
+    key: "Backspace",
+    targetIsEditable: false,
+  }),
+  false,
+  "Cmd+Backspace is not suppressed (modifier branch returns first)",
+);
+
+assertEqual(
+  shouldSuppressBrowserShortcut({
+    ctrlKey: true,
+    metaKey: false,
+    key: "Backspace",
+    targetIsEditable: true,
+  }),
+  false,
+  "Ctrl+Backspace in an editable target is not suppressed either",
+);
+
+// --- Meta-key (Cmd) parity across more of the suppressed set, plus
+// allowed clipboard keys via metaKey, showing ctrl/meta are treated
+// symmetrically by the `ctrlKey || metaKey` guard ---
+
+const metaSuppressedKeys = ["p", "f", "g", "o", "j", "+", "0"];
+
+for (const key of metaSuppressedKeys) {
+  assertEqual(
+    shouldSuppressBrowserShortcut({
+      ctrlKey: false,
+      metaKey: true,
+      key,
+      targetIsEditable: false,
+    }),
+    true,
+    `Cmd+${key} is suppressed (meta parity)`,
+  );
+}
+
+const metaAllowedEditingKeys = ["c", "v", "a"];
+
+for (const key of metaAllowedEditingKeys) {
+  assertEqual(
+    shouldSuppressBrowserShortcut({
+      ctrlKey: false,
+      metaKey: true,
+      key,
+      targetIsEditable: false,
+    }),
+    false,
+    `Cmd+${key} (editing/clipboard) is never suppressed`,
+  );
+}
 
 console.log("keydownSuppression.test.ts passed");

@@ -12,7 +12,7 @@ export type SuppressibleKeydownEvent = {
   readonly targetIsEditable: boolean;
 };
 
-const SUPPRESSED_CTRL_KEYS = new Set([
+export const SUPPRESSED_CTRL_KEYS = new Set([
   "s", "p", "f", "g", "d", "o", "u", "j",
   "+", "=", "-", "_", "0",
 ]);

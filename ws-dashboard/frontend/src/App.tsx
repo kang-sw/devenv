@@ -710,7 +710,8 @@ export function App() {
       const targetIsEditable =
         Boolean(target?.isContentEditable) ||
         tagName === "input" ||
-        tagName === "textarea";
+        tagName === "textarea" ||
+        tagName === "select";
       if (
         shouldSuppressBrowserShortcut({
           ctrlKey: event.ctrlKey,
