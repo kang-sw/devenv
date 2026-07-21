@@ -1570,7 +1570,15 @@ export function App() {
                 response.resources,
               );
               if (response.createdWorkRootId) {
-                setSelectedId(response.createdWorkRootId);
+                // 260714 Phase 2: route through `selectRoot` (not raw
+                // `setSelectedId`) so a new non-null selection clears
+                // `closeEmptyWorkbench` - otherwise a worktree created from
+                // the empty placeholder (after closing the last open root)
+                // stays stuck on the placeholder until a manual row click.
+                selectRoot(
+                  response.resources.server.id,
+                  response.createdWorkRootId,
+                );
               }
               setGitWorktreeTarget(null);
             }}
