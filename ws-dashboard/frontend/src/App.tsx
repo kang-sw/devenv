@@ -1558,6 +1558,7 @@ export function App() {
             workbenchLayoutRestoreRef={workbenchLayoutRestoreRef}
             terminalVisualRestoreRef={terminalVisualRestoreRef}
             onCommand={executeCommand}
+            onOpenWorkRoot={handleWorkRootOpened}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
             onOpenWorkRootKeysChange={setOpenWorkRootKeys}
@@ -1719,7 +1720,13 @@ function OpenWorkRootControl({
     requestedWorkRootId?: string,
   ) => void;
   onCommand: DashboardCommandDispatcher;
-  variant?: "section" | "icon";
+  // 260714 empty-screen-placeholder: "empty" is a third rendering, alongside
+  // the existing sidebar-oriented "section"/"icon" ones - a single button
+  // with a visible label (not just an icon), for use as the empty
+  // workbench's CTA. It reuses the same open/close state and
+  // `buildRootPickerOpenCommand` dispatch path as the other two variants;
+  // only the opener markup differs.
+  variant?: "section" | "icon" | "empty";
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -2047,7 +2054,9 @@ function OpenWorkRootControl({
       className={
         variant === "icon"
           ? "open-work-root open-work-root-icon"
-          : "open-work-root"
+          : variant === "empty"
+            ? "open-work-root open-work-root-empty"
+            : "open-work-root"
       }
       aria-label="Open workRoot"
     >
@@ -2061,6 +2070,24 @@ function OpenWorkRootControl({
           </div>
           {openerButton}
         </div>
+      ) : variant === "empty" ? (
+        <button
+          ref={openerRef}
+          aria-label="Open workRoot"
+          className="action-button action-button-primary open-work-root-empty-cta"
+          data-command-id="rootPicker.open"
+          disabled={disabled}
+          title={
+            disabled
+              ? `Open workRoot is unavailable for ${pickerServerLabel}`
+              : `Open workRoot on ${pickerContextLabel}`
+          }
+          type="button"
+          onClick={openPicker}
+        >
+          <FolderOpen aria-hidden="true" size={15} strokeWidth={1.8} />
+          <span>Open workRoot</span>
+        </button>
       ) : (
         openerButton
       )}
@@ -3772,6 +3799,7 @@ function WorkbenchShell({
   loading,
   error,
   onCommand,
+  onOpenWorkRoot,
   readOnlyFilePanes,
   readOnlyFilePaneOrderByGroup,
   activeReadOnlyFilePaneRequest,
@@ -3804,6 +3832,15 @@ function WorkbenchShell({
   loading: boolean;
   error: string | null;
   onCommand: DashboardCommandDispatcher;
+  // 260714 Phase 1 (empty-screen-placeholder): threaded through solely so the
+  // no-selection empty state's "Open workRoot" CTA can reuse the same
+  // opened-workRoot selection handler (`handleWorkRootOpened` in `App()`)
+  // the nav sidebar's `OpenWorkRootControl` already uses - no new open-root
+  // plumbing.
+  onOpenWorkRoot: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
   readOnlyFilePanes: ReadOnlyFilePane[];
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
@@ -6154,9 +6191,10 @@ function WorkbenchShell({
     ) : error && !resources ? (
       <StatusPane title="Workbench unavailable" detail={error} />
     ) : !resources || !workbenchModel ? (
-      <StatusPane
-        title="No workRoot"
-        detail="select a workRoot or main instance"
+      <EmptyWorkbenchPlaceholder
+        onCommand={onCommand}
+        onOpenWorkRoot={onOpenWorkRoot}
+        server={resources?.server}
       />
     ) : (
       (() => {
@@ -10117,6 +10155,49 @@ function StatusPane({
       <div className="status-title">{title}</div>
       <div className="status-detail">{detail}</div>
       {action ? <div className="status-action">{action}</div> : null}
+    </div>
+  );
+}
+
+// 260714 Phase 1 (empty-screen-placeholder): dedicated centered empty-state
+// for the main workbench pane when nothing is selected
+// (`workbenchModel === null`). Deliberately NOT a `StatusPane` variant -
+// `StatusPane` is shared with `ResourceDetail`'s Loading/Unavailable/Empty
+// branches, and changing its layout there would regress those unrelated
+// callers. This component owns its own markup/CSS class
+// (`.empty-workbench`) instead.
+function EmptyWorkbenchPlaceholder({
+  onCommand,
+  onOpenWorkRoot,
+  server,
+}: {
+  onCommand: DashboardCommandDispatcher;
+  onOpenWorkRoot: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
+  server?: Pick<ServerConnectionView, "id" | "label"> | null;
+}) {
+  return (
+    <div className="empty-workbench" role="status">
+      <FolderGit2
+        aria-hidden="true"
+        className="empty-workbench-icon"
+        size={32}
+        strokeWidth={1.5}
+      />
+      <div className="empty-workbench-title">No work root selected</div>
+      <div className="empty-workbench-detail">
+        Open a work root to get started
+      </div>
+      <div className="empty-workbench-cta">
+        <OpenWorkRootControl
+          server={server}
+          variant="empty"
+          onOpened={onOpenWorkRoot}
+          onCommand={onCommand}
+        />
+      </div>
     </div>
   );
 }
