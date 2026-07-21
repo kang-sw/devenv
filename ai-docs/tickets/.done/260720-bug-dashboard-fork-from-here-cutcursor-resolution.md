@@ -118,6 +118,18 @@ process; confirm the fork response's `cutCursor` is non-null and that the
 forked session's own `/transcript` shows only the blocks up to and including
 the cut point, not the full original thread.
 
+### Result
+
+Implemented client-side cursor reconciliation (no daemon/protocol change). Added pure `reconcileOptimisticUserCursors` in `ws-dashboard/frontend/src/agentChatSessions.ts`, wired via `onReconcileTranscript`/`reconcileAgentChatTranscript` in `App.tsx`, invoked from `beginSimulatedTurn`'s real-poll `onUpdate` so reconciled cursors write back into the canonical `pane.session.transcript.blocks` that `forkAgentChatFromBubble` reads.
+
+A review caught a defect in the first pass (bd12845d): `beginRealStreamingTurn` resets `lastSeenLength=0` per turn, so the first poll redelivers the entire transcript as the "delta"; naive positional matching then assigned an old resolved cursor/text to the newest optimistic bubble on the 2nd+ message of a session. Fixed in 7b3ae68b by excluding confirmed-delta user blocks whose cursor already exists non-optimistically in the session (`alreadyResolvedCursors` filter) before positional matching. Re-review APPROVED; the defect is closed and no new defect introduced.
+
+Verification: agent-chat `test:*` suites (incl. the 6-case `agentChatSessions.test.ts`, with a regression test reproducing the full-redelivery scenario) and `npm run build` (tsc -b && vite build) all pass. Frontend `dist` rebuilt at the final commit and served by both daemons.
+
+Follow-up (not blocking close): end-to-end live-fork dogfooding against a running session is the natural next confirmation when convenient.
+
+Commits: bd12845d, 7b3ae68b.
+
 ## Spec Impact
 
 None yet identified — no existing spec stem documents fork-from-here's
