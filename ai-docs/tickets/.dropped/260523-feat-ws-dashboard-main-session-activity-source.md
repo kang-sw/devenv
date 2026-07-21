@@ -47,3 +47,19 @@ the activity source. The underlying question (should main-session work appear in
 Activity) is still open, but it is now a **port-vs-remove deferred product
 decision** under epic 260605, not a straightforward forward-design item.
 Re-ground the follow-up questions on the mercenary lifecycle before promoting.
+
+## Ticket closure
+
+Superseded by `260620-feat-ws-dashboard-agent-client-activity-sources`
+(2026-07-21 housekeeping sweep). That ticket's own `related` frontmatter
+explicitly names this ticket as "prior main-session freshness gap that must
+be re-grounded on host-owned agent/client activity" and its Background makes
+the same re-grounding this ticket's staleness audit called for: after the
+260605 pivot removed the SQLite named-agent registry, native Codex/OpenCode/
+Claude work is treated as host-owned agent-client data and projected through
+the dashboard's source-neutral Activity model (`AgentClientProvider`
+contract, `items`-based Activity source split) rather than the old
+named-agent cache assumption this ticket's Background was written against.
+This ticket's parent epic `260514-epic-ws-web-dashboard-mvp` is already
+closed (`.done/`). Dropped rather than promoted; no distinct need remains
+that `260620` does not already own.

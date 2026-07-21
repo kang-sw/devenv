@@ -48,3 +48,19 @@ instead of being force-promoted.
 - Deferred: dashboard-facing bug tickets (`260523-bug-worktree-local-index-missing`,
   `260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky`) are explicitly
   out of scope for this workset.
+
+## Ticket closure
+
+Draining function complete: this workset's job was to group, verify, and
+triage the accumulated dogfood-bug backlog so items could be drained one at a
+time instead of sitting idle. Every remaining live item from the `## Tickets`
+list is now independently tracked as its own standalone ticket and no longer
+depends on this workset for visibility or bookkeeping:
+`260710-bug-project-index-ticket-focus-stale-status`,
+`260710-bug-release-downstream-plugin-layout-untested`,
+`260703-bug-claude-plugin-cache-stuck-below-source-version-mcp-refuses-start`,
+`260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood`.
+The two already-marked-done items and the two already-marked-dropped items
+are confirmed landed in `.done/`/`.dropped/` respectively. Closed to `.done/`
+as a housekeeping sweep (2026-07-21); no further draining action needed
+against this workset itself.
