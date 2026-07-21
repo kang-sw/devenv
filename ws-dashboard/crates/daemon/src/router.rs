@@ -421,6 +421,10 @@ pub fn build_router(state: AppState) -> Router {
             post(claude_session_interrupt),
         )
         .route("/assets/{*asset_path}", get(static_asset))
+        .route("/manifest.webmanifest", get(pwa_manifest))
+        .route("/sw.js", get(pwa_service_worker))
+        .route("/icon-192.png", get(pwa_icon_192))
+        .route("/icon-512.png", get(pwa_icon_512))
         .route("/servers", get(index))
         .route("/servers/{*app_path}", get(index))
         .route("/", get(index))
@@ -524,6 +528,43 @@ async fn static_asset(
         content_type_for_asset(&asset_path),
     )
     .await
+}
+
+// PWA installability surface: manifest, no-op passthrough service worker,
+// and app icons served from `static_dir` root alongside `index.html`, behind
+// the same owner-auth boundary as `/` and `/assets`. See
+// ai-docs/spec/ws-web-dashboard/index.md#260721-ws-dashboard-pwa-installability.
+async fn serve_root_static_file(
+    state: &AppState,
+    filename: &str,
+    content_type: &'static str,
+) -> Response {
+    let Some(static_dir) = state.config.static_dir.as_deref() else {
+        return not_found().await;
+    };
+
+    serve_static_file(static_dir.join(filename), content_type).await
+}
+
+async fn pwa_manifest(State(state): State<AppState>) -> Response {
+    serve_root_static_file(
+        &state,
+        "manifest.webmanifest",
+        "application/manifest+json; charset=utf-8",
+    )
+    .await
+}
+
+async fn pwa_service_worker(State(state): State<AppState>) -> Response {
+    serve_root_static_file(&state, "sw.js", "text/javascript; charset=utf-8").await
+}
+
+async fn pwa_icon_192(State(state): State<AppState>) -> Response {
+    serve_root_static_file(&state, "icon-192.png", "image/png").await
+}
+
+async fn pwa_icon_512(State(state): State<AppState>) -> Response {
+    serve_root_static_file(&state, "icon-512.png", "image/png").await
 }
 
 async fn not_found() -> Response {
