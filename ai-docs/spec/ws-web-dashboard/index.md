@@ -745,11 +745,13 @@ browser-initiated manifest fetch this way.
 
 The dashboard installs one capture-phase `document`-level `keydown`
 listener at the top-level `App` component that calls `preventDefault()`
-for a fixed set of Class-A browser shortcuts (Ctrl/Cmd+S/P/F/G/D/O/U/J,
+for a fixed set of Class-A browser shortcuts (Ctrl/Cmd+S/P/F/G/D/O/U/J/R,
 zoom Ctrl/Cmd+Plus/Minus/Equals/Underscore/0, and Backspace-as-back-
-navigation when the focused target is not an editable field), while
-explicitly never suppressing Ctrl/Cmd+R (reload) or normal editing/
-clipboard combos (Ctrl+C/V/X/A/Z/Y). The block/allow decision is a pure,
+navigation when the focused target is not an editable field). Ctrl/Cmd+R
+is suppressed and reserved for in-app reverse-history-search (terminal and
+agent chat inputs); reload remains available via F5 or the browser reload
+button. Normal editing/clipboard combos (Ctrl+C/V/X/A/Z/Y) are never
+suppressed. The block/allow decision is a pure,
 DOM-free predicate (`keydownSuppression.ts`) so the exact set is
 unit-tested without a browser DOM; the App effect only reads real event/
 target state into the predicate's input shape. This suppressor targets

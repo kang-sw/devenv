@@ -257,6 +257,26 @@ Delivered on branch `impl/pwa-keydown-suppression`.
   unaffected) remains the user's step - no live daemon instance was
   available in this implementing session.
 
+#### Edition (fdf73c5d) - 2026-07-21
+
+Reverses this phase's original Ctrl+R whitelist decision, per explicit
+owner direction: Ctrl+R will be reused as the in-app reverse-history-search
+binding in the terminal and agent chat inputs, so it can no longer be left
+unsuppressed at the page level.
+
+- `SUPPRESSED_CTRL_KEYS` now includes `"r"`; the special-case whitelist
+  branch (`if (key === "r") return false`) was removed from
+  `shouldSuppressBrowserShortcut` in `keydownSuppression.ts`. Ctrl/Cmd+R is
+  now suppressed like the rest of the Class-A set.
+- Reload is no longer reachable via Ctrl/Cmd+R; F5 and the browser reload
+  button remain the reload path (unaffected by this suppressor, out of its
+  scope).
+- Tests (`keydownSuppression.test.ts`) updated: the Ctrl+R/Cmd+R and
+  Ctrl+Shift+R/Cmd+Shift+R cases now assert suppressed (`true`) instead of
+  whitelisted (`false`).
+- Spec anchor `260721-ws-dashboard-browser-shortcut-suppression` in
+  `ai-docs/spec/ws-web-dashboard/index.md` updated to match.
+
 **Ticket closure**: Phases 1-2 are complete and reviewed. Phase 3 (Keyboard
 Lock API / Tauri) is intentionally deferred per this ticket's own
 Delivery-Mode Spectrum above - it is scoped as optional/deferred, to be

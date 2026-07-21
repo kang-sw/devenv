@@ -30,7 +30,7 @@ for (const key of suppressedKeys) {
   );
 }
 
-// --- Ctrl+R / Cmd+R -> false (explicit reload whitelist) ---
+// --- Ctrl+R / Cmd+R -> true (reserved for in-app reverse-history-search) ---
 
 assertEqual(
   shouldSuppressBrowserShortcut({
@@ -39,8 +39,8 @@ assertEqual(
     key: "r",
     targetIsEditable: false,
   }),
-  false,
-  "Ctrl+R is never suppressed (reload whitelist)",
+  true,
+  "Ctrl+R is suppressed (reserved for in-app reverse-history-search)",
 );
 
 assertEqual(
@@ -50,8 +50,8 @@ assertEqual(
     key: "r",
     targetIsEditable: false,
   }),
-  false,
-  "Cmd+R is never suppressed (reload whitelist)",
+  true,
+  "Cmd+R is suppressed (reserved for in-app reverse-history-search)",
 );
 
 // --- Normal editing/clipboard combos -> false ---
@@ -146,7 +146,7 @@ assertEqual(
 );
 
 // --- Uppercase / shift-cased `key` values -> still normalized via
-// toLowerCase() before the suppressed-set lookup and the R whitelist ---
+// toLowerCase() before the suppressed-set lookup ---
 
 assertEqual(
   shouldSuppressBrowserShortcut({
@@ -177,8 +177,8 @@ assertEqual(
     key: "R",
     targetIsEditable: false,
   }),
-  false,
-  "Ctrl+Shift+R (uppercase 'R') is still whitelisted (reload)",
+  true,
+  "Ctrl+Shift+R (uppercase 'R') is still suppressed (reverse-history-search)",
 );
 
 assertEqual(
@@ -188,8 +188,8 @@ assertEqual(
     key: "R",
     targetIsEditable: false,
   }),
-  false,
-  "Cmd+Shift+R (uppercase 'R') is still whitelisted (reload)",
+  true,
+  "Cmd+Shift+R (uppercase 'R') is still suppressed (reverse-history-search)",
 );
 
 // --- Ctrl/Cmd+Backspace: the ctrlOrMeta branch returns before the

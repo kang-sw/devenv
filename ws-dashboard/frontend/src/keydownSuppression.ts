@@ -12,8 +12,11 @@ export type SuppressibleKeydownEvent = {
   readonly targetIsEditable: boolean;
 };
 
+// "r" is suppressed so Ctrl/Cmd+R is reserved for in-app
+// reverse-history-search (terminal + agent chat inputs); reload remains
+// available via F5 / the browser reload button.
 export const SUPPRESSED_CTRL_KEYS = new Set([
-  "s", "p", "f", "g", "d", "o", "u", "j",
+  "s", "p", "f", "g", "d", "o", "u", "j", "r",
   "+", "=", "-", "_", "0",
 ]);
 
@@ -23,9 +26,6 @@ export function shouldSuppressBrowserShortcut(
   const ctrlOrMeta = evt.ctrlKey || evt.metaKey;
   if (ctrlOrMeta) {
     const key = evt.key.toLowerCase();
-    if (key === "r") {
-      return false; // explicit reload whitelist — never suppress
-    }
     return SUPPRESSED_CTRL_KEYS.has(key);
   }
   if (evt.key === "Backspace") {
