@@ -7,6 +7,7 @@ related-mental-model:
   - workflow-skills
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-21
 ---
 
 # feat: playbook render exposes native spawn model and reasoning effort
@@ -97,6 +98,28 @@ remain authoritative at render time.
   guidance, resource manifests, wsflow mirroring, and the full relevant test
   suites.
 
+### Result (be51bf3d) - 2026-07-21
+
+`playbook.render` now preserves its prompt-path and tier contract while adding
+ordered, configuration-resolved model and optional reasoning-effort metadata.
+`playbook.print` remains tier-only. Codex workflow guidance shows the complete
+native spawn shape, uses `model` and `reasoning_effort` with
+`fork_turns: "none"` for self-contained rendered prompts, decides exact-binding
+fallback before degraded retry, and retains the returned identifier for
+`followup_task` continuity. All twelve delegate-body model-alias echoes were
+removed; binding metadata is lead-facing only.
+
+Review converged clean across correctness, fit, and test partitions after the
+tool description was qualified for playbooks without a declared tier and both
+authoritative specs were updated. Fresh-reader audit also converged clean after
+clarifying optional-field omission, rejection handling, fallback end states,
+and continuity. Verification passed with uncached MCP/resource tests, the
+wsflow unittest suite, spec-index validation, and canonical/wsflow byte checks.
+
+No implementation finding remains unresolved. Dogfood follow-ups were captured
+as `260721-bug-codex-spawn-schema-routing-field-drift` and
+`260721-bug-review-partition-empty-artifact`.
+
 ## Spec Impact
 
 - Target spec areas: `ai-docs/spec/mcp-tools.md` playbook render contract and
@@ -105,3 +128,8 @@ remain authoritative at render time.
   model/effort metadata and Codex guidance names the actual spawn parameters.
 - Contract-first spec: no — the additive text shape is fully specified above and
   the authoritative specs will be updated with the implementation.
+
+
+## Resolution (2026-07-21)
+
+Phase 1 completed: playbook.render now returns harness-resolved native spawn bindings, Codex guidance maps them to the exact spawn parameters with deterministic fallback behavior, and redundant child alias echoes are removed.
