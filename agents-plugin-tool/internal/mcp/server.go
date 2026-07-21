@@ -1187,6 +1187,79 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		typeStr, _ := params.Arguments["type"].(string)
 		text, err := wsdoc.TicketTemplate(typeStr)
 		return toolTextResponse(req.ID, text, err)
+	case "tickets.checklist":
+		typeStr, _ := params.Arguments["type"].(string)
+		phaseStr, _ := params.Arguments["phase"].(string)
+		text, err := wsdoc.TicketChecklist(typeStr, phaseStr)
+		return toolTextResponse(req.ID, text, err)
+	case "tickets.sage_gate":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		stem, _ := params.Arguments["stem"].(string)
+		landing, _ := params.Arguments["landing"].(string)
+		answer, _ := params.Arguments["answer"].(string)
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		result, err := wsdoc.SageGate(root, wsdoc.SageGateOptions{
+			TicketStem: stem,
+			Landing:    landing,
+			Answer:     answer,
+		}, resolved.Value)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		commitHash := ""
+		if result.CommitTitle != "" {
+			commitRes, commitErr := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
+				Paths:     result.CommitPaths,
+				Title:     result.CommitTitle,
+				AIContext: result.AIContext,
+			})
+			if commitErr != nil {
+				return toolTextResponse(req.ID, "", commitErr)
+			}
+			commitHash = commitRes.Hash
+		}
+		return toolTextResponse(req.ID, formatSageGate(result, commitHash), nil)
+	case "tickets.sage_record":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		stem, _ := params.Arguments["stem"].(string)
+		stage, _ := params.Arguments["stage"].(string)
+		verdicts, err := parseSageVerdicts(params.Arguments["verdicts"])
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		result, err := wsdoc.SageRecord(root, wsdoc.SageRecordOptions{
+			TicketStem: stem,
+			Stage:      stage,
+			Verdicts:   verdicts,
+			Today:      time.Now().Format("2006-01-02"),
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		commitRes, commitErr := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
+			Paths:     result.CommitPaths,
+			Title:     result.CommitTitle,
+			AIContext: result.AIContext,
+		})
+		if commitErr != nil {
+			return toolTextResponse(req.ID, "", commitErr)
+		}
+		return toolTextResponse(req.ID, formatSageRecord(result, commitRes.Hash), nil)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2361,6 +2434,107 @@ func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
 		fmt.Fprintf(&b, "tip: %s\n", result.Tip)
 	}
 	return b.String()
+}
+
+func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "action: %s\n", result.Action)
+	if result.AskPrompt != "" {
+		fmt.Fprintf(&b, "ask_prompt: %s\n", result.AskPrompt)
+	}
+	if len(result.Reviewers) > 0 {
+		fmt.Fprintf(&b, "reviewers: %s\n", strings.Join(result.Reviewers, ", "))
+	}
+	if result.Mode != "" {
+		fmt.Fprintf(&b, "mode: %s\n", result.Mode)
+	}
+	if commitHash != "" {
+		fmt.Fprintf(&b, "commit: %s (%s)\n", commitHash, result.CommitTitle)
+	}
+	b.WriteString(sageGateNextInstruction(result))
+	return b.String()
+}
+
+func sageGateNextInstruction(result wsdoc.SageGateResult) string {
+	switch result.Action {
+	case "skip":
+		return "next_instruction: Sage review gate resolved with no review required; proceed to handoff."
+	case "stop_blocked":
+		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker."
+	case "ask":
+		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no."
+	case "run":
+		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_record(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
+	default:
+		return "next_instruction: Unrecognized action; stop and report."
+	}
+}
+
+func sageStageForReviewers(result wsdoc.SageGateResult) string {
+	if result.Mode == "combined" {
+		return "combined"
+	}
+	if len(result.Reviewers) == 1 {
+		return result.Reviewers[0]
+	}
+	return result.Mode
+}
+
+func formatSageRecord(result wsdoc.SageRecordResult, commitHash string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "verdict: %s\n", result.Verdict)
+	for _, field := range []string{"sage-review-design", "sage-review-completeness"} {
+		if value, ok := result.Posture[field]; ok {
+			fmt.Fprintf(&b, "%s: %s\n", field, value)
+		}
+	}
+	if result.BlockedSection != "" {
+		b.WriteString("blocked_section: appended\n")
+	}
+	if commitHash != "" {
+		fmt.Fprintf(&b, "commit: %s (%s)\n", commitHash, result.CommitTitle)
+	}
+	if result.Verdict == "concern" {
+		b.WriteString("next_instruction: Recorded as completed; the concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
+	} else {
+		b.WriteString("next_instruction: Sage review recorded and committed; follow this confirmation and proceed to handoff.")
+	}
+	return b.String()
+}
+
+func parseSageVerdicts(raw any) ([]wsdoc.SageVerdict, error) {
+	if raw == nil {
+		return nil, fmt.Errorf("verdicts is required")
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("verdicts must be an array")
+	}
+	verdicts := make([]wsdoc.SageVerdict, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("each verdict must be an object")
+		}
+		v := wsdoc.SageVerdict{}
+		v.Reviewer, _ = m["reviewer"].(string)
+		v.Verdict, _ = m["verdict"].(string)
+		if issuesRaw, ok := m["issues"].([]any); ok {
+			for _, ir := range issuesRaw {
+				im, ok := ir.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("each issue must be an object")
+				}
+				issue := wsdoc.SageIssue{}
+				issue.Title, _ = im["title"].(string)
+				issue.Severity, _ = im["severity"].(string)
+				issue.Resolution, _ = im["resolution"].(string)
+				v.Issues = append(v.Issues, issue)
+			}
+		}
+		verdicts = append(verdicts, v)
+	}
+	return verdicts, nil
 }
 
 func formatTickets(tickets []wsdoc.TicketInfo) string {
@@ -3629,6 +3803,44 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "tickets.checklist",
+			"description": "Return a ticket-authoring phase's checklist item list as data, for installing into a single todo.append instruction. Use instead of following the phase's static prose section directly.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"phase": enumStringProperty("Ticket-authoring phase.", []string{"content", "intent"}),
+				},
+				"required": []string{"type", "phase"},
+			},
+		},
+		{
+			"name":        "tickets.sage_gate",
+			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.show fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | ask | run); for run, the reviewer(s) to spawn and the mode. Does not spawn reviewers.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem":    stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"landing": enumStringProperty("Landing status the gate is resolving for.", []string{"idea", "todo", "ready"}),
+					"answer":  enumStringProperty("Optional follow-up answer to a prior ask action.", []string{"yes", "no"}),
+				},
+				"required": []string{"stem", "landing"},
+			},
+		},
+		{
+			"name":        "tickets.sage_record",
+			"description": "Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, commits with the canonical title, and returns the applied posture and commit ref.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem":     stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"stage":    enumStringProperty("Which stage's verdicts are being recorded.", []string{"design", "completeness", "combined"}),
+					"verdicts": objectArrayProperty("Reviewer verdicts: [{reviewer, verdict, issues:[{title, severity, resolution}]}]. verdict is pass|concern|block."),
+				},
+				"required": []string{"stem", "stage", "verdicts"},
+			},
+		},
+		{
 			"name":        "path.generate",
 			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
 			"inputSchema": map[string]any{
@@ -3868,7 +4080,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "path.generate", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "tickets.sage_gate", "tickets.sage_record", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
