@@ -376,7 +376,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
                 id: OpaqueId::from(format!(
                     "workspace-local-{}",
-                    stable_path_hash(&git.common_dir)
+                    stable_path_hash(&canonical_or_normalized(&git.common_dir))
                 )),
                 label: git.workspace_label(),
             },
@@ -511,17 +511,19 @@ fn normalize_candidate_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn canonical_or_normalized(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .unwrap_or_else(|_| normalize_candidate_path(path))
+}
+
 fn paths_equivalent(left: &Path, right: &Path) -> bool {
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => normalize_candidate_path(left) == normalize_candidate_path(right),
-    }
+    canonical_or_normalized(left) == canonical_or_normalized(right)
 }
 
 pub fn local_work_root_id_for_path(path: &Path) -> WorkRootId {
     OpaqueId::from(format!(
         "root-local-{}",
-        stable_path_hash(&normalize_candidate_path(path))
+        stable_path_hash(&canonical_or_normalized(path))
     ))
 }
 
@@ -722,6 +724,12 @@ mod tests {
         .dashboard_resources();
 
         assert_eq!(view.workspaces.len(), 1);
+        assert_eq!(
+            view.workspaces[0].work_roots.len(),
+            2,
+            "primary root and its linked worktree must remain distinct entries, \
+             not collapse or duplicate"
+        );
         let kinds: Vec<_> = view.workspaces[0]
             .work_roots
             .iter()
@@ -733,6 +741,62 @@ mod tests {
             .work_roots
             .iter()
             .all(|root| root.status == WorkRootStatus::Online));
+
+        remove_temp(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_provider_dedups_linked_worktree_reached_via_symlink_alias() {
+        if !git_available() {
+            return;
+        }
+
+        let base = temp_path("git-symlink-alias");
+        let primary = base.join("primary");
+        let linked = base.join("linked");
+        let linked_alias = base.join("linked-alias");
+        fs::create_dir_all(&primary).expect("create primary");
+        git(&primary, &["init"]);
+        git(
+            &primary,
+            &["config", "user.email", "ws-dashboard@example.local"],
+        );
+        git(&primary, &["config", "user.name", "ws dashboard"]);
+        fs::write(primary.join("README.md"), "dashboard\n").expect("write readme");
+        git(&primary, &["add", "README.md"]);
+        git(&primary, &["commit", "-m", "seed"]);
+        git(
+            &primary,
+            &["worktree", "add", linked.to_str().expect("linked path")],
+        );
+        symlink(&linked, &linked_alias).expect("create symlink alias to linked worktree");
+
+        // The same physical linked-worktree directory is reached two ways here,
+        // mirroring how git_worktree_add_submit's own top-level registration of
+        // a freshly created worktree and the primary root's `git worktree list`
+        // discovery of that same worktree can diverge textually even though
+        // they name the same directory.
+        let view = LocalDashboardResourcesProvider::new(vec![
+            LocalWorkRootCandidate::new(&primary),
+            LocalWorkRootCandidate::new(&linked_alias),
+        ])
+        .dashboard_resources();
+
+        assert_eq!(view.workspaces.len(), 1);
+        assert_eq!(
+            view.workspaces[0].work_roots.len(),
+            2,
+            "the linked worktree reached via a symlink alias must dedup to a \
+             single entry alongside the distinct primary root, not add a duplicate"
+        );
+        let kinds: Vec<_> = view.workspaces[0]
+            .work_roots
+            .iter()
+            .map(|root| root.kind)
+            .collect();
+        assert!(kinds.contains(&WorkRootKind::GitPrimaryRoot));
+        assert!(kinds.contains(&WorkRootKind::GitLinkedWorktree));
 
         remove_temp(&base);
     }
