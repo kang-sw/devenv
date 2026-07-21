@@ -138,6 +138,7 @@ import {
   revalidateWorkbenchLayoutForRoot,
   mergeReadOnlyAndTerminalPaneOrder,
   removePanesFromOrder,
+  filterPaneOrderByPaneIds,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
   upsertTerminalVisualRestoreEntryInSnapshot,
@@ -5873,17 +5874,37 @@ function WorkbenchShell({
         // (`pane.paneId`, see `terminalWorkbenchPane`), not the `logicalKey`
         // space `terminalPanes` is keyed by - filtering `id in terminalPanes`
         // here always misses, silently dropping every terminal pane from the
-        // mirror.
+        // mirror. `filterPaneOrderByPaneIds` (`workbench/layoutRestore.ts`)
+        // is the extracted, unit-tested form of this filter.
         const livePaneIds = new Set(
           Object.values(terminalPanes).map((pane) => pane.paneId),
         );
-        const next = { ...current };
-        for (const [groupId, paneIds] of Object.entries(
+        return filterPaneOrderByPaneIds(
+          current,
           result.paneOrderByGroup,
-        )) {
-          next[groupId] = paneIds.filter((id) => livePaneIds.has(id));
-        }
-        return next;
+          livePaneIds,
+        );
+      });
+      // `readOnlyFilePaneOrderByGroup` is a separate flat registry from
+      // `paneOrderByRoot` (same shape as `terminalPaneOrderByGroup` above),
+      // keyed by plain `groupId`, not `workbenchModel.root.id` /
+      // `moveRootKey`. Same as the terminal mirror, a drag/drop move must be
+      // mirrored into it or `readOnlyWorkbenchPanesByGroup` snaps read-only/
+      // document panes back to their fallback group on the next render
+      // (260711). `result.paneOrderByGroup` lives in `WorkbenchPane.id` space
+      // (`pane.id` on `readOnlyFilePanes`), not the `logicalKey` space
+      // `readOnlyFilePanes` is otherwise looked up by elsewhere - filtering by
+      // `logicalKey`/Record membership here would silently miss every pane,
+      // same `125d68e1` trap the terminal mirror above avoids.
+      onReadOnlyFilePaneOrderByGroupChange((current) => {
+        const livePaneIds = new Set(
+          readOnlyFilePanes.map((pane) => pane.id),
+        );
+        return filterPaneOrderByPaneIds(
+          current,
+          result.paneOrderByGroup,
+          livePaneIds,
+        );
       });
     }
     setActivePaneByGroupForSelected(result.activePaneByGroup);

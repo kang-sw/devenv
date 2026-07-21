@@ -254,6 +254,31 @@ export function removePanesFromOrder(
   );
 }
 
+// CONTRACT: pure helper, extracted from `movePane`'s inline
+// `setTerminalPaneOrderByGroup`/`onReadOnlyFilePaneOrderByGroupChange` mirror
+// closures in App.tsx (260711 review Test-partition finding) so the
+// pane-id-space filter both closures apply is unit-testable without a
+// render/DOM harness. `resultPaneOrderByGroup` (`commitWorkbenchPaneMoveIntoDynamicGroup`'s
+// `result.paneOrderByGroup`) lives in `WorkbenchPane.id` space (`pane.paneId`
+// for terminals, `pane.id` for read-only file panes) — callers must build
+// `livePaneIds` from that same id space, not from a `logicalKey`-keyed
+// Record's membership, per the `125d68e1` key-space trap this mirrors. Each
+// group present in `resultPaneOrderByGroup` overwrites the corresponding key
+// in `current` with its filtered order (never dropping the group key, even
+// when the filtered array is empty); groups only present in `current` are
+// left untouched.
+export function filterPaneOrderByPaneIds(
+  current: WorkbenchPaneOrder,
+  resultPaneOrderByGroup: WorkbenchPaneOrder,
+  livePaneIds: ReadonlySet<string>,
+): WorkbenchPaneOrder {
+  const next = { ...current };
+  for (const [groupId, paneIds] of Object.entries(resultPaneOrderByGroup)) {
+    next[groupId] = paneIds.filter((paneId) => livePaneIds.has(paneId));
+  }
+  return next;
+}
+
 // CONTRACT: pure merge/clobber-fix transformation extracted out of
 // `WorkbenchShell`'s layout save effect in App.tsx (Phase 7 review
 // Test-partition finding), mirroring `revalidateWorkbenchLayoutForRoot`

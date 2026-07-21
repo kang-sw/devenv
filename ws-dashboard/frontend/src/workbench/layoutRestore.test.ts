@@ -1,4 +1,5 @@
 import {
+  filterPaneOrderByPaneIds,
   loadWorkbenchLayoutRestoreSnapshot,
   mergeReadOnlyAndTerminalPaneOrder,
   mergeWorkbenchLayoutRestoreEntries,
@@ -512,6 +513,34 @@ assertDeepEqual(
     emptied,
     { "group-1": [] },
     "removing every pane id from a group empties its array without dropping the group key",
+  );
+}
+
+// `filterPaneOrderByPaneIds` is the pure form of `movePane`'s
+// `setTerminalPaneOrderByGroup`/`onReadOnlyFilePaneOrderByGroupChange` mirror
+// closures (App.tsx). This case reproduces the exact 260711 read-only mirror
+// shape over a *grouped* read-only pane split: a persisted `current` order
+// with two groups, a move result (`resultPaneOrderByGroup`) redistributing
+// those pane ids across the groups, and a `livePaneIds` set built from
+// `pane.id` (the `WorkbenchPane.id` space read-only panes and the move
+// result share) that also contains a foreign, terminal-shaped id
+// (`terminal:z`) absent from `resultPaneOrderByGroup` entirely, so it can
+// only leak into the output if the filter used loose Record/logicalKey
+// membership instead of the intended id set — the exact silent-no-op
+// key-space trap `125d68e1` fixed for the terminal mirror.
+{
+  const result = filterPaneOrderByPaneIds(
+    { "group-1": ["readonly:a"], "group-2": ["readonly:b"] },
+    {
+      "group-1": ["readonly:b"],
+      "group-2": ["readonly:a", "readonly:stale"],
+    },
+    new Set(["readonly:a", "readonly:b", "terminal:z"]),
+  );
+  assertDeepEqual(
+    result,
+    { "group-1": ["readonly:b"], "group-2": ["readonly:a"] },
+    "filterPaneOrderByPaneIds keeps only live-id-set members per group, in the move result's order, dropping stale ids and never resurrecting a foreign id-space member",
   );
 }
 

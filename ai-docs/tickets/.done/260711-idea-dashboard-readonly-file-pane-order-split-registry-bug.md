@@ -76,3 +76,38 @@ order persists and does not snap back.
 Success: dragging/splitting grouped document panes persists correctly;
 existing frontend tests (`test:workbench`, `test:resource-model`) stay green,
 plus manual dogfood confirmation.
+
+## Result (2026-07-21)
+
+- **Diagnosis:** H-LATENT confirmed, not a regression from the terminal-split
+  fix `d8e71b51`. `readOnlyFilePaneOrderByGroup` was never mirror-written
+  inside `movePane`; the gap predates `d8e71b51` and is the exact parallel
+  latent issue this ticket hypothesized. Commit `125d68e1` (2026-07-14)
+  already documents the gap in the terminal mirror path (comparing against
+  `paneId`, not `logicalKey`), confirming the pre-existing shape.
+- **Fix:** added the read-only pane-order mirror write inside `movePane`,
+  filtered by `pane.id` (the `WorkbenchPane`-id space) to match the terminal
+  mirror's fix pattern; the registry itself is left flat/group-id-keyed by
+  design (no `rootKey` layer added). The filtering logic was then extracted
+  into a pure exported helper, `filterPaneOrderByPaneIds`, in
+  `ws-dashboard/frontend/src/workbench/layoutRestore.ts`, and both the
+  terminal and read-only mirror closures in `App.tsx` were routed through it.
+  A `layoutRestore.test.ts` case was added and mutation-verified to catch the
+  wrong-id-space silent-no-op class seen in `bc566a78`/`125d68e1`.
+- **Verification:** `npm run build`, `test:workbench`, and
+  `test:resource-model` all pass. Review passes: correctness review (opus)
+  clean, fit review clean, one test-coverage finding raised and fixed, delta
+  re-review clean.
+- **Commits:** `ba9d858a` (fix: mirror `movePane` result into
+  `readOnlyFilePaneOrderByGroup`), `f93b7da8` (test: extract `movePane`
+  pane-order filter into tested helper `filterPaneOrderByPaneIds`); plan
+  recorded at `8a42982e`.
+- **Doc check:** grepped `ai-docs/spec/` and `ai-docs/mental-model/` for
+  `paneOrder`/`movePane`/`readOnlyFilePaneOrderByGroup`/
+  `terminalPaneOrderByGroup`/pane-order/workbench surfaces. No doc describes
+  `movePane`'s per-registry mirroring behavior at this level of concreteness;
+  the existing mental-model workbench statements remain accurate at their
+  altitude. No doc edit made.
+- **Open item:** manual dogfood confirmation in the running dashboard remains
+  the user's step — no live dashboard instance was available in the
+  implementing session to re-verify beyond the automated test suites.
