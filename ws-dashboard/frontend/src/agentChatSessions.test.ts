@@ -21,10 +21,13 @@ import {
   createEmptyAgentChatPane,
   markAgentChatPaneError,
   markAgentChatPaneStarting,
+  reconcileOptimisticUserCursors,
   removeAgentChatPane,
   removeAgentChatPanesForWorkRoot,
   type AgentChatPaneState,
 } from "./agentChatSessions.js";
+import type { AgentChatSessionView } from "./agentChatSessions.js";
+import type { TranscriptBlock } from "./workRootActivity.js";
 import {
   stubActivityHistoryList,
   stubResumeAgentChatSession,
@@ -407,4 +410,121 @@ assertEqual(
   secondAppendedBlock.text,
   "a second, independent send",
   "the second call's appended block carries its own text, independent of the first call",
+);
+
+// --- reconcileOptimisticUserCursors (260720 Phase 1) ------------------------
+// Reproduces the ticket's confirmed bug mechanism directly: a canonical
+// `session.transcript.blocks` entry created by `appendUserTranscriptBlock`
+// keeps its client-only `user-sent-...` cursor forever unless something
+// rewrites it once the daemon confirms the same logical message with a real
+// sequential cursor ("0", "1", "2", ...). `forkAgentChatFromBubble`
+// (`App.tsx`) reads a bubble's *last* block's cursor straight off this
+// canonical array, so this is the exact site "fork from here" depends on.
+
+function makeBlock(overrides: Partial<TranscriptBlock>): TranscriptBlock {
+  return {
+    cursor: "0",
+    timestamp: new Date().toISOString(),
+    renderKind: "markdown",
+    title: null,
+    text: null,
+    data: null,
+    degraded: false,
+    role: "agent",
+    turnId: undefined,
+    ...overrides,
+  };
+}
+
+function sessionWithBlocks(blocks: TranscriptBlock[]): AgentChatSessionView {
+  return {
+    ...codexSession,
+    transcript: { ...codexSession.transcript, blocks },
+  };
+}
+
+// 1. A single live-sent optimistic user block gets replaced wholesale by the
+//    daemon-confirmed real-cursor block once the poll observes it.
+const optimisticOnly = sessionWithBlocks([
+  makeBlock({ cursor: "user-sent-abc-1", role: "user", text: "hi" }),
+]);
+const confirmedDelta = [
+  makeBlock({ cursor: "0", role: "user", text: "hi" }),
+  makeBlock({ cursor: "1", role: "agent", text: "hello back" }),
+];
+const reconciledOnce = reconcileOptimisticUserCursors(optimisticOnly, confirmedDelta);
+assertEqual(
+  reconciledOnce.transcript.blocks.length,
+  1,
+  "reconciling a single optimistic user block does not change the canonical block count",
+);
+assertEqual(
+  reconciledOnce.transcript.blocks[0]!.cursor,
+  "0",
+  "a live user-sent block's optimistic cursor is replaced by the daemon-confirmed sequential cursor once the poll observes it",
+);
+assert(
+  !reconciledOnce.transcript.blocks[0]!.cursor.startsWith("user-sent-"),
+  "the reconciled block no longer carries a client-only optimistic cursor - forkAgentChatFromBubble can now send a daemon-resolvable cutCursor",
+);
+
+// 2. No matching confirmed user block in the delta (e.g. only agent blocks
+//    polled so far) leaves the optimistic block, and the session reference,
+//    untouched (pure no-op, not a wasted re-render).
+const onlyAgentDelta = [makeBlock({ cursor: "5", role: "agent", text: "..." })];
+const untouched = reconcileOptimisticUserCursors(optimisticOnly, onlyAgentDelta);
+assert(
+  untouched === optimisticOnly,
+  "a poll delta with no confirmed user blocks is a pure no-op, returning the same session reference",
+);
+
+// 3. A resume/hydrated bubble's already-real cursor is never touched, even
+//    when the delta also carries confirmed user blocks - this is the "should
+//    already work" bubble class the ticket calls out as unaffected.
+const alreadyResolved = sessionWithBlocks([
+  makeBlock({ cursor: "0", role: "user", text: "already real" }),
+]);
+const noOpOnResolved = reconcileOptimisticUserCursors(alreadyResolved, confirmedDelta);
+assert(
+  noOpOnResolved === alreadyResolved,
+  "a block that already carries a daemon-confirmed (non-optimistic) cursor is left alone by reconciliation",
+);
+
+// 4. Multiple pending live sends (fast typing/queued dequeue) reconcile in
+//    position/turn order against the poll's confirmed user blocks in the same
+//    order - the ticket's suggested "match by position, not identity or
+//    content" direction, so this deliberately uses non-matching text to prove
+//    the match is positional.
+const twoOptimistic = sessionWithBlocks([
+  makeBlock({ cursor: "user-sent-a-1", role: "user", text: "first send" }),
+  makeBlock({ cursor: "1", role: "agent", text: "reply to first" }),
+  makeBlock({ cursor: "user-sent-b-2", role: "user", text: "second send" }),
+]);
+const twoConfirmedDelta = [
+  makeBlock({ cursor: "2", role: "user", text: "first send (normalized)" }),
+  makeBlock({ cursor: "3", role: "agent", text: "reply to first" }),
+  makeBlock({ cursor: "4", role: "user", text: "second send (normalized)" }),
+];
+const reconciledTwo = reconcileOptimisticUserCursors(twoOptimistic, twoConfirmedDelta);
+assertEqual(
+  reconciledTwo.transcript.blocks[0]!.cursor,
+  "2",
+  "the first pending optimistic user block reconciles to the first confirmed user block in the poll delta, in order",
+);
+assertEqual(
+  reconciledTwo.transcript.blocks[2]!.cursor,
+  "4",
+  "the second pending optimistic user block reconciles to the second confirmed user block in the poll delta, in order",
+);
+assertEqual(
+  reconciledTwo.transcript.blocks[1]!.cursor,
+  "1",
+  "a non-optimistic (already-real) block between two pending sends is left untouched by reconciliation",
+);
+
+// 5. Reconciliation never mutates the input session/block array.
+assertEqual(
+  optimisticOnly.transcript.blocks[0]!.cursor,
+  "user-sent-abc-1",
+  "reconcileOptimisticUserCursors does not mutate the input session's blocks in place",
 );

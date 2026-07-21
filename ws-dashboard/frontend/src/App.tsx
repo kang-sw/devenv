@@ -227,6 +227,7 @@ import {
   createEmptyAgentChatPane,
   markAgentChatPaneError,
   markAgentChatPaneStarting,
+  reconcileOptimisticUserCursors,
   removeAgentChatPane,
   removeAgentChatPanesForWorkRoot,
   type AgentChatHarness,
@@ -4634,6 +4635,7 @@ function WorkbenchShell({
           onSendMessage: sendAgentChatMessage,
           onForkFromBubble: forkAgentChatFromBubble,
           onResumeFromBubble: () => undefined,
+          onReconcileTranscript: reconcileAgentChatTranscript,
           isActivePane: (pane) => focusedAgentChatPaneId === pane.paneId,
         },
         closedAgentPaneByRoot[root.id] ?? [],
@@ -5814,6 +5816,40 @@ function WorkbenchShell({
             : current,
         );
       });
+  }
+
+  // `260720-bug-dashboard-fork-from-here-cutcursor-resolution` Phase 1: the
+  // real transcript poll (`beginRealStreamingTurn`'s `onUpdate`, wired below
+  // in `AgentChatPaneBody`'s `beginSimulatedTurn`) only ever fed a
+  // render-only `streamingBlocks` overlay - the canonical
+  // `pane.session.transcript.blocks` array (what `forkAgentChatFromBubble`
+  // above actually reads a bubble's cursor from) never got the
+  // daemon-confirmed real cursor for a live-sent user block. Reconciling
+  // here, keyed by `pane.logicalKey` against the *current* pane state
+  // (rather than the possibly-stale `pane` closed over at the call site),
+  // means a "fork from here" click issued any time after the next poll tick
+  // sends a resolvable cursor.
+  function reconcileAgentChatTranscript(
+    pane: AgentChatPaneState,
+    blocks: readonly TranscriptBlock[],
+  ) {
+    setAgentChatPanes((current) => {
+      const currentPane = current[pane.logicalKey];
+      if (!currentPane?.session) {
+        return current;
+      }
+      const reconciledSession = reconcileOptimisticUserCursors(
+        currentPane.session,
+        blocks,
+      );
+      if (reconciledSession === currentPane.session) {
+        return current;
+      }
+      return {
+        ...current,
+        [pane.logicalKey]: { ...currentPane, session: reconciledSession },
+      };
+    });
   }
 
   function closeAgentChatPane(pane: AgentChatPaneState) {
@@ -7739,6 +7775,15 @@ type AgentChatPaneActions = {
   onSendMessage: (pane: AgentChatPaneState, text: string) => void;
   onForkFromBubble: (pane: AgentChatPaneState, bubble: ChatBubble) => void;
   onResumeFromBubble: (pane: AgentChatPaneState, bubble: ChatBubble) => void;
+  // `260720-bug-dashboard-fork-from-here-cutcursor-resolution` Phase 1:
+  // called with each real transcript-poll delta (`beginRealStreamingTurn`'s
+  // `onUpdate`) so the canonical session's still-optimistic `user-sent-...`
+  // blocks get reconciled to daemon-confirmed cursors as they arrive - see
+  // `reconcileAgentChatTranscript` / `reconcileOptimisticUserCursors`.
+  onReconcileTranscript: (
+    pane: AgentChatPaneState,
+    blocks: readonly TranscriptBlock[],
+  ) => void;
   isActivePane: (pane: AgentChatPaneState) => boolean;
 };
 
@@ -7972,6 +8017,12 @@ function AgentChatPaneBody({
             }
             return next;
           });
+          // `260720-bug-dashboard-fork-from-here-cutcursor-resolution`
+          // Phase 1: reconcile the canonical session's optimistic
+          // `user-sent-...` blocks against this poll's daemon-confirmed
+          // blocks, so a later "fork from here" click on a live user bubble
+          // sends a cursor the daemon can actually resolve.
+          actions.onReconcileTranscript(paneRef.current, blocks);
         },
         onTurnComplete,
       );

@@ -202,3 +202,70 @@ export function appendUserTranscriptBlock(
     },
   };
 }
+
+// `260720-bug-dashboard-fork-from-here-cutcursor-resolution` Phase 1: an
+// optimistic block minted by `appendUserTranscriptBlock` above carries a
+// client-only `user-sent-<ts>-<seq>` cursor that the daemon's fork
+// cursor-resolution path structurally cannot resolve (real transcript
+// cursors are plain sequential strings — "0", "1", "2", ...). Real transcript
+// polling (`beginRealStreamingTurn` in `activitySessionClient.ts`) never
+// wrote back into the canonical `session.transcript.blocks` array — it only
+// fed a separate, render-only `streamingBlocks` overlay
+// (`agentChatStreamMerge.ts`'s `mergeStreamingTranscriptBlocks`), so a live
+// user bubble kept its optimistic cursor forever, and "fork from here" on it
+// silently forked the whole thread instead of cutting.
+function isOptimisticUserCursor(cursor: string): boolean {
+  return cursor.startsWith("user-sent-");
+}
+
+/**
+ * Reconcile a session's canonical optimistic (`user-sent-...`) user blocks
+ * against a batch of freshly-polled transcript blocks, replacing each
+ * still-unresolved optimistic block with the next daemon-confirmed user
+ * block from the poll, in encountered order — position/turn-order matching
+ * (the ticket's preferred candidate direction), not cursor-identity or text
+ * matching, since minor text normalization between the optimistic echo and
+ * the daemon's stored copy should not block reconciliation.
+ *
+ * Pure: returns the same `session` reference (no-op) if there is nothing to
+ * reconcile, or a new `AgentChatSessionView` with the same block count/order
+ * otherwise — a reconciled block replaces its optimistic predecessor
+ * wholesale (the daemon's copy is authoritative for role/timestamp/text too),
+ * it is never merely appended.
+ */
+export function reconcileOptimisticUserCursors(
+  session: AgentChatSessionView,
+  polledBlocks: readonly TranscriptBlock[],
+): AgentChatSessionView {
+  const confirmedUserBlocks = polledBlocks.filter(
+    (block) => block.role === "user" && !isOptimisticUserCursor(block.cursor),
+  );
+  if (confirmedUserBlocks.length === 0) {
+    return session;
+  }
+  let nextConfirmedIndex = 0;
+  let changed = false;
+  const nextBlocks = session.transcript.blocks.map((block) => {
+    if (
+      nextConfirmedIndex >= confirmedUserBlocks.length ||
+      block.role !== "user" ||
+      !isOptimisticUserCursor(block.cursor)
+    ) {
+      return block;
+    }
+    const confirmed = confirmedUserBlocks[nextConfirmedIndex]!;
+    nextConfirmedIndex += 1;
+    changed = true;
+    return confirmed;
+  });
+  if (!changed) {
+    return session;
+  }
+  return {
+    ...session,
+    transcript: {
+      ...session.transcript,
+      blocks: nextBlocks,
+    },
+  };
+}
