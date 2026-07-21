@@ -713,6 +713,34 @@ workRoot, or instance ids. Refreshing `/servers` or server-scoped app paths
 serves the protected frontend shell through the same owner-auth static route
 boundary. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 
+## PWA Installability {#260721-ws-dashboard-pwa-installability}
+
+The dashboard daemon serves a web app manifest, a service worker, and app
+icons at fixed root paths (`/manifest.webmanifest`, `/sw.js`,
+`/icon-192.png`, `/icon-512.png`) inside the same owner-auth protected
+router as `/` and `/assets/{*asset_path}`; none of these add a new
+unauthenticated top-level route beside `/pair`. The manifest declares
+`display: "standalone"`, `start_url: "/"` (the daemon-served app root), and
+`name`/`icons` fields so Chrome/Edge offer the "Install app" affordance from
+the served origin. `theme_color` and `background_color` derive from the
+dashboard's existing dark-theme CSS tokens rather than invented colors.
+
+The service worker is intentionally a no-precache, network-passthrough
+script: it exists only to satisfy the browser's installability heuristic
+(a registered worker with a `fetch` listener), not to provide offline
+caching. It must not gain `cache.addAll`/precache behavior, since the
+dashboard's dev-iteration workflow depends on reloads always reaching the
+current build rather than a stale cached one.
+
+Because these resources sit behind owner auth, and browsers fetch
+`rel="manifest"` (and its declared icons) with an "omit" credentials mode by
+default, the served shell's `<link rel="manifest">` element sets
+`crossorigin="use-credentials"` so the owner-auth session cookie
+accompanies the manifest/icon fetches. This is only correct because the
+protected router's owner-auth check accepts a session cookie (in addition
+to a bearer token); a token-only auth boundary could not satisfy a
+browser-initiated manifest fetch this way.
+
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the
