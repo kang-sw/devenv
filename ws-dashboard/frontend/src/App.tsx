@@ -5885,6 +5885,29 @@ function WorkbenchShell({
         }
         return next;
       });
+      // `readOnlyFilePaneOrderByGroup` is a separate flat registry from
+      // `paneOrderByRoot` (same shape as `terminalPaneOrderByGroup` above),
+      // keyed by plain `groupId`, not `workbenchModel.root.id` /
+      // `moveRootKey`. Same as the terminal mirror, a drag/drop move must be
+      // mirrored into it or `readOnlyWorkbenchPanesByGroup` snaps read-only/
+      // document panes back to their fallback group on the next render
+      // (260711). `result.paneOrderByGroup` lives in `WorkbenchPane.id` space
+      // (`pane.id` on `readOnlyFilePanes`), not the `logicalKey` space
+      // `readOnlyFilePanes` is otherwise looked up by elsewhere - filtering by
+      // `logicalKey`/Record membership here would silently miss every pane,
+      // same `125d68e1` trap the terminal mirror above avoids.
+      onReadOnlyFilePaneOrderByGroupChange((current) => {
+        const livePaneIds = new Set(
+          readOnlyFilePanes.map((pane) => pane.id),
+        );
+        const next = { ...current };
+        for (const [groupId, paneIds] of Object.entries(
+          result.paneOrderByGroup,
+        )) {
+          next[groupId] = paneIds.filter((id) => livePaneIds.has(id));
+        }
+        return next;
+      });
     }
     setActivePaneByGroupForSelected(result.activePaneByGroup);
   };
