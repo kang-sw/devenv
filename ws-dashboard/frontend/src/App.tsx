@@ -301,6 +301,7 @@ import {
   type WorkNavSiblingDragPayload,
   type WorkNavSiblingOrder,
 } from "./workNavOrder";
+import { shouldSuppressBrowserShortcut } from "./keydownSuppression";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   createRootPickerDirectory,
@@ -685,6 +686,47 @@ export function App() {
         : []),
     [activeResources, serversView],
   );
+
+  // 260721-feat-dashboard-suppress-browser-shortcuts Phase 2: single
+  // app-wide capture-phase `document` keydown interceptor that suppresses
+  // catchable Class-A browser shortcuts (Ctrl/Cmd+S/P/F/G/D/O/U/J, zoom
+  // Ctrl/Cmd+Plus/Minus/Equals/Underscore/0, and Backspace-as-back-
+  // navigation outside editable targets) while explicitly never suppressing
+  // Ctrl/Cmd+R or normal editing/clipboard combos. The block/allow decision
+  // itself lives in the pure, DOM-free `shouldSuppressBrowserShortcut`
+  // predicate (`keydownSuppression.ts`); this effect only reads real event/
+  // target state into that predicate's input shape. Deliberately calls only
+  // `preventDefault()` and never `stopPropagation()`/
+  // `stopImmediatePropagation()` — the terminal pane's own bubble-phase
+  // `keydownFallback` listener must still receive and process every event
+  // unmodified (see the ticket's plan Conflict Analysis: the one overlapping
+  // key, Ctrl+U, degrades to a harmless redundant `preventDefault()`, not a
+  // collision). Empty dependency array: the predicate/handler are pure and
+  // stable, so the listener installs exactly once for the app's lifetime.
+  useEffect(() => {
+    const suppressBrowserShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      const targetIsEditable =
+        Boolean(target?.isContentEditable) ||
+        tagName === "input" ||
+        tagName === "textarea";
+      if (
+        shouldSuppressBrowserShortcut({
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          key: event.key,
+          targetIsEditable,
+        })
+      ) {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", suppressBrowserShortcut, true);
+    return () => {
+      document.removeEventListener("keydown", suppressBrowserShortcut, true);
+    };
+  }, []);
 
   useEffect(() => {
     selectedServerIdRef.current = selectedServerId;
