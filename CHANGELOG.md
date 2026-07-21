@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.34.0 - 2026-07-21
+
+### Added
+- `tickets.checklist` MCP tool — returns a ticket-authoring phase's checklist
+  (`intent`/`content` × category) as structured data for installing into a
+  single `todo.append`, replacing the skippable static prose in
+  `lead-write-ticket`.
+- `tickets.sage_gate` and `tickets.sage_record` MCP tools — the sage-review
+  gate now resolves posture (legacy `sage-review:` migration, config fallback,
+  category×stage matrix, standalone/combined mode) and records verdicts
+  (design/completeness aggregation, `resolution: missing` escalation, Go-owned
+  Blocked-section rendering, canonical commit) in the runtime instead of ~235
+  lines of playbook prose. Neither tool spawns reviewers.
+
+### Changed
+- `lead-write-ticket` diet: the sage-review state machine, the three Blocked
+  Section Templates, and the phase checklists are ported to the tools above;
+  the playbook drops ~268 lines per distribution while keeping doctrine intact.
+- `lead-verify-discussion` gains a design-verification escalation step; the
+  standalone `lead-verify-design` skill is removed and its references updated.
+- Convention text disambiguates relative "user" in worker-readable prose.
+
+### Fixed
+- Spec: removed a duplicate anchor in the verify-discussion escalation coverage.
+
 ## v0.33.14 - 2026-07-14
 
 ### Added
