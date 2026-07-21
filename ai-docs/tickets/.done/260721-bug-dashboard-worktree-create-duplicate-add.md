@@ -120,6 +120,55 @@ appear as separate entries; existing frontend tests (`test:resource-model`,
 `test:workbench`) stay green; manual dogfood repeat of the original
 create-worktree flow confirms no duplicate.
 
+### Result (commits a9f1bce8, 04355fd7) - 2026-07-21
+
+Root cause confirmed: `local_work_root_id_for_path` and the other
+`WorkspaceKey.id`/`stable_path_hash` derivations in `discovery.rs` hashed the
+RAW un-canonicalized path, so the same physical worktree reached two ways
+(e.g. a registered candidate path vs. an auto-discovered linked-worktree
+path) hashed to two different `WorkRootId`s, defeating the existing
+`WorkspaceBuilder::push` dedup guard and producing a duplicate work-root row.
+
+Fix: added a shared `canonical_or_normalized` helper (canonicalize-with-
+fallback to normalization when canonicalization fails, e.g. for a path that
+doesn't exist yet) and routed all four id-hash sites through it: the
+git-branch `workspace_key` derivation, `local_work_root_id_for_path`, the
+`discover_existing_dir` plain-dir branch, and `discovered_unusable`.
+`paths_equivalent`'s comparison semantics were left byte-for-byte unchanged.
+No over-dedup was introduced: a base/primary root and its linked-worktree
+children still resolve to distinct ids and stay distinct rows. Persisted-id
+safety was not a concern since ids are re-derived from paths on every load,
+not stored.
+
+Tests: strengthened
+`local_provider_distinguishes_git_primary_roots_and_linked_worktrees` to
+assert an exact root count of 2, and added a new
+`local_provider_dedups_linked_worktree_reached_via_symlink_alias` test
+(registers the same worktree via a symlinked parent directory and asserts a
+single row). `cargo build` clean; `cargo test -p ws-dashboard-daemon` all
+green (discovery 9/9; lib 83; routes 158; server 15).
+
+Review: correctness pass (opus) clean, with one accepted-informational
+minor (a TOCTOU note on canonicalize-then-use, not actionable). Fit pass
+found 2 Important findings (incomplete hash-site coverage across the four
+sites; a `paths_equivalent` semantic drift) - both fixed in the relay commit
+(`04355fd7`); the delta re-review came back clean.
+
+Commits: fix `a9f1bce8`, relay fix `04355fd7` (plan `38a8bcdf`).
+
+Forward follow-up (deferred, not part of this ticket's scope): after this
+id-hash canonicalization fix, `WorkspaceKey.label` is still derived from the
+literal candidate path's basename, independent of canonicalization - two
+differently-named aliases pointing at the same physical directory still
+land in separate workspace buckets even though their `WorkRootId` now
+matches. Captured as
+`260721-idea-dashboard-worktree-label-alias-split`.
+
+**Open item**: manual dogfood confirmation (create a worktree via the
+dashboard UI and confirm it appears once) remains the user's step - there
+was no live dashboard instance available in the implementing session to
+perform it.
+
 ## Spec Impact
 
 No spec text change expected. `ai-docs/spec/ws-web-dashboard/index.md`
