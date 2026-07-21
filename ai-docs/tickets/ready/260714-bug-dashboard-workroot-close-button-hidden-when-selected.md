@@ -113,3 +113,35 @@ X is present and clickable on a selected, open work root, plus a test/manual
 check that clicking it lands on the empty-main-screen placeholder rather than
 silently falling back to another root via `resolveWorkbenchSelection`'s
 fallback.
+
+## Phase 1 Result (2026-07-21)
+
+- Phase 1 (empty main-screen placeholder) implemented. New
+  `EmptyWorkbenchPlaceholder` component rendered in `WorkbenchShell`'s
+  `activeHeader` `!resources || !workbenchModel` branch (`App.tsx`), replacing
+  the small `StatusPane "No workRoot"` box: full-height centered layout, copy
+  "No work root selected" / "Open a work root to get started", existing
+  `FolderGit2` glyph, and an "Open workRoot" CTA implemented as a new
+  `"empty"` variant of `OpenWorkRootControl` reusing the existing
+  `buildRootPickerOpenCommand` flow. Scoped CSS (`.empty-workbench*`,
+  `.open-work-root-empty*`); `StatusPane` untouched so `ResourceDetail` is
+  unaffected.
+- Verification: `npm run build` PASS; `npm run test:workbench` PASS. No DOM
+  harness for this render branch (manual visual dogfood pending, user's
+  step).
+- Review: single full-scope, `clean with 1 minor`. Residual minor: the new
+  empty-state CTA (`EmptyWorkbenchPlaceholder`, `App.tsx:10169-10201`) renders
+  unconditionally clickable without checking whether the server's `openRoot`
+  action is actually enabled, unlike the sidebar `variant="icon"` call site
+  which only renders when `openRoot` is enabled - a connected-but-disabled
+  server would surface an inline picker error instead of the CTA silently
+  doing nothing. Accepted/deferred, not a bug (shared component's existing
+  error handling covers the failure gracefully; decided design/plan do not
+  ask for this parity).
+- Commits: feat 21116b54 (plan e212e96b).
+- **Phase 2 STILL PENDING** (not done): close-button `!selected` gate
+  reachability (`App.tsx` ~9793-9798) + selection-fallback behavior in
+  `resourceModel.ts` (`resolveWorkbenchSelectionWithMatchInternal` ~547-599)
+  so that closing the last/selected work root actually lands on this new
+  empty placeholder instead of snapping back to the first root. This ticket
+  remains in `ready/` until Phase 2 lands.
