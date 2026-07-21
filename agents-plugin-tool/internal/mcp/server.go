@@ -3890,7 +3890,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier and optional config-resolved recommended-model/recommended-reasoning-effort metadata. Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier, with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
