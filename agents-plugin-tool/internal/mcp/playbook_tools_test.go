@@ -586,15 +586,33 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 			}
 			if tc.harness == "codex" {
 				for _, want := range []string{
-					"Map `recommended-model: <model>` to `spawn_agent.model`",
-					"`spawn_agent.reasoning_effort`",
+					"`playbook.render` returns the prompt path first",
+					"When both optional binding lines are present",
+					`task_name: "<stable_task_name>"`,
+					`message: "Read and execute the complete prompt at <first-line-prompt-path>."`,
+					`fork_turns: "none"`,
+					`model: "<recommended-model>"`,
+					`reasoning_effort: "<recommended-reasoning-effort>"`,
+					"Omit a parameter whose line is absent",
 					"Never use `effort` as a spawn parameter.",
-					"If native spawn rejects one, report",
-					"mercenary fallback",
+					"do not pass it to\n`spawn_agent`",
+					"Before any degraded retry",
+					"do not launch a degraded native spawn",
+					"mercenary fallback described under **Persistent agents**",
+					"remove only a field that native spawn\nexplicitly identifies as rejected",
+					"Treat a rejection as ambiguous unless it explicitly names one rejected field",
+					"do not retry native or guess which field failed",
+					"If no exact-binding fallback is available",
+					"Retain the returned agent ID or canonical task name",
+					"`followup_task(target: \"<agent-id-or-canonical-task-name>\", message: \"<continuity-prompt>\")`",
+					"follow **Delegated\nplaybook bindings** for the render result and native dispatch",
 				} {
 					if !strings.Contains(body, want) {
 						t.Errorf("Codex workflow manual missing %q:\n%s", want, body)
 					}
+				}
+				if got := strings.Count(body, "### Delegated playbook bindings"); got != 1 {
+					t.Errorf("Codex workflow manual rendered delegated-binding section %d times, want 1:\n%s", got, body)
 				}
 			}
 		})
