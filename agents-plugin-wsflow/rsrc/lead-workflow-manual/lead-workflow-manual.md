@@ -91,8 +91,7 @@ For scoped fact-finding, surveys, and one-turn answers, dispatch
 model explicitly on the spawn call — do not rely on the harness default. Use an
 English prompt and require cited evidence, gaps, and follow-up needs. For
 parallel dispatch, spawn multiple in one turn; collect all before
-synthesizing. This explicit-model rule applies to direct scoped exploration;
-for playbook-rendered delegates, follow **Delegated playbook bindings**.
+synthesizing.
 
 <!-- ws:full-only:start -->
 ### Persistent agents
@@ -104,12 +103,11 @@ general-purpose named agent; registration applies delegate orientation and the
 default tier mapping. Call the agent for each continuity turn.
 Bundled delegate prompts are not registered by stem — render them. Obtain a
 delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
-(a lead key splices a child-key credential block), then follow **Delegated
-playbook bindings** for the render result and native dispatch. `reference-discovery`
-is such a delegate playbook, not a workflow skill.
-For mercenary execution, pass the rendered prompt as `system_prompt_text` and
-its `recommended-tier` as `tier` to `mercenary.register`, then use
-`mercenary.call` and collect through `mercenary.result`.
+(a lead key splices a child-key credential block). Hand the rendered prompt to a native
+subagent (default), or pass it as `system_prompt_text` with `tier:
+<recommended-tier>` to a mercenary `mercenary.register` + `mercenary.call`, then
+collect through `mercenary.result`. `reference-discovery` is such a delegate
+playbook, not a workflow skill.
 `mercenary.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,

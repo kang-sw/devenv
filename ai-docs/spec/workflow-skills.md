@@ -124,17 +124,16 @@ general-purpose named-agent form; role-specific delegates obtain a self-containe
 prompt from `ws/playbook.render` and run natively by default. For Codex-native
 dispatch, the lead passes render-returned `recommended-model` as
 `spawn_agent.model` and optional `recommended-reasoning-effort` as
-`spawn_agent.reasoning_effort`; `effort` is not the parameter name. If the active
-spawn surface rejects an optional binding, guidance reports that exact binding as
-unavailable instead of claiming it was applied. The applicable exact-binding
-fallback is a mercenary registered with the rendered prompt as
-`system_prompt_text` and the render-returned `recommended-tier` as `tier`. The
-capability tier remains the portable decision vocabulary, while concrete model
-and effort values are harness-local execution bindings. Delegate prompt bodies do
-not repeat their own model alias; binding metadata stays lead-facing and is
-applied before spawn. The removed `prompts: ["<prompt-stem>"]`/`prompt_refs`/`model`
-register fields no longer appear in shipped skill text. CLI adapter syntax belongs
-only in compatibility or testing references. {#260507-mcp-centric-workflow-language}
+`spawn_agent.reasoning_effort`; `effort` is not the parameter name. It omits
+absent bindings, uses `fork_turns: "none"` for the self-contained rendered
+prompt, and reports a rejected field and value instead of claiming the binding
+was applied. Harness selection and binding-resolution rationale remain outside
+the workflow manual; it exposes only the concrete dispatch operation needed by
+the active toolbox. Delegate prompt bodies do not repeat their own model alias;
+binding metadata stays lead-facing and is applied before spawn. The removed
+`prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
+appear in shipped skill text. CLI adapter syntax belongs only in compatibility
+or testing references. {#260507-mcp-centric-workflow-language}
 
 Scoped fact-finding delegation uses host-native exploration workers rather
 than `ws/subquery`: shipped skill text delegates scoped exploration directly to
