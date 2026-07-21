@@ -556,7 +556,7 @@ async fn pwa_manifest(State(state): State<AppState>) -> Response {
 }
 
 async fn pwa_service_worker(State(state): State<AppState>) -> Response {
-    serve_root_static_file(&state, "sw.js", "text/javascript; charset=utf-8").await
+    serve_root_static_file(&state, "sw.js", "application/javascript; charset=utf-8").await
 }
 
 async fn pwa_icon_192(State(state): State<AppState>) -> Response {
