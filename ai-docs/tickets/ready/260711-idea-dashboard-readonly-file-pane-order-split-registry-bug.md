@@ -45,3 +45,34 @@ in-commit but explicitly left it untouched:
   unifying `paneOrderByRoot`, `terminalPaneOrderByGroup`, and
   `readOnlyFilePaneOrderByGroup` into one model) — worth a separate idea
   if this pattern turns out to repeat a third time, but not forced here.
+
+## Dogfood Confirmation (2026-07-21)
+
+Confirmed via live dogfooding on 2026-07-21: grouped document/read-only-file
+panes now misbehave (splits/arrangement not working properly). This upgrades
+the ticket from a flagged parallel lead to a confirmed, reproducing symptom.
+
+## Phases
+
+### Phase 1: Determine latent-vs-regression, then apply the mirroring fix
+
+First determine whether the confirmed misbehavior is (i) the pre-existing
+latent issue this ticket hypothesized -
+`readOnlyFilePaneOrderByGroup` being a separate flat registry not mirrored
+by `movePane` (the same shape `terminalPaneOrderByGroup` had before
+`bc566a78`) - or (ii) a **regression** introduced by the terminal-split fix
+commit `d8e71b51` (which keyed `movePane`'s workbench-group/pane-order
+persistence by the scoped `rootKey` for terminal panes). Compare behavior
+against the pre-`d8e71b51` baseline to distinguish the two.
+
+Then fix by applying the **same** scoped-key/registry-mirroring pattern used
+by the terminal-split fix (`d8e71b51`, and the earlier `bc566a78` mirroring
+fix it built on) to the read-only/document pane path: filter the move
+result's per-group pane order down to ids present in the read-only-file pane
+set, write into `readOnlyFilePaneOrderByGroup` keyed consistently with
+`paneOrderByRoot`/`workbenchGroupsByRoot`, so grouped document panes' split/
+order persists and does not snap back.
+
+Success: dragging/splitting grouped document panes persists correctly;
+existing frontend tests (`test:workbench`, `test:resource-model`) stay green,
+plus manual dogfood confirmation.

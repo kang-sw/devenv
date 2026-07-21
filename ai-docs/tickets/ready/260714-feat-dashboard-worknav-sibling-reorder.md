@@ -90,3 +90,7 @@ application (workspace list order, worktree list order, order surviving a
 resource refresh) plus browser/e2e coverage for the actual drag gesture if the
 project's existing Playwright harness supports simulated drag events; manual
 verification is acceptable to note as a fallback if not.
+
+## Promotion (2026-07-21)
+
+Promoted per user curation.

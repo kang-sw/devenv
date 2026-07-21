@@ -120,10 +120,42 @@ correctly regardless of icon rendering.
 
 ## Non-Goals
 
-This ticket captures and precisely documents the current inconsistent
-state for a future design decision. It does not prescribe a fix, a target
-color/shape scheme, or which of the two icons (main glyph vs. kind badge)
-should be dropped, merged, or become the single source of truth for
-git/plain/worktree status. That is an open design question — likely wants
-input from whoever owns `260524-research-ws-dashboard-visual-design-system-refresh`
-or general dashboard visual-design direction — not something to decide here.
+This ticket originally captured and precisely documented the current
+inconsistent state for a future design decision without prescribing a fix.
+See `## Decided Direction (2026-07-21)` below: the user has since prescribed
+a narrow fix for this round. The broader open design question (which of the
+two icons should be dropped/merged/become the single source of truth for
+git/plain/worktree status, shape unification, badge-on-`workspace`-row, the
+three-competing-color-channels issue) remains out of scope here and still
+likely wants input from whoever owns
+`260524-research-ws-dashboard-visual-design-system-refresh` or general
+dashboard visual-design direction.
+
+## Decided Direction (2026-07-21)
+
+Keep the current icon **set** unchanged - do not change shapes/glyphs. Only
+change the icon **color** of a root work-root that has child worktrees
+(the `presentation === "workspace"`/`workRoot` light-gray case,
+`.resource-row-icon`, `color: var(--ws-color-text-tertiary)`,
+`styles.css:2623-2630`) so it matches the color of a single work-root with no
+worktrees (the `compactWorkRoot` case, `.resource-row-icon-compact`,
+`color: var(--ws-color-action)` = `#78a9ff`, `styles.css:2632-2634`, token at
+`styles.css:37`). Reuse the existing `--ws-color-action` token as-is - do not
+invent a new blue. This is a narrow color-unification only; shape, badge
+presence, and the border-tone channel are unchanged.
+
+## Phases
+
+### Phase 1: Unify with-child-worktrees root icon color to the single-root icon color
+
+Change the main-glyph color for the `workspace` parent row and its `workRoot`
+child rows (currently `.resource-row-icon` / `var(--ws-color-text-tertiary)`,
+`styles.css:2623-2630`) to the same `var(--ws-color-action)` blue already used
+by `.resource-row-icon-compact` (`styles.css:2632-2634`) for the single-root,
+no-worktrees case. Do not change icon shape/glyph selection
+(`ResourceGlyph`, `App.tsx:1542-1564`), the kind badge
+(`WorkRootKindIcon`), or `resourceRowTone`'s border-color behavior.
+
+Success: a root-with-worktrees (`workspace`/`workRoot` presentation) and a
+single no-worktree root (`compactWorkRoot` presentation) render their main
+glyph in the same color; no other icon/color behavior changed.

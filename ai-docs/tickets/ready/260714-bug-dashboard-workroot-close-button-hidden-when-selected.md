@@ -66,32 +66,50 @@ server-level keep-alive/deallocation.
   `setSelectedId(<id>)` calls exist, `App.tsx:586,610,633,673,679,945,1181`) -
   this is genuinely new capability, not a dormant path being re-enabled.
 
+## Decided Direction (2026-07-21)
+
+The close-button-hidden symptom exposes a deeper gap: the "empty main screen"
+UX is undefined for when the active work root is closed/deselected. The
+decided deliverable this round is to **add an "empty screen" placeholder** for
+the main content area when no work root is active (on close/deselect), and
+wire the close/deselect interaction to it. The original concern - the X/close
+control should stay usable/visible for the selected row, wired to "deselect"
+rather than the destructive close/unmount - folds into this same effort
+rather than standing as a separate change.
+
 ## Phases
 
-### Phase 1: Show X on the selected work root and wire it to deselect
+### Phase 1: Empty-main-screen placeholder
 
-- Change `canCloseWorkRoot` (`App.tsx:9112-9115`) so the X renders whenever
-  `isOpenWorkRoot` is true for a `workRoot`/`compactWorkRoot` row, regardless
-  of `selected`.
-- When the row is selected, clicking the X should deselect (clear
-  `selectedId`) and result in the workbench showing its "nothing selected"
-  `StatusPane` (`App.tsx:5619-5626`) - not simply re-run today's
-  `workRoot.close` handler as-is, since that handler doesn't touch
-  `selectedId` at all today and (per the Constraints note above) clearing
-  `selectedId` alone may not surface the empty state without also addressing
-  `resolveWorkbenchSelection`'s fallback behavior.
-- When the row is open-but-not-selected (today's existing case), preserve
-  current `workRoot.close` behavior unchanged.
-- Decide during implementation whether clicking X on the *selected* row should
-  also run the existing close/unmount side effects (i.e., both deselect and
-  close), or deselect only while leaving the root's workbench state mounted
-  for a quick re-select - the ticket only mandates the visible/clickable X and
-  the resulting empty-state landing; pick whichever keeps the two lifecycles
-  (this ticket's deselect vs. `workRoot.close`'s unmount-keep-daemon-alive)
-  coherent and document the choice in the Result.
+Define and render a coherent empty-main-screen placeholder for the main
+content area, shown whenever there is no active work root (including but not
+limited to the close/deselect interaction added in Phase 2). Success: the
+main content area has a defined, coherent "nothing active" presentation
+instead of a blank/undefined state.
 
-Verification should include a resource-model/render-level test asserting the X
-is present and clickable on a selected, open work root, plus a test/manual
-check that clicking it lands on the "nothing selected" `StatusPane` rather than
+### Phase 2: Wire close/deselect on the selected nav row into the empty state
+
+Change `canCloseWorkRoot` (`App.tsx:9112-9115`) so the X renders whenever
+`isOpenWorkRoot` is true for a `workRoot`/`compactWorkRoot` row, regardless of
+`selected` - keeping the control usable/visible on the row you are currently
+viewing, not just every other open row. Wire clicking the X on the *selected*
+row to deselect (clear `selectedId`) and land on Phase 1's empty placeholder,
+rather than re-running today's destructive `workRoot.close` handler verbatim;
+account for `resolveWorkbenchSelection`'s existing fallback-to-first-root
+behavior (`App.tsx:9433-9481`) so a deselect actually reaches the empty state
+instead of silently falling back to another root. Preserve today's
+`workRoot.close` behavior unchanged for the open-but-not-selected case.
+Decide during implementation whether clicking X on the selected row should
+also run the existing close/unmount side effects or deselect only while
+leaving workbench state mounted for quick re-select; document the choice in
+the Result.
+
+Success: closing/deselecting a work root shows the coherent empty placeholder
+instead of a blank/broken main area, and the close/deselect control is usable
+while its own row is selected.
+
+Verification should include a resource-model/render-level test asserting the
+X is present and clickable on a selected, open work root, plus a test/manual
+check that clicking it lands on the empty-main-screen placeholder rather than
 silently falling back to another root via `resolveWorkbenchSelection`'s
 fallback.
