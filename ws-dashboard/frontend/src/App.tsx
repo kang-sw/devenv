@@ -138,6 +138,7 @@ import {
   revalidateWorkbenchLayoutForRoot,
   mergeReadOnlyAndTerminalPaneOrder,
   removePanesFromOrder,
+  filterPaneOrderByPaneIds,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
   upsertTerminalVisualRestoreEntryInSnapshot,
@@ -5873,17 +5874,16 @@ function WorkbenchShell({
         // (`pane.paneId`, see `terminalWorkbenchPane`), not the `logicalKey`
         // space `terminalPanes` is keyed by - filtering `id in terminalPanes`
         // here always misses, silently dropping every terminal pane from the
-        // mirror.
+        // mirror. `filterPaneOrderByPaneIds` (`workbench/layoutRestore.ts`)
+        // is the extracted, unit-tested form of this filter.
         const livePaneIds = new Set(
           Object.values(terminalPanes).map((pane) => pane.paneId),
         );
-        const next = { ...current };
-        for (const [groupId, paneIds] of Object.entries(
+        return filterPaneOrderByPaneIds(
+          current,
           result.paneOrderByGroup,
-        )) {
-          next[groupId] = paneIds.filter((id) => livePaneIds.has(id));
-        }
-        return next;
+          livePaneIds,
+        );
       });
       // `readOnlyFilePaneOrderByGroup` is a separate flat registry from
       // `paneOrderByRoot` (same shape as `terminalPaneOrderByGroup` above),
@@ -5900,13 +5900,11 @@ function WorkbenchShell({
         const livePaneIds = new Set(
           readOnlyFilePanes.map((pane) => pane.id),
         );
-        const next = { ...current };
-        for (const [groupId, paneIds] of Object.entries(
+        return filterPaneOrderByPaneIds(
+          current,
           result.paneOrderByGroup,
-        )) {
-          next[groupId] = paneIds.filter((id) => livePaneIds.has(id));
-        }
-        return next;
+          livePaneIds,
+        );
       });
     }
     setActivePaneByGroupForSelected(result.activePaneByGroup);
