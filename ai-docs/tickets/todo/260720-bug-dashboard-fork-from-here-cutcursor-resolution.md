@@ -133,3 +133,8 @@ of the recommended direction — (a) client-side cursor reconciliation
 cursors on poll-merge); the daemon was confirmed to assign real resolvable
 cursors to user blocks too, so direction (a) is viable. Spec-ready but not
 implementation-ready until the user picks a direction.
+
+## Deferred to todo (2026-07-21)
+
+Deferred out of the ready queue this round per user curation (agent-chat work
+not this round); the existing Deferral/blocker note above remains valid.

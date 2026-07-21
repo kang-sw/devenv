@@ -119,3 +119,8 @@ acceptance spec's stub-shaped assertions; (B) add a deterministic fixture
 and accept losing real-adapter browser coverage; (C) if a fixture is added,
 which layer (daemon Rust vs frontend) it lives at. The separable CSS
 min-height/collapse fix can land independently of that decision.
+
+## Deferred to todo (2026-07-21)
+
+Deferred out of the ready queue this round per user curation (agent-chat work
+not this round); the existing Deferral/blocker note above remains valid.

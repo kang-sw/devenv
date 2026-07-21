@@ -470,3 +470,8 @@ Blocked-by `260720-bug-dashboard-fork-from-here-cutcursor-resolution`
 (unresolved — awaiting user design-direction), already recorded in this
 ticket's `related:` frontmatter. Phases 1-3 landed; Phase 4's remaining
 fork-from-here confirmation is gated on that bug's fix.
+
+## Deferred to todo (2026-07-21)
+
+Deferred out of the ready queue this round per user curation (agent-chat work
+not this round); the existing Deferral/blocker note above remains valid.
