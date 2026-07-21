@@ -120,6 +120,20 @@ No implementation finding remains unresolved. Dogfood follow-ups were captured
 as `260721-bug-codex-spawn-schema-routing-field-drift` and
 `260721-bug-review-partition-empty-artifact`.
 
+#### Edition (578bce4d) - 2026-07-21
+
+Kept harness-resolved `recommended-model` metadata as operational tool output,
+but removed the shared workflow-manual explanation of harness selection, tier
+portability, and binding-resolution policy. Claude now receives no added native
+binding guidance; the empty neutral include preserves its prior rendered manual.
+The Codex overlay is limited to concrete `model`/`reasoning_effort` mapping,
+`fork_turns: "none"`, absent-field omission, and honest rejection reporting.
+
+Verification passed with uncached MCP/resource tests, the wsflow unittest suite,
+canonical/wsflow byte comparison, spec-index validation, and a negative Claude
+render assertion for Codex-only spawn guidance. Delegate alias echoes remain
+absent.
+
 ## Spec Impact
 
 - Target spec areas: `ai-docs/spec/mcp-tools.md` playbook render contract and
