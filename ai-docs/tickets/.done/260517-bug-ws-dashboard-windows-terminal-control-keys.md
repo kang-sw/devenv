@@ -44,3 +44,10 @@ even though the local POSIX browser gate passes the same acceptance step.
 - If native Windows requires a different interrupt mechanism than raw ETX
   bytes, the terminal contract and command-plan limitations should say that
   explicitly instead of treating POSIX Ctrl-C evidence as portable.
+
+## Result (2026-07-21)
+
+Verified working via dogfood on native Windows 2026-07-21: Ctrl-C correctly
+interrupts long-running commands in dashboard-hosted native-Windows
+`cmd.exe`/PowerShell terminals. Not reproducing; closing as resolved. No code
+fix was made this round — the behavior was confirmed correct as-is.

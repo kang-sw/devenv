@@ -446,6 +446,26 @@ button {
   line-height: var(--ws-line-height-02);
 }
 
+/* 260714 Phase 1 (empty-screen-placeholder): the "empty" variant embeds
+   `OpenWorkRootControl` inside `.empty-workbench`'s centered card, not a
+   sidebar section - strip the sidebar-oriented border/background/padding
+   from the shared `.open-work-root` wrapper for this variant only. Compound
+   selector (matching `.open-work-root-icon.open-work-root`'s existing
+   pattern) so it outranks the later `.open-work-root { background: ... }`
+   nav-body override below. */
+.open-work-root-empty.open-work-root {
+  border-bottom: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.open-work-root-empty-cta {
+  display: inline-flex;
+  max-width: none;
+  align-items: center;
+  gap: var(--ws-space-04);
+}
+
 .root-picker-input {
   min-width: 0;
   flex: 1 1 auto;
@@ -1040,6 +1060,18 @@ button {
   background: var(--ws-color-panel-hover);
 }
 
+.resource-row-draggable {
+  cursor: grab;
+}
+
+.resource-row-draggable:active {
+  cursor: grabbing;
+}
+
+.resource-row-drag-over {
+  box-shadow: inset 0 2px 0 var(--ws-color-action);
+}
+
 .resource-row-select:focus-visible,
 .resource-row-action:focus-visible {
   outline: var(--ws-focus-ring);
@@ -1454,6 +1486,42 @@ button {
   min-height: 0;
   flex-direction: column;
   background: var(--ws-color-surface-region-workbench);
+}
+
+/* 260714 Phase 1 (empty-screen-placeholder): full-height, centered
+   "nothing selected" state for the main workbench pane. Scoped to this
+   class only - `.status-pane`/`.ws-state-surface` (StatusPane's styling,
+   still used by `ResourceDetail`) are intentionally untouched. */
+.empty-workbench {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ws-space-06);
+  min-height: 0;
+  padding: var(--ws-space-10);
+  text-align: center;
+}
+
+.empty-workbench-icon {
+  color: var(--ws-color-text-disabled);
+}
+
+.empty-workbench-title {
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-05);
+  line-height: var(--ws-line-height-07);
+}
+
+.empty-workbench-detail {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-03);
+  line-height: var(--ws-line-height-05);
+}
+
+.empty-workbench-cta {
+  margin-top: var(--ws-space-04);
 }
 
 .workbench-toolbar {
@@ -2626,7 +2694,7 @@ button {
   min-width: 0;
   align-items: center;
   justify-content: center;
-  color: var(--ws-color-text-tertiary);
+  color: var(--ws-color-action);
 }
 
 .resource-row-icon-compact {

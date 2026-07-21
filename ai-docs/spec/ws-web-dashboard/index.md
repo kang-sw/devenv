@@ -713,6 +713,52 @@ workRoot, or instance ids. Refreshing `/servers` or server-scoped app paths
 serves the protected frontend shell through the same owner-auth static route
 boundary. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 
+## PWA Installability {#260721-ws-dashboard-pwa-installability}
+
+The dashboard daemon serves a web app manifest, a service worker, and app
+icons at fixed root paths (`/manifest.webmanifest`, `/sw.js`,
+`/icon-192.png`, `/icon-512.png`) inside the same owner-auth protected
+router as `/` and `/assets/{*asset_path}`; none of these add a new
+unauthenticated top-level route beside `/pair`. The manifest declares
+`display: "standalone"`, `start_url: "/"` (the daemon-served app root), and
+`name`/`icons` fields so Chrome/Edge offer the "Install app" affordance from
+the served origin. `theme_color` and `background_color` derive from the
+dashboard's existing dark-theme CSS tokens rather than invented colors.
+
+The service worker is intentionally a no-precache, network-passthrough
+script: it exists only to satisfy the browser's installability heuristic
+(a registered worker with a `fetch` listener), not to provide offline
+caching. It must not gain `cache.addAll`/precache behavior, since the
+dashboard's dev-iteration workflow depends on reloads always reaching the
+current build rather than a stale cached one.
+
+Because these resources sit behind owner auth, and browsers fetch
+`rel="manifest"` (and its declared icons) with an "omit" credentials mode by
+default, the served shell's `<link rel="manifest">` element sets
+`crossorigin="use-credentials"` so the owner-auth session cookie
+accompanies the manifest/icon fetches. This is only correct because the
+protected router's owner-auth check accepts a session cookie (in addition
+to a bearer token); a token-only auth boundary could not satisfy a
+browser-initiated manifest fetch this way.
+
+## Browser Shortcut Suppression {#260721-ws-dashboard-browser-shortcut-suppression}
+
+The dashboard installs one capture-phase `document`-level `keydown`
+listener at the top-level `App` component that calls `preventDefault()`
+for a fixed set of Class-A browser shortcuts (Ctrl/Cmd+S/P/F/G/D/O/U/J,
+zoom Ctrl/Cmd+Plus/Minus/Equals/Underscore/0, and Backspace-as-back-
+navigation when the focused target is not an editable field), while
+explicitly never suppressing Ctrl/Cmd+R (reload) or normal editing/
+clipboard combos (Ctrl+C/V/X/A/Z/Y). The block/allow decision is a pure,
+DOM-free predicate (`keydownSuppression.ts`) so the exact set is
+unit-tested without a browser DOM; the App effect only reads real event/
+target state into the predicate's input shape. This suppressor targets
+Class A shortcuts only (interceptable via page-level `keydown`) — Class B
+browser-chrome-reserved shortcuts (Ctrl+W/T/N/Tab/1-9) are not addressed
+here since they never reach page script in any served mode. It runs
+identically in a plain browser tab and the Phase 1 installed PWA
+(`260721-ws-dashboard-pwa-installability`).
+
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the
@@ -725,7 +771,10 @@ When the workspace and workRoot labels are identical, the compact row displays
 that label once; distinct labels remain visible as a workspace/workRoot pair.
 Workspaces with multiple workRoots continue to show separate workspace and
 workRoot rows. Main/sub instances remain workbench surfaces or projections
-rather than default recursive left-nav rows.
+rather than default recursive left-nav rows. Sibling workspace rows within a
+server and sibling worktree rows within a workspace are user-reorderable by
+drag, with the resulting order persisted browser-locally per scope rather than
+changing server-reported order.
 
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route

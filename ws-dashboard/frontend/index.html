@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ws dashboard</title>
+    <!--
+      The manifest (and its declared icons) is served behind the owner-auth
+      protected router. Browsers fetch `rel="manifest"` resources with an
+      "omit" credentials mode by default, so without `use-credentials` the
+      background fetch would 401/403 when owner auth is enabled and
+      installability would silently fail. See
+      ai-docs/spec/ws-web-dashboard/index.md#260721-ws-dashboard-pwa-installability.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
   </head>
   <body>
     <div id="root"></div>

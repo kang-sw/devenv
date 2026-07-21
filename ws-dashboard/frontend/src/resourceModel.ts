@@ -502,6 +502,33 @@ export function reconcileSelectedId(
   return preferredSelection(entities) ?? null;
 }
 
+// Post-close selection scoped to currently-OPEN roots (tab semantics).
+// Walks the resource tree in natural order, keeping only roots whose
+// serverScopedIdentity key is in `openRootKeys`; returns the next still-open
+// root after `closingRootId`, else the previous, else null when no open root
+// remains. Pure: the open set is passed in because this module has no access
+// to React `openWorkRootKeys` state.
+export function pickWorkRootSelectionAfterClose(
+  resources: DashboardResourcesView | null,
+  closingRootId: string,
+  openRootKeys: ReadonlySet<string>,
+): string | null {
+  if (!resources) return null;
+  const orderedOpenRootIds: string[] = [];
+  for (const workspace of resources.workspaces) {
+    for (const root of workspace.workRoots) {
+      const key = serverScopedIdentity(root.resourcePath.serverId, root.id);
+      if (openRootKeys.has(key)) orderedOpenRootIds.push(root.id);
+    }
+  }
+  const idx = orderedOpenRootIds.indexOf(closingRootId);
+  if (idx === -1) {
+    // Defensive/race: closing root not in the open set — first remaining.
+    return orderedOpenRootIds.find((id) => id !== closingRootId) ?? null;
+  }
+  return orderedOpenRootIds[idx + 1] ?? orderedOpenRootIds[idx - 1] ?? null;
+}
+
 // The workbench selection resolved against a resource tree: the workspace +
 // work root + main/selected instance that the current `selectedId` points at.
 // Relocated verbatim from `App.tsx` (260714 active-root derivation refactor
@@ -523,6 +550,20 @@ export function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
   return root.kind === "gitLinkedWorktree";
 }
 
+// The root a workspace's own row represents when the workspace does not
+// compact to a single row: the primary/base root if present, otherwise the
+// first workRoot. Shared by workbench-selection resolution and the
+// "workspace"-presentation resource row's close affordance.
+export function workspaceBaseWorkRoot(
+  workspace: WorkspaceView,
+): WorkRootView | null {
+  return (
+    workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
+    workspace.workRoots[0] ??
+    null
+  );
+}
+
 // Result of walking the resource tree for `selectedId`: `matched` is true
 // only when `selectedId` was found exactly (workspace id, root id, or nested
 // instance id); a `selection` returned with `matched: false` fell through to
@@ -541,10 +582,7 @@ function resolveWorkbenchSelectionWithMatchInternal(
   let fallback: WorkbenchSelection | null = null;
 
   for (const workspace of resources.workspaces) {
-    const workspaceRoot =
-      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
-      workspace.workRoots[0] ??
-      null;
+    const workspaceRoot = workspaceBaseWorkRoot(workspace);
     if (selectedId === workspace.id && workspaceRoot) {
       const mainInstance = workspaceRoot.mainInstances[0] ?? null;
       return {

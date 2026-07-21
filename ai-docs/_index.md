@@ -69,7 +69,7 @@ history.
 | `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
 | `ai-docs/ref/windows-dogfood.md` | Native-Windows source-build dogfood / Phase C cold-load acceptance procedure |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
-| `ai-docs/ref/dashboard-headless-browser-verification.md` | Headless-Playwright + no-auth-daemon procedure for live-UI dashboard bug verification without human reproduction |
+| `ai-docs/ref/dashboard-headless-browser-verification.md` | Headless-Playwright dashboard verification: no-auth-daemon ad hoc live-UI probing, `npm run test:browser` cold-start, driving a real (non-stub) Codex/Claude harness, and verifying past the hidden-transcript landmine |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
 | `ws/infra.read("impl-playbook")` | Implementation discipline |
 | `ws/infra.read("subagent-rules")` | Subagent dispatch rules |
@@ -157,7 +157,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
-| `260714-bug-git-status-poll-index-lock-staleness` | ready | Stop the dashboard's 5s git-status poll from taking `.git/index.lock`, addressing a dogfood report of stale Windows-side lockfiles under WSL2 |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
@@ -215,34 +214,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260714-bug-git-status-poll-index-lock-staleness` (ready, bug) - dogfood
-  report of a stale Windows-side `.git/index.lock` under WSL2; confirmed the
-  dashboard daemon's 5s visible-WorkRoot git-status poll runs a lock-taking
-  `git status --porcelain` with no `--no-optional-locks`, and confirmed no
-  daemon code path kills/times-out a git subprocess (rules out self-inflicted
-  staleness from that angle). Root cause is a hypothesis, not confirmed by
-  live reproduction: a Windows-native tool colliding with this poll over the
-  WSL↔Windows interop mount (9p/drvfs), whose atomicity/cleanup semantics for
-  create-lock/rename/unlink may not match native POSIX, turning ordinary
-  lock contention into staleness. Fix direction: Phase 1 adds
-  `--no-optional-locks` to the poll's `git status` call only, removing the
-  daemon's own contribution to lock contention regardless of the exact
-  mechanism; mutating routes (switch/fetch/push/pull) are untouched. Sage
-  review (design + completeness) both completed. Implementation deferred.
-- `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo` (`ready`, bug,
-  related to `260711`/`260713-feat-...-adapter-wiring`) - implementation-ready
-  after a design-review block-and-revise cycle (2026-07-13/14): dual
-  static-trace + live-dynamic-repro subagent investigation confirmed the
-  actual "no response" root cause is a client poll race in
-  `beginRealStreamingTurn` (immediate poll can read the daemon's `live`
-  flag before the async `turn/started` notification lands, misreading
-  "not started yet" as "already finished"), not the originally-suspected
-  missing optimistic echo (which already exists and works). Phase 1 fixes
-  the race; Phase 2 (scoped down from the blocked draft - no longer removes
-  `suppress_local_prompt`) adds `role`/`turnId` to `TranscriptBlock` for
-  fork/resume rendering only. Spec-addressed via
-  `#260714-transcript-block-role-turn-id` in
-  `ai-docs/spec/ws-web-dashboard/index.md`.
+- `260714-bug-git-status-poll-index-lock-staleness` (`.done/`, bug) - closed
+  2026-07-20: Phase 1 (`--no-optional-locks` on the poll's `git status` call
+  in `git_toolbar.rs`, plus spec update) landed as commit `18e97569`,
+  confirmed fully merged and pushed to `ws-dashboard-dev`.
 - `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`idea`, chore) -
   test plan for `260525`'s live remote-dogfood gap. Phase 1 partially
   executed 2026-07-07: SSH connectivity probe blocked by this session's own

@@ -376,7 +376,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
                 id: OpaqueId::from(format!(
                     "workspace-local-{}",
-                    stable_path_hash(&git.common_dir)
+                    stable_path_hash(&canonical_or_normalized(&git.common_dir))
                 )),
                 label: git.workspace_label(),
             },
@@ -388,7 +388,10 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
         },
         None => DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
-                id: OpaqueId::from(format!("workspace-local-{}", stable_path_hash(&path))),
+                id: OpaqueId::from(format!(
+                    "workspace-local-{}",
+                    stable_path_hash(&canonical_or_normalized(&path))
+                )),
                 label: label_for_path(&path),
             },
             path,
@@ -408,7 +411,10 @@ fn discovered_unusable(
 ) -> DiscoveredWorkRoot {
     DiscoveredWorkRoot {
         workspace_key: WorkspaceKey {
-            id: OpaqueId::from(format!("workspace-local-{}", stable_path_hash(&path))),
+            id: OpaqueId::from(format!(
+                "workspace-local-{}",
+                stable_path_hash(&canonical_or_normalized(&path))
+            )),
             label: label_for_path(&path),
         },
         path,
@@ -511,7 +517,19 @@ fn normalize_candidate_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn canonical_or_normalized(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .unwrap_or_else(|_| normalize_candidate_path(path))
+}
+
 fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    // Deliberately NOT routed through `canonical_or_normalized`: when either
+    // side fails to canonicalize, this must fall back to comparing BOTH
+    // sides' `normalize_candidate_path` forms (discarding any successful
+    // canonicalization on the other side too), matching the original
+    // comparison semantics. `canonical_or_normalized` is a hash-key
+    // derivation helper only and must not be reused here, since it would mix
+    // a resolved form on one side with an unresolved form on the other.
     match (left.canonicalize(), right.canonicalize()) {
         (Ok(left), Ok(right)) => left == right,
         _ => normalize_candidate_path(left) == normalize_candidate_path(right),
@@ -521,7 +539,7 @@ fn paths_equivalent(left: &Path, right: &Path) -> bool {
 pub fn local_work_root_id_for_path(path: &Path) -> WorkRootId {
     OpaqueId::from(format!(
         "root-local-{}",
-        stable_path_hash(&normalize_candidate_path(path))
+        stable_path_hash(&canonical_or_normalized(path))
     ))
 }
 
@@ -615,6 +633,72 @@ mod tests {
         assert_eq!(work_root.state.status, "ready");
         assert_eq!(work_root.actions[0].id, "openRoot");
         assert!(work_root.main_instances.is_empty());
+
+        remove_temp(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_provider_dedups_plain_directory_reached_via_symlinked_parent() {
+        let base = temp_path("plain-symlink-alias");
+        let real_parent = base.join("real");
+        let alias_parent = base.join("real-alias");
+        let root = real_parent.join("plain");
+        fs::create_dir_all(&root).expect("create plain workRoot");
+        symlink(&real_parent, &alias_parent).expect("create symlink alias to parent dir");
+        let alias = alias_parent.join("plain");
+
+        // The same physical (non-git) plain directory is reached two ways
+        // here (direct path vs. through a symlinked parent path segment,
+        // same basename so `WorkspaceKey.label` matches either way); the
+        // plain-directory `workspace_key` branch of `discover_existing_dir`
+        // must canonicalize before hashing its id so these collapse to a
+        // single workspace/work-root, not two.
+        let view = LocalDashboardResourcesProvider::new(vec![
+            LocalWorkRootCandidate::new(&root),
+            LocalWorkRootCandidate::new(&alias),
+        ])
+        .dashboard_resources();
+
+        assert_eq!(view.workspaces.len(), 1);
+        assert_eq!(
+            view.workspaces[0].work_roots.len(),
+            1,
+            "plain directory reached via a symlinked parent path must dedup \
+             to a single entry, not add a duplicate"
+        );
+
+        remove_temp(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovered_unusable_workspace_key_is_stable_across_symlink_alias() {
+        let base = temp_path("unusable-symlink-alias");
+        let target = base.join("target");
+        let alias = base.join("alias");
+        fs::create_dir_all(&target).expect("create target");
+        symlink(&target, &alias).expect("create symlink alias");
+        let original = fs::metadata(&target)
+            .expect("target metadata")
+            .permissions()
+            .mode();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o000))
+            .expect("make target unreadable");
+
+        // Both paths name the same physical (inaccessible) directory; the
+        // `discovered_unusable` `workspace_key` must canonicalize before
+        // hashing so the direct path and its symlink alias yield the same
+        // bucket id.
+        let direct = discover_work_root(&target);
+        let via_alias = discover_work_root(&alias);
+
+        fs::set_permissions(&target, fs::Permissions::from_mode(original))
+            .expect("restore permissions");
+
+        assert_eq!(direct.availability, WorkRootAvailability::Inaccessible);
+        assert_eq!(via_alias.availability, WorkRootAvailability::Inaccessible);
+        assert_eq!(direct.workspace_key.id, via_alias.workspace_key.id);
 
         remove_temp(&base);
     }
@@ -722,6 +806,12 @@ mod tests {
         .dashboard_resources();
 
         assert_eq!(view.workspaces.len(), 1);
+        assert_eq!(
+            view.workspaces[0].work_roots.len(),
+            2,
+            "primary root and its linked worktree must remain distinct entries, \
+             not collapse or duplicate"
+        );
         let kinds: Vec<_> = view.workspaces[0]
             .work_roots
             .iter()
@@ -733,6 +823,62 @@ mod tests {
             .work_roots
             .iter()
             .all(|root| root.status == WorkRootStatus::Online));
+
+        remove_temp(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_provider_dedups_linked_worktree_reached_via_symlink_alias() {
+        if !git_available() {
+            return;
+        }
+
+        let base = temp_path("git-symlink-alias");
+        let primary = base.join("primary");
+        let linked = base.join("linked");
+        let linked_alias = base.join("linked-alias");
+        fs::create_dir_all(&primary).expect("create primary");
+        git(&primary, &["init"]);
+        git(
+            &primary,
+            &["config", "user.email", "ws-dashboard@example.local"],
+        );
+        git(&primary, &["config", "user.name", "ws dashboard"]);
+        fs::write(primary.join("README.md"), "dashboard\n").expect("write readme");
+        git(&primary, &["add", "README.md"]);
+        git(&primary, &["commit", "-m", "seed"]);
+        git(
+            &primary,
+            &["worktree", "add", linked.to_str().expect("linked path")],
+        );
+        symlink(&linked, &linked_alias).expect("create symlink alias to linked worktree");
+
+        // The same physical linked-worktree directory is reached two ways here,
+        // mirroring how git_worktree_add_submit's own top-level registration of
+        // a freshly created worktree and the primary root's `git worktree list`
+        // discovery of that same worktree can diverge textually even though
+        // they name the same directory.
+        let view = LocalDashboardResourcesProvider::new(vec![
+            LocalWorkRootCandidate::new(&primary),
+            LocalWorkRootCandidate::new(&linked_alias),
+        ])
+        .dashboard_resources();
+
+        assert_eq!(view.workspaces.len(), 1);
+        assert_eq!(
+            view.workspaces[0].work_roots.len(),
+            2,
+            "the linked worktree reached via a symlink alias must dedup to a \
+             single entry alongside the distinct primary root, not add a duplicate"
+        );
+        let kinds: Vec<_> = view.workspaces[0]
+            .work_roots
+            .iter()
+            .map(|root| root.kind)
+            .collect();
+        assert!(kinds.contains(&WorkRootKind::GitPrimaryRoot));
+        assert!(kinds.contains(&WorkRootKind::GitLinkedWorktree));
 
         remove_temp(&base);
     }

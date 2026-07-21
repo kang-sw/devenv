@@ -84,3 +84,24 @@ transaction:
 Architecture change — needs a design pass and prioritization against the
 chat-UI milestone before promotion. No implementation direction committed.
 Owner decision required.
+
+## Disposition
+
+Answered by `260714-refactor-dashboard-active-root-atomic-select-pure-derivation`
+(Phases 1-3, all landed). See that ticket's "Traceability - each failure mode ->
+the structural property that prevents it" table for the full failure-mode ->
+structural-property mapping (D1-D5 close all three regressions recorded above
+plus the fourth failure mode root-caused during that ticket's own design pass);
+not restated here. Phase 1 replaced the ref-backed safety net
+(`lastActiveRootKeyRef`/`lastActiveRootServerIdRef`) with a pure render-time
+derivation (`deriveWorkbenchView`) that mounts the selected root by
+construction instead of via a lagging effect. Phase 2 consolidated every
+selection entry point through one atomic `selectRoot` action, eliminating the
+per-entry-point mount-gap discipline this ticket's "Structural root cause"
+section identified as unable to scale. Phase 3 was a cleanup pass confirming
+no dead code, comments, or spec contract were left behind, and closed with
+Phase 1/2/3 Results recorded on the actionable ticket.
+
+This idea ticket intentionally stays open in `idea/` as the standing evidence
+log for the three-regressions-in-one-locus signal that motivated the design -
+its structural diagnosis is resolved, not the ticket itself moved or closed.

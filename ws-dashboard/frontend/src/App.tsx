@@ -123,6 +123,7 @@ import {
   surfaceLogicalKey,
   workbenchGroupId,
   DockviewWorkbenchLayout,
+  applySelectRoot,
   deriveWorkbenchView,
   driveStickyWorkbenchSelection,
   initialStickySelectionDriverState,
@@ -137,6 +138,7 @@ import {
   revalidateWorkbenchLayoutForRoot,
   mergeReadOnlyAndTerminalPaneOrder,
   removePanesFromOrder,
+  filterPaneOrderByPaneIds,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
   upsertTerminalVisualRestoreEntryInSnapshot,
@@ -265,6 +267,7 @@ import {
   isWorkspaceNavChildWorkRoot,
   LOCAL_DASHBOARD_SERVER_ROUTE,
   mergeResourcesByServer,
+  pickWorkRootSelectionAfterClose,
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
@@ -272,6 +275,7 @@ import {
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
+  workspaceBaseWorkRoot,
   workspaceEndpoint,
   type ActionHint,
   type DashboardResourcesView,
@@ -287,6 +291,17 @@ import {
   type WorkRootView,
   type WorkspaceView,
 } from "./resourceModel";
+import {
+  applySiblingOrder,
+  isAcceptableSiblingDrop,
+  loadWorkNavOrderSnapshot,
+  reorderSiblingIds,
+  saveWorkNavOrderSnapshot,
+  workNavSiblingDragMimeType,
+  type WorkNavSiblingDragPayload,
+  type WorkNavSiblingOrder,
+} from "./workNavOrder";
+import { shouldSuppressBrowserShortcut } from "./keydownSuppression";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   createRootPickerDirectory,
@@ -474,6 +489,17 @@ export function App() {
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
   >({});
+  // Browser-local SIBLING work-nav display order (workspace rows under a
+  // server; worktree rows under a workspace), drag-reordered by the user.
+  // Purely a render-time ordering overlay applied via `applySiblingOrder` -
+  // never mutates the server-reported `resources` tree and is unrelated to
+  // the daemon-side `OpenedWorkRoots` registry. `workNavOrder` itself is the
+  // single in-memory source of truth (not merged from multiple roots like
+  // the dockview layout snapshot above), so its save effect below is a plain
+  // overwrite of the persisted blob.
+  const [workNavOrder, setWorkNavOrder] = useState<WorkNavSiblingOrder>(() =>
+    loadWorkNavOrderSnapshot(),
+  );
   // Session-lifetime snapshot of persisted per-work-root dockview layouts
   // (group membership, pane order, active pane, best-effort group size),
   // seeded once at mount and kept live for the rest of the browser session
@@ -509,6 +535,13 @@ export function App() {
   const [openWorkRootRefs, setOpenWorkRootRefs] = useState<
     Record<string, { rootId: string; serverRoute: string }>
   >({});
+  // 260714 Phase 2: close-scoped explicit-empty flag (option (b)). Set only
+  // by the `workRoot.close` branch when it closes the currently-selected
+  // root and no open sibling remains; cleared by any subsequent explicit
+  // selection (`selectRoot`, guarded on a non-null `entityId`). Consulted
+  // once at the selection fold-in below to force a true empty workbench
+  // instead of the resolver's fallback-to-first-root behavior.
+  const [closeEmptyWorkbench, setCloseEmptyWorkbench] = useState(false);
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
   const restoredReadOnlyPaneKeys = useRef(
@@ -609,6 +642,17 @@ export function App() {
       stickyWorkbenchSelectionRef.current,
     );
   stickyWorkbenchSelectionRef.current = nextDriverState;
+  // 260714 Phase 2: gate the resolver's OUTPUT (never
+  // `driveStickyWorkbenchSelection`'s input above) on the close-scoped
+  // explicit-empty flag. While false this is byte-identical to
+  // `stickyWorkbenchSelection`; once true (set only by `workRoot.close`
+  // closing the last open root) it forces a true empty workbench - a null
+  // `selectedRootKey` here skips `deriveWorkbenchView`'s
+  // `withOpenWorkRootKey` fold-in, and `workbenchModel` below collapses to
+  // null - without altering the sticky driver's own state machine.
+  const workbenchSelection = closeEmptyWorkbench
+    ? null
+    : stickyWorkbenchSelection;
   // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
   // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
   // where all six committed-state fields are simultaneously in scope, so the
@@ -632,7 +676,7 @@ export function App() {
     selectedId,
     openWorkRootKeys,
     openWorkRootRefs,
-    selection: stickyWorkbenchSelection,
+    selection: workbenchSelection,
   });
   const serverConnections = useMemo(
     () =>
@@ -643,9 +687,75 @@ export function App() {
     [activeResources, serversView],
   );
 
+  // 260721-feat-dashboard-suppress-browser-shortcuts Phase 2: single
+  // app-wide capture-phase `document` keydown interceptor that suppresses
+  // catchable Class-A browser shortcuts (Ctrl/Cmd+S/P/F/G/D/O/U/J, zoom
+  // Ctrl/Cmd+Plus/Minus/Equals/Underscore/0, and Backspace-as-back-
+  // navigation outside editable targets) while explicitly never suppressing
+  // Ctrl/Cmd+R or normal editing/clipboard combos. The block/allow decision
+  // itself lives in the pure, DOM-free `shouldSuppressBrowserShortcut`
+  // predicate (`keydownSuppression.ts`); this effect only reads real event/
+  // target state into that predicate's input shape. Deliberately calls only
+  // `preventDefault()` and never `stopPropagation()`/
+  // `stopImmediatePropagation()` — the terminal pane's own bubble-phase
+  // `keydownFallback` listener must still receive and process every event
+  // unmodified (see the ticket's plan Conflict Analysis: the one overlapping
+  // key, Ctrl+U, degrades to a harmless redundant `preventDefault()`, not a
+  // collision). Empty dependency array: the predicate/handler are pure and
+  // stable, so the listener installs exactly once for the app's lifetime.
+  useEffect(() => {
+    const suppressBrowserShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      const targetIsEditable =
+        Boolean(target?.isContentEditable) ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select";
+      if (
+        shouldSuppressBrowserShortcut({
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          key: event.key,
+          targetIsEditable,
+        })
+      ) {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", suppressBrowserShortcut, true);
+    return () => {
+      document.removeEventListener("keydown", suppressBrowserShortcut, true);
+    };
+  }, []);
+
   useEffect(() => {
     selectedServerIdRef.current = selectedServerId;
   }, [selectedServerId]);
+
+  // 260714 Phase 2, D4: the single atomic action every selection call site
+  // routes through. Commits the `selectedServerIdRef.current`/
+  // `setSelectedServerId`/`setSelectedId` triple in one function body (one
+  // React commit) via the pure `applySelectRoot` core in
+  // `workbench/openRootLookup.ts`. Deliberately does NOT hand-seed
+  // `openWorkRootKeys`/`openWorkRootRefs` - Phase 1's `deriveWorkbenchView`
+  // already folds the freshly-resolved selected root into the render-time
+  // union regardless of whether that state has caught up, so the old
+  // sync-mount hack this replaces is deleted, not moved here. Accepts a
+  // non-work-root `entityId` (server row, workspace row) without complaint;
+  // resolving a concrete root stays entirely in `resolveWorkbenchSelection`
+  // downstream. Empty dependency array: only stable setters/ref involved.
+  const selectRoot = useCallback((serverId: string, entityId: string | null) => {
+    const next = applySelectRoot({ serverId, entityId });
+    selectedServerIdRef.current = next.selectedServerId;
+    setSelectedServerId(next.selectedServerId);
+    setSelectedId(next.selectedId);
+    // 260714 Phase 2: any explicit non-null selection clears the
+    // close-scoped explicit-empty flag. Guarded on `entityId !== null` so
+    // the no-sibling close's own `selectRoot(server, null)` does not
+    // immediately re-clear the flag it is about to set.
+    if (entityId !== null) setCloseEmptyWorkbench(false);
+  }, []);
 
   useEffect(() => {
     resourceRefreshCoordinatorRef.current?.resume();
@@ -684,17 +794,16 @@ export function App() {
 
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
-      // source of truth for refresh and re-entry.
-      selectedServerIdRef.current = openedView.server.id;
-      setSelectedServerId(openedView.server.id);
+      // source of truth for refresh and re-entry. `openedWorkRootId ??
+      // selectedId` preserves today's "no-op on selectedId when nothing new
+      // resolved" behavior via `selectRoot` - setting state to its existing
+      // value is inert.
+      selectRoot(openedView.server.id, openedWorkRootId ?? selectedId);
       resourceRefreshCoordinatorRef.current?.applyExternalResources(openedView);
-      if (openedWorkRootId) {
-        setSelectedId(openedWorkRootId);
-      }
       void loadServers();
       void loadResources("open");
     },
-    [loadResources, loadServers, activeResources],
+    [loadResources, loadServers, activeResources, selectRoot, selectedId],
   );
 
   useEffect(() => {
@@ -703,23 +812,27 @@ export function App() {
       return;
     }
 
-    if (resources.server.id !== selectedServerIdRef.current) {
-      selectedServerIdRef.current = resources.server.id;
-      setSelectedServerId(resources.server.id);
-    }
+    // 260714 Phase 2, D4: routed through `selectRoot` for a behavior-
+    // preserving generalization, not a silent scope expansion - the previous
+    // `if (resources.server.id !== selectedServerIdRef.current)` guard only
+    // gated the state-setting (it never touched `selectedId`), so passing
+    // the CURRENT `selectedId` back in as `entityId` reproduces a no-op on
+    // that field, and dropping the guard is harmless since `selectRoot`'s
+    // commit is itself idempotent when nothing changed.
+    // `normalizeServerRoute(resources.server.id)` stays unconditional, as
+    // today.
+    selectRoot(resources.server.id, selectedId);
     normalizeServerRoute(resources.server.id);
-  }, [resourcesByServer]);
+  }, [resourcesByServer, selectedId, selectRoot]);
 
   const handleServerSelected = useCallback(
     (server: ServerConnectionView) => {
-      selectedServerIdRef.current = server.id;
-      setSelectedServerId(server.id);
-      setSelectedId(server.id);
+      selectRoot(server.id, server.id);
       if (server.status === "connected") {
         void loadResources("explicit");
       }
     },
-    [loadResources],
+    [loadResources, selectRoot],
   );
 
   const applyServerConnection = useCallback(
@@ -735,15 +848,13 @@ export function App() {
           : [...servers, server];
         return { servers: nextServers };
       });
-      selectedServerIdRef.current = server.id;
-      setSelectedServerId(server.id);
-      setSelectedId(server.id);
+      selectRoot(server.id, server.id);
       void loadServers();
       if (server.status === "connected") {
         void loadResources("explicit");
       }
     },
-    [loadResources, loadServers, serverConnections],
+    [loadResources, loadServers, selectRoot, serverConnections],
   );
 
   const reconnectServer = useCallback(
@@ -852,13 +963,12 @@ export function App() {
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
-  // 260714 Phase 2 Prong 1: consume the already-advanced sticky-selection
-  // value computed once near `activeResources` above, rather than
-  // recomputing `resolveWorkbenchSelection` fresh here - recomputing would
-  // both discard the stickiness and risk this value diverging from what
+  // 260714 Phase 2 Prong 1: `workbenchSelection` (the close-empty-gated value
+  // computed once near `activeResources` above) is consumed here rather than
+  // recomputing `resolveWorkbenchSelection` fresh - recomputing would both
+  // discard the stickiness and risk this value diverging from what
   // `deriveWorkbenchView` derived from the same ref this render (see the
   // comment at the ref's owning site).
-  const workbenchSelection = stickyWorkbenchSelection;
   useEffect(() => {
     if (!workbenchSelection) {
       return;
@@ -1049,64 +1159,18 @@ export function App() {
       if (command.payload.type === "select") {
         const { entityId, serverId } = command.payload;
         executableHandlers[command.commandId] = () => {
-          if (serverId && serverId !== selectedServerIdRef.current) {
-            selectedServerIdRef.current = serverId;
-            setSelectedServerId(serverId);
-            // 260714-select-mount-gap fix: `setSelectedId(entityId)` below
-            // lands in the SAME commit as the server switch above, so on
-            // the very next render `activeResources`/`workbenchSelection`
-            // already reflect the target server+entity (resolved straight
-            // off `resourcesByServer`, no effect needed). But
-            // `openWorkRootKeys`/`openWorkRootRefs` - the only state
-            // `openWorkRootInstances` mounts from - are otherwise only
-            // updated by the `workbenchSelection` effect above, which runs
-            // one render *after* this commit. That gap makes
-            // `selectedRootIsMounted` false for exactly one render, so
-            // `resolveEffectiveActiveRootKey` falls through to its
-            // server-scoped fallback guard with `lastActiveRootServerIdRef`
-            // still holding the PREVIOUS server - the guard fails, every
-            // mounted instance hides, and the workbench flashes to
-            // `dv-watermark` for a frame before the effect catches up.
-            //
-            // Resolve the target work root the same way that effect does
-            // and mount it synchronously here, in the same commit, via the
-            // identical `withOpenWorkRootKey`/`withOpenWorkRootRef` helpers
-            // so the two "ensure open" paths cannot drift apart. `entityId`
-            // is not always a work-root id (the workspace-row presentation
-            // in `WorkspaceRows` dispatches `entityId: workspace.id`), so
-            // resolve via `resolveWorkbenchSelection` and mount its
-            // `.root` rather than trusting `entityId` directly. A `null`
-            // result (target server not yet resolved in
-            // `resourcesByServer`) leaves this a no-op, same as today for
-            // that case - this fix only closes the gap for the traced
-            // regression (server whose tree is already cached).
-            const targetResources = resolveActiveResources(
-              resourcesByServer,
-              serverId,
-              lastNonNullResourcesByServerRef.current,
-            );
-            const targetSelection = resolveWorkbenchSelection(
-              targetResources,
-              entityId,
-            );
-            if (targetSelection) {
-              const rootKey = serverScopedIdentity(
-                targetSelection.root.resourcePath.serverId,
-                targetSelection.root.id,
-              );
-              const rootRef = {
-                rootId: targetSelection.root.id,
-                serverRoute: targetSelection.root.resourcePath.serverId,
-              };
-              setOpenWorkRootKeys((current) =>
-                withOpenWorkRootKey(current, rootKey),
-              );
-              setOpenWorkRootRefs((current) =>
-                withOpenWorkRootRef(current, rootKey, rootRef),
-              );
-            }
-          }
-          setSelectedId(entityId);
+          // 260714 Phase 2, D4: the sync-mount hack this block used to be
+          // (manually resolving `targetSelection` and seeding
+          // `openWorkRootKeys`/`openWorkRootRefs` here to close the
+          // select-mount-gap) is deleted, not moved - Phase 1's
+          // `deriveWorkbenchView` already folds the freshly-resolved
+          // selected root into the render-time union regardless of whether
+          // that state has caught up, so manually seeding those refs here no
+          // longer changes what's mounted. `selectRoot` commits the triple
+          // atomically; no need to branch on `serverId !==
+          // selectedServerIdRef.current` since setting state to its current
+          // value is an inert no-op.
+          selectRoot(serverId ?? selectedServerIdRef.current, entityId);
         };
       } else if (command.payload.type === "refresh") {
         executableHandlers[command.commandId] = () => {
@@ -1178,6 +1242,29 @@ export function App() {
             delete next[rootKey];
             return next;
           });
+          // 260714 Phase 2: closing the currently-selected root must also
+          // move the selection, otherwise `deriveWorkbenchView`'s
+          // `withOpenWorkRootKey` fold-in (`workbench/openRootLookup.ts`)
+          // unconditionally re-mounts the selected root regardless of
+          // `openWorkRootKeys`, neutralizing the close. The resolved root id
+          // (not a naive `workRootId === selectedId` check) collapses the
+          // workspace-id indirection for a "workspace"-presentation row's X.
+          const selectedRootId =
+            resolveWorkbenchSelection(activeResources, selectedId)?.root.id ??
+            null;
+          if (selectedRootId === workRootId) {
+            const nextId = pickWorkRootSelectionAfterClose(
+              activeResources,
+              workRootId,
+              new Set(Object.keys(openWorkRootRefs)),
+            );
+            if (nextId) {
+              selectRoot(selectedServerIdRef.current, nextId);
+            } else {
+              selectRoot(selectedServerIdRef.current, null);
+              setCloseEmptyWorkbench(true);
+            }
+          }
         };
       } else if (command.payload.type === "server.off") {
         const { serverId } = command.payload;
@@ -1268,10 +1355,12 @@ export function App() {
             // `selectedServerIdRef.current`) would refetch this server on
             // its next tick and silently revive the entry just deleted
             // above, violating "explicit Off is the only path that
-            // deallocates".
-            selectedServerIdRef.current = LOCAL_DASHBOARD_SERVER_ROUTE;
-            setSelectedServerId(LOCAL_DASHBOARD_SERVER_ROUTE);
-            setSelectedId(LOCAL_DASHBOARD_SERVER_ROUTE);
+            // deallocates". 260714 Phase 2, D4: routed through `selectRoot`
+            // as a same-behavior consolidation - not named by the ticket's
+            // enumerated call-site list, but the same duplicated triple
+            // shape D4 targets ("every current caller routes through it"),
+            // and identical resulting state.
+            selectRoot(LOCAL_DASHBOARD_SERVER_ROUTE, LOCAL_DASHBOARD_SERVER_ROUTE);
           }
         };
       } else if (command.payload.type === "workspace.remove") {
@@ -1376,7 +1465,8 @@ export function App() {
       loadServers,
       openWorkRootRefs,
       readOnlyFilePanes,
-      resourcesByServer,
+      selectedId,
+      selectRoot,
     ],
   );
 
@@ -1410,6 +1500,80 @@ export function App() {
     [],
   );
 
+  // Persist the browser-local work-nav sibling order whenever it changes.
+  // `workNavOrder` is the single in-memory source of truth (unlike the
+  // dockview layout snapshot, it is never merged from multiple concurrently-
+  // open roots), so a plain overwrite is sufficient here.
+  useEffect(() => {
+    saveWorkNavOrderSnapshot(workNavOrder);
+  }, [workNavOrder]);
+
+  const handleWorkspaceReorder = useCallback(
+    (serverId: string, sourceId: string, beforeId: string | undefined) => {
+      setWorkNavOrder((current) => {
+        const effectiveOrder = applySiblingOrder(
+          resourcesByServer[serverId]?.workspaces ?? [],
+          current.workspaceOrderByServer[serverId],
+        ).map((workspace) => workspace.id);
+        if (!effectiveOrder.includes(sourceId)) {
+          return current;
+        }
+        const nextOrder = reorderSiblingIds(
+          effectiveOrder,
+          sourceId,
+          beforeId,
+        );
+        return {
+          ...current,
+          workspaceOrderByServer: {
+            ...current.workspaceOrderByServer,
+            [serverId]: nextOrder,
+          },
+        };
+      });
+    },
+    [resourcesByServer],
+  );
+
+  const handleWorktreeReorder = useCallback(
+    (
+      serverId: string,
+      workspaceId: string,
+      sourceId: string,
+      beforeId: string | undefined,
+    ) => {
+      setWorkNavOrder((current) => {
+        const scopeKey = serverScopedIdentity(serverId, workspaceId);
+        const workspace = resourcesByServer[serverId]?.workspaces.find(
+          (candidate) => candidate.id === workspaceId,
+        );
+        const childWorkRoots = (workspace?.workRoots ?? []).filter(
+          isWorkspaceNavChildWorkRoot,
+        );
+        const effectiveOrder = applySiblingOrder(
+          childWorkRoots,
+          current.worktreeOrderByWorkspace[scopeKey],
+        ).map((root) => root.id);
+        if (!effectiveOrder.includes(sourceId)) {
+          return current;
+        }
+        const nextOrder = reorderSiblingIds(
+          effectiveOrder,
+          sourceId,
+          beforeId,
+        );
+        return {
+          ...current,
+          worktreeOrderByWorkspace: {
+            ...current.worktreeOrderByWorkspace,
+            [scopeKey]: nextOrder,
+          },
+        };
+      });
+    },
+    [resourcesByServer],
+  );
+
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
@@ -1436,6 +1600,9 @@ export function App() {
             onSelectServer={handleServerSelected}
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
+            workNavOrder={workNavOrder}
+            onWorkspaceReorder={handleWorkspaceReorder}
+            onWorktreeReorder={handleWorktreeReorder}
           />
           <GitWorktreeAddModal
             target={gitWorktreeTarget}
@@ -1446,7 +1613,15 @@ export function App() {
                 response.resources,
               );
               if (response.createdWorkRootId) {
-                setSelectedId(response.createdWorkRootId);
+                // 260714 Phase 2: route through `selectRoot` (not raw
+                // `setSelectedId`) so a new non-null selection clears
+                // `closeEmptyWorkbench` - otherwise a worktree created from
+                // the empty placeholder (after closing the last open root)
+                // stays stuck on the placeholder until a manual row click.
+                selectRoot(
+                  response.resources.server.id,
+                  response.createdWorkRootId,
+                );
               }
               setGitWorktreeTarget(null);
             }}
@@ -1482,6 +1657,7 @@ export function App() {
             workbenchLayoutRestoreRef={workbenchLayoutRestoreRef}
             terminalVisualRestoreRef={terminalVisualRestoreRef}
             onCommand={executeCommand}
+            onOpenWorkRoot={handleWorkRootOpened}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
             onOpenWorkRootKeysChange={setOpenWorkRootKeys}
@@ -1643,7 +1819,13 @@ function OpenWorkRootControl({
     requestedWorkRootId?: string,
   ) => void;
   onCommand: DashboardCommandDispatcher;
-  variant?: "section" | "icon";
+  // 260714 empty-screen-placeholder: "empty" is a third rendering, alongside
+  // the existing sidebar-oriented "section"/"icon" ones - a single button
+  // with a visible label (not just an icon), for use as the empty
+  // workbench's CTA. It reuses the same open/close state and
+  // `buildRootPickerOpenCommand` dispatch path as the other two variants;
+  // only the opener markup differs.
+  variant?: "section" | "icon" | "empty";
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1971,7 +2153,9 @@ function OpenWorkRootControl({
       className={
         variant === "icon"
           ? "open-work-root open-work-root-icon"
-          : "open-work-root"
+          : variant === "empty"
+            ? "open-work-root open-work-root-empty"
+            : "open-work-root"
       }
       aria-label="Open workRoot"
     >
@@ -1985,6 +2169,24 @@ function OpenWorkRootControl({
           </div>
           {openerButton}
         </div>
+      ) : variant === "empty" ? (
+        <button
+          ref={openerRef}
+          aria-label="Open workRoot"
+          className="action-button action-button-primary open-work-root-empty-cta"
+          data-command-id="rootPicker.open"
+          disabled={disabled}
+          title={
+            disabled
+              ? `Open workRoot is unavailable for ${pickerServerLabel}`
+              : `Open workRoot on ${pickerContextLabel}`
+          }
+          type="button"
+          onClick={openPicker}
+        >
+          <FolderOpen aria-hidden="true" size={15} strokeWidth={1.8} />
+          <span>Open workRoot</span>
+        </button>
       ) : (
         openerButton
       )}
@@ -2925,6 +3127,9 @@ function ResourceNavigation({
   onSelectServer,
   onCommand,
   onOpenFile,
+  workNavOrder,
+  onWorkspaceReorder,
+  onWorktreeReorder,
 }: {
   resources: DashboardResourcesView | null;
   resourcesByServer: ResourcesByServer;
@@ -2948,6 +3153,18 @@ function ResourceNavigation({
     workRoot: WorkRootView,
     entry: WorkRootFileEntryView,
     gesture: ReadOnlyFileOpenGesture,
+  ) => void;
+  workNavOrder: WorkNavSiblingOrder;
+  onWorkspaceReorder: (
+    serverId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
+  onWorktreeReorder: (
+    serverId: string,
+    workspaceId: string,
+    sourceId: string,
+    beforeId: string | undefined,
   ) => void;
 }) {
   const selectedServer = servers.find(
@@ -3012,6 +3229,9 @@ function ResourceNavigation({
             onOpenServerAuth={onOpenServerAuth}
             onReconnectServer={onReconnectServer}
             onSelectServer={onSelectServer}
+            workNavOrder={workNavOrder}
+            onWorkspaceReorder={onWorkspaceReorder}
+            onWorktreeReorder={onWorktreeReorder}
           />
         ))}
         {!loading && !resources && selectedServer ? (
@@ -3046,6 +3266,9 @@ function ServerRows({
   onOpenServerAuth,
   onReconnectServer,
   onSelectServer,
+  workNavOrder,
+  onWorkspaceReorder,
+  onWorktreeReorder,
 }: {
   server: ServerConnectionView;
   selected: boolean;
@@ -3061,6 +3284,18 @@ function ServerRows({
   onOpenServerAuth: (server: ServerConnectionView) => void;
   onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
+  workNavOrder: WorkNavSiblingOrder;
+  onWorkspaceReorder: (
+    serverId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
+  onWorktreeReorder: (
+    serverId: string,
+    workspaceId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
 }) {
   const actions = server.actions.length > 0 ? server.actions : [];
   const isLocalServer = server.id === LOCAL_DASHBOARD_SERVER_ROUTE;
@@ -3133,7 +3368,10 @@ function ServerRows({
       </div>
       {isOn && resources ? (
         <div className="server-workspaces">
-          {resources.workspaces.map((workspace) => (
+          {applySiblingOrder(
+            resources.workspaces,
+            workNavOrder.workspaceOrderByServer[server.id],
+          ).map((workspace) => (
             <WorkspaceRows
               key={workspace.id}
               workspace={workspace}
@@ -3141,6 +3379,9 @@ function ServerRows({
               selectedId={selectedId}
               openWorkRootKeys={openWorkRootKeys}
               onCommand={onCommand}
+              worktreeOrderByWorkspace={workNavOrder.worktreeOrderByWorkspace}
+              onWorkspaceReorder={onWorkspaceReorder}
+              onWorktreeReorder={onWorktreeReorder}
             />
           ))}
         </div>
@@ -3657,6 +3898,7 @@ function WorkbenchShell({
   loading,
   error,
   onCommand,
+  onOpenWorkRoot,
   readOnlyFilePanes,
   readOnlyFilePaneOrderByGroup,
   activeReadOnlyFilePaneRequest,
@@ -3689,6 +3931,15 @@ function WorkbenchShell({
   loading: boolean;
   error: string | null;
   onCommand: DashboardCommandDispatcher;
+  // 260714 Phase 1 (empty-screen-placeholder): threaded through solely so the
+  // no-selection empty state's "Open workRoot" CTA can reuse the same
+  // opened-workRoot selection handler (`handleWorkRootOpened` in `App()`)
+  // the nav sidebar's `OpenWorkRootControl` already uses - no new open-root
+  // plumbing.
+  onOpenWorkRoot: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
   readOnlyFilePanes: ReadOnlyFilePane[];
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
@@ -5855,9 +6106,25 @@ function WorkbenchShell({
       },
     );
     if (workbenchModel) {
+      // CONTRACT (260720-bug-dashboard-terminal-split-nonhorizontal-snap-back):
+      // every reader of workbench group/pane-order state (`resolveRootLayout`
+      // via `buildEditorGroupsForRoot`, `App.tsx:~4388`) and every other
+      // writer (`openWorkRootActivityPane`, file-open placement) key by the
+      // server-scoped `serverScopedIdentity(serverId, rootId)`, not the bare
+      // root id. Keying these two writes by `workbenchModel.root.id` left a
+      // drag/drop-created dynamic group and its pane order in a slot no
+      // reader consults, so the derived group list never contained the new
+      // group and the moved pane fell back to `groups[0]` on the next
+      // render, which `syncDockviewWorkbench` then reconciled Dockview back
+      // to (the reported snap-back) - reproducible for any non-horizontal
+      // split of a multi-pane source group. Must match the scoped key.
+      const moveRootKey = serverScopedIdentity(
+        workbenchModel.root.resourcePath.serverId,
+        workbenchModel.root.id,
+      );
       onWorkbenchGroupsByRootChange((currentByRoot) => ({
         ...currentByRoot,
-        [workbenchModel.root.id]: result.groups.map((group, index) => ({
+        [moveRootKey]: result.groups.map((group, index) => ({
           id: group.id,
           label:
             group.label ??
@@ -5868,7 +6135,7 @@ function WorkbenchShell({
       }));
       onPaneOrderByRootChange((currentByRoot) => ({
         ...currentByRoot,
-        [workbenchModel.root.id]: result.paneOrderByGroup,
+        [moveRootKey]: result.paneOrderByGroup,
       }));
       // `terminalPaneOrderByGroup` is a separate registry from
       // `paneOrderByRoot` (see the CONTRACT note near its declaration), so a
@@ -5880,17 +6147,37 @@ function WorkbenchShell({
         // (`pane.paneId`, see `terminalWorkbenchPane`), not the `logicalKey`
         // space `terminalPanes` is keyed by - filtering `id in terminalPanes`
         // here always misses, silently dropping every terminal pane from the
-        // mirror.
+        // mirror. `filterPaneOrderByPaneIds` (`workbench/layoutRestore.ts`)
+        // is the extracted, unit-tested form of this filter.
         const livePaneIds = new Set(
           Object.values(terminalPanes).map((pane) => pane.paneId),
         );
-        const next = { ...current };
-        for (const [groupId, paneIds] of Object.entries(
+        return filterPaneOrderByPaneIds(
+          current,
           result.paneOrderByGroup,
-        )) {
-          next[groupId] = paneIds.filter((id) => livePaneIds.has(id));
-        }
-        return next;
+          livePaneIds,
+        );
+      });
+      // `readOnlyFilePaneOrderByGroup` is a separate flat registry from
+      // `paneOrderByRoot` (same shape as `terminalPaneOrderByGroup` above),
+      // keyed by plain `groupId`, not `workbenchModel.root.id` /
+      // `moveRootKey`. Same as the terminal mirror, a drag/drop move must be
+      // mirrored into it or `readOnlyWorkbenchPanesByGroup` snaps read-only/
+      // document panes back to their fallback group on the next render
+      // (260711). `result.paneOrderByGroup` lives in `WorkbenchPane.id` space
+      // (`pane.id` on `readOnlyFilePanes`), not the `logicalKey` space
+      // `readOnlyFilePanes` is otherwise looked up by elsewhere - filtering by
+      // `logicalKey`/Record membership here would silently miss every pane,
+      // same `125d68e1` trap the terminal mirror above avoids.
+      onReadOnlyFilePaneOrderByGroupChange((current) => {
+        const livePaneIds = new Set(
+          readOnlyFilePanes.map((pane) => pane.id),
+        );
+        return filterPaneOrderByPaneIds(
+          current,
+          result.paneOrderByGroup,
+          livePaneIds,
+        );
       });
     }
     setActivePaneByGroupForSelected(result.activePaneByGroup);
@@ -6003,9 +6290,10 @@ function WorkbenchShell({
     ) : error && !resources ? (
       <StatusPane title="Workbench unavailable" detail={error} />
     ) : !resources || !workbenchModel ? (
-      <StatusPane
-        title="No workRoot"
-        detail="select a workRoot or main instance"
+      <EmptyWorkbenchPlaceholder
+        onCommand={onCommand}
+        onOpenWorkRoot={onOpenWorkRoot}
+        server={resources?.server}
       />
     ) : (
       (() => {
@@ -9418,16 +9706,34 @@ function WorkspaceRows({
   selectedId,
   openWorkRootKeys,
   onCommand,
+  worktreeOrderByWorkspace,
+  onWorkspaceReorder,
+  onWorktreeReorder,
 }: {
   workspace: WorkspaceView;
   serverId: string;
   selectedId: string | null;
   openWorkRootKeys: ReadonlySet<string>;
   onCommand: DashboardCommandDispatcher;
+  worktreeOrderByWorkspace: Readonly<Record<string, readonly string[]>>;
+  onWorkspaceReorder: (
+    serverId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
+  onWorktreeReorder: (
+    serverId: string,
+    workspaceId: string,
+    sourceId: string,
+    beforeId: string | undefined,
+  ) => void;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
-  const childWorkRoots = workspace.workRoots.filter(
-    isWorkspaceNavChildWorkRoot,
+  const baseRoot = workspaceBaseWorkRoot(workspace);
+  const worktreeScopeKey = serverScopedIdentity(serverId, workspace.id);
+  const childWorkRoots = applySiblingOrder(
+    workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+    worktreeOrderByWorkspace[worktreeScopeKey],
   );
   const selectedChildWorkRootIds = new Set(
     childWorkRoots.map((root) => root.id),
@@ -9469,6 +9775,11 @@ function WorkspaceRows({
             `activation: ${compactRoot.activation}`,
           ]}
           onCommand={onCommand}
+          dragScopeKey={serverId}
+          dragEntityId={workspace.id}
+          onSiblingReorder={(sourceId, beforeId) =>
+            onWorkspaceReorder(serverId, sourceId, beforeId)
+          }
         />
       </div>
     );
@@ -9490,8 +9801,17 @@ function WorkspaceRows({
           (root) =>
             root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree",
         )}
+        closeWorkRootId={baseRoot?.id}
+        isOpenWorkRoot={
+          baseRoot != null &&
+          openWorkRootKeys.has(serverScopedIdentity(serverId, baseRoot.id))
+        }
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
+        dragScopeKey={serverId}
+        onSiblingReorder={(sourceId, beforeId) =>
+          onWorkspaceReorder(serverId, sourceId, beforeId)
+        }
       />
       {childWorkRoots.map((root) => (
         <div key={root.id}>
@@ -9518,6 +9838,10 @@ function WorkspaceRows({
               `activation: ${root.activation}`,
             ]}
             onCommand={onCommand}
+            dragScopeKey={worktreeScopeKey}
+            onSiblingReorder={(sourceId, beforeId) =>
+              onWorktreeReorder(serverId, workspace.id, sourceId, beforeId)
+            }
           />
           {root.mainInstances.length > 0 ? (
             <div className="nav-secondary-context">
@@ -9530,6 +9854,18 @@ function WorkspaceRows({
     </div>
   );
 }
+
+// Transient in-memory record of the sibling-drag currently in flight, set on
+// `onDragStart` and cleared on `onDragEnd`/`onDrop`. `dataTransfer.getData()`
+// is unreadable during `dragover` in most browsers (only `dataTransfer.types`
+// is), so `onDragOver`'s same-scope check reads this module-local value
+// instead of the DOM drag event's payload; the event's own `dataTransfer`
+// entry (set alongside this in `onDragStart`) is kept only as a
+// standards-compliant mirror, not read at drop time. Safe as module state
+// (not React state) because at most one HTML5 drag gesture is ever in
+// flight in a single browser tab, and no render needs to react to its value
+// changing mid-drag - only the drop/dragover handlers read it, synchronously.
+let activeWorkNavDrag: WorkNavSiblingDragPayload | null = null;
 
 function ResourceRow({
   id,
@@ -9546,8 +9882,12 @@ function ResourceRow({
   activation,
   canAddWorktree = false,
   isOpenWorkRoot = false,
+  closeWorkRootId = id,
   debugMeta,
   onCommand,
+  dragScopeKey,
+  dragEntityId,
+  onSiblingReorder,
 }: {
   id: string;
   title: string;
@@ -9563,26 +9903,48 @@ function ResourceRow({
   activation?: WorkRootView["activation"];
   canAddWorktree?: boolean;
   isOpenWorkRoot?: boolean;
+  closeWorkRootId?: string;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
+  // SIBLING drag-reorder scope key (server.id for a workspace row, including
+  // the compact-root presentation - it is still one workspace among its
+  // server's workspace siblings; serverScopedIdentity(serverId, workspace.id)
+  // for a worktree row). `draggable` (below) is false, and no drag affordance
+  // renders, only when a row is passed no scope key at all.
+  dragScopeKey?: string;
+  // Identity used for the sibling drag payload/target, when it differs from
+  // the row's display `id`. Only needed for the compact-root presentation:
+  // its `id` is the underlying workRoot's id (selection/action target), but
+  // the workspace-level sibling order list (`workspaceOrderByServer`, applied
+  // over `resources.workspaces`) is keyed by the *workspace* id. Defaults to
+  // `id`, which is already correct for plain workspace and workRoot rows.
+  dragEntityId?: string;
+  // Called on a valid same-scope drop with (sourceId, beforeId ===
+  // this row's own dragEntityId). Cross-scope drops are rejected before this
+  // ever fires.
+  onSiblingReorder?: (sourceId: string, beforeId: string) => void;
 }) {
   const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
   const canCloseWorkRoot =
-    (presentation === "workRoot" || presentation === "compactWorkRoot") &&
-    isOpenWorkRoot &&
-    !selected;
+    (presentation === "workRoot" ||
+      presentation === "compactWorkRoot" ||
+      presentation === "workspace") &&
+    isOpenWorkRoot;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
+  const [dragOver, setDragOver] = useState(false);
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(
     " · ",
   );
+  const draggable = Boolean(dragScopeKey && onSiblingReorder);
+  const siblingId = dragEntityId ?? id;
   return (
     <div
-      className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
+      className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}${draggable ? " resource-row-draggable" : ""}${dragOver ? " resource-row-drag-over" : ""}`}
       data-command-id="resource.select"
       data-resource-id={id}
       data-resource-presentation={presentation}
@@ -9591,6 +9953,67 @@ function ResourceRow({
       data-resource-availability={availability ?? ""}
       style={{ "--depth": depth } as CSSProperties}
       title={metadataTitle}
+      draggable={draggable}
+      onDragStart={
+        draggable
+          ? (event) => {
+              activeWorkNavDrag = {
+                sourceId: siblingId,
+                scopeKey: dragScopeKey!,
+              };
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(
+                workNavSiblingDragMimeType,
+                JSON.stringify(activeWorkNavDrag),
+              );
+            }
+          : undefined
+      }
+      onDragEnd={
+        draggable
+          ? () => {
+              activeWorkNavDrag = null;
+              setDragOver(false);
+            }
+          : undefined
+      }
+      onDragOver={
+        draggable
+          ? (event) => {
+              const dragged = activeWorkNavDrag;
+              if (isAcceptableSiblingDrop(dragged, dragScopeKey!, siblingId)) {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (!dragOver) {
+                  setDragOver(true);
+                }
+              }
+            }
+          : undefined
+      }
+      onDragLeave={
+        draggable
+          ? () => {
+              if (dragOver) {
+                setDragOver(false);
+              }
+            }
+          : undefined
+      }
+      onDrop={
+        draggable
+          ? (event) => {
+              event.preventDefault();
+              setDragOver(false);
+              const payload = activeWorkNavDrag;
+              activeWorkNavDrag = null;
+              if (!isAcceptableSiblingDrop(payload, dragScopeKey!, siblingId)) {
+                return;
+              }
+              onSiblingReorder?.(payload!.sourceId, siblingId);
+            }
+          : undefined
+      }
     >
       <button
         aria-label={`Select ${resourcePresentationLabel(presentation)} ${title}`}
@@ -9624,7 +10047,9 @@ function ResourceRow({
               icon={X}
               label={`Close ${title}`}
               onClick={() =>
-                onCommand(buildWorkRootCloseCommand(id, actionServerId))
+                onCommand(
+                  buildWorkRootCloseCommand(closeWorkRootId, actionServerId),
+                )
               }
             />
           ) : null}
@@ -9828,6 +10253,49 @@ function StatusPane({
       <div className="status-title">{title}</div>
       <div className="status-detail">{detail}</div>
       {action ? <div className="status-action">{action}</div> : null}
+    </div>
+  );
+}
+
+// 260714 Phase 1 (empty-screen-placeholder): dedicated centered empty-state
+// for the main workbench pane when nothing is selected
+// (`workbenchModel === null`). Deliberately NOT a `StatusPane` variant -
+// `StatusPane` is shared with `ResourceDetail`'s Loading/Unavailable/Empty
+// branches, and changing its layout there would regress those unrelated
+// callers. This component owns its own markup/CSS class
+// (`.empty-workbench`) instead.
+function EmptyWorkbenchPlaceholder({
+  onCommand,
+  onOpenWorkRoot,
+  server,
+}: {
+  onCommand: DashboardCommandDispatcher;
+  onOpenWorkRoot: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
+  server?: Pick<ServerConnectionView, "id" | "label"> | null;
+}) {
+  return (
+    <div className="empty-workbench" role="status">
+      <FolderGit2
+        aria-hidden="true"
+        className="empty-workbench-icon"
+        size={32}
+        strokeWidth={1.5}
+      />
+      <div className="empty-workbench-title">No work root selected</div>
+      <div className="empty-workbench-detail">
+        Open a work root to get started
+      </div>
+      <div className="empty-workbench-cta">
+        <OpenWorkRootControl
+          server={server}
+          variant="empty"
+          onOpened={onOpenWorkRoot}
+          onCommand={onCommand}
+        />
+      </div>
     </div>
   );
 }
