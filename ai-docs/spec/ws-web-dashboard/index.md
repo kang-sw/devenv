@@ -725,7 +725,10 @@ When the workspace and workRoot labels are identical, the compact row displays
 that label once; distinct labels remain visible as a workspace/workRoot pair.
 Workspaces with multiple workRoots continue to show separate workspace and
 workRoot rows. Main/sub instances remain workbench surfaces or projections
-rather than default recursive left-nav rows.
+rather than default recursive left-nav rows. Sibling workspace rows within a
+server and sibling worktree rows within a workspace are user-reorderable by
+drag, with the resulting order persisted browser-locally per scope rather than
+changing server-reported order.
 
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route

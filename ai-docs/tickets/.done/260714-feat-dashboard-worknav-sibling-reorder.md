@@ -94,3 +94,46 @@ verification is acceptable to note as a fallback if not.
 ## Promotion (2026-07-21)
 
 Promoted per user curation.
+
+## Result (2026-07-21)
+
+- Feature: drag to reorder sibling work-root nav entries, with browser-local
+  persistence. New pure module `workNavOrder.ts` (`WorkNavSiblingOrder`,
+  `applySiblingOrder`, `reorderSiblingIds`, `isAcceptableSiblingDrop`,
+  versioned localStorage) plus `App.tsx` HTML5 DnD glue. Daemon-side
+  `OpenedWorkRoots` is untouched — frontend-only, as the ticket's Constraints
+  required. Sibling scope: workspace rows are scoped to `server.id`, worktree
+  rows to `serverScopedIdentity(serverId, workspaceId)`; cross-scope drops are
+  rejected.
+- Reused the `layoutRestore.ts` persistence pattern and the `paneOrderByRoot`
+  render-ordering shape called out in Prior Art. Back-compat: an absent stored
+  order falls back to natural (server-reported) order.
+- Notable correctness point found during review: the compact-root render path
+  (single-work-root workspace) initially did not participate in reorder at
+  all. Fixed by threading drag props through that branch AND adding a new
+  `dragEntityId` prop so the compact branch keys drag identity on
+  `workspace.id` (not the workRoot display `id` it renders) — the two id
+  spaces would otherwise silently no-op the reorder for compact rows.
+- Verification: `npm run build` plus `test:resource-model` (including the new
+  `workNavOrder.test.ts`) and `test:workbench` all pass.
+- Review: 3-partition review (correctness/opus, fit, test). Fit found 1
+  Critical (compact-root rows excluded from reorder) — fixed. Test found 1
+  Important (the cross-scope drop-acceptance predicate was inline-duplicated
+  and untested) — fixed by extracting `isAcceptableSiblingDrop` into
+  `workNavOrder.ts` with 4 new unit cases covering its branches. The delta
+  re-review (`ea032f52..d7c5647f`) verified both fixes directly against the
+  identity-space and predicate-equivalence concerns and found no new issues.
+- Residual accepted MINOR item (both the original review and the delta
+  re-review converge on this single item; not two distinct items): a DOM drop
+  always supplies a `beforeId` (the target row's id), so a drag can only
+  insert before a sibling, never explicitly append after the last one — an
+  item can still be moved to the end indirectly by moving every other sibling
+  ahead of it. `reorderSiblingIds` already supports and unit-tests the
+  `beforeId === undefined` end-append case, so this is a UX reachability
+  limit only, with no data loss/duplication risk; the ticket does not require
+  an end-of-list drop zone. Accepted as-is, not re-opened.
+- Commits: feat `ea032f52`, relay fix `d7c5647f` (plan `e3fd3780`).
+- Open item: manual dogfood confirmation (drag-reorder a sibling, reload the
+  browser, confirm the order persists) remains the user's step; no live
+  dashboard instance was available in the implementing session to capture
+  that evidence directly.

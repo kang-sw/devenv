@@ -1040,6 +1040,18 @@ button {
   background: var(--ws-color-panel-hover);
 }
 
+.resource-row-draggable {
+  cursor: grab;
+}
+
+.resource-row-draggable:active {
+  cursor: grabbing;
+}
+
+.resource-row-drag-over {
+  box-shadow: inset 0 2px 0 var(--ws-color-action);
+}
+
 .resource-row-select:focus-visible,
 .resource-row-action:focus-visible {
   outline: var(--ws-focus-ring);
