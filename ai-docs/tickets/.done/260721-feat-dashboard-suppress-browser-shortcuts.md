@@ -257,7 +257,7 @@ Delivered on branch `impl/pwa-keydown-suppression`.
   unaffected) remains the user's step - no live daemon instance was
   available in this implementing session.
 
-#### Edition (fdf73c5d) - 2026-07-21
+#### Edition (1cc6dcdf) - 2026-07-21
 
 Reverses this phase's original Ctrl+R whitelist decision, per explicit
 owner direction: Ctrl+R will be reused as the in-app reverse-history-search
