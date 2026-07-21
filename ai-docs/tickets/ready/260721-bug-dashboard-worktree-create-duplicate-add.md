@@ -94,3 +94,38 @@ starting points only):
 - `260710-idea-dashboard-open-work-root-full-registry-redundant-rediscovery`:
   same call cluster (`open`/create paths triggering full-registry
   rediscovery); adjacent but not confirmed to be the same underlying cause.
+
+## Phases
+
+### Phase 1: Reproduce, confirm mechanism, and fix
+
+Confirm the duplicate-add is caused by the manual create-worktree add path
+(`GitWorktreeAddModal`'s `onCreated` handler applying `response.resources`
+directly) and the server-side auto-discovery/normalize path both inserting
+the same work root, then add path-based (worktree filesystem path /
+`serverScopedIdentity`) deduplication so a work root that is already present
+is not re-added. Candidate seam: `mergeResourcesByServer`
+(`resourceModel.ts:204-209`, currently no path dedup at that layer) and/or
+the `onCreated` add path (`App.tsx:1417-1430`) - the investigation notes
+above are starting points, not a prescribed fix location; the daemon-side
+`local_work_root_id_for_path` / `WorkspaceBuilder::push` dedup
+(`discovery.rs:185-194`) is a plausible alternative or complementary layer if
+investigation shows the two occurrences land in different `workspace_key`
+entries.
+
+**Verification**: creating a worktree through the dashboard's "create
+worktree" action yields exactly one entry for the new work root; legitimately
+distinct work roots (pre-existing worktrees, other primary roots) still
+appear as separate entries; existing frontend tests (`test:resource-model`,
+`test:workbench`) stay green; manual dogfood repeat of the original
+create-worktree flow confirms no duplicate.
+
+## Spec Impact
+
+No spec text change expected. `ai-docs/spec/ws-web-dashboard/index.md`
+`## Git Worktree Creation {#260524-ws-dashboard-git-worktree-creation}`
+already describes submit as refreshing canonical dashboard resources and
+selecting/focusing *the* created linked workRoot (singular) - duplicate
+entries are an implementation defect against that existing contract, not a
+new or varying specified behavior, so this fix restores conformance rather
+than changing the spec.

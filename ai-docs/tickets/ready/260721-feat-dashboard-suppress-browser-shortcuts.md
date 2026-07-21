@@ -106,3 +106,85 @@ via an Electron/kiosk-style wrapper so that class-B shortcuts also become
 interceptable/suppressible. This is a distinct, larger-scope delivery-mode
 change (manifest + install flow, or a new packaging target) and should be
 scoped and decided independently of the MVP keydown interceptor above.
+
+## Delivery-Mode Spectrum (decided direction)
+
+Decided: **PWA install is the chosen first approach.** Effort vs. coverage,
+ordered from lowest effort to highest:
+
+- **PWA install** (`display-mode: standalone`) - very low effort (~1 day).
+  Removes the browser tab/address-bar chrome entirely, so tab-management
+  shortcuts (Ctrl+T, Ctrl+Tab, Ctrl+1..9) become non-applicable - there is no
+  tab strip left for them to act on. Ctrl+R (reload) still works. Class-A
+  shortcuts remain suppressible the same way, via a `keydown` handler. Does
+  **not** block Ctrl+W: it still closes the app window, since that binding is
+  browser-reserved and uninterceptable outside fullscreen regardless of
+  delivery mode.
+- **+ Keyboard Lock API** (`navigator.keyboard.lock()`) - near-zero
+  incremental effort on top of the PWA install. Captures residual reserved
+  keys (Ctrl+W, Esc), but only while the window is in fullscreen, and only in
+  Chromium-based browsers.
+- **Tauri/Electron wrapper** - large effort (weeks, plus ongoing packaging,
+  signing, and auto-update maintenance). The only path to full keyboard
+  sovereignty in a normal windowed (non-fullscreen) app. Since the ws daemon
+  is already Rust, Tauri is the better-fit option of the two if this is ever
+  pursued, over Electron. Explicitly **out of scope** for this ticket -
+  tracked only as a larger future delivery-mode decision, to revisit if the
+  PWA path proves insufficient.
+
+Recommended order: PWA install first, Keyboard Lock as a cheap fullscreen-only
+follow-up, Tauri/Electron deferred indefinitely unless the first two are
+proven insufficient.
+
+## Phases
+
+### Phase 1: PWA installability
+
+Add a web app manifest (name, icons, `start_url`, `display: standalone`) and
+the minimal service worker needed to satisfy installability, so Chrome/Edge
+offers "Install app" from the served origin (`127.0.0.1:4300` is a secure
+localhost context and qualifies). Optionally surface an in-app install
+suggestion by listening for the `beforeinstallprompt` event.
+
+**Verification**: the installed standalone window shows no tab strip or
+address bar; tab-management shortcuts (Ctrl+T, Ctrl+Tab, Ctrl+1..9) have
+nothing to act on; Ctrl+R still reloads the installed app.
+
+### Phase 2: Class-A keydown suppression
+
+Add a global `keydown` interceptor (capture-phase, installed once near the
+`App` component - see `App.tsx:437`) that calls `preventDefault()` for the
+catchable browser shortcuts the dashboard wants blocked (e.g. Ctrl+S/P/F/G/
+D/O, zoom Ctrl+Plus/Minus/0), while explicitly whitelisting Ctrl+R so it
+keeps working. The exact block/allow set beyond that whitelist is an
+implementation-time decision, not decided by this ticket. Works identically
+in both plain-tab and installed modes. Reference precedent for the
+ctrl-combo detection + `preventDefault` idiom already in this file:
+`App.tsx:8343-8400` (`keydownFallback`).
+
+**Verification**: with the interceptor active, each targeted class-A
+shortcut is suppressed (no save dialog, no browser find bar, no zoom, etc.)
+in both a plain browser tab and the Phase 1 installed PWA, while Ctrl+R
+still reloads.
+
+### Phase 3 (optional/deferred): Residual reserved keys
+
+Evaluate fullscreen + the Keyboard Lock API (`navigator.keyboard.lock()`)
+for Ctrl+W/Esc only if Phases 1-2 prove insufficient in practice. Tauri/
+Electron remains out of scope per the Delivery-Mode Spectrum above and is
+not part of this phase.
+
+**Verification**: deferred - no action required unless a future session
+picks this phase up; if picked up, verify Ctrl+W/Esc suppression in
+fullscreen on a Chromium-based browser only, with graceful no-op fallback
+elsewhere.
+
+## Spec Impact
+
+None yet - no existing spec stem documents dashboard delivery mode (PWA
+manifest/installability) or a keyboard-shortcut-suppression contract.
+Contract-first spec: yes for Phase 1's installability surface (manifest,
+`display: standalone`) once implemented, since it changes how the dashboard
+is served/consumed; Phase 2's keydown suppression set is expected to be
+finalized and spec-addressed alongside or shortly after Phase 1's spec
+entry, per this ticket's `ready/` gate.
