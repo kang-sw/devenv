@@ -1,6 +1,7 @@
 import {
   applySiblingOrder,
   emptyWorkNavSiblingOrder,
+  isAcceptableSiblingDrop,
   loadWorkNavOrderSnapshot,
   reorderSiblingIds,
   saveWorkNavOrderSnapshot,
@@ -203,5 +204,38 @@ function assertTrue(value: boolean, label: string) {
     "absent storage entry loads the empty order",
   );
 }
+
+// --- isAcceptableSiblingDrop ---
+//
+// This is the pure accept/reject decision behind the "NOT re-parenting"
+// non-goal: a drop is only accepted when the in-flight drag's scope key
+// matches the candidate drop target's scope key (rejecting cross-server
+// workspace drops and cross-workspace worktree drops) and the drag isn't
+// being dropped onto its own source row.
+
+// Same scope, different id -> accept.
+assertTrue(
+  isAcceptableSiblingDrop({ sourceId: "a", scopeKey: "server-1" }, "server-1", "b"),
+  "same-scope drop onto a different sibling is accepted",
+);
+
+// Same scope, same id (dropping onto the dragged row itself) -> reject.
+assertTrue(
+  !isAcceptableSiblingDrop({ sourceId: "a", scopeKey: "server-1" }, "server-1", "a"),
+  "same-scope drop onto the dragged row's own id is rejected",
+);
+
+// Different scope (e.g. a different server's workspace list, or a different
+// workspace's worktree list) -> reject, regardless of id.
+assertTrue(
+  !isAcceptableSiblingDrop({ sourceId: "a", scopeKey: "server-1" }, "server-2", "b"),
+  "cross-scope drop is rejected",
+);
+
+// No drag in flight (null payload) -> reject.
+assertTrue(
+  !isAcceptableSiblingDrop(null, "server-1", "b"),
+  "a null dragged payload is rejected",
+);
 
 console.log("workNavOrder.test.ts passed");

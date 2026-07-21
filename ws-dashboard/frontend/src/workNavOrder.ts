@@ -40,6 +40,25 @@ export type WorkNavSiblingDragPayload = {
   readonly scopeKey: string;
 };
 
+// The single accept/reject decision for a sibling-reorder drag-over/drop:
+// enforces the ticket's central non-goal ("NOT re-parenting") by requiring
+// the in-flight drag to belong to the same sibling scope as the candidate
+// drop target, and to not be a drop onto itself. Pure so both the
+// `dragover` (gates `preventDefault`) and `drop` (gates whether
+// `onSiblingReorder` fires) call sites in App.tsx can share one definition
+// instead of hand-duplicating the De Morgan dual of this boolean.
+export function isAcceptableSiblingDrop(
+  dragged: WorkNavSiblingDragPayload | null,
+  targetScopeKey: string,
+  targetId: string,
+): boolean {
+  return (
+    !!dragged &&
+    dragged.scopeKey === targetScopeKey &&
+    dragged.sourceId !== targetId
+  );
+}
+
 // Applies a persisted id-order over a server-supplied sibling list without
 // mutating or reordering the source array in place: ids named in `order`
 // come first (in `order`'s sequence, skipping any id no longer present in

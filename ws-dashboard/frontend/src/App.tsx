@@ -291,6 +291,7 @@ import {
 } from "./resourceModel";
 import {
   applySiblingOrder,
+  isAcceptableSiblingDrop,
   loadWorkNavOrderSnapshot,
   reorderSiblingIds,
   saveWorkNavOrderSnapshot,
@@ -9637,6 +9638,11 @@ function WorkspaceRows({
             `activation: ${compactRoot.activation}`,
           ]}
           onCommand={onCommand}
+          dragScopeKey={serverId}
+          dragEntityId={workspace.id}
+          onSiblingReorder={(sourceId, beforeId) =>
+            onWorkspaceReorder(serverId, sourceId, beforeId)
+          }
         />
       </div>
     );
@@ -9743,6 +9749,7 @@ function ResourceRow({
   debugMeta,
   onCommand,
   dragScopeKey,
+  dragEntityId,
   onSiblingReorder,
 }: {
   id: string;
@@ -9762,13 +9769,22 @@ function ResourceRow({
   closeWorkRootId?: string;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
-  // SIBLING drag-reorder scope key (server.id for a workspace row,
-  // serverScopedIdentity(serverId, workspace.id) for a worktree row). Rows
-  // without a scope key (e.g. the compact-root presentation) render without
-  // any drag affordance - there is no sibling list to reorder for them.
+  // SIBLING drag-reorder scope key (server.id for a workspace row, including
+  // the compact-root presentation - it is still one workspace among its
+  // server's workspace siblings; serverScopedIdentity(serverId, workspace.id)
+  // for a worktree row). `draggable` (below) is false, and no drag affordance
+  // renders, only when a row is passed no scope key at all.
   dragScopeKey?: string;
-  // Called on a valid same-scope drop with (sourceId, beforeId === this
-  // row's own id). Cross-scope drops are rejected before this ever fires.
+  // Identity used for the sibling drag payload/target, when it differs from
+  // the row's display `id`. Only needed for the compact-root presentation:
+  // its `id` is the underlying workRoot's id (selection/action target), but
+  // the workspace-level sibling order list (`workspaceOrderByServer`, applied
+  // over `resources.workspaces`) is keyed by the *workspace* id. Defaults to
+  // `id`, which is already correct for plain workspace and workRoot rows.
+  dragEntityId?: string;
+  // Called on a valid same-scope drop with (sourceId, beforeId ===
+  // this row's own dragEntityId). Cross-scope drops are rejected before this
+  // ever fires.
   onSiblingReorder?: (sourceId: string, beforeId: string) => void;
 }) {
   const hasWorkspaceRemove = actions.some(
@@ -9789,6 +9805,7 @@ function ResourceRow({
     " · ",
   );
   const draggable = Boolean(dragScopeKey && onSiblingReorder);
+  const siblingId = dragEntityId ?? id;
   return (
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}${draggable ? " resource-row-draggable" : ""}${dragOver ? " resource-row-drag-over" : ""}`}
@@ -9804,7 +9821,10 @@ function ResourceRow({
       onDragStart={
         draggable
           ? (event) => {
-              activeWorkNavDrag = { sourceId: id, scopeKey: dragScopeKey! };
+              activeWorkNavDrag = {
+                sourceId: siblingId,
+                scopeKey: dragScopeKey!,
+              };
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData(
                 workNavSiblingDragMimeType,
@@ -9825,11 +9845,7 @@ function ResourceRow({
         draggable
           ? (event) => {
               const dragged = activeWorkNavDrag;
-              if (
-                dragged &&
-                dragged.scopeKey === dragScopeKey &&
-                dragged.sourceId !== id
-              ) {
+              if (isAcceptableSiblingDrop(dragged, dragScopeKey!, siblingId)) {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
                 if (!dragOver) {
@@ -9855,14 +9871,10 @@ function ResourceRow({
               setDragOver(false);
               const payload = activeWorkNavDrag;
               activeWorkNavDrag = null;
-              if (
-                !payload ||
-                payload.scopeKey !== dragScopeKey ||
-                payload.sourceId === id
-              ) {
+              if (!isAcceptableSiblingDrop(payload, dragScopeKey!, siblingId)) {
                 return;
               }
-              onSiblingReorder?.(payload.sourceId, id);
+              onSiblingReorder?.(payload!.sourceId, siblingId);
             }
           : undefined
       }
