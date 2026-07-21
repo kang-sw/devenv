@@ -267,9 +267,11 @@ import {
   isWorkspaceNavChildWorkRoot,
   LOCAL_DASHBOARD_SERVER_ROUTE,
   mergeResourcesByServer,
+  pickWorkRootSelectionAfterClose,
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
+  resolveWorkbenchSelection,
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
@@ -532,6 +534,13 @@ export function App() {
   const [openWorkRootRefs, setOpenWorkRootRefs] = useState<
     Record<string, { rootId: string; serverRoute: string }>
   >({});
+  // 260714 Phase 2: close-scoped explicit-empty flag (option (b)). Set only
+  // by the `workRoot.close` branch when it closes the currently-selected
+  // root and no open sibling remains; cleared by any subsequent explicit
+  // selection (`selectRoot`, guarded on a non-null `entityId`). Consulted
+  // once at the selection fold-in below to force a true empty workbench
+  // instead of the resolver's fallback-to-first-root behavior.
+  const [closeEmptyWorkbench, setCloseEmptyWorkbench] = useState(false);
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
   const restoredReadOnlyPaneKeys = useRef(
@@ -632,6 +641,17 @@ export function App() {
       stickyWorkbenchSelectionRef.current,
     );
   stickyWorkbenchSelectionRef.current = nextDriverState;
+  // 260714 Phase 2: gate the resolver's OUTPUT (never
+  // `driveStickyWorkbenchSelection`'s input above) on the close-scoped
+  // explicit-empty flag. While false this is byte-identical to
+  // `stickyWorkbenchSelection`; once true (set only by `workRoot.close`
+  // closing the last open root) it forces a true empty workbench - a null
+  // `selectedRootKey` here skips `deriveWorkbenchView`'s
+  // `withOpenWorkRootKey` fold-in, and `workbenchModel` below collapses to
+  // null - without altering the sticky driver's own state machine.
+  const workbenchSelection = closeEmptyWorkbench
+    ? null
+    : stickyWorkbenchSelection;
   // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
   // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
   // where all six committed-state fields are simultaneously in scope, so the
@@ -655,7 +675,7 @@ export function App() {
     selectedId,
     openWorkRootKeys,
     openWorkRootRefs,
-    selection: stickyWorkbenchSelection,
+    selection: workbenchSelection,
   });
   const serverConnections = useMemo(
     () =>
@@ -687,6 +707,11 @@ export function App() {
     selectedServerIdRef.current = next.selectedServerId;
     setSelectedServerId(next.selectedServerId);
     setSelectedId(next.selectedId);
+    // 260714 Phase 2: any explicit non-null selection clears the
+    // close-scoped explicit-empty flag. Guarded on `entityId !== null` so
+    // the no-sibling close's own `selectRoot(server, null)` does not
+    // immediately re-clear the flag it is about to set.
+    if (entityId !== null) setCloseEmptyWorkbench(false);
   }, []);
 
   useEffect(() => {
@@ -895,13 +920,12 @@ export function App() {
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
-  // 260714 Phase 2 Prong 1: consume the already-advanced sticky-selection
-  // value computed once near `activeResources` above, rather than
-  // recomputing `resolveWorkbenchSelection` fresh here - recomputing would
-  // both discard the stickiness and risk this value diverging from what
+  // 260714 Phase 2 Prong 1: `workbenchSelection` (the close-empty-gated value
+  // computed once near `activeResources` above) is consumed here rather than
+  // recomputing `resolveWorkbenchSelection` fresh - recomputing would both
+  // discard the stickiness and risk this value diverging from what
   // `deriveWorkbenchView` derived from the same ref this render (see the
   // comment at the ref's owning site).
-  const workbenchSelection = stickyWorkbenchSelection;
   useEffect(() => {
     if (!workbenchSelection) {
       return;
@@ -1175,6 +1199,29 @@ export function App() {
             delete next[rootKey];
             return next;
           });
+          // 260714 Phase 2: closing the currently-selected root must also
+          // move the selection, otherwise `deriveWorkbenchView`'s
+          // `withOpenWorkRootKey` fold-in (`workbench/openRootLookup.ts`)
+          // unconditionally re-mounts the selected root regardless of
+          // `openWorkRootKeys`, neutralizing the close. The resolved root id
+          // (not a naive `workRootId === selectedId` check) collapses the
+          // workspace-id indirection for a "workspace"-presentation row's X.
+          const selectedRootId =
+            resolveWorkbenchSelection(activeResources, selectedId)?.root.id ??
+            null;
+          if (selectedRootId === workRootId) {
+            const nextId = pickWorkRootSelectionAfterClose(
+              activeResources,
+              workRootId,
+              new Set(Object.keys(openWorkRootRefs)),
+            );
+            if (nextId) {
+              selectRoot(selectedServerIdRef.current, nextId);
+            } else {
+              selectRoot(selectedServerIdRef.current, null);
+              setCloseEmptyWorkbench(true);
+            }
+          }
         };
       } else if (command.payload.type === "server.off") {
         const { serverId } = command.payload;
@@ -1375,6 +1422,7 @@ export function App() {
       loadServers,
       openWorkRootRefs,
       readOnlyFilePanes,
+      selectedId,
       selectRoot,
     ],
   );
@@ -9832,8 +9880,7 @@ function ResourceRow({
     (presentation === "workRoot" ||
       presentation === "compactWorkRoot" ||
       presentation === "workspace") &&
-    isOpenWorkRoot &&
-    !selected;
+    isOpenWorkRoot;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));

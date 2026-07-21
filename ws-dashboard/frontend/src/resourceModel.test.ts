@@ -3,11 +3,13 @@ import {
   compactWorkspaceWorkRootTitle,
   flattenEntities,
   mergeResourcesByServer,
+  pickWorkRootSelectionAfterClose,
   preferredSelection,
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
   resolveStickyWorkbenchSelection,
+  serverScopedIdentity,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
   workspaceBaseWorkRoot,
@@ -750,4 +752,148 @@ assertTrue(
   stickyOnNullSelectedId.nextLastMatchedSelectionByServer ===
     stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
   "a null selectedId leaves the cache reference untouched",
+);
+
+// pickWorkRootSelectionAfterClose (260714 Phase 2): post-close selection
+// scoped to currently-OPEN roots (tab semantics) - membership comes from the
+// passed-in open-key set, order comes from the natural resources-tree walk.
+const tripleRootWorkspace: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-triple",
+      label: "triple",
+      state: readyState,
+      compactable: false,
+      workRoots: [
+        workRoot("root-triple-a", "workspace-triple", "triple-a"),
+        workRoot("root-triple-b", "workspace-triple", "triple-b"),
+        workRoot("root-triple-c", "workspace-triple", "triple-c"),
+      ],
+      actions: [],
+    },
+  ],
+};
+
+// Builds the `serverScopedIdentity` open-key set for a subset of a resources
+// tree's roots, mirroring how `App.tsx` derives `openWorkRootRefs`' keys.
+function openKeysOf(
+  resources: DashboardResourcesView,
+  openRootIds: readonly string[],
+): Set<string> {
+  const openIds = new Set(openRootIds);
+  const keys = new Set<string>();
+  for (const workspace of resources.workspaces) {
+    for (const root of workspace.workRoots) {
+      if (openIds.has(root.id)) {
+        keys.add(serverScopedIdentity(root.resourcePath.serverId, root.id));
+      }
+    }
+  }
+  return keys;
+}
+
+// (1) All roots open, close a middle root -> the next sibling in tree order.
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    tripleRootWorkspace,
+    "root-triple-b",
+    openKeysOf(tripleRootWorkspace, [
+      "root-triple-a",
+      "root-triple-b",
+      "root-triple-c",
+    ]),
+  ),
+  "root-triple-c",
+  "closing a middle open root selects the next open sibling",
+);
+
+// (2) All roots open, close the last root -> the previous sibling.
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    tripleRootWorkspace,
+    "root-triple-c",
+    openKeysOf(tripleRootWorkspace, [
+      "root-triple-a",
+      "root-triple-b",
+      "root-triple-c",
+    ]),
+  ),
+  "root-triple-b",
+  "closing the last open root falls back to the previous open sibling",
+);
+
+// (3) Cross-workspace natural-order boundary: closing a workspace's only
+// (hence last) open root selects the first open root of the next workspace.
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    twoWorkspaceView,
+    "root-local-abc",
+    openKeysOf(twoWorkspaceView, ["root-local-abc", "root-second"]),
+  ),
+  "root-second",
+  "closing the last open root of a workspace crosses into the next workspace's first open root",
+);
+
+// (4) OPEN-scoping discriminator: a sibling exists in the tree, but only the
+// closing root is in the open-key set -> null (tab semantics: no *open*
+// sibling remains, even though the tree still has one).
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    multiRootWorkspace,
+    "root-multi-a",
+    openKeysOf(multiRootWorkspace, ["root-multi-a"]),
+  ),
+  null,
+  "closing the only open root yields null even when an unopened sibling exists in the tree",
+);
+
+// (5) Two open roots non-adjacent in the tree (the middle root is NOT in the
+// open set) -> closing one selects the other open root; order derives from
+// the tree walk, membership from the open set.
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    tripleRootWorkspace,
+    "root-triple-a",
+    openKeysOf(tripleRootWorkspace, ["root-triple-a", "root-triple-c"]),
+  ),
+  "root-triple-c",
+  "closing an open root selects the next open root even when an unopened root sits between them",
+);
+
+// (6) Defensive/race: the closing root itself is absent from the open-key
+// set. Other open roots present -> the first open id; none present -> null.
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    multiRootWorkspace,
+    "root-multi-a",
+    openKeysOf(multiRootWorkspace, ["root-multi-b"]),
+  ),
+  "root-multi-b",
+  "a closing root missing from the open set still falls back to the first remaining open root",
+);
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    multiRootWorkspace,
+    "root-multi-a",
+    openKeysOf(multiRootWorkspace, []),
+  ),
+  null,
+  "a closing root missing from the open set with no other open roots yields null",
+);
+
+// (7) `null` resources and an empty open-key set both yield null.
+assertEqual(
+  pickWorkRootSelectionAfterClose(null, "root-multi-a", new Set()),
+  null,
+  "null resources yields null regardless of the open-key set",
+);
+assertEqual(
+  pickWorkRootSelectionAfterClose(
+    multiRootWorkspace,
+    "root-multi-a",
+    new Set(),
+  ),
+  null,
+  "an empty open-key set yields null since the only-open-root case degenerates to no open roots",
 );
