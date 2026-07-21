@@ -37,7 +37,6 @@ lead-skill-authoring
 lead-sprint
 lead-tune
 lead-update-spec
-lead-verify-design
 lead-verify-discussion
 lead-workflow-manual
 lead-write-spec
@@ -56,7 +55,7 @@ The directly invocable surface is narrowed to 14 entry skills the user invokes a
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
 `lead-verify-discussion`, `lead-tune`, and `lead-drain-ready-queue`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
-`lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
+`lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
 content invoked by caller skills, not directly user-invoked entry points;
 `lead-write-ticket` and `lead-write-spec` are orchestration-only. The
@@ -144,7 +143,7 @@ uses host-native exploration workers directly.
 
 Workflow guidance prefers `model` for both portable aliases and concrete
 overrides. Examples use `model: "core"` or `model: "deep"` for portable
-selection and concrete provider names such as `gpt-5.5` or
+selection and concrete provider names such as `gpt-5.6-terra` or
 `claude-sonnet-4.6` only when backend-specific routing is intentional. `tier`
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
@@ -187,7 +186,7 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
-`lead-sprint`, `lead-verify-design`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
+`lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill mirrors the episode-oriented sprint shell: it
@@ -404,7 +403,11 @@ implemented items that can be reused or merged to avoid duplication, synthesizes
 corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, checks for over-alignment signals such as weak premise handling or
 missing countercases, then steers the discussion toward the best-supported
-direction.
+direction. When the user specifically asks to verify a design's validity, it
+also dictates the concluded design in full — the hypothesis under review,
+rejected alternatives, and paths to already-read evidence files — to a fresh
+higher-tier subagent and folds that subagent's independent judgment into its
+recommendation.
 It intentionally remains compact and frequent-use; downstream authoring sweeps
 must not force full workflow-skill ceremony onto this checkpoint unless its
 actual output or end state is unclear.
@@ -472,16 +475,13 @@ no `merge_confirm` override, and no new persisted state — "currently
 checked out on `goal/<slug>`" is the entire signal.
 {#260707-drain-goal-branch-staging}
 
-`lead-verify-design` gives users a premise-gated design verification checkpoint
-for discussed designs. It first runs discussion verification so false or blocker
-premises do not seed the review, then writes a neutral temporary brief that
-separates evidence, constraints, preferences, unknowns, alternatives, and
-non-goals. A fresh deep reviewer receives only the brief and calibrated review
-instructions, then judges keep, revise, reject, or defer without forcing
-findings. The lead classifies findings, removes reviewer-overreach and out-of-scope
-items, reports design risks and simpler alternatives, and treats durable
-ticket/spec persistence as a soft recommendation gate unless explicitly
-requested or required by dogfood-capture rules.
+`lead-verify-design` is removed; its `SKILL.md` and rsrc playbook were deleted
+entirely (delete-don't-diet decision, `260630-epic-skill-playbook-diet`). Its
+premise-gated design-verification function is now covered by the ticket
+lifecycle's Sage Review Gate (`260624-sage-review-gate`), which dispatches
+`ticket-reviewer-design` automatically at `todo/`→`ready/` promotion, plus the
+conditional independent-judgment step added to `lead-verify-discussion`. Do
+not route new work through it.
 {#260524-design-verification-skill}
 
 ### Check Blockers Checkpoint {#260513-check-blockers-skill}
@@ -703,7 +703,7 @@ an active worktree, the merge target was ambiguous, or the branch has commits
 unreachable from the merge target. When none of those conditions hold, the
 branch's naming convention gates the remaining flow: a branch named
 `impl/<stem>` (the convention `lead-implement` uses for branches it creates,
-`<stem>` hard-truncated to 15 characters with a trailing `-` trimmed) is
+`<stem>` <=15 characters recommended, with any trailing `-` trimmed) is
 deleted without asking. A branch under any other name — including the legacy
 `implement/<scope-slug>` convention — keeps the ask-first flow: the user is
 asked before `git branch -d` runs, and the branch is retained if not

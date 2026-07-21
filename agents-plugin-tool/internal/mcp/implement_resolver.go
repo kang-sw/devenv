@@ -670,16 +670,12 @@ func deriveImplementDocMode(n normalizedImplementFacts) string {
 }
 
 // implementTargetBranchName builds the canonical implementation branch name
-// for a given scope slug: "impl/" followed by the slug hard-truncated to 15
-// characters with any resulting trailing "-" trimmed. Both branch-plan
+// for a given scope slug: "impl/" followed by the slug (<=15 characters
+// recommended, not enforced) with any trailing "-" trimmed. Both branch-plan
 // derivation and enter-implement observation must use this single helper so
 // the two never construct diverging target-branch names.
 func implementTargetBranchName(scopeSlug string) string {
-	stem := scopeSlug
-	if len(stem) > 15 {
-		stem = stem[:15]
-	}
-	stem = strings.TrimRight(stem, "-")
+	stem := strings.TrimRight(scopeSlug, "-")
 	return "impl/" + stem
 }
 

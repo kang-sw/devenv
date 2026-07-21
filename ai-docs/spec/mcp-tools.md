@@ -281,7 +281,7 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
   the applicability rule sees that the field was read and deliberately not
   applied. Fresh implementation branches are created under the `impl/<stem>`
-  convention, with `<stem>` hard-truncated to 15 characters (trailing `-`
+  convention, with `<stem>` <=15 characters recommended (trailing `-`
   trimmed); legacy `implement/<scope-slug>` branches already in progress are
   still recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
@@ -650,7 +650,12 @@ and backend-affinity resolution are unchanged; only the key vocabulary changed.
 Delegate playbooks declare a single tier-derived model hint variable
 (`{{.RoleModel}}`) resolved from the playbook's own `tier:`, replacing the
 alias-named `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` set; the rendered
-native model hint is preserved.
+native model hint is preserved. Beyond that per-role hint, any playbook body may
+reference the four generic fixed-tier vars
+(`{{.SmallTierModel}}`/`{{.MediumTierModel}}`/`{{.LargeTierModel}}`/`{{.XLargeTierModel}}`)
+to name a specific tier's model in prose; these resolve through the same
+per-harness config seam and are injected as reserved implicit variables (see
+`#260609-playbook-harness-rendering`), not as terminology-table entries.
 {#260620-tier-vocabulary-collapse-direct-model-map}
 
 ### Layered Config Scope Model {#260619-layered-config-scope-model}
@@ -877,6 +882,20 @@ into a new ticket body. An unknown or empty `type` is rejected with an error
 listing valid types. Capability range: `>=0.30.6-dev <0.31.0`.
 {#260624-tickets-template-tool}
 
+`tickets.checklist` returns the verification checklist for one `lead-write-ticket`
+phase as data, so the playbook can install it as a single todo instead of
+carrying the item list as static prose. `type` and `phase` are both required:
+`type` accepts the same set as `tickets.template`
+(`feat`/`bug`/`refactor`/`chore`/`research`/`workset`/`epic`), and `phase` is
+`content` (the ticket-content capture checklist) or `intent` (the intent-review
+checklist). The returned markdown is the full multi-item text for that phase,
+numbered and ready to paste verbatim into one todo `instruction`; the `intent`
+phase emits one extra category-scoped item for `epic` and `workset` and
+renumbers the trailing items accordingly. Like `tickets.template` it is a pure
+lookup — no `session_key`/root, no gate. An unknown or empty `type`, or a `phase`
+other than `content`/`intent`, is rejected with an error listing valid values.
+{#260720-tickets-checklist-tool}
+
 The Sage Review Gate is split into two sequential, non-looping stage gates
 keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
 ticket: a design-sketch review at `todo/` landing (tolerant of missing detail;
@@ -943,6 +962,28 @@ stamping. The migration write persists both new fields on that first touch
 (self-healing, no bulk-rewrite script) and leaves the old `sage-review:` field
 in place.
 {#260624-sage-review-gate}
+
+`tickets.sage_gate` and `tickets.sage_record` are the two root-aware tools the
+`lead-write-ticket` playbook calls to run the gate above; both require
+`session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
+decision for a ticket and returns `{ action, ask_prompt?, reviewers?, mode? }`
+where `action` is one of `skip`, `stop_blocked`, `ask`, or `run`. It owns
+posture resolution, the legacy single-field `sage-review:` migration, the
+`sage_review` config fallback, the category×stage matrix, and
+standalone-versus-combined mode selection. For `ask` it returns the exact
+question to relay; the caller re-invokes with `answer` (`yes`/`no`), and each
+still-pending `recommended` stage is asked separately (design first) so one
+answer never resolves another stage. A declined `ask` and a config-fallback
+resolution each persist the resolved posture and commit. The tool never spawns
+reviewers — for `run` it names the reviewer(s) to dispatch and leaves spawning
+to the lead. `tickets.sage_record(stem, stage, verdicts)` aggregates the
+supplied stage verdicts into the final posture, writes the frontmatter field(s),
+renders any `## Blocked` section from a Go-owned template whose output is
+byte-identical to the prior playbook templates, commits with the canonical
+title, and returns the applied posture plus the commit reference. A `stage`
+whose expected reviewer verdict is absent from `verdicts` is rejected with an
+error rather than recording a passing posture for a review that did not run.
+Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
@@ -1133,10 +1174,16 @@ documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.print` and
 `playbook.render` select those sections after harness rendering and before
 returning text or writing a prompt file. User-facing namespace notation in
 shared playbooks is authored with reserved implicit variables (`McpNamespace`
-for `ws/<tool>` notation and `SkillNamespace` for `ws:<skill>` notation). These
-vars are injected by the playbook tool layer, are available without frontmatter
-declarations, and override caller-supplied `context` keys. Literal MCP tool
-identifiers remain literal unless a dedicated semantic variable is introduced.
+for `ws/<tool>` notation and `SkillNamespace` for `ws:<skill>` notation). The
+same reserved-implicit-variable mechanism also carries the four generic
+tier-model vars (`SmallTierModel`, `MediumTierModel`, `LargeTierModel`,
+`XLargeTierModel`), which resolve at render time from config through the same
+per-harness `(backend, model, effort)` seam as `RoleModel` and fall back to a
+stable `the <tier>-tier model` label when resolution fails, so they never render
+empty mid-sentence. These vars are injected by the playbook tool layer, are
+available without frontmatter declarations, and override caller-supplied
+`context` keys. Literal MCP tool identifiers remain literal unless a dedicated
+semantic variable is introduced.
 
 A playbook may declare text dependencies in its frontmatter; the renderer
 auto-includes that text at print/render time, so a single `playbook.print(name)`

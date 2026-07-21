@@ -2114,12 +2114,13 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 	mustWrite(t, root, "file.txt", "one\n")
 	runGit(t, root, "add", "file.txt")
 	runGit(t, root, "commit", "-m", "initial")
-	// The target branch this scenario resolves to is "impl/enter-implement"
-	// (implementTargetBranchName truncates the ready-args scope slug to 15
-	// chars). Pre-create it so observeImplementBranch's TargetExists check
-	// and deriveImplementBranchPlan's target-branch naming both key off the
-	// same shared helper (implementTargetBranchName) instead of drifting.
-	runGit(t, root, "switch", "-c", "impl/enter-implement")
+	// The target branch this scenario resolves to is
+	// "impl/enter-implement-deterministic-verdict-engine" (implementTargetBranchName
+	// no longer truncates the ready-args scope slug; the <=15-char cap is
+	// advisory only). Pre-create it so observeImplementBranch's TargetExists
+	// check and deriveImplementBranchPlan's target-branch naming both key off
+	// the same shared helper (implementTargetBranchName) instead of drifting.
+	runGit(t, root, "switch", "-c", "impl/enter-implement-deterministic-verdict-engine")
 	runGit(t, root, "switch", "-c", "impl/old-scope")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
@@ -2136,8 +2137,8 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("expected stop branch action when target already exists, got %+v", result.Verdict.BranchPlan)
 	}
-	if result.Verdict.BranchPlan.TargetBranch != "impl/enter-implement" {
-		t.Fatalf("target branch = %q, want impl/enter-implement", result.Verdict.BranchPlan.TargetBranch)
+	if result.Verdict.BranchPlan.TargetBranch != "impl/enter-implement-deterministic-verdict-engine" {
+		t.Fatalf("target branch = %q, want impl/enter-implement-deterministic-verdict-engine", result.Verdict.BranchPlan.TargetBranch)
 	}
 	if !strings.Contains(result.Verdict.BranchPlan.Reason, "already exists") {
 		t.Fatalf("expected already-exists reason, got %q", result.Verdict.BranchPlan.Reason)

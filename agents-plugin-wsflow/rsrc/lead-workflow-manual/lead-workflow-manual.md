@@ -2,6 +2,7 @@
 kind: print
 variables:
   - WorkflowLang
+  - ExploreAgent
 ---
 # Workflow Manual
 
@@ -35,6 +36,11 @@ When writing shared skill text, name only primitives that exist in the {{.McpNam
 If a workflow needs a surface that is still planned, state the required MCP
 contract instead of naming a Claude helper command or another host-specific
 fallback.
+`user` is relative: in a lead session it is the human; in a delegated worker
+session it is the lead that spawned the worker. In shared skill text, name `the
+lead` for worker-facing escalation targets and reserve `user` for the human
+decision at the top.
+
 Centralize primitive usage here. Other skills should name the primitive and
 include only local arguments that affect the current step.
 
@@ -77,10 +83,13 @@ For lead-owned tuning of delegation posture or other workflow knobs, use the `{{
 
 ### Scoped Exploration (native Explore)
 
-For scoped fact-finding, surveys, and one-turn answers, spawn host-native
-exploration workers with an English prompt and require cited evidence, gaps, and
-follow-up needs. For parallel dispatch, spawn multiple in one turn; collect all
-before synthesizing.
+For scoped fact-finding, surveys, and one-turn answers, dispatch
+{{.ExploreAgent}} as {{.SmallTierModel}} by default; escalate to
+{{.MediumTierModel}} only when the exploration requires judgment. Specify the
+model explicitly on the spawn call — do not rely on the harness default. Use an
+English prompt and require cited evidence, gaps, and follow-up needs. For
+parallel dispatch, spawn multiple in one turn; collect all before
+synthesizing.
 
 <!-- ws:full-only:start -->
 ### Persistent agents

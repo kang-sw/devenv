@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.33.12`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.12`).
+Active plugin package: `agents-plugin/` (`ws@0.34.0`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.34.0`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -247,38 +247,43 @@ dropped tickets live in hidden archive dirs and git history.
   `260524-research-visual-design-system-refresh`,
   `260524-research-react-aria-ui-primitives`). No remaining open child of the
   old epic was left orphaned.
-- `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
+- `260622-feat-playbook-render-tier-label` (ready, feat) - make
+  `playbook.render` expose harness-resolved native spawn `model` and
+  `reasoning_effort` metadata, then teach the Codex workflow manual to pass
+  those exact fields. Spec addressing via `## Spec Impact` (`mcp-tools.md` and
+  `workflow-skills.md`, Contract-first: no).
+- `260702-bug-config-unset-asymmetry` (`.done/`, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
   (`mcp-tools.md`, Contract-first: no). Sage review completed.
-- `260702-bug-lead-manual-sections-thin` (ready, bug) - fill the empty
+- `260702-bug-lead-manual-sections-thin` (`.done/`, bug) - fill the empty
   `workflow_manual` `Session setup`/`User preferences` sections with the
   ferrule reuse-discipline; spec addressing via `## Spec Impact`
   (`mcp-tools.md`, Contract-first: no). Sage review completed.
-- `260702-feat-agenda-enumerate-and-clear-all` (ready, feat) - add
+- `260702-feat-agenda-enumerate-and-clear-all` (`.done/`, feat) - add
   `agenda_list` and/or `agenda_clear(all: true)` to enumerate/clear agenda
   blob keys; spec addressing via `## Spec Impact` (`mcp-tools.md`,
   Contract-first: no). Sage review completed.
-- `260702-feat-enter-implement-policy-feedback` (ready, feat) - `enter_implement`
+- `260702-feat-enter-implement-policy-feedback` (`.done/`, feat) - `enter_implement`
   verdict notes when a caller policy field was outside its applicability
   window and ignored; spec addressing via `## Spec Impact` (`mcp-tools.md`,
   Contract-first: no). Sage review completed.
-- `260702-feat-tickets-move-ready-gate-warning` (ready, feat) - `tickets_move`
+- `260702-feat-tickets-move-ready-gate-warning` (`.done/`, feat) - `tickets_move`
   to `ready` emits a soft non-blocking warning when no spec addressing is
   detected; spec addressing via `## Spec Impact` (`mcp-tools.md`,
   Contract-first: no). Sage review completed.
-- `260702-feat-lead-revive-session-key-candidates` (idea, feat) - **sage
+- `260702-feat-lead-revive-session-key-candidates` (`.dropped/`, feat) - **sage
   review blocked**: design premise assumed transient in-memory session-key
   storage, but storage is actually persistent per-key disk files with no
   eviction; needs re-authoring before promotion.
-- `260702-feat-workflow-manual-state-only-view` (ready, feat) - add a
+- `260702-feat-workflow-manual-state-only-view` (`.done/`, feat) - add a
   lead-only session-state-only MCP tool (name TBD, e.g. `session_state`)
   returning only the Session State (todos/agenda) for the caller's key,
   reusing `workflow_manual`'s key-validation behavior; spec addressing via
   `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
   completed (re-authored after initial completeness block: added Phase 1 +
   verification criteria, resolved lead-only-gating design concern).
-- `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
+- `260622-chore-windows-shipping-hardening` (`.done/`, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
   verifiable on Windows), B launcher cold-load robustness, C branch-pinned
@@ -296,7 +301,7 @@ dropped tickets live in hidden archive dirs and git history.
   Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
   Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
   — gates the epic merge to `main`.
-- `260627-feat-enter-proceed-deterministic-verdict-engine` (ready, feat, child
+- `260627-feat-enter-proceed-deterministic-verdict-engine` (`.done/`, feat, child
   of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
   at the routing-facts-complete boundary. The playbook keeps fact gathering and
   ambiguous judgments, while MCP owns normalized precedence, warnings, JSON
@@ -388,8 +393,8 @@ dropped tickets live in hidden archive dirs and git history.
   merged to the epic at `04452233`; P1-3 had already merged at `016c1425`.
   **Live follow-ups:** deferred config-surface slice
   (`config.agents_tier`→`config.model_alias`, `config.role_tier`), the
-  `(skill,role)→tier` override surface, the `lead-verify-design` inline-reviewer
-  model/tier path, and `ref/ws-agent-runtime.md` pre-M3 staleness cleanup.
+  `(skill,role)→tier` override surface, and `ref/ws-agent-runtime.md` pre-M3
+  staleness cleanup.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
@@ -438,7 +443,7 @@ dropped tickets live in hidden archive dirs and git history.
   constraint:** tree-kills scoped
   to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
   because the dogfooding WSL2 host runs a live `claude.exe`.
-- `260703-chore-implement-branch-rename-default-allow` (ready, chore) -
+- `260703-chore-implement-branch-rename-default-allow` (`.done/`, chore) -
   default `policy.branch.allow_rename` to `yes` in `enter.implement`'s
   branch plan resolver so the lead no longer needs explicit per-invocation
   user consent before a rename verdict is reachable; existing
@@ -446,7 +451,7 @@ dropped tickets live in hidden archive dirs and git history.
   remain the safety net. Spec addressing via Phase 1 (spec update bullet
   added per completeness-reviewer finding, Contract-first: no). Sage
   review completed.
-- `260707-feat-forge-autonomy-bootstrap-chaining` (ready, feat) - narrow
+- `260707-feat-forge-autonomy-bootstrap-chaining` (`.done/`, feat) - narrow
   `lead-forge-spec`'s per-ambiguous-item classification loop to auto-proceed
   (inline `<!-- AMBIGUOUS: ... -->` markers, summarized in the final report),
   leaving the destructive archive gate and one-time domain-list confirmation
@@ -456,7 +461,7 @@ dropped tickets live in hidden archive dirs and git history.
   Complements `260707-feat-doc-coverage-live-bootstrap-alarm`'s cross-session
   safety net. Spec addressing via `## Spec Impact` (`workflow-skills.md`,
   Contract-first: no). Sage review completed.
-- `260707-feat-doc-coverage-live-bootstrap-alarm` (ready, feat) - add a live
+- `260707-feat-doc-coverage-live-bootstrap-alarm` (`.done/`, feat) - add a live
   (non-persisted, no set/clear flag) session-bootstrap check for whether
   `ai-docs/spec/`/`ai-docs/mental-model/` each contain at least one
   frontmatter-bearing `.md` file, surfaced via `ferrule`/`workflow_manual`

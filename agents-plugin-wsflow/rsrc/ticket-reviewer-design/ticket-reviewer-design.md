@@ -72,8 +72,8 @@ Verdict thresholds:
 - `concern`: one or more `important` issues that the implementer can resolve autonomously.
 - `pass`: no issues, or only `minor` issues that do not block implementation.
 
-`resolution: autonomous` — the implementer can resolve this without a user decision.
-`resolution: missing` — a user decision or design input is required.
+`resolution: autonomous` — the lead or implementer can resolve this without a user decision.
+`resolution: missing` — a user decision or design input the lead or implementer cannot supply is required.
 
 ## Doctrine
 

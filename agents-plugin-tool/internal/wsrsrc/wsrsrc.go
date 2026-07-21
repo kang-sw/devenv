@@ -52,7 +52,16 @@ type LoadedPlaybook struct {
 // ImplicitVariableNames are resource-format variables that may appear in
 // playbook bodies and includes without being declared in frontmatter. The MCP
 // playbook layer owns their runtime values.
-var ImplicitVariableNames = []string{"McpNamespace", "SkillNamespace"}
+//
+// SmallTierModel/MediumTierModel/LargeTierModel/XLargeTierModel are the four
+// fixed-tier, config-resolved model vars (see resolveTierModelVars in the MCP
+// playbook layer): unlike RoleModel (frontmatter-declared, playbook's own
+// tier), any playbook body may reference these four unconditionally, mirroring
+// the McpNamespace/SkillNamespace precedent exactly.
+var ImplicitVariableNames = []string{
+	"McpNamespace", "SkillNamespace",
+	"SmallTierModel", "MediumTierModel", "LargeTierModel", "XLargeTierModel",
+}
 
 // Manifest is the on-disk manifest.json structure.
 type Manifest struct {

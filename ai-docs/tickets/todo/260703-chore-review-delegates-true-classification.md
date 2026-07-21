@@ -23,7 +23,9 @@ delegation. This ambiguity was exposed during
 `lead-verify-discussion` carried `delegates:true` even though its own
 Process step explicitly delegates only "when investigation is useful"
 (conditional), unlike `lead-verify-design`'s unconditional "isolate a fresh
-deep reviewer" delegation (also `delegates:true`). Meanwhile
+deep reviewer" delegation (also `delegates:true`) — the skill was later
+deleted rather than reclassified, see `260630-epic-skill-playbook-diet`.
+Meanwhile
 `lead-check-blockers` — described with near-identical "compact, lightweight
 checkpoint" framing in the mental model — carries no `delegates:true` at all
 and never spawns subagents as part of its normal flow. `lead-verify-discussion`

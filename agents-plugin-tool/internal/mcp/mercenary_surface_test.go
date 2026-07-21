@@ -504,7 +504,8 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 // RoleModel var resolves to per-harness model strings on the REAL shipped delegate
 // playbooks. implementer declares {{.RoleModel}} (tier medium); reviewer declares
 // {{.RoleModel}} (tier large). An isolated empty CacheHome yields the built-in
-// default aliases (claude: medium→sonnet, large→opus; codex: medium/large→gpt-5.5),
+// default aliases (claude: medium→sonnet, large→opus; codex: medium→gpt-5.6-terra,
+// large→gpt-5.6-sol),
 // so the assertions are deterministic and config-independent. Closes 260611 Phase 1
 // gap 2 (260609 Edition 379ff5e5: tier model vars never surfaced on a shipped asset).
 func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
@@ -524,14 +525,14 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 		return body
 	}
 
-	// implementer → RoleModel (tier medium): claude=sonnet, codex=gpt-5.5 (distinct per harness).
+	// implementer → RoleModel (tier medium): claude=sonnet, codex=gpt-5.6-terra (distinct per harness).
 	implClaude := render(t, "implementer", "claude")
 	implCodex := render(t, "implementer", "codex")
 	if !strings.Contains(implClaude, "sonnet") {
 		t.Errorf("implementer (claude) body must surface RoleModel 'sonnet':\n%s", implClaude)
 	}
-	if !strings.Contains(implCodex, "gpt-5.5") {
-		t.Errorf("implementer (codex) body must surface RoleModel 'gpt-5.5':\n%s", implCodex)
+	if !strings.Contains(implCodex, "gpt-5.6-terra") {
+		t.Errorf("implementer (codex) body must surface RoleModel 'gpt-5.6-terra':\n%s", implCodex)
 	}
 	if implClaude == implCodex {
 		t.Error("implementer render did not diverge per harness — model var not resolved per harness")
@@ -686,7 +687,7 @@ func TestMercenaryTierRoutingResolvesCustomModel(t *testing.T) {
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	cache := filepath.Join(t.TempDir(), "cache")
-	// Custom small & large models distinct from the medium default (gpt-5.5): a
+	// Custom small & large models distinct from the medium default (gpt-5.6-terra): a
 	// resolved custom model proves the capability tier flowed straight through.
 	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "small", "", "claude-custom-small"); err != nil {
 		t.Fatalf("set small tier: %v", err)
