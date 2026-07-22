@@ -1,5 +1,5 @@
 import { normalizeServerRouteLocation } from "./routeBasis.js";
-import { decideSurfaceClose, type SurfaceKind } from "./workbench";
+import { decideSurfaceClose, type SurfaceKind } from "./workbench/index.js";
 import type {
   InstanceView,
   ResourceEntity,
