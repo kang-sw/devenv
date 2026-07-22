@@ -1,10 +1,13 @@
 import {
+  applyHiddenWorktrees,
   applySiblingOrder,
   emptyWorkNavSiblingOrder,
+  hiddenWorktreeItems,
   isAcceptableSiblingDrop,
   loadWorkNavOrderSnapshot,
   reorderSiblingIds,
   saveWorkNavOrderSnapshot,
+  withHiddenWorktree,
   type WorkNavSiblingOrder,
 } from "./workNavOrder.js";
 
@@ -143,6 +146,9 @@ assertDeepEqual(
     worktreeOrderByWorkspace: {
       "server-local/ws-a": ["root-c", "root-b", "root-a"],
     },
+    hiddenWorktreesByWorkspace: {
+      "server-local/ws-a": ["root-hidden"],
+    },
   };
   saveWorkNavOrderSnapshot(order, storage);
   const loaded = loadWorkNavOrderSnapshot(storage);
@@ -157,6 +163,7 @@ assertDeepEqual(
     {
       workspaceOrderByServer: { "server-local": ["ws-a"] },
       worktreeOrderByWorkspace: {},
+      hiddenWorktreesByWorkspace: {},
     },
     storage,
   );
@@ -237,5 +244,104 @@ assertTrue(
   !isAcceptableSiblingDrop(null, "server-1", "b"),
   "a null dragged payload is rejected",
 );
+
+// --- hidden worktrees (B-3, PURE-UI hide) ---
+//
+// applyHiddenWorktrees drops hidden ids from a server-supplied list without
+// mutating the source; hiddenWorktreeItems is its complement (the currently
+// present rows that are hidden), for the un-hide submenu.
+{
+  const worktrees = [{ id: "root-a" }, { id: "root-b" }, { id: "root-c" }];
+
+  // Empty/undefined hidden set -> identity.
+  assertDeepEqual(
+    applyHiddenWorktrees(worktrees, undefined),
+    worktrees,
+    "undefined hidden set returns worktrees unchanged",
+  );
+  assertDeepEqual(
+    applyHiddenWorktrees(worktrees, []),
+    worktrees,
+    "empty hidden set returns worktrees unchanged",
+  );
+
+  // Hiding drops only the named ids, preserving source order of the rest.
+  assertDeepEqual(
+    applyHiddenWorktrees(worktrees, ["root-b"]),
+    [{ id: "root-a" }, { id: "root-c" }],
+    "a hidden id is dropped from the visible list",
+  );
+
+  // Complement lists only currently-present hidden rows; an unknown hidden id
+  // is silently ignored rather than surfacing a phantom row.
+  assertDeepEqual(
+    hiddenWorktreeItems(worktrees, ["root-b", "root-gone"]),
+    [{ id: "root-b" }],
+    "hiddenWorktreeItems lists only present hidden rows",
+  );
+  assertDeepEqual(
+    hiddenWorktreeItems(worktrees, []),
+    [],
+    "empty hidden set has no hidden items",
+  );
+}
+
+// withHiddenWorktree is a pure add/remove of a single id from a scope's hidden
+// set. Adding is idempotent; removing the last id prunes the scope key so the
+// persisted blob stays minimal; a no-op returns the same reference.
+{
+  const scope = "server-local/ws-a";
+
+  const afterHide = withHiddenWorktree(
+    emptyWorkNavSiblingOrder,
+    scope,
+    "root-a",
+    true,
+  );
+  assertDeepEqual(
+    afterHide.hiddenWorktreesByWorkspace,
+    { "server-local/ws-a": ["root-a"] },
+    "hiding adds the id to the scope",
+  );
+
+  // Idempotent add returns the same object reference (no spurious re-render).
+  assertTrue(
+    withHiddenWorktree(afterHide, scope, "root-a", true) === afterHide,
+    "hiding an already-hidden id is a no-op (same reference)",
+  );
+
+  const afterSecond = withHiddenWorktree(afterHide, scope, "root-b", true);
+  assertDeepEqual(
+    afterSecond.hiddenWorktreesByWorkspace,
+    { "server-local/ws-a": ["root-a", "root-b"] },
+    "hiding a second id appends within the scope",
+  );
+
+  const afterUnhideOne = withHiddenWorktree(afterSecond, scope, "root-a", false);
+  assertDeepEqual(
+    afterUnhideOne.hiddenWorktreesByWorkspace,
+    { "server-local/ws-a": ["root-b"] },
+    "un-hiding one id leaves the remaining hidden ids",
+  );
+
+  const afterUnhideLast = withHiddenWorktree(
+    afterUnhideOne,
+    scope,
+    "root-b",
+    false,
+  );
+  assertDeepEqual(
+    afterUnhideLast.hiddenWorktreesByWorkspace,
+    {},
+    "un-hiding the last id prunes the empty scope key",
+  );
+
+  // Un-hiding an absent id is a no-op (same reference).
+  assertTrue(
+    withHiddenWorktree(afterUnhideLast, scope, "root-x", false) ===
+      afterUnhideLast,
+    "un-hiding an absent id is a no-op (same reference)",
+  );
+}
 
 console.log("workNavOrder.test.ts passed");

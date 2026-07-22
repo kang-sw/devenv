@@ -197,10 +197,12 @@ const EXPECTED_DEFAULT_KEYMAP: readonly {
   { keys: ["g", "l"], commandId: "git.pullFfOnly" },
   { keys: ["g", "b"], commandId: "git.branchMenu.open" },
   { keys: ["g", "c"], commandId: "git.branchCreate.open" },
-  // `g w` worktree sub-menu, 3-tier (spec: "g w a" / "g w x" / "g w m")
+  // `g w` worktree sub-menu, 4-tier (spec: "g w a" / "g w x" / "g w m" +
+  // "g w h" hidden-worktrees)
   { keys: ["g", "w", "a"], commandId: "gitWorktreeAdd.open" },
   { keys: ["g", "w", "x"], commandId: "workspace.remove" },
   { keys: ["g", "w", "m"], commandId: "workspace.menu.open" },
+  { keys: ["g", "w", "h"], commandId: "worktreeHidden.menu.open" },
 ];
 
 {

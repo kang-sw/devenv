@@ -6,6 +6,13 @@ export type DashboardCommandId =
   | "gitWorktreeAdd.open"
   | "gitWorktreeAdd.close"
   | "gitWorktreeAdd.submit"
+  | "worktreeRemove.open"
+  | "worktreeRemove.close"
+  | "worktreeRemove.submit"
+  | "worktree.hide"
+  | "worktree.unhide"
+  | "worktree.menu.open"
+  | "worktreeHidden.menu.open"
   | "git.refresh"
   | "git.fetch"
   | "git.push"
@@ -55,6 +62,13 @@ export type DashboardCommandPayload =
   | { type: "gitWorktreeAdd.open"; workspaceId: string }
   | { type: "gitWorktreeAdd.close"; workspaceId: string }
   | { type: "gitWorktreeAdd.submit"; workspaceId: string }
+  | { type: "worktreeRemove.open"; workRootId: string }
+  | { type: "worktreeRemove.close"; workRootId: string }
+  | { type: "worktreeRemove.submit"; workRootId: string }
+  | { type: "worktree.hide"; workspaceId: string; workRootId: string }
+  | { type: "worktree.unhide"; workspaceId: string; workRootId: string }
+  | { type: "worktree.menu.open"; workRootId: string }
+  | { type: "worktreeHidden.menu.open"; workspaceId: string }
   | { type: "git.refresh"; workRootId: string }
   | { type: "git.fetch"; workRootId: string }
   | { type: "git.push"; workRootId: string }
@@ -252,6 +266,78 @@ export function buildGitWorktreeAddSubmitCommand(
   return {
     commandId: "gitWorktreeAdd.submit",
     payload: { type: "gitWorktreeAdd.submit", serverRoute, workspaceId },
+  };
+}
+
+export function buildWorktreeRemoveOpenCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktreeRemove.open",
+    payload: { type: "worktreeRemove.open", serverRoute, workRootId },
+  };
+}
+
+export function buildWorktreeRemoveCloseCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktreeRemove.close",
+    payload: { type: "worktreeRemove.close", serverRoute, workRootId },
+  };
+}
+
+export function buildWorktreeRemoveSubmitCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktreeRemove.submit",
+    payload: { type: "worktreeRemove.submit", serverRoute, workRootId },
+  };
+}
+
+export function buildWorktreeHideCommand(
+  workspaceId: string,
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktree.hide",
+    payload: { type: "worktree.hide", serverRoute, workspaceId, workRootId },
+  };
+}
+
+export function buildWorktreeUnhideCommand(
+  workspaceId: string,
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktree.unhide",
+    payload: { type: "worktree.unhide", serverRoute, workspaceId, workRootId },
+  };
+}
+
+export function buildWorktreeMenuOpenCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktree.menu.open",
+    payload: { type: "worktree.menu.open", serverRoute, workRootId },
+  };
+}
+
+export function buildWorktreeHiddenMenuOpenCommand(
+  workspaceId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktreeHidden.menu.open",
+    payload: { type: "worktreeHidden.menu.open", serverRoute, workspaceId },
   };
 }
 
@@ -600,6 +686,20 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Close add worktree";
     case "gitWorktreeAdd.submit":
       return "Create worktree";
+    case "worktreeRemove.open":
+      return "Remove worktree";
+    case "worktreeRemove.close":
+      return "Close remove worktree";
+    case "worktreeRemove.submit":
+      return "Confirm remove worktree";
+    case "worktree.hide":
+      return "Hide worktree";
+    case "worktree.unhide":
+      return "Unhide worktree";
+    case "worktree.menu.open":
+      return "Open worktree menu";
+    case "worktreeHidden.menu.open":
+      return "Open hidden worktrees";
     case "git.refresh":
       return "Refresh Git status";
     case "git.fetch":

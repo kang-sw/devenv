@@ -37,6 +37,7 @@ import {
   buildWorkRootCloseCommand,
   buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
+  buildWorktreeHiddenMenuOpenCommand,
   type DashboardCommand,
   type DashboardCommandId,
   type DashboardCommandPayload,
@@ -726,8 +727,8 @@ export function buildDefaultHotkeyBindings(): readonly HotkeyBinding<HotkeyDispa
         buildGitBranchCreateOpenCommand(root.workRootId, root.serverRoute).payload,
       "Open new-branch form for active work root",
     ),
-    // `g w` worktree sub-menu (3-tier: spec "g w a"/"g w x"/"g w m"; `g w`
-    // itself is a pure group prefix - "g w h" hidden-worktrees is a GAP).
+    // `g w` worktree sub-menu (4-tier: spec "g w a"/"g w x"/"g w m" plus
+    // "g w h" hidden-worktrees; `g w` itself is a pure group prefix).
     activeRootBinding(
       "gitWorktreeAdd.open",
       ["g", "w", "a"],
@@ -749,6 +750,14 @@ export function buildDefaultHotkeyBindings(): readonly HotkeyBinding<HotkeyDispa
       "workspace.menu.open",
       (root) => buildWorkspaceMenuOpenCommand(root.workspaceId, root.serverRoute).payload,
       "Open workspace menu for active workspace",
+    ),
+    activeRootBinding(
+      "worktreeHidden.menu.open",
+      ["g", "w", "h"],
+      "worktreeHidden.menu.open",
+      (root) =>
+        buildWorktreeHiddenMenuOpenCommand(root.workspaceId, root.serverRoute).payload,
+      "Open hidden worktrees for active workspace",
     ),
   ];
 }

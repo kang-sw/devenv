@@ -25,6 +25,8 @@
     "src/gitToolbar.ts",
     "src/gitToolbar.test.ts",
     "src/gitWorktreeAdd.ts",
+    "src/gitWorktreeRemove.ts",
+    "src/gitWorktreeRemove.test.ts",
     "src/linkedServers.ts",
     "src/linkedServers.test.ts",
     "src/resourceModel.ts",

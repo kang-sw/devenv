@@ -1041,6 +1041,86 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note("git worktree add: workspace overflow preserved remove action, previewed new branch, submitted through daemon resources, and selected daemon-created workRoot id");
   });
 
+  await test.step("git worktree removal modal (clean + dirty) and hide/unhide", async () => {
+    if (!gitWorkRoot) {
+      note("git worktree remove/hide: skipped because no daemon-host Git workRoot is configured");
+      return;
+    }
+    await selectWorkRootInBrowser(page, gitWorkRoot);
+    // The linked worktree created by the add step above.
+    const childSelector =
+      '.resource-row[data-resource-presentation="workRoot"]';
+    const childRow = page
+      .locator(childSelector, { hasText: "Browser-Gate-Branch" })
+      .first();
+    await expect(childRow).toBeVisible();
+
+    // --- B-1 clean state: baseline confirmation copy, NO red data-loss banner. ---
+    await childRow.locator('[data-command-id="worktree.menu.open"]').click();
+    await childRow.locator('[data-command-id="worktreeRemove.open"]').click();
+    const removeModal = page.locator(".git-worktree-modal");
+    await expect(removeModal).toBeVisible();
+    await expect(removeModal.locator(".git-worktree-remove-copy")).toBeVisible();
+    // Clean worktree: the uncommitted-changes data-loss banner must be absent.
+    await expect(
+      removeModal.getByText("Uncommitted changes will be lost"),
+    ).toHaveCount(0);
+    await removeModal
+      .locator('[data-command-id="worktreeRemove.close"]')
+      .filter({ hasText: "Cancel" })
+      .click();
+    await expect(removeModal).toHaveCount(0);
+
+    // --- B-1 dirty state: an untracked file surfaces the RED data-loss banner. ---
+    const worktreeDir = path.join(
+      gitWorkRoot,
+      ".git",
+      "ws-worktree",
+      "Browser-Gate-Branch",
+    );
+    const scratchFile = path.join(worktreeDir, "scratch-uncommitted.txt");
+    writeFileSync(scratchFile, "wip\n");
+    await childRow.locator('[data-command-id="worktree.menu.open"]').click();
+    await childRow.locator('[data-command-id="worktreeRemove.open"]').click();
+    await expect(removeModal).toBeVisible();
+    await expect(
+      removeModal.getByText("Uncommitted changes will be lost"),
+    ).toBeVisible();
+    await removeModal
+      .locator('[data-command-id="worktreeRemove.close"]')
+      .filter({ hasText: "Cancel" })
+      .click();
+    await expect(removeModal).toHaveCount(0);
+    // Leave the worktree on disk for the hide round-trip below.
+    rmSync(scratchFile, { force: true });
+
+    // --- B-3 hide → hidden-worktrees submenu → unhide (pure browser-local). ---
+    await childRow.locator('[data-command-id="worktree.menu.open"]').click();
+    await childRow.locator('[data-command-id="worktree.hide"]').click();
+    await expect(
+      page.locator(childSelector, { hasText: "Browser-Gate-Branch" }),
+    ).toHaveCount(0);
+    // Restore via the root workspace row "..." menu's hidden-worktrees section.
+    const gitRow = page
+      .locator(".resource-row", { hasText: workRootDisplayName(gitWorkRoot) })
+      .first();
+    await gitRow.locator('[data-command-id="workspace.menu.open"]').click();
+    const hiddenSection = gitRow.locator(
+      '[data-testid="hidden-worktrees-section"]',
+    );
+    await expect(hiddenSection).toBeVisible();
+    await hiddenSection
+      .locator('[data-command-id="worktree.unhide"]')
+      .first()
+      .click();
+    await expect(
+      page.locator(childSelector, { hasText: "Browser-Gate-Branch" }),
+    ).toBeVisible();
+    note(
+      "git worktree remove/hide: clean modal hid the data-loss banner, an untracked file surfaced the red banner, and the hide -> hidden-worktrees-submenu -> unhide round trip restored the row",
+    );
+  });
+
   await test.step("activation controls are command-routed and update visible state", async () => {
     const metaRow = page.locator(".workbench-toolbar-meta");
     const activationButton = page.locator(

@@ -132,3 +132,49 @@ scope is unchanged, this phase adds the surrounding UX.
 Verification should include resource model tests for the branch
 unmerged/dangling check and browser coverage for the confirmation modal
 (both warning states) and the hide/unhide flow.
+
+### Result (bf7deab0)
+
+Shipped the worktree-removal slice: Phase 3 UX (B-1/B-2/B-3) plus the Phase 1
+daemon `git worktree remove` op it depends on. Commits: `f0843859` (daemon
+remove op), `2e373a9c` (frontend removal/hide UX + `g w h` hotkey), `bf7deab0`
+(review fixes).
+
+Daemon op: preview/submit two-step, 409 force-gate (explicit force only),
+runs `git worktree remove`/branch-delete from the workspace PRIMARY git root,
+non-destructive branch delete (`git merge-base --is-ancestor` detection,
+`git branch -d` only, unmerged branch kept with reported skip, checkbox
+default OFF), atomic registry unregister+persist with DISK-as-source-of-truth
+on persist failure (no re-register; terminal/codex/claude session cleanup
+still runs).
+
+Frontend: B-1 always-real confirm modal + conditional data-loss notice + 409
+in-place preview refresh; B-2 default-OFF delete-branch checkbox +
+unmerged keep-warning; B-3 pure browser-local hide/unhide (`workNavOrder`)
+fully decoupled from the daemon registry (not gated on removal
+availability); `g w h` hotkey reveals the hidden-worktrees section.
+
+Specs: documented under new anchors
+`260722-ws-dashboard-git-worktree-removal` and
+`260722-ws-dashboard-worktree-removal-hide-ux` in
+`ai-docs/spec/ws-web-dashboard/index.md`.
+
+Review: 3-partition review (correctness/fit/test) found 1+3+4 Important
+issues, all resolved in `bf7deab0`; a focused opus re-review returned clean.
+Safety invariants verified load-bearing by daemon tests
+(rollback-persist-failure, codex/claude session cleanup, primary-root argv
+builder) plus frontend unit tests.
+
+KNOWN LIMITATION: ticket-mandated e2e browser coverage (confirm-modal
+warning states + hide/unhide flow) was AUTHORED in
+`dashboard-acceptance.spec.ts` and type-checks, but could not be run to
+green due to a PRE-EXISTING acceptance-harness locator ambiguity
+(`openWorkRootInBrowser` / `[data-command-id="rootPicker.open"]` also
+matching the `.open-work-root-empty-cta` empty-state CTA from commit
+`21116b54`), which red-lines the whole acceptance suite at step 1. Tracked
+in idea ticket `260722-bug-e2e-open-work-root-locator-ambiguity`.
+
+SCOPE REMAINING (ticket stays in `ready/`, do NOT move it to `.done/`):
+Phase 1 full WorkRoot lifecycle polish + placement migration (only the
+daemon remove-op was borrowed for this slice), and Phase 2 git toolbar
+polish / index.lock handling.

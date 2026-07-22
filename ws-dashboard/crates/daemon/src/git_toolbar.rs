@@ -437,7 +437,7 @@ fn branches_for_path(root: &Path) -> GitBranchList {
     }
 }
 
-fn changes_for_path(root: &Path) -> GitChangeSummary {
+pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
     let mut summary = GitChangeSummary::default();
     if let Some(numstat) = git_text(root, &["diff", "--numstat", "HEAD", "--"]) {
         for line in numstat.lines() {

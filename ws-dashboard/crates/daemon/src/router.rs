@@ -23,6 +23,7 @@ use crate::git_toolbar::{
 };
 use crate::git_worktree::{
     git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
+    git_worktree_remove_preview, git_worktree_remove_submit,
 };
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
@@ -37,7 +38,8 @@ use crate::servers::{
     server_scoped_git_branches, server_scoped_git_fetch, server_scoped_git_pull_ff_only,
     server_scoped_git_push, server_scoped_git_status, server_scoped_git_switch_branch,
     server_scoped_git_worktree_add_options, server_scoped_git_worktree_add_preview,
-    server_scoped_git_worktree_add_submit, server_scoped_open_work_root,
+    server_scoped_git_worktree_add_submit, server_scoped_git_worktree_remove_preview,
+    server_scoped_git_worktree_remove_submit, server_scoped_open_work_root,
     server_scoped_read_work_root_file, server_scoped_remove_workspace, server_scoped_root_picker,
     server_scoped_root_picker_pins, server_scoped_set_work_root_activation,
     server_scoped_claude_session_interrupt, server_scoped_claude_session_prompt,
@@ -169,6 +171,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_route}/workspaces/{workspace_id}/git-worktree-add",
             post(server_scoped_git_worktree_add_submit),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git-worktree-remove/preview",
+            get(server_scoped_git_worktree_remove_preview),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git-worktree-remove",
+            post(server_scoped_git_worktree_remove_submit),
         )
         .route(
             "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity",
@@ -303,6 +313,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/workspaces/{workspace_id}/git-worktree-add",
             post(git_worktree_add_submit),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git-worktree-remove/preview",
+            get(git_worktree_remove_preview),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git-worktree-remove",
+            post(git_worktree_remove_submit),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activation",

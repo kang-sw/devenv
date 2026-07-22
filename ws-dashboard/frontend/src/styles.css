@@ -3478,6 +3478,22 @@ button {
   color: var(--danger-foreground, #ffb4ab);
 }
 
+.action-button-danger {
+  border-color: var(--danger-foreground, #ffb4ab);
+  color: var(--danger-foreground, #ffb4ab);
+}
+
+.action-button-danger:hover:not(:disabled),
+.action-button-danger:focus-visible {
+  border-color: var(--danger-foreground, #ffb4ab);
+  color: var(--danger-foreground, #ffb4ab);
+  outline-color: var(--danger-foreground, #ffb4ab);
+}
+
+.git-worktree-remove-unmerged {
+  color: var(--danger-foreground, #ffb4ab);
+}
+
 .git-worktree-modal {
   height: auto;
   max-height: min(680px, calc(100vh - 32px));
