@@ -1,6 +1,6 @@
 ---
 title: Goal-run autonomy posture — stop only on critical during goal pursue
-sage-review-design: required
+sage-review-design: completed
 ---
 
 # Goal-run autonomy posture — stop only on critical during goal pursue
