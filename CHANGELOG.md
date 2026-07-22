@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.34.1 - 2026-07-22
+
+### Added
+- `playbook.render` now returns config-resolved native spawn bindings —
+  `recommended-model`, and optional `recommended-reasoning-effort` — after the
+  existing `recommended-tier` line, so native (Codex) subagent dispatch can bind
+  a model and reasoning effort. Resolution failures or empty values omit only
+  the affected optional line; the path and `recommended-tier` are unaffected.
+  `playbook.print` stays tier-only.
+
+### Changed
+- Codex-native delegation guidance maps `recommended-model` to
+  `spawn_agent.model` and `recommended-reasoning-effort` to
+  `spawn_agent.reasoning_effort` (`fork_turns: "none"` for self-contained
+  rendered prompts), and delegate prompt bodies no longer echo their own model
+  alias.
+
 ## v0.34.0 - 2026-07-21
 
 ### Added
