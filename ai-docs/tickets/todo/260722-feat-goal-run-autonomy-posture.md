@@ -48,6 +48,27 @@ expanding / premise-breaking) decisions.
      current branch and branches on `impl/` prefixes; add a `goal/` case that
      appends the posture line to the verdict text).
 
+### Layer-2 branch-coverage reality (design-review finding)
+
+Per the drain branch model (`SKILL.md:54-58`, spec `workflow-skills.md:476`),
+per-ticket implementation runs on an `impl/<stem>` branch merged into
+`goal/<parent>/<slug>`. Consequences for the two Layer-2 sites under the
+`goal/*`-only signal:
+
+- `enter.implement` verdict tip fires correctly: at resolve time the lead is
+  still on `goal/<parent>/<slug>` before the `impl/*` branch is created. This is
+  the reliable per-slice reinforcement point.
+- `git.commit` tip does NOT fire on implementation commits: those run on
+  `impl/<stem>`, where `HasPrefix(head, "goal/")` is false. It fires only on
+  commits made directly on the goal branch (plan artifacts, final merge).
+
+Accepted resolution (keeps the branch-name-only signal intact): implementation
+commits are covered authoritatively by Layer 1 (drain body, re-surfaced every
+turn, branch-independent) and by the per-slice `enter.implement` verdict tip; the
+`git.commit` tip is best-effort for direct goal-branch commits only, NOT a claim
+of implementation-commit coverage. See the Open Design Decision below for the
+one broadening alternative that would require revisiting a constraint.
+
 ### Wording constraint (both layers)
 
 The posture RAISES the auto-proceed threshold; it does NOT nullify gates.
@@ -108,9 +129,12 @@ observes the branch via `observeImplementBranch`.
 - **New bespoke `policy.*` autonomy flag + Go resolver/schema wiring** —
   rejected as over-engineered for the symptom. The `goal/*` branch name is a
   sufficient, already-available signal; no new policy field is needed.
-- **Layer 2 in `git.commit` only** — rejected. Misses the pre-commit "option
-  a/b" re-asking; `enter.implement` verdict is where the "how to do this slice"
-  decision is rendered, so both sites are included.
+- **Layer 2 in `git.commit` only** — rejected. `enter.implement` verdict is where
+  the per-slice "how to do this slice" decision is rendered and it fires while on
+  `goal/*`, so it is the reliable reinforcement site; `git.commit` is included
+  only as best-effort for direct goal-branch commits (see Layer-2 branch-coverage
+  reality — implementation commits run on `impl/*` and are covered by Layer 1,
+  not by the `git.commit` tip).
 
 ## Phases
 
@@ -145,11 +169,33 @@ Tip wording references the Phase-1 drain posture; "stop only on critical", never
 "never stop". Keep each site self-contained (a few lines per handler); do not
 touch the `workflow_manual` banner injectors.
 
-Verification: `go build` / existing MCP test suite passes; manual check that a
-commit / enter.implement call on a `goal/*` branch shows the tip and a call on a
-non-goal branch does not. Bump plugin version on dev-merge.
+Verification: `go build` / existing MCP test suite passes; manual checks —
+(a) `enter.implement` resolved while on `goal/<parent>/<slug>` shows the tip;
+(b) `git.commit` made directly on a `goal/*` branch shows the tip;
+(c) `git.commit` on an `impl/<stem>` branch does NOT show the tip (documented
+limitation, not a bug — see Layer-2 branch-coverage reality);
+(d) both on a plain non-goal branch show nothing. Bump plugin version on dev-merge.
 
 Depends on Phase 1 (the authority the tips reference must exist first).
+
+## Open Design Decision
+
+The user explicitly wanted a commit-time reminder, but under the branch-name-only
+signal the `git.commit` tip cannot fire on implementation commits (they run on
+`impl/*`). Two options, to confirm before Phase 2 is finalized:
+
+- **A (accept limitation — recommended, autonomous):** keep the `goal/*`-only
+  signal. Implementation commits are covered by Layer 1 + the `enter.implement`
+  verdict tip; the `git.commit` tip stays best-effort for direct goal-branch
+  commits. No new state, no constraint change.
+- **B (broaden signal — "ask first" scope):** make `git.commit` detect goal-run
+  context from an `impl/*` branch by inspecting the fork parent / merge target
+  (the goal-branch name is already encoded per commit `3ef852e5`). This delivers
+  the literal commit-time reminder the user asked for, but revisits the stated
+  "the `goal/*` branch name is the sole signal, no new persisted state"
+  constraint, so it is an architecture decision, not an implementer call.
+
+Default if unresolved: A.
 
 ## Spec Impact
 
