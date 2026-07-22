@@ -160,8 +160,12 @@ Deferred: no Go changes; spec documentation.
 
 ### Result (f303d091) - 2026-07-22
 
-Shipped as a standalone hotfix on `main` (v0.34.4) at the user's request,
-outside the normal proceed/implement flow. Posture added as a top-of-body
+Shipped as a standalone hotfix on `main` (v0.34.5) at the user's request,
+outside the normal proceed/implement flow. (An initial v0.34.4 tag failed CI on
+a stale `agents-plugin/skills/manifest.json` — the drain edit changed the skill
+hash but the manifest was not regenerated; a local `go test ./...` without
+`-count=1` served a cached pass and hid it. Fixed by `WSRSRC_REGEN_SKILLS`
+regen and re-shipped as v0.34.5; the abandoned v0.34.4 tag published nothing.) Posture added as a top-of-body
 lead-in (not buried mid-skill) so the `/goal` Stop-hook re-surfaces it every
 turn. drain is a substitution-mirrored wsflow skill: edited canonical source
 only, regenerated `agents-plugin-wsflow` via `WS_REGEN_WSFLOW_SKILLS`; drift

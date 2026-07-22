@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.34.4 - 2026-07-22
+## v0.34.5 - 2026-07-22
 
 ### Changed
 - `lead-drain-ready-queue` now opens with a **goal-run posture**: during a goal
