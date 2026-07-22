@@ -20,7 +20,6 @@ import type {
 import {
   Activity,
   Bot,
-  BriefcaseBusiness,
   CirclePower,
   Eye,
   EyeOff,
@@ -35,8 +34,6 @@ import {
   MessageSquarePlus,
   Plus,
   PlugZap,
-  LayoutPanelTop,
-  ListTodo,
   MoreHorizontal,
   PanelsTopLeft,
   Pencil,
@@ -46,10 +43,8 @@ import {
   Server,
   Settings as SettingsIcon,
   SquareTerminal,
-  Stethoscope,
   Trash2,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import {
   Dialog,
@@ -63,7 +58,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import "@xterm/xterm/css/xterm.css";
-import { normalizeServerRouteLocation } from "./routeBasis";
 import { mergeStreamingTranscriptBlocks } from "./agentChatStreamMerge";
 import {
   DocumentViewer,
@@ -85,7 +79,6 @@ import {
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
   buildFileExplorerToggleDirectoryCommand,
-  buildGitWorktreeAddCloseCommand,
   buildGitWorktreeAddOpenCommand,
   buildGitBranchCreateCloseCommand,
   buildGitBranchCreateOpenCommand,
@@ -96,7 +89,6 @@ import {
   buildGitPullFfOnlyCommand,
   buildGitPushCommand,
   buildGitRefreshCommand,
-  buildGitWorktreeAddSubmitCommand,
   buildRootPickerCloseCommand,
   buildRootPickerCreateDirectoryCommand,
   buildRootPickerNavigateCommand,
@@ -105,7 +97,6 @@ import {
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
   buildAgentChatCreateCommand,
-  buildSettingsCloseCommand,
   buildSettingsOpenCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
@@ -115,8 +106,6 @@ import {
   buildWorktreeHideCommand,
   buildWorktreeMenuOpenCommand,
   buildWorktreeRemoveOpenCommand,
-  buildWorktreeRemoveCloseCommand,
-  buildWorktreeRemoveSubmitCommand,
   buildWorktreeUnhideCommand,
   buildWorkRootActivationCommand,
   buildWorkRootCloseCommand,
@@ -182,6 +171,19 @@ import {
   resolveTerminalMountWrite,
   terminalVisualRestoreScrollbackLines,
   terminalVisualRestoreDebounceMs,
+  addPaneToGroupOrder,
+  removePaneFromOrder,
+  activityPaneGroupIdFromOrder,
+  placeAgentChatPane,
+  placeTerminalSessions,
+  readOnlyFilePlacementState,
+  sameReadOnlyOpenRequest,
+  readOnlyFilePaneRevision,
+  workRootActivityPaneLogicalKey,
+  workRootActivityPaneId,
+  workRootActivityPaneRevision,
+  WorkRootActivityPane,
+  type ActivityTranscriptRefreshSignal,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -301,7 +303,6 @@ import {
   dashboardServerRoute,
   flattenEntities,
   isLocalDashboardServerRoute,
-  isValidServerRouteSegment,
   isWorkspaceNavChildWorkRoot,
   LOCAL_DASHBOARD_SERVER_ROUTE,
   mergeResourcesByServer,
@@ -363,43 +364,18 @@ import {
   type RootPickerView,
 } from "./rootPicker";
 import {
-  fetchGitWorktreeAddOptions,
-  previewGitWorktreeAdd,
-  GitWorktreeAddSubmitError,
-  submitGitWorktreeAdd,
-  type GitWorktreeAddOptions,
-  type GitWorktreeAddPreview,
-  type GitWorktreeAddPreviewRequest,
-} from "./gitWorktreeAdd";
-import {
-  fetchGitWorktreeRemovePreview,
-  submitGitWorktreeRemove,
-  GitWorktreeRemoveSubmitError,
-  type GitWorktreeRemovePreview,
-} from "./gitWorktreeRemove";
-import {
   createWorkRootGitBranch,
   fetchWorkRootGit,
   fetchWorkRootGitBranches,
   fetchWorkRootGitStatus,
-  gitChangeStatusSegments,
-  gitSyncStatusSegments,
-  gitStatusSegments,
   pullWorkRootGitFfOnly,
   pushWorkRootGit,
   startGitRefreshScheduler,
   switchWorkRootGitBranch,
   type GitBranchList,
-  type GitStatusSegment,
   type WorkRootGitStatus,
 } from "./gitToolbar";
-import {
-  defaultLinkedServerId,
-  linkEndpointServer,
-  linkServerPassphrase,
-  reconnectServerTunnel,
-} from "./linkedServers";
-import { ActivityConsole } from "./ActivityConsole";
+import { reconnectServerTunnel } from "./linkedServers";
 import { WhichKeyOverlay } from "./WhichKeyOverlay";
 import {
   createResourceRefreshCoordinator,
@@ -411,7 +387,6 @@ import {
 import {
   applyActivityConsoleEvent,
   fetchWorkRootActivity,
-  fetchWorkRootActivityTranscript,
   mergeWorkRootActivityViews,
   parseActivityConsoleEvent,
   shouldApplyActivityStreamRequest,
@@ -424,7 +399,6 @@ import {
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
-import type { SettingsSectionDescriptor } from "./settingsStore";
 import {
   buildEffectiveTerminalFontFamily,
   loadTerminalStylePrefs,
@@ -436,6 +410,35 @@ import {
   SETTINGS_SECTIONS,
   SettingsTerminalContext,
 } from "./settingsSections";
+import {
+  DetailItem,
+  StateLine,
+  StateBadge,
+  StateDot,
+  normalizeServerRoute,
+  resourceEntityForWorkRoot,
+  instanceSummary,
+  closeContractLabel,
+  resourcePresentationLabel,
+  resourceRowTone,
+  kindLabel,
+} from "./resourcePresentation.js";
+import {
+  ChromeIconButton,
+  ResourceGlyph,
+  WorkRootKindIcon,
+  ToggleIcon,
+  InlineNotice,
+  type WorkbenchToggle,
+} from "./chrome.js";
+import { GitStatusPill, WorkbenchActivityBadge } from "./workbenchChips.js";
+import { GitWorktreeAddModal } from "./gitWorktreeAddModal.js";
+import { GitWorktreeRemoveModal } from "./gitWorktreeRemoveModal.js";
+import { SettingsModal } from "./settingsModal.js";
+import {
+  LinkedServerModal,
+  type ServerModalState,
+} from "./linkedServerModal.js";
 
 type CommandPayload = DashboardCommandPayload;
 type CommandEntry = DashboardCommandEntry;
@@ -445,10 +448,6 @@ type WorkRootExplorerSnapshot = {
   directories: Record<string, DirectoryLoadState>;
   selectedPath: string | null;
 };
-
-type ServerModalState =
-  | { mode: "add" }
-  | { mode: "auth"; server: ServerConnectionView };
 
 async function requestWorkRootActivation(
   workRootId: string,
@@ -2083,72 +2082,6 @@ function useDismissableMenu(
   }, [containerRef, onDismiss, open]);
 }
 
-function ChromeIconButton({
-  icon: Icon,
-  label,
-  className = "",
-  commandId,
-  disabled = false,
-  tone = "default",
-  onClick,
-}: {
-  icon: LucideIcon;
-  label: string;
-  className?: string;
-  commandId: string;
-  disabled?: boolean;
-  tone?: "default" | "primary" | "danger";
-  onClick: () => void;
-}) {
-  return (
-    <button
-      aria-label={label}
-      className={`icon-button icon-button-${tone} ${className}`.trim()}
-      data-command-id={commandId}
-      disabled={disabled}
-      title={label}
-      type="button"
-      onClick={onClick}
-    >
-      <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
-    </button>
-  );
-}
-
-function ResourceGlyph({
-  presentation,
-}: {
-  presentation: "compactWorkRoot" | "workspace" | "workRoot";
-}) {
-  if (presentation === "compactWorkRoot") {
-    return (
-      <span
-        className="resource-row-icon resource-row-icon-compact"
-        aria-hidden="true"
-      >
-        <FolderOpen size={15} strokeWidth={1.8} />
-      </span>
-    );
-  }
-
-  const Icon = presentation === "workspace" ? BriefcaseBusiness : FolderGit2;
-  return (
-    <span className="resource-row-icon" aria-hidden="true">
-      <Icon size={15} strokeWidth={1.8} />
-    </span>
-  );
-}
-
-function WorkRootKindIcon({ kind }: { kind: WorkRootView["kind"] }) {
-  const Icon =
-    kind === "plainDirectory"
-      ? Folder
-      : kind === "gitLinkedWorktree"
-        ? GitBranch
-        : FolderGit2;
-  return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
-}
-
 function serverViewToConnection(server: ServerView): ServerConnectionView {
   return {
     id: server.id,
@@ -2175,11 +2108,6 @@ function serverConnectionStatusLabel(server: ServerConnectionView): string {
     case "unreachable":
       return "unreachable";
   }
-}
-
-function ToggleIcon({ toggle }: { toggle: WorkbenchToggle }) {
-  const Icon = workbenchToggleIcon(toggle);
-  return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
 }
 
 function OpenWorkRootControl({
@@ -2898,894 +2826,6 @@ function OpenWorkRootControl({
         </Modal>
       </ModalOverlay>
     </div>
-  );
-}
-
-function GitWorktreeAddModal({
-  target,
-  onCommand,
-  onClose,
-  onCreated,
-}: {
-  target: { serverRoute: string; workspaceId: string } | null;
-  onCommand: DashboardCommandDispatcher;
-  onClose: () => void;
-  onCreated: (response: {
-    resources: DashboardResourcesView;
-    createdWorkRootId?: string;
-  }) => void;
-}) {
-  const workspaceId = target?.workspaceId ?? null;
-  const serverRoute = target?.serverRoute ?? null;
-  const [options, setOptions] = useState<GitWorktreeAddOptions | null>(null);
-  const [worktreeName, setWorktreeName] = useState("");
-  const [branchMode, setBranchMode] = useState<"auto" | "manual">("auto");
-  const [manualBranch, setManualBranch] = useState("");
-  const [pathMode, setPathMode] = useState<"auto" | "custom">("auto");
-  const [customPath, setCustomPath] = useState("");
-  const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
-  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(
-    null,
-  );
-  const previewSequenceRef = useRef(0);
-  const currentRequestKeyRef = useRef<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!workspaceId || !serverRoute) {
-      setOptions(null);
-      setPreview(null);
-      setPreviewRequestKey(null);
-      setError(null);
-      return;
-    }
-    setWorktreeName("");
-    setBranchMode("auto");
-    setManualBranch("");
-    setPathMode("auto");
-    setCustomPath("");
-    setPreview(null);
-    setPreviewRequestKey(null);
-    setError(null);
-    setLoading(true);
-    void fetchGitWorktreeAddOptions(workspaceId, serverRoute)
-      .then(setOptions)
-      .catch((nextError) =>
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "worktree options failed",
-        ),
-      )
-      .finally(() => setLoading(false));
-  }, [serverRoute, workspaceId]);
-
-  const request = useMemo<GitWorktreeAddPreviewRequest | null>(() => {
-    if (!workspaceId) {
-      return null;
-    }
-    return {
-      worktreeName,
-      branch:
-        branchMode === "auto"
-          ? { mode: "auto" }
-          : { mode: "manual", name: manualBranch },
-      path:
-        pathMode === "auto"
-          ? { mode: "auto" }
-          : { mode: "custom", targetPath: customPath },
-    };
-  }, [
-    branchMode,
-    customPath,
-    manualBranch,
-    pathMode,
-    worktreeName,
-    workspaceId,
-  ]);
-
-  const requestKey = request ? JSON.stringify(request) : null;
-
-  useEffect(() => {
-    currentRequestKeyRef.current = requestKey;
-  }, [requestKey]);
-
-  useEffect(() => {
-    if (
-      !workspaceId ||
-      !request ||
-      !requestKey ||
-      worktreeName.trim().length === 0
-    ) {
-      setPreview(null);
-      setPreviewRequestKey(null);
-      return;
-    }
-    const sequence = previewSequenceRef.current + 1;
-    previewSequenceRef.current = sequence;
-    setPreview(null);
-    setPreviewRequestKey(null);
-    const timer = window.setTimeout(() => {
-      void previewGitWorktreeAdd(workspaceId, request, serverRoute)
-        .then((nextPreview) => {
-          if (previewSequenceRef.current !== sequence) {
-            return;
-          }
-          setPreview(nextPreview);
-          setPreviewRequestKey(requestKey);
-        })
-        .catch((nextError) => {
-          if (previewSequenceRef.current !== sequence) {
-            return;
-          }
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "worktree preview failed",
-          );
-        });
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [request, requestKey, serverRoute, worktreeName, workspaceId]);
-
-  if (!workspaceId || !serverRoute) {
-    return null;
-  }
-
-  const close = () => {
-    onCommand(buildGitWorktreeAddCloseCommand(workspaceId, serverRoute), {
-      "gitWorktreeAdd.close": onClose,
-    });
-  };
-  const submitDisabled =
-    submitting ||
-    !request ||
-    worktreeName.trim().length === 0 ||
-    (branchMode === "manual" && manualBranch.trim().length === 0) ||
-    (pathMode === "custom" && customPath.trim().length === 0) ||
-    !preview ||
-    previewRequestKey !== requestKey ||
-    preview.status === "blocked" ||
-    options?.git.available === false;
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!request || submitDisabled) {
-      return;
-    }
-    onCommand(buildGitWorktreeAddSubmitCommand(workspaceId, serverRoute), {
-      "gitWorktreeAdd.submit": () => {
-        const submittedRequestKey = requestKey;
-        setSubmitting(true);
-        setError(null);
-        void submitGitWorktreeAdd(
-          workspaceId,
-          { ...request, activate: true },
-          serverRoute,
-        )
-          .then(onCreated)
-          .catch((nextError) => {
-            if (
-              nextError instanceof GitWorktreeAddSubmitError &&
-              nextError.preview
-            ) {
-              if (currentRequestKeyRef.current !== submittedRequestKey) {
-                return;
-              }
-              setPreview(nextError.preview);
-              setPreviewRequestKey(submittedRequestKey);
-              setError("Submit blocked by current server validation");
-              return;
-            }
-            setError(
-              nextError instanceof Error
-                ? nextError.message
-                : "worktree add failed",
-            );
-          })
-          .finally(() => setSubmitting(false));
-      },
-    });
-  };
-
-  const severity = preview?.status ?? "blocked";
-  const manualBranchOptions = (options?.branches ?? []).filter(
-    (branch) => !branch.checkedOut,
-  );
-  const autoBranchDisplay = preview?.branchName ?? worktreeName.trim();
-  const autoPathDisplay =
-    preview?.targetPathLabel ??
-    (worktreeName.trim()
-      ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}`
-      : "");
-  return (
-    <ModalOverlay
-      className="root-picker-backdrop"
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) close();
-      }}
-    >
-      <Modal className="root-picker-modal git-worktree-modal">
-        <Dialog aria-label="Add Git worktree" className="root-picker-dialog">
-          <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">
-              Add worktree
-            </Heading>
-            <div className="root-picker-window-actions">
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="gitWorktreeAdd.close"
-                icon={X}
-                label="Close"
-                onClick={close}
-              />
-            </div>
-          </div>
-          <div className="root-picker-current root-picker-context">
-            {options?.git.rootLabel ?? "Loading Git workspace"}
-          </div>
-          <form className="git-worktree-form" onSubmit={submit}>
-            <label className="git-worktree-field">
-              <span className="section-label">Worktree name</span>
-              <input
-                className="root-picker-input"
-                autoComplete="off"
-                value={worktreeName}
-                onChange={(event) => setWorktreeName(event.target.value)}
-                placeholder="feature-name"
-              />
-            </label>
-            <fieldset className="git-worktree-fieldset">
-              <legend className="section-label">Branch</legend>
-              <div className="git-worktree-radio-grid">
-                <label>
-                  <input
-                    type="radio"
-                    checked={branchMode === "auto"}
-                    onChange={() => setBranchMode("auto")}
-                  />{" "}
-                  Auto from name
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    checked={branchMode === "manual"}
-                    onChange={() => setBranchMode("manual")}
-                  />{" "}
-                  Existing/manual
-                </label>
-              </div>
-              {branchMode === "auto" ? (
-                <input
-                  className="root-picker-input git-worktree-derived-input"
-                  readOnly
-                  value={autoBranchDisplay}
-                  placeholder="derived from worktree name"
-                />
-              ) : (
-                <label
-                  className="git-worktree-select-wrap"
-                  aria-label="Existing or manual branch"
-                >
-                  <select
-                    className="root-picker-input git-worktree-select"
-                    value={manualBranch}
-                    onChange={(event) => setManualBranch(event.target.value)}
-                  >
-                    <option value="">Select or type below…</option>
-                    {manualBranchOptions.map((branch) => (
-                      <option key={branch.name} value={branch.name}>
-                        {branch.name}
-                        {branch.current ? " (current)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className="root-picker-input"
-                    value={manualBranch}
-                    onChange={(event) => setManualBranch(event.target.value)}
-                    placeholder="or type branch-name"
-                  />
-                </label>
-              )}
-            </fieldset>
-            <fieldset className="git-worktree-fieldset">
-              <legend className="section-label">Path</legend>
-              <div className="git-worktree-radio-grid">
-                <label>
-                  <input
-                    type="radio"
-                    checked={pathMode === "auto"}
-                    onChange={() => setPathMode("auto")}
-                  />{" "}
-                  Auto path
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    checked={pathMode === "custom"}
-                    onChange={() => setPathMode("custom")}
-                  />{" "}
-                  Custom path
-                </label>
-              </div>
-              <input
-                className="root-picker-input"
-                readOnly={pathMode === "auto"}
-                value={pathMode === "auto" ? autoPathDisplay : customPath}
-                onChange={(event) => setCustomPath(event.target.value)}
-                placeholder={
-                  pathMode === "auto"
-                    ? "derived from worktree name"
-                    : "/path/to/worktree"
-                }
-              />
-            </fieldset>
-            {options && !options.git.available ? (
-              <InlineNotice
-                tone="error"
-                title="Git unavailable"
-                detail={options.git.reason ?? "workspace is not Git-capable"}
-              />
-            ) : null}
-            {preview ? (
-              <div
-                className={`git-worktree-preview git-worktree-preview-${severity}`}
-                role="status"
-              >
-                <strong>{preview.message}</strong>
-                <span>
-                  {preview.branchName
-                    ? `Branch: ${preview.branchName}`
-                    : "Branch pending"}
-                </span>
-                <span>
-                  {preview.targetPathLabel
-                    ? `Target: ${preview.targetPathLabel}`
-                    : "Target pending"}
-                </span>
-                {preview.blockers.map((blocker) => (
-                  <span key={`${blocker.code}:${blocker.field ?? ""}`}>
-                    {blocker.message}
-                  </span>
-                ))}
-              </div>
-            ) : loading ? (
-              <InlineNotice
-                tone="info"
-                title="Loading"
-                detail="Git worktree options"
-              />
-            ) : null}
-            {error ? (
-              <InlineNotice tone="error" title="Add worktree" detail={error} />
-            ) : null}
-            <div className="root-picker-footer-actions">
-              <button
-                className="action-button action-button-primary"
-                data-command-id="gitWorktreeAdd.submit"
-                disabled={submitDisabled}
-                type="submit"
-              >
-                {submitting ? "Creating" : "Create worktree"}
-              </button>
-              <button
-                className="action-button"
-                data-command-id="gitWorktreeAdd.close"
-                type="button"
-                onClick={close}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
-  );
-}
-
-// 260525 Phase 3 B-1/B-2: worktree removal ALWAYS opens this real confirmation
-// modal (never a bare `window.confirm` — worktree add/remove is heavy
-// regardless of dirty state). A red data-loss banner is shown ONLY when the
-// preview reports uncommitted/untracked changes; a default-OFF "delete branch"
-// checkbox shows a red parenthetical when the branch is unmerged, and even if
-// checked the daemon refuses to force-delete it.
-function GitWorktreeRemoveModal({
-  target,
-  onCommand,
-  onClose,
-  onRemoved,
-}: {
-  target: { serverRoute: string; workRootId: string } | null;
-  onCommand: DashboardCommandDispatcher;
-  onClose: () => void;
-  onRemoved: (
-    response: {
-      resources: DashboardResourcesView;
-      removedWorkRootId?: string;
-      branchDeleted: boolean;
-      branchDeleteSkippedUnmerged: boolean;
-    },
-    context: { workRootId: string; serverRoute: string },
-  ) => void;
-}) {
-  const workRootId = target?.workRootId ?? null;
-  const serverRoute = target?.serverRoute ?? null;
-  const [preview, setPreview] = useState<GitWorktreeRemovePreview | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [deleteBranch, setDeleteBranch] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refreshPreview = useCallback(() => {
-    if (!workRootId || !serverRoute) {
-      return;
-    }
-    setLoading(true);
-    void fetchGitWorktreeRemovePreview(workRootId, serverRoute)
-      .then(setPreview)
-      .catch((nextError) =>
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "worktree remove preview failed",
-        ),
-      )
-      .finally(() => setLoading(false));
-  }, [serverRoute, workRootId]);
-
-  useEffect(() => {
-    if (!workRootId || !serverRoute) {
-      setPreview(null);
-      setDeleteBranch(false);
-      setError(null);
-      return;
-    }
-    setPreview(null);
-    setDeleteBranch(false);
-    setError(null);
-    refreshPreview();
-  }, [refreshPreview, serverRoute, workRootId]);
-
-  if (!workRootId || !serverRoute) {
-    return null;
-  }
-
-  const close = () => {
-    onCommand(buildWorktreeRemoveCloseCommand(workRootId, serverRoute), {
-      "worktreeRemove.close": onClose,
-    });
-  };
-
-  const submitDisabled =
-    submitting || loading || !preview || preview.available === false;
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!preview || submitDisabled) {
-      return;
-    }
-    onCommand(buildWorktreeRemoveSubmitCommand(workRootId, serverRoute), {
-      "worktreeRemove.submit": () => {
-        setSubmitting(true);
-        setError(null);
-        // The confirmation modal itself IS the force confirmation: submitting
-        // after seeing the red data-loss banner authorizes `--force`.
-        void submitGitWorktreeRemove(
-          workRootId,
-          { deleteBranch, force: preview.hasUncommittedChanges },
-          serverRoute,
-        )
-          .then((response) => onRemoved(response, { workRootId, serverRoute }))
-          .catch((nextError) => {
-            setError(
-              nextError instanceof Error
-                ? nextError.message
-                : "worktree remove failed",
-            );
-            // Force-gate 409: the tree turned dirty after a clean preview.
-            // Refresh so the red data-loss banner appears and a deliberate
-            // re-submit can authorize `--force`, instead of forcing the owner
-            // to close and reopen the modal.
-            if (
-              nextError instanceof GitWorktreeRemoveSubmitError &&
-              nextError.status === 409
-            ) {
-              refreshPreview();
-            }
-          })
-          .finally(() => setSubmitting(false));
-      },
-    });
-  };
-
-  const branchName = preview?.branchName ?? null;
-  return (
-    <ModalOverlay
-      className="root-picker-backdrop"
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) close();
-      }}
-    >
-      <Modal className="root-picker-modal git-worktree-modal">
-        <Dialog aria-label="Remove Git worktree" className="root-picker-dialog">
-          <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">
-              Remove worktree
-            </Heading>
-            <div className="root-picker-window-actions">
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="worktreeRemove.close"
-                icon={X}
-                label="Close"
-                onClick={close}
-              />
-            </div>
-          </div>
-          <div className="root-picker-current root-picker-context">
-            {preview?.targetPathLabel ?? "Loading worktree"}
-          </div>
-          <form className="git-worktree-form" onSubmit={submit}>
-            <p className="git-worktree-remove-copy">
-              This removes the linked worktree with{" "}
-              <code>git worktree remove</code>. The worktree directory will be
-              deleted from disk; the repository and other worktrees are
-              untouched.
-            </p>
-            {preview && preview.available === false ? (
-              <InlineNotice
-                tone="error"
-                title="Unavailable"
-                detail={preview.reason ?? "worktree cannot be removed"}
-              />
-            ) : null}
-            {preview?.hasUncommittedChanges ? (
-              <InlineNotice
-                tone="error"
-                title="Uncommitted changes will be lost"
-                detail={`${preview.modifiedFiles} modified · ${preview.untrackedFiles} untracked file(s) in this worktree will be permanently deleted.`}
-              />
-            ) : null}
-            {branchName ? (
-              <label className="git-worktree-remove-branch">
-                <input
-                  type="checkbox"
-                  checked={deleteBranch}
-                  onChange={(event) => setDeleteBranch(event.target.checked)}
-                />{" "}
-                <span>
-                  Delete branch <code>{branchName}</code> too
-                </span>
-                {preview?.branchUnmerged ? (
-                  <span className="git-worktree-remove-unmerged">
-                    {" "}
-                    아직 머지되지 않았습니다 (unmerged — will be kept)
-                  </span>
-                ) : null}
-              </label>
-            ) : null}
-            {error ? (
-              <InlineNotice
-                tone="error"
-                title="Remove worktree"
-                detail={error}
-              />
-            ) : null}
-            <div className="root-picker-footer-actions">
-              <button
-                className="action-button action-button-danger"
-                data-command-id="worktreeRemove.submit"
-                disabled={submitDisabled}
-                type="submit"
-              >
-                {submitting ? "Removing" : "Remove worktree"}
-              </button>
-              <button
-                className="action-button"
-                data-command-id="worktreeRemove.close"
-                type="button"
-                onClick={close}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
-  );
-}
-
-function SettingsModal({
-  open,
-  sections,
-  onCommand,
-  onClose,
-}: {
-  open: boolean;
-  sections: readonly SettingsSectionDescriptor[];
-  onCommand: DashboardCommandDispatcher;
-  onClose: () => void;
-}) {
-  // The shell is section-agnostic: it receives the section list as an injected
-  // prop and only ever consumes `{ id, title, Component }`. It threads no
-  // section-specific (e.g. Terminal-typed) props, so registering a new section
-  // means appending a descriptor to `SETTINGS_SECTIONS` - each section sources
-  // its own state from its own context - with no change to this component.
-  const [activeSectionId, setActiveSectionId] = useState<string | undefined>(
-    () => sections[0]?.id,
-  );
-
-  if (!open) {
-    return null;
-  }
-
-  const close = () => {
-    onCommand(buildSettingsCloseCommand(), { "settings.close": onClose });
-  };
-
-  const activeSection =
-    sections.find((section) => section.id === activeSectionId) ?? sections[0];
-
-  return (
-    <ModalOverlay
-      className="root-picker-backdrop"
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) close();
-      }}
-    >
-      <Modal className="root-picker-modal settings-modal">
-        <Dialog aria-label="Settings" className="root-picker-dialog">
-          <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">
-              Settings
-            </Heading>
-            <div className="root-picker-window-actions">
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="settings.close"
-                icon={X}
-                label="Close"
-                onClick={close}
-              />
-            </div>
-          </div>
-          <div className="root-picker-content">
-            <nav
-              className="root-picker-places settings-section-nav"
-              aria-label="Settings sections"
-            >
-              {sections.map((section) => {
-                const isActive = section.id === activeSection?.id;
-                return (
-                  <button
-                    key={section.id}
-                    aria-current={isActive ? "true" : undefined}
-                    className={`root-picker-place settings-section-nav-button${
-                      isActive ? " settings-section-nav-button-active" : ""
-                    }`}
-                    type="button"
-                    onClick={() => setActiveSectionId(section.id)}
-                  >
-                    {section.title}
-                  </button>
-                );
-              })}
-            </nav>
-            <div className="root-picker-list-region settings-section-body">
-              {activeSection ? <activeSection.Component /> : null}
-            </div>
-          </div>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
-  );
-}
-
-function LinkedServerModal({
-  state,
-  onClose,
-  onLinked,
-}: {
-  state: ServerModalState | null;
-  onClose: () => void;
-  onLinked: (server: ServerConnectionView) => void;
-}) {
-  const [label, setLabel] = useState("");
-  const [endpoint, setEndpoint] = useState("");
-  const [passphrase, setPassphrase] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!state) {
-      return;
-    }
-    setError(null);
-    setSubmitting(false);
-    setPassphrase("");
-    if (state.mode === "add") {
-      setLabel("");
-      setEndpoint("");
-    } else {
-      setLabel(state.server.label);
-      setEndpoint("");
-    }
-  }, [state]);
-
-  if (!state) {
-    return null;
-  }
-
-  const addMode = state.mode === "add";
-  const title = addMode ? "Add server" : `Authenticate ${state.server.label}`;
-  const submitDisabled =
-    submitting ||
-    (addMode && (label.trim().length === 0 || endpoint.trim().length === 0)) ||
-    (!addMode && passphrase.trim().length === 0);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (submitDisabled) {
-      return;
-    }
-    setError(null);
-    const passphraseValue = passphrase.trim();
-    let request: Promise<ServerConnectionView>;
-    if (addMode) {
-      const serverRoute = defaultLinkedServerId(label, endpoint);
-      if (!isValidServerRouteSegment(serverRoute)) {
-        setError(
-          "Server route must contain only letters, digits, hyphen, or underscore (dot is reserved).",
-        );
-        return;
-      }
-      request = linkEndpointServer({
-        serverId: serverRoute,
-        label: label.trim(),
-        endpoint: endpoint.trim(),
-        ...(passphraseValue ? { passphrase: passphraseValue } : {}),
-      });
-    } else {
-      request = linkServerPassphrase(state.server.id, passphraseValue);
-    }
-    setSubmitting(true);
-    void request
-      .then((server) => {
-        onLinked(server);
-        if (server.status === "connected") {
-          onClose();
-          return;
-        }
-        if (addMode && passphraseValue.length === 0) {
-          onClose();
-          return;
-        }
-        setError(
-          "Passphrase was not accepted; the server is saved and still requires authentication.",
-        );
-      })
-      .catch((nextError) => {
-        setError(
-          nextError instanceof Error ? nextError.message : "server link failed",
-        );
-      })
-      .finally(() => setSubmitting(false));
-  };
-
-  return (
-    <ModalOverlay
-      className="root-picker-backdrop"
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          onClose();
-        }
-      }}
-    >
-      <Modal className="root-picker-modal linked-server-modal">
-        <Dialog aria-label={title} className="root-picker-dialog">
-          <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">
-              {title}
-            </Heading>
-            <div className="root-picker-window-actions">
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="resource.action.server.modal.close"
-                icon={X}
-                label="Close"
-                onClick={onClose}
-              />
-            </div>
-          </div>
-          <form className="linked-server-form" onSubmit={submit}>
-            {addMode ? (
-              <>
-                <label className="linked-server-field">
-                  <span className="section-label">Name</span>
-                  <input
-                    className="root-picker-input"
-                    autoComplete="off"
-                    value={label}
-                    onChange={(event) => setLabel(event.target.value)}
-                    placeholder="Remote dev"
-                  />
-                </label>
-                <label className="linked-server-field">
-                  <span className="section-label">Endpoint</span>
-                  <input
-                    className="root-picker-input"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={endpoint}
-                    onChange={(event) => setEndpoint(event.target.value)}
-                    placeholder="http://127.0.0.1:49170"
-                  />
-                </label>
-                <div className="linked-server-hint">
-                  Use an endpoint already reachable from this host, including a
-                  loopback tunnel you created outside the dashboard.
-                </div>
-              </>
-            ) : (
-              <div className="linked-server-hint">
-                Enter the daemon-lifetime passphrase printed by the remote
-                dashboard daemon.
-              </div>
-            )}
-            <label className="linked-server-field">
-              <span className="section-label">Passphrase</span>
-              <input
-                className="root-picker-input"
-                autoComplete="off"
-                spellCheck={false}
-                type="password"
-                value={passphrase}
-                onChange={(event) => setPassphrase(event.target.value)}
-                placeholder={addMode ? "Optional" : "Required"}
-              />
-            </label>
-            {error ? (
-              <InlineNotice tone="error" title="Server link" detail={error} />
-            ) : null}
-            <div className="root-picker-footer-actions">
-              <button
-                className="action-button action-button-primary"
-                data-command-id="resource.action.server.link.submit"
-                disabled={submitDisabled}
-                type="submit"
-              >
-                {submitting
-                  ? "Connecting"
-                  : addMode
-                    ? "Connect"
-                    : "Authenticate"}
-              </button>
-              <button
-                className="action-button"
-                data-command-id="resource.action.server.modal.close"
-                type="button"
-                onClick={onClose}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
   );
 }
 
@@ -4560,23 +3600,6 @@ function initialExplorerSnapshot(): WorkRootExplorerSnapshot {
     directories: {},
     selectedPath: null,
   };
-}
-
-function InlineNotice({
-  tone,
-  title,
-  detail,
-}: {
-  tone: "error" | "info";
-  title: string;
-  detail: string;
-}) {
-  return (
-    <div className={`inline-notice inline-notice-${tone}`} role="status">
-      <strong>{title}</strong>
-      <span>{detail}</span>
-    </div>
-  );
 }
 
 function WorkbenchShell({
@@ -7187,8 +6210,6 @@ function WorkbenchClosePopover({
   );
 }
 
-type WorkbenchToggle = "viewer" | "task" | "diagnostics" | "events" | "layout";
-
 function WorkbenchToolbar({
   server,
   workspace,
@@ -7862,160 +6883,63 @@ function WorkRootGitToolbar({
   );
 }
 
-function GitStatusPill({
-  status,
-  pendingAction,
-  onFetch,
-  onPush,
-  onPull,
-}: {
-  status: WorkRootGitStatus;
-  pendingAction: "fetch" | "push" | "pull" | null;
-  onFetch: () => void;
-  onPush: () => void;
-  onPull: () => void;
-}) {
-  const changeSegments = gitChangeStatusSegments(status);
-  const syncSegments = gitSyncStatusSegments(status);
-  const renderSegment = (segment: GitStatusSegment) => {
-    const className = `git-status-segment git-status-segment-${segment.tone}`;
-    if (segment.commandId === "git.push") {
-      return (
-        <button
-          key={segment.key}
-          className={className}
-          data-command-id="git.push"
-          type="button"
-          disabled={segment.disabled || pendingAction === "push"}
-          aria-label={
-            pendingAction === "push" ? "Pushing Git changes" : undefined
-          }
-          onClick={onPush}
-        >
-          {pendingAction === "push" ? (
-            <RefreshCw
-              className="git-spinner"
-              aria-hidden="true"
-              size={12}
-              strokeWidth={1.9}
-            />
-          ) : (
-            segment.label
-          )}
-        </button>
-      );
-    }
-    if (segment.commandId === "git.pullFfOnly") {
-      return (
-        <button
-          key={segment.key}
-          className={className}
-          data-command-id="git.pullFfOnly"
-          type="button"
-          disabled={segment.disabled}
-          onClick={onPull}
-        >
-          {segment.label}
-        </button>
-      );
-    }
-    return (
-      <span key={segment.key} className={className}>
-        {segment.label}
-      </span>
+function toolbarActions(
+  root: WorkRootView,
+  selectedEntity: ResourceEntity | null,
+) {
+  const actions = root.actions.map((action) => ({ action, entityId: root.id }));
+
+  if (selectedEntity && selectedEntity.id !== root.id) {
+    actions.push(
+      ...selectedEntity.actions.map((action) => ({
+        action,
+        entityId: selectedEntity.id,
+      })),
     );
-  };
+  }
 
-  return (
-    <span
-      className="meta-chip ws-chip git-status-pill"
-      title={status.branch?.upstream ?? "Git status"}
-      aria-label={`Git status ${gitStatusSegments(status)}`}
-    >
-      <button
-        className="git-status-refresh"
-        data-command-id="git.fetch"
-        type="button"
-        aria-label={
-          pendingAction === "fetch" ? "Fetching Git status" : "Fetch Git status"
-        }
-        disabled={pendingAction === "fetch"}
-        onClick={onFetch}
-      >
-        <RefreshCw
-          className={pendingAction === "fetch" ? "git-spinner" : undefined}
-          aria-hidden="true"
-          size={12}
-          strokeWidth={1.9}
-        />
-      </button>
-      {changeSegments.length ? (
-        changeSegments.map(renderSegment)
-      ) : (
-        <span className="git-status-segment git-status-segment-clean">
-          clean
-        </span>
-      )}
-      {syncSegments.length ? (
-        <span className="git-status-separator" aria-hidden="true">
-          |
-        </span>
-      ) : null}
-      {syncSegments.map(renderSegment)}
-    </span>
-  );
+  return actions;
 }
 
-function WorkbenchActivityBadge({
-  activity,
-  onOpenActivity,
-}: {
-  activity: WorkRootActivityBadgeView;
-  onOpenActivity: () => void;
-}) {
-  // CONTRACT: Phase 2 renders a compact named-agent summary chip inside the
-  // existing toolbar metadata row. It is a summary/entrypoint only: no detail
-  // pane, agent controls, or row diagnostics live here.
-  // CONTRACT: Phase 3 turns this entrypoint into the only top-bar opener for a
-  // selected-workRoot Activity pane. The click handler must route through
-  // dashboard workbench placement policy, focus duplicate panes, and keep the
-  // pane reversible/read-only.
-  return (
-    <button
-      className={`meta-chip ws-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
-      data-command-id="workbench.openActivity"
-      data-activity-tone={activity.tone}
-      type="button"
-      title={activity.title}
-      aria-label={`Open WorkRoot Activity: ${activity.title}`}
-      onClick={onOpenActivity}
-    >
-      <span className="workbench-activity-badge-icon" aria-hidden="true">
-        <Activity size={13} strokeWidth={1.8} />
-      </span>
-      <span className="workbench-activity-badge-dot" aria-hidden="true" />
-      <span className="workbench-activity-badge-label">{activity.label}</span>
-      {activity.summary ? (
-        <span className="workbench-activity-badge-summary">
-          {activity.summary}
-        </span>
-      ) : null}
-    </button>
-  );
+function activationForAction(actionId: string): "online" | "offline" | null {
+  if (actionId === "workRoot.activation.online") {
+    return "online";
+  }
+  if (actionId === "workRoot.activation.offline") {
+    return "offline";
+  }
+  return null;
 }
 
-function workRootActivityPaneLogicalKey(workRootId: string) {
-  return surfaceLogicalKey("workRootActivity", workRootId);
-}
+type WorkbenchPane = {
+  readonly id: string;
+  readonly kind: SurfaceKind;
+  readonly category: WorkbenchPaneCategory;
+  readonly title: string;
+  readonly detail: string;
+  readonly state: ViewState;
+  readonly meta: readonly string[];
+  readonly contentRevision?: string;
+  readonly body?: ReactNode;
+};
 
-function workRootActivityPaneId(workRootId: string) {
-  return `workRootActivity-pane:${workRootId}`;
-}
+type WorkbenchEditorGroupModel = {
+  readonly id: string;
+  readonly label: string;
+  readonly panes: readonly WorkbenchPane[];
+};
 
 // Build the placement state the WorkRoot Activity badge feeds into
 // decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
 // duplicate open focuses the pane in whatever group it currently occupies,
 // while a first open resolves through the policy-owned support-split target.
+//
+// NOTE: kept in App.tsx (not moved to workbench/activityPlacement.tsx with
+// the rest of the WorkRoot Activity pane cluster) because it depends on the
+// `WorkbenchEditorGroupModel` type and `initialWorkbenchGroups` const, both
+// of which still live in App.tsx this phase (they move to
+// workbench/editorGroups.tsx in the Phase 1 plan's step 7, at which point
+// this function can move alongside them with no remaining back-reference).
 function workRootActivityPlacementState(
   groups: ReadonlyArray<{ id: string; label: string }>,
   editorGroups: WorkbenchEditorGroupModel[],
@@ -8045,6 +6969,9 @@ function workRootActivityPlacementState(
   };
 }
 
+// NOTE: kept in App.tsx alongside `workRootActivityPlacementState` above for
+// the same reason — its `WorkbenchPane` return type still lives in App.tsx
+// this phase.
 function workRootActivityWorkbenchPane(
   root: WorkRootView,
   activity: WorkRootActivityBadgeInput,
@@ -8092,156 +7019,6 @@ function workRootActivityWorkbenchPane(
     ),
   };
 }
-
-type ActivityTranscriptRefreshSignal = {
-  readonly rootId: string;
-  readonly serverRoute?: string | null;
-  readonly activityId: string;
-  readonly cursor: string | null;
-  readonly sequence: number;
-};
-
-function WorkRootActivityPane({
-  activity,
-  onCommand,
-  transcriptRefresh,
-  serverRoute,
-}: {
-  activity: WorkRootActivityBadgeInput;
-  onCommand: DashboardCommandDispatcher;
-  transcriptRefresh: ActivityTranscriptRefreshSignal | null;
-  serverRoute: string;
-}) {
-  // CONTRACT: A reversible read-only Activity Console projection. It consumes
-  // source-neutral feed items/transcripts, exposes command-routed controls, and
-  // offers no agent/exec control actions or daemon-side acknowledgement.
-  return (
-    <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
-      {activity.phase === "loading" ? (
-        <div className="workroot-activity-state">Loading workRoot activity</div>
-      ) : activity.phase === "error" ? (
-        <div className="workroot-activity-state workroot-activity-state-error">
-          WorkRoot activity is unavailable
-        </div>
-      ) : (
-        <ActivityConsole
-          view={activity.view}
-          onCommand={onCommand}
-          loadTranscript={(workRootId, activityId, options) =>
-            fetchWorkRootActivityTranscript(workRootId, activityId, {
-              ...options,
-              serverRoute,
-            })
-          }
-          transcriptRefresh={transcriptRefresh}
-        />
-      )}
-    </section>
-  );
-}
-
-function workRootActivityPaneRevision(
-  activity: WorkRootActivityBadgeInput,
-  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
-) {
-  if (activity.phase !== "ready") {
-    return `activity:${activity.phase}`;
-  }
-  const view = activity.view;
-  return [
-    "activity",
-    view.status,
-    view.updateMode,
-    view.feedCursor ?? "",
-    view.selectedItemId ?? "",
-    view.items.length,
-    transcriptRefresh?.activityId ?? "",
-    transcriptRefresh?.cursor ?? "",
-    transcriptRefresh?.sequence ?? 0,
-  ].join(":");
-}
-
-function readOnlyFilePaneRevision(pane: ReadOnlyFilePane) {
-  return [
-    "readonly",
-    pane.status,
-    pane.path,
-    pane.sizeBytes ?? "",
-    pane.languageHint ?? "",
-    pane.extension ?? "",
-    pane.error ?? "",
-    hashText(pane.content),
-  ].join(":");
-}
-
-function hashText(value: string) {
-  let hash = 5381;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 33) ^ value.charCodeAt(index);
-  }
-  return `${value.length}:${(hash >>> 0).toString(36)}`;
-}
-
-function toolbarActions(
-  root: WorkRootView,
-  selectedEntity: ResourceEntity | null,
-) {
-  const actions = root.actions.map((action) => ({ action, entityId: root.id }));
-
-  if (selectedEntity && selectedEntity.id !== root.id) {
-    actions.push(
-      ...selectedEntity.actions.map((action) => ({
-        action,
-        entityId: selectedEntity.id,
-      })),
-    );
-  }
-
-  return actions;
-}
-
-function workbenchToggleIcon(toggle: WorkbenchToggle): LucideIcon {
-  switch (toggle) {
-    case "viewer":
-      return Eye;
-    case "task":
-      return ListTodo;
-    case "diagnostics":
-      return Stethoscope;
-    case "events":
-      return Activity;
-    case "layout":
-      return LayoutPanelTop;
-  }
-}
-
-function activationForAction(actionId: string): "online" | "offline" | null {
-  if (actionId === "workRoot.activation.online") {
-    return "online";
-  }
-  if (actionId === "workRoot.activation.offline") {
-    return "offline";
-  }
-  return null;
-}
-
-type WorkbenchPane = {
-  readonly id: string;
-  readonly kind: SurfaceKind;
-  readonly category: WorkbenchPaneCategory;
-  readonly title: string;
-  readonly detail: string;
-  readonly state: ViewState;
-  readonly meta: readonly string[];
-  readonly contentRevision?: string;
-  readonly body?: ReactNode;
-};
-
-type WorkbenchEditorGroupModel = {
-  readonly id: string;
-  readonly label: string;
-  readonly panes: readonly WorkbenchPane[];
-};
 
 function buildWorkbenchEditorGroups(
   root: WorkRootView,
@@ -8359,59 +7136,6 @@ function buildWorkbenchEditorGroups(
       ...(agentChatPanesByGroup[group.id] ?? []),
     ],
   }));
-}
-
-function placeAgentChatPane(
-  current: WorkbenchPaneOrder,
-  existingPanes: Record<string, AgentChatPaneState>,
-  pane: AgentChatPaneState,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPaneOrder {
-  const placementState = agentChatPlacementState(
-    existingPanes,
-    groups,
-    workbenchPaneOrderByGroup,
-    current,
-  );
-  const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
-    surfaceKind: "agentChat",
-    logicalKey: surfaceLogicalKey("agentChat", pane.workRootId, pane.tabId),
-  });
-  if (decision.type !== "openNew") {
-    return current;
-  }
-  return {
-    ...current,
-    [decision.groupId]: [...(current[decision.groupId] ?? []), pane.paneId],
-  };
-}
-
-function agentChatPlacementState(
-  panesByLogicalKey: Record<string, AgentChatPaneState>,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-  agentChatPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPlacementState {
-  const firstGroupId = groups[0]?.id ?? "group-1";
-  return {
-    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
-    focusedGroupId: workbenchGroupId(firstGroupId),
-    attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId:
-        pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId(
-        groupIdForPaneOrder(
-          pane.paneId,
-          workbenchPaneOrderByGroup,
-          agentChatPaneOrderByGroup,
-          firstGroupId,
-        ),
-      ),
-      surfaceKind: "agentChat",
-      logicalKey: surfaceLogicalKey("agentChat", pane.workRootId, pane.tabId),
-    })),
-  };
 }
 
 function agentChatWorkbenchPanesByGroup(
@@ -9015,84 +7739,6 @@ function AgentChatPaneBody({
       ) : null}
     </div>
   );
-}
-
-function placeTerminalSessions(
-  current: WorkbenchPaneOrder,
-  existingPanes: Record<string, TerminalPaneState>,
-  sessions: TerminalSessionView[],
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPaneOrder {
-  let next = { ...current };
-  let placementState = terminalPlacementState(
-    existingPanes,
-    groups,
-    workbenchPaneOrderByGroup,
-    current,
-  );
-  for (const session of sessions) {
-    const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
-      surfaceKind: "persistentTerminal",
-      logicalKey: surfaceLogicalKey(
-        "persistentTerminal",
-        session.workRootId,
-        session.terminalId,
-      ),
-    });
-    if (decision.type === "openNew") {
-      const pane = terminalPaneFromSession(session);
-      next = {
-        ...next,
-        [decision.groupId]: [...(next[decision.groupId] ?? []), pane.paneId],
-      };
-      placementState = {
-        ...placementState,
-        attachments: [
-          ...placementState.attachments,
-          {
-            attachmentId:
-              pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-            groupId: decision.groupId,
-            surfaceKind: "persistentTerminal",
-            logicalKey: decision.logicalKey,
-          },
-        ],
-      };
-    }
-  }
-  return next;
-}
-
-function terminalPlacementState(
-  panesByLogicalKey: Record<string, TerminalPaneState>,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-  terminalPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPlacementState {
-  const firstGroupId = groups[0]?.id ?? "group-1";
-  return {
-    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
-    focusedGroupId: workbenchGroupId(firstGroupId),
-    attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId:
-        pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId(
-        groupIdForPaneOrder(
-          pane.paneId,
-          workbenchPaneOrderByGroup,
-          terminalPaneOrderByGroup,
-          firstGroupId,
-        ),
-      ),
-      surfaceKind: "persistentTerminal",
-      logicalKey: surfaceLogicalKey(
-        "persistentTerminal",
-        pane.session.workRootId,
-        pane.session.terminalId,
-      ),
-    })),
-  };
 }
 
 function terminalWorkbenchPanesByGroup(
@@ -9872,101 +8518,6 @@ function terminalScreenFitsVisibleBox(container: HTMLElement) {
   const containerBox = container.getBoundingClientRect();
   const screenBox = screen.getBoundingClientRect();
   return screenBox.bottom <= containerBox.bottom + 0.5;
-}
-
-function readOnlyFilePlacementState(
-  panesByLogicalKey: Record<string, ReadOnlyFilePane>,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPlacementState {
-  const fallbackGroupId = groups[1]?.id ?? groups[0]?.id ?? "group-2";
-  return {
-    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
-    attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId:
-        pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId(
-        groupIdForPaneOrder(
-          pane.id,
-          workbenchPaneOrderByGroup,
-          readOnlyFilePaneOrderByGroup,
-          fallbackGroupId,
-        ),
-      ),
-      surfaceKind: "editor",
-      logicalKey: surfaceLogicalKey(...pane.logicalKey.split("/")),
-    })),
-  };
-}
-
-function sameReadOnlyOpenRequest(
-  current: ReadOnlyFilePane | undefined,
-  requested: ReadOnlyFilePane,
-): current is ReadOnlyFilePane {
-  return (
-    current !== undefined &&
-    current.workRootId === requested.workRootId &&
-    current.path === requested.path &&
-    current.mode === requested.mode
-  );
-}
-
-function addPaneToGroupOrder(
-  orderByGroup: WorkbenchPaneOrder,
-  paneId: string,
-  groupId: string,
-): WorkbenchPaneOrder {
-  const withoutPane = removePaneFromOrder(orderByGroup, paneId);
-  return {
-    ...withoutPane,
-    [groupId]: [...(withoutPane[groupId] ?? []), paneId],
-  };
-}
-
-function removePaneFromOrder(
-  orderByGroup: WorkbenchPaneOrder,
-  paneId: string | undefined,
-): WorkbenchPaneOrder {
-  if (!paneId) {
-    return orderByGroup;
-  }
-  return Object.fromEntries(
-    Object.entries(orderByGroup).map(([groupId, paneIds]) => [
-      groupId,
-      paneIds.filter((candidate) => candidate !== paneId),
-    ]),
-  );
-}
-
-function activityPaneGroupIdFromOrder(
-  paneId: string,
-  orderByGroup: WorkbenchPaneOrder,
-  groups: ReadonlyArray<{ id: string }>,
-): string {
-  return groupIdForPaneOrder(
-    paneId,
-    orderByGroup,
-    {},
-    groups[1]?.id ?? groups[0]?.id ?? "group-1",
-  );
-}
-
-function groupIdForPaneOrder(
-  paneId: string,
-  primaryOrderByGroup: WorkbenchPaneOrder,
-  fallbackOrderByGroup: WorkbenchPaneOrder,
-  fallbackGroupId: string,
-): string {
-  return (
-    Object.entries(primaryOrderByGroup).find(([, paneIds]) =>
-      paneIds.includes(paneId),
-    )?.[0] ??
-    Object.entries(fallbackOrderByGroup).find(([, paneIds]) =>
-      paneIds.includes(paneId),
-    )?.[0] ??
-    fallbackGroupId
-  );
 }
 
 function readOnlyWorkbenchPanesByGroup(
@@ -11254,129 +9805,4 @@ function EmptyWorkbenchPlaceholder({
       </div>
     </div>
   );
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="detail-item">
-      <dt>{label}</dt>
-      <dd>{value || "none"}</dd>
-    </div>
-  );
-}
-
-function StateLine({ state }: { state: ViewState }) {
-  return (
-    <div className="state-line">
-      <StateDot state={state} />
-      <span>{state.status}</span>
-      {state.stale ? <span>stale</span> : null}
-      {state.loading ? <span>loading</span> : null}
-    </div>
-  );
-}
-
-function StateBadge({ state }: { state: ViewState }) {
-  return (
-    <span
-      className={`state-badge ws-badge ${state.loading ? "state-loading" : ""} ${
-        state.stale ? "state-stale" : ""
-      } ${state.error ? "state-error" : ""}`}
-    >
-      <StateDot state={state} />
-      {state.status}
-    </span>
-  );
-}
-
-function StateDot({ state }: { state: ViewState }) {
-  return (
-    <span
-      className={`state-dot ws-state-dot ${state.loading ? "state-loading" : ""} ${
-        state.stale ? "state-stale" : ""
-      } ${state.error ? "state-error" : ""}`}
-      aria-hidden="true"
-    />
-  );
-}
-
-function normalizeServerRoute(serverRoute: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const normalizedPath = normalizeServerRouteLocation(
-    window.location,
-    serverRoute,
-  );
-  if (normalizedPath) {
-    window.history.replaceState(null, "", normalizedPath);
-  }
-}
-
-function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
-  return {
-    id: root.id,
-    type: "workRoot",
-    label: root.label,
-    state: root.state,
-    actions: root.actions,
-    compactable: root.compactable,
-    path: root.resourcePath,
-    kind: root.kind,
-    activation: root.activation,
-    availability: root.availability,
-    status: root.status,
-    instanceCount: root.mainInstances.length,
-  };
-}
-
-function instanceSummary(instance: InstanceView) {
-  return `${instance.role} ${instance.kind} · ${instance.interactionMode}`;
-}
-
-function closeContractLabel(kind: SurfaceKind) {
-  return `close: ${decideSurfaceClose(kind).behavior}`;
-}
-
-function resourcePresentationLabel(
-  presentation: "compactWorkRoot" | "workspace" | "workRoot",
-) {
-  switch (presentation) {
-    case "compactWorkRoot":
-      return "compact workRoot";
-    case "workspace":
-      return "workspace";
-    case "workRoot":
-      return "workRoot";
-  }
-}
-
-function resourceRowTone(
-  state: ViewState,
-  availability?: WorkRootView["availability"],
-  activation?: WorkRootView["activation"],
-) {
-  if (
-    state.error ||
-    availability === "inaccessible" ||
-    availability === "missing"
-  ) {
-    return "error";
-  }
-  if (state.stale || availability === "moved" || activation === "offline") {
-    return "muted";
-  }
-  return "ready";
-}
-
-function kindLabel(kind: WorkRootView["kind"]) {
-  switch (kind) {
-    case "gitPrimaryRoot":
-      return "git root";
-    case "gitLinkedWorktree":
-      return "worktree";
-    case "plainDirectory":
-      return "directory";
-  }
 }

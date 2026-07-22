@@ -8,3 +8,8 @@ export * from "./placementGroups.js";
 export * from "./openRootLookup.js";
 export * from "./layoutRestore.js";
 export * from "./terminalVisualRestore.js";
+export * from "./paneOrder.js";
+export * from "./agentChatPlacement.js";
+export * from "./terminalPlacement.js";
+export * from "./readOnlyFilePlacement.js";
+export * from "./activityPlacement.js";

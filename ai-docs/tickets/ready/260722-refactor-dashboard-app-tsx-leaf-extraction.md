@@ -53,12 +53,46 @@ existing pattern (paired `.test.ts` where any logic warrants it):
   placeTerminalSessions*, readOnlyFile* helpers - hoist into `workbench/`
   alongside policy.ts/editorGroupModel.ts.
 
+### Result (34562f3c) - 2026-07-22
+
+- Landed 6 of 7 planned extraction commits (d5e7b4b9..34562f3c). App.tsx
+  11,382 -> 9,808 lines (-1,574).
+- New sibling modules: resourcePresentation.tsx, chrome.tsx,
+  workbenchChips.tsx, gitWorktreeAddModal.tsx, gitWorktreeRemoveModal.tsx,
+  settingsModal.tsx, linkedServerModal.tsx, workbench/{paneOrder.ts,
+  agentChatPlacement.ts, terminalPlacement.ts, readOnlyFilePlacement.ts,
+  activityPlacement.tsx}; workbench/index.ts barrel extended;
+  ActivityConsole.tsx got a compile-only 2-line `.js`-suffix import fix.
+- Verification: `npm run build` green after every commit; all 19 `test:*`
+  suites green; `npm run test:browser` fails ONLY at
+  dashboard-acceptance.spec.ts:2714 (pre-existing, unrelated, tracked by
+  260722-bug-e2e-terminal-resize-frame-assertion-fails) with no new
+  failures. Full browser-green stays blocked by 2714, not by this refactor.
+- Review: partitioned correctness + test, both clean with 1 deferred minor
+  each (compile-only `: ReactNode` annotation on WorkRootActivityPane; no
+  paired `.test.ts` for the 5 workbench modules, which had zero prior direct
+  coverage). No Critical/Important.
+- Deviation: plan step 7 (buildWorkbenchEditorGroups, the three
+  `*WorkbenchPane` single-constructors, and
+  workRootActivityPlacementState/workRootActivityWorkbenchPane) was NOT
+  extracted - it entangles with the Phase-2-scoped pane bodies
+  (TerminalPaneBody/AgentChatPaneBody/ReadOnlyDocumentPane) still resident
+  in App.tsx; moving it would recreate the barrel back-import route-tests-
+  tsconfig pollution. Per the plan's own fallback clause this payload rolls
+  into Phase 2.
+- Doc: barrel back-import build hazard captured as a ws-web-dashboard
+  mental-model Common-Mistakes entry (a2784d59).
+
 ### Phase 2: Pane-body extraction
 
 Move the three leaf pane renderers into their own files: TerminalPaneBody
 (~654 lines), AgentChatPaneBody (~482), ReadOnlyDocumentPane (~370). These
 consume `TerminalPrefsContext` but are otherwise structurally extractable -
-keep the context consumption, just relocate the component.
+keep the context consumption, just relocate the component. Phase 2
+additionally lands the deferred step-7 pane-placement constructors
+(buildWorkbenchEditorGroups, the three `*WorkbenchPane` single-constructors,
+workRootActivityPlacementState/workRootActivityWorkbenchPane), which stay in
+App.tsx until the pane bodies move.
 
 Verification (both phases): `npm run build` (tsc -b && vite build) green + all
 `test:*` suites green + `npm run test:browser` (Playwright acceptance gate;
