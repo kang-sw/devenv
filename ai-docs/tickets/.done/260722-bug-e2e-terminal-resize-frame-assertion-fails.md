@@ -1,5 +1,6 @@
 ---
 title: ws-dashboard e2e - "create terminal and run a command" resize-frame assertion fails, blocks acceptance suite green
+completed: 2026-07-22
 related:
   260722-bug-e2e-open-work-root-locator-ambiguity: unmasked this failure once the earlier locator ambiguity was fixed
 related-mental-model:
@@ -154,3 +155,30 @@ passthrough) to avoid the unrelated zsh/starship prompt-content mismatch at
 `spec.ts:2588`. Confirm the `"create terminal and run a command"` step's
 input/control-byte assertions still pass and the resize-frame assertion at
 `spec.ts:2714` now passes, with no regressions elsewhere in the suite.
+
+### Result (297b1061) - 2026-07-22
+
+Root cause fixed in `ws-dashboard/frontend/src/terminalPaneBody.tsx` (fix
+commit 297b1061): tagged `lastForwardedSizeRef` with transport
+(`"socket"|"http"`), made `forwardSize()`'s early-return gate compare
+(columns, rows, transport), and added a catch-up
+`forwardSizeRef.current?.()` call in the WebSocket `"open"` handler so a
+`{type:"resize"}` frame traverses the live socket on initial creation.
+
+Behavior-preserving: the daemon's resulting PTY size is unchanged (idempotent
+re-send of the already-fitted size); transport-alignment only.
+
+Verification: `npm run build` PASS; baseline check (fix stashed) reproduced
+the `spec.ts:2714` failure, fix restored makes execution proceed past 2714
+(target assertion now passes); `npm run test:terminals` route tests PASS (no
+regression). Full acceptance suite still stops later at `spec.ts:2772`
+(`agent-chat-transcript` visibility) - a SEPARATE, pre-existing known flake
+tracked by ticket `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden`,
+independently reproduced on baseline and untouched by this diff.
+
+Completion boundary (`spec.ts:2714` green, no new failures) is MET. Note the
+remaining full-suite-green blocker is `260713` (`spec.ts:2772`), out of scope
+for this ticket.
+
+Mental model updated (commit c182da92): captured the socket-open catch-up
+re-forward modification guideline.
