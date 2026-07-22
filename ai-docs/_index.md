@@ -153,7 +153,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260622-epic-ws-dashboard-session-key-realignment` | todo | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
+| `260622-epic-ws-dashboard-session-key-realignment` | idea | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |

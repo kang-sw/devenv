@@ -126,3 +126,19 @@ session-key-aware model:
 - Deferred: provider-specific implementation, browser control actions beyond
   read/observe, credential persistence, deployment automation, and broader
   visual/UX refresh may remain in child tickets or future epics.
+
+## Disposition
+
+2026-07-22: Demoted to idea/. This epic owns the dashboard agent/harness
+session-key binding (injecting `ws.ferrule(root)` keys into harness launch
+context at spawn time), i.e. the dashboard's agent/harness integration track.
+That track is deprioritized in favor of completing the dashboard/terminal
+usability track first; once terminal usability is complete, swapping the
+underlying CLI harness is a viable alternative to native agent/harness
+surfacing. Its active priority child
+(260620-feat-ws-dashboard-agent-client-activity-sources) was demoted to idea/
+in the same sweep. The shared session-binding foundation
+260622-research-ws-dashboard-ferrule-session-binding is intentionally NOT
+demoted, since the dashboard managed-CLI terminal track relies on it.
+Re-promote when the dashboard/terminal track is complete and the agent/harness
+integration resumes.
