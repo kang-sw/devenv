@@ -74,3 +74,27 @@ green end to end.
 Verification: run the acceptance suite (e.g. `npx playwright test
 dashboard-acceptance.spec.ts` from `ws-dashboard/frontend/`) and confirm all
 tests pass, including the first `openWorkRootInBrowser` step.
+
+### Result (2bc160d4) - 2026-07-22
+
+Narrowed the `openWorkRootInBrowser` helper locator in
+`ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts` (line 591) from
+`[data-command-id="rootPicker.open"]` to
+`[data-command-id="rootPicker.open"]:not(.open-work-root-empty-cta)`. Test-only
+change; `App.tsx` and all `data-command-id` values left untouched per the
+design-reviewer guidance (those are dispatch/hotkey load-bearing).
+
+Verified: reproduced the original strict-mode double-match on the unmodified file
+(stash baseline) at spec.ts:592/951, then confirmed the fix resolves it to exactly
+one element — the suite now proceeds past every `openWorkRootInBrowser` call site
+including the `.toBeFocused()` assertion. `npm run build` green. Single full-scope
+review: clean.
+
+Deviation from the completion boundary: the acceptance suite is NOT fully green
+end to end. Removing the locator ambiguity unmasked a separate, pre-existing
+failure at `dashboard-acceptance.spec.ts:2714` ("create terminal and run a
+command", asserting a WebSocket resize-type frame was sent), confirmed via baseline
+rerun to reproduce identically and NOT caused by this change. That distinct failure
+is out of this ticket's scope and is tracked by
+`260722-bug-e2e-terminal-resize-frame-assertion-fails`. This ticket's own scope —
+locator disambiguation — is complete.
