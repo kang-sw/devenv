@@ -5,6 +5,8 @@ related:
   260722-bug-e2e-open-work-root-locator-ambiguity: verification prerequisite - the Playwright acceptance gate for this refactor cannot pass until this e2e locator fix lands
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Decompose App.tsx - behavior-preserving leaf, modal, and pane-body extraction
