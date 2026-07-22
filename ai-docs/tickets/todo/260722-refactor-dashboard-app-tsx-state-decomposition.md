@@ -5,6 +5,7 @@ related:
 related-mental-model:
   - ws-web-dashboard
 sage-review-design: completed
+sage-review-completeness: required
 ---
 
 # Decompose App.tsx - untangle the WorkbenchShell/App() state core (design-gated)
