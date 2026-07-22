@@ -1,6 +1,6 @@
 ---
 title: Dashboard general-purpose Settings panel (section registry, Terminal style first)
-sage-review-design: required
+sage-review-design: completed
 parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 spec: 260722-ws-dashboard-settings-panel
 related:
@@ -10,7 +10,7 @@ related:
     rework to host that section later
 related-mental-model:
   - ws-web-dashboard
-sage-review-completeness: required
+sage-review-completeness: completed
 ---
 
 # feat: Dashboard general-purpose Settings panel (section registry, Terminal style first)
