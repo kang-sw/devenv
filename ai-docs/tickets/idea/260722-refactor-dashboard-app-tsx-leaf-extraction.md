@@ -2,6 +2,7 @@
 title: Decompose App.tsx - behavior-preserving leaf, modal, and pane-body extraction
 related:
   260722-refactor-dashboard-app-tsx-state-decomposition: follow-on that decomposes the entangled WorkbenchShell/App() core
+  260722-bug-e2e-open-work-root-locator-ambiguity: verification prerequisite - the Playwright acceptance gate for this refactor cannot pass until this e2e locator fix lands
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -58,8 +59,12 @@ consume `TerminalPrefsContext` but are otherwise structurally extractable -
 keep the context consumption, just relocate the component.
 
 Verification (both phases): `npm run build` (tsc -b && vite build) green + all
-`test:*` suites green + a manual smoke that terminal restore/reattach, the four
-modals, and dockview layout are unchanged.
+`test:*` suites green + `npm run test:browser` (Playwright acceptance gate;
+mandatory for UI-facing changes per the ws-web-dashboard domain rule) green +
+a manual smoke that terminal restore/reattach, the four modals, and dockview
+layout are unchanged. Note: the Playwright acceptance suite is currently
+red-lined by `260722-bug-e2e-open-work-root-locator-ambiguity`; that fix must
+land first for the browser gate to pass.
 
 ## Spec Impact
 

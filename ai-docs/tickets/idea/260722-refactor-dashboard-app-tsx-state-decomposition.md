@@ -47,6 +47,11 @@ split `WorkbenchShell`/`App()` into cohesive units. High regression risk
 (terminal restore/reattach, dockview layout); heavy review expected. Left
 intentionally underspecified until Phase 1 fixes the approach.
 
+Verification: settled by the Phase 1 design, but at minimum the
+ws-web-dashboard domain-rule browser gate (`npm run test:browser`, Playwright
+acceptance) plus `npm run build` and `test:*` green, since this reshapes
+visible UI (terminal restore/reattach, dockview layout).
+
 ## Spec Impact
 
 Deferred to Phase 1. If the decomposition introduces an observable seam it gets
