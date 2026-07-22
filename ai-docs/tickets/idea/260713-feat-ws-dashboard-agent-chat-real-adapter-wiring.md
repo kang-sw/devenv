@@ -475,3 +475,14 @@ fork-from-here confirmation is gated on that bug's fix.
 
 Deferred out of the ready queue this round per user curation (agent-chat work
 not this round); the existing Deferral/blocker note above remains valid.
+
+## Disposition
+
+2026-07-22: Demoted to idea/. The dashboard agent-dogfooding track (agent
+activity source, agent-chat real-adapter wiring, and related acceptance) is
+deprioritized in favor of completing the dashboard/terminal usability track
+first. Rationale: once terminal usability reaches 100%, swapping the
+underlying CLI harness is a viable alternative to native agent surfacing, so
+finishing the dashboard is the higher-value path now. Prior shipped work
+stands (see phase Results above); only unfinished work is parked. Re-promote
+when the dashboard/terminal track is complete and agent dogfooding resumes.

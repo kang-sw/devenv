@@ -158,7 +158,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
-| `260620-feat-ws-dashboard-agent-client-activity-sources` | ready | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
+| `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract (demoted 2026-07-22, see Disposition) |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
