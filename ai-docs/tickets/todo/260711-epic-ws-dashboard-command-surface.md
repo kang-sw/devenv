@@ -52,7 +52,48 @@ agent.
   background research (VSCode Quick Open prefix reference, existing
   `DashboardCommand` bus, existing shortcut-guard precedent) plus a
   3-phase implementation plan (frontend shell → backend `%`/`!` endpoints
-  → frontend wiring) approved 2026-07-11.
+  → frontend wiring) approved 2026-07-11. Restructured 2026-07-22 (see
+  below): its Phase 1 shortcut-capture layer now binds onto the hotkey
+  config framework rather than standing alone.
+- `260722-feat-dashboard-hotkey-config-framework` - todo; first
+  implementation target of the layer stack below. Foundation binding
+  registry (leader-sub first-class, standalone hotkeys configurable on
+  top) that everything else in this epic registers through.
+- `260722-feat-dashboard-which-key-hint-overlay` - todo; layer 2, depends
+  on the hotkey config framework.
+- `260722-feat-dashboard-hint-click-fast-jump` - todo; layer 4, last in
+  the sequence, depends on the hotkey config framework.
+
+### Restructure: layered keyboard-interaction stack (Agenda A, 2026-07-22)
+
+A dedicated UX review ("Agenda A") finalized the dashboard's keyboard
+interaction model as tmux-style **leader-only, no modal** (leader key
+`Ctrl+Space`), with leader-sub bindings as the first-class binding schema
+and standalone hotkeys as a user-configurable layer on top. This settles
+and supersedes the informal "keyboard shortcut registration" scope note
+in this epic's own Scope section with a concrete, sequenced layer stack:
+
+1. **Hotkey configuration framework** (`260722-feat-dashboard-hotkey-
+   config-framework`) - the foundation every binding registers through.
+   First implementation target.
+2. **Which-key-style leader hint overlay**
+   (`260722-feat-dashboard-which-key-hint-overlay`) - discoverability
+   layer over the framework's binding registry.
+3. **Command bar** (`260711-idea-dashboard-command-bus-quick-open-
+   shortcuts`, already specced) - integrates with the framework; its
+   existing prefix grammar and phased frontend/backend plan are
+   unchanged by this restructure.
+4. **Hint-click / fast-jump** (`260722-feat-dashboard-hint-click-fast-
+   jump`) - Vimium/flash/leap-style on-screen labels over the full
+   visible viewport, performance-gated. Last layer.
+
+Implementation proceeds sequentially (framework first), but each layer's
+design leaves room for the full stack rather than being built as if it
+were the only layer. Full decision record (reserved keys, the `Ctrl+
+Space`/emacs `set-mark` caveat, persistence, passthrough-guard reuse)
+lives in `260722-feat-dashboard-hotkey-config-framework`; this note only
+records the ordering and that the decisions are final, not open for
+re-litigation.
 
 ## Cross-Child Decisions
 

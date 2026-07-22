@@ -155,6 +155,9 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260622-epic-ws-dashboard-session-key-realignment` | idea | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
+| `260722-feat-dashboard-hotkey-config-framework` | todo | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
+| `260722-feat-dashboard-which-key-hint-overlay` | todo | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry |
+| `260722-feat-dashboard-hint-click-fast-jump` | todo | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |

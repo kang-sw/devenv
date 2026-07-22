@@ -5,11 +5,22 @@ related:
   260710-epic-ws-dashboard-terminal-ux-polishing: sibling UX-polish board; this idea's parent epic was split out from it because its Non-Scope excludes new product surfaces
   260711-idea-dashboard-agent-facing-mcp-control-surface: agent/MCP-facing half of custom commands, kept under 260622 instead of this epic
   260711-idea-dashboard-workroot-scoped-artifact-consolidation: storage substrate this ticket's custom command definitions depend on (.ws-dashboard/scripts/)
+  260722-feat-dashboard-hotkey-config-framework: hotkey configuration framework this ticket's Phase 1 shortcut-capture layer now binds onto, per the Agenda A restructure note below
 related-mental-model:
   - ws-web-dashboard
 ---
 
 # Unify dashboard quick-open command bar, custom command buttons, and keyboard shortcuts on one command bus
+
+> **Restructure note (2026-07-22):** the global shortcut-capture layer this
+> ticket's Phase 1 plans now sits on top of the hotkey configuration
+> framework decided in Agenda A UX review and tracked as
+> `260722-feat-dashboard-hotkey-config-framework` (tmux-style leader-only
+> model, `Ctrl+Space` leader, leader-sub bindings first-class). This ticket's
+> prefix grammar and phased plan below are unaffected; only the underlying
+> shortcut-capture mechanism gains a formal binding registry to integrate
+> with. See the parent epic's Restructure section for the full layer
+> ordering.
 
 ## Background
 
