@@ -15,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to embed in ws-mcp binaries, for example 0.34.3-dev"
+        description: "Version to embed in ws-mcp binaries, for example 0.34.4-dev"
         required: false
-        default: "0.34.3-dev"
+        default: "0.34.4-dev"
 
 permissions:
   contents: write
@@ -61,7 +61,7 @@ jobs:
           elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
             scripts/build-release-assets.sh "${GITHUB_REF_NAME}"
           else
-            scripts/build-release-assets.sh 0.34.3-dev
+            scripts/build-release-assets.sh 0.34.4-dev
           fi
 
       - name: Verify release asset checksums
@@ -104,7 +104,7 @@ jobs:
       - name: Build Windows executable
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          go build -trimpath -ldflags "-s -w -X main.version=0.34.3-dev" -o dist/ws-mcp-windows-amd64.exe ./cmd/ws-mcp
+          go build -trimpath -ldflags "-s -w -X main.version=0.34.4-dev" -o dist/ws-mcp-windows-amd64.exe ./cmd/ws-mcp
 
       - name: Run Windows executable smoke
         shell: pwsh

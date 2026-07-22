@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.34.3-dev"
+var version = "0.34.4-dev"
 var sourceCommit = "dev"
 
 func main() {
