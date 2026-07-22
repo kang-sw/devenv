@@ -7,6 +7,7 @@ related-mental-model:
   - workflow-skills
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-21
 ---
 
 # feat: playbook render exposes native spawn model and reasoning effort
@@ -96,6 +97,42 @@ remain authoritative at render time.
   effort, unresolved-value fallback, exact output compatibility, Codex rendered
   guidance, resource manifests, wsflow mirroring, and the full relevant test
   suites.
+
+### Result (be51bf3d) - 2026-07-21
+
+`playbook.render` now preserves its prompt-path and tier contract while adding
+ordered, configuration-resolved model and optional reasoning-effort metadata.
+`playbook.print` remains tier-only. Codex workflow guidance shows the complete
+native spawn shape, uses `model` and `reasoning_effort` with
+`fork_turns: "none"` for self-contained rendered prompts, decides exact-binding
+fallback before degraded retry, and retains the returned identifier for
+`followup_task` continuity. All twelve delegate-body model-alias echoes were
+removed; binding metadata is lead-facing only.
+
+Review passed on correctness, fit, and test partitions once the tool
+description was qualified for playbooks without a declared tier and both
+authoritative specs were updated. A fresh-reader pass then clarified
+optional-field omission, rejection handling, fallback end states, and
+continuity. Verification ran uncached MCP/resource tests, the wsflow unittest
+suite, spec-index validation, and canonical/wsflow byte checks.
+
+No implementation finding remains unresolved. Dogfood follow-ups were captured
+as `260721-bug-codex-spawn-schema-routing-field-drift` and
+`260721-bug-review-partition-empty-artifact`.
+
+#### Edition (578bce4d) - 2026-07-21
+
+Kept harness-resolved `recommended-model` metadata as operational tool output,
+but removed the shared workflow-manual explanation of harness selection, tier
+portability, and binding-resolution policy. Claude now receives no added native
+binding guidance; the empty neutral include preserves its prior rendered manual.
+The Codex overlay is limited to concrete `model`/`reasoning_effort` mapping,
+`fork_turns: "none"`, absent-field omission, and honest rejection reporting.
+
+Verification passed with uncached MCP/resource tests, the wsflow unittest suite,
+canonical/wsflow byte comparison, spec-index validation, and a negative Claude
+render assertion for Codex-only spawn guidance. Delegate alias echoes remain
+absent.
 
 ## Spec Impact
 

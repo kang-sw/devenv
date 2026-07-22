@@ -1416,6 +1416,41 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	}
 }
 
+func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
+	useLeadProfile(t)
+	root := initGitRepo(t)
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	cacheHome := t.TempDir()
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "codex")
+	leadKey, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+	rendered := callToolOnce(t, s, 2, "playbook.render", map[string]any{"name": "model-pb", "session_key": leadKey})
+	if toolIsError(t, rendered) {
+		t.Fatalf("playbook.render returned error: %s", rendered)
+	}
+	responseText := toolText(t, rendered)
+	lines := strings.Split(strings.TrimSpace(responseText), "\n")
+	if len(lines) != 4 || !strings.HasSuffix(lines[0], "-model-pb.md") {
+		t.Fatalf("render metadata path/tier shape = %q", responseText)
+	}
+	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-5.6-terra\nrecommended-reasoning-effort: high"; got != want {
+		t.Fatalf("render metadata = %q, want %q", got, want)
+	}
+
+	printed := callToolOnce(t, s, 3, "playbook.print", map[string]any{"name": "model-pb", "session_key": leadKey})
+	if toolIsError(t, printed) {
+		t.Fatalf("playbook.print returned error: %s", printed)
+	}
+	if got := toolText(t, printed); strings.Contains(got, "recommended-model:") || strings.Contains(got, "recommended-reasoning-effort:") || !strings.HasSuffix(strings.TrimSpace(got), "recommended-tier: medium") {
+		t.Fatalf("playbook.print contract changed: %q", got)
+	}
+}
+
 func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-claude-harness")

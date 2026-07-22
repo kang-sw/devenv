@@ -584,6 +584,36 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 			if strings.Contains(body, "{{.") {
 				t.Errorf("body %q: unsubstituted placeholder remains", body)
 			}
+			if tc.harness == "claude" {
+				for _, forbidden := range []string{
+					"### Native delegate spawn",
+					"spawn_agent.model",
+					"spawn_agent.reasoning_effort",
+					`fork_turns: "none"`,
+				} {
+					if strings.Contains(body, forbidden) {
+						t.Errorf("Claude workflow manual leaked Codex native binding guidance %q:\n%s", forbidden, body)
+					}
+				}
+			}
+			if tc.harness == "codex" {
+				for _, want := range []string{
+					"### Native delegate spawn",
+					"pass a returned `recommended-model` as\n`spawn_agent.model`",
+					"a returned `recommended-reasoning-effort` as\n`spawn_agent.reasoning_effort`",
+					"Omit either field when its binding line is\nabsent",
+					`fork_turns: "none"`,
+					"never use `effort` as a spawn parameter.",
+					"report the rejected field and\nvalue and do not claim that binding was applied",
+				} {
+					if !strings.Contains(body, want) {
+						t.Errorf("Codex workflow manual missing %q:\n%s", want, body)
+					}
+				}
+				if got := strings.Count(body, "### Native delegate spawn"); got != 1 {
+					t.Errorf("Codex workflow manual rendered delegated-binding section %d times, want 1:\n%s", got, body)
+				}
+			}
 		})
 	}
 }
@@ -1032,7 +1062,6 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
@@ -1087,7 +1116,6 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",

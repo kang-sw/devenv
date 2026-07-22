@@ -1354,7 +1354,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
 		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
 		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
-		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
+		return toolTextResponse(req.ID, withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})+"\n", err)
 
 	case "mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -3890,7 +3890,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier, with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

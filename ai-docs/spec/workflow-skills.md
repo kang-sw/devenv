@@ -121,11 +121,20 @@ discovery.
 Codex-facing workflow skill guidance presents MCP primitives as the primary ws
 runtime surface. Promptless `ws.mercenary.register(name: "<agent-name>")` is the
 general-purpose named-agent form; role-specific delegates obtain a self-contained
-prompt from `ws/playbook.render` and run natively by default or as a mercenary via
-`system_prompt_text` plus the render-returned `recommended-tier` (`tier`). The
-removed `prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
-appear in shipped skill text. CLI adapter syntax belongs only in compatibility or
-testing references. {#260507-mcp-centric-workflow-language}
+prompt from `ws/playbook.render` and run natively by default. For Codex-native
+dispatch, the lead passes render-returned `recommended-model` as
+`spawn_agent.model` and optional `recommended-reasoning-effort` as
+`spawn_agent.reasoning_effort` — the parameter is `reasoning_effort`, not
+`effort`. The lead omits absent bindings, spawns the self-contained rendered
+prompt with `fork_turns: "none"`, and, if a binding is rejected, reports the
+rejected field and value rather than claiming it was applied. Shipped skill text
+shows only these concrete dispatch operations, not harness-selection or
+binding-resolution rationale. Delegate prompt bodies do not repeat their own
+model alias; binding metadata stays lead-facing and is applied before spawn. The
+removed
+`prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
+appear in shipped skill text. CLI adapter syntax belongs only in compatibility
+or testing references. {#260507-mcp-centric-workflow-language}
 
 Scoped fact-finding delegation uses host-native exploration workers rather
 than `ws/subquery`: shipped skill text delegates scoped exploration directly to

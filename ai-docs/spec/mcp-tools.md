@@ -1130,14 +1130,24 @@ bodies.
 
 `playbook.render(session_key, name, context?, root_override?)` materializes the
 named playbook as a context-injected, harness-rendered prompt, writes it to a
-worktree-scoped temporary file, and returns that file path together with a
-`recommended-tier` line carrying the playbook's first-class frontmatter tier (when
-declared). The caller hands the path to a host-native subagent or a mercenary and
-routes the recommended tier to whichever path it picks — as a host model-selection
-guide for a native subagent, or as `mercenary.register`'s pass-through `tier` for a
-mercenary. `playbook.print` surfaces the same `recommended-tier` line. It
-carries no routing or strategy decision — the caller selects `name`, and the
-tool only materializes a rendered copy. `root_override`, when set, rebinds both the
+worktree-scoped temporary file, and returns its metadata as ordered lines. The
+first line is always the prompt path. If the playbook declares a first-class
+frontmatter tier, the next line is `recommended-tier`, optionally followed by
+`recommended-model` when the tier resolves to a model for the active harness and
+`recommended-reasoning-effort` when it also resolves an effort. Harness-local
+configuration, including user overrides, is authoritative for this resolution. A
+resolution failure or empty value omits only that optional line; the path and
+`recommended-tier` are unaffected.
+
+The caller hands the path to a host-native subagent or a mercenary. Native
+dispatch uses the resolved binding metadata supported by its harness; Codex maps
+`recommended-model` to `spawn_agent.model` and the optional
+`recommended-reasoning-effort` to `spawn_agent.reasoning_effort`. Mercenary
+dispatch continues to pass `recommended-tier` as `mercenary.register`'s `tier`.
+`playbook.print` remains tier-only: it may surface `recommended-tier`, but never
+the render-only model or reasoning-effort lines. Neither tool carries a routing
+or strategy decision — the caller selects `name`, and the tool only returns or
+materializes the requested playbook. `root_override`, when set, rebinds both the
 auto-include resolution root and the child-key binding root for a delegate
 running in a different worktree. When the calling `session_key` is lead-scoped
 and the playbook frontmatter declares a delegate-eligible role, the render mints
