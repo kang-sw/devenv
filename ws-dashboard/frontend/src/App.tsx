@@ -63,7 +63,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import "@xterm/xterm/css/xterm.css";
-import { normalizeServerRouteLocation } from "./routeBasis";
 import { mergeStreamingTranscriptBlocks } from "./agentChatStreamMerge";
 import {
   DocumentViewer,
@@ -436,6 +435,19 @@ import {
   SETTINGS_SECTIONS,
   SettingsTerminalContext,
 } from "./settingsSections";
+import {
+  DetailItem,
+  StateLine,
+  StateBadge,
+  StateDot,
+  normalizeServerRoute,
+  resourceEntityForWorkRoot,
+  instanceSummary,
+  closeContractLabel,
+  resourcePresentationLabel,
+  resourceRowTone,
+  kindLabel,
+} from "./resourcePresentation.js";
 
 type CommandPayload = DashboardCommandPayload;
 type CommandEntry = DashboardCommandEntry;
@@ -11254,129 +11266,4 @@ function EmptyWorkbenchPlaceholder({
       </div>
     </div>
   );
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="detail-item">
-      <dt>{label}</dt>
-      <dd>{value || "none"}</dd>
-    </div>
-  );
-}
-
-function StateLine({ state }: { state: ViewState }) {
-  return (
-    <div className="state-line">
-      <StateDot state={state} />
-      <span>{state.status}</span>
-      {state.stale ? <span>stale</span> : null}
-      {state.loading ? <span>loading</span> : null}
-    </div>
-  );
-}
-
-function StateBadge({ state }: { state: ViewState }) {
-  return (
-    <span
-      className={`state-badge ws-badge ${state.loading ? "state-loading" : ""} ${
-        state.stale ? "state-stale" : ""
-      } ${state.error ? "state-error" : ""}`}
-    >
-      <StateDot state={state} />
-      {state.status}
-    </span>
-  );
-}
-
-function StateDot({ state }: { state: ViewState }) {
-  return (
-    <span
-      className={`state-dot ws-state-dot ${state.loading ? "state-loading" : ""} ${
-        state.stale ? "state-stale" : ""
-      } ${state.error ? "state-error" : ""}`}
-      aria-hidden="true"
-    />
-  );
-}
-
-function normalizeServerRoute(serverRoute: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const normalizedPath = normalizeServerRouteLocation(
-    window.location,
-    serverRoute,
-  );
-  if (normalizedPath) {
-    window.history.replaceState(null, "", normalizedPath);
-  }
-}
-
-function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
-  return {
-    id: root.id,
-    type: "workRoot",
-    label: root.label,
-    state: root.state,
-    actions: root.actions,
-    compactable: root.compactable,
-    path: root.resourcePath,
-    kind: root.kind,
-    activation: root.activation,
-    availability: root.availability,
-    status: root.status,
-    instanceCount: root.mainInstances.length,
-  };
-}
-
-function instanceSummary(instance: InstanceView) {
-  return `${instance.role} ${instance.kind} · ${instance.interactionMode}`;
-}
-
-function closeContractLabel(kind: SurfaceKind) {
-  return `close: ${decideSurfaceClose(kind).behavior}`;
-}
-
-function resourcePresentationLabel(
-  presentation: "compactWorkRoot" | "workspace" | "workRoot",
-) {
-  switch (presentation) {
-    case "compactWorkRoot":
-      return "compact workRoot";
-    case "workspace":
-      return "workspace";
-    case "workRoot":
-      return "workRoot";
-  }
-}
-
-function resourceRowTone(
-  state: ViewState,
-  availability?: WorkRootView["availability"],
-  activation?: WorkRootView["activation"],
-) {
-  if (
-    state.error ||
-    availability === "inaccessible" ||
-    availability === "missing"
-  ) {
-    return "error";
-  }
-  if (state.stale || availability === "moved" || activation === "offline") {
-    return "muted";
-  }
-  return "ready";
-}
-
-function kindLabel(kind: WorkRootView["kind"]) {
-  switch (kind) {
-    case "gitPrimaryRoot":
-      return "git root";
-    case "gitLinkedWorktree":
-      return "worktree";
-    case "plainDirectory":
-      return "directory";
-  }
 }
