@@ -5,7 +5,7 @@ import {
   buildActivitySelectItemCommand,
   buildActivityTranscriptLoadMoreCommand,
   type DashboardCommandDispatcher,
-} from "./commands";
+} from "./commands.js";
 import {
   acknowledgeActivityItem,
   activityRibbonSourceLabel,
@@ -25,7 +25,7 @@ import {
   type ActivityTranscriptFetchOptions,
   type TranscriptBlock,
   type WorkRootActivityView,
-} from "./workRootActivity";
+} from "./workRootActivity.js";
 
 export type ActivityTranscriptLoader = (
   workRootId: string,

@@ -171,6 +171,19 @@ import {
   resolveTerminalMountWrite,
   terminalVisualRestoreScrollbackLines,
   terminalVisualRestoreDebounceMs,
+  addPaneToGroupOrder,
+  removePaneFromOrder,
+  activityPaneGroupIdFromOrder,
+  placeAgentChatPane,
+  placeTerminalSessions,
+  readOnlyFilePlacementState,
+  sameReadOnlyOpenRequest,
+  readOnlyFilePaneRevision,
+  workRootActivityPaneLogicalKey,
+  workRootActivityPaneId,
+  workRootActivityPaneRevision,
+  WorkRootActivityPane,
+  type ActivityTranscriptRefreshSignal,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -363,7 +376,6 @@ import {
   type WorkRootGitStatus,
 } from "./gitToolbar";
 import { reconnectServerTunnel } from "./linkedServers";
-import { ActivityConsole } from "./ActivityConsole";
 import { WhichKeyOverlay } from "./WhichKeyOverlay";
 import {
   createResourceRefreshCoordinator,
@@ -375,7 +387,6 @@ import {
 import {
   applyActivityConsoleEvent,
   fetchWorkRootActivity,
-  fetchWorkRootActivityTranscript,
   mergeWorkRootActivityViews,
   parseActivityConsoleEvent,
   shouldApplyActivityStreamRequest,
@@ -6872,18 +6883,63 @@ function WorkRootGitToolbar({
   );
 }
 
-function workRootActivityPaneLogicalKey(workRootId: string) {
-  return surfaceLogicalKey("workRootActivity", workRootId);
+function toolbarActions(
+  root: WorkRootView,
+  selectedEntity: ResourceEntity | null,
+) {
+  const actions = root.actions.map((action) => ({ action, entityId: root.id }));
+
+  if (selectedEntity && selectedEntity.id !== root.id) {
+    actions.push(
+      ...selectedEntity.actions.map((action) => ({
+        action,
+        entityId: selectedEntity.id,
+      })),
+    );
+  }
+
+  return actions;
 }
 
-function workRootActivityPaneId(workRootId: string) {
-  return `workRootActivity-pane:${workRootId}`;
+function activationForAction(actionId: string): "online" | "offline" | null {
+  if (actionId === "workRoot.activation.online") {
+    return "online";
+  }
+  if (actionId === "workRoot.activation.offline") {
+    return "offline";
+  }
+  return null;
 }
+
+type WorkbenchPane = {
+  readonly id: string;
+  readonly kind: SurfaceKind;
+  readonly category: WorkbenchPaneCategory;
+  readonly title: string;
+  readonly detail: string;
+  readonly state: ViewState;
+  readonly meta: readonly string[];
+  readonly contentRevision?: string;
+  readonly body?: ReactNode;
+};
+
+type WorkbenchEditorGroupModel = {
+  readonly id: string;
+  readonly label: string;
+  readonly panes: readonly WorkbenchPane[];
+};
 
 // Build the placement state the WorkRoot Activity badge feeds into
 // decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
 // duplicate open focuses the pane in whatever group it currently occupies,
 // while a first open resolves through the policy-owned support-split target.
+//
+// NOTE: kept in App.tsx (not moved to workbench/activityPlacement.tsx with
+// the rest of the WorkRoot Activity pane cluster) because it depends on the
+// `WorkbenchEditorGroupModel` type and `initialWorkbenchGroups` const, both
+// of which still live in App.tsx this phase (they move to
+// workbench/editorGroups.tsx in the Phase 1 plan's step 7, at which point
+// this function can move alongside them with no remaining back-reference).
 function workRootActivityPlacementState(
   groups: ReadonlyArray<{ id: string; label: string }>,
   editorGroups: WorkbenchEditorGroupModel[],
@@ -6913,6 +6969,9 @@ function workRootActivityPlacementState(
   };
 }
 
+// NOTE: kept in App.tsx alongside `workRootActivityPlacementState` above for
+// the same reason — its `WorkbenchPane` return type still lives in App.tsx
+// this phase.
 function workRootActivityWorkbenchPane(
   root: WorkRootView,
   activity: WorkRootActivityBadgeInput,
@@ -6960,141 +7019,6 @@ function workRootActivityWorkbenchPane(
     ),
   };
 }
-
-type ActivityTranscriptRefreshSignal = {
-  readonly rootId: string;
-  readonly serverRoute?: string | null;
-  readonly activityId: string;
-  readonly cursor: string | null;
-  readonly sequence: number;
-};
-
-function WorkRootActivityPane({
-  activity,
-  onCommand,
-  transcriptRefresh,
-  serverRoute,
-}: {
-  activity: WorkRootActivityBadgeInput;
-  onCommand: DashboardCommandDispatcher;
-  transcriptRefresh: ActivityTranscriptRefreshSignal | null;
-  serverRoute: string;
-}) {
-  // CONTRACT: A reversible read-only Activity Console projection. It consumes
-  // source-neutral feed items/transcripts, exposes command-routed controls, and
-  // offers no agent/exec control actions or daemon-side acknowledgement.
-  return (
-    <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
-      {activity.phase === "loading" ? (
-        <div className="workroot-activity-state">Loading workRoot activity</div>
-      ) : activity.phase === "error" ? (
-        <div className="workroot-activity-state workroot-activity-state-error">
-          WorkRoot activity is unavailable
-        </div>
-      ) : (
-        <ActivityConsole
-          view={activity.view}
-          onCommand={onCommand}
-          loadTranscript={(workRootId, activityId, options) =>
-            fetchWorkRootActivityTranscript(workRootId, activityId, {
-              ...options,
-              serverRoute,
-            })
-          }
-          transcriptRefresh={transcriptRefresh}
-        />
-      )}
-    </section>
-  );
-}
-
-function workRootActivityPaneRevision(
-  activity: WorkRootActivityBadgeInput,
-  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
-) {
-  if (activity.phase !== "ready") {
-    return `activity:${activity.phase}`;
-  }
-  const view = activity.view;
-  return [
-    "activity",
-    view.status,
-    view.updateMode,
-    view.feedCursor ?? "",
-    view.selectedItemId ?? "",
-    view.items.length,
-    transcriptRefresh?.activityId ?? "",
-    transcriptRefresh?.cursor ?? "",
-    transcriptRefresh?.sequence ?? 0,
-  ].join(":");
-}
-
-function readOnlyFilePaneRevision(pane: ReadOnlyFilePane) {
-  return [
-    "readonly",
-    pane.status,
-    pane.path,
-    pane.sizeBytes ?? "",
-    pane.languageHint ?? "",
-    pane.extension ?? "",
-    pane.error ?? "",
-    hashText(pane.content),
-  ].join(":");
-}
-
-function hashText(value: string) {
-  let hash = 5381;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 33) ^ value.charCodeAt(index);
-  }
-  return `${value.length}:${(hash >>> 0).toString(36)}`;
-}
-
-function toolbarActions(
-  root: WorkRootView,
-  selectedEntity: ResourceEntity | null,
-) {
-  const actions = root.actions.map((action) => ({ action, entityId: root.id }));
-
-  if (selectedEntity && selectedEntity.id !== root.id) {
-    actions.push(
-      ...selectedEntity.actions.map((action) => ({
-        action,
-        entityId: selectedEntity.id,
-      })),
-    );
-  }
-
-  return actions;
-}
-
-function activationForAction(actionId: string): "online" | "offline" | null {
-  if (actionId === "workRoot.activation.online") {
-    return "online";
-  }
-  if (actionId === "workRoot.activation.offline") {
-    return "offline";
-  }
-  return null;
-}
-
-type WorkbenchPane = {
-  readonly id: string;
-  readonly kind: SurfaceKind;
-  readonly category: WorkbenchPaneCategory;
-  readonly title: string;
-  readonly detail: string;
-  readonly state: ViewState;
-  readonly meta: readonly string[];
-  readonly contentRevision?: string;
-  readonly body?: ReactNode;
-};
-
-type WorkbenchEditorGroupModel = {
-  readonly id: string;
-  readonly label: string;
-  readonly panes: readonly WorkbenchPane[];
-};
 
 function buildWorkbenchEditorGroups(
   root: WorkRootView,
@@ -7212,59 +7136,6 @@ function buildWorkbenchEditorGroups(
       ...(agentChatPanesByGroup[group.id] ?? []),
     ],
   }));
-}
-
-function placeAgentChatPane(
-  current: WorkbenchPaneOrder,
-  existingPanes: Record<string, AgentChatPaneState>,
-  pane: AgentChatPaneState,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPaneOrder {
-  const placementState = agentChatPlacementState(
-    existingPanes,
-    groups,
-    workbenchPaneOrderByGroup,
-    current,
-  );
-  const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
-    surfaceKind: "agentChat",
-    logicalKey: surfaceLogicalKey("agentChat", pane.workRootId, pane.tabId),
-  });
-  if (decision.type !== "openNew") {
-    return current;
-  }
-  return {
-    ...current,
-    [decision.groupId]: [...(current[decision.groupId] ?? []), pane.paneId],
-  };
-}
-
-function agentChatPlacementState(
-  panesByLogicalKey: Record<string, AgentChatPaneState>,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-  agentChatPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPlacementState {
-  const firstGroupId = groups[0]?.id ?? "group-1";
-  return {
-    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
-    focusedGroupId: workbenchGroupId(firstGroupId),
-    attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId:
-        pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId(
-        groupIdForPaneOrder(
-          pane.paneId,
-          workbenchPaneOrderByGroup,
-          agentChatPaneOrderByGroup,
-          firstGroupId,
-        ),
-      ),
-      surfaceKind: "agentChat",
-      logicalKey: surfaceLogicalKey("agentChat", pane.workRootId, pane.tabId),
-    })),
-  };
 }
 
 function agentChatWorkbenchPanesByGroup(
@@ -7868,84 +7739,6 @@ function AgentChatPaneBody({
       ) : null}
     </div>
   );
-}
-
-function placeTerminalSessions(
-  current: WorkbenchPaneOrder,
-  existingPanes: Record<string, TerminalPaneState>,
-  sessions: TerminalSessionView[],
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPaneOrder {
-  let next = { ...current };
-  let placementState = terminalPlacementState(
-    existingPanes,
-    groups,
-    workbenchPaneOrderByGroup,
-    current,
-  );
-  for (const session of sessions) {
-    const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
-      surfaceKind: "persistentTerminal",
-      logicalKey: surfaceLogicalKey(
-        "persistentTerminal",
-        session.workRootId,
-        session.terminalId,
-      ),
-    });
-    if (decision.type === "openNew") {
-      const pane = terminalPaneFromSession(session);
-      next = {
-        ...next,
-        [decision.groupId]: [...(next[decision.groupId] ?? []), pane.paneId],
-      };
-      placementState = {
-        ...placementState,
-        attachments: [
-          ...placementState.attachments,
-          {
-            attachmentId:
-              pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-            groupId: decision.groupId,
-            surfaceKind: "persistentTerminal",
-            logicalKey: decision.logicalKey,
-          },
-        ],
-      };
-    }
-  }
-  return next;
-}
-
-function terminalPlacementState(
-  panesByLogicalKey: Record<string, TerminalPaneState>,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-  terminalPaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPlacementState {
-  const firstGroupId = groups[0]?.id ?? "group-1";
-  return {
-    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
-    focusedGroupId: workbenchGroupId(firstGroupId),
-    attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId:
-        pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId(
-        groupIdForPaneOrder(
-          pane.paneId,
-          workbenchPaneOrderByGroup,
-          terminalPaneOrderByGroup,
-          firstGroupId,
-        ),
-      ),
-      surfaceKind: "persistentTerminal",
-      logicalKey: surfaceLogicalKey(
-        "persistentTerminal",
-        pane.session.workRootId,
-        pane.session.terminalId,
-      ),
-    })),
-  };
 }
 
 function terminalWorkbenchPanesByGroup(
@@ -8725,101 +8518,6 @@ function terminalScreenFitsVisibleBox(container: HTMLElement) {
   const containerBox = container.getBoundingClientRect();
   const screenBox = screen.getBoundingClientRect();
   return screenBox.bottom <= containerBox.bottom + 0.5;
-}
-
-function readOnlyFilePlacementState(
-  panesByLogicalKey: Record<string, ReadOnlyFilePane>,
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
-  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
-): WorkbenchPlacementState {
-  const fallbackGroupId = groups[1]?.id ?? groups[0]?.id ?? "group-2";
-  return {
-    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
-    attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId:
-        pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId(
-        groupIdForPaneOrder(
-          pane.id,
-          workbenchPaneOrderByGroup,
-          readOnlyFilePaneOrderByGroup,
-          fallbackGroupId,
-        ),
-      ),
-      surfaceKind: "editor",
-      logicalKey: surfaceLogicalKey(...pane.logicalKey.split("/")),
-    })),
-  };
-}
-
-function sameReadOnlyOpenRequest(
-  current: ReadOnlyFilePane | undefined,
-  requested: ReadOnlyFilePane,
-): current is ReadOnlyFilePane {
-  return (
-    current !== undefined &&
-    current.workRootId === requested.workRootId &&
-    current.path === requested.path &&
-    current.mode === requested.mode
-  );
-}
-
-function addPaneToGroupOrder(
-  orderByGroup: WorkbenchPaneOrder,
-  paneId: string,
-  groupId: string,
-): WorkbenchPaneOrder {
-  const withoutPane = removePaneFromOrder(orderByGroup, paneId);
-  return {
-    ...withoutPane,
-    [groupId]: [...(withoutPane[groupId] ?? []), paneId],
-  };
-}
-
-function removePaneFromOrder(
-  orderByGroup: WorkbenchPaneOrder,
-  paneId: string | undefined,
-): WorkbenchPaneOrder {
-  if (!paneId) {
-    return orderByGroup;
-  }
-  return Object.fromEntries(
-    Object.entries(orderByGroup).map(([groupId, paneIds]) => [
-      groupId,
-      paneIds.filter((candidate) => candidate !== paneId),
-    ]),
-  );
-}
-
-function activityPaneGroupIdFromOrder(
-  paneId: string,
-  orderByGroup: WorkbenchPaneOrder,
-  groups: ReadonlyArray<{ id: string }>,
-): string {
-  return groupIdForPaneOrder(
-    paneId,
-    orderByGroup,
-    {},
-    groups[1]?.id ?? groups[0]?.id ?? "group-1",
-  );
-}
-
-function groupIdForPaneOrder(
-  paneId: string,
-  primaryOrderByGroup: WorkbenchPaneOrder,
-  fallbackOrderByGroup: WorkbenchPaneOrder,
-  fallbackGroupId: string,
-): string {
-  return (
-    Object.entries(primaryOrderByGroup).find(([, paneIds]) =>
-      paneIds.includes(paneId),
-    )?.[0] ??
-    Object.entries(fallbackOrderByGroup).find(([, paneIds]) =>
-      paneIds.includes(paneId),
-    )?.[0] ??
-    fallbackGroupId
-  );
 }
 
 function readOnlyWorkbenchPanesByGroup(
