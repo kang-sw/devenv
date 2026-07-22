@@ -82,9 +82,9 @@ export function TerminalPaneBody({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const writtenLengthRef = useRef(0);
-  const lastForwardedSizeRef = useRef<{ columns: number; rows: number } | null>(
-    null,
-  );
+  const lastForwardedSizeRef = useRef<
+    { columns: number; rows: number; transport: "socket" | "http" } | null
+  >(null);
   const socketRef = useRef<WebSocket | null>(null);
   // Latest fitNow/forwardSize closures from the mount effect below, exposed so
   // the paneVisible-gated socket effect can trigger a corrective refit (on a
@@ -355,8 +355,14 @@ export function TerminalPaneBody({
       if (next.columns !== terminal.cols || next.rows !== terminal.rows) {
         terminal.resize(next.columns, next.rows);
       }
+      const socketOpen = socketRef.current?.readyState === WebSocket.OPEN;
       const prev = lastForwardedSizeRef.current;
-      if (prev && prev.columns === next.columns && prev.rows === next.rows) {
+      if (
+        prev &&
+        prev.columns === next.columns &&
+        prev.rows === next.rows &&
+        prev.transport === (socketOpen ? "socket" : "http")
+      ) {
         return;
       }
       // Record the forwarded size only after the daemon accepts it; a rejected
@@ -380,13 +386,13 @@ export function TerminalPaneBody({
           next.columns,
           next.rows,
         );
-        lastForwardedSizeRef.current = next;
+        lastForwardedSizeRef.current = { ...next, transport: "socket" };
         return;
       }
       void liveRef.current.actions
         .onResize(liveRef.current.pane, next.columns, next.rows)
         .then(() => {
-          lastForwardedSizeRef.current = next;
+          lastForwardedSizeRef.current = { ...next, transport: "http" };
         })
         .catch(() => {
           /* leave lastForwardedSizeRef unchanged so the next fit retries */
@@ -559,6 +565,14 @@ export function TerminalPaneBody({
         "connected",
         null,
       );
+      // Catch-up resize forward now that the socket is open: an earlier
+      // HTTP-fallback forward (e.g. while the socket was still connecting)
+      // may have already latched the daemon to these dimensions, but the
+      // transport-aware gate in forwardSize() lets this through so the
+      // now-live socket also carries a resize frame, matching the spec's
+      // "carries PTY output, input, resize, ping/pong, and close frames"
+      // contract for the socket transport itself.
+      forwardSizeRef.current?.();
     });
     socket.addEventListener("message", (event) => {
       if (disposed || typeof event.data !== "string") return;
