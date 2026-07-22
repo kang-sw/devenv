@@ -588,7 +588,9 @@ async function expectDurableTerminalSplitDrop(
 }
 
 async function openWorkRootInBrowser(page: Page, rootPath: string) {
-  const opener = page.locator('[data-command-id="rootPicker.open"]');
+  const opener = page.locator(
+    '[data-command-id="rootPicker.open"]:not(.open-work-root-empty-cta)',
+  );
   await opener.click();
   let modal = page.locator(".root-picker-modal");
   await expect(modal).toBeVisible();
