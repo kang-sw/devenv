@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.34.3 - 2026-07-22
+
+### Fixed
+- `lead-drain-ready-queue` goal-branch staging now encodes the fork parent in
+  the branch name (`goal/<parent>/<slug>`, was `goal/<slug>`) and derives the
+  completion merge target from it, instead of hardcoding a merge into `main`.
+  Previously a `/goal` run staged on a non-main base branch (e.g. a feature
+  stream) would silently complete-merge into `main`, bypassing the branch it was
+  actually forked from. Creation captures the current branch as the parent and
+  guards against a detached HEAD; completion parses the parent by splitting on
+  the last `/`, and an old-format `goal/<slug>` branch (no parent segment) falls
+  back to `main` so in-flight pre-upgrade runs are unaffected. The merge stays
+  user-approval-gated and never pushes.
+
 ## v0.34.2 - 2026-07-22
 
 ### Added
