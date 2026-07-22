@@ -97,7 +97,6 @@ import {
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
   buildAgentChatCreateCommand,
-  buildSettingsCloseCommand,
   buildSettingsOpenCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
@@ -291,7 +290,6 @@ import {
   dashboardServerRoute,
   flattenEntities,
   isLocalDashboardServerRoute,
-  isValidServerRouteSegment,
   isWorkspaceNavChildWorkRoot,
   LOCAL_DASHBOARD_SERVER_ROUTE,
   mergeResourcesByServer,
@@ -364,12 +362,7 @@ import {
   type GitBranchList,
   type WorkRootGitStatus,
 } from "./gitToolbar";
-import {
-  defaultLinkedServerId,
-  linkEndpointServer,
-  linkServerPassphrase,
-  reconnectServerTunnel,
-} from "./linkedServers";
+import { reconnectServerTunnel } from "./linkedServers";
 import { ActivityConsole } from "./ActivityConsole";
 import { WhichKeyOverlay } from "./WhichKeyOverlay";
 import {
@@ -395,7 +388,6 @@ import {
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
-import type { SettingsSectionDescriptor } from "./settingsStore";
 import {
   buildEffectiveTerminalFontFamily,
   loadTerminalStylePrefs,
@@ -431,6 +423,11 @@ import {
 import { GitStatusPill, WorkbenchActivityBadge } from "./workbenchChips.js";
 import { GitWorktreeAddModal } from "./gitWorktreeAddModal.js";
 import { GitWorktreeRemoveModal } from "./gitWorktreeRemoveModal.js";
+import { SettingsModal } from "./settingsModal.js";
+import {
+  LinkedServerModal,
+  type ServerModalState,
+} from "./linkedServerModal.js";
 
 type CommandPayload = DashboardCommandPayload;
 type CommandEntry = DashboardCommandEntry;
@@ -440,10 +437,6 @@ type WorkRootExplorerSnapshot = {
   directories: Record<string, DirectoryLoadState>;
   selectedPath: string | null;
 };
-
-type ServerModalState =
-  | { mode: "add" }
-  | { mode: "auth"; server: ServerConnectionView };
 
 async function requestWorkRootActivation(
   workRootId: string,
@@ -2822,291 +2815,6 @@ function OpenWorkRootControl({
         </Modal>
       </ModalOverlay>
     </div>
-  );
-}
-
-function SettingsModal({
-  open,
-  sections,
-  onCommand,
-  onClose,
-}: {
-  open: boolean;
-  sections: readonly SettingsSectionDescriptor[];
-  onCommand: DashboardCommandDispatcher;
-  onClose: () => void;
-}) {
-  // The shell is section-agnostic: it receives the section list as an injected
-  // prop and only ever consumes `{ id, title, Component }`. It threads no
-  // section-specific (e.g. Terminal-typed) props, so registering a new section
-  // means appending a descriptor to `SETTINGS_SECTIONS` - each section sources
-  // its own state from its own context - with no change to this component.
-  const [activeSectionId, setActiveSectionId] = useState<string | undefined>(
-    () => sections[0]?.id,
-  );
-
-  if (!open) {
-    return null;
-  }
-
-  const close = () => {
-    onCommand(buildSettingsCloseCommand(), { "settings.close": onClose });
-  };
-
-  const activeSection =
-    sections.find((section) => section.id === activeSectionId) ?? sections[0];
-
-  return (
-    <ModalOverlay
-      className="root-picker-backdrop"
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) close();
-      }}
-    >
-      <Modal className="root-picker-modal settings-modal">
-        <Dialog aria-label="Settings" className="root-picker-dialog">
-          <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">
-              Settings
-            </Heading>
-            <div className="root-picker-window-actions">
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="settings.close"
-                icon={X}
-                label="Close"
-                onClick={close}
-              />
-            </div>
-          </div>
-          <div className="root-picker-content">
-            <nav
-              className="root-picker-places settings-section-nav"
-              aria-label="Settings sections"
-            >
-              {sections.map((section) => {
-                const isActive = section.id === activeSection?.id;
-                return (
-                  <button
-                    key={section.id}
-                    aria-current={isActive ? "true" : undefined}
-                    className={`root-picker-place settings-section-nav-button${
-                      isActive ? " settings-section-nav-button-active" : ""
-                    }`}
-                    type="button"
-                    onClick={() => setActiveSectionId(section.id)}
-                  >
-                    {section.title}
-                  </button>
-                );
-              })}
-            </nav>
-            <div className="root-picker-list-region settings-section-body">
-              {activeSection ? <activeSection.Component /> : null}
-            </div>
-          </div>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
-  );
-}
-
-function LinkedServerModal({
-  state,
-  onClose,
-  onLinked,
-}: {
-  state: ServerModalState | null;
-  onClose: () => void;
-  onLinked: (server: ServerConnectionView) => void;
-}) {
-  const [label, setLabel] = useState("");
-  const [endpoint, setEndpoint] = useState("");
-  const [passphrase, setPassphrase] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!state) {
-      return;
-    }
-    setError(null);
-    setSubmitting(false);
-    setPassphrase("");
-    if (state.mode === "add") {
-      setLabel("");
-      setEndpoint("");
-    } else {
-      setLabel(state.server.label);
-      setEndpoint("");
-    }
-  }, [state]);
-
-  if (!state) {
-    return null;
-  }
-
-  const addMode = state.mode === "add";
-  const title = addMode ? "Add server" : `Authenticate ${state.server.label}`;
-  const submitDisabled =
-    submitting ||
-    (addMode && (label.trim().length === 0 || endpoint.trim().length === 0)) ||
-    (!addMode && passphrase.trim().length === 0);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (submitDisabled) {
-      return;
-    }
-    setError(null);
-    const passphraseValue = passphrase.trim();
-    let request: Promise<ServerConnectionView>;
-    if (addMode) {
-      const serverRoute = defaultLinkedServerId(label, endpoint);
-      if (!isValidServerRouteSegment(serverRoute)) {
-        setError(
-          "Server route must contain only letters, digits, hyphen, or underscore (dot is reserved).",
-        );
-        return;
-      }
-      request = linkEndpointServer({
-        serverId: serverRoute,
-        label: label.trim(),
-        endpoint: endpoint.trim(),
-        ...(passphraseValue ? { passphrase: passphraseValue } : {}),
-      });
-    } else {
-      request = linkServerPassphrase(state.server.id, passphraseValue);
-    }
-    setSubmitting(true);
-    void request
-      .then((server) => {
-        onLinked(server);
-        if (server.status === "connected") {
-          onClose();
-          return;
-        }
-        if (addMode && passphraseValue.length === 0) {
-          onClose();
-          return;
-        }
-        setError(
-          "Passphrase was not accepted; the server is saved and still requires authentication.",
-        );
-      })
-      .catch((nextError) => {
-        setError(
-          nextError instanceof Error ? nextError.message : "server link failed",
-        );
-      })
-      .finally(() => setSubmitting(false));
-  };
-
-  return (
-    <ModalOverlay
-      className="root-picker-backdrop"
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          onClose();
-        }
-      }}
-    >
-      <Modal className="root-picker-modal linked-server-modal">
-        <Dialog aria-label={title} className="root-picker-dialog">
-          <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">
-              {title}
-            </Heading>
-            <div className="root-picker-window-actions">
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="resource.action.server.modal.close"
-                icon={X}
-                label="Close"
-                onClick={onClose}
-              />
-            </div>
-          </div>
-          <form className="linked-server-form" onSubmit={submit}>
-            {addMode ? (
-              <>
-                <label className="linked-server-field">
-                  <span className="section-label">Name</span>
-                  <input
-                    className="root-picker-input"
-                    autoComplete="off"
-                    value={label}
-                    onChange={(event) => setLabel(event.target.value)}
-                    placeholder="Remote dev"
-                  />
-                </label>
-                <label className="linked-server-field">
-                  <span className="section-label">Endpoint</span>
-                  <input
-                    className="root-picker-input"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={endpoint}
-                    onChange={(event) => setEndpoint(event.target.value)}
-                    placeholder="http://127.0.0.1:49170"
-                  />
-                </label>
-                <div className="linked-server-hint">
-                  Use an endpoint already reachable from this host, including a
-                  loopback tunnel you created outside the dashboard.
-                </div>
-              </>
-            ) : (
-              <div className="linked-server-hint">
-                Enter the daemon-lifetime passphrase printed by the remote
-                dashboard daemon.
-              </div>
-            )}
-            <label className="linked-server-field">
-              <span className="section-label">Passphrase</span>
-              <input
-                className="root-picker-input"
-                autoComplete="off"
-                spellCheck={false}
-                type="password"
-                value={passphrase}
-                onChange={(event) => setPassphrase(event.target.value)}
-                placeholder={addMode ? "Optional" : "Required"}
-              />
-            </label>
-            {error ? (
-              <InlineNotice tone="error" title="Server link" detail={error} />
-            ) : null}
-            <div className="root-picker-footer-actions">
-              <button
-                className="action-button action-button-primary"
-                data-command-id="resource.action.server.link.submit"
-                disabled={submitDisabled}
-                type="submit"
-              >
-                {submitting
-                  ? "Connecting"
-                  : addMode
-                    ? "Connect"
-                    : "Authenticate"}
-              </button>
-              <button
-                className="action-button"
-                data-command-id="resource.action.server.modal.close"
-                type="button"
-                onClick={onClose}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
   );
 }
 
