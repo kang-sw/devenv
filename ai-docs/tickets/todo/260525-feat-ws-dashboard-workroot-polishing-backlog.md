@@ -23,6 +23,14 @@ when they become implementation-ready.
 
 ### Phase 1: WorkRoot lifecycle polish
 
+**Priority (2026-07-22):** worktree delete is the immediate priority item in
+this ticket. The atomic `git worktree remove` operation (force-gated on
+uncommitted/untracked changes, plus dashboard registry cleanup and active
+terminal-session accounting) described below is scoped and ready; Phase 3
+below layers the now-finalized removal/hide UX decisions ("Agenda B") on top
+of it. Implement the daemon op and the Phase 3 UX together rather than
+sequencing UX as a follow-up.
+
 Improve owner operations for active, unavailable, linked, remembered, pinned,
 recoverable, and prunable WorkRoots without turning the root picker into a
 generic file manager.
@@ -85,3 +93,42 @@ pulls use `git pull --ff-only` and never attempt conflict resolution.
 
 Verification should include daemon Git tests where practical and browser
 coverage for any changed Git interaction.
+
+### Phase 3: Worktree removal & hide UX (Agenda B, finalized 2026-07-22)
+
+Owner finalized the "Agenda B — worktree UX" decisions below during dogfood
+discussion on 2026-07-22. These are **final**; implement as specified rather
+than re-litigating. They layer onto the atomic `git worktree remove` operation
+already scoped in Phase 1 (force-gated on uncommitted/untracked changes, plus
+registry cleanup and active terminal-session accounting) — that operation's
+scope is unchanged, this phase adds the surrounding UX.
+
+- **B-1 (removal confirmation, always shown):** worktree removal always shows
+  a confirmation modal before running, regardless of clean/dirty state —
+  worktree add/remove is a heavy operation, so confirmation is not
+  conditional on there being something to lose. When the worktree has
+  uncommitted or untracked changes, the modal must additionally surface a red
+  data-loss warning calling that out explicitly (distinct from the baseline
+  confirmation copy).
+- **B-2 (optional branch deletion):** the same confirmation modal includes a
+  "delete branch too" checkbox, **default OFF** (branch preserved unless the
+  owner opts in). Before submitting, check whether the branch has unmerged /
+  dangling commits — i.e. commits not reachable from another ref, the same
+  condition under which plain `git branch -d` would refuse. If so, show a red
+  parenthetical warning next to the checkbox (example UI string: "아직
+  머지되지 않았습니다"). If the branch is safe to delete (no unique commits,
+  or already merged), checking the box simply deletes it — never silently
+  force-delete a branch with dangling commits.
+- **B-3 (hide worktrees, pure UI):** add a hide action that is presentation-only
+  — the worktree directory stays on disk and its branch is untouched; hiding
+  only removes it from the dashboard's visible list. Restore path: the root
+  workRoot's right-side "..." settings menu gains a "hidden worktrees"
+  submenu; clicking a hidden entry there un-hides it. This supersedes the
+  prior direction recorded in
+  `260523-research-ws-dashboard-persistable-ui-state-map` (which rejected
+  invisible worktrees in favor of a future explicit forget/remove action) —
+  see that ticket's 2026-07-22 update for the reversal record.
+
+Verification should include resource model tests for the branch
+unmerged/dangling check and browser coverage for the confirmation modal
+(both warning states) and the hide/unhide flow.

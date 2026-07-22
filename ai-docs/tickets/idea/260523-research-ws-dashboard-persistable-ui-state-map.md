@@ -65,9 +65,18 @@ than daemon/resource state.
   daemon-local, not loggable command payload.
 - **Linked worktree visibility choices**: whether an auto-discovered sibling
   worktree was acknowledged, hidden, or opened. This should stay coupled to
-  `260523-feat-ws-dashboard-linked-worktree-discovery`. The current direction
-  rejects invisible worktrees: known workRoots stay visible with live-derived
-  availability until a future explicit forget/remove action exists.
+  `260523-feat-ws-dashboard-linked-worktree-discovery`.
+  ~~The prior direction rejected invisible worktrees: known workRoots stayed
+  visible with live-derived availability until a future explicit
+  forget/remove action existed.~~ **Superseded 2026-07-22:** owner finalized
+  "Agenda B — worktree UX" and reversed this — direction is now a plain UI
+  hide (worktree stays on disk, branch untouched; hiding only affects the
+  dashboard's visible list), restored via the root workRoot's "..." settings
+  menu → a "hidden worktrees" submenu, where clicking a hidden entry
+  un-hides it. See `260525-feat-ws-dashboard-workroot-polishing-backlog`
+  Phase 3 for the full, final spec (this also covers the paired removal
+  confirmation modal and branch-delete checkbox, which are new decisions not
+  previously tracked in this candidate list).
 
 ## Risk Boundaries
 
