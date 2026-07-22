@@ -73,12 +73,31 @@ confirmation modal precedent to follow for visual/interaction consistency:
   (`260722-feat-dashboard-hotkey-config-framework`, done). This ticket's
   Phase 1 must leave the registry contract able to host that section later
   without shell rework; actually building it is a future phase/ticket.
+- **Font-family control form: free-text, prepended to the existing
+  fallback stack.** The current `fontFamily` is a long CSS fallback stack
+  (`App.tsx:9089-9099`). Default the control to a free-text CSS family
+  string that is prepended onto the existing fallback stack, rather than
+  replacing it (a curated preset list is an acceptable alternative
+  implementation). When unset, the effective value must reproduce today's
+  hardcoded look exactly.
 
 ## Constraints
 
 - Terminal preference changes must apply live to already-open terminal
   panes (via xterm option mutation) and persist across reload — no forced
   full remount of live sessions just to apply a style change.
+- **Live-update distribution mechanism.** Each terminal pane is constructed
+  in its own per-pane component effect (around `App.tsx:9098+`) with a
+  local xterm instance; there is no global registry of live xterm instances
+  at the construction site. Applying a preference change to already-open
+  panes therefore requires each pane to subscribe to the shared prefs
+  store/context and apply `terminal.options.fontFamily` /
+  `terminal.options.fontSize` / `terminal.options.theme = ...` on change (a
+  standard React subscription), not a construction-time-only read.
+  Construction-time-only wiring is disallowed — it leaves already-open
+  panes stale and tempts a forbidden remount to pick up new values. This
+  subscription must not touch the protected terminal restore/reattach zone
+  (~`App.tsx:9083-9230`).
 - Must not regress the terminal visual-restore/reattach logic around
   `App.tsx:9083-9230`.
 - The panel must be operable without a mouse: open, navigate sections, and
@@ -158,3 +177,7 @@ Add a hotkey-rebind editor section over the existing
 `260722-feat-dashboard-hotkey-config-framework` binding registry, registered
 into the Phase 1 section registry. Not required for this ticket's initial
 slice; tracked here so the dependency is visible from both sides.
+
+This phase is a deferred forward-reference: implementation and verification
+are deferred to a future ticket/slice, so no verification is required for
+this ticket's initial slice.
