@@ -873,6 +873,51 @@ guard) is unchanged and remains the sole input-handling surface.
 > The behavior above is verified by unit tests over the pure row-derivation
 > logic only.
 
+## 🚧 Dashboard Settings Panel {#260722-ws-dashboard-settings-panel}
+
+The dashboard exposes a single global Settings modal for dashboard-wide
+preferences, distinct from any per-workRoot or per-worktree UI. It is
+reachable from a command/hotkey entry point regardless of which (or
+whether any) workRoot is currently focused, follows the same react-aria
+`ModalOverlay`/`Modal`/`Dialog` composition as other dashboard confirmation
+modals (`260722-ws-dashboard-git-worktree-removal`), and is keyboard-only
+operable: open, section navigation, and dismissal (`Escape` or
+backdrop click) all work without a mouse.
+
+The panel's body is not a hard-coded screen; it renders an ordered list of
+independently registered setting sections. Each section contributes an id,
+a display title, and its own render surface, and owns reading and writing
+its own preferences — the modal shell has no knowledge of a section's
+internal fields or storage shape. This registry contract exists so that
+later sections (starting with a planned hotkey-rebind editor) can be added
+by registering a new section, without modifying the shell or any other
+section's code.
+
+Section preferences persist through a shared, namespaced preferences-store
+helper built over the dashboard's existing low-level `browserStorage()`
+accessor, generalizing the versioned `"ws-dashboard.<feature>.v<N>"`
+JSON-blob convention already used ad hoc per feature (e.g. hotkey
+bindings). The helper is the single read/write seam for section prefs:
+each section loads and saves through it under its own namespaced key, with
+defensive parsing that falls back to that section's defaults on missing or
+malformed stored data, rather than each section reimplementing its own
+storage logic.
+
+The first registered section is Terminal style: font family, font size, and
+background theme color, replacing the values currently hardcoded at the
+xterm construction site (`260516-ws-web-dashboard-browser-terminal-emulator-behavior`
+documents the resulting rendering behavior). When no preference is stored,
+the section's defaults reproduce today's hardcoded look, so an unconfigured
+dashboard is visually unchanged. A live change to a Terminal-style
+preference applies to already-open terminal panes immediately, without
+remounting or interrupting the underlying session; new terminal panes read
+the persisted preference at construction time.
+
+> [!note] Planned 🚧
+> A future hotkey-rebind editor section will register into this panel to
+> edit bindings from the hotkey binding registry directly. It is a planned
+> extension of the section registry, not specified further here.
+
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the
