@@ -163,9 +163,10 @@ import {
   workRootActivityPaneId,
   workRootActivityPaneRevision,
   WorkRootActivityPane,
+  initialWorkbenchGroups,
   type ActivityTranscriptRefreshSignal,
-  type SurfaceKind,
-  type WorkbenchPaneCategory,
+  type WorkbenchPane,
+  type WorkbenchEditorGroupModel,
   type WorkbenchPaneOrder,
   type DockviewTabCloseRequest,
   type WorkbenchPlacementState,
@@ -456,10 +457,6 @@ async function requestWorkspaceRemoval(
 const terminalOutputPollIntervalMs = 120;
 const workRootActivityRefreshIntervalMs = 3_000;
 const workRootActivityRecentRefreshLimit = 30;
-const initialWorkbenchGroups = [
-  { id: "group-1", label: "group 1" },
-  { id: "group-2", label: "group 2" },
-] as const;
 
 export function App() {
   // Per-server cache of the last resolved resources tree, keyed by
@@ -6825,35 +6822,17 @@ function activationForAction(actionId: string): "online" | "offline" | null {
   return null;
 }
 
-type WorkbenchPane = {
-  readonly id: string;
-  readonly kind: SurfaceKind;
-  readonly category: WorkbenchPaneCategory;
-  readonly title: string;
-  readonly detail: string;
-  readonly state: ViewState;
-  readonly meta: readonly string[];
-  readonly contentRevision?: string;
-  readonly body?: ReactNode;
-};
-
-type WorkbenchEditorGroupModel = {
-  readonly id: string;
-  readonly label: string;
-  readonly panes: readonly WorkbenchPane[];
-};
-
 // Build the placement state the WorkRoot Activity badge feeds into
 // decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
 // duplicate open focuses the pane in whatever group it currently occupies,
 // while a first open resolves through the policy-owned support-split target.
 //
 // NOTE: kept in App.tsx (not moved to workbench/activityPlacement.tsx with
-// the rest of the WorkRoot Activity pane cluster) because it depends on the
-// `WorkbenchEditorGroupModel` type and `initialWorkbenchGroups` const, both
-// of which still live in App.tsx this phase (they move to
-// workbench/editorGroups.tsx in the Phase 1 plan's step 7, at which point
-// this function can move alongside them with no remaining back-reference).
+// the rest of the WorkRoot Activity pane cluster) because
+// workRootActivityWorkbenchPane below still needs to move alongside it
+// (both depend on things that stay resident in App.tsx a while longer);
+// they move together to workbench/activityPlacement.tsx in a later step of
+// this same phase.
 function workRootActivityPlacementState(
   groups: ReadonlyArray<{ id: string; label: string }>,
   editorGroups: WorkbenchEditorGroupModel[],
