@@ -15,6 +15,7 @@ import {
   BriefcaseBusiness,
   CirclePower,
   Eye,
+  EyeOff,
   File,
   Folder,
   FolderGit2,
@@ -100,6 +101,11 @@ import {
   buildServerOffCommand,
   buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
+  buildWorktreeHideCommand,
+  buildWorktreeRemoveOpenCommand,
+  buildWorktreeRemoveCloseCommand,
+  buildWorktreeRemoveSubmitCommand,
+  buildWorktreeUnhideCommand,
   buildWorkRootActivationCommand,
   buildWorkRootCloseCommand,
   buildWorkRootOpenCommand,
@@ -311,11 +317,14 @@ import {
   type WorkspaceView,
 } from "./resourceModel";
 import {
+  applyHiddenWorktrees,
   applySiblingOrder,
+  hiddenWorktreeItems,
   isAcceptableSiblingDrop,
   loadWorkNavOrderSnapshot,
   reorderSiblingIds,
   saveWorkNavOrderSnapshot,
+  withHiddenWorktree,
   workNavSiblingDragMimeType,
   type WorkNavSiblingDragPayload,
   type WorkNavSiblingOrder,
@@ -349,6 +358,11 @@ import {
   type GitWorktreeAddPreview,
   type GitWorktreeAddPreviewRequest,
 } from "./gitWorktreeAdd";
+import {
+  fetchGitWorktreeRemovePreview,
+  submitGitWorktreeRemove,
+  type GitWorktreeRemovePreview,
+} from "./gitWorktreeRemove";
 import {
   createWorkRootGitBranch,
   fetchWorkRootGit,
@@ -484,6 +498,10 @@ export function App() {
   const [gitWorktreeTarget, setGitWorktreeTarget] = useState<{
     serverRoute: string;
     workspaceId: string;
+  } | null>(null);
+  const [worktreeRemoveTarget, setWorktreeRemoveTarget] = useState<{
+    serverRoute: string;
+    workRootId: string;
   } | null>(null);
   const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1292,6 +1310,38 @@ export function App() {
       } else if (command.payload.type === "gitWorktreeAdd.close") {
         executableHandlers[command.commandId] = () =>
           setGitWorktreeTarget(null);
+      } else if (command.payload.type === "worktreeRemove.open") {
+        const { workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          setWorktreeRemoveTarget({
+            serverRoute: serverRoute ?? "server-local",
+            workRootId,
+          });
+      } else if (command.payload.type === "worktreeRemove.close") {
+        executableHandlers[command.commandId] = () =>
+          setWorktreeRemoveTarget(null);
+      } else if (command.payload.type === "worktree.hide") {
+        const { workspaceId, workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          setWorkNavOrder((current) =>
+            withHiddenWorktree(
+              current,
+              serverScopedIdentity(serverRoute ?? "server-local", workspaceId),
+              workRootId,
+              true,
+            ),
+          );
+      } else if (command.payload.type === "worktree.unhide") {
+        const { workspaceId, workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          setWorkNavOrder((current) =>
+            withHiddenWorktree(
+              current,
+              serverScopedIdentity(serverRoute ?? "server-local", workspaceId),
+              workRootId,
+              false,
+            ),
+          );
       } else if (command.payload.type === "workRoot.close") {
         const { workRootId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -1831,6 +1881,29 @@ export function App() {
                 );
               }
               setGitWorktreeTarget(null);
+            }}
+          />
+          <GitWorktreeRemoveModal
+            target={worktreeRemoveTarget}
+            onCommand={executeCommand}
+            onClose={() => setWorktreeRemoveTarget(null)}
+            onRemoved={(response, context) => {
+              // Tear down the removed root's workbench instance and move the
+              // selection off it BEFORE merging the daemon's post-removal
+              // resource view, so the close's selection-move logic still sees
+              // the root present in `activeResources`.
+              if (context.workRootId) {
+                executeCommand(
+                  buildWorkRootCloseCommand(
+                    context.workRootId,
+                    context.serverRoute,
+                  ),
+                );
+              }
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(
+                response.resources,
+              );
+              setWorktreeRemoveTarget(null);
             }}
           />
           <LinkedServerModal
@@ -3120,6 +3193,207 @@ function GitWorktreeAddModal({
   );
 }
 
+// 260525 Phase 3 B-1/B-2: worktree removal ALWAYS opens this real confirmation
+// modal (never a bare `window.confirm` — worktree add/remove is heavy
+// regardless of dirty state). A red data-loss banner is shown ONLY when the
+// preview reports uncommitted/untracked changes; a default-OFF "delete branch"
+// checkbox shows a red parenthetical when the branch is unmerged, and even if
+// checked the daemon refuses to force-delete it.
+function GitWorktreeRemoveModal({
+  target,
+  onCommand,
+  onClose,
+  onRemoved,
+}: {
+  target: { serverRoute: string; workRootId: string } | null;
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+  onRemoved: (
+    response: {
+      resources: DashboardResourcesView;
+      removedWorkRootId?: string;
+      branchDeleted: boolean;
+      branchDeleteSkippedUnmerged: boolean;
+    },
+    context: { workRootId: string; serverRoute: string },
+  ) => void;
+}) {
+  const workRootId = target?.workRootId ?? null;
+  const serverRoute = target?.serverRoute ?? null;
+  const [preview, setPreview] = useState<GitWorktreeRemovePreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [deleteBranch, setDeleteBranch] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workRootId || !serverRoute) {
+      setPreview(null);
+      setDeleteBranch(false);
+      setError(null);
+      return;
+    }
+    setPreview(null);
+    setDeleteBranch(false);
+    setError(null);
+    setLoading(true);
+    void fetchGitWorktreeRemovePreview(workRootId, serverRoute)
+      .then(setPreview)
+      .catch((nextError) =>
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "worktree remove preview failed",
+        ),
+      )
+      .finally(() => setLoading(false));
+  }, [serverRoute, workRootId]);
+
+  if (!workRootId || !serverRoute) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildWorktreeRemoveCloseCommand(workRootId, serverRoute), {
+      "worktreeRemove.close": onClose,
+    });
+  };
+
+  const submitDisabled =
+    submitting || loading || !preview || preview.available === false;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!preview || submitDisabled) {
+      return;
+    }
+    onCommand(buildWorktreeRemoveSubmitCommand(workRootId, serverRoute), {
+      "worktreeRemove.submit": () => {
+        setSubmitting(true);
+        setError(null);
+        // The confirmation modal itself IS the force confirmation: submitting
+        // after seeing the red data-loss banner authorizes `--force`.
+        void submitGitWorktreeRemove(
+          workRootId,
+          { deleteBranch, force: preview.hasUncommittedChanges },
+          serverRoute,
+        )
+          .then((response) => onRemoved(response, { workRootId, serverRoute }))
+          .catch((nextError) => {
+            setError(
+              nextError instanceof Error
+                ? nextError.message
+                : "worktree remove failed",
+            );
+          })
+          .finally(() => setSubmitting(false));
+      },
+    });
+  };
+
+  const branchName = preview?.branchName ?? null;
+  return (
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) close();
+      }}
+    >
+      <Modal className="root-picker-modal git-worktree-modal">
+        <Dialog aria-label="Remove Git worktree" className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">
+              Remove worktree
+            </Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="worktreeRemove.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
+            </div>
+          </div>
+          <div className="root-picker-current root-picker-context">
+            {preview?.targetPathLabel ?? "Loading worktree"}
+          </div>
+          <form className="git-worktree-form" onSubmit={submit}>
+            <p className="git-worktree-remove-copy">
+              This removes the linked worktree with{" "}
+              <code>git worktree remove</code>. The worktree directory will be
+              deleted from disk; the repository and other worktrees are
+              untouched.
+            </p>
+            {preview && preview.available === false ? (
+              <InlineNotice
+                tone="error"
+                title="Unavailable"
+                detail={preview.reason ?? "worktree cannot be removed"}
+              />
+            ) : null}
+            {preview?.hasUncommittedChanges ? (
+              <InlineNotice
+                tone="error"
+                title="Uncommitted changes will be lost"
+                detail={`${preview.modifiedFiles} modified · ${preview.untrackedFiles} untracked file(s) in this worktree will be permanently deleted.`}
+              />
+            ) : null}
+            {branchName ? (
+              <label className="git-worktree-remove-branch">
+                <input
+                  type="checkbox"
+                  checked={deleteBranch}
+                  onChange={(event) => setDeleteBranch(event.target.checked)}
+                />{" "}
+                <span>
+                  Delete branch <code>{branchName}</code> too
+                </span>
+                {preview?.branchUnmerged ? (
+                  <span
+                    className="git-worktree-remove-unmerged"
+                    style={{ color: "var(--tone-error, #d33)" }}
+                  >
+                    {" "}
+                    아직 머지되지 않았습니다 (unmerged — will be kept)
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
+            {error ? (
+              <InlineNotice
+                tone="error"
+                title="Remove worktree"
+                detail={error}
+              />
+            ) : null}
+            <div className="root-picker-footer-actions">
+              <button
+                className="action-button action-button-danger"
+                data-command-id="worktreeRemove.submit"
+                disabled={submitDisabled}
+                type="submit"
+              >
+                {submitting ? "Removing" : "Remove worktree"}
+              </button>
+              <button
+                className="action-button"
+                data-command-id="worktreeRemove.close"
+                type="button"
+                onClick={close}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
 function LinkedServerModal({
   state,
   onClose,
@@ -3587,6 +3861,7 @@ function ServerRows({
               openWorkRootKeys={openWorkRootKeys}
               onCommand={onCommand}
               worktreeOrderByWorkspace={workNavOrder.worktreeOrderByWorkspace}
+              hiddenWorktreesByWorkspace={workNavOrder.hiddenWorktreesByWorkspace}
               onWorkspaceReorder={onWorkspaceReorder}
               onWorktreeReorder={onWorktreeReorder}
             />
@@ -9964,6 +10239,7 @@ function WorkspaceRows({
   openWorkRootKeys,
   onCommand,
   worktreeOrderByWorkspace,
+  hiddenWorktreesByWorkspace,
   onWorkspaceReorder,
   onWorktreeReorder,
 }: {
@@ -9973,6 +10249,7 @@ function WorkspaceRows({
   openWorkRootKeys: ReadonlySet<string>;
   onCommand: DashboardCommandDispatcher;
   worktreeOrderByWorkspace: Readonly<Record<string, readonly string[]>>;
+  hiddenWorktreesByWorkspace: Readonly<Record<string, readonly string[]>>;
   onWorkspaceReorder: (
     serverId: string,
     sourceId: string,
@@ -9988,10 +10265,18 @@ function WorkspaceRows({
   const compactRoot = compactWorkspaceWorkRoot(workspace);
   const baseRoot = workspaceBaseWorkRoot(workspace);
   const worktreeScopeKey = serverScopedIdentity(serverId, workspace.id);
+  const hiddenIds = hiddenWorktreesByWorkspace[worktreeScopeKey];
+  const navChildWorkRoots = workspace.workRoots.filter(
+    isWorkspaceNavChildWorkRoot,
+  );
   const childWorkRoots = applySiblingOrder(
-    workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+    applyHiddenWorktrees(navChildWorkRoots, hiddenIds),
     worktreeOrderByWorkspace[worktreeScopeKey],
   );
+  const hiddenChildWorkRoots = hiddenWorktreeItems(
+    navChildWorkRoots,
+    hiddenIds,
+  ).map((root) => ({ id: root.id, label: root.label }));
   const selectedChildWorkRootIds = new Set(
     childWorkRoots.map((root) => root.id),
   );
@@ -10018,6 +10303,7 @@ function WorkspaceRows({
           kind={compactRoot.kind}
           availability={compactRoot.availability}
           activation={compactRoot.activation}
+          hiddenWorktrees={hiddenChildWorkRoots}
           canAddWorktree={
             compactRoot.kind === "gitPrimaryRoot" ||
             compactRoot.kind === "gitLinkedWorktree"
@@ -10054,6 +10340,7 @@ function WorkspaceRows({
         actions={workspace.actions}
         actionEntityId={workspace.id}
         actionServerId={serverId}
+        hiddenWorktrees={hiddenChildWorkRoots}
         canAddWorktree={workspace.workRoots.some(
           (root) =>
             root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree",
@@ -10079,9 +10366,10 @@ function WorkspaceRows({
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
-            actions={[]}
+            actions={root.actions}
             actionEntityId={root.id}
             actionServerId={serverId}
+            workspaceId={workspace.id}
             kind={root.kind}
             availability={root.availability}
             activation={root.activation}
@@ -10134,6 +10422,8 @@ function ResourceRow({
   actions = [],
   actionEntityId = id,
   actionServerId = "server-local",
+  workspaceId,
+  hiddenWorktrees = [],
   kind,
   availability,
   activation,
@@ -10155,6 +10445,12 @@ function ResourceRow({
   actions?: ActionHint[];
   actionEntityId?: string;
   actionServerId?: string;
+  // Owning workspace id for a child worktree row — target scope for the
+  // browser-local hide command (B-3). Unused by workspace/compact rows.
+  workspaceId?: string;
+  // Currently-hidden worktree entries for the workspace-row "..." menu's
+  // hidden-worktrees submenu (B-3 restore path). Empty on worktree rows.
+  hiddenWorktrees?: ReadonlyArray<{ id: string; label: string }>;
   kind?: WorkRootView["kind"];
   availability?: WorkRootView["availability"];
   activation?: WorkRootView["activation"];
@@ -10184,6 +10480,13 @@ function ResourceRow({
   const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
+  // Child worktree rows expose their own "..." menu (Remove worktree.../Hide
+  // worktree), gated on the daemon's `worktree.remove` action hint.
+  const hasWorktreeRemove =
+    presentation === "workRoot" &&
+    actions.some(
+      (action) => action.enabled && action.id === "worktree.remove",
+    );
   const canCloseWorkRoot =
     (presentation === "workRoot" ||
       presentation === "compactWorkRoot" ||
@@ -10295,7 +10598,7 @@ function ResourceRow({
           ) : null}
         </span>
       </button>
-      {hasWorkspaceRemove || canCloseWorkRoot ? (
+      {hasWorkspaceRemove || hasWorktreeRemove || canCloseWorkRoot ? (
         <span className="resource-row-actions">
           {canCloseWorkRoot ? (
             <ChromeIconButton
@@ -10366,6 +10669,94 @@ function ResourceRow({
                   >
                     <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
                     <span>Remove workspace...</span>
+                  </button>
+                  {hiddenWorktrees.length > 0 ? (
+                    <div
+                      className="workspace-row-menu-section"
+                      data-testid="hidden-worktrees-section"
+                    >
+                      <div className="workbench-overflow-heading">
+                        Hidden worktrees
+                      </div>
+                      {hiddenWorktrees.map((hidden) => (
+                        <button
+                          key={hidden.id}
+                          className="workbench-overflow-item"
+                          data-command-id="worktree.unhide"
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onCommand(
+                              buildWorktreeUnhideCommand(
+                                actionEntityId,
+                                hidden.id,
+                                actionServerId,
+                              ),
+                            );
+                          }}
+                        >
+                          <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
+                          <span>{hidden.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </span>
+          ) : null}
+          {hasWorktreeRemove ? (
+            <span className="workspace-row-menu-wrap" ref={menuRef}>
+              <ChromeIconButton
+                className="resource-row-action"
+                commandId="worktreeHidden.menu.open"
+                icon={MoreHorizontal}
+                label={`More actions for ${title}`}
+                onClick={() =>
+                  setMenuOpen((current) => !current)
+                }
+              />
+              {menuOpen ? (
+                <div
+                  className="workbench-overflow-menu workspace-row-menu"
+                  role="menu"
+                >
+                  <button
+                    className="workbench-overflow-item"
+                    data-command-id="worktree.hide"
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (workspaceId) {
+                        onCommand(
+                          buildWorktreeHideCommand(
+                            workspaceId,
+                            id,
+                            actionServerId,
+                          ),
+                        );
+                      }
+                    }}
+                  >
+                    <EyeOff aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <span>Hide worktree</span>
+                  </button>
+                  <button
+                    className="workbench-overflow-item workbench-overflow-item-danger"
+                    data-command-id="worktreeRemove.open"
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onCommand(
+                        buildWorktreeRemoveOpenCommand(id, actionServerId),
+                      );
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <span>Remove worktree...</span>
                   </button>
                 </div>
               ) : null}
