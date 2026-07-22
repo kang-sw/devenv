@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.34.4 - 2026-07-22
+
+### Changed
+- `lead-drain-ready-queue` now opens with a **goal-run posture**: during a goal
+  run (current branch `goal/*`, or an active `/goal` Stop-hook reminder), the
+  lead assumes the user is away and resolves reversible, local decisions on its
+  own stated recommendation — recording the choice in one line and continuing
+  without waiting for confirmation — instead of stalling on trivial "which
+  option?" prompts. It stops only for genuinely critical decisions (irreversible
+  or destructive actions, public-API/cross-module scope expansion, unresolved
+  binding decisions, or any AGENTS.md "Always ask" item); the confirmation
+  threshold rises but the hard gates never dissolve. Placed as a top-of-body
+  lead-in so the `/goal` Stop-hook re-surfaces it every turn, covering all
+  downstream sub-skills rather than one gate. Ships the authoritative posture
+  only; decision-point reinforcement tips and spec documentation are tracked in
+  `260722-feat-goal-run-autonomy-posture`.
+
 ## v0.34.3 - 2026-07-22
 
 ### Fixed
