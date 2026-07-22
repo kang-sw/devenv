@@ -35,7 +35,7 @@ import type {
   ActivitySessionForkRequest,
   ActivitySessionForkResponse,
 } from "./activitySessionApi.js";
-import type { AgentChatSessionView } from "./agentChatSessions.js";
+import type { AgentChatHarness, AgentChatSessionView } from "./agentChatSessions.js";
 import type {
   ActivityItem,
   ActivitySourceDisplay,
@@ -45,6 +45,17 @@ import type {
 
 // The subset of `AgentChatHarness` that has a real daemon route today.
 export type RealAgentChatHarness = "codex" | "claude";
+
+// `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1 harness
+// routing: only Codex/Claude have a real adapter wired in this module; every
+// other harness (OpenCode today) stays on `activitySessionStub.ts` (see the
+// plan's Codebase Findings — do not regress stub-backed flows for unadapted
+// harnesses).
+export function realAgentChatHarness(
+  harness: AgentChatHarness,
+): RealAgentChatHarness | null {
+  return harness === "codex" || harness === "claude" ? harness : null;
+}
 
 function sessionSegment(harness: RealAgentChatHarness): "codex-sessions" | "claude-sessions" {
   return harness === "codex" ? "codex-sessions" : "claude-sessions";
