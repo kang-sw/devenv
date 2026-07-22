@@ -178,24 +178,23 @@ limitation, not a bug — see Layer-2 branch-coverage reality);
 
 Depends on Phase 1 (the authority the tips reference must exist first).
 
-## Open Design Decision
+## Resolved Design Decision (git.commit tip scope)
 
-The user explicitly wanted a commit-time reminder, but under the branch-name-only
-signal the `git.commit` tip cannot fire on implementation commits (they run on
-`impl/*`). Two options, to confirm before Phase 2 is finalized:
+**Decided: A — accept the limitation, keep the `goal/*`-only signal.** No new
+persisted state, no constraint change. Implementation commits (on `impl/*`) are
+covered authoritatively by Layer 1 (drain body, re-surfaced every turn) and by
+the per-slice `enter.implement` verdict tip; the `git.commit` tip is best-effort
+for commits made directly on the goal branch. The `git.commit` site is retained
+(not dropped) because a non-trivial number of commit calls do occur directly at
+the goal-branch point (plan artifacts, staging, final merge), so the tip still
+has real reinforcement value there.
 
-- **A (accept limitation — recommended, autonomous):** keep the `goal/*`-only
-  signal. Implementation commits are covered by Layer 1 + the `enter.implement`
-  verdict tip; the `git.commit` tip stays best-effort for direct goal-branch
-  commits. No new state, no constraint change.
-- **B (broaden signal — "ask first" scope):** make `git.commit` detect goal-run
-  context from an `impl/*` branch by inspecting the fork parent / merge target
-  (the goal-branch name is already encoded per commit `3ef852e5`). This delivers
-  the literal commit-time reminder the user asked for, but revisits the stated
-  "the `goal/*` branch name is the sole signal, no new persisted state"
-  constraint, so it is an architecture decision, not an implementer call.
-
-Default if unresolved: A.
+Rejected — **B (broaden signal):** making `git.commit` detect goal-run context
+from an `impl/*` branch by inspecting the fork parent / merge target (the
+goal-branch name is already encoded per commit `3ef852e5`) would deliver a literal
+implementation-commit reminder, but revisits the "the `goal/*` branch name is the
+sole signal, no new persisted state" constraint — an architecture change judged
+not worth reopening, since Layer 1 already covers mid-implementation commits.
 
 ## Spec Impact
 
