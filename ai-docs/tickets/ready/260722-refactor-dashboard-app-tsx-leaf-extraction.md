@@ -102,6 +102,55 @@ layout are unchanged. Note: the Playwright acceptance suite is currently
 red-lined by `260722-bug-e2e-open-work-root-locator-ambiguity`; that fix must
 land first for the browser gate to pass.
 
+### Result (4b492e60) - 2026-07-22
+
+Landed 10 commits (339714fe..4b492e60). App.tsx 9,808 -> 7,626 lines (-2,182).
+Cumulative Phase 1+2: 11,382 -> 7,626 (-3,756, ~33%).
+
+Extracted (all props-only, verified NOT capturing App()/WorkbenchShell state):
+ReadOnlyDocumentPane -> readOnlyDocumentPane.tsx, TerminalPaneBody ->
+terminalPaneBody.tsx, AgentChatPaneBody -> agentChatPaneBody.tsx. Deferred
+step-7 constructors -> workbench/ (readOnlyWorkbenchPane.tsx,
+terminalWorkbenchPane.tsx, agentChatWorkbenchPane.tsx;
+buildWorkbenchEditorGroups + types + initialWorkbenchGroups -> new neutral
+workbench/editorGroups.ts; workRootActivityPlacementState/
+workRootActivityWorkbenchPane -> workbench/activityPlacement.tsx). New
+neutral module dismissableMenu.ts (useDismissableMenu). Relocated
+TerminalPrefsContext -> terminalPrefs.ts, realAgentChatHarness ->
+activitySessionClient.ts. resourcePresentation.tsx got a compile-only
+`.js`-suffix barrel-import fix.
+
+Barrel back-import hazard avoided: shared symbols relocated to neutral
+modules imported by BOTH pane bodies and WorkbenchShell (not duplicated),
+no `../App` back-imports (grep-verified per commit). The editorGroups.ts
+<-> workbench/activityPlacement.tsx runtime circular import was verified
+safe (cross-referenced bindings read only inside function bodies after
+module-graph load, never top-level); opus correctness review confirmed
+clean.
+
+Verification: per-commit `npm run build` + NodeNext
+`tsc -p tsconfig.route-tests.json` green; all 20 `test:*` suites green;
+`npm run test:browser` fails ONLY at pre-existing
+dashboard-acceptance.spec.ts:2714 (unrelated, tracked by
+260722-bug-e2e-terminal-resize-frame-assertion-fails), no new failures.
+
+Review: partitioned correctness (opus) clean + test (sonnet) clean with 1
+deferred minor (pane bodies/workbench modules lack paired `.test.ts`; no
+coverage regression - untested before the move too; consistent with Phase 1
+precedent). No Critical/Important.
+
+Residual acceptance (why this ticket is NOT yet closed to .done/): the
+ticket's stated bar (full `npm run test:browser` green + manual smoke of
+terminal restore/reattach, the four modals, and dockview layout) is not
+fully met - full browser-green is blocked by the unrelated pre-existing
+2714 failure, and manual smoke is pending a human pass. Both phases now
+have Results; closure awaits the 2714 fix + a manual smoke pass.
+
+Forward: buildWorkbenchEditorGroups now lives in a testable neutral module
+(workbench/editorGroups.ts); adding a direct unit test for its
+group-assignment / agentChat-append-last branching is a worthwhile
+follow-up.
+
 ## Spec Impact
 
 No spec addressing: this is a behavior-preserving refactor with no
