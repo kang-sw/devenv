@@ -49,6 +49,8 @@ export type DashboardCommandId =
   | "document.mode.set"
   | "document.save"
   | "document.revert"
+  | "settings.open"
+  | "settings.close"
   | `resource.action.${string}`
   | `workbench.toggle.${string}`
   | `workbench.tab.${string}`;
@@ -122,7 +124,9 @@ export type DashboardCommandPayload =
       mode: "view" | "edit";
     }
   | { type: "document.save"; workRootId: string; path: string }
-  | { type: "document.revert"; workRootId: string; path: string };
+  | { type: "document.revert"; workRootId: string; path: string }
+  | { type: "settings.open" }
+  | { type: "settings.close" };
 
 export type DashboardCommand = {
   commandId: DashboardCommandId;
@@ -656,6 +660,14 @@ export function buildDocumentRevertCommand(
   };
 }
 
+export function buildSettingsOpenCommand(): DashboardCommand {
+  return { commandId: "settings.open", payload: { type: "settings.open" } };
+}
+
+export function buildSettingsCloseCommand(): DashboardCommand {
+  return { commandId: "settings.close", payload: { type: "settings.close" } };
+}
+
 export function dispatchDashboardCommand(
   command: DashboardCommand,
   options: {
@@ -770,6 +782,10 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Save document";
     case "document.revert":
       return "Revert document";
+    case "settings.open":
+      return "Open settings";
+    case "settings.close":
+      return "Close settings";
     case "action":
       return payload.label;
   }

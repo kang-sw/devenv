@@ -65,6 +65,10 @@
     "src/terminals.test.ts",
     "src/terminalCommandPlan.ts",
     "src/terminalCommandPlan.test.ts",
+    "src/settingsStore.ts",
+    "src/settingsStore.test.ts",
+    "src/terminalPrefs.ts",
+    "src/terminalPrefs.test.ts",
     "src/workbench/**/*.ts"
   ]
 }
