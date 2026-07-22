@@ -124,13 +124,14 @@ general-purpose named-agent form; role-specific delegates obtain a self-containe
 prompt from `ws/playbook.render` and run natively by default. For Codex-native
 dispatch, the lead passes render-returned `recommended-model` as
 `spawn_agent.model` and optional `recommended-reasoning-effort` as
-`spawn_agent.reasoning_effort`; `effort` is not the parameter name. It omits
-absent bindings, uses `fork_turns: "none"` for the self-contained rendered
-prompt, and reports a rejected field and value instead of claiming the binding
-was applied. Harness selection and binding-resolution rationale remain outside
-the workflow manual; it exposes only the concrete dispatch operation needed by
-the active toolbox. Delegate prompt bodies do not repeat their own model alias;
-binding metadata stays lead-facing and is applied before spawn. The removed
+`spawn_agent.reasoning_effort` — the parameter is `reasoning_effort`, not
+`effort`. The lead omits absent bindings, spawns the self-contained rendered
+prompt with `fork_turns: "none"`, and, if a binding is rejected, reports the
+rejected field and value rather than claiming it was applied. Shipped skill text
+shows only these concrete dispatch operations, not harness-selection or
+binding-resolution rationale. Delegate prompt bodies do not repeat their own
+model alias; binding metadata stays lead-facing and is applied before spawn. The
+removed
 `prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
 appear in shipped skill text. CLI adapter syntax belongs only in compatibility
 or testing references. {#260507-mcp-centric-workflow-language}

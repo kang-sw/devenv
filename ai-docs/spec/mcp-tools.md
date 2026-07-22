@@ -1130,15 +1130,14 @@ bodies.
 
 `playbook.render(session_key, name, context?, root_override?)` materializes the
 named playbook as a context-injected, harness-rendered prompt, writes it to a
-worktree-scoped temporary file, and returns ordered line-oriented metadata. The
-prompt path remains the first line. A playbook with a declared first-class
-frontmatter tier then returns the existing `recommended-tier` line, followed by
-`recommended-model` when that tier resolves to a non-empty model for the active
-harness, and `recommended-reasoning-effort` when the same harness-local binding
-also resolves a non-empty effort. Harness-local configuration, including user
-overrides, is authoritative; a binding-resolution failure or empty optional
-value omits the corresponding new line while preserving the path and stable tier
-guidance.
+worktree-scoped temporary file, and returns its metadata as ordered lines. The
+first line is always the prompt path. If the playbook declares a first-class
+frontmatter tier, the next line is `recommended-tier`, optionally followed by
+`recommended-model` when the tier resolves to a model for the active harness and
+`recommended-reasoning-effort` when it also resolves an effort. Harness-local
+configuration, including user overrides, is authoritative for this resolution. A
+resolution failure or empty value omits only that optional line; the path and
+`recommended-tier` are unaffected.
 
 The caller hands the path to a host-native subagent or a mercenary. Native
 dispatch uses the resolved binding metadata supported by its harness; Codex maps
