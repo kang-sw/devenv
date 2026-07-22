@@ -4,6 +4,7 @@ related:
   260722-refactor-dashboard-app-tsx-leaf-extraction: prerequisite that shrinks the leaf surface first
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
 ---
 
 # Decompose App.tsx - untangle the WorkbenchShell/App() state core (design-gated)
