@@ -138,7 +138,7 @@ observes the branch via `observeImplementBranch`.
 
 ## Phases
 
-### Phase 1: Authoritative goal-run posture in drain body (+ spec)
+### Phase 1: Authoritative goal-run posture in drain body
 
 Add a goal-run autonomy paragraph to
 `agents-plugin/skills/lead-drain-ready-queue/SKILL.md`: when in goal pursue
@@ -149,15 +149,26 @@ line; do not wait for confirmation; stop only on critical
 Wording must not contradict `lead-implement`'s genuine hard gates.
 
 Follow `agents-plugin/skills/lead-skill-authoring/SKILL.md` invariant checklist
-for the changed lines. Document the posture in the spec drain anchor (see
-`## Spec Impact`).
+for the changed lines. Spec documentation of the posture moves to Phase 2 (see
+`## Spec Impact`); this phase ships the behavior only.
 
 Verification: skill-authoring invariant checklist passes for changed lines;
-posture text is consistent with the hard-gate list; spec anchor updated.
+posture text is consistent with the hard-gate list; wsflow substitution mirror
+regenerated and package tests pass.
 
-Deferred: no Go changes in this phase.
+Deferred: no Go changes; spec documentation.
 
-### Phase 2: Just-in-time reinforcement tips (Go)
+### Result (f303d091) - 2026-07-22
+
+Shipped as a standalone hotfix on `main` (v0.34.4) at the user's request,
+outside the normal proceed/implement flow. Posture added as a top-of-body
+lead-in (not buried mid-skill) so the `/goal` Stop-hook re-surfaces it every
+turn. drain is a substitution-mirrored wsflow skill: edited canonical source
+only, regenerated `agents-plugin-wsflow` via `WS_REGEN_WSFLOW_SKILLS`; drift
+guard + wsflow package tests (9) pass. Posture text is namespace-clean so it
+clears the generation eligibility guard. Spec documentation deferred to Phase 2.
+
+### Phase 2: Just-in-time reinforcement tips (Go) + spec documentation
 
 Inject a `goal/*`-conditional posture tip at two decision-point handlers:
 - `git.commit` — append a tip line when `wsgit.Status(root).Branch.Head` starts
@@ -168,6 +179,9 @@ Inject a `goal/*`-conditional posture tip at two decision-point handlers:
 Tip wording references the Phase-1 drain posture; "stop only on critical", never
 "never stop". Keep each site self-contained (a few lines per handler); do not
 touch the `workflow_manual` banner injectors.
+
+Also document the shipped posture in the spec drain anchor (see `## Spec Impact`)
+— deferred here from Phase 1 so the spec captures both layers in one entry.
 
 Verification: `go build` / existing MCP test suite passes; manual checks —
 (a) `enter.implement` resolved while on `goal/<parent>/<slug>` shows the tip;
