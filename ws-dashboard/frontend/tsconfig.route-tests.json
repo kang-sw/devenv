@@ -33,6 +33,8 @@
     "src/workNavOrder.test.ts",
     "src/keydownSuppression.ts",
     "src/keydownSuppression.test.ts",
+    "src/hotkeys.ts",
+    "src/hotkeys.test.ts",
     "src/resourceRefresh.ts",
     "src/resourceRefresh.test.ts",
     "src/documentViewer.tsx",
