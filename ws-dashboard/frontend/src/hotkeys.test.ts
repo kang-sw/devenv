@@ -4,6 +4,7 @@ import {
   buildLeaderTree,
   checkHotkeyBindingKeys,
   chordFromKeydownEvent,
+  describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
   HotkeyRegistry,
@@ -542,6 +543,66 @@ const EXPECTED_DEFAULT_KEYMAP: readonly {
     stepIntoXY.binding?.id,
     "deeper-leaf",
     "'x y' resolves to the longer registration's binding",
+  );
+
+  // --- describeLeaderChildren: which-key overlay row derivation ---
+  //
+  // Reuses the same mixed 'x' (leaf-and-group) node from above to verify
+  // `describeLeaderChildren` replicates `stepLeaderState`'s children-win
+  // precedence rather than re-deriving its own rule.
+
+  // The mixed tree's ROOT has a single child, 'x', which itself carries
+  // BOTH a binding (shadowed-leaf) and children (the 'x y' registration).
+  // Children must win: 'x' describes as a group, never a leaf.
+  const rootEntries = describeLeaderChildren(mixedTree);
+  assertDeepEqual(
+    rootEntries,
+    [{ key: "x", kind: "group" }],
+    "a child with both a binding and children describes as a group (children win), carrying no label",
+  );
+
+  // Descending into 'x', its own child 'y' is a true terminal leaf (no
+  // children of its own) - describes as a leaf with its label sourced from
+  // `binding.description`.
+  const yLeafEntries = describeLeaderChildren(xNode);
+  assertDeepEqual(
+    yLeafEntries,
+    [{ key: "y", kind: "leaf", label: undefined }],
+    "a childless node with a binding describes as a leaf; label falls back to undefined when the binding sets no description",
+  );
+
+  // A binding WITH a `description` set produces that description as the
+  // leaf's label (mirrors every real default binding).
+  const describedBindings: readonly HotkeyBinding<HotkeyDispatchContext>[] = [
+    {
+      id: "described-leaf",
+      kind: "leaderSub",
+      keys: leaderKeys("q"),
+      commandId: "terminal.create",
+      buildPayload: () => ({ type: "terminal.create", workRootId: "r" }),
+      description: "Create a new terminal",
+    },
+  ];
+  const describedTree = buildLeaderTree(describedBindings);
+  assertDeepEqual(
+    describeLeaderChildren(describedTree),
+    [{ key: "q", kind: "leaf", label: "Create a new terminal" }],
+    "a leaf's label is sourced from the binding's `description`",
+  );
+
+  // Defensive: calling `describeLeaderChildren` on a true terminal leaf
+  // node (empty `children` map) returns an empty list rather than
+  // throwing or fabricating rows - not reachable via the overlay itself
+  // (only ever invoked on a `pending` node, never a resolved leaf), but
+  // the contract must hold since `LeaderTreeNode` is an exported type.
+  const yNode = xNode.children.get("y");
+  if (!yNode) {
+    throw new Error("expected the 'y' node to exist under the mixed tree's 'x' node");
+  }
+  assertDeepEqual(
+    describeLeaderChildren(yNode),
+    [],
+    "describeLeaderChildren on a childless node returns an empty list",
   );
 }
 

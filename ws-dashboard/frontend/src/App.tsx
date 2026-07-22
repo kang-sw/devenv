@@ -123,6 +123,7 @@ import {
   buildDefaultHotkeyBindings,
   buildLeaderTree,
   chordFromKeydownEvent,
+  describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
   isLeaderTriggerKeydown,
@@ -388,6 +389,7 @@ import {
   reconnectServerTunnel,
 } from "./linkedServers";
 import { ActivityConsole } from "./ActivityConsole";
+import { WhichKeyOverlay } from "./WhichKeyOverlay";
 import {
   createResourceRefreshCoordinator,
   requestDashboardResources,
@@ -744,6 +746,16 @@ export function App() {
   const leaderStateRef = useRef<LeaderState<HotkeyDispatchContext>>({
     kind: "idle",
   });
+  // Parallel React-state mirror of `leaderStateRef` (260722-feat-dashboard-
+  // which-key-hint-overlay Phase 1). The ref above remains the synchronous
+  // dispatch source of truth (unchanged) - this state exists purely so the
+  // which-key overlay can reactively re-render off leader-mode transitions,
+  // since a component cannot render off a bare ref. Updated via
+  // `setLeaderUiState` immediately alongside every `leaderStateRef.current =
+  // ...` assignment inside the keydown handler below, never on its own.
+  const [leaderUiState, setLeaderUiState] = useState<
+    LeaderState<HotkeyDispatchContext>
+  >({ kind: "idle" });
   // The live dispatch context (currently active work root/workspace/server)
   // the leader-listener effect below reads on every keydown without needing
   // to reinstall the listener on every selection change - same ref-sync
@@ -1670,6 +1682,7 @@ export function App() {
           Date.now(),
         );
         leaderStateRef.current = transition.state;
+        setLeaderUiState(transition.state);
         if (transition.action === "resolve" && transition.binding) {
           const command = resolveHotkeyCommand(
             transition.binding,
@@ -1706,6 +1719,7 @@ export function App() {
           framework.leaderTree,
           Date.now(),
         );
+        setLeaderUiState(leaderStateRef.current);
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -1965,6 +1979,7 @@ export function App() {
           />
         </section>
       </div>
+      <WhichKeyOverlay leaderState={leaderUiState} />
     </main>
   );
 }
