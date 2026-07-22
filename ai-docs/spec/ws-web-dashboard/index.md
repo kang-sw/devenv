@@ -621,6 +621,44 @@ the daemon can identify it. Checked-out branches, invalid names, unavailable
 Git roots, and path conflicts produce bounded errors without exposing private
 host paths in command payloads, logs, or browser-visible diagnostics.
 
+## Git Worktree Removal {#260722-ws-dashboard-git-worktree-removal}
+
+The dashboard lets an authenticated owner remove a linked Git worktree
+through a two-step preview/submit flow mirroring worktree creation: a
+non-mutating preview reports the target's dirty state (modified/untracked
+file counts) and, when the worktree has a checked-out branch, whether that
+branch is unmerged. Submit re-resolves and re-validates before mutating.
+
+The op always resolves and runs `git worktree remove`, and any branch
+deletion, from the workspace's PRIMARY Git root — never from a working
+directory rooted inside the worktree being removed, since a worktree cannot
+remove itself from its own context.
+
+Force gate: submitting against a worktree with uncommitted or untracked
+changes without an explicit `force` flag is rejected with a bounded 409
+response; the caller must resubmit with `force` set after the owner has seen
+the data-loss warning. Force is never implied or defaulted — it is a
+deliberate per-submit caller choice, not something a client can trigger
+accidentally.
+
+Optional branch deletion is non-destructive. Whether deletion is requested is
+the caller's choice. Before deleting, the daemon checks — using a
+non-mutating merge-base ancestry check equivalent to the condition under
+which plain `git branch -d` itself would refuse — whether the branch has
+commits unreachable from its upstream, or, absent an upstream, from the
+primary root's current HEAD. A branch found unmerged is left intact and
+reported back as skipped; branch deletion only ever runs plain `git branch
+-d`, never a force variant, so it can never discard dangling commits.
+
+On successful disk removal, the daemon unregisters the workRoot entry and
+persists the registry, then clears terminal, Codex, and Claude sessions
+scoped to the removed workRoot id. If the registry persist fails after a
+successful `git worktree remove`, disk is treated as the source of truth:
+the entry is not re-registered — doing so would resurrect a registry row
+pointing at a path that no longer exists — session cleanup still runs, and
+the returned view reflects the completed removal. The stale persisted file
+is logged for self-heal on a later successful persist.
+
 ## Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
 
 The selected WorkRoot toolbar shows Git controls only for online, available
@@ -673,6 +711,35 @@ does not become browser-side resource authority, overlapping refresh requests
 are suppressed, stale poll results do not overwrite newer open or activation
 resource views, and refresh failures keep the last known resource tree visible.
 Filesystem watchers, if added later, act only as refresh hints.
+
+## Worktree Removal Confirmation And Hide UX {#260722-ws-dashboard-worktree-removal-hide-ux}
+
+Removing a linked worktree always opens a real confirmation modal — never a
+bare browser `confirm()` dialog — regardless of whether the target is clean
+or dirty; worktree add/remove is treated as a heavy operation independent of
+whether there is uncommitted work to lose. When the preview reports
+uncommitted or untracked changes, the modal additionally surfaces a distinct
+red data-loss notice naming the file counts that will be deleted; submitting
+from that state is what authorizes the daemon's force gate. A 409 force-gate
+response — the target turned dirty after a clean preview — refreshes the
+preview in place so the notice appears, rather than forcing the owner to
+close and reopen the modal.
+
+The same modal includes a "delete branch too" checkbox that defaults OFF, so
+the branch is preserved unless the owner opts in. When the preview reports
+the branch as unmerged, the checkbox shows a red inline warning; even if
+checked in that state, the branch is kept rather than deleted.
+
+Hiding a worktree is pure browser-local display state, fully decoupled from
+the daemon registry: it only removes the row from the dashboard's visible
+worktree list, never touches the worktree directory or its branch, and never
+calls the removal op. The hide affordance is not gated on the daemon's
+worktree-removal availability — an unavailable or inactive worktree can still
+be hidden, which is the case where decluttering is most useful. Restore
+path: the owning workspace's "..." overflow menu gains a hidden-worktrees
+submenu listing currently-hidden entries; selecting one un-hides it. The
+`g w h` chord opens/reveals this hidden-worktrees submenu for the currently
+relevant workspace.
 
 ## Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
 
