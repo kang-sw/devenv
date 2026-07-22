@@ -86,3 +86,16 @@ export function buildEffectiveTerminalFontFamily(override: string): string {
   }
   return `${trimmed}, ${TERMINAL_FONT_FALLBACK_STACK}`;
 }
+
+// Pure validation for the Terminal settings section's font-size <input>:
+// accepts the raw input string, returns a usable positive finite point size,
+// or null when the entry is empty / NaN / zero / negative. Extracted from the
+// JSX onChange guard so the "reject NaN and non-positive sizes" contract is
+// unit-testable without a DOM.
+export function parseTerminalFontSizeInput(raw: string): number | null {
+  const nextSize = Number(raw);
+  if (Number.isFinite(nextSize) && nextSize > 0) {
+    return nextSize;
+  }
+  return null;
+}

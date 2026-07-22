@@ -2,6 +2,7 @@ import {
   buildEffectiveTerminalFontFamily,
   DEFAULT_TERMINAL_STYLE_PREFS,
   loadTerminalStylePrefs,
+  parseTerminalFontSizeInput,
   saveTerminalStylePrefs,
   TERMINAL_FONT_FALLBACK_STACK,
   type TerminalStylePrefs,
@@ -123,5 +124,48 @@ assertDeepEqual(
     "a version-mismatched payload falls back to the default terminal style prefs",
   );
 }
+
+// --- Font-size input validation ---------------------------------------------
+//
+// The Terminal settings section's font-size <input> guards its onChange through
+// this pure helper: only finite, strictly-positive sizes are accepted; empty,
+// NaN, zero, and negative entries are rejected (return null) so a partially
+// typed or invalid value never clobbers the persisted size.
+
+assertEqual(
+  parseTerminalFontSizeInput("14"),
+  14,
+  "a valid positive size string parses to that number",
+);
+
+assertEqual(
+  parseTerminalFontSizeInput("13.5"),
+  13.5,
+  "a fractional positive size is accepted",
+);
+
+assertEqual(
+  parseTerminalFontSizeInput(""),
+  null,
+  "an empty input is rejected (returns null)",
+);
+
+assertEqual(
+  parseTerminalFontSizeInput("abc"),
+  null,
+  "a non-numeric input (NaN) is rejected",
+);
+
+assertEqual(
+  parseTerminalFontSizeInput("0"),
+  null,
+  "zero is rejected as a non-positive size",
+);
+
+assertEqual(
+  parseTerminalFontSizeInput("-4"),
+  null,
+  "a negative size is rejected",
+);
 
 assertEqual(true, true, "terminalPrefs tests completed");

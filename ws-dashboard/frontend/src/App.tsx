@@ -432,6 +432,10 @@ import {
   DEFAULT_TERMINAL_STYLE_PREFS,
   type TerminalStylePrefs,
 } from "./terminalPrefs";
+import {
+  SETTINGS_SECTIONS,
+  SettingsTerminalContext,
+} from "./settingsSections";
 
 type CommandPayload = DashboardCommandPayload;
 type CommandEntry = DashboardCommandEntry;
@@ -1903,8 +1907,17 @@ export function App() {
     saveTerminalStylePrefs(next);
   }, []);
 
+  // Settings-scoped Terminal context value (prefs + write path) consumed by the
+  // Terminal settings section. Memoized so the Provider value only changes when
+  // the prefs actually change, not on every unrelated App re-render.
+  const settingsTerminalContextValue = useMemo(
+    () => ({ prefs: terminalPrefs, onChange: handleTerminalPrefsChange }),
+    [terminalPrefs, handleTerminalPrefsChange],
+  );
+
   return (
     <TerminalPrefsContext.Provider value={terminalPrefs}>
+    <SettingsTerminalContext.Provider value={settingsTerminalContextValue}>
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
         <aside
@@ -1982,8 +1995,7 @@ export function App() {
           />
           <SettingsModal
             open={settingsOpen}
-            terminalPrefs={terminalPrefs}
-            onTerminalPrefsChange={handleTerminalPrefsChange}
+            sections={SETTINGS_SECTIONS}
             onCommand={executeCommand}
             onClose={() => setSettingsOpen(false)}
           />
@@ -2036,6 +2048,7 @@ export function App() {
       </div>
       <WhichKeyOverlay leaderState={leaderUiState} />
     </main>
+    </SettingsTerminalContext.Provider>
     </TerminalPrefsContext.Provider>
   );
 }
@@ -3493,40 +3506,20 @@ function GitWorktreeRemoveModal({
 
 function SettingsModal({
   open,
-  terminalPrefs,
-  onTerminalPrefsChange,
+  sections,
   onCommand,
   onClose,
 }: {
   open: boolean;
-  terminalPrefs: TerminalStylePrefs;
-  onTerminalPrefsChange: (next: TerminalStylePrefs) => void;
+  sections: readonly SettingsSectionDescriptor[];
   onCommand: DashboardCommandDispatcher;
   onClose: () => void;
 }) {
-  // Section registry: id/title/render surface only - this shell has no other
-  // knowledge of what a section renders, so a future section (e.g. a
-  // hotkey-rebind editor) registers here without any other change below.
-  // Built per-render rather than at module scope purely so the Terminal
-  // section's `Component` can close over the live
-  // `terminalPrefs`/`onTerminalPrefsChange` from `App()` (which owns that
-  // state and must persist on change) without widening
-  // `SettingsSectionDescriptor` itself to carry per-section props.
-  const sections = useMemo<readonly SettingsSectionDescriptor[]>(
-    () => [
-      {
-        id: "terminal",
-        title: "Terminal",
-        Component: () => (
-          <TerminalStyleSection
-            prefs={terminalPrefs}
-            onChange={onTerminalPrefsChange}
-          />
-        ),
-      },
-    ],
-    [terminalPrefs, onTerminalPrefsChange],
-  );
+  // The shell is section-agnostic: it receives the section list as an injected
+  // prop and only ever consumes `{ id, title, Component }`. It threads no
+  // section-specific (e.g. Terminal-typed) props, so registering a new section
+  // means appending a descriptor to `SETTINGS_SECTIONS` - each section sources
+  // its own state from its own context - with no change to this component.
   const [activeSectionId, setActiveSectionId] = useState<string | undefined>(
     () => sections[0]?.id,
   );
@@ -3596,61 +3589,6 @@ function SettingsModal({
         </Dialog>
       </Modal>
     </ModalOverlay>
-  );
-}
-
-function TerminalStyleSection({
-  prefs,
-  onChange,
-}: {
-  prefs: TerminalStylePrefs;
-  onChange: (next: TerminalStylePrefs) => void;
-}) {
-  return (
-    <div className="settings-field-group">
-      <label className="settings-field">
-        <span className="settings-field-label">Font family</span>
-        <input
-          className="root-picker-input"
-          placeholder="System default (Nerd Font stack)"
-          spellCheck={false}
-          type="text"
-          value={prefs.fontFamilyOverride}
-          onChange={(event) =>
-            onChange({ ...prefs, fontFamilyOverride: event.target.value })
-          }
-        />
-      </label>
-      <label className="settings-field">
-        <span className="settings-field-label">Font size</span>
-        <input
-          className="root-picker-input"
-          max={32}
-          min={8}
-          type="number"
-          value={prefs.fontSize}
-          onChange={(event) => {
-            const nextSize = Number(event.target.value);
-            if (Number.isFinite(nextSize) && nextSize > 0) {
-              onChange({ ...prefs, fontSize: nextSize });
-            }
-          }}
-        />
-      </label>
-      <label className="settings-field">
-        <span className="settings-field-label">Background color</span>
-        <input
-          className="root-picker-input"
-          placeholder="#0b0d10"
-          spellCheck={false}
-          type="text"
-          value={prefs.themeBackground}
-          onChange={(event) =>
-            onChange({ ...prefs, themeBackground: event.target.value })
-          }
-        />
-      </label>
-    </div>
   );
 }
 
@@ -9836,6 +9774,15 @@ function TerminalPaneBody({
     );
     terminal.options.fontSize = terminalPrefs.fontSize;
     terminal.options.theme = { background: terminalPrefs.themeBackground };
+    // A font metric change (family or size) recomputes the emulator's cell
+    // size but not its col/row count, so without a re-fit a larger font
+    // overflows/clips the pane and the daemon PTY keeps the stale geometry
+    // until the next container resize. Re-run the mount effect's own fit +
+    // size-forward closures (same path as a ResizeObserver tick). Both refs are
+    // nulled on the mount effect's cleanup, so the optional-chaining guard makes
+    // this a no-op against a disposed terminal.
+    fitNowRef.current?.();
+    forwardSizeRef.current?.();
   }, [terminalPrefs]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
