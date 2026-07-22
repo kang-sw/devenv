@@ -309,6 +309,47 @@ export function stepLeaderState<TContext>(
   return { state: { kind: "idle" }, action: "cancel" };
 }
 
+// --- Which-key overlay support (260722-feat-dashboard-which-key-hint-
+// overlay Phase 1) -----------------------------------------------------
+//
+// Pure, DOM-free presentation helper: given the currently-pending
+// `LeaderTreeNode`, describe its immediate children as overlay-ready rows.
+// Deliberately does NOT introduce its own group/leaf rule - it replicates
+// the exact same children-win precedence `stepLeaderState` already
+// enforces (see the module-level comment above `LeaderTreeNode`): a child
+// with any children of its own is always a group and never shadow-fires a
+// `binding` it might also carry.
+//
+// Leaf label source: the finalized which-key spec says leaf labels come
+// from `dashboardCommandLabel`, but that requires resolving a
+// `DashboardCommand` via `binding.buildPayload(ctx)`, which returns `null`
+// (and therefore no label) for every context-dependent default binding
+// whenever no work root is selected (see `activeRootBinding`). Every
+// default leaf's `description` was already authored as the same
+// human-readable action label `dashboardCommandLabel` would have produced,
+// so `binding?.description` is used directly here instead - satisfying the
+// spec's intent without the null-payload gap. This module has zero other
+// `description` consumers today; this helper is its first reader.
+export type LeaderChildEntry = {
+  readonly key: string;
+  readonly kind: "group" | "leaf";
+  readonly label?: string;
+};
+
+export function describeLeaderChildren<TContext>(
+  node: LeaderTreeNode<TContext>,
+): readonly LeaderChildEntry[] {
+  const entries: LeaderChildEntry[] = [];
+  for (const [key, child] of node.children) {
+    if (child.children.size > 0) {
+      entries.push({ key, kind: "group" });
+    } else {
+      entries.push({ key, kind: "leaf", label: child.binding?.description });
+    }
+  }
+  return entries;
+}
+
 export type LeaderTimeoutConfig = {
   readonly enabled: boolean;
   readonly ms: number;
