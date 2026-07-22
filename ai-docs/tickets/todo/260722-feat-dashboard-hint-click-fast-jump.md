@@ -16,6 +16,9 @@ related-mental-model:
 
 ## Background
 
+Finalized behavior: see 260722-feat-dashboard-hotkey-config-framework §
+Default Keymap & Interaction Spec (hint-click / fast-jump behavior).
+
 Agenda A UX review (owner, 2026-07-22) finalized the dashboard's layered
 keyboard-interaction stack (leader-only, `Ctrl+Space`, no modal - full
 decision record in `260722-feat-dashboard-hotkey-config-framework`). This

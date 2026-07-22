@@ -135,24 +135,29 @@ defines the leader-key model it must implement.
   rebindings persist across a reload.
 
 ---
-## Proposed Default Keymap & Interaction Spec (DRAFT v2 — revised per owner feedback 2026-07-22; PENDING: editor-text hint decision + taxonomy confirm)
+## Default Keymap & Interaction Spec (finalized 2026-07-22)
 
-> Grounded in the actual `DashboardCommandId` inventory in `ws-dashboard/frontend/src/commands.ts`. `▸` = payload-needing action that opens a menu/picker (Rule R1). ALL numeric indices are 1-based (differs from tmux default). Items marked PENDING await owner sign-off.
+> Grounded in the `DashboardCommandId` inventory in `ws-dashboard/frontend/src/commands.ts`. `▸` = payload-needing action that opens a menu/picker (Rule R1). ALL numeric indices are 1-based (differs from tmux default). Owner-approved 2026-07-22.
 
-Leader = `Ctrl+Space`. Model: leader → group key → action key (two-step mnemonic), except the index-driven selectors below.
+Leader = `Ctrl+Space`. Model: leader → group key → action key (two-step mnemonic), except the index-driven selectors.
 
 ### Top-level
 | keys | action |
 |---|---|
-| `<leader> 1`..`8` | switch to workRoot N — flat, counted top-down in the left nav, **servers not counted**, 1-indexed (NEW nav command id, see R2) |
-| `<leader> w <server> <workspace> [<worktree>]` | hierarchical select among ALREADY-OPEN roots; all 1-indexed; the worktree tier is entered only when that workspace has worktrees (NEW nav command ids, see R2). Distinct from the root picker, which browses the filesystem to ADD a new root. PENDING taxonomy confirm. |
-| `<leader> f` | hint-click / fast-jump (elements only; see below) |
+| `<leader> 1`..`8` | flat fast-switch to workRoot N — counted top-down in the left nav, servers NOT counted, 1-indexed (NEW command id, R2) |
+| `<leader> f` | hint-click / fast-jump (elements only) |
 | `<leader> <space>` | command palette (command bar) |
 | `<leader> ?` | which-key: show all bindings |
 
+`<leader> w` is intentionally UNUSED: all worktree ops live under `g w`, all root/workRoot ops under `r`.
+
 ### Groups
-- `g` Git — `r` git.refresh · `f` git.fetch · `p` git.push · `l` git.pullFfOnly · `b` git.branchMenu.open ▸ · `c` git.branchCreate.open ▸ · `s` focus git-status/diff inspector surface (new surface — see idea ticket 260722-idea-dashboard-git-status-diff-inspector) · `w` → **worktree sub-menu (3-tier)**: `a` gitWorktreeAdd.open ▸ · `x` workspace.remove (always-confirm modal) · `m` workspace.menu.open ▸ · `h` hidden-worktrees submenu ▸
-- `r` Root lifecycle — `o` rootPicker.open (browse filesystem → add a NEW root) · `x` workRoot.close · `t` workRoot.activation.set (online/offline)
+- `g` Git — `r` git.refresh · `f` git.fetch · `p` git.push · `l` git.pullFfOnly · `b` git.branchMenu.open ▸ · `c` git.branchCreate.open ▸ · `s` focus git-status/diff inspector surface (see idea 260722-idea-dashboard-git-status-diff-inspector) · `w` → **worktree sub-menu (3-tier)**: `a` gitWorktreeAdd.open ▸ · `x` workspace.remove (always-confirm modal) · `m` workspace.menu.open ▸ · `h` hidden-worktrees submenu ▸
+- `r` Root / WorkRoot (all root-scoped ops consolidated here):
+  - `r <server> <workspace> [<worktree>]` → hierarchical select among ALREADY-OPEN roots; all 1-indexed; the worktree tier is entered only when that workspace has worktrees. A digit after `r` begins hierarchical selection (NEW command ids, R2).
+  - `r o` → rootPicker.open (browse the filesystem → add a NEW root)
+  - `r x` → workRoot.close
+  - `r t` → workRoot.activation.set (online/offline)
 - `a` Agent-chat — `n` agentChat.create · `s` agentChat.prompt.send · `y` agentChat.history.open ▸ · `f` agentChat.bubble.forkFromHere · `r` agentChat.bubble.resumeFromHere · `c` agentChat.bubble.copy · `k` agentChat.thinking.toggle
 - `t` Terminal — `n` terminal.create · `x` terminal.close  (scroll/clear/copy = GAP, R2)
 - `d` Document — `s` document.save · `r` document.revert · `e` document.mode.set(edit) · `v` document.mode.set(view) · `t` document.translation.toggle · `x` close editor (GAP, R2)
@@ -161,15 +166,17 @@ Leader = `Ctrl+Space`. Model: leader → group key → action key (two-step mnem
 
 ### which-key overlay behavior
 - On leader press, enter a transient "pending" capture mode; keys are captured by command mode and NOT forwarded to terminal/inputs.
-- Overlay renders as a **bottom-right lazyvim-style popup** (owner preference), appearing after a configurable delay (default 250ms), listing available next keys grouped: group keys as `key → +group`, leaf keys as `key → <label>` (labels from `dashboardCommandLabel`).
-- Pressing a group key drills into that group's leaves. `Esc` or a second leader press cancels/exits. An unbound key = brief flash then exit. No auto-timeout by default (configurable).
+- Renders as a **bottom-right lazyvim-style popup**, appearing after a configurable delay (default 250ms), listing available next keys grouped: group keys as `key → +group`, leaf keys as `key → <label>` (labels from `dashboardCommandLabel`). Under `r`, digits are shown as the hierarchical-select entry.
+- Pressing a group key drills into its leaves. `Esc` or a second leader press cancels/exits. An unbound key = brief flash then exit. No auto-timeout by default (configurable).
 
 ### hint-click / fast-jump behavior
-- Trigger `<leader> f`. Reproduce the flash/leap-style interaction faithfully (no surprises): label every in-viewport, non-occluded actionable ELEMENT (has `data-command-id` / focusable, including clickable content such as diff hunks and links) with home-row labels (default alphabet `fjdksla;gh...`, two-char combos when needed); type label chars to filter; unique match activates (dispatch its command id / click); `Enter` activates the highlight; `Esc` cancels.
+- Trigger `<leader> f`. Reproduce the flash/leap-style interaction faithfully (no surprises): label every in-viewport, non-occluded actionable ELEMENT (has `data-command-id` / focusable, including clickable content such as diff hunks and links) with home-row labels (default alphabet `fjdksla;gh...`, two-char combos when needed); type label chars to filter; a unique match activates (dispatch its command id / click); `Enter` activates the highlight; `Esc` cancels.
 - Scope spans all visible panes plus the left nav (including other servers' worktree rows), enabling the "jump from terminal to another server's worktree" use case.
-- **Internal TEXT is excluded**: terminal content is excluded (raw bytes). Editor document text-position jumping is **PENDING owner decision** — lead recommendation is to also exclude it (treat editor content like the terminal: the component's own domain; global hint-click stays elements-only; in-editor flash/leap motion, if wanted, belongs later to the editor component's own buffer-local keymap, not this global layer).
-- Performance-gated: only in-viewport/non-occluded targets; default cap (e.g. 150); beyond the cap, restrict to the focused pane + nav. Alphabet and cap configurable.
+- Internal TEXT excluded (FINAL): both terminal content and editor document text-position jumping are out of scope for this global layer — the editor is treated like the terminal, its content being the component's own domain. In-editor flash/leap motion, if wanted later, belongs to the editor component's own buffer-local keymap, not this global layer.
+- Performance-gated: only in-viewport/non-occluded targets; default cap (e.g. 150); beyond the cap, restrict to the focused pane + nav. Alphabet and cap are configurable.
 
 ### Design rules
 - **R1 — no invented targets.** A leader-sub binding resolves to a no-payload command (execute directly) or, for a payload-needing action, opens the relevant menu/picker (`▸`); existing in-menu navigation makes the selection. The keymap never fabricates the target selection.
-- **R2 — prerequisite command ids (currently GAPS).** Must be added or their leader targets silently break: workRoot flat select-by-index (`<leader> 1..8`); hierarchical server/workspace/worktree select-by-index (`<leader> w`); `pane.focus.<kind>`; tab next/prev + cycle; terminal scroll/clear/copy-selection; editor next/prev-file + close; left-nav row select; focus-git-status-inspector (depends on the new inspector surface).
+- **R2 — prerequisite command ids (currently GAPS).** Must be added or their leader targets silently break: workRoot flat select-by-index (`<leader> 1..8`); hierarchical server/workspace/worktree select-by-index (`<leader> r <digits>`); `pane.focus.<kind>`; tab next/prev + cycle; terminal scroll/clear/copy-selection; editor next/prev-file + close; left-nav row select; focus-git-status-inspector (depends on the new inspector surface).
+
+(end)

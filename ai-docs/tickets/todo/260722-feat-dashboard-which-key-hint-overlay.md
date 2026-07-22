@@ -16,6 +16,9 @@ related-mental-model:
 
 ## Background
 
+Finalized behavior: see 260722-feat-dashboard-hotkey-config-framework §
+Default Keymap & Interaction Spec (which-key overlay behavior).
+
 Agenda A UX review (owner, 2026-07-22) finalized a tmux-style, leader-only
 (no modal) dashboard keyboard model with `Ctrl+Space` as the leader key; see
 `260722-feat-dashboard-hotkey-config-framework` for the full decision record
