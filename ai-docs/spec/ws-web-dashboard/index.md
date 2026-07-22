@@ -828,6 +828,51 @@ here since they never reach page script in any served mode. It runs
 identically in a plain browser tab and the Phase 1 installed PWA
 (`260721-ws-dashboard-pwa-installability`).
 
+## Which-Key Leader Hint Overlay {#260722-ws-dashboard-which-key-hint-overlay}
+
+While a `Ctrl+Space` leader sequence is pending, the dashboard shows a
+transient which-key/lazyvim-style hint popup anchored to the bottom-right of
+the viewport, listing the currently-reachable next keys from the hotkey
+binding registry's leader tree. The popup does not appear immediately: it
+appears only after the sequence has been pending for 250ms, so a fast,
+already-memorized leader chord never flashes the popup. That 250ms delay is
+anchored to the initial idle-to-pending transition (the moment `Ctrl+Space`
+is first pressed) — narrowing the sequence with a further key press does not
+restart the delay or re-hide an already-visible popup.
+
+Each reachable next key renders as one row: `key → +group` when that key
+leads to further sub-keys (a branch), or `key → <label>` when that key
+resolves directly to a bound command (a leaf). As the user types further
+keys in the sequence, the popup's row list updates to the new current node's
+children, narrowing along with the sequence. The popup dismisses on every
+path that returns leader mode to idle: successful resolution of a binding,
+an unmatched-key cancel, `Escape`, or a second `Ctrl+Space` leader press.
+
+A leaf row's label is sourced from the resolved `HotkeyBinding`'s
+`description` field, not from a label derived from the bound command. This
+is a fixed contract, not an incidental shortcut: resolving a command-derived
+label requires invoking the binding's payload builder against the live
+dispatch context, and every context-dependent default binding's payload
+builder returns no result when no work root is selected — a common,
+unremarkable state the popup must still render correctly in. Every default
+leaf binding's `description` is authored as the same human-readable action
+label a command-derived label would otherwise produce, so reading
+`description` directly satisfies the popup's labeling intent without that
+gap.
+
+The popup is a read-only presentation layer over the live hotkey binding
+registry: it defines no bindings and no dispatch path of its own, and it
+reflects the registry's current contents — including a user's own
+rebindings — automatically. It does not capture or consume keyboard input;
+the existing leader-press capture path (including its terminal-focus/IME
+guard) is unchanged and remains the sole input-handling surface.
+
+> [!note] Implementation Gap · 2026-07-22
+> Browser-level (Playwright) verification of the popup's appear/narrow/
+> dismiss lifecycle across all four dismissal paths has not been run yet.
+> The behavior above is verified by unit tests over the pure row-derivation
+> logic only.
+
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the

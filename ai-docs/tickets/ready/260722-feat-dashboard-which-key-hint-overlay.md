@@ -86,3 +86,51 @@ define new bindings or a new command path.
   rebindings from the framework's persistence layer), and disappears
   cleanly on every dismissal path (match, timeout, Escape) without leaving
   stale UI or blocking subsequent terminal input.
+
+### Result (7caaaeb6)
+
+Overlay shipped: a pure `describeLeaderChildren` helper in `hotkeys.ts`
+(mirrors `stepLeaderState`'s children-win group/leaf precedence), a parallel
+`leaderUiState` React-state mirror of the existing `leaderStateRef` updated
+at its two existing mutation sites in `App.tsx`'s keydown handler, a new
+`WhichKeyOverlay.tsx` presentational component (250ms appearance-delay timer
+anchored to the idle→pending transition, mounted as a sibling of
+`shell-grid`), `.which-key-overlay*` styles in `styles.css` reusing the
+`.workbench-close-popover` semantic-token vocabulary, and new
+`describeLeaderChildren` assertions in `hotkeys.test.ts`. Impl commit
+`7caaaeb6`.
+
+Deviation from the plan's literal wording (documented, reasoned): leaf row
+labels are sourced from the resolved `HotkeyBinding.description` field, not
+from `dashboardCommandLabel(resolveHotkeyCommand(...))`. Every
+context-dependent default binding's `buildPayload` returns `null` when no
+work root is selected, making a command-derived label undefined in that
+common state; every default leaf's `description` is already authored as the
+same human-readable action label, so reading it directly satisfies the
+spec's intent without the null-payload gap.
+
+Verification run: build and `test:hotkeys` (including the new
+`describeLeaderChildren` assertions) passed. Browser-level (Playwright)
+verification of the overlay's appear/narrow/dismiss lifecycle across all
+four dismissal paths was explicitly not run this cycle (see commit
+`7caaaeb6`'s AI Context and Ticket Updates) and is not yet covered.
+
+3-partition review outcome: correctness clean, fit clean, test 1 Important
++ 3 Minor. The Important finding is not a code defect — it is the same
+disclosed gap above: per the ws-web-dashboard mental model's mandatory
+UI-verification rule, Phase 1's code is complete but the phase is not fully
+closeable until browser-level verification lands. See Phase 2.
+
+### Phase 2: Browser-level (Playwright) verification
+
+- Goal: cover the overlay's appear/narrow/dismiss lifecycle (250ms
+  appearance delay, row narrowing on partial sequences, and all four
+  dismissal paths — match, unmatched-key cancel, Escape, second
+  `Ctrl+Space`) with Playwright acceptance coverage, closing the gap left
+  open by Phase 1.
+- Blocked on: `260722-bug-e2e-open-work-root-locator-ambiguity` — the
+  acceptance suite's `openWorkRootInBrowser` locator
+  (`[data-command-id="rootPicker.open"]`) is ambiguous against the
+  `.open-work-root-empty-cta` empty-state CTA, red-lining the whole
+  acceptance suite at step 1 before this overlay's flows can even be
+  reached. This phase cannot proceed until that harness bug is fixed.
