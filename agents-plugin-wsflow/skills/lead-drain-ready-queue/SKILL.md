@@ -5,6 +5,16 @@ description: Pick the next ready/ ticket and hand it to lead-proceed. Stop if re
 
 # Drain Ready Queue
 
+**Goal-run posture.** During a goal run — the current branch is `goal/*`, or an
+active `/goal` Stop-hook reminder is present — assume the user is away. Resolve
+reversible, local decisions on your own stated recommendation, record the choice
+in one line, and continue without waiting for confirmation; this posture carries
+into the work handed off downstream, not only this skill's own steps. Stop only
+for genuinely critical decisions: irreversible or destructive actions, scope
+expanding into public API or cross-module patterns, unresolved binding
+decisions, or any AGENTS.md "Always ask" item. The confirmation threshold rises;
+the hard gates never dissolve.
+
 Spawn a light-tier Explore-style subagent to pick the next ticket: list
 `ai-docs/tickets/ready/`, prefer one named as a prerequisite via another
 ready ticket's `related:`/`parent:` frontmatter, otherwise the oldest
