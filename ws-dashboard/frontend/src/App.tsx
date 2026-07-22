@@ -112,6 +112,24 @@ import {
   type DashboardCommandPayload,
 } from "./commands";
 import {
+  applyHotkeyUserConfig,
+  buildDefaultHotkeyBindings,
+  buildLeaderTree,
+  chordFromKeydownEvent,
+  enterLeaderPending,
+  findStandaloneMatch,
+  isLeaderTriggerKeydown,
+  loadHotkeyUserConfig,
+  resolveHotkeyCommand,
+  shouldSkipHotkeyCapture,
+  stepLeaderState,
+  HotkeyRegistry,
+  type HotkeyBinding,
+  type HotkeyDispatchContext,
+  type LeaderState,
+  type LeaderTreeNode,
+} from "./hotkeys";
+import {
   decideSurfaceClose,
   decideWorkbenchTabClosePresentation,
   decideSurfaceOpenWithDynamicGroups,
@@ -654,6 +672,70 @@ export function App() {
   const workbenchSelection = closeEmptyWorkbench
     ? null
     : stickyWorkbenchSelection;
+  // 260722-feat-dashboard-hotkey-config-framework Phase 1: the merged
+  // (defaults + persisted user rebinds) binding table, built once for the
+  // component's lifetime via the pure `hotkeys.ts` module. `HotkeyRegistry`
+  // is the binding-registration API later layers (which-key overlay,
+  // command bar, hint-click - separate tickets) can call
+  // `hotkeyFrameworkRef.current.registry.registerUser(...)` against at
+  // runtime without a rewrite. Lazy ref init (guarded by `!current`) instead
+  // of `useEffect` because the leader-listener effect below needs the tree/
+  // registry synchronously on its first mount, and this init is a pure,
+  // idempotent read (default table construction + one `localStorage` read),
+  // safe under React StrictMode's double-invoke.
+  const hotkeyFrameworkRef = useRef<{
+    readonly registry: HotkeyRegistry<HotkeyDispatchContext>;
+    readonly leaderTree: LeaderTreeNode<HotkeyDispatchContext>;
+    readonly standaloneBindings: readonly HotkeyBinding<HotkeyDispatchContext>[];
+  } | null>(null);
+  if (!hotkeyFrameworkRef.current) {
+    const registry = new HotkeyRegistry<HotkeyDispatchContext>();
+    const defaults = buildDefaultHotkeyBindings();
+    const userConfig = loadHotkeyUserConfig();
+    const { bindings } = applyHotkeyUserConfig(defaults, userConfig);
+    for (const binding of bindings) {
+      // `applyHotkeyUserConfig` already re-validated any user rebind against
+      // the reserved-key set (Ticket Contract "Reserved keys ... enforced as
+      // data the registry checks"); `registerUser` here re-checks defense in
+      // depth rather than assuming that upstream validation is exhaustive.
+      registry.registerUser(binding);
+    }
+    const activeBindings = registry.list();
+    hotkeyFrameworkRef.current = {
+      registry,
+      leaderTree: buildLeaderTree(activeBindings),
+      standaloneBindings: activeBindings.filter(
+        (binding) => binding.kind === "standalone",
+      ),
+    };
+  }
+  // Pending-sequence state for the leader-mode state machine
+  // (`stepLeaderState`/`enterLeaderPending` in `hotkeys.ts`); mutated
+  // directly inside the keydown handler below rather than via `useState`
+  // since it must be read/written synchronously within a single native
+  // event (no re-render should happen mid-keystroke), mirroring the terminal
+  // pane's own `liveRef`/`keepTerminalFocusRef` mutable-ref style elsewhere
+  // in this file.
+  const leaderStateRef = useRef<LeaderState<HotkeyDispatchContext>>({
+    kind: "idle",
+  });
+  // The live dispatch context (currently active work root/workspace/server)
+  // the leader-listener effect below reads on every keydown without needing
+  // to reinstall the listener on every selection change - same ref-sync
+  // pattern as `selectedServerIdRef` a little further down.
+  const hotkeyContextRef = useRef<HotkeyDispatchContext>({ activeRoot: null });
+  useEffect(() => {
+    hotkeyContextRef.current = {
+      activeRoot: workbenchSelection
+        ? {
+            workRootId: workbenchSelection.root.id,
+            serverRoute: workbenchSelection.root.resourcePath.serverId,
+            workspaceId: workbenchSelection.workspace.id,
+            activation: workbenchSelection.root.activation,
+          }
+        : null,
+    };
+  }, [workbenchSelection]);
   // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
   // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
   // where all six committed-state fields are simultaneously in scope, so the
@@ -1470,6 +1552,125 @@ export function App() {
       selectRoot,
     ],
   );
+
+  // 260722-feat-dashboard-hotkey-config-framework Phase 1: global leader-press
+  // capture and dispatch. There is no existing generic global shortcut-
+  // capture layer to register onto yet (260711-idea-dashboard-command-bus-
+  // quick-open-shortcuts' own Phase 1 is still `todo/`), so this effect IS
+  // that layer's leader-press entry point for this ticket's scope -
+  // structured as a small, mostly-self-contained handler so a later capture
+  // layer can call into it instead of building a second competing listener.
+  // Installed as a capture-phase `document` listener, the same way
+  // `suppressBrowserShortcut` above is, and coexisting with it and with the
+  // terminal pane's own bubble-phase `keydownFallback` per that effect's
+  // non-`stopPropagation()` discipline - EXCEPT while a leader sequence is
+  // actively pending: then this listener always swallows the key
+  // (`preventDefault` + `stopPropagation`) so it can never reach
+  // `keydownFallback`, which forwards keystrokes to the last-active terminal
+  // pane even when DOM focus has wandered elsewhere on the page (the
+  // deliberately-accepted "set-mark tradeoff" from the ticket's own plan) -
+  // without swallowing, an unmatched leader-sub key would otherwise leak
+  // into that terminal as literal input, violating the ticket's own Phase 1
+  // verify bullet ("leader-press-then-unmatched-key cancels cleanly without
+  // leaking into terminal input"). Depends on `executeCommand` (recreated
+  // when its own dependencies change) rather than mounting once with an
+  // empty dependency array, since it must always dispatch through the
+  // current closure - stale-closure dispatch would silently drop contextual
+  // payloads (e.g. the active work root) on the next render.
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      const framework = hotkeyFrameworkRef.current;
+      if (!framework) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      const targetIsEditable =
+        Boolean(target?.isContentEditable) ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select";
+      const targetInsideTerminalPane = Boolean(
+        document.activeElement?.closest(".terminal-pane"),
+      );
+
+      if (leaderStateRef.current.kind === "pending") {
+        event.preventDefault();
+        event.stopPropagation();
+        const transition = stepLeaderState(
+          leaderStateRef.current,
+          event.key,
+          Date.now(),
+        );
+        leaderStateRef.current = transition.state;
+        if (transition.action === "resolve" && transition.binding) {
+          const command = resolveHotkeyCommand(
+            transition.binding,
+            hotkeyContextRef.current,
+          );
+          if (command) {
+            executeCommand(command);
+          }
+        }
+        return;
+      }
+
+      if (
+        shouldSkipHotkeyCapture({
+          isComposing: event.isComposing || event.key === "Process",
+          key: event.key,
+          targetIsEditable,
+          targetInsideTerminalPane,
+        })
+      ) {
+        return;
+      }
+
+      if (
+        isLeaderTriggerKeydown({
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        })
+      ) {
+        leaderStateRef.current = enterLeaderPending(
+          framework.leaderTree,
+          Date.now(),
+        );
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      const standaloneMatch = findStandaloneMatch(
+        framework.standaloneBindings,
+        chordFromKeydownEvent({
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        }),
+      );
+      if (standaloneMatch) {
+        const command = resolveHotkeyCommand(
+          standaloneMatch,
+          hotkeyContextRef.current,
+        );
+        if (command) {
+          event.preventDefault();
+          event.stopPropagation();
+          executeCommand(command);
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeydown, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeydown, true);
+    };
+  }, [executeCommand]);
 
   const applyDocumentSaved = useCallback(
     (source: {
