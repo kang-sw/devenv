@@ -133,3 +133,43 @@ defines the leader-key model it must implement.
   terminal-focus and control-key behavior keeps working); leader-press-then-
   unmatched-key cancels cleanly without leaking into terminal input; user
   rebindings persist across a reload.
+
+---
+## Proposed Default Keymap & Interaction Spec (DRAFT — pending owner review, 2026-07-22)
+
+> Status: draft awaiting owner sign-off on mnemonics and the R2 prerequisite command ids. Grounded in the actual `DashboardCommandId` inventory in `ws-dashboard/frontend/src/commands.ts`. `▸` marks a payload-needing action that opens a menu/picker rather than executing directly (see Rule R1).
+
+Leader = `Ctrl+Space`. Model: leader → group key → action key (two-step mnemonic).
+
+### Top-level (no group)
+| keys | action |
+|---|---|
+| `<leader> <space>` | open command palette (command bar) |
+| `<leader> f` | hint-click / fast-jump mode |
+| `<leader> ?` | which-key: show all bindings |
+
+### Groups
+- `g` Git — `r` git.refresh · `f` git.fetch · `p` git.push · `l` git.pullFfOnly · `b` git.branchMenu.open ▸ · `c` git.branchCreate.open ▸
+- `w` Worktree/WorkRoot — `a` gitWorktreeAdd.open ▸ · `x` workspace.remove (always-confirm modal) · `o` workRoot.open · `c` workRoot.close · `t` workRoot.activation.set (online/offline) · `m` workspace.menu.open ▸ · `h` hidden-worktrees submenu ▸
+- `a` Agent-chat — `n` agentChat.create · `s` agentChat.prompt.send · `y` agentChat.history.open ▸ · `f` agentChat.bubble.forkFromHere · `r` agentChat.bubble.resumeFromHere · `c` agentChat.bubble.copy · `k` agentChat.thinking.toggle
+- `t` Terminal — `n` terminal.create · `x` terminal.close  (scroll/clear/copy = GAP, see R2)
+- `d` Document — `s` document.save · `r` document.revert · `e` document.mode.set(edit) · `v` document.mode.set(view) · `t` document.translation.toggle · `x` close editor (GAP, see R2)
+- `p` Pane focus (GAP — needs `pane.focus.<kind>`, see R2) — `a` Agent · `t` Terminal · `c` Agent Chat · `e` Editor · `v` Viewer · `d` Diff · `g` Diagnostics · `k` Task · `i` Inspector
+- `v` View toggle (`workbench.toggle.*`) — `v` viewer · `t` task · `d` diagnostics · `e` events · `l` layout
+- `r` Root picker — `o` rootPicker.open
+
+### which-key overlay behavior
+- On leader press, enter a transient "pending" capture mode; subsequent keys are captured by command mode and NOT forwarded to terminal/inputs.
+- Overlay appears after a configurable delay (default 250ms) as a bottom-docked panel (lazyvim which-key style), listing available next keys grouped: group keys as `key → +group`, leaf keys as `key → <label>` (labels from `dashboardCommandLabel`).
+- Pressing a group key replaces the overlay with that group's leaves. `Esc` or a second leader press cancels and exits. An unbound key = brief flash then exit.
+- No auto-timeout by default (stays until a binding resolves or Esc); configurable.
+
+### hint-click / fast-jump behavior
+- Trigger `<leader> f`. Labels every in-viewport, non-occluded actionable element (has `data-command-id` / focusable) with home-row labels (default alphabet `fjdksla;gh...`, two-char combos when needed).
+- Type label chars to filter; a unique match activates (dispatches its command id / clicks). `Enter` activates the highlighted target; `Esc` cancels.
+- Scope spans all visible panes plus the left nav (including other servers' worktree rows) — this enables the "jump from terminal to another server's worktree" use case.
+- Performance-gated: only in-viewport/non-occluded targets; default cap (e.g. 150 targets); beyond the cap, restrict to the focused pane + nav. Alphabet and cap are configurable.
+
+### Design rules
+- **R1 — no invented targets.** A leader-sub binding resolves to either a no-payload command (execute directly) or, for a payload-needing action (branch switch, worktree/workspace select, file open, etc.), a command that opens the relevant menu/picker (marked `▸`); existing in-menu navigation then makes the selection. The keymap never fabricates the target selection.
+- **R2 — prerequisite command ids (currently GAPS).** These have no command id today and must be added for their leader targets to work, so implementation does not silently drop them: `pane.focus.<kind>` (focus a workbench surface); tab next/prev + cycle; terminal scroll / clear / copy-selection; editor next/prev-file + close; left-nav row select. List them as prerequisites of this framework.
