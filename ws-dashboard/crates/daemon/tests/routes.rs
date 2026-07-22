@@ -7186,6 +7186,201 @@ async fn git_worktree_remove_clears_terminal_sessions_for_removed_root() {
 }
 
 #[tokio::test]
+async fn git_worktree_remove_clears_codex_and_claude_sessions_for_removed_root() {
+    if skip_without_git("git_worktree_remove_clears_codex_and_claude_sessions_for_removed_root") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-agent-sessions");
+    let target = base.join("wt-agent-sessions");
+
+    // Invariant 4: agent-session cleanup covers codex AND claude, not only
+    // terminals. Install owned registries so the seeded sessions live in the
+    // exact instances the removal handler calls `remove_for_work_roots` on.
+    let mut state = app_state();
+    let codex_registry = CodexProviderRegistry::default();
+    let claude_registry = ClaudeProviderRegistry::default();
+    state.codex_sessions = codex_registry.clone();
+    state.claude_sessions = claude_registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let workspace_id = opened_primary_workspace(app.clone(), cookie.as_str(), &primary).await;
+    let created = add_linked_worktree_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        "Agent Topic",
+        &target,
+    )
+    .await;
+
+    let worktree_id = WorkRootId::from(created.clone());
+    codex_registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:remove",
+            worktree_id.clone(),
+            "thread-remove",
+            spawn_codex_reply_peer(serde_json::json!({ "turn": { "id": "t" } })),
+            CodexProjector::new(),
+        )
+        .expect("seed codex session");
+    claude_registry
+        .insert_session_for_tests(
+            "server-local",
+            "claude:remove",
+            worktree_id.clone(),
+            "session-remove",
+            target.clone(),
+            spawn_claude_reply_peer("ack"),
+            ClaudeProjector::new(),
+        )
+        .expect("seed claude session");
+    assert!(codex_registry
+        .session_for("server-local", "codex:remove")
+        .is_some());
+    assert!(claude_registry
+        .session_for("server-local", "claude:remove")
+        .is_some());
+
+    git_worktree_remove_submit_json(
+        app,
+        cookie.as_str(),
+        &created,
+        serde_json::json!({ "deleteBranch": false, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+
+    assert!(
+        codex_registry
+            .session_for("server-local", "codex:remove")
+            .is_none(),
+        "codex session for the removed worktree must be cleared"
+    );
+    assert!(
+        claude_registry
+            .session_for("server-local", "claude:remove")
+            .is_none(),
+        "claude session for the removed worktree must be cleared"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_remove_persist_failure_keeps_removal_and_clears_sessions() {
+    if skip_without_git("git_worktree_remove_persist_failure_keeps_removal_and_clears_sessions") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-persist-fail");
+    let target = base.join("wt-persist-fail");
+    // Create the linked worktree directly on disk (a failing store would
+    // reject the add route's own persist), then register both roots so the
+    // live resource view groups them into one workspace.
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            target.to_string_lossy().as_ref(),
+            "-b",
+            "persist-fail-topic",
+        ],
+    );
+    let worktree_id = ws_dashboard_daemon::discovery::local_work_root_id_for_path(&target);
+    let worktree_id_str = worktree_id.as_str().to_owned();
+
+    // A store pointing at a directory (not a file) makes every persist fail,
+    // reproducing a registry-persist failure AFTER the irreversible disk
+    // removal — the exact ordering invariant 3 protects.
+    let state_file_directory = temp_fixture_path("git-worktree-remove-persist-fail-store");
+    fs::create_dir_all(&state_file_directory).expect("create state-file directory");
+    let mut state = app_state_with_opened_and_store(
+        OpenedWorkRoots::from_paths(vec![primary.clone(), target.clone()]),
+        DashboardStateStore::at_path(&state_file_directory),
+    );
+    let codex_registry = CodexProviderRegistry::default();
+    let claude_registry = ClaudeProviderRegistry::default();
+    state.codex_sessions = codex_registry.clone();
+    state.claude_sessions = claude_registry.clone();
+    codex_registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:persist-fail",
+            worktree_id.clone(),
+            "thread-persist-fail",
+            spawn_codex_reply_peer(serde_json::json!({ "turn": { "id": "t" } })),
+            CodexProjector::new(),
+        )
+        .expect("seed codex session");
+    claude_registry
+        .insert_session_for_tests(
+            "server-local",
+            "claude:persist-fail",
+            worktree_id.clone(),
+            "session-persist-fail",
+            target.clone(),
+            spawn_claude_reply_peer("ack"),
+            ClaudeProjector::new(),
+        )
+        .expect("seed claude session");
+
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    assert!(codex_registry
+        .session_for("server-local", "codex:persist-fail")
+        .is_some());
+    assert!(claude_registry
+        .session_for("server-local", "claude:persist-fail")
+        .is_some());
+
+    // Disk removal succeeds; the subsequent persist fails. The corrected
+    // rollback must NOT re-register the already-deleted entry (no zombie row
+    // pointing at a deleted path), must still clear ALL sessions, and must
+    // return the removal result — disk is the source of truth once removed.
+    // A regression that re-registers + returns 500 before session cleanup
+    // fails this test on the status assertion alone.
+    let submit = git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &worktree_id_str,
+        serde_json::json!({ "deleteBranch": false, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(submit["removedWorkRootId"], worktree_id_str);
+    assert!(!work_root_ids(&submit["resources"]).contains(&worktree_id_str));
+    assert!(!target.exists(), "disk removal is irreversible and must stand");
+
+    // No zombie re-register: a fresh resources read must not resurrect the id.
+    let resources = dashboard_resources_json(app, cookie.as_str()).await;
+    assert!(
+        !work_root_ids(&resources).contains(&worktree_id_str),
+        "persist failure after disk removal must not resurrect the registry entry"
+    );
+
+    // Session cleanup still ran despite the persist failure.
+    assert!(
+        codex_registry
+            .session_for("server-local", "codex:persist-fail")
+            .is_none(),
+        "codex session must be cleared even when persist fails after disk removal"
+    );
+    assert!(
+        claude_registry
+            .session_for("server-local", "claude:persist-fail")
+            .is_none(),
+        "claude session must be cleared even when persist fails after disk removal"
+    );
+
+    remove_static_fixture(&base);
+    remove_static_fixture(&state_file_directory);
+}
+
+#[tokio::test]
 async fn git_toolbar_routes_are_owner_authenticated() {
     let app = build_router(app_state());
     for (method, uri) in [

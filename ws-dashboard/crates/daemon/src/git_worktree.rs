@@ -424,6 +424,31 @@ fn branch_unmerged(primary_root: &Path, branch: &str) -> bool {
     !is_ancestor
 }
 
+/// Build the `git worktree remove [--force] <target>` invocation.
+///
+/// SAFETY: the `-C` context is ALWAYS the primary root, never the target
+/// worktree — you must not run the removal from inside the tree it deletes.
+/// The target is passed as an absolute-path argument (so `-C` never changes
+/// which path is removed), and `--force` is added only when explicitly
+/// requested by the caller after the data-loss warning. Extracted as a pure
+/// builder so the primary-root-vs-target argument order is directly
+/// assertable in a unit test (`git worktree remove` tolerates a
+/// self-referential `-C target`, so a black-box outcome test cannot catch a
+/// `-C primary` -> `-C target` regression on the command itself).
+fn worktree_remove_command(primary_root: &Path, target: &Path, force: bool) -> Command {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(primary_root)
+        .arg("worktree")
+        .arg("remove");
+    if force {
+        command.arg("--force");
+    }
+    command.arg(target);
+    command
+}
+
 fn run_git_ok(root: &Path, args: &[&str]) -> bool {
     Command::new("git")
         .arg("-C")
@@ -504,16 +529,8 @@ pub async fn git_worktree_remove_submit(
         );
     }
 
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(&context.primary_root_path)
-        .arg("worktree")
-        .arg("remove");
-    if request.force {
-        command.arg("--force");
-    }
-    command.arg(&context.target_path);
+    let mut command =
+        worktree_remove_command(&context.primary_root_path, &context.target_path, request.force);
     let output = match command.output() {
         Ok(output) => output,
         Err(_) => {
@@ -541,21 +558,22 @@ pub async fn git_worktree_remove_submit(
     }
 
     let _persist_guard = state.registry_persist_lock.lock().await;
-    let previous_entry = state.opened_work_roots.unregister(&work_root_id);
+    state.opened_work_roots.unregister(&work_root_id);
     if let Err(error) = state
         .dashboard_state
         .persist_opened_work_roots(&state.opened_work_roots)
         .await
     {
-        if let Some(previous) = previous_entry {
-            state
-                .opened_work_roots
-                .register_registry_entry(work_root_id.clone(), previous);
-        }
-        tracing::warn!(%error, "failed to persist removed Git worktree");
-        return bounded_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "persist worktree removal failed",
+        // The worktree directory (and possibly its branch) is already
+        // irreversibly gone from disk. Disk is now the source of truth, so we
+        // must NOT re-register the entry — doing so would resurrect a zombie
+        // registry row pointing at a deleted path, the exact registry/disk
+        // divergence this op exists to prevent. Keep the in-memory removal,
+        // still run the session cleanup below, and return the removal result.
+        // The stale persisted file self-heals on the next successful persist.
+        tracing::warn!(
+            %error,
+            "failed to persist removed Git worktree; keeping in-memory removal (disk already gone)"
         );
     }
 
@@ -945,6 +963,55 @@ mod tests {
         run(&dir, &["add", "tracked.txt"]);
         run(&dir, &["commit", "-q", "-m", "init"]);
         dir
+    }
+
+    #[test]
+    fn worktree_remove_command_runs_from_primary_root_context() {
+        use std::ffi::OsStr;
+
+        let primary = PathBuf::from("/repo/primary");
+        let target = PathBuf::from("/repo/wt-topic");
+
+        // Invariant 1: the removal ALWAYS runs `-C <primary>` (never
+        // `-C <target>`), and the target is the final path argument. Asserting
+        // the argv directly is the only load-bearing guard for this, because
+        // git tolerates a self-referential `-C <target> worktree remove
+        // <target>`, so an outcome-only integration test would pass even if
+        // `-C` were regressed to the target worktree.
+        let command = worktree_remove_command(&primary, &target, false);
+        let args: Vec<&OsStr> = command.get_args().collect();
+        assert_eq!(
+            args,
+            vec![
+                OsStr::new("-C"),
+                primary.as_os_str(),
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                target.as_os_str(),
+            ],
+            "remove must run -C <primary> and pass <target> as the final arg"
+        );
+        assert_ne!(
+            args[1], target,
+            "the -C context must never be the target worktree being removed"
+        );
+
+        // `--force` is inserted only when requested, immediately before the
+        // target path.
+        let forced = worktree_remove_command(&primary, &target, true);
+        let forced_args: Vec<&OsStr> = forced.get_args().collect();
+        assert_eq!(
+            forced_args,
+            vec![
+                OsStr::new("-C"),
+                primary.as_os_str(),
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                OsStr::new("--force"),
+                target.as_os_str(),
+            ],
+            "forced remove keeps the primary -C context and appends --force"
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ export type DashboardCommandId =
   | "worktreeRemove.submit"
   | "worktree.hide"
   | "worktree.unhide"
+  | "worktree.menu.open"
   | "worktreeHidden.menu.open"
   | "git.refresh"
   | "git.fetch"
@@ -66,6 +67,7 @@ export type DashboardCommandPayload =
   | { type: "worktreeRemove.submit"; workRootId: string }
   | { type: "worktree.hide"; workspaceId: string; workRootId: string }
   | { type: "worktree.unhide"; workspaceId: string; workRootId: string }
+  | { type: "worktree.menu.open"; workRootId: string }
   | { type: "worktreeHidden.menu.open"; workspaceId: string }
   | { type: "git.refresh"; workRootId: string }
   | { type: "git.fetch"; workRootId: string }
@@ -316,6 +318,16 @@ export function buildWorktreeUnhideCommand(
   return {
     commandId: "worktree.unhide",
     payload: { type: "worktree.unhide", serverRoute, workspaceId, workRootId },
+  };
+}
+
+export function buildWorktreeMenuOpenCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "worktree.menu.open",
+    payload: { type: "worktree.menu.open", serverRoute, workRootId },
   };
 }
 
@@ -684,6 +696,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Hide worktree";
     case "worktree.unhide":
       return "Unhide worktree";
+    case "worktree.menu.open":
+      return "Open worktree menu";
     case "worktreeHidden.menu.open":
       return "Open hidden worktrees";
     case "git.refresh":

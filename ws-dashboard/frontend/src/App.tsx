@@ -102,6 +102,7 @@ import {
   buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
   buildWorktreeHideCommand,
+  buildWorktreeMenuOpenCommand,
   buildWorktreeRemoveOpenCommand,
   buildWorktreeRemoveCloseCommand,
   buildWorktreeRemoveSubmitCommand,
@@ -361,6 +362,7 @@ import {
 import {
   fetchGitWorktreeRemovePreview,
   submitGitWorktreeRemove,
+  GitWorktreeRemoveSubmitError,
   type GitWorktreeRemovePreview,
 } from "./gitWorktreeRemove";
 import {
@@ -1341,6 +1343,16 @@ export function App() {
               workRootId,
               false,
             ),
+          );
+      } else if (command.payload.type === "worktreeHidden.menu.open") {
+        // `g w h`: reveal the workspace "..." menu (which hosts the
+        // hidden-worktrees restore section) for the targeted workspace. The
+        // menu is component-local state on the matching workspace row, so
+        // dispatch through the scope-keyed reveal signal it subscribes to.
+        const { workspaceId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          emitHiddenWorktreesMenuOpen(
+            serverScopedIdentity(serverRoute ?? "server-local", workspaceId),
           );
       } else if (command.payload.type === "workRoot.close") {
         const { workRootId, serverRoute } = command.payload;
@@ -3226,16 +3238,10 @@ function GitWorktreeRemoveModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshPreview = useCallback(() => {
     if (!workRootId || !serverRoute) {
-      setPreview(null);
-      setDeleteBranch(false);
-      setError(null);
       return;
     }
-    setPreview(null);
-    setDeleteBranch(false);
-    setError(null);
     setLoading(true);
     void fetchGitWorktreeRemovePreview(workRootId, serverRoute)
       .then(setPreview)
@@ -3248,6 +3254,19 @@ function GitWorktreeRemoveModal({
       )
       .finally(() => setLoading(false));
   }, [serverRoute, workRootId]);
+
+  useEffect(() => {
+    if (!workRootId || !serverRoute) {
+      setPreview(null);
+      setDeleteBranch(false);
+      setError(null);
+      return;
+    }
+    setPreview(null);
+    setDeleteBranch(false);
+    setError(null);
+    refreshPreview();
+  }, [refreshPreview, serverRoute, workRootId]);
 
   if (!workRootId || !serverRoute) {
     return null;
@@ -3285,6 +3304,16 @@ function GitWorktreeRemoveModal({
                 ? nextError.message
                 : "worktree remove failed",
             );
+            // Force-gate 409: the tree turned dirty after a clean preview.
+            // Refresh so the red data-loss banner appears and a deliberate
+            // re-submit can authorize `--force`, instead of forcing the owner
+            // to close and reopen the modal.
+            if (
+              nextError instanceof GitWorktreeRemoveSubmitError &&
+              nextError.status === 409
+            ) {
+              refreshPreview();
+            }
           })
           .finally(() => setSubmitting(false));
       },
@@ -3352,10 +3381,7 @@ function GitWorktreeRemoveModal({
                   Delete branch <code>{branchName}</code> too
                 </span>
                 {preview?.branchUnmerged ? (
-                  <span
-                    className="git-worktree-remove-unmerged"
-                    style={{ color: "var(--tone-error, #d33)" }}
-                  >
+                  <span className="git-worktree-remove-unmerged">
                     {" "}
                     아직 머지되지 않았습니다 (unmerged — will be kept)
                   </span>
@@ -10412,6 +10438,43 @@ function WorkspaceRows({
 // changing mid-drag - only the drop/dragover handlers read it, synchronously.
 let activeWorkNavDrag: WorkNavSiblingDragPayload | null = null;
 
+// Reveal signal for the `g w h` (worktreeHidden.menu.open) hotkey. The
+// workspace "..." menu that hosts the hidden-worktrees restore section is
+// component-local `menuOpen` state on each workspace ResourceRow, so the
+// command-bus handler in `executeCommand` cannot toggle it directly. This
+// tiny scope-keyed pub/sub lets the dispatched command ask the matching
+// workspace row (keyed by `serverScopedIdentity(serverId, workspace.id)`) to
+// open its menu, keeping the hotkey path routed through the command bus while
+// the actual DOM affordance stays owned by the row that renders it.
+type HiddenWorktreesMenuListener = () => void;
+const hiddenWorktreesMenuListeners = new Map<
+  string,
+  Set<HiddenWorktreesMenuListener>
+>();
+function subscribeHiddenWorktreesMenu(
+  scopeKey: string,
+  listener: HiddenWorktreesMenuListener,
+): () => void {
+  let listeners = hiddenWorktreesMenuListeners.get(scopeKey);
+  if (!listeners) {
+    listeners = new Set();
+    hiddenWorktreesMenuListeners.set(scopeKey, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = hiddenWorktreesMenuListeners.get(scopeKey);
+    current?.delete(listener);
+    if (current && current.size === 0) {
+      hiddenWorktreesMenuListeners.delete(scopeKey);
+    }
+  };
+}
+function emitHiddenWorktreesMenuOpen(scopeKey: string): void {
+  hiddenWorktreesMenuListeners
+    .get(scopeKey)
+    ?.forEach((listener) => listener());
+}
+
 function ResourceRow({
   id,
   title,
@@ -10480,13 +10543,17 @@ function ResourceRow({
   const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
-  // Child worktree rows expose their own "..." menu (Remove worktree.../Hide
-  // worktree), gated on the daemon's `worktree.remove` action hint.
+  // Child worktree rows expose their own "..." menu. "Remove worktree..." is
+  // gated on the daemon's `worktree.remove` action hint, but "Hide worktree"
+  // is pure browser-local UI state (B-3) with no daemon dependency, so it must
+  // stay reachable even when the worktree is unavailable/inactive — the case
+  // where decluttering via hide is most useful.
   const hasWorktreeRemove =
     presentation === "workRoot" &&
     actions.some(
       (action) => action.enabled && action.id === "worktree.remove",
     );
+  const canHideWorktree = presentation === "workRoot" && workspaceId != null;
   const canCloseWorkRoot =
     (presentation === "workRoot" ||
       presentation === "compactWorkRoot" ||
@@ -10495,6 +10562,18 @@ function ResourceRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
+  // Workspace/compact-root rows own the "..." menu that hosts the
+  // hidden-worktrees restore section; subscribe them to the `g w h` reveal
+  // signal so the hotkey can open this component-local menu through the bus.
+  const menuScopeKey = serverScopedIdentity(actionServerId, actionEntityId);
+  useEffect(() => {
+    if (!hasWorkspaceRemove) {
+      return;
+    }
+    return subscribeHiddenWorktreesMenu(menuScopeKey, () =>
+      setMenuOpen((current) => !current),
+    );
+  }, [hasWorkspaceRemove, menuScopeKey]);
   const [dragOver, setDragOver] = useState(false);
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(
@@ -10598,7 +10677,10 @@ function ResourceRow({
           ) : null}
         </span>
       </button>
-      {hasWorkspaceRemove || hasWorktreeRemove || canCloseWorkRoot ? (
+      {hasWorkspaceRemove ||
+      hasWorktreeRemove ||
+      canHideWorktree ||
+      canCloseWorkRoot ? (
         <span className="resource-row-actions">
           {canCloseWorkRoot ? (
             <ChromeIconButton
@@ -10706,15 +10788,18 @@ function ResourceRow({
               ) : null}
             </span>
           ) : null}
-          {hasWorktreeRemove ? (
+          {canHideWorktree || hasWorktreeRemove ? (
             <span className="workspace-row-menu-wrap" ref={menuRef}>
               <ChromeIconButton
                 className="resource-row-action"
-                commandId="worktreeHidden.menu.open"
+                commandId="worktree.menu.open"
                 icon={MoreHorizontal}
                 label={`More actions for ${title}`}
                 onClick={() =>
-                  setMenuOpen((current) => !current)
+                  onCommand(buildWorktreeMenuOpenCommand(id, actionServerId), {
+                    "worktree.menu.open": () =>
+                      setMenuOpen((current) => !current),
+                  })
                 }
               />
               {menuOpen ? (
@@ -10722,42 +10807,46 @@ function ResourceRow({
                   className="workbench-overflow-menu workspace-row-menu"
                   role="menu"
                 >
-                  <button
-                    className="workbench-overflow-item"
-                    data-command-id="worktree.hide"
-                    role="menuitem"
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      if (workspaceId) {
+                  {canHideWorktree ? (
+                    <button
+                      className="workbench-overflow-item"
+                      data-command-id="worktree.hide"
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (workspaceId) {
+                          onCommand(
+                            buildWorktreeHideCommand(
+                              workspaceId,
+                              id,
+                              actionServerId,
+                            ),
+                          );
+                        }
+                      }}
+                    >
+                      <EyeOff aria-hidden="true" size={14} strokeWidth={1.8} />
+                      <span>Hide worktree</span>
+                    </button>
+                  ) : null}
+                  {hasWorktreeRemove ? (
+                    <button
+                      className="workbench-overflow-item workbench-overflow-item-danger"
+                      data-command-id="worktreeRemove.open"
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
                         onCommand(
-                          buildWorktreeHideCommand(
-                            workspaceId,
-                            id,
-                            actionServerId,
-                          ),
+                          buildWorktreeRemoveOpenCommand(id, actionServerId),
                         );
-                      }
-                    }}
-                  >
-                    <EyeOff aria-hidden="true" size={14} strokeWidth={1.8} />
-                    <span>Hide worktree</span>
-                  </button>
-                  <button
-                    className="workbench-overflow-item workbench-overflow-item-danger"
-                    data-command-id="worktreeRemove.open"
-                    role="menuitem"
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onCommand(
-                        buildWorktreeRemoveOpenCommand(id, actionServerId),
-                      );
-                    }}
-                  >
-                    <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                    <span>Remove worktree...</span>
-                  </button>
+                      }}
+                    >
+                      <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                      <span>Remove worktree...</span>
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </span>
