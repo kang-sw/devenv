@@ -9,10 +9,12 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
-    DashboardResourcesView, WorkRootActivation, WorkRootAvailability, WorkRootKind, WorkspaceId,
+    DashboardResourcesView, WorkRootActivation, WorkRootAvailability, WorkRootId, WorkRootKind,
+    WorkspaceId,
 };
 
 use crate::discovery::local_work_root_id_for_path;
+use crate::git_toolbar::changes_for_path;
 use crate::resources::live_dashboard_resources;
 use crate::router::AppState;
 use crate::work_root_files::{RegisteredWorkRoot, WorkRootProvenance};
@@ -280,6 +282,317 @@ pub async fn git_worktree_add_submit(
     Json(AddGitWorktreeResponse {
         resources,
         created_work_root_id: created_present.then(|| created_id.as_str().to_owned()),
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Worktree removal (260525 Phase 1 prerequisite + Phase 3 B-1/B-2 UX).
+//
+// SAFETY: `git worktree remove` and any branch delete ALWAYS run with
+// `-C <primary-root-path>`, never `-C <target-worktree>` — you cannot remove a
+// worktree from a git context rooted inside itself. Branch deletion is plain
+// `git branch -d` gated on a non-mutating `merge-base --is-ancestor` merged
+// check; it NEVER becomes `git branch -D`.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoveGitWorktreeRequest {
+    pub delete_branch: bool,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreeRemovePreview {
+    pub work_root_id: String,
+    pub target_path_label: String,
+    pub branch_name: Option<String>,
+    pub has_uncommitted_changes: bool,
+    pub modified_files: u64,
+    pub untracked_files: u64,
+    pub branch_unmerged: bool,
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveGitWorktreeResponse {
+    pub resources: DashboardResourcesView,
+    pub removed_work_root_id: Option<String>,
+    pub branch_deleted: bool,
+    pub branch_delete_skipped_unmerged: bool,
+}
+
+struct WorktreeRemoveContext {
+    primary_root_path: PathBuf,
+    target_path: PathBuf,
+    branch_name: Option<String>,
+}
+
+fn resolve_worktree_remove(
+    state: &AppState,
+    work_root_id: &WorkRootId,
+) -> Result<WorktreeRemoveContext, GitWorkspaceError> {
+    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let workspace = resources
+        .workspaces
+        .iter()
+        .find(|workspace| {
+            workspace
+                .work_roots
+                .iter()
+                .any(|root| root.id == *work_root_id)
+        })
+        .ok_or_else(|| GitWorkspaceError {
+            message: "unknown workRoot".to_owned(),
+            root_label: None,
+        })?;
+    let target = workspace
+        .work_roots
+        .iter()
+        .find(|root| root.id == *work_root_id)
+        .expect("target root present in owning workspace");
+    if target.kind != WorkRootKind::GitLinkedWorktree {
+        return Err(GitWorkspaceError {
+            message: "workRoot is not a linked worktree".to_owned(),
+            root_label: Some(target.label.clone()),
+        });
+    }
+    let target_path =
+        state
+            .opened_work_roots
+            .resolve(work_root_id)
+            .ok_or_else(|| GitWorkspaceError {
+                message: "worktree path is unavailable".to_owned(),
+                root_label: Some(target.label.clone()),
+            })?;
+    // Resolve the workspace's PRIMARY root: `git worktree remove` must run from
+    // there, never from inside the worktree being removed.
+    let primary = workspace
+        .work_roots
+        .iter()
+        .filter(|root| root.availability == WorkRootAvailability::Available)
+        .find(|root| root.kind == WorkRootKind::GitPrimaryRoot)
+        .ok_or_else(|| GitWorkspaceError {
+            message: "workspace primary Git root is unavailable".to_owned(),
+            root_label: Some(workspace.label.clone()),
+        })?;
+    let primary_root_path =
+        state
+            .opened_work_roots
+            .resolve(&primary.id)
+            .ok_or_else(|| GitWorkspaceError {
+                message: "primary root path is unavailable".to_owned(),
+                root_label: Some(primary.label.clone()),
+            })?;
+    let branch_name = git_text(&target_path, &["branch", "--show-current"])
+        .filter(|branch| !branch.is_empty());
+    Ok(WorktreeRemoveContext {
+        primary_root_path,
+        target_path,
+        branch_name,
+    })
+}
+
+/// Non-mutating equivalent of "would `git branch -d <branch>` refuse". Returns
+/// `true` when the branch has commits not reachable from its chosen safety ref
+/// (its configured upstream if any, else the primary root's current HEAD),
+/// i.e. deleting it would lose commits. A git invocation failure is treated as
+/// unmerged (conservative: never let a spawn error greenlight a delete).
+fn branch_unmerged(primary_root: &Path, branch: &str) -> bool {
+    let upstream = git_text(
+        primary_root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            &format!("{branch}@{{upstream}}"),
+        ],
+    )
+    .filter(|upstream| !upstream.is_empty());
+    let reference = upstream.unwrap_or_else(|| "HEAD".to_owned());
+    let is_ancestor = Command::new("git")
+        .arg("-C")
+        .arg(primary_root)
+        .args(["merge-base", "--is-ancestor", branch, &reference])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    !is_ancestor
+}
+
+/// Build the `git worktree remove [--force] <target>` invocation.
+///
+/// SAFETY: the `-C` context is ALWAYS the primary root, never the target
+/// worktree — you must not run the removal from inside the tree it deletes.
+/// The target is passed as an absolute-path argument (so `-C` never changes
+/// which path is removed), and `--force` is added only when explicitly
+/// requested by the caller after the data-loss warning. Extracted as a pure
+/// builder so the primary-root-vs-target argument order is directly
+/// assertable in a unit test (`git worktree remove` tolerates a
+/// self-referential `-C target`, so a black-box outcome test cannot catch a
+/// `-C primary` -> `-C target` regression on the command itself).
+fn worktree_remove_command(primary_root: &Path, target: &Path, force: bool) -> Command {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(primary_root)
+        .arg("worktree")
+        .arg("remove");
+    if force {
+        command.arg("--force");
+    }
+    command.arg(target);
+    command
+}
+
+fn run_git_ok(root: &Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+pub async fn git_worktree_remove_preview(
+    State(state): State<AppState>,
+    AxumPath(work_root_id): AxumPath<String>,
+) -> Response {
+    let work_root_id = WorkRootId::from(work_root_id);
+    let context = match resolve_worktree_remove(&state, &work_root_id) {
+        Ok(context) => context,
+        Err(error) => {
+            return Json(GitWorktreeRemovePreview {
+                work_root_id: work_root_id.as_str().to_owned(),
+                target_path_label: String::new(),
+                branch_name: None,
+                has_uncommitted_changes: false,
+                modified_files: 0,
+                untracked_files: 0,
+                branch_unmerged: false,
+                available: false,
+                reason: Some(error.message),
+            })
+            .into_response()
+        }
+    };
+    let changes = changes_for_path(&context.target_path);
+    let has_uncommitted = changes.modified_files > 0 || changes.untracked_files > 0;
+    let branch_unmerged = context
+        .branch_name
+        .as_deref()
+        .map(|branch| branch_unmerged(&context.primary_root_path, branch))
+        .unwrap_or(false);
+    Json(GitWorktreeRemovePreview {
+        work_root_id: work_root_id.as_str().to_owned(),
+        target_path_label: context.target_path.display().to_string(),
+        branch_name: context.branch_name,
+        has_uncommitted_changes: has_uncommitted,
+        modified_files: changes.modified_files,
+        untracked_files: changes.untracked_files,
+        branch_unmerged,
+        available: true,
+        reason: None,
+    })
+    .into_response()
+}
+
+pub async fn git_worktree_remove_submit(
+    State(state): State<AppState>,
+    AxumPath(work_root_id): AxumPath<String>,
+    Json(request): Json<RemoveGitWorktreeRequest>,
+) -> Response {
+    let work_root_id = WorkRootId::from(work_root_id);
+    let context = match resolve_worktree_remove(&state, &work_root_id) {
+        Ok(context) => context,
+        Err(_) => {
+            return bounded_error(
+                StatusCode::BAD_REQUEST,
+                "worktree is not available for removal",
+            )
+        }
+    };
+
+    // B-1 force gate: never destroy uncommitted/untracked work without an
+    // explicit force flag set after the owner has seen the data-loss warning.
+    let changes = changes_for_path(&context.target_path);
+    let has_uncommitted = changes.modified_files > 0 || changes.untracked_files > 0;
+    if has_uncommitted && !request.force {
+        return bounded_error(
+            StatusCode::CONFLICT,
+            "worktree has uncommitted or untracked changes; force required",
+        );
+    }
+
+    let mut command =
+        worktree_remove_command(&context.primary_root_path, &context.target_path, request.force);
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(_) => {
+            return bounded_error(StatusCode::INTERNAL_SERVER_ERROR, "git worktree remove failed")
+        }
+    };
+    if !output.status.success() {
+        return bounded_error(StatusCode::BAD_REQUEST, "git worktree remove failed");
+    }
+
+    // B-2 branch delete: plain `-d` only, and only when the non-mutating
+    // merged check confirms it is safe. An unmerged branch is left intact and
+    // reported back — this path must NEVER escalate to `git branch -D`.
+    let mut branch_deleted = false;
+    let mut branch_delete_skipped_unmerged = false;
+    if request.delete_branch {
+        if let Some(branch) = context.branch_name.as_deref() {
+            if branch_unmerged(&context.primary_root_path, branch) {
+                branch_delete_skipped_unmerged = true;
+            } else {
+                branch_deleted =
+                    run_git_ok(&context.primary_root_path, &["branch", "-d", branch]);
+            }
+        }
+    }
+
+    let _persist_guard = state.registry_persist_lock.lock().await;
+    state.opened_work_roots.unregister(&work_root_id);
+    if let Err(error) = state
+        .dashboard_state
+        .persist_opened_work_roots(&state.opened_work_roots)
+        .await
+    {
+        // The worktree directory (and possibly its branch) is already
+        // irreversibly gone from disk. Disk is now the source of truth, so we
+        // must NOT re-register the entry — doing so would resurrect a zombie
+        // registry row pointing at a deleted path, the exact registry/disk
+        // divergence this op exists to prevent. Keep the in-memory removal,
+        // still run the session cleanup below, and return the removal result.
+        // The stale persisted file self-heals on the next successful persist.
+        tracing::warn!(
+            %error,
+            "failed to persist removed Git worktree; keeping in-memory removal (disk already gone)"
+        );
+    }
+
+    let ids: BTreeSet<WorkRootId> = std::iter::once(work_root_id.clone()).collect();
+    state.terminals.remove_for_work_roots(&ids);
+    state.codex_sessions.remove_for_work_roots(&ids);
+    state.claude_sessions.remove_for_work_roots(&ids);
+
+    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let removed = !resources
+        .workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.work_roots)
+        .any(|root| root.id == work_root_id);
+    Json(RemoveGitWorktreeResponse {
+        resources,
+        removed_work_root_id: removed.then(|| work_root_id.as_str().to_owned()),
+        branch_deleted,
+        branch_delete_skipped_unmerged,
     })
     .into_response()
 }
@@ -604,4 +917,131 @@ fn bounded_error(status: StatusCode, error: impl Into<String>) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn git_available() -> bool {
+        Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn run(path: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_fixture_repo(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-git-worktree-remove-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create fixture dir");
+        run(&dir, &["init", "-q"]);
+        run(&dir, &["config", "user.email", "test@example.com"]);
+        run(&dir, &["config", "user.name", "Test"]);
+        fs::write(dir.join("tracked.txt"), "one\n").expect("write tracked.txt");
+        run(&dir, &["add", "tracked.txt"]);
+        run(&dir, &["commit", "-q", "-m", "init"]);
+        dir
+    }
+
+    #[test]
+    fn worktree_remove_command_runs_from_primary_root_context() {
+        use std::ffi::OsStr;
+
+        let primary = PathBuf::from("/repo/primary");
+        let target = PathBuf::from("/repo/wt-topic");
+
+        // Invariant 1: the removal ALWAYS runs `-C <primary>` (never
+        // `-C <target>`), and the target is the final path argument. Asserting
+        // the argv directly is the only load-bearing guard for this, because
+        // git tolerates a self-referential `-C <target> worktree remove
+        // <target>`, so an outcome-only integration test would pass even if
+        // `-C` were regressed to the target worktree.
+        let command = worktree_remove_command(&primary, &target, false);
+        let args: Vec<&OsStr> = command.get_args().collect();
+        assert_eq!(
+            args,
+            vec![
+                OsStr::new("-C"),
+                primary.as_os_str(),
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                target.as_os_str(),
+            ],
+            "remove must run -C <primary> and pass <target> as the final arg"
+        );
+        assert_ne!(
+            args[1], target,
+            "the -C context must never be the target worktree being removed"
+        );
+
+        // `--force` is inserted only when requested, immediately before the
+        // target path.
+        let forced = worktree_remove_command(&primary, &target, true);
+        let forced_args: Vec<&OsStr> = forced.get_args().collect();
+        assert_eq!(
+            forced_args,
+            vec![
+                OsStr::new("-C"),
+                primary.as_os_str(),
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                OsStr::new("--force"),
+                target.as_os_str(),
+            ],
+            "forced remove keeps the primary -C context and appends --force"
+        );
+    }
+
+    #[test]
+    fn branch_unmerged_distinguishes_merged_and_dangling_branches() {
+        if !git_available() {
+            return;
+        }
+        let dir = init_fixture_repo("branch-check");
+        let base_branch =
+            git_text(&dir, &["branch", "--show-current"]).expect("default branch name");
+
+        // A branch with no unique commits (freshly created off HEAD) is safe to
+        // delete — `git branch -d` would accept it.
+        run(&dir, &["branch", "merged-topic"]);
+        assert!(
+            !branch_unmerged(&dir, "merged-topic"),
+            "a branch with no commits beyond HEAD must read as merged/safe"
+        );
+
+        // A branch carrying a commit not reachable from HEAD is unmerged —
+        // `git branch -d` would refuse and only `-D` would force it.
+        run(&dir, &["switch", "-c", "dangling-topic"]);
+        fs::write(dir.join("tracked.txt"), "one\ntwo\n").expect("modify tracked.txt");
+        run(&dir, &["commit", "-aqm", "dangling commit"]);
+        run(&dir, &["switch", "-q", &base_branch]);
+        assert!(
+            branch_unmerged(&dir, "dangling-topic"),
+            "a branch with a commit not on HEAD must read as unmerged/dangling"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }

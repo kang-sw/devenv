@@ -25,6 +25,8 @@
     "src/gitToolbar.ts",
     "src/gitToolbar.test.ts",
     "src/gitWorktreeAdd.ts",
+    "src/gitWorktreeRemove.ts",
+    "src/gitWorktreeRemove.test.ts",
     "src/linkedServers.ts",
     "src/linkedServers.test.ts",
     "src/resourceModel.ts",
@@ -33,6 +35,8 @@
     "src/workNavOrder.test.ts",
     "src/keydownSuppression.ts",
     "src/keydownSuppression.test.ts",
+    "src/hotkeys.ts",
+    "src/hotkeys.test.ts",
     "src/resourceRefresh.ts",
     "src/resourceRefresh.test.ts",
     "src/documentViewer.tsx",
@@ -61,6 +65,12 @@
     "src/terminals.test.ts",
     "src/terminalCommandPlan.ts",
     "src/terminalCommandPlan.test.ts",
+    "src/settingsStore.ts",
+    "src/settingsStore.test.ts",
+    "src/terminalPrefs.ts",
+    "src/terminalPrefs.test.ts",
+    "src/settingsSections.tsx",
+    "src/settingsSections.test.ts",
     "src/workbench/**/*.ts"
   ]
 }

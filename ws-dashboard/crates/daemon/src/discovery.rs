@@ -230,7 +230,7 @@ impl WorkspaceBuilder {
             },
             compactable: false,
             main_instances,
-            actions: activation_actions(active, available),
+            actions: work_root_actions(discovered.kind, active, available),
         });
     }
 
@@ -569,6 +569,23 @@ fn availability_status(availability: WorkRootAvailability) -> &'static str {
         WorkRootAvailability::Inaccessible => "inaccessible",
         WorkRootAvailability::Unknown => "unknown",
     }
+}
+
+// Per-row action hints: the shared activation actions plus, for linked
+// worktrees only, the `worktree.remove` hint that gates the frontend's
+// per-worktree "..." overflow menu (260525 Phase 3 B-1/B-2). The primary root
+// and plain directories never expose it — a whole-workspace forget is the
+// separate `workspace.remove` workspace-level action.
+fn work_root_actions(kind: WorkRootKind, active: bool, available: bool) -> Vec<ActionHint> {
+    let mut actions = activation_actions(active, available);
+    if kind == WorkRootKind::GitLinkedWorktree {
+        actions.push(ActionHint {
+            id: "worktree.remove".to_owned(),
+            label: "Remove worktree...".to_owned(),
+            enabled: available && active,
+        });
+    }
+    actions
 }
 
 fn activation_actions(active: bool, available: bool) -> Vec<ActionHint> {

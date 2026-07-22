@@ -621,6 +621,44 @@ the daemon can identify it. Checked-out branches, invalid names, unavailable
 Git roots, and path conflicts produce bounded errors without exposing private
 host paths in command payloads, logs, or browser-visible diagnostics.
 
+## Git Worktree Removal {#260722-ws-dashboard-git-worktree-removal}
+
+The dashboard lets an authenticated owner remove a linked Git worktree
+through a two-step preview/submit flow mirroring worktree creation: a
+non-mutating preview reports the target's dirty state (modified/untracked
+file counts) and, when the worktree has a checked-out branch, whether that
+branch is unmerged. Submit re-resolves and re-validates before mutating.
+
+The op always resolves and runs `git worktree remove`, and any branch
+deletion, from the workspace's PRIMARY Git root — never from a working
+directory rooted inside the worktree being removed, since a worktree cannot
+remove itself from its own context.
+
+Force gate: submitting against a worktree with uncommitted or untracked
+changes without an explicit `force` flag is rejected with a bounded 409
+response; the caller must resubmit with `force` set after the owner has seen
+the data-loss warning. Force is never implied or defaulted — it is a
+deliberate per-submit caller choice, not something a client can trigger
+accidentally.
+
+Optional branch deletion is non-destructive. Whether deletion is requested is
+the caller's choice. Before deleting, the daemon checks — using a
+non-mutating merge-base ancestry check equivalent to the condition under
+which plain `git branch -d` itself would refuse — whether the branch has
+commits unreachable from its upstream, or, absent an upstream, from the
+primary root's current HEAD. A branch found unmerged is left intact and
+reported back as skipped; branch deletion only ever runs plain `git branch
+-d`, never a force variant, so it can never discard dangling commits.
+
+On successful disk removal, the daemon unregisters the workRoot entry and
+persists the registry, then clears terminal, Codex, and Claude sessions
+scoped to the removed workRoot id. If the registry persist fails after a
+successful `git worktree remove`, disk is treated as the source of truth:
+the entry is not re-registered — doing so would resurrect a registry row
+pointing at a path that no longer exists — session cleanup still runs, and
+the returned view reflects the completed removal. The stale persisted file
+is logged for self-heal on a later successful persist.
+
 ## Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
 
 The selected WorkRoot toolbar shows Git controls only for online, available
@@ -673,6 +711,35 @@ does not become browser-side resource authority, overlapping refresh requests
 are suppressed, stale poll results do not overwrite newer open or activation
 resource views, and refresh failures keep the last known resource tree visible.
 Filesystem watchers, if added later, act only as refresh hints.
+
+## Worktree Removal Confirmation And Hide UX {#260722-ws-dashboard-worktree-removal-hide-ux}
+
+Removing a linked worktree always opens a real confirmation modal — never a
+bare browser `confirm()` dialog — regardless of whether the target is clean
+or dirty; worktree add/remove is treated as a heavy operation independent of
+whether there is uncommitted work to lose. When the preview reports
+uncommitted or untracked changes, the modal additionally surfaces a distinct
+red data-loss notice naming the file counts that will be deleted; submitting
+from that state is what authorizes the daemon's force gate. A 409 force-gate
+response — the target turned dirty after a clean preview — refreshes the
+preview in place so the notice appears, rather than forcing the owner to
+close and reopen the modal.
+
+The same modal includes a "delete branch too" checkbox that defaults OFF, so
+the branch is preserved unless the owner opts in. When the preview reports
+the branch as unmerged, the checkbox shows a red inline warning; even if
+checked in that state, the branch is kept rather than deleted.
+
+Hiding a worktree is pure browser-local display state, fully decoupled from
+the daemon registry: it only removes the row from the dashboard's visible
+worktree list, never touches the worktree directory or its branch, and never
+calls the removal op. The hide affordance is not gated on the daemon's
+worktree-removal availability — an unavailable or inactive worktree can still
+be hidden, which is the case where decluttering is most useful. Restore
+path: the owning workspace's "..." overflow menu gains a hidden-worktrees
+submenu listing currently-hidden entries; selecting one un-hides it. The
+`g w h` chord opens/reveals this hidden-worktrees submenu for the currently
+relevant workspace.
 
 ## Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
 
@@ -760,6 +827,139 @@ browser-chrome-reserved shortcuts (Ctrl+W/T/N/Tab/1-9) are not addressed
 here since they never reach page script in any served mode. It runs
 identically in a plain browser tab and the Phase 1 installed PWA
 (`260721-ws-dashboard-pwa-installability`).
+
+## Which-Key Leader Hint Overlay {#260722-ws-dashboard-which-key-hint-overlay}
+
+While a `Ctrl+Space` leader sequence is pending, the dashboard shows a
+transient which-key/lazyvim-style hint popup anchored to the bottom-right of
+the viewport, listing the currently-reachable next keys from the hotkey
+binding registry's leader tree. The popup does not appear immediately: it
+appears only after the sequence has been pending for 250ms, so a fast,
+already-memorized leader chord never flashes the popup. That 250ms delay is
+anchored to the initial idle-to-pending transition (the moment `Ctrl+Space`
+is first pressed) — narrowing the sequence with a further key press does not
+restart the delay or re-hide an already-visible popup.
+
+Each reachable next key renders as one row: `key → +group` when that key
+leads to further sub-keys (a branch), or `key → <label>` when that key
+resolves directly to a bound command (a leaf). As the user types further
+keys in the sequence, the popup's row list updates to the new current node's
+children, narrowing along with the sequence. The popup dismisses on every
+path that returns leader mode to idle: successful resolution of a binding,
+an unmatched-key cancel, `Escape`, or a second `Ctrl+Space` leader press.
+
+A leaf row's label is sourced from the resolved `HotkeyBinding`'s
+`description` field, not from a label derived from the bound command. This
+is a fixed contract, not an incidental shortcut: resolving a command-derived
+label requires invoking the binding's payload builder against the live
+dispatch context, and every context-dependent default binding's payload
+builder returns no result when no work root is selected — a common,
+unremarkable state the popup must still render correctly in. Every default
+leaf binding's `description` is authored as the same human-readable action
+label a command-derived label would otherwise produce, so reading
+`description` directly satisfies the popup's labeling intent without that
+gap.
+
+The popup is a read-only presentation layer over the live hotkey binding
+registry: it defines no bindings and no dispatch path of its own, and it
+reflects the registry's current contents — including a user's own
+rebindings — automatically. It does not capture or consume keyboard input;
+the existing leader-press capture path (including its terminal-focus/IME
+guard) is unchanged and remains the sole input-handling surface.
+
+> [!note] Implementation Gap · 2026-07-22
+> Browser-level (Playwright) verification of the popup's appear/narrow/
+> dismiss lifecycle across all four dismissal paths has not been run yet.
+> The behavior above is verified by unit tests over the pure row-derivation
+> logic only.
+
+## Dashboard Settings Panel {#260722-ws-dashboard-settings-panel}
+
+The dashboard exposes a single global Settings modal for dashboard-wide
+preferences, distinct from any per-workRoot or per-worktree UI. It is
+opened by a `settings.open` command (mirrored by `settings.close` on
+dismissal), issued from a keyboard-reachable topbar button; it follows the
+same react-aria `ModalOverlay`/`Modal`/`Dialog` composition as other
+dashboard confirmation modals (`260722-ws-dashboard-git-worktree-removal`),
+and is keyboard-only operable: open, section navigation, and dismissal
+(`Escape` or backdrop click) all work without a mouse. There is
+deliberately no default leader-hotkey binding for `settings.open` — the
+shipped keymap table is exhaustiveness-tested (`hotkeys.test.ts`) against
+every command, and no settings leaf was added to it. A hotkey binding can
+be introduced once the planned hotkey-rebind section below lands.
+
+The panel's body is not a hard-coded screen; it renders an ordered list of
+independently registered setting sections, backed by a module-scope
+`SETTINGS_SECTIONS` registry of `{ id, title, Component }` descriptors with
+stable `Component` identity (never an inline function rebuilt on
+re-render, which would otherwise remount — and drop focus out of — a
+section's inputs on every keystroke). The `SettingsModal` shell receives
+this descriptor list as an injected `sections` prop and iterates it
+generically: it consumes only `id`/`title`/`Component` and threads no
+section-specific typed props. A section owns reading and writing its own
+preferences through its own context/state; the shell has no knowledge of a
+section's internal fields or storage shape. This registry contract exists
+so that later sections (starting with a planned hotkey-rebind editor) can
+be added by appending a descriptor to `SETTINGS_SECTIONS`, without
+modifying the shell or any other section's code.
+
+Section preferences persist through a shared, namespaced preferences-store
+helper built over the dashboard's existing low-level `browserStorage()`
+accessor, generalizing the versioned `"ws-dashboard.<feature>.v<N>"`
+JSON-blob convention already used ad hoc per feature (e.g. hotkey
+bindings). The helper is the single read/write seam for section prefs:
+each section loads and saves through it under its own namespaced key, with
+defensive parsing that falls back to that section's defaults on missing or
+malformed stored data, rather than each section reimplementing its own
+storage logic.
+
+The first registered section is Terminal style: font family, font size, and
+background theme color, replacing the values previously hardcoded at the
+xterm construction site (`260516-ws-web-dashboard-browser-terminal-emulator-behavior`
+documents the resulting rendering behavior). When no preference is stored,
+the section's defaults reproduce the prior hardcoded look exactly — an
+empty font-family override leaves the existing Nerd Font fallback stack
+unchanged (a non-empty override is prepended onto that stack rather than
+replacing it), font size defaults to `12`, and background defaults to
+`#0b0d10` — so an unconfigured dashboard is visually unchanged.
+
+Live values reach open terminal panes through a dedicated
+`SettingsTerminalContext` (prefs plus the section's single write path),
+separate from the read-only `TerminalPrefsContext` that every open
+terminal pane consumes to live-restyle its emulator. A change applies to
+already-open panes immediately, without remounting or interrupting the
+underlying session; new panes read the persisted preference at
+construction time.
+
+> [!note] Protected zone
+> The terminal mount effect that constructs the xterm `Terminal` instance
+> and performs session restore/reattach is a protected zone
+> (`260516-ws-web-dashboard-protected-frontend-shell`). Its only
+> settings-related change is substituting the 3 constructor values
+> (`fontFamily`/`fontSize`/`theme.background`) for prefs-derived reads at
+> construction time; it does not otherwise change. Live restyling of an
+> already-open pane must be implemented as a separate effect, declared
+> outside the mount effect, that subscribes to prefs changes post-mount and
+> mutates `terminal.options.*` directly, then re-triggers the existing
+> FitAddon refit and size-forward so a font-metric change reflows the
+> emulator's cell geometry (guarded to no-op against an already-disposed
+> terminal). The mount effect itself must never be made to depend on live
+> prefs, since that would remount the emulator and interrupt the session.
+
+> [!note] Implementation Gap · 2026-07-22
+> Browser-level (Playwright) verification that a live Terminal-style change
+> fans out to an open pane, and that the protected-zone mount effect is
+> otherwise unaffected, has not been run yet. The behavior above is
+> verified by unit tests over the pure prefs helpers
+> (`terminalPrefs.test.ts`) and the section-registry contract
+> (`settingsSections.test.ts`, `settingsStore.test.ts`) only.
+
+> [!note] Planned 🚧
+> A future hotkey-rebind editor section will register into this panel to
+> edit bindings from the hotkey binding registry directly, and is expected
+> to introduce the first default leader-hotkey binding for
+> `settings.open`. It is a planned extension of the section registry, not
+> specified further here.
 
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 

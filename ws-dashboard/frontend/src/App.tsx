@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   CSSProperties,
   Dispatch,
@@ -15,6 +23,7 @@ import {
   BriefcaseBusiness,
   CirclePower,
   Eye,
+  EyeOff,
   File,
   Folder,
   FolderGit2,
@@ -35,6 +44,7 @@ import {
   RotateCcw,
   Save,
   Server,
+  Settings as SettingsIcon,
   SquareTerminal,
   Stethoscope,
   Trash2,
@@ -95,11 +105,19 @@ import {
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
   buildAgentChatCreateCommand,
+  buildSettingsCloseCommand,
+  buildSettingsOpenCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildServerOffCommand,
   buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
+  buildWorktreeHideCommand,
+  buildWorktreeMenuOpenCommand,
+  buildWorktreeRemoveOpenCommand,
+  buildWorktreeRemoveCloseCommand,
+  buildWorktreeRemoveSubmitCommand,
+  buildWorktreeUnhideCommand,
   buildWorkRootActivationCommand,
   buildWorkRootCloseCommand,
   buildWorkRootOpenCommand,
@@ -111,6 +129,25 @@ import {
   type DashboardCommandHandlers,
   type DashboardCommandPayload,
 } from "./commands";
+import {
+  applyHotkeyUserConfig,
+  buildDefaultHotkeyBindings,
+  buildLeaderTree,
+  chordFromKeydownEvent,
+  describeLeaderChildren,
+  enterLeaderPending,
+  findStandaloneMatch,
+  isLeaderTriggerKeydown,
+  loadHotkeyUserConfig,
+  resolveHotkeyCommand,
+  shouldSkipHotkeyCapture,
+  stepLeaderState,
+  HotkeyRegistry,
+  type HotkeyBinding,
+  type HotkeyDispatchContext,
+  type LeaderState,
+  type LeaderTreeNode,
+} from "./hotkeys";
 import {
   decideSurfaceClose,
   decideWorkbenchTabClosePresentation,
@@ -293,11 +330,14 @@ import {
   type WorkspaceView,
 } from "./resourceModel";
 import {
+  applyHiddenWorktrees,
   applySiblingOrder,
+  hiddenWorktreeItems,
   isAcceptableSiblingDrop,
   loadWorkNavOrderSnapshot,
   reorderSiblingIds,
   saveWorkNavOrderSnapshot,
+  withHiddenWorktree,
   workNavSiblingDragMimeType,
   type WorkNavSiblingDragPayload,
   type WorkNavSiblingOrder,
@@ -332,6 +372,12 @@ import {
   type GitWorktreeAddPreviewRequest,
 } from "./gitWorktreeAdd";
 import {
+  fetchGitWorktreeRemovePreview,
+  submitGitWorktreeRemove,
+  GitWorktreeRemoveSubmitError,
+  type GitWorktreeRemovePreview,
+} from "./gitWorktreeRemove";
+import {
   createWorkRootGitBranch,
   fetchWorkRootGit,
   fetchWorkRootGitBranches,
@@ -354,6 +400,7 @@ import {
   reconnectServerTunnel,
 } from "./linkedServers";
 import { ActivityConsole } from "./ActivityConsole";
+import { WhichKeyOverlay } from "./WhichKeyOverlay";
 import {
   createResourceRefreshCoordinator,
   requestDashboardResources,
@@ -377,6 +424,18 @@ import {
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
+import type { SettingsSectionDescriptor } from "./settingsStore";
+import {
+  buildEffectiveTerminalFontFamily,
+  loadTerminalStylePrefs,
+  saveTerminalStylePrefs,
+  DEFAULT_TERMINAL_STYLE_PREFS,
+  type TerminalStylePrefs,
+} from "./terminalPrefs";
+import {
+  SETTINGS_SECTIONS,
+  SettingsTerminalContext,
+} from "./settingsSections";
 
 type CommandPayload = DashboardCommandPayload;
 type CommandEntry = DashboardCommandEntry;
@@ -449,6 +508,16 @@ function realAgentChatHarness(
   return harness === "codex" || harness === "claude" ? harness : null;
 }
 
+// Live fan-out for terminal-style prefs: open terminal panes subscribe via
+// `useContext` and apply `terminal.options.*` on change (see
+// `TerminalPaneBody`'s post-mount subscription effect) instead of only
+// reading the value at construction time. The default matches
+// `DEFAULT_TERMINAL_STYLE_PREFS` so any consumer rendered outside the
+// Provider (there should be none) still reproduces today's hardcoded look.
+export const TerminalPrefsContext = createContext<TerminalStylePrefs>(
+  DEFAULT_TERMINAL_STYLE_PREFS,
+);
+
 export function App() {
   // Per-server cache of the last resolved resources tree, keyed by
   // `server.id`. Replaces a single-slot `resources` state so that switching
@@ -467,7 +536,15 @@ export function App() {
     serverRoute: string;
     workspaceId: string;
   } | null>(null);
+  const [worktreeRemoveTarget, setWorktreeRemoveTarget] = useState<{
+    serverRoute: string;
+    workRootId: string;
+  } | null>(null);
   const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [terminalPrefs, setTerminalPrefs] = useState<TerminalStylePrefs>(() =>
+    loadTerminalStylePrefs(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -654,6 +731,85 @@ export function App() {
   const workbenchSelection = closeEmptyWorkbench
     ? null
     : stickyWorkbenchSelection;
+  // 260722-feat-dashboard-hotkey-config-framework Phase 1: the merged
+  // (defaults + persisted user rebinds) binding table, built once for the
+  // component's lifetime via the pure `hotkeys.ts` module. `HotkeyRegistry`
+  // is the binding-registration API later layers (which-key overlay,
+  // command bar, hint-click - separate tickets) can call
+  // `hotkeyFrameworkRef.current.registry.registerUser(...)` against at
+  // runtime without a rewrite. Lazy ref init (guarded by `!current`) instead
+  // of `useEffect` because the leader-listener effect below needs the tree/
+  // registry synchronously on its first mount, and this init is a pure,
+  // idempotent read (default table construction + one `localStorage` read),
+  // safe under React StrictMode's double-invoke.
+  const hotkeyFrameworkRef = useRef<{
+    readonly registry: HotkeyRegistry<HotkeyDispatchContext>;
+    readonly leaderTree: LeaderTreeNode<HotkeyDispatchContext>;
+    readonly standaloneBindings: readonly HotkeyBinding<HotkeyDispatchContext>[];
+  } | null>(null);
+  if (!hotkeyFrameworkRef.current) {
+    const registry = new HotkeyRegistry<HotkeyDispatchContext>();
+    const defaults = buildDefaultHotkeyBindings();
+    const userConfig = loadHotkeyUserConfig();
+    const { bindings } = applyHotkeyUserConfig(defaults, userConfig);
+    for (const binding of bindings) {
+      // `applyHotkeyUserConfig` already re-validated any user rebind against
+      // the reserved-key set (Ticket Contract "Reserved keys ... enforced as
+      // data the registry checks"), so every entry in `bindings` is expected
+      // to already be reserved-key-clean. `registerDefault` (fail-fast,
+      // throws) rather than `registerUser` (silently drops) is deliberate
+      // here: this loop is installing the app's resolved default/effective
+      // table, not accepting a single live user rebind attempt, so a
+      // reserved-key entry reaching this point is a bug upstream that should
+      // surface loudly (build/test-time) instead of silently vanishing.
+      registry.registerDefault(binding);
+    }
+    const activeBindings = registry.list();
+    hotkeyFrameworkRef.current = {
+      registry,
+      leaderTree: buildLeaderTree(activeBindings),
+      standaloneBindings: activeBindings.filter(
+        (binding) => binding.kind === "standalone",
+      ),
+    };
+  }
+  // Pending-sequence state for the leader-mode state machine
+  // (`stepLeaderState`/`enterLeaderPending` in `hotkeys.ts`); mutated
+  // directly inside the keydown handler below rather than via `useState`
+  // since it must be read/written synchronously within a single native
+  // event (no re-render should happen mid-keystroke), mirroring the terminal
+  // pane's own `liveRef`/`keepTerminalFocusRef` mutable-ref style elsewhere
+  // in this file.
+  const leaderStateRef = useRef<LeaderState<HotkeyDispatchContext>>({
+    kind: "idle",
+  });
+  // Parallel React-state mirror of `leaderStateRef` (260722-feat-dashboard-
+  // which-key-hint-overlay Phase 1). The ref above remains the synchronous
+  // dispatch source of truth (unchanged) - this state exists purely so the
+  // which-key overlay can reactively re-render off leader-mode transitions,
+  // since a component cannot render off a bare ref. Updated via
+  // `setLeaderUiState` immediately alongside every `leaderStateRef.current =
+  // ...` assignment inside the keydown handler below, never on its own.
+  const [leaderUiState, setLeaderUiState] = useState<
+    LeaderState<HotkeyDispatchContext>
+  >({ kind: "idle" });
+  // The live dispatch context (currently active work root/workspace/server)
+  // the leader-listener effect below reads on every keydown without needing
+  // to reinstall the listener on every selection change - same ref-sync
+  // pattern as `selectedServerIdRef` a little further down.
+  const hotkeyContextRef = useRef<HotkeyDispatchContext>({ activeRoot: null });
+  useEffect(() => {
+    hotkeyContextRef.current = {
+      activeRoot: workbenchSelection
+        ? {
+            workRootId: workbenchSelection.root.id,
+            serverRoute: workbenchSelection.root.resourcePath.serverId,
+            workspaceId: workbenchSelection.workspace.id,
+            activation: workbenchSelection.root.activation,
+          }
+        : null,
+    };
+  }, [workbenchSelection]);
   // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
   // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
   // where all six committed-state fields are simultaneously in scope, so the
@@ -1205,6 +1361,52 @@ export function App() {
       } else if (command.payload.type === "gitWorktreeAdd.close") {
         executableHandlers[command.commandId] = () =>
           setGitWorktreeTarget(null);
+      } else if (command.payload.type === "worktreeRemove.open") {
+        const { workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          setWorktreeRemoveTarget({
+            serverRoute: serverRoute ?? "server-local",
+            workRootId,
+          });
+      } else if (command.payload.type === "worktreeRemove.close") {
+        executableHandlers[command.commandId] = () =>
+          setWorktreeRemoveTarget(null);
+      } else if (command.payload.type === "settings.open") {
+        executableHandlers[command.commandId] = () => setSettingsOpen(true);
+      } else if (command.payload.type === "settings.close") {
+        executableHandlers[command.commandId] = () => setSettingsOpen(false);
+      } else if (command.payload.type === "worktree.hide") {
+        const { workspaceId, workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          setWorkNavOrder((current) =>
+            withHiddenWorktree(
+              current,
+              serverScopedIdentity(serverRoute ?? "server-local", workspaceId),
+              workRootId,
+              true,
+            ),
+          );
+      } else if (command.payload.type === "worktree.unhide") {
+        const { workspaceId, workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          setWorkNavOrder((current) =>
+            withHiddenWorktree(
+              current,
+              serverScopedIdentity(serverRoute ?? "server-local", workspaceId),
+              workRootId,
+              false,
+            ),
+          );
+      } else if (command.payload.type === "worktreeHidden.menu.open") {
+        // `g w h`: reveal the workspace "..." menu (which hosts the
+        // hidden-worktrees restore section) for the targeted workspace. The
+        // menu is component-local state on the matching workspace row, so
+        // dispatch through the scope-keyed reveal signal it subscribes to.
+        const { workspaceId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () =>
+          emitHiddenWorktreesMenuOpen(
+            serverScopedIdentity(serverRoute ?? "server-local", workspaceId),
+          );
       } else if (command.payload.type === "workRoot.close") {
         const { workRootId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -1471,6 +1673,127 @@ export function App() {
     ],
   );
 
+  // 260722-feat-dashboard-hotkey-config-framework Phase 1: global leader-press
+  // capture and dispatch. There is no existing generic global shortcut-
+  // capture layer to register onto yet (260711-idea-dashboard-command-bus-
+  // quick-open-shortcuts' own Phase 1 is still `todo/`), so this effect IS
+  // that layer's leader-press entry point for this ticket's scope -
+  // structured as a small, mostly-self-contained handler so a later capture
+  // layer can call into it instead of building a second competing listener.
+  // Installed as a capture-phase `document` listener, the same way
+  // `suppressBrowserShortcut` above is, and coexisting with it and with the
+  // terminal pane's own bubble-phase `keydownFallback` per that effect's
+  // non-`stopPropagation()` discipline - EXCEPT while a leader sequence is
+  // actively pending: then this listener always swallows the key
+  // (`preventDefault` + `stopPropagation`) so it can never reach
+  // `keydownFallback`, which forwards keystrokes to the last-active terminal
+  // pane even when DOM focus has wandered elsewhere on the page (the
+  // deliberately-accepted "set-mark tradeoff" from the ticket's own plan) -
+  // without swallowing, an unmatched leader-sub key would otherwise leak
+  // into that terminal as literal input, violating the ticket's own Phase 1
+  // verify bullet ("leader-press-then-unmatched-key cancels cleanly without
+  // leaking into terminal input"). Depends on `executeCommand` (recreated
+  // when its own dependencies change) rather than mounting once with an
+  // empty dependency array, since it must always dispatch through the
+  // current closure - stale-closure dispatch would silently drop contextual
+  // payloads (e.g. the active work root) on the next render.
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      const framework = hotkeyFrameworkRef.current;
+      if (!framework) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      const targetIsEditable =
+        Boolean(target?.isContentEditable) ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select";
+      const targetInsideTerminalPane = Boolean(
+        document.activeElement?.closest(".terminal-pane"),
+      );
+
+      if (leaderStateRef.current.kind === "pending") {
+        event.preventDefault();
+        event.stopPropagation();
+        const transition = stepLeaderState(
+          leaderStateRef.current,
+          event.key,
+          Date.now(),
+        );
+        leaderStateRef.current = transition.state;
+        setLeaderUiState(transition.state);
+        if (transition.action === "resolve" && transition.binding) {
+          const command = resolveHotkeyCommand(
+            transition.binding,
+            hotkeyContextRef.current,
+          );
+          if (command) {
+            executeCommand(command);
+          }
+        }
+        return;
+      }
+
+      if (
+        shouldSkipHotkeyCapture({
+          isComposing: event.isComposing || event.key === "Process",
+          key: event.key,
+          targetIsEditable,
+          targetInsideTerminalPane,
+        })
+      ) {
+        return;
+      }
+
+      if (
+        isLeaderTriggerKeydown({
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        })
+      ) {
+        leaderStateRef.current = enterLeaderPending(
+          framework.leaderTree,
+          Date.now(),
+        );
+        setLeaderUiState(leaderStateRef.current);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      const standaloneMatch = findStandaloneMatch(
+        framework.standaloneBindings,
+        chordFromKeydownEvent({
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        }),
+      );
+      if (standaloneMatch) {
+        const command = resolveHotkeyCommand(
+          standaloneMatch,
+          hotkeyContextRef.current,
+        );
+        if (command) {
+          event.preventDefault();
+          event.stopPropagation();
+          executeCommand(command);
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeydown, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeydown, true);
+    };
+  }, [executeCommand]);
+
   const applyDocumentSaved = useCallback(
     (source: {
       serverRoute?: string;
@@ -1575,7 +1898,26 @@ export function App() {
     [resourcesByServer],
   );
 
+  // Settings > Terminal section's single write path: updates the live
+  // `TerminalPrefsContext` value (driving open panes' subscription effect,
+  // see `TerminalPaneBody`) and persists, in that order, so the in-memory
+  // Context is always at least as fresh as what is on disk.
+  const handleTerminalPrefsChange = useCallback((next: TerminalStylePrefs) => {
+    setTerminalPrefs(next);
+    saveTerminalStylePrefs(next);
+  }, []);
+
+  // Settings-scoped Terminal context value (prefs + write path) consumed by the
+  // Terminal settings section. Memoized so the Provider value only changes when
+  // the prefs actually change, not on every unrelated App re-render.
+  const settingsTerminalContextValue = useMemo(
+    () => ({ prefs: terminalPrefs, onChange: handleTerminalPrefsChange }),
+    [terminalPrefs, handleTerminalPrefsChange],
+  );
+
   return (
+    <TerminalPrefsContext.Provider value={terminalPrefs}>
+    <SettingsTerminalContext.Provider value={settingsTerminalContextValue}>
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
         <aside
@@ -1594,6 +1936,7 @@ export function App() {
             openWorkRootKeys={openWorkRootKeysSet}
             onOpenWorkRoot={handleWorkRootOpened}
             onOpenAddServer={() => setServerModal({ mode: "add" })}
+            onOpenSettings={() => setSettingsOpen(true)}
             onOpenServerAuth={(server) =>
               setServerModal({ mode: "auth", server })
             }
@@ -1626,6 +1969,35 @@ export function App() {
               }
               setGitWorktreeTarget(null);
             }}
+          />
+          <GitWorktreeRemoveModal
+            target={worktreeRemoveTarget}
+            onCommand={executeCommand}
+            onClose={() => setWorktreeRemoveTarget(null)}
+            onRemoved={(response, context) => {
+              // Tear down the removed root's workbench instance and move the
+              // selection off it BEFORE merging the daemon's post-removal
+              // resource view, so the close's selection-move logic still sees
+              // the root present in `activeResources`.
+              if (context.workRootId) {
+                executeCommand(
+                  buildWorkRootCloseCommand(
+                    context.workRootId,
+                    context.serverRoute,
+                  ),
+                );
+              }
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(
+                response.resources,
+              );
+              setWorktreeRemoveTarget(null);
+            }}
+          />
+          <SettingsModal
+            open={settingsOpen}
+            sections={SETTINGS_SECTIONS}
+            onCommand={executeCommand}
+            onClose={() => setSettingsOpen(false)}
           />
           <LinkedServerModal
             state={serverModal}
@@ -1674,7 +2046,10 @@ export function App() {
           />
         </section>
       </div>
+      <WhichKeyOverlay leaderState={leaderUiState} />
     </main>
+    </SettingsTerminalContext.Provider>
+    </TerminalPrefsContext.Provider>
   );
 }
 
@@ -2914,6 +3289,309 @@ function GitWorktreeAddModal({
   );
 }
 
+// 260525 Phase 3 B-1/B-2: worktree removal ALWAYS opens this real confirmation
+// modal (never a bare `window.confirm` — worktree add/remove is heavy
+// regardless of dirty state). A red data-loss banner is shown ONLY when the
+// preview reports uncommitted/untracked changes; a default-OFF "delete branch"
+// checkbox shows a red parenthetical when the branch is unmerged, and even if
+// checked the daemon refuses to force-delete it.
+function GitWorktreeRemoveModal({
+  target,
+  onCommand,
+  onClose,
+  onRemoved,
+}: {
+  target: { serverRoute: string; workRootId: string } | null;
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+  onRemoved: (
+    response: {
+      resources: DashboardResourcesView;
+      removedWorkRootId?: string;
+      branchDeleted: boolean;
+      branchDeleteSkippedUnmerged: boolean;
+    },
+    context: { workRootId: string; serverRoute: string },
+  ) => void;
+}) {
+  const workRootId = target?.workRootId ?? null;
+  const serverRoute = target?.serverRoute ?? null;
+  const [preview, setPreview] = useState<GitWorktreeRemovePreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [deleteBranch, setDeleteBranch] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshPreview = useCallback(() => {
+    if (!workRootId || !serverRoute) {
+      return;
+    }
+    setLoading(true);
+    void fetchGitWorktreeRemovePreview(workRootId, serverRoute)
+      .then(setPreview)
+      .catch((nextError) =>
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "worktree remove preview failed",
+        ),
+      )
+      .finally(() => setLoading(false));
+  }, [serverRoute, workRootId]);
+
+  useEffect(() => {
+    if (!workRootId || !serverRoute) {
+      setPreview(null);
+      setDeleteBranch(false);
+      setError(null);
+      return;
+    }
+    setPreview(null);
+    setDeleteBranch(false);
+    setError(null);
+    refreshPreview();
+  }, [refreshPreview, serverRoute, workRootId]);
+
+  if (!workRootId || !serverRoute) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildWorktreeRemoveCloseCommand(workRootId, serverRoute), {
+      "worktreeRemove.close": onClose,
+    });
+  };
+
+  const submitDisabled =
+    submitting || loading || !preview || preview.available === false;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!preview || submitDisabled) {
+      return;
+    }
+    onCommand(buildWorktreeRemoveSubmitCommand(workRootId, serverRoute), {
+      "worktreeRemove.submit": () => {
+        setSubmitting(true);
+        setError(null);
+        // The confirmation modal itself IS the force confirmation: submitting
+        // after seeing the red data-loss banner authorizes `--force`.
+        void submitGitWorktreeRemove(
+          workRootId,
+          { deleteBranch, force: preview.hasUncommittedChanges },
+          serverRoute,
+        )
+          .then((response) => onRemoved(response, { workRootId, serverRoute }))
+          .catch((nextError) => {
+            setError(
+              nextError instanceof Error
+                ? nextError.message
+                : "worktree remove failed",
+            );
+            // Force-gate 409: the tree turned dirty after a clean preview.
+            // Refresh so the red data-loss banner appears and a deliberate
+            // re-submit can authorize `--force`, instead of forcing the owner
+            // to close and reopen the modal.
+            if (
+              nextError instanceof GitWorktreeRemoveSubmitError &&
+              nextError.status === 409
+            ) {
+              refreshPreview();
+            }
+          })
+          .finally(() => setSubmitting(false));
+      },
+    });
+  };
+
+  const branchName = preview?.branchName ?? null;
+  return (
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) close();
+      }}
+    >
+      <Modal className="root-picker-modal git-worktree-modal">
+        <Dialog aria-label="Remove Git worktree" className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">
+              Remove worktree
+            </Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="worktreeRemove.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
+            </div>
+          </div>
+          <div className="root-picker-current root-picker-context">
+            {preview?.targetPathLabel ?? "Loading worktree"}
+          </div>
+          <form className="git-worktree-form" onSubmit={submit}>
+            <p className="git-worktree-remove-copy">
+              This removes the linked worktree with{" "}
+              <code>git worktree remove</code>. The worktree directory will be
+              deleted from disk; the repository and other worktrees are
+              untouched.
+            </p>
+            {preview && preview.available === false ? (
+              <InlineNotice
+                tone="error"
+                title="Unavailable"
+                detail={preview.reason ?? "worktree cannot be removed"}
+              />
+            ) : null}
+            {preview?.hasUncommittedChanges ? (
+              <InlineNotice
+                tone="error"
+                title="Uncommitted changes will be lost"
+                detail={`${preview.modifiedFiles} modified · ${preview.untrackedFiles} untracked file(s) in this worktree will be permanently deleted.`}
+              />
+            ) : null}
+            {branchName ? (
+              <label className="git-worktree-remove-branch">
+                <input
+                  type="checkbox"
+                  checked={deleteBranch}
+                  onChange={(event) => setDeleteBranch(event.target.checked)}
+                />{" "}
+                <span>
+                  Delete branch <code>{branchName}</code> too
+                </span>
+                {preview?.branchUnmerged ? (
+                  <span className="git-worktree-remove-unmerged">
+                    {" "}
+                    아직 머지되지 않았습니다 (unmerged — will be kept)
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
+            {error ? (
+              <InlineNotice
+                tone="error"
+                title="Remove worktree"
+                detail={error}
+              />
+            ) : null}
+            <div className="root-picker-footer-actions">
+              <button
+                className="action-button action-button-danger"
+                data-command-id="worktreeRemove.submit"
+                disabled={submitDisabled}
+                type="submit"
+              >
+                {submitting ? "Removing" : "Remove worktree"}
+              </button>
+              <button
+                className="action-button"
+                data-command-id="worktreeRemove.close"
+                type="button"
+                onClick={close}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
+function SettingsModal({
+  open,
+  sections,
+  onCommand,
+  onClose,
+}: {
+  open: boolean;
+  sections: readonly SettingsSectionDescriptor[];
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+}) {
+  // The shell is section-agnostic: it receives the section list as an injected
+  // prop and only ever consumes `{ id, title, Component }`. It threads no
+  // section-specific (e.g. Terminal-typed) props, so registering a new section
+  // means appending a descriptor to `SETTINGS_SECTIONS` - each section sources
+  // its own state from its own context - with no change to this component.
+  const [activeSectionId, setActiveSectionId] = useState<string | undefined>(
+    () => sections[0]?.id,
+  );
+
+  if (!open) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildSettingsCloseCommand(), { "settings.close": onClose });
+  };
+
+  const activeSection =
+    sections.find((section) => section.id === activeSectionId) ?? sections[0];
+
+  return (
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) close();
+      }}
+    >
+      <Modal className="root-picker-modal settings-modal">
+        <Dialog aria-label="Settings" className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">
+              Settings
+            </Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="settings.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
+            </div>
+          </div>
+          <div className="root-picker-content">
+            <nav
+              className="root-picker-places settings-section-nav"
+              aria-label="Settings sections"
+            >
+              {sections.map((section) => {
+                const isActive = section.id === activeSection?.id;
+                return (
+                  <button
+                    key={section.id}
+                    aria-current={isActive ? "true" : undefined}
+                    className={`root-picker-place settings-section-nav-button${
+                      isActive ? " settings-section-nav-button-active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => setActiveSectionId(section.id)}
+                  >
+                    {section.title}
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="root-picker-list-region settings-section-body">
+              {activeSection ? <activeSection.Component /> : null}
+            </div>
+          </div>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
 function LinkedServerModal({
   state,
   onClose,
@@ -3123,6 +3801,7 @@ function ResourceNavigation({
   openWorkRootKeys,
   onOpenWorkRoot,
   onOpenAddServer,
+  onOpenSettings,
   onOpenServerAuth,
   onReconnectServer,
   onSelectServer,
@@ -3146,6 +3825,7 @@ function ResourceNavigation({
     requestedWorkRootId?: string,
   ) => void;
   onOpenAddServer: () => void;
+  onOpenSettings: () => void;
   onOpenServerAuth: (server: ServerConnectionView) => void;
   onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
@@ -3195,6 +3875,16 @@ function ResourceNavigation({
               },
               { "resource.action.server.add": onOpenAddServer },
             )
+          }
+        />
+        <ChromeIconButton
+          commandId="settings.open"
+          icon={SettingsIcon}
+          label="Settings"
+          onClick={() =>
+            onCommand(buildSettingsOpenCommand(), {
+              "settings.open": onOpenSettings,
+            })
           }
         />
       </div>
@@ -3381,6 +4071,7 @@ function ServerRows({
               openWorkRootKeys={openWorkRootKeys}
               onCommand={onCommand}
               worktreeOrderByWorkspace={workNavOrder.worktreeOrderByWorkspace}
+              hiddenWorktreesByWorkspace={workNavOrder.hiddenWorktreesByWorkspace}
               onWorkspaceReorder={onWorkspaceReorder}
               onWorktreeReorder={onWorktreeReorder}
             />
@@ -8553,9 +9244,14 @@ function TerminalPaneBody({
   // while already hidden briefly opens then closes on the first watchdog
   // tick, an accepted minor inefficiency, not a correctness issue.
   const [paneVisible, setPaneVisible] = useState(true);
-  // Latest pane/actions for emulator callbacks registered once at mount.
-  const liveRef = useRef({ pane, actions });
-  liveRef.current = { pane, actions };
+  // Live terminal-style prefs (font family/size, background) for the mount
+  // effect's construction-time read below and the post-mount subscription
+  // effect further down (see that effect for the live-apply path).
+  const terminalPrefs = useContext(TerminalPrefsContext);
+  // Latest pane/actions/terminalPrefs for emulator callbacks registered once
+  // at mount.
+  const liveRef = useRef({ pane, actions, terminalPrefs });
+  liveRef.current = { pane, actions, terminalPrefs };
 
   const terminalId = pane.session.terminalId;
   const refocusActiveTerminal = () => {
@@ -8582,13 +9278,14 @@ function TerminalPaneBody({
     const terminal = new Terminal({
       cursorBlink: true,
       // Prefer Powerline/Nerd Font capable families so prompt glyphs render
-      // correctly, falling back to plain monospace when none are installed.
-      fontFamily:
-        '"MesloLGS NF", "JetBrainsMono Nerd Font", "CaskaydiaCove Nerd Font", ' +
-        '"FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, ' +
-        'Menlo, Consolas, "Liberation Mono", monospace',
-      fontSize: 12,
-      theme: { background: "#0b0d10" },
+      // correctly, falling back to plain monospace when none are installed;
+      // an empty prefs override reproduces this exact fallback stack
+      // unchanged (see `buildEffectiveTerminalFontFamily`).
+      fontFamily: buildEffectiveTerminalFontFamily(
+        liveRef.current.terminalPrefs.fontFamilyOverride,
+      ),
+      fontSize: liveRef.current.terminalPrefs.fontSize,
+      theme: { background: liveRef.current.terminalPrefs.themeBackground },
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -9058,6 +9755,35 @@ function TerminalPaneBody({
       if (socket.readyState !== WebSocket.CONNECTING) socket.close();
     };
   }, [terminalId]);
+
+  // Live fan-out of terminal-style prefs (Settings > Terminal): applies
+  // `terminal.options.*` post-construction on every `terminalPrefs` change,
+  // so an open pane's font/size/background updates without a remount -
+  // deliberately declared after the mount effect (deps `[]`, restore/
+  // reattach logic) so on first mount it runs once `terminalRef.current` is
+  // already set. This is the only place `terminalPrefs` drives the emulator;
+  // the mount effect above only reads it once, at construction time, via
+  // `liveRef`.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    terminal.options.fontFamily = buildEffectiveTerminalFontFamily(
+      terminalPrefs.fontFamilyOverride,
+    );
+    terminal.options.fontSize = terminalPrefs.fontSize;
+    terminal.options.theme = { background: terminalPrefs.themeBackground };
+    // A font metric change (family or size) recomputes the emulator's cell
+    // size but not its col/row count, so without a re-fit a larger font
+    // overflows/clips the pane and the daemon PTY keeps the stale geometry
+    // until the next container resize. Re-run the mount effect's own fit +
+    // size-forward closures (same path as a ResizeObserver tick). Both refs are
+    // nulled on the mount effect's cleanup, so the optional-chaining guard makes
+    // this a no-op against a disposed terminal.
+    fitNowRef.current?.();
+    forwardSizeRef.current?.();
+  }, [terminalPrefs]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
   // sequences render as terminal behavior rather than raw text.
@@ -9758,6 +10484,7 @@ function WorkspaceRows({
   openWorkRootKeys,
   onCommand,
   worktreeOrderByWorkspace,
+  hiddenWorktreesByWorkspace,
   onWorkspaceReorder,
   onWorktreeReorder,
 }: {
@@ -9767,6 +10494,7 @@ function WorkspaceRows({
   openWorkRootKeys: ReadonlySet<string>;
   onCommand: DashboardCommandDispatcher;
   worktreeOrderByWorkspace: Readonly<Record<string, readonly string[]>>;
+  hiddenWorktreesByWorkspace: Readonly<Record<string, readonly string[]>>;
   onWorkspaceReorder: (
     serverId: string,
     sourceId: string,
@@ -9782,10 +10510,18 @@ function WorkspaceRows({
   const compactRoot = compactWorkspaceWorkRoot(workspace);
   const baseRoot = workspaceBaseWorkRoot(workspace);
   const worktreeScopeKey = serverScopedIdentity(serverId, workspace.id);
+  const hiddenIds = hiddenWorktreesByWorkspace[worktreeScopeKey];
+  const navChildWorkRoots = workspace.workRoots.filter(
+    isWorkspaceNavChildWorkRoot,
+  );
   const childWorkRoots = applySiblingOrder(
-    workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+    applyHiddenWorktrees(navChildWorkRoots, hiddenIds),
     worktreeOrderByWorkspace[worktreeScopeKey],
   );
+  const hiddenChildWorkRoots = hiddenWorktreeItems(
+    navChildWorkRoots,
+    hiddenIds,
+  ).map((root) => ({ id: root.id, label: root.label }));
   const selectedChildWorkRootIds = new Set(
     childWorkRoots.map((root) => root.id),
   );
@@ -9812,6 +10548,7 @@ function WorkspaceRows({
           kind={compactRoot.kind}
           availability={compactRoot.availability}
           activation={compactRoot.activation}
+          hiddenWorktrees={hiddenChildWorkRoots}
           canAddWorktree={
             compactRoot.kind === "gitPrimaryRoot" ||
             compactRoot.kind === "gitLinkedWorktree"
@@ -9848,6 +10585,7 @@ function WorkspaceRows({
         actions={workspace.actions}
         actionEntityId={workspace.id}
         actionServerId={serverId}
+        hiddenWorktrees={hiddenChildWorkRoots}
         canAddWorktree={workspace.workRoots.some(
           (root) =>
             root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree",
@@ -9873,9 +10611,10 @@ function WorkspaceRows({
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
-            actions={[]}
+            actions={root.actions}
             actionEntityId={root.id}
             actionServerId={serverId}
+            workspaceId={workspace.id}
             kind={root.kind}
             availability={root.availability}
             activation={root.activation}
@@ -9918,6 +10657,43 @@ function WorkspaceRows({
 // changing mid-drag - only the drop/dragover handlers read it, synchronously.
 let activeWorkNavDrag: WorkNavSiblingDragPayload | null = null;
 
+// Reveal signal for the `g w h` (worktreeHidden.menu.open) hotkey. The
+// workspace "..." menu that hosts the hidden-worktrees restore section is
+// component-local `menuOpen` state on each workspace ResourceRow, so the
+// command-bus handler in `executeCommand` cannot toggle it directly. This
+// tiny scope-keyed pub/sub lets the dispatched command ask the matching
+// workspace row (keyed by `serverScopedIdentity(serverId, workspace.id)`) to
+// open its menu, keeping the hotkey path routed through the command bus while
+// the actual DOM affordance stays owned by the row that renders it.
+type HiddenWorktreesMenuListener = () => void;
+const hiddenWorktreesMenuListeners = new Map<
+  string,
+  Set<HiddenWorktreesMenuListener>
+>();
+function subscribeHiddenWorktreesMenu(
+  scopeKey: string,
+  listener: HiddenWorktreesMenuListener,
+): () => void {
+  let listeners = hiddenWorktreesMenuListeners.get(scopeKey);
+  if (!listeners) {
+    listeners = new Set();
+    hiddenWorktreesMenuListeners.set(scopeKey, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = hiddenWorktreesMenuListeners.get(scopeKey);
+    current?.delete(listener);
+    if (current && current.size === 0) {
+      hiddenWorktreesMenuListeners.delete(scopeKey);
+    }
+  };
+}
+function emitHiddenWorktreesMenuOpen(scopeKey: string): void {
+  hiddenWorktreesMenuListeners
+    .get(scopeKey)
+    ?.forEach((listener) => listener());
+}
+
 function ResourceRow({
   id,
   title,
@@ -9928,6 +10704,8 @@ function ResourceRow({
   actions = [],
   actionEntityId = id,
   actionServerId = "server-local",
+  workspaceId,
+  hiddenWorktrees = [],
   kind,
   availability,
   activation,
@@ -9949,6 +10727,12 @@ function ResourceRow({
   actions?: ActionHint[];
   actionEntityId?: string;
   actionServerId?: string;
+  // Owning workspace id for a child worktree row — target scope for the
+  // browser-local hide command (B-3). Unused by workspace/compact rows.
+  workspaceId?: string;
+  // Currently-hidden worktree entries for the workspace-row "..." menu's
+  // hidden-worktrees submenu (B-3 restore path). Empty on worktree rows.
+  hiddenWorktrees?: ReadonlyArray<{ id: string; label: string }>;
   kind?: WorkRootView["kind"];
   availability?: WorkRootView["availability"];
   activation?: WorkRootView["activation"];
@@ -9978,6 +10762,17 @@ function ResourceRow({
   const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
+  // Child worktree rows expose their own "..." menu. "Remove worktree..." is
+  // gated on the daemon's `worktree.remove` action hint, but "Hide worktree"
+  // is pure browser-local UI state (B-3) with no daemon dependency, so it must
+  // stay reachable even when the worktree is unavailable/inactive — the case
+  // where decluttering via hide is most useful.
+  const hasWorktreeRemove =
+    presentation === "workRoot" &&
+    actions.some(
+      (action) => action.enabled && action.id === "worktree.remove",
+    );
+  const canHideWorktree = presentation === "workRoot" && workspaceId != null;
   const canCloseWorkRoot =
     (presentation === "workRoot" ||
       presentation === "compactWorkRoot" ||
@@ -9986,6 +10781,18 @@ function ResourceRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
+  // Workspace/compact-root rows own the "..." menu that hosts the
+  // hidden-worktrees restore section; subscribe them to the `g w h` reveal
+  // signal so the hotkey can open this component-local menu through the bus.
+  const menuScopeKey = serverScopedIdentity(actionServerId, actionEntityId);
+  useEffect(() => {
+    if (!hasWorkspaceRemove) {
+      return;
+    }
+    return subscribeHiddenWorktreesMenu(menuScopeKey, () =>
+      setMenuOpen((current) => !current),
+    );
+  }, [hasWorkspaceRemove, menuScopeKey]);
   const [dragOver, setDragOver] = useState(false);
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(
@@ -10089,7 +10896,10 @@ function ResourceRow({
           ) : null}
         </span>
       </button>
-      {hasWorkspaceRemove || canCloseWorkRoot ? (
+      {hasWorkspaceRemove ||
+      hasWorktreeRemove ||
+      canHideWorktree ||
+      canCloseWorkRoot ? (
         <span className="resource-row-actions">
           {canCloseWorkRoot ? (
             <ChromeIconButton
@@ -10161,6 +10971,101 @@ function ResourceRow({
                     <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
                     <span>Remove workspace...</span>
                   </button>
+                  {hiddenWorktrees.length > 0 ? (
+                    <div
+                      className="workspace-row-menu-section"
+                      data-testid="hidden-worktrees-section"
+                    >
+                      <div className="workbench-overflow-heading">
+                        Hidden worktrees
+                      </div>
+                      {hiddenWorktrees.map((hidden) => (
+                        <button
+                          key={hidden.id}
+                          className="workbench-overflow-item"
+                          data-command-id="worktree.unhide"
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onCommand(
+                              buildWorktreeUnhideCommand(
+                                actionEntityId,
+                                hidden.id,
+                                actionServerId,
+                              ),
+                            );
+                          }}
+                        >
+                          <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
+                          <span>{hidden.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </span>
+          ) : null}
+          {canHideWorktree || hasWorktreeRemove ? (
+            <span className="workspace-row-menu-wrap" ref={menuRef}>
+              <ChromeIconButton
+                className="resource-row-action"
+                commandId="worktree.menu.open"
+                icon={MoreHorizontal}
+                label={`More actions for ${title}`}
+                onClick={() =>
+                  onCommand(buildWorktreeMenuOpenCommand(id, actionServerId), {
+                    "worktree.menu.open": () =>
+                      setMenuOpen((current) => !current),
+                  })
+                }
+              />
+              {menuOpen ? (
+                <div
+                  className="workbench-overflow-menu workspace-row-menu"
+                  role="menu"
+                >
+                  {canHideWorktree ? (
+                    <button
+                      className="workbench-overflow-item"
+                      data-command-id="worktree.hide"
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (workspaceId) {
+                          onCommand(
+                            buildWorktreeHideCommand(
+                              workspaceId,
+                              id,
+                              actionServerId,
+                            ),
+                          );
+                        }
+                      }}
+                    >
+                      <EyeOff aria-hidden="true" size={14} strokeWidth={1.8} />
+                      <span>Hide worktree</span>
+                    </button>
+                  ) : null}
+                  {hasWorktreeRemove ? (
+                    <button
+                      className="workbench-overflow-item workbench-overflow-item-danger"
+                      data-command-id="worktreeRemove.open"
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onCommand(
+                          buildWorktreeRemoveOpenCommand(id, actionServerId),
+                        );
+                      }}
+                    >
+                      <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                      <span>Remove worktree...</span>
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </span>

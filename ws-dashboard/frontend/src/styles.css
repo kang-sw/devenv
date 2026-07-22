@@ -2104,6 +2104,73 @@ button {
   line-height: var(--ws-line-height-03);
 }
 
+/* 260722-feat-dashboard-which-key-hint-overlay Phase 1: bottom-right
+   lazyvim-style leader-hint popup. Chrome reuses the same
+   `.workbench-close-popover` token vocabulary (panel-raised background,
+   border-strong hairline border, space-scale padding/gap, matching
+   box-shadow) rather than hardcoding colors - see the fixed-position
+   popover pattern above. Anchored to the viewport corner instead of the
+   close-popover's `transform: translate(...)` cursor-relative anchor,
+   since it isn't triggered from a specific DOM element. */
+.which-key-overlay {
+  position: fixed;
+  z-index: 1000;
+  right: var(--ws-space-09);
+  bottom: var(--ws-space-09);
+  display: grid;
+  gap: var(--ws-space-04);
+  min-width: 220px;
+  max-width: 320px;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-raised);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  padding: var(--ws-space-07);
+}
+
+.which-key-overlay-title {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.which-key-overlay-list {
+  display: grid;
+  gap: var(--ws-space-03);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.which-key-overlay-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-04);
+  font-size: var(--ws-font-size-02);
+}
+
+.which-key-overlay-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: var(--ws-space-01) var(--ws-space-04);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  border-radius: var(--ws-radius-square);
+  background: var(--ws-color-surface-context-raised);
+  color: var(--ws-color-text-primary);
+  font-family: var(--ws-font-family-mono);
+  font-size: var(--ws-font-size-01);
+}
+
+.which-key-overlay-arrow {
+  color: var(--ws-color-text-secondary);
+}
+
+.which-key-overlay-label {
+  color: var(--ws-color-text-primary);
+}
+
 .workbench-close-popover-actions {
   display: flex;
   justify-content: flex-end;
@@ -3478,6 +3545,22 @@ button {
   color: var(--danger-foreground, #ffb4ab);
 }
 
+.action-button-danger {
+  border-color: var(--danger-foreground, #ffb4ab);
+  color: var(--danger-foreground, #ffb4ab);
+}
+
+.action-button-danger:hover:not(:disabled),
+.action-button-danger:focus-visible {
+  border-color: var(--danger-foreground, #ffb4ab);
+  color: var(--danger-foreground, #ffb4ab);
+  outline-color: var(--danger-foreground, #ffb4ab);
+}
+
+.git-worktree-remove-unmerged {
+  color: var(--danger-foreground, #ffb4ab);
+}
+
 .git-worktree-modal {
   height: auto;
   max-height: min(680px, calc(100vh - 32px));
@@ -3532,6 +3615,62 @@ button {
 .git-worktree-select-wrap {
   align-items: stretch;
   flex-direction: column;
+}
+
+.settings-modal {
+  height: auto;
+  max-height: min(560px, calc(100vh - 32px));
+  width: min(640px, calc(100vw - 32px));
+  overflow: auto;
+}
+
+.settings-modal .root-picker-dialog {
+  height: auto;
+  min-height: 0;
+  /* Two direct children only (titlebar, section content grid) - no
+     toolbar/context/footer rows, unlike the worktree-remove form. */
+  grid-template-rows: auto minmax(240px, 1fr);
+}
+
+.settings-section-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-02);
+}
+
+.settings-section-nav-button {
+  font-weight: 600;
+}
+
+.settings-section-nav-button-active {
+  border-left-color: var(--ws-color-action);
+  background: var(--ws-color-panel-hover);
+  color: var(--ws-color-text-primary);
+}
+
+.settings-section-body {
+  min-width: 0;
+  overflow: auto;
+  padding: var(--ws-space-07);
+}
+
+.settings-field-group {
+  display: grid;
+  gap: var(--ws-space-06);
+  max-width: 360px;
+}
+
+.settings-field {
+  display: grid;
+  gap: var(--ws-space-03);
+}
+
+.settings-field-label {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .linked-server-modal {

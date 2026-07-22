@@ -26,11 +26,21 @@ export type WorkNavSiblingOrder = {
   readonly worktreeOrderByWorkspace: Readonly<
     Record<string, readonly string[]>
   >;
+  // B-3 (260525): PURE-UI hidden worktrees, keyed identically to
+  // `worktreeOrderByWorkspace` (serverScopedIdentity(serverId, workspace.id)).
+  // Hiding only drops a worktree row from the visible nav — it is NOT a git
+  // worktree removal and NOT a daemon "forget"; the directory, branch, and
+  // daemon registry are untouched. Restored via the root workspace row's "..."
+  // menu → hidden-worktrees submenu.
+  readonly hiddenWorktreesByWorkspace: Readonly<
+    Record<string, readonly string[]>
+  >;
 };
 
 export const emptyWorkNavSiblingOrder: WorkNavSiblingOrder = {
   workspaceOrderByServer: {},
   worktreeOrderByWorkspace: {},
+  hiddenWorktreesByWorkspace: {},
 };
 
 export const workNavSiblingDragMimeType = "application/x-ws-worknav-sibling";
@@ -119,6 +129,63 @@ export function reorderSiblingIds(
   return result;
 }
 
+// Drops hidden worktree ids from a server-supplied worktree list without
+// mutating the source (mirrors `applySiblingOrder`'s non-mutating contract).
+// An unknown/empty hidden set returns the items unchanged.
+export function applyHiddenWorktrees<T extends { id: string }>(
+  items: readonly T[],
+  hiddenIds: readonly string[] | undefined,
+): T[] {
+  if (!hiddenIds || hiddenIds.length === 0) {
+    return items.slice();
+  }
+  const hidden = new Set(hiddenIds);
+  return items.filter((item) => !hidden.has(item.id));
+}
+
+// Returns the currently-present items whose id is in the hidden set, for the
+// hidden-worktrees submenu (so a hidden row can be un-hidden). A hidden id no
+// longer present in `items` is simply not listed (its entry stays harmlessly
+// in storage until unhidden while present, or dropped by a later save).
+export function hiddenWorktreeItems<T extends { id: string }>(
+  items: readonly T[],
+  hiddenIds: readonly string[] | undefined,
+): T[] {
+  if (!hiddenIds || hiddenIds.length === 0) {
+    return [];
+  }
+  const hidden = new Set(hiddenIds);
+  return items.filter((item) => hidden.has(item.id));
+}
+
+// Pure add/remove of a single worktree id from a scope's hidden set, returning
+// a new WorkNavSiblingOrder. Adding is idempotent; removing an absent id (or
+// emptying a scope) prunes the scope key so the persisted blob stays minimal.
+export function withHiddenWorktree(
+  order: WorkNavSiblingOrder,
+  scopeKey: string,
+  workRootId: string,
+  hidden: boolean,
+): WorkNavSiblingOrder {
+  const current = order.hiddenWorktreesByWorkspace[scopeKey] ?? [];
+  const currentSet = new Set(current);
+  if (hidden === currentSet.has(workRootId)) {
+    return order;
+  }
+  const nextHidden = { ...order.hiddenWorktreesByWorkspace };
+  if (hidden) {
+    nextHidden[scopeKey] = [...current, workRootId];
+  } else {
+    const remaining = current.filter((id) => id !== workRootId);
+    if (remaining.length === 0) {
+      delete nextHidden[scopeKey];
+    } else {
+      nextHidden[scopeKey] = remaining;
+    }
+  }
+  return { ...order, hiddenWorktreesByWorkspace: nextHidden };
+}
+
 const workNavOrderStorageKey = "ws-dashboard.workNavOrder.v1";
 
 export function loadWorkNavOrderSnapshot(
@@ -136,6 +203,7 @@ export function loadWorkNavOrderSnapshot(
       version?: unknown;
       workspaceOrderByServer?: unknown;
       worktreeOrderByWorkspace?: unknown;
+      hiddenWorktreesByWorkspace?: unknown;
     };
     if (parsed.version !== 1) {
       return emptyWorkNavSiblingOrder;
@@ -144,6 +212,9 @@ export function loadWorkNavOrderSnapshot(
       workspaceOrderByServer: parseOrderByScope(parsed.workspaceOrderByServer),
       worktreeOrderByWorkspace: parseOrderByScope(
         parsed.worktreeOrderByWorkspace,
+      ),
+      hiddenWorktreesByWorkspace: parseOrderByScope(
+        parsed.hiddenWorktreesByWorkspace,
       ),
     };
   } catch {
@@ -163,7 +234,9 @@ export function saveWorkNavOrderSnapshot(
       Object.keys(order.workspaceOrderByServer).length > 0;
     const hasWorktreeOrder =
       Object.keys(order.worktreeOrderByWorkspace).length > 0;
-    if (!hasWorkspaceOrder && !hasWorktreeOrder) {
+    const hasHiddenWorktrees =
+      Object.keys(order.hiddenWorktreesByWorkspace).length > 0;
+    if (!hasWorkspaceOrder && !hasWorktreeOrder && !hasHiddenWorktrees) {
       storage.removeItem(workNavOrderStorageKey);
       return;
     }
@@ -173,6 +246,7 @@ export function saveWorkNavOrderSnapshot(
         version: 1,
         workspaceOrderByServer: order.workspaceOrderByServer,
         worktreeOrderByWorkspace: order.worktreeOrderByWorkspace,
+        hiddenWorktreesByWorkspace: order.hiddenWorktreesByWorkspace,
       }),
     );
   } catch {
