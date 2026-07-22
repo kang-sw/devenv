@@ -460,28 +460,36 @@ single-cycle shim above, activated only when the lead itself observes both
 an active `/goal` Stop-hook reminder in the current turn and a current
 branch that is not already `goal/*`; the ticket-selection subagent stays
 unaware of this and is not asked to detect it. When active, the lead
-derives a branch-safe slug from the goal text and creates/checks out
-`goal/<slug>` with plain `git` commands before dispatching the selected
-ticket, then hands off to `lead-proceed` with `policy.branch.merge_confirm:
-"skip"` supplied as explicit caller policy — `lead-implement`'s existing
-Route step 3 ("explicit caller policy") consumes this without any
-goal-specific change on that side, and no `merge_target` override is
-needed since the create-path already derives the merge target from the
-checked-out branch. Each ticket still gets its own `impl/<stem>` branch,
-merged into `goal/<slug>` without an approval ask and auto-deleted per the
-Branch Cleanup naming-gate behavior (see the `impl/<stem>`-branch section
-above). When the selection subagent
-reports `ready/` empty while the current branch is `goal/<slug>`, the
-skill performs the run's one confirmed final merge itself in its own
-prose — ask the user for explicit approval, then `git merge --no-ff
-goal/<slug>` into `main` — rather than routing through
-`lead-proceed`/`lead-implement`, because `enter.implement` requires a
-ticket target this ticket-less step has none of. This override never
-extends to push or remote actions for either the per-ticket or the final
-merge. Outside an active `/goal` context, or once off a `goal/*` branch,
-the skill reproduces the pre-staging behavior exactly: no branch creation,
-no `merge_confirm` override, and no new persisted state — "currently
-checked out on `goal/<slug>`" is the entire signal.
+captures the current branch as PARENT (the fork point) via `git
+rev-parse --abbrev-ref HEAD` — a detached-HEAD guard aborts staging-branch
+creation with a clear message instead of producing `goal/HEAD/<slug>`
+when that command returns literal `HEAD` — then derives an arbitrary
+random branch-safe slug (never from the goal text, to avoid collisions
+across concurrent goal runs) and creates/checks out
+`goal/<parent>/<slug>` with plain `git` commands before
+dispatching the selected ticket, then hands off to `lead-proceed` with
+`policy.branch.merge_confirm: "skip"` supplied as explicit caller policy —
+`lead-implement`'s existing Route step 3 ("explicit caller policy")
+consumes this without any goal-specific change on that side, and no
+`merge_target` override is needed since the create-path already derives
+the merge target from the checked-out branch. Each ticket still gets its
+own `impl/<stem>` branch, merged into `goal/<parent>/<slug>` without an
+approval ask and auto-deleted per the Branch Cleanup naming-gate behavior
+(see the `impl/<stem>`-branch section above). When the selection subagent
+reports `ready/` empty while the current branch is `goal/<parent>/<slug>`,
+the skill performs the run's one confirmed final merge itself in its own
+prose: derive PARENT and SLUG from the branch name by stripping the
+`goal/` prefix and splitting on the last `/` (old-format single-segment
+`goal/<slug>` falls back to `main` as the merge target), ask the user for
+explicit approval, then `git merge --no-ff goal/<parent>/<slug>` into
+`<parent>` (or the `main`-fallback equivalent) — rather than routing
+through `lead-proceed`/`lead-implement`, because `enter.implement`
+requires a ticket target this ticket-less step has none of. This override
+never extends to push or remote actions for either the per-ticket or the
+final merge. Outside an active `/goal` context, or once off a `goal/*`
+branch, the skill reproduces the pre-staging behavior exactly: no branch
+creation, no `merge_confirm` override, and no new persisted state —
+"currently checked out on a `goal/*` branch" is the entire signal.
 {#260707-drain-goal-branch-staging}
 
 `lead-verify-design` is removed; its `SKILL.md` and rsrc playbook were deleted
