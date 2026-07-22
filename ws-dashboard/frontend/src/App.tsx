@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   CSSProperties,
   Dispatch,
@@ -36,6 +44,7 @@ import {
   RotateCcw,
   Save,
   Server,
+  Settings as SettingsIcon,
   SquareTerminal,
   Stethoscope,
   Trash2,
@@ -96,6 +105,8 @@ import {
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
   buildAgentChatCreateCommand,
+  buildSettingsCloseCommand,
+  buildSettingsOpenCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildServerOffCommand,
@@ -413,6 +424,18 @@ import {
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
+import type { SettingsSectionDescriptor } from "./settingsStore";
+import {
+  buildEffectiveTerminalFontFamily,
+  loadTerminalStylePrefs,
+  saveTerminalStylePrefs,
+  DEFAULT_TERMINAL_STYLE_PREFS,
+  type TerminalStylePrefs,
+} from "./terminalPrefs";
+import {
+  SETTINGS_SECTIONS,
+  SettingsTerminalContext,
+} from "./settingsSections";
 
 type CommandPayload = DashboardCommandPayload;
 type CommandEntry = DashboardCommandEntry;
@@ -485,6 +508,16 @@ function realAgentChatHarness(
   return harness === "codex" || harness === "claude" ? harness : null;
 }
 
+// Live fan-out for terminal-style prefs: open terminal panes subscribe via
+// `useContext` and apply `terminal.options.*` on change (see
+// `TerminalPaneBody`'s post-mount subscription effect) instead of only
+// reading the value at construction time. The default matches
+// `DEFAULT_TERMINAL_STYLE_PREFS` so any consumer rendered outside the
+// Provider (there should be none) still reproduces today's hardcoded look.
+export const TerminalPrefsContext = createContext<TerminalStylePrefs>(
+  DEFAULT_TERMINAL_STYLE_PREFS,
+);
+
 export function App() {
   // Per-server cache of the last resolved resources tree, keyed by
   // `server.id`. Replaces a single-slot `resources` state so that switching
@@ -508,6 +541,10 @@ export function App() {
     workRootId: string;
   } | null>(null);
   const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [terminalPrefs, setTerminalPrefs] = useState<TerminalStylePrefs>(() =>
+    loadTerminalStylePrefs(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -1334,6 +1371,10 @@ export function App() {
       } else if (command.payload.type === "worktreeRemove.close") {
         executableHandlers[command.commandId] = () =>
           setWorktreeRemoveTarget(null);
+      } else if (command.payload.type === "settings.open") {
+        executableHandlers[command.commandId] = () => setSettingsOpen(true);
+      } else if (command.payload.type === "settings.close") {
+        executableHandlers[command.commandId] = () => setSettingsOpen(false);
       } else if (command.payload.type === "worktree.hide") {
         const { workspaceId, workRootId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () =>
@@ -1857,7 +1898,26 @@ export function App() {
     [resourcesByServer],
   );
 
+  // Settings > Terminal section's single write path: updates the live
+  // `TerminalPrefsContext` value (driving open panes' subscription effect,
+  // see `TerminalPaneBody`) and persists, in that order, so the in-memory
+  // Context is always at least as fresh as what is on disk.
+  const handleTerminalPrefsChange = useCallback((next: TerminalStylePrefs) => {
+    setTerminalPrefs(next);
+    saveTerminalStylePrefs(next);
+  }, []);
+
+  // Settings-scoped Terminal context value (prefs + write path) consumed by the
+  // Terminal settings section. Memoized so the Provider value only changes when
+  // the prefs actually change, not on every unrelated App re-render.
+  const settingsTerminalContextValue = useMemo(
+    () => ({ prefs: terminalPrefs, onChange: handleTerminalPrefsChange }),
+    [terminalPrefs, handleTerminalPrefsChange],
+  );
+
   return (
+    <TerminalPrefsContext.Provider value={terminalPrefs}>
+    <SettingsTerminalContext.Provider value={settingsTerminalContextValue}>
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
         <aside
@@ -1876,6 +1936,7 @@ export function App() {
             openWorkRootKeys={openWorkRootKeysSet}
             onOpenWorkRoot={handleWorkRootOpened}
             onOpenAddServer={() => setServerModal({ mode: "add" })}
+            onOpenSettings={() => setSettingsOpen(true)}
             onOpenServerAuth={(server) =>
               setServerModal({ mode: "auth", server })
             }
@@ -1932,6 +1993,12 @@ export function App() {
               setWorktreeRemoveTarget(null);
             }}
           />
+          <SettingsModal
+            open={settingsOpen}
+            sections={SETTINGS_SECTIONS}
+            onCommand={executeCommand}
+            onClose={() => setSettingsOpen(false)}
+          />
           <LinkedServerModal
             state={serverModal}
             onClose={() => setServerModal(null)}
@@ -1981,6 +2048,8 @@ export function App() {
       </div>
       <WhichKeyOverlay leaderState={leaderUiState} />
     </main>
+    </SettingsTerminalContext.Provider>
+    </TerminalPrefsContext.Provider>
   );
 }
 
@@ -3435,6 +3504,94 @@ function GitWorktreeRemoveModal({
   );
 }
 
+function SettingsModal({
+  open,
+  sections,
+  onCommand,
+  onClose,
+}: {
+  open: boolean;
+  sections: readonly SettingsSectionDescriptor[];
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+}) {
+  // The shell is section-agnostic: it receives the section list as an injected
+  // prop and only ever consumes `{ id, title, Component }`. It threads no
+  // section-specific (e.g. Terminal-typed) props, so registering a new section
+  // means appending a descriptor to `SETTINGS_SECTIONS` - each section sources
+  // its own state from its own context - with no change to this component.
+  const [activeSectionId, setActiveSectionId] = useState<string | undefined>(
+    () => sections[0]?.id,
+  );
+
+  if (!open) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildSettingsCloseCommand(), { "settings.close": onClose });
+  };
+
+  const activeSection =
+    sections.find((section) => section.id === activeSectionId) ?? sections[0];
+
+  return (
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) close();
+      }}
+    >
+      <Modal className="root-picker-modal settings-modal">
+        <Dialog aria-label="Settings" className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">
+              Settings
+            </Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="settings.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
+            </div>
+          </div>
+          <div className="root-picker-content">
+            <nav
+              className="root-picker-places settings-section-nav"
+              aria-label="Settings sections"
+            >
+              {sections.map((section) => {
+                const isActive = section.id === activeSection?.id;
+                return (
+                  <button
+                    key={section.id}
+                    aria-current={isActive ? "true" : undefined}
+                    className={`root-picker-place settings-section-nav-button${
+                      isActive ? " settings-section-nav-button-active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => setActiveSectionId(section.id)}
+                  >
+                    {section.title}
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="root-picker-list-region settings-section-body">
+              {activeSection ? <activeSection.Component /> : null}
+            </div>
+          </div>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
 function LinkedServerModal({
   state,
   onClose,
@@ -3644,6 +3801,7 @@ function ResourceNavigation({
   openWorkRootKeys,
   onOpenWorkRoot,
   onOpenAddServer,
+  onOpenSettings,
   onOpenServerAuth,
   onReconnectServer,
   onSelectServer,
@@ -3667,6 +3825,7 @@ function ResourceNavigation({
     requestedWorkRootId?: string,
   ) => void;
   onOpenAddServer: () => void;
+  onOpenSettings: () => void;
   onOpenServerAuth: (server: ServerConnectionView) => void;
   onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
@@ -3716,6 +3875,16 @@ function ResourceNavigation({
               },
               { "resource.action.server.add": onOpenAddServer },
             )
+          }
+        />
+        <ChromeIconButton
+          commandId="settings.open"
+          icon={SettingsIcon}
+          label="Settings"
+          onClick={() =>
+            onCommand(buildSettingsOpenCommand(), {
+              "settings.open": onOpenSettings,
+            })
           }
         />
       </div>
@@ -9075,9 +9244,14 @@ function TerminalPaneBody({
   // while already hidden briefly opens then closes on the first watchdog
   // tick, an accepted minor inefficiency, not a correctness issue.
   const [paneVisible, setPaneVisible] = useState(true);
-  // Latest pane/actions for emulator callbacks registered once at mount.
-  const liveRef = useRef({ pane, actions });
-  liveRef.current = { pane, actions };
+  // Live terminal-style prefs (font family/size, background) for the mount
+  // effect's construction-time read below and the post-mount subscription
+  // effect further down (see that effect for the live-apply path).
+  const terminalPrefs = useContext(TerminalPrefsContext);
+  // Latest pane/actions/terminalPrefs for emulator callbacks registered once
+  // at mount.
+  const liveRef = useRef({ pane, actions, terminalPrefs });
+  liveRef.current = { pane, actions, terminalPrefs };
 
   const terminalId = pane.session.terminalId;
   const refocusActiveTerminal = () => {
@@ -9104,13 +9278,14 @@ function TerminalPaneBody({
     const terminal = new Terminal({
       cursorBlink: true,
       // Prefer Powerline/Nerd Font capable families so prompt glyphs render
-      // correctly, falling back to plain monospace when none are installed.
-      fontFamily:
-        '"MesloLGS NF", "JetBrainsMono Nerd Font", "CaskaydiaCove Nerd Font", ' +
-        '"FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, ' +
-        'Menlo, Consolas, "Liberation Mono", monospace',
-      fontSize: 12,
-      theme: { background: "#0b0d10" },
+      // correctly, falling back to plain monospace when none are installed;
+      // an empty prefs override reproduces this exact fallback stack
+      // unchanged (see `buildEffectiveTerminalFontFamily`).
+      fontFamily: buildEffectiveTerminalFontFamily(
+        liveRef.current.terminalPrefs.fontFamilyOverride,
+      ),
+      fontSize: liveRef.current.terminalPrefs.fontSize,
+      theme: { background: liveRef.current.terminalPrefs.themeBackground },
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -9580,6 +9755,35 @@ function TerminalPaneBody({
       if (socket.readyState !== WebSocket.CONNECTING) socket.close();
     };
   }, [terminalId]);
+
+  // Live fan-out of terminal-style prefs (Settings > Terminal): applies
+  // `terminal.options.*` post-construction on every `terminalPrefs` change,
+  // so an open pane's font/size/background updates without a remount -
+  // deliberately declared after the mount effect (deps `[]`, restore/
+  // reattach logic) so on first mount it runs once `terminalRef.current` is
+  // already set. This is the only place `terminalPrefs` drives the emulator;
+  // the mount effect above only reads it once, at construction time, via
+  // `liveRef`.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    terminal.options.fontFamily = buildEffectiveTerminalFontFamily(
+      terminalPrefs.fontFamilyOverride,
+    );
+    terminal.options.fontSize = terminalPrefs.fontSize;
+    terminal.options.theme = { background: terminalPrefs.themeBackground };
+    // A font metric change (family or size) recomputes the emulator's cell
+    // size but not its col/row count, so without a re-fit a larger font
+    // overflows/clips the pane and the daemon PTY keeps the stale geometry
+    // until the next container resize. Re-run the mount effect's own fit +
+    // size-forward closures (same path as a ResizeObserver tick). Both refs are
+    // nulled on the mount effect's cleanup, so the optional-chaining guard makes
+    // this a no-op against a disposed terminal.
+    fitNowRef.current?.();
+    forwardSizeRef.current?.();
+  }, [terminalPrefs]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
   // sequences render as terminal behavior rather than raw text.

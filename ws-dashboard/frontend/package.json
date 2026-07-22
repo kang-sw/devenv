@@ -26,7 +26,8 @@
     "test:document-viewer": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/documentViewer.test.js && node ./node_modules/.tmp/route-tests/documentRawEditor.test.js",
     "test:git": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/gitToolbar.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeAdd.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeRemove.test.js",
     "test:keydown-suppression": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/keydownSuppression.test.js",
-    "test:hotkeys": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/hotkeys.test.js"
+    "test:hotkeys": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/hotkeys.test.js",
+    "test:settings": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/settingsStore.test.js && node ./node_modules/.tmp/route-tests/terminalPrefs.test.js && node ./node_modules/.tmp/route-tests/settingsSections.test.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

@@ -3617,6 +3617,62 @@ button {
   flex-direction: column;
 }
 
+.settings-modal {
+  height: auto;
+  max-height: min(560px, calc(100vh - 32px));
+  width: min(640px, calc(100vw - 32px));
+  overflow: auto;
+}
+
+.settings-modal .root-picker-dialog {
+  height: auto;
+  min-height: 0;
+  /* Two direct children only (titlebar, section content grid) - no
+     toolbar/context/footer rows, unlike the worktree-remove form. */
+  grid-template-rows: auto minmax(240px, 1fr);
+}
+
+.settings-section-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-02);
+}
+
+.settings-section-nav-button {
+  font-weight: 600;
+}
+
+.settings-section-nav-button-active {
+  border-left-color: var(--ws-color-action);
+  background: var(--ws-color-panel-hover);
+  color: var(--ws-color-text-primary);
+}
+
+.settings-section-body {
+  min-width: 0;
+  overflow: auto;
+  padding: var(--ws-space-07);
+}
+
+.settings-field-group {
+  display: grid;
+  gap: var(--ws-space-06);
+  max-width: 360px;
+}
+
+.settings-field {
+  display: grid;
+  gap: var(--ws-space-03);
+}
+
+.settings-field-label {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .linked-server-modal {
   height: auto;
   width: min(440px, calc(100vw - 32px));
