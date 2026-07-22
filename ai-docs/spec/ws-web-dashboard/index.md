@@ -873,25 +873,35 @@ guard) is unchanged and remains the sole input-handling surface.
 > The behavior above is verified by unit tests over the pure row-derivation
 > logic only.
 
-## 🚧 Dashboard Settings Panel {#260722-ws-dashboard-settings-panel}
+## Dashboard Settings Panel {#260722-ws-dashboard-settings-panel}
 
 The dashboard exposes a single global Settings modal for dashboard-wide
 preferences, distinct from any per-workRoot or per-worktree UI. It is
-reachable from a command/hotkey entry point regardless of which (or
-whether any) workRoot is currently focused, follows the same react-aria
-`ModalOverlay`/`Modal`/`Dialog` composition as other dashboard confirmation
-modals (`260722-ws-dashboard-git-worktree-removal`), and is keyboard-only
-operable: open, section navigation, and dismissal (`Escape` or
-backdrop click) all work without a mouse.
+opened by a `settings.open` command (mirrored by `settings.close` on
+dismissal), issued from a keyboard-reachable topbar button; it follows the
+same react-aria `ModalOverlay`/`Modal`/`Dialog` composition as other
+dashboard confirmation modals (`260722-ws-dashboard-git-worktree-removal`),
+and is keyboard-only operable: open, section navigation, and dismissal
+(`Escape` or backdrop click) all work without a mouse. There is
+deliberately no default leader-hotkey binding for `settings.open` — the
+shipped keymap table is exhaustiveness-tested (`hotkeys.test.ts`) against
+every command, and no settings leaf was added to it. A hotkey binding can
+be introduced once the planned hotkey-rebind section below lands.
 
 The panel's body is not a hard-coded screen; it renders an ordered list of
-independently registered setting sections. Each section contributes an id,
-a display title, and its own render surface, and owns reading and writing
-its own preferences — the modal shell has no knowledge of a section's
-internal fields or storage shape. This registry contract exists so that
-later sections (starting with a planned hotkey-rebind editor) can be added
-by registering a new section, without modifying the shell or any other
-section's code.
+independently registered setting sections, backed by a module-scope
+`SETTINGS_SECTIONS` registry of `{ id, title, Component }` descriptors with
+stable `Component` identity (never an inline function rebuilt on
+re-render, which would otherwise remount — and drop focus out of — a
+section's inputs on every keystroke). The `SettingsModal` shell receives
+this descriptor list as an injected `sections` prop and iterates it
+generically: it consumes only `id`/`title`/`Component` and threads no
+section-specific typed props. A section owns reading and writing its own
+preferences through its own context/state; the shell has no knowledge of a
+section's internal fields or storage shape. This registry contract exists
+so that later sections (starting with a planned hotkey-rebind editor) can
+be added by appending a descriptor to `SETTINGS_SECTIONS`, without
+modifying the shell or any other section's code.
 
 Section preferences persist through a shared, namespaced preferences-store
 helper built over the dashboard's existing low-level `browserStorage()`
@@ -904,19 +914,52 @@ malformed stored data, rather than each section reimplementing its own
 storage logic.
 
 The first registered section is Terminal style: font family, font size, and
-background theme color, replacing the values currently hardcoded at the
+background theme color, replacing the values previously hardcoded at the
 xterm construction site (`260516-ws-web-dashboard-browser-terminal-emulator-behavior`
 documents the resulting rendering behavior). When no preference is stored,
-the section's defaults reproduce today's hardcoded look, so an unconfigured
-dashboard is visually unchanged. A live change to a Terminal-style
-preference applies to already-open terminal panes immediately, without
-remounting or interrupting the underlying session; new terminal panes read
-the persisted preference at construction time.
+the section's defaults reproduce the prior hardcoded look exactly — an
+empty font-family override leaves the existing Nerd Font fallback stack
+unchanged (a non-empty override is prepended onto that stack rather than
+replacing it), font size defaults to `12`, and background defaults to
+`#0b0d10` — so an unconfigured dashboard is visually unchanged.
+
+Live values reach open terminal panes through a dedicated
+`SettingsTerminalContext` (prefs plus the section's single write path),
+separate from the read-only `TerminalPrefsContext` that every open
+terminal pane consumes to live-restyle its emulator. A change applies to
+already-open panes immediately, without remounting or interrupting the
+underlying session; new panes read the persisted preference at
+construction time.
+
+> [!note] Protected zone
+> The terminal mount effect that constructs the xterm `Terminal` instance
+> and performs session restore/reattach is a protected zone
+> (`260516-ws-web-dashboard-protected-frontend-shell`). Its only
+> settings-related change is substituting the 3 constructor values
+> (`fontFamily`/`fontSize`/`theme.background`) for prefs-derived reads at
+> construction time; it does not otherwise change. Live restyling of an
+> already-open pane must be implemented as a separate effect, declared
+> outside the mount effect, that subscribes to prefs changes post-mount and
+> mutates `terminal.options.*` directly, then re-triggers the existing
+> FitAddon refit and size-forward so a font-metric change reflows the
+> emulator's cell geometry (guarded to no-op against an already-disposed
+> terminal). The mount effect itself must never be made to depend on live
+> prefs, since that would remount the emulator and interrupt the session.
+
+> [!note] Implementation Gap · 2026-07-22
+> Browser-level (Playwright) verification that a live Terminal-style change
+> fans out to an open pane, and that the protected-zone mount effect is
+> otherwise unaffected, has not been run yet. The behavior above is
+> verified by unit tests over the pure prefs helpers
+> (`terminalPrefs.test.ts`) and the section-registry contract
+> (`settingsSections.test.ts`, `settingsStore.test.ts`) only.
 
 > [!note] Planned 🚧
 > A future hotkey-rebind editor section will register into this panel to
-> edit bindings from the hotkey binding registry directly. It is a planned
-> extension of the section registry, not specified further here.
+> edit bindings from the hotkey binding registry directly, and is expected
+> to introduce the first default leader-hotkey binding for
+> `settings.open`. It is a planned extension of the section registry, not
+> specified further here.
 
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 

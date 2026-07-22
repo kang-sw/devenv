@@ -171,6 +171,52 @@ Acceptance criteria:
   changes.
 - No regression to terminal visual-restore/reattach behavior.
 
+### Result (33cd7133) - 2026-07-22
+
+Implemented. A global, workroot-independent react-aria `ModalOverlay`/`Modal`/
+`Dialog` Settings modal (following `GitWorktreeRemoveModal`) is mounted once
+at `App()`'s top level and opened via a `settings.open` command (mirrored by
+`settings.close` on dismissal), issued from a keyboard-reachable topbar
+button — no default leader-hotkey binding was added, since the shipped
+keymap table is exhaustiveness-tested against every command and no settings
+leaf exists yet. Sections register through a module-scope `SETTINGS_SECTIONS`
+registry of `{id, label/title, Component}` descriptors with stable
+`Component` identity; the shell consumes only that generic shape, so a later
+section needs no shell edit. `loadNamespacedPrefs`/`saveNamespacedPrefs`
+(`settingsStore.ts`) generalize the existing per-feature
+`"ws-dashboard.<feature>.vN"` `browserStorage()` pattern into one shared,
+defensive-parse helper. The first section, Terminal style
+(fontFamily/fontSize/theme), live-applies to already-open panes through
+`SettingsTerminalContext` plus a post-mount subscription effect (no
+remount), refitting via the existing `FitAddon` after a style change so
+font-metric changes reflow rows/cols; the protected terminal
+mount/restore/reattach effect (`App.tsx` ~9083-9230 pre-diff) received only
+the 3 hardcoded-constructor-value substitutions and is otherwise untouched.
+
+Shipped across two commits: `33cd7133` (initial: modal shell, registry,
+prefs helper, Terminal section, live fan-out) and `96f6b576` (fix cycle).
+Partitioned review (correctness/fit/test) on the initial commit found 2
+Criticals sharing one root cause — inline per-render section construction in
+`SettingsModal` gave `TerminalStyleSection` a changing `Component` identity,
+which remounted (and dropped focus from) the section on every keystroke
+(correctness) and coupled the shell to Terminal-typed props (fit,
+registry-independence violation). `96f6b576` fixed both via a single
+registry-decoupling refactor: sections and the Terminal section moved to a
+new `settingsSections.tsx` module-scope registry with a stable named
+component that reads its prefs/setter from context instead of props; it
+also added the post-style-change refit and extracted/unit-tested a pure
+`parseTerminalFontSizeInput` helper. Re-review of both correctness and fit
+came back clean. Pure-helper and registry unit tests are green
+(`test:settings`, `test:hotkeys`).
+
+Known deferral: browser-level (Playwright) verification that a live
+Terminal-style change fans out to open panes, and that the protected mount
+zone is otherwise unaffected, has not run — recorded as a `## Ticket
+Updates` forward-note on the `96f6b576` commit and as an Implementation Gap
+note in the spec (`ai-docs/spec/ws-web-dashboard/index.md`,
+`#260722-ws-dashboard-settings-panel`). Only unit-level coverage over the
+pure helpers and the registry contract exists today.
+
 ### Phase 2: Hotkey-rebind editor section (future)
 
 Add a hotkey-rebind editor section over the existing
