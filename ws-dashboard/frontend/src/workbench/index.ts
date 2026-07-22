@@ -14,3 +14,4 @@ export * from "./agentChatPlacement.js";
 export * from "./terminalPlacement.js";
 export * from "./readOnlyFilePlacement.js";
 export * from "./activityPlacement.js";
+export * from "./readOnlyWorkbenchPane.js";
