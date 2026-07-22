@@ -138,6 +138,22 @@ When a mental-model domain covers behavior that has a corresponding spec entry, 
 - Grep for `{#stem}` across `ai-docs/mental-model/` to find which domain documents a given spec entry. No back-reference in spec files is needed — one-directional reduces dual-maintenance risk.
 - When a spec stem is renamed (`renamed-spec: old → new` commit convention), any mental-model file referencing the old stem must be updated in the same commit.
 
+### Spec coverage audit
+
+The `mental-model-updater` run already holds both the source diff and the scoped
+spec diff, so it flags suspected post-implementation spec staleness in a
+`## Spec Coverage Gaps` output block — it does not author or edit spec content.
+This is an audit, not a spec-writing step: caller-visibility and spec-impact
+judgment (and any spec edit) stay with the lead's `lead-update-spec` pass.
+
+- Signal: an affected domain references a spec stem via `{#stem}` and had source
+  changes in the range, but that stem's entry was not touched in the spec diff.
+- The heuristic is deliberately coarse and over-flags — a pure internal refactor
+  under a spec-linked domain will trip it. Flag-only + lead-resolves keeps
+  over-flagging cheap, mirroring the `## Stale Rules` "flag, do not edit" contract.
+- The lead resolves each flag by updating the spec, stamping the section, or
+  confirming no spec impact. The updater never decides which.
+
 ## Commit Stamp
 
 Every commit that updates mental-model documents must include `(mental-model-updated)` in
