@@ -155,16 +155,16 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260622-epic-ws-dashboard-session-key-realignment` | idea | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
-| `260722-feat-dashboard-hotkey-config-framework` | todo | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
-| `260722-feat-dashboard-which-key-hint-overlay` | todo | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry |
-| `260722-feat-dashboard-hint-click-fast-jump` | todo | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
+| `260722-feat-dashboard-hotkey-config-framework` | ready | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
+| `260722-feat-dashboard-which-key-hint-overlay` | ready | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry |
+| `260722-feat-dashboard-hint-click-fast-jump` | ready | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-idea-dashboard-git-status-diff-inspector` | idea | Dedicated right-sidebar surface to inspect changed files' contents and diffs, focused via `<leader> g s` |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract (demoted 2026-07-22, see Disposition) |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
-| `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
+| `260525-feat-ws-dashboard-workroot-polishing-backlog` | ready | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
