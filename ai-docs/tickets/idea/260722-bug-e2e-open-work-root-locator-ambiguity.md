@@ -1,7 +1,7 @@
 ---
 title: ws-dashboard e2e - openWorkRoot locator ambiguity (rootPicker.open vs empty-state CTA) red-lines acceptance suite
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 related: 260525-feat-ws-dashboard-workroot-polishing-backlog
 ---
 
