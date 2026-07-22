@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.34.2 - 2026-07-22
+
+### Added
+- `mental-model-updater` now emits a flag-only `## Spec Coverage Gaps` audit
+  block: for each affected domain that references a spec stem and had source
+  changes in the scoped range whose spec entry was not touched in the spec diff,
+  it flags the domain for lead review. It never authors or edits spec content —
+  caller-visibility and spec-impact judgment stay with the lead's spec pass. The
+  heuristic is deliberately coarse (over-flags), mirroring the `## Stale Rules`
+  "flag, do not edit, user resolves" contract.
+
 ## v0.34.1 - 2026-07-22
 
 ### Added
