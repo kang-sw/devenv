@@ -155,7 +155,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260622-epic-ws-dashboard-session-key-realignment` | idea | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
-| `260722-feat-dashboard-hotkey-config-framework` | ready | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
+| `260722-feat-dashboard-hotkey-config-framework` | done | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
 | `260722-feat-dashboard-which-key-hint-overlay` | ready | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry |
 | `260722-feat-dashboard-hint-click-fast-jump` | ready | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-idea-dashboard-git-status-diff-inspector` | idea | Dedicated right-sidebar surface to inspect changed files' contents and diffs, focused via `<leader> g s` |
