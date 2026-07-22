@@ -134,6 +134,42 @@ defines the leader-key model it must implement.
   unmatched-key cancels cleanly without leaking into terminal input; user
   rebindings persist across a reload.
 
+### Result (f3e23b92)
+
+Shipped a pure DOM-free `hotkeys.ts` module: a binding registry with
+reserved-key rejection, a leader-mode state machine over a children-win
+prefix trie (a node with children always descends on the next keystroke and
+never shadow-fires a leaf), the terminal/IME/input focus-capture guard reused
+verbatim, versioned-JSON browser-local persistence for user rebinds
+colocated in the same module, and a default-binding table of 14 leaves
+matching the finalized "Default Keymap & Interaction Spec" above. `App.tsx`
+wires a global `Ctrl+Space` capture-phase document keydown listener that
+dispatches through the existing `executeCommand`/`commands.ts` bus.
+`hotkeys.test.ts` adds a table-driven regression test that asserts every
+default binding against an independently-transcribed literal table of the
+finalized keymap spec (two-directional exhaustiveness), so implementation
+drift and spec drift both fail the test.
+
+Commits `b6565106` (initial framework), `e3303d53` (trie + spec-conformance
+fix), `f3e23b92` (spec-conformance regression test) — range
+`8e793a07..f3e23b92`.
+
+Review: partitioned correctness/fit/test review, CLEAN on all three
+partitions after two fix cycles. Minor items recorded during review, none
+blocking.
+
+Deviations / scope notes:
+
+- The `document.*` command group and the agentChat bubble/prompt/history
+  group are intentionally excluded from Phase 1 default wiring: their
+  command ids either do not exist yet in the `DashboardCommandId` union or
+  have no App-level focus/target to resolve, and R1/R2 forbid fabricating a
+  target. These remain open gaps for a follow-up ticket once the
+  prerequisite command ids/targets land (see R2 in the spec section below).
+- Persistence for user hotkey configuration is colocated inside `hotkeys.ts`
+  (single module) rather than a separate persistence layer, resolving the
+  "open design point" noted in Background/Decisions above.
+
 ---
 ## Default Keymap & Interaction Spec (finalized 2026-07-22)
 
