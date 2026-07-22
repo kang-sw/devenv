@@ -153,7 +153,8 @@ import {
   workRootActivityPaneLogicalKey,
   workRootActivityPaneId,
   workRootActivityPaneRevision,
-  WorkRootActivityPane,
+  workRootActivityPlacementState,
+  workRootActivityWorkbenchPane,
   readOnlyWorkbenchPanesByGroup,
   terminalWorkbenchPanesByGroup,
   agentChatWorkbenchPanesByGroup,
@@ -6813,97 +6814,6 @@ function activationForAction(actionId: string): "online" | "offline" | null {
     return "offline";
   }
   return null;
-}
-
-// Build the placement state the WorkRoot Activity badge feeds into
-// decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
-// duplicate open focuses the pane in whatever group it currently occupies,
-// while a first open resolves through the policy-owned support-split target.
-//
-// NOTE: kept in App.tsx (not moved to workbench/activityPlacement.tsx with
-// the rest of the WorkRoot Activity pane cluster) because
-// workRootActivityWorkbenchPane below still needs to move alongside it
-// (both depend on things that stay resident in App.tsx a while longer);
-// they move together to workbench/activityPlacement.tsx in a later step of
-// this same phase.
-function workRootActivityPlacementState(
-  groups: ReadonlyArray<{ id: string; label: string }>,
-  editorGroups: WorkbenchEditorGroupModel[],
-  workRootId: string,
-): WorkbenchPlacementState {
-  const dashboardGroups = groups.length > 0 ? groups : initialWorkbenchGroups;
-  const paneId = workRootActivityPaneId(workRootId);
-  const owningGroup = editorGroups.find((group) =>
-    group.panes.some((pane) => pane.id === paneId),
-  );
-  return {
-    groups: dashboardGroups.map((group) => ({
-      groupId: workbenchGroupId(group.id),
-    })),
-    focusedGroupId: workbenchGroupId(dashboardGroups[0]?.id ?? "group-1"),
-    attachments: owningGroup
-      ? [
-          {
-            attachmentId:
-              paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-            groupId: workbenchGroupId(owningGroup.id),
-            surfaceKind: "workRootActivity",
-            logicalKey: workRootActivityPaneLogicalKey(workRootId),
-          },
-        ]
-      : [],
-  };
-}
-
-// NOTE: kept in App.tsx alongside `workRootActivityPlacementState` above for
-// the same reason — its `WorkbenchPane` return type still lives in App.tsx
-// this phase.
-function workRootActivityWorkbenchPane(
-  root: WorkRootView,
-  activity: WorkRootActivityBadgeInput,
-  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
-  onCommand: DashboardCommandDispatcher,
-): WorkbenchPane {
-  const ready = activity.phase === "ready" ? activity.view : null;
-  const state: ViewState = {
-    status:
-      activity.phase === "loading"
-        ? "loading"
-        : activity.phase === "error"
-          ? "unavailable"
-          : (ready?.status ?? "ok"),
-    loading: activity.phase === "loading",
-    stale: false,
-    error: activity.phase === "error" ? "activity unavailable" : null,
-  };
-  const meta =
-    ready !== null
-      ? [
-          `${ready.summary.total} agents`,
-          `${ready.summary.active} active`,
-          "read-only",
-        ]
-      : [activity.phase, "read-only"];
-  return {
-    id: workRootActivityPaneId(
-      serverScopedIdentity(root.resourcePath.serverId, root.id),
-    ),
-    kind: "workRootActivity",
-    category: "opened",
-    title: "WorkRoot Activity",
-    detail: `${root.label} activity console`,
-    state,
-    meta,
-    contentRevision: workRootActivityPaneRevision(activity, transcriptRefresh),
-    body: (
-      <WorkRootActivityPane
-        activity={activity}
-        onCommand={onCommand}
-        transcriptRefresh={transcriptRefresh}
-        serverRoute={root.resourcePath.serverId}
-      />
-    ),
-  };
 }
 
 function buildWorkbenchEditorGroups(
