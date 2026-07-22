@@ -1,5 +1,8 @@
 ---
 title: ws-dashboard e2e - openWorkRoot locator ambiguity (rootPicker.open vs empty-state CTA) red-lines acceptance suite
+sage-review-design: required
+sage-review-completeness: required
+related: 260525-feat-ws-dashboard-workroot-polishing-backlog
 ---
 
 # ws-dashboard e2e - openWorkRoot locator ambiguity (rootPicker.open vs empty-state CTA) red-lines acceptance suite
@@ -42,4 +45,32 @@ Disambiguate the locator - e.g.:
 ## Reporter Context
 
 Surfaced 2026-07-22 while adding ticket-mandated browser coverage for ticket
-260525 (worktree removal / hide-unhide).
+260525-feat-ws-dashboard-workroot-polishing-backlog (worktree removal /
+hide-unhide).
+
+## Phases
+
+### Phase 1: Disambiguate the openWorkRoot locator
+
+Scope: `openWorkRootInBrowser`'s Playwright strict-mode locator
+`[data-command-id="rootPicker.open"]` double-matches the primary root-picker
+opener (App.tsx:2513) and the empty-state CTA button
+`.open-work-root-empty-cta` (App.tsx:2553). Disambiguate so the helper
+resolves exactly one element.
+
+Implementer has latitude across the three directions listed under Suspected
+Fix Direction above. Design-reviewer guidance: prefer narrowing the test
+helper's selector (e.g. scope to the primary control, or exclude
+`.open-work-root-empty-cta`) or adding a distinct `data-testid` to one of the
+two buttons. Avoid changing either button's `data-command-id` value - both
+`commands.ts` and `hotkeys.ts` key off `rootPicker.open` for command
+dispatch/hotkey binding, so retargeting that attribute risks breaking
+non-test behavior.
+
+Completion boundary: the locator no longer double-matches, and the full
+`ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts` acceptance suite runs
+green end to end.
+
+Verification: run the acceptance suite (e.g. `npx playwright test
+dashboard-acceptance.spec.ts` from `ws-dashboard/frontend/`) and confirm all
+tests pass, including the first `openWorkRootInBrowser` step.
