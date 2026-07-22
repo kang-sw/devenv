@@ -12,6 +12,7 @@ import {
   leaderKeys,
   leaderPendingExpired,
   loadHotkeyUserConfig,
+  normalizeChordKey,
   resolveHotkeyCommand,
   saveHotkeyUserConfig,
   shouldSkipHotkeyCapture,
@@ -160,6 +161,96 @@ assertDeepEqual(
     registry.list().length,
     defaults.length,
     "every default binding registers cleanly (none claims a reserved key)",
+  );
+}
+
+// --- Default binding table matches the finalized spec EXACTLY (regression) ---
+//
+// The table below is a literal transcription of the ticket's owner-approved
+// "## Default Keymap & Interaction Spec (finalized 2026-07-22)" section,
+// restricted to the leaves whose `DashboardCommandId` already exists today
+// (the Phase 1 subset - see the exclusion list in hotkeys.ts's "Default
+// bindings" section comment). It is NOT derived from
+// `buildDefaultHotkeyBindings` - it is copied from the spec independently -
+// so a future implementation change that repositions, drops, or adds a
+// default binding fails this test in either direction, rather than only
+// being caught by eyeball review. (This is the regression test for the
+// Critical "8 of 13 default bindings contradict the finalized keymap"
+// review finding.)
+
+const EXPECTED_DEFAULT_KEYMAP: readonly {
+  readonly keys: readonly string[];
+  readonly commandId: string;
+}[] = [
+  // `r` Root/WorkRoot group (spec: "r o" / "r x" / "r t")
+  { keys: ["r", "o"], commandId: "rootPicker.open" },
+  { keys: ["r", "x"], commandId: "workRoot.close" },
+  { keys: ["r", "t"], commandId: "workRoot.activation.set" },
+  // `t` Terminal group (spec: "t n")
+  { keys: ["t", "n"], commandId: "terminal.create" },
+  // `a` Agent-chat group (spec: "a n")
+  { keys: ["a", "n"], commandId: "agentChat.create" },
+  // `g` Git group (spec: "g r"/"g f"/"g p"/"g l"/"g b"/"g c")
+  { keys: ["g", "r"], commandId: "git.refresh" },
+  { keys: ["g", "f"], commandId: "git.fetch" },
+  { keys: ["g", "p"], commandId: "git.push" },
+  { keys: ["g", "l"], commandId: "git.pullFfOnly" },
+  { keys: ["g", "b"], commandId: "git.branchMenu.open" },
+  { keys: ["g", "c"], commandId: "git.branchCreate.open" },
+  // `g w` worktree sub-menu, 3-tier (spec: "g w a" / "g w x" / "g w m")
+  { keys: ["g", "w", "a"], commandId: "gitWorktreeAdd.open" },
+  { keys: ["g", "w", "x"], commandId: "workspace.remove" },
+  { keys: ["g", "w", "m"], commandId: "workspace.menu.open" },
+];
+
+{
+  const actual = buildDefaultHotkeyBindings();
+
+  const actualKeySeq = (binding: HotkeyBinding<HotkeyDispatchContext>): string =>
+    binding.keys.map((chord) => normalizeChordKey(chord.key)).join(",");
+  const expectedKeySeq = (entry: { readonly keys: readonly string[] }): string =>
+    entry.keys.map((key) => key.toLowerCase()).join(",");
+
+  // Exhaustiveness (missing direction): every expected spec leaf has a
+  // corresponding default binding, placed at exactly that key sequence.
+  for (const expected of EXPECTED_DEFAULT_KEYMAP) {
+    const match = actual.find((binding) => binding.commandId === expected.commandId);
+    if (!match) {
+      throw new Error(
+        `expected a default binding for commandId "${expected.commandId}" at the finalized spec's key sequence "${expectedKeySeq(expected)}", but no default binding targets that commandId at all`,
+      );
+    }
+    assertEqual(
+      actualKeySeq(match),
+      expectedKeySeq(expected),
+      `default binding for "${expected.commandId}" is placed at the finalized spec's exact key sequence ("${expectedKeySeq(expected)}")`,
+    );
+    assertEqual(
+      match.kind,
+      "leaderSub",
+      `default binding for "${expected.commandId}" is a leader-sub binding (spec: shipped defaults are always leader-sub)`,
+    );
+  }
+
+  // Exhaustiveness (extra direction): no default binding exists for a
+  // commandId outside the expected table - an extra binding would silently
+  // ship keymap behavior the finalized spec doesn't define, the exact
+  // Critical defect this regression test exists to catch.
+  const expectedCommandIds = new Set(EXPECTED_DEFAULT_KEYMAP.map((e) => e.commandId));
+  for (const binding of actual) {
+    assertEqual(
+      expectedCommandIds.has(binding.commandId),
+      true,
+      `default binding "${binding.id}" (commandId "${binding.commandId}") is not in the finalized spec's expected table - either it wasn't removed after the spec was finalized, or the table above needs updating to match a spec change`,
+    );
+  }
+
+  // Exact set size (belt-and-suspenders on top of the two directions
+  // above): rules out a duplicate commandId masking a missing/extra entry.
+  assertEqual(
+    actual.length,
+    EXPECTED_DEFAULT_KEYMAP.length,
+    `buildDefaultHotkeyBindings produces exactly ${EXPECTED_DEFAULT_KEYMAP.length} default bindings, matching the finalized spec's already-real-command-id subset one-to-one`,
   );
 }
 
