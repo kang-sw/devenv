@@ -1,3 +1,4 @@
+import { createContext } from "react";
 import { loadNamespacedPrefs, saveNamespacedPrefs } from "./settingsStore.js";
 import { browserStorage } from "./workRootFiles.js";
 
@@ -24,6 +25,16 @@ export const DEFAULT_TERMINAL_STYLE_PREFS: TerminalStylePrefs = {
   fontSize: 12,
   themeBackground: "#0b0d10",
 };
+
+// Live fan-out for terminal-style prefs: open terminal panes subscribe via
+// `useContext` and apply `terminal.options.*` on change (see
+// `TerminalPaneBody`'s post-mount subscription effect) instead of only
+// reading the value at construction time. The default matches
+// `DEFAULT_TERMINAL_STYLE_PREFS` so any consumer rendered outside the
+// Provider (there should be none) still reproduces today's hardcoded look.
+export const TerminalPrefsContext = createContext<TerminalStylePrefs>(
+  DEFAULT_TERMINAL_STYLE_PREFS,
+);
 
 const terminalStylePrefsStorageKey = "ws-dashboard.settings.terminal.v1";
 const terminalStylePrefsVersion = 1;

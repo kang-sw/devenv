@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -289,6 +288,7 @@ import {
   beginRealStreamingTurn,
   forkActivitySession as realForkActivitySession,
   hydrateForkedAgentChatSession,
+  realAgentChatHarness,
   resumeAgentChatSession as realResumeAgentChatSession,
   sendAgentChatPrompt,
   startNewAgentChatSession as realStartNewAgentChatSession,
@@ -344,6 +344,7 @@ import {
   type WorkNavSiblingOrder,
 } from "./workNavOrder";
 import { shouldSuppressBrowserShortcut } from "./keydownSuppression";
+import { useDismissableMenu } from "./dismissableMenu";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   createRootPickerDirectory,
@@ -403,7 +404,7 @@ import {
   buildEffectiveTerminalFontFamily,
   loadTerminalStylePrefs,
   saveTerminalStylePrefs,
-  DEFAULT_TERMINAL_STYLE_PREFS,
+  TerminalPrefsContext,
   type TerminalStylePrefs,
 } from "./terminalPrefs";
 import {
@@ -495,27 +496,6 @@ const initialWorkbenchGroups = [
   { id: "group-1", label: "group 1" },
   { id: "group-2", label: "group 2" },
 ] as const;
-
-// `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1 harness
-// routing: only Codex/Claude have a real `activitySessionClient.ts` adapter
-// wired in; every other harness (OpenCode today) stays on
-// `activitySessionStub.ts` (see the plan's Codebase Findings — do not regress
-// stub-backed flows for unadapted harnesses).
-function realAgentChatHarness(
-  harness: AgentChatHarness,
-): RealAgentChatHarness | null {
-  return harness === "codex" || harness === "claude" ? harness : null;
-}
-
-// Live fan-out for terminal-style prefs: open terminal panes subscribe via
-// `useContext` and apply `terminal.options.*` on change (see
-// `TerminalPaneBody`'s post-mount subscription effect) instead of only
-// reading the value at construction time. The default matches
-// `DEFAULT_TERMINAL_STYLE_PREFS` so any consumer rendered outside the
-// Provider (there should be none) still reproduces today's hardcoded look.
-export const TerminalPrefsContext = createContext<TerminalStylePrefs>(
-  DEFAULT_TERMINAL_STYLE_PREFS,
-);
 
 export function App() {
   // Per-server cache of the last resolved resources tree, keyed by
@@ -2050,36 +2030,6 @@ export function App() {
     </SettingsTerminalContext.Provider>
     </TerminalPrefsContext.Provider>
   );
-}
-
-function useDismissableMenu(
-  open: boolean,
-  containerRef: RefObject<HTMLElement | null>,
-  onDismiss: () => void,
-) {
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const dismissIfOutside = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node) || containerRef.current?.contains(target)) {
-        return;
-      }
-      onDismiss();
-    };
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onDismiss();
-      }
-    };
-    document.addEventListener("click", dismissIfOutside);
-    document.addEventListener("keydown", dismissOnEscape, true);
-    return () => {
-      document.removeEventListener("click", dismissIfOutside);
-      document.removeEventListener("keydown", dismissOnEscape, true);
-    };
-  }, [containerRef, onDismiss, open]);
 }
 
 function serverViewToConnection(server: ServerView): ServerConnectionView {
