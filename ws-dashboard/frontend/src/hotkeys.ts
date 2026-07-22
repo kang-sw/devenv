@@ -11,12 +11,16 @@
 // registry, the leader-press state machine, the reserved-key guard, the
 // terminal-focus/IME capture guard, and browser-local persistence for user
 // rebindings. It does NOT wire the full default keymap (groups
-// `g`/`r`/`a`/`t`/`d`/`p`/`v` etc. from the finalized keymap spec) - only a
-// representative subset whose target already exists as a real
+// `g`/`r`/`a`/`t`/`d`/`p`/`v` etc. from the finalized keymap spec) - only the
+// SUBSET of leaves from that spec whose target already exists as a real
 // `DashboardCommandId` today (see `commands.ts`), enough to exercise
 // no-payload dispatch, payload-needing "opens a picker" dispatch, and the
-// reserved-key rejection path end-to-end. Wiring every concrete binding is
-// explicitly out of scope for this phase.
+// reserved-key rejection path end-to-end. Wiring every concrete binding
+// (including every GAP id from the spec's R2 list) is explicitly out of
+// scope for this phase. Every default binding's key SEQUENCE, not just its
+// command id, matches the finalized spec's group/leaf placement exactly -
+// see `buildDefaultHotkeyBindings` below - so no default claims a group
+// prefix (`r`/`t`/`a`/`g w`) as a leaf ahead of that group's later leaves.
 
 import {
   buildAgentChatCreateCommand,
@@ -178,6 +182,19 @@ export function resolveHotkeyCommand<TContext>(
 // section, which supersedes the ticket's own older Phase 1 bullet wording
 // ("times out/cancels on an unmatched key or explicit cancel"). Unmatched-key
 // and Escape remain the default cancel paths regardless of timeout config.
+//
+// Leaf-vs-prefix precedence (proper prefix TRIE, not a flat lookup): the
+// finalized keymap spec nests leaves and sub-groups under the same parent
+// (e.g. under `g`: `r`/`f`/`p`/`l`/`b`/`c` are leaves while `w` is itself a
+// further 3-tier sub-menu). A `LeaderTreeNode` therefore MAY carry both a
+// `binding` (it is a registered leaf) AND non-empty `children` (something
+// else registered a longer sequence through the same node) at the same
+// time. When that happens, **children always win**: a node with any
+// children is treated purely as a group and DESCENDS (narrows) on the next
+// keystroke, never shadow-firing its own `binding` - only a node with NO
+// children (an actual terminal leaf) resolves. This keeps a shorter
+// registration from silently stranding a longer one as unreachable dead
+// code; see `stepLeaderState` below for the enforcement point.
 
 export type LeaderTreeNode<TContext = unknown> = {
   readonly binding?: HotkeyBinding<TContext>;
@@ -240,6 +257,14 @@ export type LeaderStepResult<TContext = unknown> = {
   readonly binding?: HotkeyBinding<TContext>;
 };
 
+// Bare modifier keydowns (`Shift`/`Control`/`Alt`/`Meta` reported as their
+// own `key` value, e.g. holding Shift before typing a capitalized leaf like
+// the finalized spec's `<leader> ?`) are not sequence input on their own -
+// treating them as an ordinary unmatched key would cancel a pending
+// sequence before the actual shifted key arrives. Ignore them in place
+// rather than consuming a step.
+const PURE_MODIFIER_KEYS = new Set(["shift", "control", "alt", "meta"]);
+
 export function stepLeaderState<TContext>(
   state: LeaderState<TContext>,
   key: string,
@@ -252,22 +277,35 @@ export function stepLeaderState<TContext>(
     return { state: { kind: "idle" }, action: "cancel" };
   }
   const normalized = normalizeChordKey(key);
+  if (PURE_MODIFIER_KEYS.has(normalized)) {
+    return { state, action: "ignore" };
+  }
   const next = state.node.children.get(normalized);
   if (!next) {
     return { state: { kind: "idle" }, action: "cancel" };
   }
+  // Leaf-vs-prefix precedence (see the module-level comment above
+  // `LeaderTreeNode`): a node with children is always a group and must
+  // descend, never shadow-fire a `binding` it might also carry. Only a
+  // childless node - a true terminal leaf - resolves.
+  if (next.children.size > 0) {
+    return {
+      state: {
+        kind: "pending",
+        node: next,
+        typed: [...state.typed, normalized],
+        enteredAtMs: nowMs,
+      },
+      action: "narrow",
+    };
+  }
   if (next.binding) {
     return { state: { kind: "idle" }, action: "resolve", binding: next.binding };
   }
-  return {
-    state: {
-      kind: "pending",
-      node: next,
-      typed: [...state.typed, normalized],
-      enteredAtMs: nowMs,
-    },
-    action: "narrow",
-  };
+  // Defensive fallback: `buildLeaderTree` never produces a node with
+  // neither a binding nor children, but a hand-built `LeaderTreeNode` (the
+  // type is exported) could - treat it the same as an unmatched key.
+  return { state: { kind: "idle" }, action: "cancel" };
 }
 
 export type LeaderTimeoutConfig = {
@@ -522,18 +560,49 @@ export function applyHotkeyUserConfig<TContext>(
 
 // --- Default bindings (Phase 1 subset) ----------------------------------
 //
-// Only the subset of default bindings whose target is a real, already-
-// existing `DashboardCommandId` today (see `commands.ts`), enough breadth to
-// exercise no-payload dispatch, payload-needing "opens a picker" dispatch
-// (R1: never fabricates a selection - either dispatches directly or opens
-// the relevant picker/menu), and the reserved-key rejection path. Explicitly
-// excludes: every R2-listed GAP prerequisite id, the agentChat-bubble/
-// prompt/history group (those command-id strings exist only as
-// `data-command-id` DOM markers, not real `DashboardCommandId` union
-// members - see plan Codebase Findings), and the `document.*` group (no
-// existing "currently focused document pane" concept to resolve a `path`
-// from without inventing new focus-tracking, which would violate R1's
-// "never fabricates a selection").
+// Every entry below is a real leaf from the ticket's owner-approved
+// "## Default Keymap & Interaction Spec (finalized 2026-07-22)" section,
+// placed at EXACTLY the key sequence that spec assigns it, restricted to
+// the leaves whose `DashboardCommandId` already exists in `commands.ts`
+// today. Nothing here invents a key placement: a default is either wired at
+// its spec position or omitted entirely (never approximated).
+//
+// Group-prefix discipline (this is what keeps the leader tree a real trie,
+// not a flat table masquerading as one): `r`, `t`, `a`, and `g w` are all
+// GROUP prefixes in the finalized spec, each holding further leaves of
+// their own (`r o`/`r x`/`r t`; `t n`; `a n`; `g w a`/`g w x`/`g w m`).
+// None of them is ever bound as a bare leaf here, so a group prefix node
+// never carries a `binding` of its own to begin with - `stepLeaderState`'s
+// children-win precedence (see the leader-mode state machine section above)
+// is defense in depth on top of this, not a substitute for it. `<leader> w`
+// itself is bound to NOTHING (spec: "intentionally UNUSED: all worktree ops
+// live under `g w`, all root/workRoot ops under `r`").
+//
+// Excluded, and why (not an oversight):
+// - Every R2-listed GAP prerequisite id (workRoot flat/hierarchical
+//   select-by-index, `pane.focus.<kind>`, tab next/prev/cycle, terminal
+//   scroll/clear/copy-selection, editor next/prev-file/close, left-nav row
+//   select, focus-git-status-inspector) - spec leaves `g s`, `t x`, the
+//   entire `p`/`d`/`v` groups, and `r`'s digit-prefixed hierarchical select
+//   all depend on one of these and are omitted rather than fabricated.
+// - The agentChat-bubble/prompt/history group (`a s`/`a y`/`a f`/`a
+//   r`/`a c`/`a k`) - those command-id strings exist only as
+//   `data-command-id` DOM markers, not real `DashboardCommandId` union
+//   members (see plan Codebase Findings). Only `a n` (agentChat.create, a
+//   real union member) is wired.
+// - The `d` (Document) group - `document.save`/`document.revert`/etc. ARE
+//   real union members, but there is no existing "currently focused
+//   document pane" concept to resolve a `path` from without inventing new
+//   focus-tracking, which would violate R1's "never fabricates a
+//   selection".
+// - Top-level `<leader> <space>` (command palette), `<leader> ?`
+//   (which-key), and `<leader> f` (hint-click) - these are framework-UI
+//   entry points for the two later layers
+//   (`260722-feat-dashboard-which-key-hint-overlay`,
+//   `260722-feat-dashboard-hint-click-fast-jump`) and the command bar
+//   (`260711-idea-dashboard-command-bus-quick-open-shortcuts`), not
+//   `DashboardCommandId` dispatches this registry resolves to; wiring them
+//   without their owning UI would be scope creep into those tickets.
 
 export type HotkeyActiveRootContext = {
   readonly workRootId: string;
@@ -565,28 +634,55 @@ function activeRootBinding(
 
 export function buildDefaultHotkeyBindings(): readonly HotkeyBinding<HotkeyDispatchContext>[] {
   return [
+    // `r` Root/WorkRoot group (spec: "r o" / "r x" / "r t"; the bare `r`
+    // prefix and its digit-driven hierarchical-select leaves are GAPs, R2).
     {
       id: "rootPicker.open",
       kind: "leaderSub",
-      keys: leaderKeys("r"),
+      keys: leaderKeys("r", "o"),
       commandId: "rootPicker.open",
       buildPayload: () => buildRootPickerOpenCommand().payload,
-      description: "Open root picker",
+      description: "Open root picker (browse filesystem to add a new root)",
     },
     activeRootBinding(
+      "workRoot.close",
+      ["r", "x"],
+      "workRoot.close",
+      (root) => buildWorkRootCloseCommand(root.workRootId, root.serverRoute).payload,
+      "Close active work root",
+    ),
+    activeRootBinding(
+      "workRoot.activation.set",
+      ["r", "t"],
+      "workRoot.activation.set",
+      (root) =>
+        buildWorkRootActivationCommand(
+          root.workRootId,
+          root.activation === "online" ? "offline" : "online",
+          root.serverRoute,
+        ).payload,
+      "Toggle active work root online/offline",
+    ),
+    // `t` Terminal group (spec: "t n"; "t x" terminal.close is a GAP - no
+    // `DashboardCommandId` member exists for it today).
+    activeRootBinding(
       "terminal.create",
-      ["t"],
+      ["t", "n"],
       "terminal.create",
       (root) => buildTerminalCreateCommand(root.workRootId, root.serverRoute).payload,
       "Open new terminal in active work root",
     ),
+    // `a` Agent-chat group (spec: "a n"; every other `a` leaf targets a
+    // DOM-marker-only id, not a real `DashboardCommandId` member).
     activeRootBinding(
       "agentChat.create",
-      ["a"],
+      ["a", "n"],
       "agentChat.create",
       (root) => buildAgentChatCreateCommand(root.workRootId, root.serverRoute).payload,
       "Open new agent tab in active work root",
     ),
+    // `g` Git group (spec: "g r"/"g f"/"g p"/"g l"/"g b"/"g c"; "g s" is a
+    // GAP - no focus-git-status-inspector id exists yet).
     activeRootBinding(
       "git.refresh",
       ["g", "r"],
@@ -624,52 +720,35 @@ export function buildDefaultHotkeyBindings(): readonly HotkeyBinding<HotkeyDispa
     ),
     activeRootBinding(
       "git.branchCreate.open",
-      ["g", "n"],
+      ["g", "c"],
       "git.branchCreate.open",
       (root) =>
         buildGitBranchCreateOpenCommand(root.workRootId, root.serverRoute).payload,
       "Open new-branch form for active work root",
     ),
+    // `g w` worktree sub-menu (3-tier: spec "g w a"/"g w x"/"g w m"; `g w`
+    // itself is a pure group prefix - "g w h" hidden-worktrees is a GAP).
     activeRootBinding(
       "gitWorktreeAdd.open",
-      ["g", "w"],
+      ["g", "w", "a"],
       "gitWorktreeAdd.open",
       (root) =>
         buildGitWorktreeAddOpenCommand(root.workspaceId, root.serverRoute).payload,
       "Open add-worktree form for active workspace",
     ),
     activeRootBinding(
-      "workRoot.close",
-      ["w", "c"],
-      "workRoot.close",
-      (root) => buildWorkRootCloseCommand(root.workRootId, root.serverRoute).payload,
-      "Close active work root",
-    ),
-    activeRootBinding(
-      "workRoot.activation.set",
-      ["w", "o"],
-      "workRoot.activation.set",
-      (root) =>
-        buildWorkRootActivationCommand(
-          root.workRootId,
-          root.activation === "online" ? "offline" : "online",
-          root.serverRoute,
-        ).payload,
-      "Toggle active work root online/offline",
+      "workspace.remove",
+      ["g", "w", "x"],
+      "workspace.remove",
+      (root) => buildWorkspaceRemoveCommand(root.workspaceId, root.serverRoute).payload,
+      "Remove active workspace (always-confirm modal)",
     ),
     activeRootBinding(
       "workspace.menu.open",
-      ["s", "m"],
+      ["g", "w", "m"],
       "workspace.menu.open",
       (root) => buildWorkspaceMenuOpenCommand(root.workspaceId, root.serverRoute).payload,
       "Open workspace menu for active workspace",
-    ),
-    activeRootBinding(
-      "workspace.remove",
-      ["s", "x"],
-      "workspace.remove",
-      (root) => buildWorkspaceRemoveCommand(root.workspaceId, root.serverRoute).payload,
-      "Remove active workspace",
     ),
   ];
 }

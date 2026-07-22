@@ -696,9 +696,14 @@ export function App() {
     for (const binding of bindings) {
       // `applyHotkeyUserConfig` already re-validated any user rebind against
       // the reserved-key set (Ticket Contract "Reserved keys ... enforced as
-      // data the registry checks"); `registerUser` here re-checks defense in
-      // depth rather than assuming that upstream validation is exhaustive.
-      registry.registerUser(binding);
+      // data the registry checks"), so every entry in `bindings` is expected
+      // to already be reserved-key-clean. `registerDefault` (fail-fast,
+      // throws) rather than `registerUser` (silently drops) is deliberate
+      // here: this loop is installing the app's resolved default/effective
+      // table, not accepting a single live user rebind attempt, so a
+      // reserved-key entry reaching this point is a bug upstream that should
+      // surface loudly (build/test-time) instead of silently vanishing.
+      registry.registerDefault(binding);
     }
     const activeBindings = registry.list();
     hotkeyFrameworkRef.current = {

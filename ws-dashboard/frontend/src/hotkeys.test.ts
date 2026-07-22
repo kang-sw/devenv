@@ -288,6 +288,25 @@ assertDeepEqual(
   const ignored = stepLeaderState({ kind: "idle" }, "t", 1_060);
   assertEqual(ignored.action, "ignore", "idle state ignores keys until a leader press");
 
+  // pending + a bare modifier keydown (Shift/Control/Alt/Meta reported as
+  // its own `key`) -> ignored in place, not treated as an unmatched key.
+  // Otherwise holding Shift before a capitalized leaf (e.g. the finalized
+  // spec's `<leader> ?`) would cancel the sequence before the actual key
+  // arrives.
+  for (const modifierKey of ["Shift", "Control", "Alt", "Meta"]) {
+    const modifierStep = stepLeaderState(pending0, modifierKey, 1_070);
+    assertEqual(
+      modifierStep.action,
+      "ignore",
+      `pending + bare '${modifierKey}' keydown is ignored, not cancelled`,
+    );
+    assertEqual(
+      modifierStep.state,
+      pending0,
+      `pending + bare '${modifierKey}' keydown leaves the pending state unchanged`,
+    );
+  }
+
   // Configurable timeout, DEFAULT OFF (finalized spec supersedes the
   // ticket's older "times out/cancels" Phase 1 bullet wording).
   assertEqual(
@@ -310,6 +329,126 @@ assertDeepEqual(
     leaderPendingExpired(pending0, 1_150, enabledTimeout),
     true,
     "an enabled timeout expires once its window elapses",
+  );
+}
+
+// --- Leader tree: proper prefix TRIE resolution ---
+//
+// Precedence rule under test (documented alongside `LeaderTreeNode` and
+// `stepLeaderState` in hotkeys.ts): a node with children is ALWAYS treated
+// as a group and descends on the next keystroke; only a childless node (a
+// true terminal leaf) resolves. A node may carry both a `binding` and
+// children at the same time (a shorter registration sharing a prefix with a
+// longer one) - when that happens, children win and the node's own binding
+// never shadow-fires.
+
+{
+  // (a) Descend through a real multi-level group prefix (from the actual
+  // default table's "g w a" gitWorktreeAdd.open) to its leaf and execute.
+  const defaults = buildDefaultHotkeyBindings();
+  const tree = buildLeaderTree(defaults);
+
+  const afterG = stepLeaderState(enterLeaderPending(tree, 0), "g", 0);
+  assertEqual(afterG.action, "narrow", "'g' narrows into the git group");
+  const afterGW = stepLeaderState(afterG.state, "w", 0);
+  assertEqual(
+    afterGW.action,
+    "narrow",
+    "'g w' narrows further into the worktree sub-menu (a group, not a leaf)",
+  );
+  const afterGWA = stepLeaderState(afterGW.state, "a", 0);
+  assertEqual(
+    afterGWA.action,
+    "resolve",
+    "'g w a' resolves the worktree sub-menu's leaf",
+  );
+  assertEqual(
+    afterGWA.binding?.commandId,
+    "gitWorktreeAdd.open",
+    "the resolved 3-deep leaf is gitWorktreeAdd.open, per the finalized spec's 'g w a' placement",
+  );
+
+  // (c) A reserved/registered group prefix with no leaf of its own stays
+  // open for future children rather than resolving or cancelling - no
+  // "leaf squatting" on `r`/`t`/`a`/`g w`. Using the real default table:
+  // `r` alone must narrow (it holds `r o`/`r x`/`r t`, never a bare-`r`
+  // binding), and `g w` alone must narrow (it holds `g w a`/`g w x`/`g w m`,
+  // never a bare-`g w` binding).
+  const afterR = stepLeaderState(enterLeaderPending(tree, 0), "r", 0);
+  assertEqual(
+    afterR.action,
+    "narrow",
+    "bare 'r' (the Root/WorkRoot group prefix) narrows rather than resolving or cancelling - it is not squatted by a leaf",
+  );
+  assertEqual(
+    afterGW.action,
+    "narrow",
+    "bare 'g w' (the worktree sub-menu group prefix) narrows rather than resolving - not squatted by gitWorktreeAdd.open",
+  );
+}
+
+{
+  // (b) Synthetic mixed leaf+children node: a shorter binding registers a
+  // leaf exactly where a longer binding also continues past it. Verifies
+  // the state machine's children-win precedence directly (this exact shape
+  // does not occur in the shipped default table, which deliberately avoids
+  // it - see the "Group-prefix discipline" comment in hotkeys.ts - but the
+  // trie/state-machine contract must hold for any future registration,
+  // e.g. a which-key-overlay or command-bar binding set).
+  const mixedBindings: readonly HotkeyBinding<HotkeyDispatchContext>[] = [
+    {
+      id: "shadowed-leaf",
+      kind: "leaderSub",
+      keys: leaderKeys("x"),
+      commandId: "dashboard.refresh",
+      buildPayload: () => ({ type: "refresh" }),
+    },
+    {
+      id: "deeper-leaf",
+      kind: "leaderSub",
+      keys: leaderKeys("x", "y"),
+      commandId: "terminal.create",
+      buildPayload: () => ({ type: "terminal.create", workRootId: "r" }),
+    },
+  ];
+  const mixedTree = buildLeaderTree(mixedBindings);
+  const xNode = mixedTree.children.get("x");
+  if (!xNode) {
+    throw new Error("expected the 'x' node to exist in the mixed tree");
+  }
+  assertEqual(
+    Boolean(xNode.binding),
+    true,
+    "the 'x' node itself carries a leaf binding (the shorter registration)",
+  );
+  assertEqual(
+    xNode.children.size > 0,
+    true,
+    "the 'x' node ALSO carries children (the longer 'x y' registration)",
+  );
+
+  const stepIntoX = stepLeaderState(enterLeaderPending(mixedTree, 0), "x", 0);
+  assertEqual(
+    stepIntoX.action,
+    "narrow",
+    "a node with children always narrows and never shadow-fires its own leaf binding, even though 'x' alone is also a registered leaf",
+  );
+  assertEqual(
+    stepIntoX.state.kind,
+    "pending",
+    "narrowing into the mixed node stays pending rather than resolving the shadowed leaf",
+  );
+
+  const stepIntoXY = stepLeaderState(stepIntoX.state, "y", 0);
+  assertEqual(
+    stepIntoXY.action,
+    "resolve",
+    "the deeper 'x y' leaf remains reachable and resolves normally",
+  );
+  assertEqual(
+    stepIntoXY.binding?.id,
+    "deeper-leaf",
+    "'x y' resolves to the longer registration's binding",
   );
 }
 
