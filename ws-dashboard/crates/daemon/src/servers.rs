@@ -35,7 +35,9 @@ use crate::git_toolbar::{
 };
 use crate::git_worktree::{
     git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
-    AddGitWorktreeRequest, AddGitWorktreeResponse, GitWorktreeAddPreviewRequest,
+    git_worktree_remove_preview, git_worktree_remove_submit, AddGitWorktreeRequest,
+    AddGitWorktreeResponse, GitWorktreeAddPreviewRequest, RemoveGitWorktreeRequest,
+    RemoveGitWorktreeResponse,
 };
 use crate::persistent_state::PersistedLinkedServer;
 use crate::resources::local_dashboard_resources_view;
@@ -526,6 +528,7 @@ enum ForwardResponseRewrite {
     None,
     Resources,
     GitWorktreeAdd,
+    GitWorktreeRemove,
 }
 
 impl ServerScopedForwardOperation {
@@ -639,6 +642,24 @@ impl ServerScopedForwardOperation {
             method: Method::POST,
             legacy_path: format!("/api/dashboard/workspaces/{workspace_id}/git-worktree-add"),
             rewrite: ForwardResponseRewrite::GitWorktreeAdd,
+        }
+    }
+
+    fn git_worktree_remove_preview(work_root_id: &str) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: format!(
+                "/api/dashboard/work-roots/{work_root_id}/git-worktree-remove/preview"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn git_worktree_remove_submit(work_root_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/git-worktree-remove"),
+            rewrite: ForwardResponseRewrite::GitWorktreeRemove,
         }
     }
 
@@ -1070,6 +1091,36 @@ pub async fn server_scoped_git_worktree_add_submit(
         return match parse_json_alias_body::<AddGitWorktreeRequest>(&headers, &body) {
             Ok(request) => {
                 git_worktree_add_submit(State(state), AxumPath(workspace_id), Json(request)).await
+            }
+            Err(response) => response,
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_git_worktree_remove_preview(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id)): AxumPath<(String, String)>,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_worktree_remove_preview(&work_root_id);
+    if server_route == LOCAL_SERVER_ID {
+        return git_worktree_remove_preview(State(state), AxumPath(work_root_id)).await;
+    }
+    forward_server_scoped_operation(state, server_route, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_git_worktree_remove_submit(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_worktree_remove_submit(&work_root_id);
+    if server_route == LOCAL_SERVER_ID {
+        return match parse_json_alias_body::<RemoveGitWorktreeRequest>(&headers, &body) {
+            Ok(request) => {
+                git_worktree_remove_submit(State(state), AxumPath(work_root_id), Json(request)).await
             }
             Err(response) => response,
         };
@@ -1915,6 +1966,22 @@ impl ForwardedDashboardResponse {
                 ForwardResponseRewrite::GitWorktreeAdd => {
                     if let Ok(mut response_body) =
                         serde_json::from_slice::<AddGitWorktreeResponse>(&self.body)
+                    {
+                        response_body.resources =
+                            rewrite_resources_for_linked_server(response_body.resources, server);
+                        let mut response = Json(response_body).into_response();
+                        *response.status_mut() = self.status;
+                        if let Some(value) = self.opened_work_root_id {
+                            response
+                                .headers_mut()
+                                .insert("x-ws-dashboard-opened-work-root-id", value);
+                        }
+                        return response;
+                    }
+                }
+                ForwardResponseRewrite::GitWorktreeRemove => {
+                    if let Ok(mut response_body) =
+                        serde_json::from_slice::<RemoveGitWorktreeResponse>(&self.body)
                     {
                         response_body.resources =
                             rewrite_resources_for_linked_server(response_body.resources, server);

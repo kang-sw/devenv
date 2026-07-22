@@ -6879,6 +6879,312 @@ async fn git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs
     remove_static_fixture(&base);
 }
 
+// --- 260525 Phase 1/3: git worktree remove -------------------------------
+
+/// Add a linked worktree at `target` on an auto-derived new branch and return
+/// its work-root id. Shared setup for the remove-route tests below.
+async fn add_linked_worktree_for_test(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+    worktree_name: &str,
+    target: &Path,
+) -> String {
+    let submit = git_worktree_submit_json(
+        app,
+        cookie,
+        workspace_id,
+        serde_json::json!({
+            "worktreeName": worktree_name,
+            "branch": { "mode": "auto" },
+            "path": { "mode": "custom", "targetPath": target.display().to_string() },
+            "activate": true
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    submit["createdWorkRootId"]
+        .as_str()
+        .expect("created worktree id")
+        .to_owned()
+}
+
+async fn opened_primary_workspace(
+    app: axum::Router,
+    cookie: &str,
+    primary: &Path,
+) -> String {
+    open_work_root_for_test(app.clone(), cookie, primary).await;
+    let resources = dashboard_resources_json(app, cookie).await;
+    resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned()
+}
+
+fn seeded_primary_repo(name: &str) -> (PathBuf, PathBuf) {
+    let base = temp_fixture_path(name);
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    (base, primary)
+}
+
+#[tokio::test]
+async fn git_worktree_remove_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    for (method, uri) in [
+        (
+            Method::GET,
+            "/api/dashboard/work-roots/root-local-missing/git-worktree-remove/preview",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git-worktree-remove",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated worktree remove request"),
+            )
+            .await
+            .expect("unauthenticated worktree remove response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn git_worktree_remove_clean_worktree_clears_registry_and_git() {
+    if skip_without_git("git_worktree_remove_clean_worktree_clears_registry_and_git") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-clean");
+    let target = base.join("wt-clean");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let workspace_id = opened_primary_workspace(app.clone(), cookie.as_str(), &primary).await;
+    let created =
+        add_linked_worktree_for_test(app.clone(), cookie.as_str(), &workspace_id, "Topic One", &target)
+            .await;
+    assert!(target.is_dir(), "worktree directory exists after add");
+
+    let preview = git_worktree_remove_preview_json(app.clone(), cookie.as_str(), &created).await;
+    assert_eq!(preview["available"], true);
+    assert_eq!(preview["hasUncommittedChanges"], false);
+    assert_eq!(preview["branchName"], "Topic-One");
+    assert_eq!(preview["branchUnmerged"], false);
+
+    let submit = git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &created,
+        serde_json::json!({ "deleteBranch": false, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(submit["removedWorkRootId"], created);
+    assert_eq!(submit["branchDeleted"], false);
+    assert!(!work_root_ids(&submit["resources"]).contains(&created));
+    assert!(!target.exists(), "git worktree remove deletes the directory");
+    assert!(
+        !git_stdout(&primary, &["worktree", "list", "--porcelain"]).contains("wt-clean"),
+        "removed worktree must be gone from git worktree list"
+    );
+    let body = serde_json::to_string(&submit).expect("submit body");
+    assert!(
+        !body.contains(primary.to_string_lossy().as_ref()),
+        "submit response must not leak the primary root path"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_remove_dirty_without_force_is_blocked() {
+    if skip_without_git("git_worktree_remove_dirty_without_force_is_blocked") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-dirty");
+    let target = base.join("wt-dirty");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let workspace_id = opened_primary_workspace(app.clone(), cookie.as_str(), &primary).await;
+    let created =
+        add_linked_worktree_for_test(app.clone(), cookie.as_str(), &workspace_id, "Dirty Topic", &target)
+            .await;
+    fs::write(target.join("scratch.txt"), "wip\n").expect("write untracked file");
+
+    let preview = git_worktree_remove_preview_json(app.clone(), cookie.as_str(), &created).await;
+    assert_eq!(preview["hasUncommittedChanges"], true);
+    assert_eq!(preview["untrackedFiles"], 1);
+
+    let blocked = git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &created,
+        serde_json::json!({ "deleteBranch": false, "force": false }),
+        StatusCode::CONFLICT,
+    )
+    .await;
+    assert!(blocked["error"]
+        .as_str()
+        .expect("error message")
+        .contains("uncommitted"));
+    assert!(target.is_dir(), "blocked remove must not delete the worktree");
+
+    let forced = git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &created,
+        serde_json::json!({ "deleteBranch": false, "force": true }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(forced["removedWorkRootId"], created);
+    assert!(!target.exists(), "forced remove deletes the dirty worktree");
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_remove_deletes_merged_branch_but_keeps_unmerged() {
+    if skip_without_git("git_worktree_remove_deletes_merged_branch_but_keeps_unmerged") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-branch");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let workspace_id = opened_primary_workspace(app.clone(), cookie.as_str(), &primary).await;
+
+    // Merged branch: no commits beyond the seed HEAD -> deleteBranch deletes it.
+    let merged_target = base.join("wt-merged");
+    let merged = add_linked_worktree_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        "Merged Topic",
+        &merged_target,
+    )
+    .await;
+    let merged_submit = git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &merged,
+        serde_json::json!({ "deleteBranch": true, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(merged_submit["branchDeleted"], true);
+    assert_eq!(merged_submit["branchDeleteSkippedUnmerged"], false);
+    assert!(
+        git_stdout(&primary, &["branch", "--list", "Merged-Topic"]).is_empty(),
+        "merged branch must be deleted"
+    );
+
+    // Unmerged branch: a commit made inside the worktree is NOT reachable from
+    // HEAD, so deleteBranch must be refused (never `-D`) and the branch kept.
+    let dangling_target = base.join("wt-dangling");
+    let dangling = add_linked_worktree_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        "Dangling Topic",
+        &dangling_target,
+    )
+    .await;
+    fs::write(dangling_target.join("README.md"), "seed\nmore\n").expect("edit in worktree");
+    run_git(&dangling_target, &["commit", "-aqm", "unique worktree commit"]);
+
+    let unmerged_preview =
+        git_worktree_remove_preview_json(app.clone(), cookie.as_str(), &dangling).await;
+    assert_eq!(unmerged_preview["branchName"], "Dangling-Topic");
+    assert_eq!(unmerged_preview["branchUnmerged"], true);
+
+    let dangling_submit = git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &dangling,
+        serde_json::json!({ "deleteBranch": true, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(dangling_submit["branchDeleted"], false);
+    assert_eq!(dangling_submit["branchDeleteSkippedUnmerged"], true);
+    assert!(
+        !git_stdout(&primary, &["branch", "--list", "Dangling-Topic"]).is_empty(),
+        "unmerged branch must survive a deleteBranch request (never force-deleted)"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_remove_clears_terminal_sessions_for_removed_root() {
+    if skip_without_git("git_worktree_remove_clears_terminal_sessions_for_removed_root") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-sessions");
+    let target = base.join("wt-sessions");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let workspace_id = opened_primary_workspace(app.clone(), cookie.as_str(), &primary).await;
+    let created = add_linked_worktree_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        "Session Topic",
+        &target,
+    )
+    .await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &created).await;
+
+    git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &created,
+        serde_json::json!({ "deleteBranch": false, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+
+    // A cleared session yields "unknown terminal" (404), not a
+    // still-registered-but-offline error.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/output"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("terminal output request"),
+        )
+        .await
+        .expect("terminal output response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    remove_static_fixture(&base);
+}
+
 #[tokio::test]
 async fn git_toolbar_routes_are_owner_authenticated() {
     let app = build_router(app_state());
@@ -11664,6 +11970,58 @@ async fn git_worktree_submit_json(
         .await
         .expect("git worktree submit body");
     serde_json::from_slice(&body).expect("git worktree submit JSON")
+}
+
+async fn git_worktree_remove_preview_json(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/git-worktree-remove/preview"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("git worktree remove preview request"),
+        )
+        .await
+        .expect("git worktree remove preview response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree remove preview body");
+    serde_json::from_slice(&body).expect("git worktree remove preview JSON")
+}
+
+async fn git_worktree_remove_submit_json(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+    request: serde_json::Value,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/git-worktree-remove"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git worktree remove submit request"),
+        )
+        .await
+        .expect("git worktree remove submit response");
+    assert_eq!(response.status(), expected_status);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree remove submit body");
+    serde_json::from_slice(&body).expect("git worktree remove submit JSON")
 }
 
 fn json_with_activate(mut value: serde_json::Value, activate: bool) -> serde_json::Value {
