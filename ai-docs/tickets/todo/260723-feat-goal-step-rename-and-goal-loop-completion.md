@@ -26,10 +26,13 @@ staging, autonomy posture, terminal merge — on top of its original single-shot
    Stop-hook keeps re-surfacing the reminder, i.e. thrash. There is no framing
    that treats "no path forward" as a clean goal-run conclusion.
 
-Separately, bugs discovered mid-run are captured (per AGENTS.md "Dogfood
-surprises get captured") at `idea/` level — inert, awaiting human triage. During
-an unattended goal run that parks actionable work the loop could otherwise fix
-in a later iteration.
+Separately, in devenv today bugs discovered mid-run are captured (per this
+repo's AGENTS.md "Dogfood surprises get captured") at `idea/` level — inert,
+awaiting human triage. During an unattended goal run that parks actionable work
+the loop could otherwise fix in a later iteration. Note: that AGENTS.md rule is
+devenv's local convention; the shipped skill's own bug routing must be judged
+separately (see the bug-capture decision), since the skill runs in downstream
+repos.
 
 ### Mechanism facts (verified, load-bearing for the design)
 
@@ -78,6 +81,23 @@ in a later iteration.
 - **Rename only (no reposition)** — rejected. Leaves spec/mental-model presenting
   the standalone shim as primary identity; incoherent with the new name.
 
+### Lead ticket-curation authority during the goal step (prose, no new ticket-system state)
+
+The goal step grants the lead explicit authority to curate the ticket queue as
+part of advancing the goal — not only "pick one and hand off": autonomously edit
+existing tickets (record findings, restructure, re-triage status) and create +
+link new tickets, all via the normal ticket-write path (`lead-write-ticket` /
+`ws/tickets.*`), within the goal-run autonomy bounds. This single authority
+clause is the shared mechanism for BOTH blocked-progress handling and in-scope
+bug capture below — **no new ticket-system state** (no `blocked:` field / marker
+substrate) is introduced. Rationale: the entire loop is already AI-judged prose
+(see Mechanism facts); a lone structured-determinism island would be inconsistent
+and would add set/clear lifecycle machinery the prose authority does not need.
+Blocked state and discovered bugs are recorded as ordinary ticket edits on living
+documents, which the selector (which reads ticket state/bodies) then sees —
+durable across the stateless re-invocations and compaction because it is on disk,
+not in the lead's context.
+
 ### Blocked-progress = clean goal-run conclusion (distinct from hard-gate pause)
 
 Add a completion-term to the body so the AI-judged loop treats "no makeable
@@ -94,9 +114,29 @@ wording must not let one collapse into the other:
 
 Scoping guard: "blocked-progress" means **all remaining `ready/` tickets are
 blocked / none can advance**. If ticket A is blocked but B/C are workable, this
-is NOT a conclusion — skip A and continue to the next workable ticket. This
-requires the selection step to be able to report "N tickets remain but all are
-blocked", not just "one path" or "empty".
+is NOT a conclusion — skip A and continue to the next workable ticket.
+
+Mechanism (per the ticket-curation authority above, no new state): when the lead
+hits a genuine block on a ready ticket, it **records the blocker onto that ticket
+and re-triages it out of the active ready path before yielding the turn** — an
+ordinary ticket edit (a recorded blocker note and/or a status re-triage), not a
+new marker field. The selection step **reads ticket state/bodies to judge
+"advanceable now"** and skips tickets carrying a recorded block, replacing the
+body-blind FIFO pick of today. This is why the block survives the stateless
+re-invocations and compaction: it lives on the ticket, not in the lead's head.
+
+Discriminator (pause vs conclusion), sharpened per design review: the test is
+**"is there any work I could still do without the human?"** — NOT "does this
+re-surface every turn?" (which fails to separate the two in the single-ready,
+human-away case). Work remains and only a final irreversible/destructive action
+awaits sign-off → pause. No advanceable work remains anywhere in `ready/` (every
+path needs a human decision) → conclude with a blocker report.
+
+Robustness risk (named): if a block is discovered but NOT recorded before the
+turn yields (e.g. mid-turn compaction), the next selector re-picks it and thrash
+returns. Mitigation is prose, not structure — "record the blocker before
+yielding" must be an explicit, non-skippable body step, and the selector's
+advanceable-now read is the second line of defense.
 
 Anti-abuse: the conclusion term must not become an escape hatch that reclassifies
 a hard-gate pause as "goal complete" to avoid waiting. It fires only when there
@@ -117,12 +157,26 @@ unattended scope explosion and non-termination. Three guardrails (all confirmed)
    is usually not a hard blocker; the real gate is the sage design gate.)
 2. **Scope bound: only goal-relevant bugs reach `ready/` for same-run fixing.**
    A bug that blocks or is directly relevant to the current goal → promote to
-   `ready/`. An incidental / unrelated-module bug → `idea/` per the existing
-   AGENTS.md capture rule (the away human triages later). This preserves scope
-   control and prevents the loop self-feeding on tangential bugs into
-   non-termination.
+   `ready/`. An incidental / unrelated-module bug → `idea/` capture (the away
+   human triages later). This routing is **skill-intrinsic behavior stated in the
+   skill body**, judged separately from any downstream project's own dogfood-
+   capture convention (e.g. devenv's AGENTS.md "Dogfood surprises → idea/") — the
+   skill ships into downstream repos and must not anchor its routing to devenv's
+   local rule. It preserves scope control and prevents the loop self-feeding on
+   tangential bugs into non-termination.
 3. **Respect explicit deferral.** If implementation of the bug was explicitly
    deferred, capture only — do not queue it to `ready/`.
+
+Same-run fixing vs the sage gate (resolved per design review): a goal-relevant
+bug ticket routed to `ready/` still passes the sage ready-landing gate. If sage
+blocks it, the ticket parks in `ready/` carrying sage's existing rendered Blocked
+section — which is exactly an on-ticket blocked state the selector already handles
+via the blocked-progress mechanism above: the next step skips it and works other
+tickets, or concludes if nothing else can advance. So same-run fixing holds for
+bugs that clear the gate; sage-blocked bugs park visibly and are picked up once
+unblocked. This is the honest contract — the feature does not undermine or
+auto-clear the gate. (The sage Blocked section is also the reuse precedent showing
+on-ticket blocked state needs no new field.)
 
 ### Rejected: unconditional direct-to-`ready/` bug drop
 
@@ -131,6 +185,15 @@ and — with only an "unless explicitly deferred" opt-out — defaults to fixing
 every discovered bug unattended, risking scope explosion and loop
 non-termination (bug-fix reveals bug reveals bug...). The scope bound above is
 the accepted form.
+
+### Rejected: structured blocked-marker / new ticket-system state
+
+Rejected. Adding a `blocked:` frontmatter field (or a `.blocked/` status) plus its
+set/clear lifecycle would be a lone island of determinism in an otherwise
+prose-judged loop, and new substrate to maintain. The lead's ticket-curation
+authority + the selector's advanceable-now read over ordinary ticket edits cover
+the same need on living documents, durably across compaction, with no new state.
+(Chosen over the earlier discussion's separate substrate-ticket option.)
 
 ## Constraints
 
@@ -204,17 +267,22 @@ manifest incident); `go test ./...` green (test-list update only).
 
 ### Phase 2: Blocked-progress completion term + autonomous in-scope bug capture
 
-Add to the (renamed) skill body: (a) the blocked-progress-conclusion term,
-distinct from hard-gate pause, with the "all remaining ready blocked" scoping
-guard and the skip-blocked-continue rule (which requires the selection step to
-report "N remain but all blocked"); (b) the bounded autonomous bug-capture
-posture (route via ticket-write path; goal-relevant → `ready/`, unrelated →
-`idea/`; respect explicit deferral). Wording must not nullify hard gates or let
-a pause be reclassified as completion.
+Add to the (renamed) skill body: (a) the lead ticket-curation authority clause;
+(b) the blocked-progress-conclusion term, distinct from hard-gate pause, with the
+"all remaining ready blocked" scoping guard, the non-skippable "record the blocker
+before yielding" step, the selector's advanceable-now read (replacing body-blind
+FIFO), and the sharpened "is there work I could do without the human?"
+discriminator; (c) the bounded autonomous bug-capture posture (route via
+ticket-write path; goal-relevant → `ready/`, unrelated → `idea/`; respect explicit
+deferral; routing is skill-intrinsic, not anchored to a downstream AGENTS.md).
+Wording must not nullify hard gates, let a pause be reclassified as completion, or
+introduce any new ticket-system state field.
 
 Verification: skill-authoring invariant checklist passes; completion/pause
-distinction is unambiguous against the `260722` hard-gate list; bug-capture
-guardrails are all present; wsflow mirror regenerated and package tests pass.
+distinction is unambiguous against the `260722` hard-gate list; the discriminator
+and record-before-yield step are explicit; bug-capture guardrails all present and
+decoupled from devenv's AGENTS.md; no new frontmatter/state field introduced;
+wsflow mirror regenerated and package tests pass.
 
 Depends on Phase 1 (edits the renamed body).
 
