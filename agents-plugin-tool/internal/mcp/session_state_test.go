@@ -2160,12 +2160,12 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902600, root, nil))
 
-	resp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+	resp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
 		"stem":          "feat-sage-create",
 		"initial_state": "todo",
 	})
 	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "recommended") {
-		t.Fatalf("tickets.create response missing created path or posture: %s", resp)
+		t.Fatalf("tickets.create_empty response missing created path or posture: %s", resp)
 	}
 
 	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create.md"))
@@ -2196,12 +2196,12 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902601, root, nil))
 
-	resp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+	resp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
 		"stem":          "feat-sage-create-default",
 		"initial_state": "todo",
 	})
 	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "required") {
-		t.Fatalf("tickets.create response missing created path or posture: %s", resp)
+		t.Fatalf("tickets.create_empty response missing created path or posture: %s", resp)
 	}
 
 	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create-default.md"))
@@ -2232,12 +2232,12 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
 
-	createResp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
 		"stem":          "feat-sage-move-default",
 		"initial_state": "idea",
 	})
 	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
-		t.Fatalf("tickets.create response missing created path: %s", createResp)
+		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
 	}
 	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-default.md"))
 	if err != nil || len(createdMatches) != 1 {
@@ -2285,12 +2285,12 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902603, root, nil))
 
-	createResp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
 		"stem":          "feat-sage-move-override",
 		"initial_state": "idea",
 	})
 	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
-		t.Fatalf("tickets.create response missing created path: %s", createResp)
+		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
 	}
 	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-override.md"))
 	if err != nil || len(createdMatches) != 1 {

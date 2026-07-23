@@ -1915,15 +1915,21 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	if !strings.Contains(body, "recoverability of intent") {
 		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
 	}
-	if !strings.Contains(body, `tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`) {
-		t.Errorf("body missing tickets.create public schema call:\n%s", body)
+	if !strings.Contains(body, `tickets.create_empty(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`) {
+		t.Errorf("body missing tickets.create_empty public schema call:\n%s", body)
 	}
 	// 260701 Phase 2: the sage-review state-machine prose was relocated into the
 	// tickets.sage_gate / tickets.sage_record MCP tools; the playbook now carries
 	// only the two-step call site and the parameterized Reviewer Spawn block.
+	// 260723 Phase 2: tickets.sage_record was renamed to the lead-only
+	// tickets.sage_stamp, and the two-step call site was further trimmed down
+	// to "follow its returned next_instruction" (action-time obligation prose)
+	// instead of restating the four sage_gate action branches or sage_stamp's
+	// aggregate/write/render/commit behavior up front.
 	for _, want := range []string{
 		"tickets.sage_gate(stem, landing)",
-		"tickets.sage_record(stem, stage, verdicts)",
+		"tickets.sage_stamp(stem, stage, verdicts)",
+		"follow its returned next_instruction",
 		"## On: Reviewer Spawn",
 		"For each reviewer named by `tickets.sage_gate`",
 	} {
@@ -1931,7 +1937,8 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 			t.Errorf("body missing sage review gate call-site language %q:\n%s", want, body)
 		}
 	}
-	// The relocated state-machine prose and Blocked templates must be gone.
+	// The relocated state-machine prose, Blocked templates, and the retired
+	// tool name must all be gone.
 	for _, forbidden := range []string{
 		"If posture is `recommended`, ask the user",
 		"If posture is `required`, run design review without asking",
@@ -1939,6 +1946,8 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 		"Blocked Section Template",
 		"## On: Design Review Stage",
 		"## On: Ready-promotion Aggregation",
+		"tickets.sage_record(stem, stage, verdicts)",
+		"tickets.create(session_key:",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("body still contains relocated sage prose %q:\n%s", forbidden, body)
