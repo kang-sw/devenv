@@ -820,7 +820,12 @@ dropped tickets.
 (status=dropped), writing the appropriate `completed:` or `dropped:` date into
 frontmatter and optionally appending a `## Resolution (YYYY-MM-DD)` body section.
 The operation is atomic: the frontmatter write, `git add`, and `git mv` happen as
-one staged change set, and the tool never commits. {#260620-ticket-close-tool}
+one staged change set, and the tool never commits. It is free-edit on phase
+completeness: closing with an unresolved `### Phase N: <title>` heading (one
+with no `### Result` heading before the next Phase heading or EOF, and not
+marked `[dropped]`) returns a soft, non-blocking tip naming the unresolved
+phase(s) — never a hard block, mirroring `tickets.move`'s ready-gate spec-
+address tip. {#260620-ticket-close-tool}
 
 `tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
@@ -853,23 +858,27 @@ a retrying caller cannot mistake a blocked move for a fully unresolved,
 unchanged ticket.
 {#260620-ticket-move-tool}
 
-`tickets.create` creates a dated ticket stub at a caller-specified initial state
-(`idea`, `todo`, or `ready`). It auto-prefixes today's date to form the full
-ticket stem, writes a minimal frontmatter stub (`title: ""` placeholder;
-resolved `sage-review-design:` posture for `todo/+` states when the ticket's
-category requires design review), and returns the created path and a
-caller-facing tip that names the posture. It does not stamp
-`sage-review-completeness` at creation time, even for `state: "ready"` —
-completeness is evaluated only at ready-promotion time via `tickets.move`,
-which has a "from" state to validate against. Creating directly at `ready/`
-for a category requiring design review still enforces the never-skippable
-design invariant: if the freshly resolved design posture is not terminal
-(`completed` or `skipped`), the call is rejected with an action-oriented error
-instead of silently stamping a non-terminal posture and succeeding. Terminal
-states (`done`, `dropped`) and an empty stem are rejected with errors. The tool
-is not idempotent: a duplicate path returns an error. The `idea/` tip directs
-the caller to promote through `todo/` so the resolved posture can be stamped.
-{#260622-create-ticket-tool}
+`tickets.create_empty` (renamed from `tickets.create`, 260723 Phase 2) creates
+a dated ticket stub at a caller-specified initial state (`idea`, `todo`, or
+`ready`). It auto-prefixes today's date to form the full ticket stem, writes a
+minimal frontmatter stub (`title: ""` placeholder; resolved
+`sage-review-design:` posture for `todo/+` states when the ticket's category
+requires design review), and returns the created path and a caller-facing tip
+that names the posture. The attention-salient rename and the tool's own
+return prose both state the caveat this name exists to enforce: it yields
+only a valid empty skeleton + initial posture, not a full mutation
+orchestrator — `tickets.template` remains the separate tool that supplies the
+body skeleton. It does not stamp `sage-review-completeness` at creation time,
+even for `state: "ready"` — completeness is evaluated only at ready-promotion
+time via `tickets.move`, which has a "from" state to validate against.
+Creating directly at `ready/` for a category requiring design review still
+enforces the never-skippable design invariant: if the freshly resolved design
+posture is not terminal (`completed` or `skipped`), the call is rejected with
+an action-oriented error instead of silently stamping a non-terminal posture
+and succeeding. Terminal states (`done`, `dropped`) and an empty stem are
+rejected with errors. The tool is not idempotent: a duplicate path returns an
+error. The `idea/` tip directs the caller to promote through `todo/` so the
+resolved posture can be stamped. {#260622-create-ticket-tool}
 
 `tickets.template` returns the typed body skeleton for a given ticket type.
 `type` is required; accepted values are `feat`, `bug`, `refactor`, `chore`,
@@ -909,7 +918,11 @@ sage-review posture presence and terminal value, close-date field presence for
 are hard findings that fail the verdict (`OK: false`). Missing spec addressing on
 a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
 failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
-a hard block is separate deferred scope. verify performs no prose or design
+a hard block is separate deferred scope. An unresolved `### Phase N:` heading
+(no `### Result` before the next Phase heading or EOF, not marked `[dropped]`)
+on a `.done`/`.dropped` ticket is likewise a soft **warning** only, matching
+`tickets.close`'s own tip — the SOFT seed of the 260723 Phase 2 must-not-forget
+filter, deliberately never promoted to a hard block. verify performs no prose or design
 judgment and does not attempt the append-only phase-Result convention, which is a
 diff-level property a single-file snapshot cannot see. It is callable standalone
 for mid-edit red-green feedback, and the identical check runs as the `git.commit`
@@ -986,7 +999,7 @@ stamping. The migration write persists both new fields on that first touch
 in place.
 {#260624-sage-review-gate}
 
-`tickets.sage_gate` and `tickets.sage_record` are the two root-aware tools the
+`tickets.sage_gate` and `tickets.sage_stamp` are the two root-aware tools the
 `lead-write-ticket` playbook calls to run the gate above; both require
 `session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
 decision for a ticket and returns `{ action, ask_prompt?, reviewers?, mode? }`
@@ -999,13 +1012,22 @@ still-pending `recommended` stage is asked separately (design first) so one
 answer never resolves another stage. A declined `ask` and a config-fallback
 resolution each persist the resolved posture and commit. The tool never spawns
 reviewers — for `run` it names the reviewer(s) to dispatch and leaves spawning
-to the lead. `tickets.sage_record(stem, stage, verdicts)` aggregates the
-supplied stage verdicts into the final posture, writes the frontmatter field(s),
-renders any `## Blocked` section from a Go-owned template whose output is
-byte-identical to the prior playbook templates, commits with the canonical
-title, and returns the applied posture plus the commit reference. A `stage`
-whose expected reviewer verdict is absent from `verdicts` is rejected with an
-error rather than recording a passing posture for a review that did not run.
+to the lead. `tickets.sage_stamp(stem, stage, verdicts)` (renamed from
+`tickets.sage_record`, 260723 Phase 2) aggregates the supplied stage verdicts
+into the final posture, writes the frontmatter field(s), renders any
+`## Blocked` section from a Go-owned template whose output is byte-identical
+to the prior playbook templates, commits with the canonical title, and returns
+the applied posture plus the commit reference. A `stage` whose expected
+reviewer verdict is absent from `verdicts` is rejected with an error rather
+than recording a passing posture for a review that did not run.
+`tickets.sage_stamp` is **lead-only** (`isLeadOnlyTool`): it is the sole
+terminal writer of sage-review posture and the `## Blocked` companion, and a
+delegate/leaf-scoped session key is rejected at the keyed capability gate
+before dispatch — reviewers never write frontmatter directly, preserving the
+lead-single-writer property this spec anchor already established. This is
+new, code-enforced gating as of 260723 Phase 2: the pre-rename
+`tickets.sage_record` carried no `isLeadOnlyTool` entry, so a delegate-scoped
+key could reach it even though no reviewer playbook ever called it.
 Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
