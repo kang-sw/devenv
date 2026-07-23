@@ -113,6 +113,51 @@ blocked at the gate; the spec-address case emits a *warning*, not a block; and a
 standalone `ticket.verify(paths)` call returns the same verdict as the gate for
 identical input (call-site parity). Go test coverage for these cases passes.
 
+### Result (9744429) - 2026-07-23
+
+`wsdoc.TicketVerify(root, paths)` ships seven hard guardrails (stem, status-dir
+against the canonical five dirs, file-exists, frontmatter-fence integrity,
+ready-landing sage-review posture, close-date field, phase/Result heading
+well-formedness) plus a soft spec-address warning, exposed as a standalone
+`tickets.verify` MCP tool + CLI subcommand and wired as a commit-time gate on
+`wsgit.Client.Commit`. Spec addressing recorded under `260723-tickets-verify-tool`
+and `260723-git-commit-ticket-verify-gate` (commit `44e530a`).
+
+- **Import boundary preserved.** The gate uses a `Verifier func(root, paths)
+  error` seam on `wsgit.Client` (mirroring the existing `Runner` field) so
+  `internal/wsdoc` never imports `internal/wsgit`, honoring
+  `{#260720-wsdoc-commit-boundary}`; MCP dispatch and the CLI each construct the
+  client with a `verifyAdapter`.
+- **Single source of truth.** A pure `readyPostureProblems` predicate extracted
+  in `tickets_mutate.go` is shared by both the ready-move check and verify. Its
+  signature deviates from the plan's illustrative `(fm, stem)` form — it takes
+  resolved posture values + required-ness so a hand-authored ready ticket with a
+  genuinely unset required stage reports "unset" rather than being misread as
+  not-applicable; caught by `TicketVerifyReadySagePostureGuardrail/missing`
+  before shipping.
+- spec-address is soft-warn only (never fails `OK`); phase/Result is
+  presence/well-formedness only (append-only not attempted); the gate is
+  non-overridable (an invalid staged ticket blocks the commit, `HEAD` unmoved).
+- **Deviation:** added `tickets.verify` to both `runtime.json` trees and
+  `runtimeCapabilityCommandNames()` (outside the plan's file list) — required by
+  the launcher-contract test, a mechanical same-pattern addition matching sibling
+  `tickets.*` tools.
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./...` all clean (12
+packages, 0 failures). Review (partitioned): fit clean; test clean + 3 minor
+coverage-gap notes; correctness's lone "critical" was a **false alarm** — a
+review subagent left an uncommitted `if false` edit disabling the stem guardrail
+in the shared working tree, which a sibling reviewer then ran tests against. The
+committed tip `9744429` has the correct `ticketStemRE` check and passes the stem
+tests; the stray edit was discarded and the tree re-verified green.
+
+Deferred (minor, none blocking Phase 2): (1) an empty ticket file in
+`todo/`/`idea/` passes verify (documented choice); (2) phase/Result match could
+over-fire on `### Results summary` (low likelihood; convention uses the exact
+form); (3) three narrow-branch test gaps (missing-opening-fence,
+`sageReviewStageError` default branch, `.dropped` happy-path). The shared-worktree
+reviewer-contamination hazard is captured separately as an `idea/` ticket.
+
 ### Phase 2: must-not-forget mutation-tool collapse + action-time obligation prose
 
 With the verify floor in place, collapse the mutation surface. Produce the

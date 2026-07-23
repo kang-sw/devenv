@@ -218,11 +218,13 @@ dropped tickets live in hidden archive dirs and git history.
   authoring/mutation whitelist (overlay). Spec addressing via `## Spec Impact`
   (`workflow-skills`, Contract-first: no). Sage review completed.
 - `260723-feat-ticket-write-verify-commit-gate` (ready, feat, child of
-  260723-epic) - deterministic `ticket.verify` at `git.commit`'s validation slot
-  (mechanical floor; closes 260627 bypass), then must-not-forget mutation-tool
-  collapse. 2 phases. Spec addressing via `## Spec Impact` (`mcp-tools`,
-  Contract-first: no). Sage review completed. Open: true universal commit
-  chokepoint (pre-commit hook vs routing mandate) to resolve in Phase 1.
+  260723-epic) - **Phase 1 landed** (`9744429`): deterministic `ticket.verify`
+  + non-bypassable `git.commit` gate (mechanical floor; closes 260627 direct-edit
+  bypass), spec `260723-tickets-verify-tool` / `260723-git-commit-ticket-verify-gate`
+  (commit `44e530a`). **Phase 2 remaining**: must-not-forget mutation-tool collapse
+  + action-time obligation prose. Spec addressing via `## Spec Impact` (`mcp-tools`,
+  Contract-first: no). Sage review completed. Chokepoint resolved by hosting at
+  `git.commit` (shell raw-commit bypass tracked as epic Caveat).
 - `260723-feat-ticket-system-concept-doc` (ready, feat, child of 260723-epic) -
   single ticket-system concept doc homed in the `workflow_manual` bundle
   (session-once grounding, host-neutral), playbook references it instead of
@@ -230,6 +232,11 @@ dropped tickets live in hidden archive dirs and git history.
   `workflow-manual`, Contract-first: no). Sage review completed (re-authored after
   initial block: loading resolved to workflow_manual per user). Open knob: inline
   vs referenced manual payload (Phase 1).
+- `260723-research-reviewer-worktree-isolation` (idea, research) - captured from
+  T2 Phase 1 review: a review subagent left an uncommitted `if false` edit in the
+  shared working tree, producing a sibling reviewer's false critical. Research
+  read-only reviewer profiles vs per-agent worktree isolation vs a pre-dispatch
+  clean-tree assertion.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
