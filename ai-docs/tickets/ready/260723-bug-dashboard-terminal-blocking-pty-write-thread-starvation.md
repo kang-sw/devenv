@@ -89,15 +89,43 @@ daemon resilient regardless of the external cause.
 - No single global writer task / shared broadcast channel serializing all
   terminals.
 
-## Recommended fix direction (design choice to settle)
+## Recommended fix direction (DECIDED 2026-07-23)
 
-Wrap the blocking PTY write (and resize) off the async worker. Two options:
-(a) `tokio::task::spawn_blocking` per write — simplest, matches existing
-codebase pattern, but per-keystroke task overhead; (b) a dedicated
-per-session blocking writer thread fed by a channel — more code, avoids
-per-keystroke spawn churn, better under heavy input. Decide at
-implementation. Secondarily consider memoizing the `App.tsx:4833-4848` pane
-scan and coalescing `setTerminalPanes` output updates.
+Wrap the blocking PTY write (and resize) off the async worker. Two options
+were weighed: (a) `tokio::task::spawn_blocking` per write — simplest,
+matches existing codebase pattern, but rejected due to per-keystroke
+task-spawn churn under heavy input; (b) a dedicated per-session blocking
+writer thread fed by a channel — more code, avoids per-keystroke spawn
+churn, better under heavy input.
+
+**Chosen: option (b)** — a dedicated per-session blocking writer thread fed
+by a channel. Decided by the user on 2026-07-23.
+
+Scope: move BOTH the blocking PTY write (`terminal.rs:591-606`) AND the
+blocking resize (`terminal.rs:608-628`) off the async Tokio worker; resize
+may route through the same per-session writer thread as the write path.
+
+Out of scope for this ticket (tracked as separate follow-ups): the
+frontend O(N) render scan (`App.tsx:4833-4848`) and the HTTP short-poll
+fallback (`App.tsx:441`, `App.tsx:4859-4916`).
+
+## Spec Impact
+
+None — this is an internal concurrency fix; caller-visible terminal
+behavior is unchanged (input is still delivered in order over WS and the
+HTTP fallback; only the execution moves off the shared async worker
+thread). Per the spec-impact rule, an internal refactor preserving all
+caller-visible behavior does not qualify for spec addressing.
+
+## Phases
+
+### Phase 1: Move blocking PTY write + resize off the async worker
+
+Completion boundary: daemon builds clean and the existing daemon test
+suite passes; `write_input` and `resize` no longer block a Tokio worker
+thread (writes/resizes are handed to a per-session dedicated blocking
+writer thread); terminal input/output behavior is unchanged and in-order
+over both WS and HTTP fallback.
 
 ## Relation
 
