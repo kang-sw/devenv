@@ -62,8 +62,61 @@ measurement.
 - Coalesce output bursts (e.g. debounce/batch rapid successive chunks) before
   triggering a backfill send.
 
-None of the above is decided; this ticket captures the finding for triage
-pending measurement.
+The below `## Phases` section decides and scopes the concrete fix for Phase 1;
+this section is retained as the original triage-time brainstorm.
+
+## Phases
+
+### Phase 1: Replace O(N) output_after scan with index arithmetic and drop the redundant status rescan
+
+**Change 1 — `output_after` (`terminal.rs` ~607-620):** Chunks retained in
+`inner.output` have strictly contiguous, gapless, increasing `sequence`
+(`append_output` increments `next_sequence` exactly once per push; eviction
+only ever does `pop_front`). Replace the
+`.iter().filter(|c| c.sequence > after).cloned().collect()` scan with index
+arithmetic: compute `front_seq = inner.output.front().map(|c| c.sequence)`
+(no front → nothing retained); then
+`skip = after.saturating_add(1).saturating_sub(front_seq).min(len) as usize`
+(0 when there is no front); then
+`inner.output.iter().skip(skip).cloned().collect()`. This drops the cost from
+O(N) to O(1) + O(K) (K = chunks actually returned) and is byte-identical to
+the old filter for every `after`, by the gapless-contiguous-sequence
+invariant. Add a CONTRACT comment on `output_after` noting the optimization
+depends on that invariant (gapless contiguous sequence + front-only
+eviction) and must be revisited if either changes.
+
+**Change 2 — `send_terminal_socket_status` (`terminal.rs` ~893-916):** Add a
+small private accessor `status_and_next_sequence(&self) -> (TerminalStatus,
+u64)` that locks `inner` once and returns only those two scalars — it must
+never touch `inner.output`. Call it at ~899 instead of the current
+`output_after(u64::MAX)`, which eliminates a second unconditional full-ring
+scan + clone + allocation on every wake purely to read `status` and
+`next_sequence`.
+
+**Constraints on the completion boundary:**
+
+- No public signature or struct-field changes.
+- Other `output_after`/`is_range_truncated` call sites are unaffected and
+  stay unchanged: HTTP `terminal_output` (~line 432), `plan_output_backfill`
+  (~line 863), `is_range_truncated` (~line 628).
+- Use saturating arithmetic throughout (`saturating_add`, `saturating_sub`);
+  clamp `skip` to `len` so it can never index past the deque.
+- Fully behavior-preserving: identical bytes, order, JSON wire shape,
+  resume-by-cursor semantics, and truncation semantics as today.
+- Spec Impact: None — internal perf refactor, no caller-visible behavior
+  change.
+
+**Verification (Phase 1 completion boundary):**
+
+- Add a unit test asserting the new skip-based `output_after` is equal to the
+  old `filter(seq > after)` semantics across representative `after` values,
+  on a deque pushed past `MAX_OUTPUT_CHUNKS` (eviction forced): before-window,
+  at-boundary, mid-window, at-next_sequence, and near-`u64::MAX` — identical
+  in-order `Vec` for each case.
+- Existing `is_range_truncated_*` and `plan_output_backfill_*` tests must keep
+  passing unmodified.
+- `cargo build --workspace` and `cargo test -p ws-dashboard-daemon` both
+  green.
 
 ## Relation
 
