@@ -7,6 +7,7 @@ related:
 parent: 260723-epic-ticket-write-reshape
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-23
 ---
 
 # Single session-loaded ticket-system concept doc; playbook references instead of re-glossing
@@ -176,3 +177,8 @@ verify owns enforcement.
 - Contract-first spec: no — the doc's content is authored during implementation;
   the spec entry is a closeout describing the new grounding artifact's role and
   the `workflow_manual` payload change.
+
+
+## Resolution (2026-07-23)
+
+Phase 1 landed. Added a "## Ticket System Concepts" section (status dirs, type prefixes, sage review, spec addressing, phases, epic-vs-workset) to the lead-workflow-manual bundle as tight-inline session-once grounding, and de-duplicated the scattered conceptual glosses from ticket-conventions.md and the lead-write-ticket.md judge tables — keeping all unenforced hard invariants verbatim, guardrails in ticket.verify, and Go constants as the mechanical source. Dual-tree mirror + manifests regenerated (not hand-edited). Base-path size effectively flat; the real win is structural (single concept home; first-ever documentation of sage-review rationale and type-prefix categorization). Spec closeout under documentation-system 260723-ticket-system-concept-grounding. Shipped in ws 0.35.3. Review clean (correctness/test) after closing one fit important (judge:initial-status de-dup) + minor.
