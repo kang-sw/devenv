@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.35.0 - 2026-07-23
+
+### Changed
+- Renamed the `lead-drain-ready-queue` skill to **`lead-goal-step`** and
+  repositioned its identity: advancing a goal-pursuit run by one step is now the
+  primary framing (with `ready/` as the sole progress gate), and the
+  single-cycle drain becomes a degenerate case rather than the headline. The
+  `/goal` Stop-hook and playbook resolvers now reference the new name; the skill
+  is substitution-mirrored, so `agents-plugin-wsflow` and the skills manifest
+  were regenerated in lockstep. This is a minor bump because it replaces a
+  caller-visible Codex skill entry point.
+- Added body posture to `lead-goal-step`: lead ticket-curation authority, a
+  blocked-progress **clean-conclusion** term distinct from a hard-gate pause
+  (with anti-abuse guards — it never runs the empty-queue merge-approval flow,
+  re-reads the advanceable-now selector, and records before yielding), and
+  bounded autonomous in-scope bug capture that files a `ready/` ticket for a
+  later loop unless the fix was explicitly deferred.
+
 ## v0.34.5 - 2026-07-22
 
 ### Changed
