@@ -1,6 +1,6 @@
 ---
 title: Reshape drain-ready-queue into lead-goal-step — goal-primary identity, blocked-progress completion, autonomous in-scope bug capture
-sage-review-design: required
+sage-review-design: completed
 related:
   260722-feat-goal-run-autonomy-posture: sibling goal-loop body edit; its Phase 2 (Go tips + spec) references the same SKILL.md this rename moves — coordinate sequencing
 ---
