@@ -7,6 +7,7 @@ related:
 parent: 260723-epic-ticket-write-reshape
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-23
 ---
 
 # Single session-loaded ticket-system concept doc; playbook references instead of re-glossing
@@ -117,6 +118,55 @@ inline concept text lean, or by the referenced fallback). Also confirm no hard
 invariant was softened in the move (each removed line is a restatement, not a
 guardrail).
 
+### Result (c1d1b5a0) - 2026-07-23
+
+Authored a `## Ticket System Concepts` section (six subsections: status
+directories, type prefixes, sage review, spec addressing, phases, epic-vs-workset)
+in the `lead-workflow-manual` bundle and de-duplicated the scattered conceptual
+glosses. Home decision: **tight inline** (measured manual delta 180→270 lines /
++53%, judged proportionate as a once-per-session cost; the `native-spawn-binding`
+`includes:` referenced pattern was available but not needed). Sage-review posture
+semantics were sourced solely from `tickets_sage.go`; type-prefix content is a
+pure addition (mechanically-identical framing, no invented divergence) since no
+prior gloss existed for it anywhere.
+
+- **Dual-tree mechanism.** Edited only canonical `agents-plugin/rsrc/`, then
+  regenerated the `agents-plugin-wsflow/rsrc/` mirror and both shipped manifests
+  via `WS_REGEN_WSFLOW_RSRC=1` / `WS_REGEN_MANIFEST=1` Go test modes — never
+  hand-edited the mirror (deviation from the ticket's literal "edit both trees";
+  the real contract is generate-then-commit, guarded by
+  `TestWsflowRsrcMirrorUpToDate`).
+- **Gloss removal (highest-risk step).** Pruned only pure meaning restatements
+  from `ticket-conventions.md` (status/epic/workset/phase definition prose) and
+  the `lead-write-ticket.md` `judge: ticket-category` + `judge: initial-status`
+  tables, each replaced by a pointer to the concept section. Unenforced hard
+  invariants that merely *read* as prose were kept verbatim — phase numbers never
+  renumbered, Result/Edition frozen once written, worksets never change `parent:`,
+  epics/worksets do not use implementation phases. Confirmed against
+  `tickets_verify.go` / `tickets_mutate.go` enforcement surfaces.
+- **Acceptance boundary — honest result.** The write-ticket base path
+  (`lead-write-ticket.md` + `ticket-conventions.md`) is effectively flat
+  (2693→2673 words, ≈ −0.7%): a net reduction in letter, but the real win is
+  structural (concept meaning now lives once in the manual; sage-review and
+  type-prefix gain a documented home they never had) rather than raw size, because
+  small glosses plus pointer text roughly cancel. All six areas confirmed present.
+
+Verification: `go build ./...`, golden tests
+(`TestPlaybookPrintGoldenLeadWriteTicket`, `...LeadWorkflowManual`,
+`...ScopedExplorationTierModels`), `TestWsflowRsrcMirrorUpToDate`, shipped-manifest
+drift guards, and `internal/wsdoc` all green. Review (partitioned): correctness
+**clean** (guardrail-vs-restatement audit traced every pruned line — no invariant
+dropped or softened; 2 cosmetic word-drops that survive in kept lines); test
+**clean** (no test files touched, golden assertions intact, manifest/mirror
+consistent); fit found one important (`judge: initial-status` — a named de-dup
+target left undone — plus an over-promising epic pointer) closed in `c1d1b5a0`.
+Spec closeout under `documentation-system {#260723-ticket-system-concept-grounding}`
+with a workflow_manual cross-reference in `mcp-tools`.
+
+Go constants (`tickets_template.go`, `tickets_checklist.go`, `tickets_sage.go`)
+untouched — the concept doc explains meaning, Go stays the mechanical source,
+verify owns enforcement.
+
 ## Spec Impact
 
 - Target spec area: `documentation-system` (the concept doc as a grounding
@@ -127,3 +177,8 @@ guardrail).
 - Contract-first spec: no — the doc's content is authored during implementation;
   the spec entry is a closeout describing the new grounding artifact's role and
   the `workflow_manual` payload change.
+
+
+## Resolution (2026-07-23)
+
+Phase 1 landed. Added a "## Ticket System Concepts" section (status dirs, type prefixes, sage review, spec addressing, phases, epic-vs-workset) to the lead-workflow-manual bundle as tight-inline session-once grounding, and de-duplicated the scattered conceptual glosses from ticket-conventions.md and the lead-write-ticket.md judge tables — keeping all unenforced hard invariants verbatim, guardrails in ticket.verify, and Go constants as the mechanical source. Dual-tree mirror + manifests regenerated (not hand-edited). Base-path size effectively flat; the real win is structural (single concept home; first-ever documentation of sage-review rationale and type-prefix categorization). Spec closeout under documentation-system 260723-ticket-system-concept-grounding. Shipped in ws 0.35.3. Review clean (correctness/test) after closing one fit important (judge:initial-status de-dup) + minor.

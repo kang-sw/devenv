@@ -61,6 +61,7 @@ related:
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.
 - Moving current feature inventory or implementation status from `_index.md` into the project reading map instead of specs, tickets, source, or tests.
 - Duplicating MCP tool schemas or current tool inventory in `ai-docs/ref/`; use `tools/list`, `runtime capabilities`, source registries, or specs for stable behavior instead. {#260524-reference-document-ownership}
+- Re-glossing ticket-system concept meaning (status dirs, type prefixes, sage review, phase model, epic/workset) in convention or playbook docs; concept meaning lives once in the `lead-workflow-manual` "Ticket System Concepts" section, guardrails stay in `ticket.verify`, and mechanical content stays in the Go template/checklist/sage constants. Convention/playbook docs keep only rules + a pointer. {#260723-ticket-system-concept-grounding}
 - Replacing tolerant broad-query scoring with exact phrase matching; multi-word user questions should find candidates by shared terms while exact selectors remain exact filters.
 
 ## Technical Debt
