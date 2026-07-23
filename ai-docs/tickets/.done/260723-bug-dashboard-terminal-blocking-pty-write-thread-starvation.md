@@ -160,6 +160,30 @@ Constraints on the completion boundary:
   error/session-teardown handling — since the existing daemon suite
   exercises none of `write_input`/`resize`.
 
+### Result (5b77d5c5) - 2026-07-23
+
+PTY writes moved off the async Tokio worker onto a per-session dedicated
+blocking writer thread (unbounded `std::sync::mpsc`; non-blocking
+`write_input` enqueue). `resize` offloaded via `spawn_blocking` at both
+HTTP `terminal_resize` and WS handler sites (handler became async, takes
+`Arc<TerminalSession>`). `terminate`/`mark_error`/`mark_exited` reordered
+to kill+wait child and drop master before dropping `writer_tx`; writer
+thread detached (never joined under session mutex). Synchronous `Gone`
+short-circuit preserved. Mid-flight write errors now surface
+asynchronously via the `is_live()` socket-close path (noted,
+caller-behavior-preserving).
+
+Verification: `cargo build --workspace` clean; `cargo test -p
+ws-dashboard-daemon` 180 pass (165 routes + 15 server); `--lib terminal`
+11 pass incl. 4 new writer-thread tests (in-order delivery, write-error
+clean shutdown, synchronous-Gone after terminate/mark_error). Partitioned
+review: correctness clean, test clean.
+
+Deferred (Minor, non-blocking): `mark_exited()` shares the same teardown
+reorder as `terminate`/`mark_error` but has no dedicated test; the
+guarded `write_input` status check is already proven by the two sibling
+tests.
+
 ## Relation
 
 Adjacent to `260723-feat-dashboard-terminal-lifetime-daemon-decouple`
