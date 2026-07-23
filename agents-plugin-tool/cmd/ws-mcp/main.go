@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.35.1-dev"
+var version = "0.35.2-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -232,7 +232,7 @@ func runtimeCapabilityCommandNames() []string {
 		"specs.list",
 		"specs.status",
 		"tickets.close",
-		"tickets.create",
+		"tickets.create-empty",
 		"tickets.find",
 		"tickets.list",
 		"tickets.move",
@@ -521,8 +521,8 @@ func ticketsCommand(args []string) {
 		ticketsClose(args[1:])
 	case "move":
 		ticketsMove(args[1:])
-	case "create":
-		ticketsCreate(args[1:])
+	case "create-empty":
+		ticketsCreateEmpty(args[1:])
 	case "verify":
 		ticketsVerify(args[1:])
 	default:
@@ -532,7 +532,7 @@ func ticketsCommand(args []string) {
 }
 
 func ticketsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create|verify>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create-empty|verify>")
 }
 
 func ticketsList(args []string) {
@@ -653,8 +653,8 @@ func ticketsMove(args []string) {
 	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), err)
 }
 
-func ticketsCreate(args []string) {
-	fs := flag.NewFlagSet("tickets create", flag.ExitOnError)
+func ticketsCreateEmpty(args []string) {
+	fs := flag.NewFlagSet("tickets create-empty", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	stem := fs.String("stem", "", "semantic ticket stem without date prefix")
 	initialState := fs.String("initial-state", "", "ticket status: idea, todo, or ready")
@@ -672,7 +672,7 @@ func ticketsCreate(args []string) {
 		Stem:         *stem,
 		InitialState: *initialState,
 	})
-	printTextOrFatal("tickets create", mcp.FormatTicketCreate(result), err)
+	printTextOrFatal("tickets create-empty", mcp.FormatTicketCreate(result), err)
 }
 
 func ticketsVerify(args []string) {
