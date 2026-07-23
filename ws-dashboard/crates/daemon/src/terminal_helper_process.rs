@@ -251,11 +251,32 @@ async fn handle_connection(
     };
     write_ndjson(&mut *write_half.lock().await, &initial_message).await?;
 
-    // A fresh connection has nothing "already sent" from this process's own
-    // point of view; re-pushing the full retained ring here doubles as the
-    // grace-reattach/boot-reconcile-adopt backfill mechanism without a
-    // dedicated request/response round trip for the common case.
+    // CONTRACT (260723 Phase-1 review finding I1 - cross-restart backfill
+    // gap): a fresh connection has nothing "already sent" from this
+    // process's own point of view, so unconditionally flush the entire
+    // retained ring here, BEFORE entering the select loop below. This is
+    // what actually guarantees the grace-reattach/boot-reconcile-adopt
+    // backfill: an earlier version of this function relied solely on the
+    // `shared.notify.notified()` arm inside the loop to re-push the ring,
+    // which only fires when a `Notify` permit already happens to be
+    // pending - a QUIESCENT adopted shell (resume cursor behind the
+    // helper's current sequence, but no further output produced after
+    // reconnect) would never trigger it, silently dropping the backfill
+    // (and `is_range_truncated` on the daemon side would see an empty
+    // proxy ring and report no truncation either - a silent loss with no
+    // flag). Flushing once, unconditionally, here removes that race: every
+    // (re)connect - fresh spawn, grace-reattach, or boot-reconcile adopt -
+    // always re-delivers whatever the ring still holds, whether or not new
+    // output ever arrives afterward.
     let mut last_sent_sequence: u64 = 0;
+    let initial_backfill = {
+        let ring = shared.ring.lock().expect("ring lock poisoned");
+        ring.backfill_after(last_sent_sequence)
+    };
+    for chunk in initial_backfill {
+        last_sent_sequence = last_sent_sequence.max(chunk.sequence);
+        write_ndjson(&mut *write_half.lock().await, &HelperToDaemonMessage::Output(chunk)).await?;
+    }
 
     loop {
         tokio::select! {

@@ -446,10 +446,15 @@ struct TerminalSessionInner {
     // CONTRACT: this is a daemon-side *cache*, not the source of truth - the
     // helper owns the authoritative bounded ring (see
     // `terminal_helper_process.rs::RingState`) and pushes every chunk over
-    // IPC as it is produced. On (re)connect (fresh create or boot-reconcile
-    // adopt) the helper re-pushes its whole retained ring from sequence 1,
-    // which doubles as this cache's bootstrap/backfill without a dedicated
-    // request/response round trip for the common case.
+    // IPC as it is produced. On (re)connect (fresh create, grace-reattach,
+    // or boot-reconcile adopt) the helper unconditionally flushes its whole
+    // retained ring BEFORE entering its per-connection select loop (see
+    // `handle_connection`'s matching CONTRACT comment in
+    // `terminal_helper_process.rs`) - this is a deterministic, one-shot
+    // push on every connect, not something that merely happens to fire via
+    // a pending `Notify` permit, which is what makes this cache's
+    // bootstrap/backfill on adopt reliable even for an already-quiescent
+    // shell with no further output after reconnect.
     output: VecDeque<TerminalOutputChunk>,
     next_sequence: u64,
     grace_until_ms: Option<u64>,
