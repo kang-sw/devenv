@@ -6,6 +6,7 @@ related:
 parent: 260723-epic-ticket-write-reshape
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-23
 ---
 
 # ticket.verify + commit-gate mechanical backstop, then must-not-forget mutation-tool collapse
@@ -248,3 +249,8 @@ shared-worktree reviewer-contamination hazard from Phase 1 remains tracked in
 - Contract-first spec: no — the exact tool signatures and prose are still
   design-level and will be refined during implementation; the ticket phases carry
   the behavioral intent and the spec update follows as closeout.
+
+
+## Resolution (2026-07-23)
+
+Both phases landed. Phase 1: deterministic tickets.verify mechanical floor + non-bypassable git.commit gate (closes 260627 direct-edit bypass). Phase 2: mutation-tool collapse — tickets.create_empty / tickets.sage_stamp (lead-only) renames, tickets.close soft-warn on unresolved phases, ready-move sage-posture hard-block preserved (single-sourced via readyPostureProblems), front-loaded playbook prose replaced by action-time next_instruction prose. Shipped in ws 0.35.2. Partitioned review clean after closing one test-coverage critical (create_empty caveat assertion, fcb96383).
