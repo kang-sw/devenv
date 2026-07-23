@@ -239,3 +239,51 @@ Phase 1 delivered server-side per-terminal supervisor decoupling for both platfo
 **Risk-signal fixes (plan-flagged, ticket-absent)**
 - Risk-signal-1: `remove_for_work_roots` now returns removed sessions and all three async call sites (`git_worktree.rs`, `resources.rs`, `root_picker.rs`) explicitly `.await terminate()` — Arc-drop of the PTY master no longer kills the shell once the PTY lives in the helper.
 - Risk-signal-2: helper re-exec is testable via an injectable `helper_binary` path (`CARGO_BIN_EXE_ws-dashboard` in tests), avoiding the `current_exe()`-in-test-binary trap.
+
+### Native-Windows E2E acceptance walk - 2026-07-23
+
+Ran the owed live native-Windows acceptance against a REAL native-Windows
+daemon binary rebuilt from goal tip `70a18a14` (OPTION A: rebuilt in a D:
+scratch git worktree; drove the daemon's HTTP API from Windows
+PowerShell). This is the native-Windows counterpart to the Unix
+`crates/daemon/tests/terminal_lifetime.rs` E2E.
+
+**Core mechanisms — ALL PASS on native Windows**
+
+- Detached helper SURVIVES a hard daemon kill (Job-Object breakaway):
+  daemon #1 (PID 154976) was hard-killed with `Stop-Process -Force`
+  (SIGKILL-equivalent, no graceful shutdown); the terminal-helper
+  (PID 207612) stayed alive.
+- `boot_reconcile` re-adopts the SAME live helper on daemon restart: a
+  fresh daemon adopted the same helper — same pid (207612) AND same
+  start-time (registry `startTime` 134292671352410928 unchanged),
+  terminal status "running".
+- Same live shell, gapless reattach, NO chunk replay: after restart a new
+  marker command ("SURVIVE-MARKER-2") executed and was observed in output;
+  the pre-kill marker ("SURVIVE-MARKER-1") was NOT replayed; the live
+  PowerShell prompt `PS D:\dbg-ws-terminal-dogfood>` was visible in the
+  reattached stream.
+
+**Defect discovered and filed**
+
+A same-port restart defect was found and filed as
+`260723-bug-dashboard-terminal-helper-inherits-daemon-listen-socket`: on
+Windows the detached terminal-helper INHERITS the daemon's listening TCP
+socket handle (Rust `std::process::Command` spawns with
+`bInheritHandles=TRUE` and the listener is not marked non-inheritable), so
+after hard-killing daemon #1 a restart on the SAME port 4300 failed to
+bind with Rust `os error 10048` (WSAEADDRINUSE). Because of this, the
+reconcile PASS above was obtained by restarting the daemon on a DIFFERENT
+port (4301, same state home); closing the terminal made the helper exit
+and freed port 4300 immediately, proving the helper held the old listen
+socket.
+
+**Conclusion**
+
+The survival + reconcile MECHANISMS are verified on native Windows against
+a real rebuilt binary. However the owed "live native-Windows E2E
+acceptance" (the HELD deferred item above) is NOT fully cleared: the
+same-port-restart bug must be fixed or explicitly accepted before the
+Windows surface is production-correct, since a real deployment restarts the
+daemon on its same fixed configured port. This bears on the held final
+`goal/drain-ready-queue -> ws-dashboard-dev` merge decision.
