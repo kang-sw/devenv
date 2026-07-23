@@ -4,6 +4,8 @@ related:
   260723-feat-dashboard-terminal-lifetime-daemon-decouple: adjacent — moving PTY ownership to a helper process would reshape this write path, but this is a distinct performance bug to fix independently regardless of the lifetime work
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # dashboard terminal latency under load traces to blocking PTY write/flush starving the shared Tokio worker pool
