@@ -2,8 +2,8 @@
 title: Decouple dashboard terminal (PTY) lifetime from daemon process
 related-mental-model:
   - ws-web-dashboard
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # idea: Decouple dashboard terminal (PTY) lifetime from daemon process
