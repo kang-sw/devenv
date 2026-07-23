@@ -45,6 +45,33 @@ fn echo_marker_command(marker: &str) -> String {
     }
 }
 
+// CONTRACT: unlike `echo_marker_command`, this schedules the shell to print
+// the marker immediately and THEN exit itself after a short delay,
+// independent of whether any daemon is attached when the delay elapses.
+// This is what lets a test hard-kill the daemon connection *before* the
+// shell's exit fires, so the exit genuinely happens during the down window
+// with zero IPC connections open - the real production trigger for boot-
+// reconcile row 2 (AdoptGrace): a daemon crash/restart while the shell is
+// still alive, followed by the shell exiting on its own sometime before the
+// next daemon reconnects (as opposed to exiting while a daemon connection is
+// still live and witnessing it in real time).
+fn delayed_exit_marker_command(marker: &str) -> String {
+    if cfg!(windows) {
+        format!("echo {marker}\r\nping -n 2 127.0.0.1 >NUL\r\nexit\r\n")
+    } else {
+        format!("printf '%s\\n' '{marker}'\nsleep 1\nexit\n")
+    }
+}
+
+// CONTRACT: generous on purpose - this only needs to exceed the shell's own
+// scheduled delay (see `delayed_exit_marker_command`'s `sleep 1`) by enough
+// margin to stay robust under CPU contention from other tests/daemons
+// running concurrently in the same `cargo test` invocation (this test spawns
+// four real OS processes across two daemons). A too-short margin risks a
+// false failure (daemon #2 observes the shell still `running`), not a false
+// pass, so err generous rather than tune this tight.
+const DELAYED_EXIT_MARGIN: Duration = Duration::from_secs(4);
+
 struct DaemonProcess {
     child: Child,
     base_url: String,
@@ -367,6 +394,182 @@ async fn terminal_survives_simulated_daemon_restart_and_reattaches_by_id() {
         close_response.status(),
         reqwest::StatusCode::NO_CONTENT,
         "close terminal"
+    );
+
+    daemon_b.kill_hard().await;
+    let _ = std::fs::remove_dir_all(&state_home);
+    let _ = std::fs::remove_dir_all(&work_root);
+}
+
+// CONTRACT (260723 Phase 1 review finding I3): reconcile row 2 (AdoptGrace)
+// must be exercised through the REAL async `TerminalRegistry::boot_reconcile`
+// driver with a genuine helper connection, not merely
+// `terminal_reconcile::classify(VerifiedOurs, ReachableShellExited) ==
+// AdoptGrace` in isolation - that pure table-lookup test never touches
+// `reconcile_entry`, `connect_and_handshake`, or `TerminalSession::
+// from_connection`, the exact code that must correctly translate a helper's
+// already-exited handshake response into a properly grace-timed adopted
+// session across a restart. This also regression-guards the I1 fix (helper
+// retained-ring backfill on connect): the marker below is produced entirely
+// during the down window, before daemon #2's IPC connection to the helper -
+// and before the reattaching WebSocket - ever exist, so nothing will
+// re-deliver it to the fresh (empty) daemon-side proxy cache unless the
+// helper proactively flushes its retained ring on every (re)connect.
+#[tokio::test]
+async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_reattach() {
+    let client = reqwest::Client::new();
+    let state_home = temp_fixture_path("state-row2");
+    std::fs::create_dir_all(&state_home).expect("create shared state home dir");
+    let work_root = temp_fixture_path("root-row2");
+    std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    // --- Daemon #1: create a live terminal and schedule its shell to print
+    // a marker, then exit on its own shortly after.
+    let daemon_a = spawn_real_daemon(&state_home).await;
+    let work_root_id = open_work_root(&client, &daemon_a.base_url, &work_root).await;
+    let terminal_id = create_terminal(&client, &daemon_a.base_url, &work_root_id).await;
+
+    send_input(
+        &client,
+        &daemon_a.base_url,
+        &terminal_id,
+        &delayed_exit_marker_command("ROW2-GRACE-MARKER"),
+    )
+    .await;
+    poll_output_until_contains(
+        &client,
+        &daemon_a.base_url,
+        &terminal_id,
+        0,
+        "ROW2-GRACE-MARKER",
+    )
+    .await;
+
+    // --- Hard-kill daemon #1 *before* the shell's scheduled exit fires -
+    // the shell is still alive at this point (still inside its delay), so
+    // its eventual exit genuinely happens with no daemon attached at all,
+    // rather than while a daemon connection is still live to witness it.
+    daemon_a.kill_hard().await;
+
+    // Give the shell time to run its scheduled exit while no daemon is
+    // connected.
+    tokio::time::sleep(DELAYED_EXIT_MARGIN).await;
+
+    // --- Daemon #2: an independent process, same state home. Its
+    // boot-reconcile pass must classify this entry as row 2 (AdoptGrace: IPC
+    // reachable, shell already exited) through the real async driver.
+    let daemon_b = spawn_real_daemon(&state_home).await;
+
+    let listed: serde_json::Value = client
+        .get(format!(
+            "{}/api/dashboard/work-roots/{work_root_id}/terminals",
+            daemon_b.base_url
+        ))
+        .send()
+        .await
+        .expect("list terminals on daemon #2 request")
+        .json()
+        .await
+        .expect("list terminals on daemon #2 JSON");
+    let listed_terminals = listed.as_array().expect("listed terminals array");
+    let adopted = listed_terminals
+        .iter()
+        .find(|entry| entry["terminalId"] == terminal_id)
+        .unwrap_or_else(|| panic!("grace-adopted terminal missing from list: {listed_terminals:?}"));
+    assert_eq!(
+        adopted["status"], "exited",
+        "boot-reconcile must adopt row 2 with the helper's real exited status, not `running`"
+    );
+
+    // --- One grace reattach: both the WS `GONE` gate and the list filter
+    // had to be relaxed for exactly this case (ticket "Boot reconcile
+    // policy" row 2). Confirm the reattach succeeds and delivers the marker
+    // the shell printed before it exited during the down window, plus the
+    // terminal's non-running status/exit frame.
+    let mut request = format!(
+        "ws://{}/api/dashboard/terminals/{terminal_id}/socket?after=0",
+        daemon_b
+            .base_url
+            .strip_prefix("http://")
+            .expect("daemon base url is http")
+    )
+    .into_client_request()
+    .expect("grace reattach websocket request");
+    request
+        .headers_mut()
+        .insert(axum::http::header::HOST, "127.0.0.1".parse().unwrap());
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("grace reattach websocket upgrades");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::SWITCHING_PROTOCOLS,
+        "grace reattach websocket upgrade"
+    );
+
+    let mut text = String::new();
+    let mut saw_non_running_status_or_exit = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        let Some(message) = tokio::time::timeout(Duration::from_millis(500), socket.next())
+            .await
+            .unwrap_or(None)
+        else {
+            continue;
+        };
+        let message = message.expect("grace reattach websocket message");
+        let TungsteniteMessage::Text(payload) = message else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).expect("grace reattach websocket frame JSON");
+        assert_eq!(value["terminalId"], terminal_id);
+        match value["type"].as_str() {
+            Some("output") => {
+                text.push_str(value["chunk"]["data"].as_str().expect("output data"));
+            }
+            Some("status") => {
+                if value["status"] != "running" {
+                    saw_non_running_status_or_exit = true;
+                }
+            }
+            Some("exit") => {
+                saw_non_running_status_or_exit = true;
+                break;
+            }
+            _ => {}
+        }
+        if text.contains("ROW2-GRACE-MARKER") && saw_non_running_status_or_exit {
+            break;
+        }
+    }
+    assert!(
+        text.contains("ROW2-GRACE-MARKER"),
+        "grace reattach must deliver the buffered marker produced during the down window: {text:?}"
+    );
+    assert!(
+        saw_non_running_status_or_exit,
+        "grace reattach must deliver the terminal's non-running status/exit on this one reattach"
+    );
+
+    socket
+        .close(None)
+        .await
+        .expect("close grace reattach websocket");
+
+    // Cleanup: explicitly close the terminal before killing daemon #2.
+    let close_response = client
+        .delete(format!(
+            "{}/api/dashboard/terminals/{terminal_id}",
+            daemon_b.base_url
+        ))
+        .send()
+        .await
+        .expect("close grace-adopted terminal request");
+    assert_eq!(
+        close_response.status(),
+        reqwest::StatusCode::NO_CONTENT,
+        "close grace-adopted terminal"
     );
 
     daemon_b.kill_hard().await;
