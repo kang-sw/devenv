@@ -380,7 +380,10 @@ func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview, to string) 
 
 	// design is reported before completeness (readyPostureProblems preserves
 	// that order), matching the earlier inline switch's early-return order.
-	if problems := readyPostureProblems(result); len(problems) > 0 {
+	// design/completeness are guaranteed non-empty here for any required
+	// stage (the defaulting above already resolved "" and "pending"), so the
+	// posture=="" ("unset") branch below is unreachable from this call site.
+	if problems := readyPostureProblems(designRequired, design, completenessRequired, completeness); len(problems) > 0 {
 		first := problems[0]
 		if first.Blocked {
 			return result, sageReviewBlockedError(first.Field)
@@ -398,29 +401,38 @@ type readyPostureProblem struct {
 	Blocked bool
 }
 
-// readyPostureProblems reports, in design-before-completeness order, which of
-// postures' required stages block a ticket from landing at ready/. postures
-// must already be category-gated (an empty field means that stage does not
-// apply to the ticket's category), matching currentSageReviewPostures'
-// output shape. Pure: no I/O, no writes. This is the single implementation
-// of the ready-landing terminal-posture rule, shared by
+// readyPostureProblems reports, in design-before-completeness order, which
+// required sage-review stage(s) block a ticket from landing at ready/. A
+// stage is only checked when its *Required flag is true (the category gate
+// from sageReviewStageRequirement); an empty posture for a required stage
+// means the review was never resolved and is reported as "unset" rather than
+// silently treated as not-applicable — deliberately distinct from an
+// unrequired stage's empty value, so a hand-authored ready/ ticket that
+// never went through TicketsMove's resolved-posture stamping is still
+// caught. Pure: no I/O, no writes. This is the single implementation of the
+// ready-landing terminal-posture rule, shared by
 // prepareSageReviewForUpwardMove's ready-promotion check (which wraps the
 // result in its own sageReviewStageError/sageReviewBlockedError types) and
 // TicketVerify's ready-sage-posture guardrail.
-func readyPostureProblems(postures sageReviewPostures) []readyPostureProblem {
+func readyPostureProblems(designRequired bool, design string, completenessRequired bool, completeness string) []readyPostureProblem {
 	var problems []readyPostureProblem
 	for _, stage := range []struct {
-		field   string
-		posture string
+		field    string
+		required bool
+		posture  string
 	}{
-		{"sage-review-design", postures.Design},
-		{"sage-review-completeness", postures.Completeness},
+		{"sage-review-design", designRequired, design},
+		{"sage-review-completeness", completenessRequired, completeness},
 	} {
+		if !stage.required {
+			continue
+		}
 		switch stage.posture {
-		case "", "completed", "skipped":
-			// "" means the stage does not apply to this ticket's category.
+		case "completed", "skipped":
 		case "blocked":
 			problems = append(problems, readyPostureProblem{Field: stage.field, Posture: stage.posture, Blocked: true})
+		case "":
+			problems = append(problems, readyPostureProblem{Field: stage.field, Posture: "unset"})
 		default:
 			problems = append(problems, readyPostureProblem{Field: stage.field, Posture: stage.posture})
 		}

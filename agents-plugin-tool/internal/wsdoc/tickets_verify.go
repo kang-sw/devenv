@@ -109,8 +109,9 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 	}
 
 	if status == "ready" {
-		postures := currentSageReviewPostures(absPath, stem)
-		for _, problem := range readyPostureProblems(postures) {
+		designRequired, completenessRequired := sageReviewStageRequirement(stem)
+		design, completeness := effectiveSageReviewPostures(frontmatter(absPath))
+		for _, problem := range readyPostureProblems(designRequired, design, completenessRequired, completeness) {
 			var err error
 			if problem.Blocked {
 				err = sageReviewBlockedError(problem.Field)
