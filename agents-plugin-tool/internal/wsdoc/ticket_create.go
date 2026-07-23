@@ -55,7 +55,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	// ready has no "from" state that could have already run a design-review
 	// gate against it, so a fresh, non-terminal resolved posture must block
 	// creation here the same way prepareSageReviewForUpwardMove blocks a
-	// tickets.move promotion — otherwise tickets.create(status: "ready")
+	// tickets.move promotion — otherwise tickets.create_empty(status: "ready")
 	// would be a silent bypass of the invariant.
 	if state == "ready" && designRequired && resolved != "completed" && resolved != "skipped" {
 		return TicketCreateResult{}, sageReviewStageError("sage-review-design", resolved)

@@ -2221,6 +2221,84 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 	}
 }
 
+// TestServeStdioTicketsCreateEmptyStatesSkeletonCaveat is the 260723 Phase 2
+// review-fix regression test: formatTicketCreate's next_instruction caveat
+// ("valid empty skeleton + initial posture") must actually reach the
+// dispatched tools/call response, not just live in the source comment.
+func TestServeStdioTicketsCreateEmptyStatesSkeletonCaveat(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902605, root, nil))
+
+	resp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
+		"stem":          "feat-skeleton-caveat",
+		"initial_state": "todo",
+	})
+	if !strings.Contains(resp, "valid empty skeleton") {
+		t.Fatalf("tickets.create_empty response missing skeleton caveat: %s", resp)
+	}
+}
+
+// TestServeStdioTicketsMoveToReadyStatesSageGateNextInstruction covers the
+// "moved" branch of ticketMutateNextInstruction (260723 Phase 2): promoting a
+// ticket to ready/ must surface the sage-review-gate follow-on instruction in
+// the dispatched tools/call response.
+func TestServeStdioTicketsMoveToReadyStatesSageGateNextInstruction(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-ready-next-instruction"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Ready move\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902606, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "ready",
+	})
+	if !strings.Contains(moveResp, "next_instruction: Call tickets.sage_gate(stem, landing) next") {
+		t.Fatalf("tickets.move to ready response missing sage_gate next_instruction: %s", moveResp)
+	}
+}
+
+// TestServeStdioTicketsCloseUnresolvedPhaseStatesSoftWarnNextInstruction
+// covers the "closed" branch of ticketMutateNextInstruction (260723 Phase 2):
+// closing a ticket with an unresolved phase heading must surface the
+// soft-warning follow-on instruction in the dispatched tools/call response.
+func TestServeStdioTicketsCloseUnresolvedPhaseStatesSoftWarnNextInstruction(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	stem := "260101-feat-close-next-instruction"
+	body := "---\ntitle: Open phase\n---\n\n" +
+		"## Phases\n\n" +
+		"### Phase 1: First\n\n" +
+		"Never resolved.\n"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), body)
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902607, root, nil))
+
+	closeResp := callToolWithKey(t, server, 1, key, "tickets.close", map[string]any{
+		"stem":   stem,
+		"status": "done",
+	})
+	if !strings.Contains(closeResp, "next_instruction: This is a soft warning only (no block)") {
+		t.Fatalf("tickets.close response missing unresolved-phase next_instruction: %s", closeResp)
+	}
+}
+
 func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
