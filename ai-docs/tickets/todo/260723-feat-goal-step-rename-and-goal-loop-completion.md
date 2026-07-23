@@ -3,6 +3,11 @@ title: Reshape drain-ready-queue into lead-goal-step — goal-primary identity, 
 sage-review-design: completed
 related:
   260722-feat-goal-run-autonomy-posture: sibling goal-loop body edit; its Phase 2 (Go tips + spec) references the same SKILL.md this rename moves — coordinate sequencing
+spec:
+  - 260723-lead-goal-step-rename-reposition
+  - 260723-goal-step-ticket-curation-authority
+  - 260723-goal-step-blocked-progress-conclusion
+sage-review-completeness: completed
 ---
 
 # Reshape drain-ready-queue into lead-goal-step
@@ -241,7 +246,7 @@ the same need on living documents, durably across compaction, with no new state.
   on `goal/*` handoff) is precedent for goal-branch-conditional logic already in
   this body.
 
-## Constraints — sequencing with 260722
+## Sequencing with 260722
 
 The rename moves the canonical SKILL.md path that `260722` Phase 2 edits, and the
 completion-term must not contradict `260722` Phase 1's autonomy posture wording.
@@ -286,17 +291,9 @@ wsflow mirror regenerated and package tests pass.
 
 Depends on Phase 1 (edits the renamed body).
 
-## Spec Impact
-
-- Target spec area: `ai-docs/spec/workflow-skills.md`, the drain anchors
-  (`{#260703-drain-ready-queue-skill}` / `{#260707-drain-goal-branch-staging}`
-  neighborhood) — the anchors stay, but the entry text is repositioned to a
-  goal-primary identity under the new `lead-goal-step` name, and documents the
-  blocked-progress completion term and the bounded autonomous bug-capture posture.
-- Expected caller-visible change: the skill is named `lead-goal-step` and framed
-  as the per-turn goal-pursuit step; a blocked goal run concludes cleanly with a
-  blocker report instead of thrashing; goal-relevant bugs found mid-run are
-  auto-queued to `ready/` (unrelated ones to `idea/`) for later loop fixing.
-- Contract-first spec: yes (cross-skill routing / goal-run behavior + rename is a
-  consumed contract). Write the spec entry at ready-promotion / proceed via
-  `lead-write-spec`.
+Spec addressing: contract-first `🚧` planned entries authored at ready-promotion
+in `ai-docs/spec/workflow-skills.md` under the existing drain anchors (stems in
+`spec:` — `260723-lead-goal-step-rename-reposition`,
+`260723-goal-step-ticket-curation-authority`,
+`260723-goal-step-blocked-progress-conclusion`). Implementation removes the `🚧`
+markers as each behavior lands.
