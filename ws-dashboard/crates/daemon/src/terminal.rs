@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -208,9 +208,45 @@ struct TerminalSessionInner {
     rows: u16,
     output: VecDeque<TerminalOutputChunk>,
     next_sequence: u64,
-    writer: Option<Box<dyn Write + Send>>,
+    writer_tx: Option<mpsc::Sender<TerminalWriterCommand>>,
     master: Option<Box<dyn MasterPty + Send>>,
     child: Option<Box<dyn Child + Send + Sync>>,
+}
+
+// CONTRACT: PTY writes must never block a Tokio worker thread (see ticket
+// 260723-bug-dashboard-terminal-blocking-pty-write-thread-starvation). Each
+// live terminal session owns exactly one dedicated blocking OS thread that
+// serializes writes to the PTY master; `write_input` only ever performs a
+// non-blocking `mpsc::Sender::send` handoff onto this thread, never a direct
+// blocking `write_all`.
+enum TerminalWriterCommand {
+    Write(Vec<u8>),
+}
+
+// Detached, unjoined thread (mirrors `spawn_reader`'s style below): a stalled
+// `write_all` on a full OS pipe buffer is unblocked by the *child process*
+// dying (see `terminate`/`mark_error`/`mark_exited` ordering), not by
+// anything this thread does on its own, so there is nothing useful to join.
+fn spawn_writer_thread(writer: Box<dyn Write + Send>) -> mpsc::Sender<TerminalWriterCommand> {
+    let (tx, rx) = mpsc::channel::<TerminalWriterCommand>();
+    thread::spawn(move || run_writer_thread(rx, writer));
+    tx
+}
+
+// Pulled out of `spawn_writer_thread` so tests can drive the loop on a
+// `thread::Builder` handle they retain and `.join()` (safe in test code,
+// since no session mutex is held across the join) to assert a failing write
+// stops the loop cleanly without panicking, without giving production code
+// a joinable handle to misuse.
+fn run_writer_thread(rx: mpsc::Receiver<TerminalWriterCommand>, mut writer: Box<dyn Write + Send>) {
+    while let Ok(TerminalWriterCommand::Write(data)) = rx.recv() {
+        if writer.write_all(&data).and_then(|()| writer.flush()).is_err() {
+            // A write failure correlates with process death; the reader
+            // thread already observes that independently and reports it via
+            // `mark_error`/`mark_exited`, so this thread just stops quietly.
+            break;
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -427,9 +463,15 @@ pub async fn terminal_resize(
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
     };
-    match session.resize(columns, rows) {
-        Ok(view) => Json(view).into_response(),
-        Err(error) => error.into_response(),
+    // `resize()`'s body stays synchronous (it must return the
+    // `TerminalSessionView` for the JSON response), but the blocking
+    // `master.resize()` syscall itself must not run on a Tokio worker
+    // thread - offload the whole call via `spawn_blocking`, mirroring the
+    // existing idiom in `git_toolbar.rs`/`root_picker.rs`/`resources.rs`.
+    match tokio::task::spawn_blocking(move || session.resize(columns, rows)).await {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(error)) => error.into_response(),
+        Err(_) => terminal_error(StatusCode::INTERNAL_SERVER_ERROR, "terminal resize failed"),
     }
 }
 
@@ -528,7 +570,7 @@ impl TerminalSession {
                 rows,
                 output: VecDeque::new(),
                 next_sequence: 1,
-                writer: Some(writer),
+                writer_tx: Some(spawn_writer_thread(writer)),
                 master: Some(pair.master),
                 child: Some(child),
             }),
@@ -592,17 +634,25 @@ impl TerminalSession {
         if input.len() > MAX_INPUT_BYTES {
             return Err(TerminalError::BadRequest("terminal input too large"));
         }
-        let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+        // Fast path stays synchronous and cheap: an already-closed terminal
+        // must still return `Gone` immediately, without touching the writer
+        // channel. Only the actual PTY write is handed off.
+        let inner = self.inner.lock().expect("terminal session lock poisoned");
         if inner.status != TerminalStatus::Running {
             return Err(TerminalError::Gone("terminal is closed"));
         }
-        let Some(writer) = inner.writer.as_mut() else {
+        let Some(writer_tx) = inner.writer_tx.as_ref() else {
             return Err(TerminalError::Gone("terminal is closed"));
         };
-        writer
-            .write_all(input)
-            .and_then(|()| writer.flush())
-            .map_err(|_| TerminalError::Gone("terminal is closed"))
+        // Non-blocking handoff to the dedicated writer thread (see
+        // `spawn_writer_thread`). `send` on an unbounded `mpsc` channel never
+        // blocks the caller. A send error means the writer thread already
+        // exited (e.g. after a prior write failure) - best-effort, not a
+        // synchronous error; the reader thread's `mark_error`/`mark_exited`
+        // is the authoritative signal for that case, surfaced asynchronously
+        // via `output_signal`/`is_live`.
+        let _ = writer_tx.send(TerminalWriterCommand::Write(input.to_vec()));
+        Ok(())
     }
 
     fn resize(&self, columns: u16, rows: u16) -> Result<TerminalSessionView, TerminalError> {
@@ -631,12 +681,17 @@ impl TerminalSession {
         let next_sequence = {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
             inner.status = TerminalStatus::Terminated;
-            inner.writer = None;
-            inner.master = None;
+            // Kill/wait the child (and drop the master) BEFORE dropping the
+            // writer channel: this is what actually unblocks a `write_all`
+            // stuck on a full OS pipe buffer inside the writer thread.
+            // Dropping the channel sender first does nothing for an
+            // already-blocked syscall - see shutdown-ordering constraint.
             if let Some(mut child) = inner.child.take() {
                 let _ = child.kill();
                 let _ = child.wait();
             }
+            inner.master = None;
+            inner.writer_tx = None;
             inner.next_sequence
         };
         let _ = self.output_signal.send(next_sequence);
@@ -668,11 +723,13 @@ impl TerminalSession {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
             if inner.status == TerminalStatus::Running {
                 inner.status = TerminalStatus::Error;
-                inner.writer = None;
-                inner.master = None;
+                // Same shutdown ordering as `terminate`: unblock a stalled
+                // writer-thread write before dropping the channel/master.
                 if let Some(mut child) = inner.child.take() {
                     let _ = child.kill();
                 }
+                inner.master = None;
+                inner.writer_tx = None;
             }
             inner.next_sequence
         };
@@ -684,11 +741,13 @@ impl TerminalSession {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
             if inner.status == TerminalStatus::Running {
                 inner.status = TerminalStatus::Exited;
-                inner.writer = None;
-                inner.master = None;
+                // Same shutdown ordering as `terminate`: unblock a stalled
+                // writer-thread write before dropping the channel/master.
                 if let Some(mut child) = inner.child.take() {
                     let _ = child.wait();
                 }
+                inner.master = None;
+                inner.writer_tx = None;
             }
             inner.next_sequence
         };
@@ -729,7 +788,7 @@ async fn terminal_socket_task(
                         let Ok(message) = serde_json::from_str::<TerminalWebSocketClientMessage>(&text) else {
                             break;
                         };
-                        if handle_terminal_socket_client_message(&session, message).is_err() {
+                        if handle_terminal_socket_client_message(session.clone(), message).await.is_err() {
                             let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
@@ -767,8 +826,8 @@ async fn terminal_socket_task(
     }
 }
 
-fn handle_terminal_socket_client_message(
-    session: &TerminalSession,
+async fn handle_terminal_socket_client_message(
+    session: Arc<TerminalSession>,
     message: TerminalWebSocketClientMessage,
 ) -> Result<(), TerminalError> {
     match message {
@@ -776,7 +835,13 @@ fn handle_terminal_socket_client_message(
         TerminalWebSocketClientMessage::Resize { columns, rows } => {
             let (columns, rows) = validate_size(columns, rows)
                 .map_err(|_| TerminalError::BadRequest("invalid terminal size"))?;
-            session.resize(columns, rows).map(|_| ())
+            // Same rationale as the HTTP `terminal_resize` handler: offload
+            // the blocking `master.resize()` call so it never runs on this
+            // Tokio worker.
+            tokio::task::spawn_blocking(move || session.resize(columns, rows))
+                .await
+                .map_err(|_| TerminalError::BadRequest("terminal resize failed"))?
+                .map(|_| ())
         }
     }
 }
@@ -1124,7 +1189,7 @@ mod terminal_portability_skeleton_tests {
                 rows: default_rows(),
                 output: VecDeque::new(),
                 next_sequence: 1,
-                writer: None,
+                writer_tx: None,
                 master: None,
                 child: None,
             }),
@@ -1230,6 +1295,129 @@ mod terminal_portability_skeleton_tests {
             "contiguous resume at the retention boundary must not be reported as truncated"
         );
         assert_eq!(cursor, newest_retained);
+    }
+
+    // Test-only `Write` impl that forwards each write's bytes over a plain
+    // `mpsc` channel the test polls with `recv_timeout`, so the assertion
+    // exercises the real writer thread's ordering guarantee without a real
+    // PTY and without a flaky sleep-based race.
+    struct RecordingWriter {
+        tx: mpsc::Sender<Vec<u8>>,
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let _ = self.tx.send(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // Test-only `Write` impl that always fails, used to prove the writer
+    // thread's loop exits cleanly (no panic, no unwrap on the write error)
+    // instead of looping forever or crashing the thread abnormally.
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "boom"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_input_delivers_chunks_in_order_over_the_writer_thread() {
+        let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
+        let writer_tx = spawn_writer_thread(Box::new(RecordingWriter { tx: record_tx }));
+        let session = fake_terminal_session();
+        {
+            let mut inner = session.inner.lock().expect("terminal session lock poisoned");
+            inner.writer_tx = Some(writer_tx);
+        }
+
+        session.write_input(b"first").expect("write first");
+        session.write_input(b"second").expect("write second");
+        session.write_input(b"third").expect("write third");
+
+        let timeout = std::time::Duration::from_secs(2);
+        assert_eq!(
+            record_rx.recv_timeout(timeout).expect("first chunk delivered"),
+            b"first"
+        );
+        assert_eq!(
+            record_rx.recv_timeout(timeout).expect("second chunk delivered"),
+            b"second"
+        );
+        assert_eq!(
+            record_rx.recv_timeout(timeout).expect("third chunk delivered"),
+            b"third"
+        );
+    }
+
+    #[test]
+    fn writer_thread_loop_stops_without_panicking_on_write_error() {
+        let (tx, rx) = mpsc::channel::<TerminalWriterCommand>();
+        // Unlike `spawn_writer_thread` (detached, never joined in
+        // production - see shutdown-ordering constraint), the test retains
+        // a `JoinHandle` via `run_writer_thread` directly so it can assert
+        // the loop returns normally (no panic) instead of only inferring it
+        // from a timing-sensitive absence of a crash.
+        let handle = thread::spawn(move || run_writer_thread(rx, Box::new(FailingWriter)));
+
+        tx.send(TerminalWriterCommand::Write(b"doomed".to_vec()))
+            .expect("channel receiver still alive before the failing write");
+        drop(tx);
+
+        handle
+            .join()
+            .expect("writer thread must not panic when the underlying write fails");
+    }
+
+    #[test]
+    fn write_input_returns_gone_synchronously_after_terminate_without_touching_channel() {
+        let session = fake_terminal_session();
+        let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
+        let writer_tx = spawn_writer_thread(Box::new(RecordingWriter { tx: record_tx }));
+        {
+            let mut inner = session.inner.lock().expect("terminal session lock poisoned");
+            inner.writer_tx = Some(writer_tx);
+        }
+
+        session.terminate();
+
+        assert!(matches!(
+            session.write_input(b"too-late"),
+            Err(TerminalError::Gone("terminal is closed"))
+        ));
+        // The synchronous `status != Running` fast-path must short-circuit
+        // before ever reaching the channel: nothing should have been
+        // forwarded to the (now-dropped) writer thread.
+        assert!(record_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn write_input_returns_gone_synchronously_after_mark_error_without_touching_channel() {
+        let session = fake_terminal_session();
+        let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
+        let writer_tx = spawn_writer_thread(Box::new(RecordingWriter { tx: record_tx }));
+        {
+            let mut inner = session.inner.lock().expect("terminal session lock poisoned");
+            inner.writer_tx = Some(writer_tx);
+        }
+
+        session.mark_error();
+
+        assert!(matches!(
+            session.write_input(b"too-late"),
+            Err(TerminalError::Gone("terminal is closed"))
+        ));
+        assert!(record_rx.try_recv().is_err());
     }
 }
 
