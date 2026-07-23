@@ -59,6 +59,13 @@ where
     )?;
     let auth = OwnerAuthState::new_ephemeral();
     let listener = TcpListener::bind(config.bind_addr).await?;
+    // CONTRACT (ticket 260723-bug-dashboard-terminal-helper-inherits-daemon-listen-socket):
+    // the listening socket must be non-inheritable on Windows so detached
+    // terminal-helpers spawned later do not inherit it and pin the port after
+    // this daemon exits (which would fail a same-port restart with
+    // WSAEADDRINUSE / os error 10048). No-op on Unix.
+    #[cfg(windows)]
+    crate::terminal_platform::windows::mark_socket_non_inheritable(&listener)?;
     let bound_addr = listener.local_addr()?;
     let info = startup_info(bound_addr, &auth, config.owner_auth_enabled);
 

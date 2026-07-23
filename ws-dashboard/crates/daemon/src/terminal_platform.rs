@@ -117,7 +117,9 @@ pub mod windows {
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
     use std::os::windows::process::CommandExt;
     use std::process::Command;
-    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, SetHandleInformation, FALSE, HANDLE, HANDLE_FLAG_INHERIT,
+    };
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
         SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -149,6 +151,25 @@ pub mod windows {
         command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
         let child = command.spawn()?;
         drop(child);
+        Ok(())
+    }
+
+    /// Marks a socket/handle non-inheritable so children spawned later with
+    /// `bInheritHandles=TRUE` (which is what `std::process::Command` always does
+    /// on Windows) do NOT inherit it. The daemon's listening TCP socket must be
+    /// marked this way right after bind: otherwise every detached terminal-helper
+    /// spawned afterwards inherits the listen socket and keeps the port bound
+    /// after the daemon exits, so a same-port daemon restart fails with
+    /// WSAEADDRINUSE (`os error 10048`). Unix needs no equivalent because file
+    /// descriptors are CLOEXEC by default there.
+    pub fn mark_socket_non_inheritable<S: std::os::windows::io::AsRawSocket>(
+        socket: &S,
+    ) -> io::Result<()> {
+        let handle = socket.as_raw_socket() as HANDLE;
+        let ok = unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) };
+        if ok == FALSE {
+            return Err(io::Error::last_os_error());
+        }
         Ok(())
     }
 
