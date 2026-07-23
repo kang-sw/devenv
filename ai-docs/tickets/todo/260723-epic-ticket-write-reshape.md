@@ -5,7 +5,7 @@ related:
   260630-epic-skill-playbook-diet: extends the diet's Lever B (MCP-ification) but partially inverts it — collapses mutation validation into one gate instead of adding tools
   260627-bug-write-ticket-bypasses-tickets-create: prose-only fix left zero mechanical backstop against direct-file-edit bypass; the verify-commit gate closes exactly that hole
   260702-research-destructive-dedup-methodology: guardrail-vs-restatement discipline governs what the concept doc may absorb vs what must stay a mechanical check
-sage-review-design: required
+sage-review-design: completed
 ---
 
 # Ticket-write reshape — verify-commit gate, must-not-forget tool collapse, concept-doc consolidation
@@ -21,9 +21,14 @@ Deliverables (child tickets):
    check hosted at `git.commit`'s existing validation slot, run before every
    commit that touches a ticket file. It owns all mechanical guardrails (stem
    format, status/dir consistency, frontmatter integrity, sage-posture
-   presence/value, spec-address presence, phase/Result structure). This is the
-   first mechanical chokepoint every path — tool-mediated or hand-edited — must
-   pass, and it can also be called voluntarily mid-edit for red-green feedback.
+   presence/value, spec-address presence, phase/Result structure). It is the
+   first mechanical chokepoint for every commit routed through `ws/git.commit`,
+   and it can also be called voluntarily mid-edit for red-green feedback.
+   **Caveat (open):** hosting the gate inside `ws/git.commit` does not cover a
+   raw `git commit` issued from the shell after a hand-edit; a *truly* universal
+   chokepoint needs either a git pre-commit hook or a workflow mandate that all
+   ticket-touching commits route through `ws/git.commit`. The verify-gate child
+   must resolve which before leaning on the "every path" premise.
 2. **Mutation-tool collapse by the must-not-forget filter.** Keep thin tools only
    where they bundle a *catastrophic-to-forget* follow-on; free the rest to
    agent free-edit under the verify floor. Surface each action's must-know
