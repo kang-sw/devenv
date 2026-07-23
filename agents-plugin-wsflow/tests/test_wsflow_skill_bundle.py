@@ -17,7 +17,7 @@ EXPECTED_SKILLS = {
     "lead-add-rule",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-drain-ready-queue",
+    "lead-goal-step",
     "lead-forge-mental-model",
     "lead-forge-spec",
     "lead-implement",
@@ -41,7 +41,7 @@ EXPECTED_INLINE_SKILLS = {
     "lead-revive",
     "lead-prefer-subagent",
     "lead-verify-discussion",
-    "lead-drain-ready-queue",
+    "lead-goal-step",
 }
 EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint"}
 

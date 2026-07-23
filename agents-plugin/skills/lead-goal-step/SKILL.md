@@ -1,9 +1,18 @@
 ---
-name: lead-drain-ready-queue
-description: Pick the next ready/ ticket and hand it to lead-proceed. Stop if ready/ is empty.
+name: lead-goal-step
+description: Advance a goal-pursuit run by one step, picking the next `ready/` ticket and handing it to lead-proceed; `ready/` is the sole progress gate. Stop if ready/ is empty.
 ---
 
-# Drain Ready Queue
+# Goal Step
+
+**Goal-pursuit step; `ready/` is the sole progress gate.** This skill advances
+a goal-pursuit run by one step: select and dispatch exactly one ticket from
+`ready/` — nothing advances until a ticket reaches `ready/`. Invoked without
+an active goal run, it degenerates to a single-cycle shim: one invocation
+resolves at most one ready ticket and stops — it does not poll or repeat
+internally. Repeated draining across the whole `ready/` backlog is the
+caller's responsibility (for example, a standing `/goal` directive whose
+Stop-hook re-invokes this skill each turn until the queue is empty).
 
 **Goal-run posture.** During a goal run — the current branch is `goal/*`, or an
 active `/goal` Stop-hook reminder is present — assume the user is away. Resolve

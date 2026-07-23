@@ -13,7 +13,7 @@ import (
 // deliberately migrated out of playbook.print. This is not a blanket
 // auto-mirror mechanism — see ai-docs/ref/wsflow-mirroring.md.
 var substitutionMirroredSkills = []string{
-	"lead-drain-ready-queue",
+	"lead-goal-step",
 	"lead-prefer-subagent",
 	"lead-verify-discussion",
 }
