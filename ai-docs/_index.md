@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.35.0`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.35.0`).
+Active plugin package: `agents-plugin/` (`ws@0.35.1`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.35.1`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
