@@ -2,6 +2,8 @@
 title: "dashboard terminal daemon: output_after does an O(N) ring scan + clone on every PTY output chunk"
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 ## Symptom
