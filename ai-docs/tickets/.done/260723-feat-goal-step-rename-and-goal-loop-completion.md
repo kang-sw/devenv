@@ -8,6 +8,7 @@ spec:
   - 260723-goal-step-ticket-curation-authority
   - 260723-goal-step-blocked-progress-conclusion
 sage-review-completeness: completed
+completed: 2026-07-23
 ---
 
 # Reshape drain-ready-queue into lead-goal-step
@@ -328,3 +329,40 @@ in `ai-docs/spec/workflow-skills.md` under the existing drain anchors (stems in
 `260723-goal-step-ticket-curation-authority`,
 `260723-goal-step-blocked-progress-conclusion`). Implementation removes the `🚧`
 markers as each behavior lands.
+
+### Result (0048af20) - 2026-07-23
+
+Added three body-posture behaviors to `agents-plugin/skills/lead-goal-step/SKILL.md`:
+(a) lead ticket-curation authority — the lead may autonomously edit existing
+tickets and create + link new ones via the ticket-write path (`lead-write-ticket`)
+within the goal-run autonomy bounds, the single shared mechanism for both blocked
+handling and bug capture, with no new ticket-system state; (b) blocked-progress
+conclusion — fires only when all remaining `ready/` tickets are blocked, reports
+the recorded blocker(s) and ends the run without looping, explicitly does NOT run
+the empty-queue merge-approval flow and cross-references the `260722` hard-gate
+list so a hard-gate pause can never be reclassified as goal-complete; includes the
+"all remaining blocked" scoping guard, the advanceable-now selector read replacing
+body-blind FIFO, the non-skippable record-the-blocker-before-yielding step (ordinary
+`## Blocked (YYYY-MM-DD)`-style on-ticket note, per the sage precedent), and the
+"is there any work I could do without the human?" discriminator; (c) bounded
+in-scope bug capture — goal-relevant → `ready/` via the ticket-write path,
+unrelated → `idea/`, explicit deferral → capture only, stated as skill-intrinsic
+routing decoupled from any downstream project's AGENTS.md. Settled the two
+contract-first spec blocks (`{#260723-goal-step-ticket-curation-authority}`,
+`{#260723-goal-step-blocked-progress-conclusion}`) — dropped the `🚧` markers,
+kept the anchors (both resolve) — and extended the two mental-model bullets with
+stacked anchors. Regenerated the wsflow mirror and skills manifest.
+
+Verification: `go test ./... -count=1` (agents-plugin-tool, 12 pkgs ok, drift +
+manifest guards green), wsflow tests (9 ok), agents-plugin tests (43 ok), body grep
+for `ws/`/`ws:`/`ws.` and mirror-eligibility forbidden tokens returns zero,
+`spec_index.verify` ok. Partitioned review (correctness + fit) both clean.
+
+Deviation: none of substance. The manifest-regen test served a stale cached pass on
+the first run without `-count=1` (same class as the `260722` v0.34.4 incident); the
+implementer caught it and re-ran with `-count=1` for the real hash update.
+
+Deferred (not phase scope): version bump on dev-merge (`bump-ws-version.sh`) — due
+when this branch merges; coordination with `260722` Phase 2 (shared SKILL.md, now
+at the `lead-goal-step` path) at that phase's proceed time; dead-weight non-goal
+defensive-branch removal remains a separate ticket.
