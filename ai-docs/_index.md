@@ -209,6 +209,24 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260723-epic-ticket-write-reshape` (todo, epic) - coordinates the ticket-write
+  reshape: verify-commit gate as mechanical floor, must-not-forget tool collapse,
+  concept-doc consolidation. Board artifact, not an implementation target.
+- `260723-refactor-fork-removal-prefer-subagent` (ready, refactor) - delete the
+  fork delegation construct (zero Go impl; unreliable per 260625/260629, dropped
+  260626-*); reshape `lead-prefer-subagent` to fresh-spawn + central
+  authoring/mutation whitelist (overlay). Spec addressing via `## Spec Impact`
+  (`workflow-skills`, Contract-first: no). Sage review completed.
+- `260723-feat-ticket-write-verify-commit-gate` (ready, feat, child of
+  260723-epic) - deterministic `ticket.verify` at `git.commit`'s validation slot
+  (mechanical floor; closes 260627 bypass), then must-not-forget mutation-tool
+  collapse. 2 phases. Spec addressing via `## Spec Impact` (`mcp-tools`,
+  Contract-first: no). Sage review completed. Open: true universal commit
+  chokepoint (pre-commit hook vs routing mandate) to resolve in Phase 1.
+- `260723-feat-ticket-system-concept-doc` (todo, feat, child of 260723-epic) -
+  **sage review blocked**: needs a user decision on the concept doc's loading
+  mechanism (AGENTS.md mandatory session-load vs on-demand) and home category
+  before promotion; not implementation-ready.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
