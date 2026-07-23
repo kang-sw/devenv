@@ -1867,14 +1867,29 @@ daemon-owned.
 
 ## Terminal Registry And PTY Spawn {#260516-ws-web-dashboard-terminal-registry-pty-spawn}
 
-The dashboard daemon owns shell terminal sessions scoped to opened workRoots.
-Authenticated owners can create and list live terminal sessions by opaque
-terminal ids. Spawns run in the selected workRoot directory and terminal ids are
-not process ids or host paths.
+The dashboard daemon manages shell terminal sessions scoped to opened
+workRoots through an authenticated registry, but the daemon itself does not
+own the PTY. Creating a terminal spawns a detached per-terminal helper
+process that owns the underlying PTY for the shell's lifetime; the daemon
+holds a proxy session that talks to the helper over a native IPC channel (a
+Unix domain socket on Unix, a named pipe on Windows) and mirrors the
+helper's output into a local ring cache so ordinary reads stay synchronous
+calls instead of a per-request IPC round trip. Authenticated owners can
+create and list live terminal sessions by opaque terminal ids. Spawns run in
+the selected workRoot directory and terminal ids are not process ids or host
+paths.
 
-Live terminal sessions persist across browser refresh because the daemon owns
-their lifecycle. Browser arrangement state controls where sessions are shown,
-not whether the daemon session exists.
+Each helper records its identity — process id and process start-time — in a
+per-terminal registry file, so the daemon can distinguish a still-live helper
+from a stale entry whose pid has since been reused by an unrelated process
+rather than trusting a bare pid.
+
+Live terminal sessions persist across browser refresh, and across a daemon
+restart, because the PTY's lifetime belongs to the detached helper process,
+not the daemon. Browser arrangement state controls where sessions are shown,
+not whether the underlying live session exists. See
+[WorkRoot IO Restore Model](#260523-ws-dashboard-terminal-tab-restore) for
+daemon-restart reattachment and helper-termination behavior.
 
 ## Terminal I/O Transport {#260516-ws-web-dashboard-terminal-io-transport}
 
@@ -1893,6 +1908,16 @@ PTY output. HTTP output transport remains available for initial replay, reload
 reconstruction, deterministic tests, or fallback, but the normal connected
 xterm path does not depend on periodic output polling.
 {#260516-ws-web-dashboard-terminal-websocket-transport}
+
+A terminal whose shell has just exited remains listed and WebSocket-
+attachable for a bounded grace window after the exit before it is dropped, so
+a browser that reconnects slightly late — including immediately after a
+daemon restart — still receives the final output and exit status instead of
+finding the terminal already gone. Once a terminal id is unknown or has
+passed out of that grace window with no live process behind it, the WebSocket
+route rejects the upgrade with a bounded not-found response before accepting
+the socket, the same as any other unknown terminal id.
+{#260723-terminal-attach-grace-window}
 
 ## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
 
@@ -2021,10 +2046,40 @@ terminal pane with no matching daemon-alive terminal or restore intent) is
 silently dropped from the restored layout rather than shown as an error,
 consistent with this anchor's existing file-pane restore rule.
 
-Browser-visible terminal tab descriptors can restore after daemon restart as
-newly created daemon terminal sessions attached to the remembered workRoot. The
-restore descriptor carries title plus a workRoot-relative cwd hint, but it does
-not treat old daemon terminal ids or PTY processes as resumable state.
+A live terminal survives a daemon restart: because the PTY lives in the
+detached per-terminal helper process rather than the daemon, daemon exit does
+not run any terminal teardown, and daemon exit alone never kills a terminal.
+On daemon (re)start, the daemon runs `boot_reconcile`: an identity-gated
+reconcile pass over the on-disk per-terminal registry that classifies each
+entry against a 6-row decision table, collapsing to four caller-observable
+outcomes — adopt a still-live helper as an attached live session, adopt a
+helper whose shell already exited but remains within a bounded post-exit
+grace window (so an exit that happened just before or during the restart is
+still visible and attachable rather than silently dropped, per
+[Terminal Attach Grace Window](#260723-terminal-attach-grace-window)), kill a
+helper whose identity cannot be verified against the recorded pid and
+process-start-time (for example after pid reuse), or drop a stale registry
+entry that has no live process behind it, without touching any unrelated
+process. Because reconciliation re-adopts the still-running helper under the
+same terminal id, the frontend's existing resume-by-id path reattaches to the
+same live shell — not a newly spawned one — with cursor continuity, the same
+as any other stale-cursor reconnect surfacing a truncation gap marker if the
+daemon's retained output no longer covers the gap. The restore-descriptor
+fallback (a newly created daemon terminal session attached to the remembered
+workRoot, carrying title plus a workRoot-relative cwd hint) still applies
+only when boot reconcile could not adopt any live or in-grace helper for that
+terminal id — it no longer describes the ordinary daemon-restart case.
+
+Only two events terminate a helper process: an explicit terminal-close
+request, or removal of the owning workRoot/workspace root. Termination is
+graceful-then-verified: the daemon first sends the helper a graceful-shutdown
+request over the IPC channel, then falls back to an identity-verified kill of
+the helper's recorded pid — never a bare-pid re-resolve, so a pid reused by
+an unrelated process after the helper already exited is never mistakenly
+killed. On Windows, the helper additionally places its spawned shell into a
+kill-on-close job object so the fallback kill tears down the whole shell
+subtree; on Unix, the helper detaches from the daemon at spawn time so it
+keeps running independent of the daemon process.
 
 When the frontend instead reattaches to a still-alive daemon terminal by id on
 reload, it restores that pane's visual appearance rather than replaying only
