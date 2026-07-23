@@ -1,0 +1,63 @@
+---
+domain: terminal
+description: "Daemon-side terminal helper-process subsystem: the detached per-terminal process that owns the portable-pty PTY across daemon restarts, the daemon<->helper NDJSON IPC transport, the on-disk registry file, the boot-reconcile identity-gated adopt/kill/drop decision table, and identity-verified kill mechanics."
+sources:
+  - ws-dashboard/crates/daemon/src/
+---
+
+# Terminal (ws Web Dashboard)
+
+Sub-domain of `ws-web-dashboard`; read `ws-web-dashboard/index.md` first —
+route auth, workRoot access gating, and the browser-facing terminal
+pane/WebSocket contract stay documented there. This file covers only the
+daemon-side helper-process/registry/reconcile subsystem.
+
+## Entry Points
+
+- `ws-dashboard/crates/daemon/src/terminal.rs` — `TerminalSession`/`TerminalRegistry`: a thin daemon-side IPC proxy over a helper connection plus a local output-chunk read cache, the HTTP/WebSocket route handlers, and the `boot_reconcile`/`reconcile_entry` async driver.
+- `ws-dashboard/crates/daemon/src/terminal_helper_process.rs` — the detached helper binary's own runtime (`run_terminal_helper`, dispatched from the hidden `ws-dashboard terminal-helper` CLI subcommand in `cli.rs`, never invoked by a human): owns the `portable-pty` master/child, the reader/writer threads, and `RingState`, the authoritative bounded output ring.
+- `ws-dashboard/crates/daemon/src/terminal_reconcile.rs` — pure `classify(identity, ipc)`: the boot-reconcile decision table, decoupled from I/O for direct unit-testability.
+- `ws-dashboard/crates/daemon/src/terminal_platform.rs` — cfg-gated detach-spawn / OS start-time read / identity-verified kill (Unix `pidfd_open`+`pidfd_send_signal`; Windows `OpenProcess`+`TerminateProcess` plus a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` kill-on-close job object for the shell subtree).
+- `ws-dashboard/crates/daemon/src/terminal_registry_file.rs` — the on-disk `<registry_dir>/<terminal_id>.json` entry (pid, start_time, socket_path, ...): atomic temp-rename write, tolerant directory scan (skip-and-warn on a malformed entry).
+- `ws-dashboard/crates/daemon/src/terminal_helper_ipc.rs`, `terminal_helper_protocol.rs`, `terminal_ipc_transport.rs` — NDJSON framing, the daemon<->helper message enums, and the cross-platform transport underneath (Unix domain socket / Windows named pipe, type-erased behind `BoxedIpcStream`). Deliberately separate from the browser-facing `TerminalWebSocketServerMessage`/`TerminalWebSocketClientMessage` wire contract in `terminal.rs`.
+
+## Module Contracts
+
+- The daemon does not own the terminal PTY. A detached `ws-dashboard terminal-helper` process owns the `portable-pty` master/child and its reader/writer threads; `terminal.rs::TerminalSession` is a proxy plus a read cache fed by helper pushes, never a second source of truth. {#260516-ws-web-dashboard-terminal-registry-pty-spawn}
+- A live terminal survives a daemon restart. `TerminalRegistry::boot_reconcile` MUST run to completion before `build_router`/`axum::serve` starts accepting connections (wired in `server.rs::run`) so an adopted terminal is already visible to the very first `list_terminals`/WS-reattach request. It scans the registry dir, checks each entry's OS-level identity (PID + start-time) before ever attempting an IPC connect, and applies `terminal_reconcile::classify`'s 6-row table (collapsed to 5 code branches because identity short-circuits before IPC is consulted): `AdoptLive`/`AdoptGrace` insert via `insert_unchecked` — bypassing the session cap so scan order can never evict an adopted session — `KillVerified` kills through a verified handle then drops the entry, and `DropNoSuchProcess`/`DropPidReused` only delete the registry entry. An unverified identity is NEVER killed. {#260523-ws-dashboard-terminal-tab-restore}
+- Every kill (boot-reconcile's `KillVerified` row, and `TerminalSession::terminate`'s fallback tier) goes through `terminal_platform::kill_verified`, an identity-gated handle captured at verification time — never a bare-PID re-resolve. This closes the PID-reuse TOCTOU window a plain `kill(pid, SIGKILL)`/`TerminateProcess(pid)` would leave open.
+- `terminate()` is unconditionally 2-tier regardless of apparent success: send `GracefulShutdown` over IPC, sleep 200ms, then always run the verified-PID kill fallback — the daemon has no reliable signal that the helper actually processed the graceful request before its IPC connection could drop.
+- An exited terminal stays listed and WebSocket-attachable for a bounded grace window (`TerminalSession::admits_attach()`, daemon-local `grace_until_ms`, `DAEMON_GRACE_WINDOW_MS` = 30s) even though `is_live()` would say otherwise. The helper independently self-exits after its own `GRACE_WINDOW` (also 30s) elapses, or after serving exactly one post-exit reattach — whichever comes first — regardless of what the daemon believes; the daemon's flag is a display/attach-gating convenience, not the authoritative timer. Only an explicitly-closed (removed-from-registry) terminal now rejects a WebSocket upgrade, with 404 (gone) rather than a strict-liveness 410. {#260723-terminal-attach-grace-window}
+- Daemon exit must NOT kill terminal helpers: there is deliberately no Drop-based teardown loop over `TerminalRegistry`/`AppState`. Re-introducing one would break restart-survival — a helper's shell must keep running with nothing attached until either the daemon comes back or the terminal is explicitly closed.
+- Workspace/worktree-root removal must explicitly `.await TerminalSession::terminate()` for every session `TerminalRegistry::remove_for_work_roots` returns. An `Arc`-drop of the daemon-side proxy does nothing to a detached helper (unlike the pre-decouple in-process PTY master, whose drop implied SIGHUP). The three coupled call sites are `git_worktree.rs`, `resources.rs`, and `root_picker.rs`; a `tokio::spawn`-detached fire-and-forget kill here can lose its race against the enclosing runtime/process exiting and silently leak the helper — this was dogfooded and fixed to an inline `.await` before landing.
+- Terminal input crossing the daemon<->helper wire is lossy for non-UTF-8 bytes: `write_input` converts input via `String::from_utf8_lossy` before sending it as NDJSON text, a deliberate simplification rather than adding a base64 wire encoding. The browser's primary input paths are already UTF-8 `String`; only the WebSocket binary-frame fallback path can lose fidelity.
+- The daemon-side `TerminalSession.output` cache (`append_output_from_helper`) mirrors the same gapless, strictly-contiguous `sequence`-run invariant as the helper's authoritative `RingState`: every push consumes exactly one `next_sequence` value and eviction only ever pops from the front. `output_after` depends on this to slice by index arithmetic instead of a `filter(seq > after)` scan; a future change to either ring's retention/eviction must preserve gapless contiguity or the daemon-side shortcut must revert to a scan.
+- The helper resets its per-connection "last sent sequence" to 0 on every new connection (fresh create, boot-reconcile adopt, or reattach) and replays its whole retained ring, flushed unconditionally at the start of `handle_connection` before the connection's select loop begins — not merely when a `Notify` permit happens to already be pending. This is the implicit backfill path for the common case; the protocol's `RequestBackfill`/`BackfillResponse` message pair exists but is not driven by this implementation.
+
+## Coupling
+
+- `terminal.rs` <-> `terminal_helper_process.rs` are coupled only through the NDJSON messages in `terminal_helper_protocol.rs`, framed by `terminal_helper_ipc.rs`, carried by `terminal_ipc_transport.rs`. This protocol is independent of the browser-facing WebSocket wire contract in `terminal.rs`; changing one must not require changing the other.
+- `terminal_reconcile::classify` (pure) and `terminal.rs::reconcile_entry` (async driver) must stay in lock-step: the driver duplicates the identity short-circuit `classify` also encodes (never attempting an IPC connect on unverified identity) so a change to one path without the other can desync unit coverage from actual boot behavior.
+- `terminal_platform.rs`'s Windows kill-on-close Job Object (`create_kill_on_close_job`/`assign_into_job`) is wired into `terminal_helper_process.rs`'s shell-spawn path right after `portable_pty::SlavePty::spawn_command` returns, via the child's raw handle rather than a `Command` — ConPTY does the actual `CreateProcessW` call internally, so there is no `creation_flags` hook to inject through `CommandBuilder`. This backs the verified-kill fallback tier with the same shell-subtree teardown Unix gets from `setsid()` + PTY-master-close.
+- `terminal_registry_file.rs`'s on-disk entry is the identity source boot-reconcile keys off; a leftover `.sock` file after a hard-killed helper is disk hygiene only (`delete_registry_entry` prunes both) and has no effect on identity/adoption correctness.
+
+## Extension Points & Change Recipes
+
+- **Add a new daemon<->helper message**: add the variant to `terminal_helper_protocol.rs`'s `DaemonToHelperMessage`/`HelperToDaemonMessage`, keep it distinct from the browser WebSocket wire enums, and handle it on both sides (`terminal.rs`'s connection driver, `terminal_helper_process.rs::handle_connection`).
+- **Change the boot-reconcile decision table**: edit `terminal_reconcile::classify` and its pure unit tests first (no I/O), then update `terminal.rs::reconcile_entry`'s matching identity/IPC handling; never let a row reachable from `classify` return a kill for an identity that was not independently `VerifiedOurs`.
+- **Change terminal kill/teardown**: route every kill through `terminal_platform::kill_verified` (identity re-checked at kill time via a captured handle, not a fresh PID lookup); do not add a Drop-based cleanup path to `TerminalRegistry`/`AppState`; keep the three `remove_for_work_roots` call sites (`git_worktree.rs`, `resources.rs`, `root_picker.rs`) awaiting `terminate()` inline rather than detaching the kill into a spawned task.
+- **Change terminal spawn environment**: keep shell executable selection (`terminal.rs::select_terminal_shell`, invoked from `terminal_helper_process.rs::spawn_shell`) and browser PTY capability environment as separate contracts. Non-interactive daemon launches may carry `TERM=dumb`, so the helper's spawn code must normalize unusable parent `TERM` values for the browser PTY session without overriding explicit capable terminal types.
+
+## Common Mistakes
+
+- Assuming a daemon restart always produces a fresh terminal session; boot-reconcile can reattach to a still-live helper with cursor continuity, so tests/dogfooding that hard-kill the daemon must account for the helper outliving it.
+- Relying on dropping the last `Arc<TerminalSession>` to close the shell; only an explicit `terminate()` (or the helper's own grace-window self-exit) does that now.
+- Re-resolving a PID by number for a kill instead of using the identity-gated handle captured at verification time; a reused PID would then kill an unrelated process.
+- Treating boot-reconcile rows 3/5 (unverified identity — `DropNoSuchProcess`/`DropPidReused`) as kill-eligible; both are drop-entry-only by design.
+- Dropping `writer_tx` (or the PTY `master`) before killing/waiting the child in `SharedState::kill_shell_if_running`/`transition` (`terminal_helper_process.rs`); only child death reliably unblocks a writer thread stuck on a full OS pipe buffer. This ordering lives entirely in the helper process now — `terminal.rs` no longer owns a writer thread.
+- Leaving a test-created terminal unclosed: with the PTY out-of-process, this leaks a real `ws-dashboard terminal-helper` OS process instead of silently exiting alongside the daemon/test process (tracked as a separate test-hygiene follow-up, not a correctness bug in this domain).
+
+## Technical Debt
+
+- Windows job-object shell-subtree teardown is cross-compile-checked only (`cargo check --target x86_64-pc-windows-gnu`); no live-Windows-host runtime verification yet.
+- The IPC protocol's `RequestBackfill`/`BackfillResponse` message pair exists in `terminal_helper_protocol.rs` but is unused by the current daemon-side implementation; push-on-connect covers the common reattach path instead.

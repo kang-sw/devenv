@@ -364,7 +364,14 @@ pub async fn remove_workspace(
             "persist workspace removal failed",
         );
     }
-    state.terminals.remove_for_work_roots(&work_root_ids);
+    // CONTRACT (260723 Phase 1 risk signal): see git_worktree.rs's matching
+    // comment - explicit kill replaces the old implicit-drop-closes-PTY
+    // behavior now that the PTY lives in a detached helper process. Awaited
+    // (not `tokio::spawn`-detached) so the kill is guaranteed to run to
+    // completion before the route responds.
+    for session in state.terminals.remove_for_work_roots(&work_root_ids) {
+        session.terminate().await;
+    }
     state.codex_sessions.remove_for_work_roots(&work_root_ids);
     state.claude_sessions.remove_for_work_roots(&work_root_ids);
     Json::<DashboardResourcesView>(local_dashboard_resources_view(&state).await)

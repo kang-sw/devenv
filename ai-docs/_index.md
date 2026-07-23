@@ -167,6 +167,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | ready | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
+| `260723-feat-dashboard-terminal-lifetime-daemon-decouple` | done | Terminal PTY lifetime decoupled from the daemon: per-terminal detached helper owns the PTY, daemon is a proxy over NDJSON native-IPC, `boot_reconcile` re-adopts live helpers so terminals survive a daemon restart (both Unix + Windows) |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -507,6 +508,21 @@ dropped tickets live in hidden archive dirs and git history.
   popup + section registry + namespaced prefs store + Terminal-style first
   section); ready, prioritized as next drain target ahead of
   hint-click-fast-jump.
+- `260723-feat-dashboard-terminal-lifetime-daemon-decouple` (`.done/`, feat) -
+  closed 2026-07-23: Phase 1 decoupled terminal PTY lifetime from the daemon.
+  Per-terminal detached helper process owns the portable-pty PTY; the daemon is
+  a proxy over NDJSON native-IPC (Unix domain socket / Windows named pipe);
+  a registry file (pid + start-time identity) plus `boot_reconcile` (6-row
+  identity-gated adopt/kill/drop table) re-adopts live helpers so terminals
+  survive a daemon restart with gapless cursor continuity. Both platforms
+  landed (Decision B): Unix E2E-verified here; Windows Job-Object breakaway
+  implemented + cross-compile-checked + unit-tested, with **live native-Windows
+  E2E acceptance still owed by user dogfood**. Impl `45a8a71f`..`1b8d8f9e`, spec
+  `86c023f4`, mental-model `e674e796`; three Important review findings
+  remediated and re-reviewed clean. Merged into `goal/drain-ready-queue` (no-ff);
+  **`goal` -> `ws-dashboard-dev` final merge + push HELD for explicit user
+  approval.** Follow-up idea ticket:
+  `260723-bug-dashboard-terminal-detached-helper-leaks-in-tests`.
 
 ## Session Notes
 

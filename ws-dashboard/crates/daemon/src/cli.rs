@@ -18,6 +18,35 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Serve(ServeArgs),
+    // CONTRACT: internal re-exec target for the detached per-terminal helper
+    // process (260723 terminal lifetime supervisor decouple). Not documented
+    // in `--help`; the daemon spawns this itself, pointed at its own
+    // resolved binary path (see `terminal_platform`). Never invoked directly
+    // by a human or the remote-deployment guide.
+    #[command(hide = true)]
+    TerminalHelper(TerminalHelperArgs),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct TerminalHelperArgs {
+    #[arg(long)]
+    pub registry_dir: std::path::PathBuf,
+    #[arg(long)]
+    pub terminal_id: String,
+    #[arg(long)]
+    pub work_root_id: String,
+    #[arg(long)]
+    pub cwd: std::path::PathBuf,
+    #[arg(long)]
+    pub cwd_hint: Option<String>,
+    #[arg(long)]
+    pub title: String,
+    #[arg(long)]
+    pub columns: u16,
+    #[arg(long)]
+    pub rows: u16,
+    #[arg(long)]
+    pub socket_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Parser)]
@@ -86,6 +115,15 @@ impl Cli {
         self.remote_guide
     }
 
+    // CONTRACT: Non-consuming, checked before `into_serve_config` consumes
+    // `self.command` - mirrors `log_file`'s accessor shape.
+    pub fn terminal_helper_args(&self) -> Option<&TerminalHelperArgs> {
+        match self.command.as_ref() {
+            Some(Command::TerminalHelper(args)) => Some(args),
+            _ => None,
+        }
+    }
+
     pub fn remote_deployment_guide() -> &'static str {
         REMOTE_DEPLOYMENT_GUIDE
     }
@@ -93,6 +131,9 @@ impl Cli {
     pub fn into_serve_config(self) -> anyhow::Result<ServeConfig> {
         match self.command {
             Some(Command::Serve(args)) => ServeConfig::from_args(args),
+            Some(Command::TerminalHelper(_)) => {
+                anyhow::bail!("terminal-helper is an internal re-exec target, not a serve command")
+            }
             None => {
                 let mut command = Self::command();
                 command.print_help()?;

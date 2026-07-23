@@ -84,13 +84,24 @@ where
             },
         );
     }
+    // CONTRACT (ticket 260723 Phase 1 "Boot reconcile policy"): must
+    // complete before `build_router`/`axum::serve` starts accepting
+    // connections, so an adopted terminal is already visible to the very
+    // first `list_terminals`/WS-reattach request this daemon instance
+    // serves.
+    let terminals = TerminalRegistry::boot_reconcile(
+        crate::terminal::default_helper_binary(),
+        crate::terminal::default_registry_dir(),
+        crate::terminal::DEFAULT_RECONCILE_CONNECT_TIMEOUT,
+    )
+    .await;
     let app = build_router(AppState {
         config,
         auth,
         opened_work_roots,
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
-        terminals: TerminalRegistry::default(),
+        terminals,
         codex_sessions: crate::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: crate::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),

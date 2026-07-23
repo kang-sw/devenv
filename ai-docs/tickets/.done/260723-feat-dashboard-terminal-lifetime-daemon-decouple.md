@@ -208,3 +208,34 @@ Phase 1 kickoff open questions resolved (autonomous goal run; user confirmed aut
 - **Decision B — platform scope: BOTH Unix and Windows land in this phase; the optional Phase-2 split is NOT taken.** The user confirmed the daemon's primary deployment is native Windows, so the Windows Job-Object breakaway detach is pulled into scope rather than deferred. Verification is split by capability: the Unix path (setsid/double-fork detach + pidfd-gated kill) is verified end-to-end IN this session; the Windows path (helper-owned Job Object + `CREATE_BREAKAWAY_FROM_JOB` + stable OpenProcess-handle kill) is implemented, cross-compile-checked, and unit-tested in this session, with LIVE native-Windows end-to-end acceptance completed on the user's native-Windows dogfooding host (this session has no native-Windows daemon host; cf. 260703-chore-windows-branch-pinned-acceptance). Both legs sit behind the existing `TerminalPlatform` abstraction (`terminal.rs`); the helper architecture, registry-file identity model (PID + start-time), IPC protocol, and the 6-row reconcile state machine are platform-independent and shared.
 
 Implementation is staged for reviewability on a single effort: (1) helper process + NDJSON IPC + registry-file identity + 6-row reconcile + Unix detach (E2E-verified here), then (2) the Windows detach leg layered on the same abstraction (statically verified here, live-verified by user dogfood).
+
+### Result (1b8d8f9e) - 2026-07-23
+
+Phase 1 delivered server-side per-terminal supervisor decoupling for both platforms (kickoff Decision B: Unix + Windows this phase). Implementation range 45a8a71f (initial) plus remediation to 1b8d8f9e; docs in 86c023f4 (spec) and e674e796 (mental model).
+
+**Behavioral delta**
+- Each terminal now runs in a detached per-terminal helper process that owns the portable-pty PTY. The daemon holds only a proxy/mirror ring and communicates over NDJSON native-IPC (Unix domain socket / Windows named pipe) via a dedicated `HelperToDaemonMessage`/`DaemonToHelperMessage` protocol (Decision A: types separate from the browser wire; NDJSON framing reusing the `codex_app_server.rs` precedent; zero new crate).
+- A per-terminal registry file (pid + process start-time identity, 0600 atomic write) plus `boot_reconcile` (6-row identity-gated adopt-live / adopt-in-grace / kill-verified / drop-entry-only table) lets a live terminal survive a daemon restart: the browser reattaches to the same live shell with gapless cursor continuity.
+- Daemon exit no longer kills terminals (no Drop-based teardown). Only explicit close or workspace-root removal terminates a helper, via graceful IPC shutdown then identity-verified kill (pidfd on Unix, OpenProcess handle on Windows — never bare-PID re-resolve).
+- New caller-observable grace window: an exited terminal stays listed / WS-attachable for a bounded window (`admits_attach()`/`grace_until_ms`) before a uniform not-found rejection.
+
+**Deviations from plan**
+- I1: backfill delivered via an unconditional proactive whole-ring flush (`backfill_after(0)`) on (re)connect rather than wiring the `RequestBackfill`/`BackfillResponse` request/response channel — chosen to avoid a double-delivery race against the notify loop; the channel is left dormant.
+- I2: Windows shell held in a kill-on-close Job Object via `assign_into_job(&job, child_handle)` called AFTER spawn (not a `spawn_into_job` creation hook), because portable-pty's ConPTY backend does its own internal `CreateProcessW` with no creation-flags hook.
+- Stage-1/Stage-2 commit collapse: `terminal_ipc_transport.rs` is required for the crate to build on Windows at all, so a genuinely Unix-only intermediate commit was not achievable without an intentionally-broken checkpoint.
+
+**Verification**
+- Full daemon suite green: lib 114 passed / 2 ignored, routes 165, server 15, terminal_lifetime 2 (incl. a new row-2 AdoptGrace test driven through the real async `boot_reconcile` across a hard-kill restart). Zero warnings.
+- Real two-OS-process SIGKILL restart + reattach E2E (`tests/terminal_lifetime.rs`) passing — daemon #2 is a wholly separate process; validates cursor continuity and same-live-shell reattach.
+- Windows leg cross-compiles clean (`--target x86_64-pc-windows-gnu`); platform-independent logic (reconcile table, registry-file, NDJSON protocol) unit-tested cross-platform.
+- Three Important review findings (I1 backfill reliability, I2 Windows Job-Object wiring, I3 row-2 E2E coverage) remediated and re-reviewed clean; no new Critical/Important introduced.
+
+**Deferred / unresolved**
+- Live native-Windows E2E acceptance of the Job-Object detach + verified-PID kill is the user's dogfood responsibility (Decision B defers only live-Windows-host verification, not the wiring — which is implemented).
+- Two accepted Minors: the redundant explicit Windows job-assign may emit `ERROR_ACCESS_DENIED` warning noise (subtree-kill guarantee still holds via job inheritance); `DELAYED_EXIT_MARGIN=4s` in the row-2 test is a bounded, false-fail-only flake margin.
+- M-a (truncation-marker-after-eviction on the restart+adopt path) test not added — indirectly covered by RingState eviction unit tests plus the general truncation unit tests.
+- Filed follow-up idea ticket `260723-bug-dashboard-terminal-detached-helper-leaks-in-tests` (pre-existing routes.rs test hygiene: tests create real terminals and never close them, leaking detached helper + shell processes).
+
+**Risk-signal fixes (plan-flagged, ticket-absent)**
+- Risk-signal-1: `remove_for_work_roots` now returns removed sessions and all three async call sites (`git_worktree.rs`, `resources.rs`, `root_picker.rs`) explicitly `.await terminate()` — Arc-drop of the PTY master no longer kills the shell once the PTY lives in the helper.
+- Risk-signal-2: helper re-exec is testable via an injectable `helper_binary` path (`CARGO_BIN_EXE_ws-dashboard` in tests), avoiding the `current_exe()`-in-test-binary trap.

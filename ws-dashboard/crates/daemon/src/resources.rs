@@ -33,7 +33,13 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
             .expect("dashboard resources discovery task panicked");
     if !pruned_work_root_ids.is_empty() {
         let pruned: std::collections::BTreeSet<_> = pruned_work_root_ids.into_iter().collect();
-        state.terminals.remove_for_work_roots(&pruned);
+        // CONTRACT (260723 Phase 1 risk signal): see git_worktree.rs's
+        // matching comment - the detached helper does not die on `Arc`
+        // drop, so pruned sessions must be explicitly terminated and
+        // awaited, not `tokio::spawn`-detached.
+        for session in state.terminals.remove_for_work_roots(&pruned) {
+            session.terminate().await;
+        }
         state.claude_sessions.remove_for_work_roots(&pruned);
     }
     view
