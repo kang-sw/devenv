@@ -217,22 +217,21 @@ dropped tickets live in hidden archive dirs and git history.
   260626-*); reshape `lead-prefer-subagent` to fresh-spawn + central
   authoring/mutation whitelist (overlay). Spec addressing via `## Spec Impact`
   (`workflow-skills`, Contract-first: no). Sage review completed.
-- `260723-feat-ticket-write-verify-commit-gate` (ready, feat, child of
-  260723-epic) - **Phase 1 landed** (`9744429`): deterministic `ticket.verify`
-  + non-bypassable `git.commit` gate (mechanical floor; closes 260627 direct-edit
-  bypass), spec `260723-tickets-verify-tool` / `260723-git-commit-ticket-verify-gate`
-  (commit `44e530a`). **Phase 2 BLOCKED (pending user)**: must-not-forget
-  mutation-tool collapse + action-time obligation prose. Survey escalated two
-  public-API naming decisions the ticket left open — (1) `tickets.create` rename
-  target (lead rec: single `tickets.create_empty`); (2) `sage.stamp` namespace +
-  contract (lead rec: `tickets.sage_stamp` in the `tickets.*` family, reusing
-  `sage_record`'s `(stem,stage,verdicts[])` contract + adding the currently-missing
-  lead-only gating). Survey plan at `ai-docs/.plans/2026-07/23-1648-...-phase2.md`.
-  Also confirmed: sage single-writer is a playbook convention only today, NOT code
-  enforcement (`sage_record` is delegate-callable), so Phase 2 lead-only is genuine
-  new enforcement. Spec addressing via `## Spec Impact` (`mcp-tools`, Contract-first:
-  no). Sage review completed. Chokepoint resolved by hosting at `git.commit` (shell
-  raw-commit bypass tracked as epic Caveat).
+- `260723-feat-ticket-write-verify-commit-gate` (feat, child of 260723-epic) -
+  **both phases landed** (`fcb96383`), pending move to `.done`. Phase 1
+  (`9744429`): deterministic `tickets.verify` + non-bypassable `git.commit` gate
+  (mechanical floor; closes 260627 direct-edit bypass). Phase 2: mutation-tool
+  collapse — `tickets.create`→`tickets.create_empty`, `tickets.sage_record`→
+  `tickets.sage_stamp` (now lead-only via `isLeadOnlyTool`, genuine new
+  enforcement — the old tool was delegate-callable), `tickets.close` freed to soft
+  unresolved-phase warn, ready-move sage-posture stays hard (single-sourced via
+  `readyPostureProblems`), front-loaded playbook prose replaced by action-time
+  `next_instruction` prose. User-approved naming: single `create_empty`;
+  `sage_stamp` in the `tickets.*` family reusing `SageRecord`'s
+  `(stem,stage,verdicts[])`. Spec `260723-tickets-verify-tool` /
+  `260723-git-commit-ticket-verify-gate` + mcp-tools rename/close/sage_stamp doc;
+  mental-model `mcp-runtime` updated. Version 0.35.2. Chokepoint resolved by
+  hosting at `git.commit` (shell raw-commit bypass tracked as epic Caveat).
 - `260723-feat-ticket-system-concept-doc` (ready, feat, child of 260723-epic) -
   single ticket-system concept doc homed in the `workflow_manual` bundle
   (session-once grounding, host-neutral), playbook references it instead of
