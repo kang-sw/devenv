@@ -420,6 +420,15 @@ prompt override-marker engine and the product-mode markers. The handler owns mod
 branching and the Session State scaffolding only; all manual prose lives in the
 rsrc.
 
+The rendered manual body carries a **Ticket System Concepts** grounding section
+(status-directory meaning, type-prefix categorization, sage-review rationale and
+posture semantics, spec addressing, the phase model, and epic-vs-workset), so a
+lead session receives ticket-system concepts once per session rather than through
+per-invocation glosses in convention and playbook documents. The layering that
+keeps this section concept-only (guardrails stay in enforcement, mechanical
+content stays in Go) is specified in the documentation-system spec under
+Ticket-System Concept Grounding (`260723-ticket-system-concept-grounding`).
+
 > Known residual: `playbook.print(name: "lead-workflow-manual")` — and printing the
 > repointed lead skills — is not role-gated and re-exposes the gated bootstrap line
 > and the fresh-bootstrap sentinel to any caller that knows the stem; the defense
