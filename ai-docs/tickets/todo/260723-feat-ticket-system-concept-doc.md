@@ -5,8 +5,8 @@ related:
   260702-research-destructive-dedup-methodology: guardrail-vs-restatement discipline bounds what the concept doc may absorb
   260723-feat-ticket-write-verify-commit-gate: sibling — once verify owns mechanical guardrails, the doc carries only concepts
 parent: 260723-epic-ticket-write-reshape
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Single session-loaded ticket-system concept doc; playbook references instead of re-glossing
@@ -36,10 +36,17 @@ decision point re-derives concept meaning, which is itself part of the weight.
   when to use it; the semantic distinction between type prefixes; what sage review
   is, why it exists, and what its postures mean; what spec addressing is for; the
   phase model; epic vs. workset.
+- **Type-prefix distinction is categorization guidance only.** The workflow treats
+  `feat`/`bug`/`refactor`/`chore` identically (all "actionable, phased" per
+  `judge: ticket-category`); there is no mechanical divergence. The doc gives
+  plain-word "which prefix fits" guidance and must **not** imply behavioral
+  differences that do not exist.
 - **Home and loading: the `workflow_manual` bundle (decided).** The concept doc
   is a bundled runtime doc under the workflow-manual surface
   (`rsrc/lead-workflow-manual/`), grounded through `ws/workflow_manual` at session
-  bootstrap — the call every session already makes. Chosen over AGENTS.md
+  bootstrap — the call every session already makes. The bundle is dual-maintained
+  (`agents-plugin/rsrc/` and `agents-plugin-wsflow/rsrc/`, kept in sync); edit
+  both trees. Chosen over AGENTS.md
   mandatory-reading (host-specific; against host-neutral-first) and over on-demand
   load (per-invocation, which defeats the amortization the ticket is built on).
   Because `workflow_manual` is session-once, the doc is loaded once and the
@@ -51,9 +58,10 @@ decision point re-derives concept meaning, which is itself part of the weight.
 - The playbook and convention doc **reference** the concept doc for meaning and
   keep only the mechanical call sequence + hard invariants.
 - **Go constants stay the mechanical source of truth.** The template/checklist/sage
-  Go constants are not touched by this consolidation; the concept doc explains
-  *meaning*, the Go constants remain the *mechanical* content, and verify owns
-  *enforcement*.
+  Go constants (`agents-plugin-tool/internal/wsdoc/tickets_template.go`,
+  `tickets_checklist.go`, `tickets_sage.go`) are not touched by this
+  consolidation; the concept doc explains *meaning*, the Go constants remain the
+  *mechanical* content, and verify owns *enforcement*.
 
 ### Inline vs referenced (open knob, not a blocker)
 
@@ -74,14 +82,33 @@ Measure the manual-payload delta during Phase 1 and pick accordingly.
 
 ### Phase 1: Author the concept doc and de-duplicate the glosses
 
-Write the single concept doc. Then strip the duplicated conceptual glosses from
-`ticket-conventions.md` and `lead-write-ticket.md`'s judge tables, replacing them
-with a reference to the concept doc — removing only *restatements*, never a
-guardrail verify() does not yet own.
+Write the single concept doc covering all six areas named in Decisions. Then
+strip the duplicated conceptual glosses, replacing them with a reference to the
+concept doc — removing only *restatements*, never a guardrail verify() does not
+yet own. Per-file scope:
 
-**Acceptance check (measurement boundary stated).** Compare the token count of
-the write-ticket base path (`lead-write-ticket.md` + `ticket-conventions.md`)
-before vs. after the gloss removal; confirm a net reduction on *that* path. State
+- `agents-plugin-tool/internal/wsdoc/conventions/ticket-conventions.md` — the
+  status-dir / type-prefix / spec-addressing / phase / epic-vs-workset
+  *explanatory* prose (keep the mechanical rules and hard invariants).
+- `lead-write-ticket.md` — the `judge:` decision tables that re-gloss concept
+  meaning (e.g. `ticket-category`, `initial-status`, `spec-address-gate`), which
+  keep their *decision criteria* but drop the concept re-explanation.
+
+**High-risk step — gloss removal.** Deciding "distinct guardrail vs. pure
+restatement" for each removed line is exactly the destructive-dedup failure mode
+`260702-research-destructive-dedup-methodology` documents, and that ticket records
+the per-merge audit (guardrail-vs-restatement in both directions, flow-position
+preservation) as **not yet codified** — a user previously caught two silent
+misses. Until 260702 lands a procedure, treat the gloss-removal diff as the
+highest-risk part of this phase and give it close line-level review, not a
+methodology this ticket can assume exists.
+
+**Acceptance check (measurement boundary stated).** Confirm the concept doc
+covers all six areas listed in Decisions (status-dir semantics, type-prefix
+distinctions, sage-review rationale/postures, spec addressing, phase model,
+epic-vs-workset). Compare the token count of the write-ticket base path
+(`lead-write-ticket.md` + `ticket-conventions.md`) before vs. after the gloss
+removal; confirm a net reduction on *that* path. State
 the boundary explicitly: the win is per-write-invocation gloss savings, while the
 concept doc adds a once-per-session baseline via the `workflow_manual` payload —
 so amortization clearly wins for multi-ticket sessions, and a session that never
