@@ -5,8 +5,8 @@ related:
   260702-research-destructive-dedup-methodology: guardrail-vs-restatement discipline bounds what the concept doc may absorb
   260723-feat-ticket-write-verify-commit-gate: sibling — once verify owns mechanical guardrails, the doc carries only concepts
 parent: 260723-epic-ticket-write-reshape
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Single session-loaded ticket-system concept doc; playbook references instead of re-glossing
@@ -45,6 +45,23 @@ decision point re-derives concept meaning, which is itself part of the weight.
   not honor (per `260702`'s guardrail-vs-restatement caution).
 - The playbook and convention doc **reference** the concept doc for meaning and
   keep only the mechanical call sequence + hard invariants.
+- **Go constants stay the mechanical source of truth.** The template/checklist/sage
+  Go constants are not touched by this consolidation; the concept doc explains
+  *meaning*, the Go constants remain the *mechanical* content, and verify owns
+  *enforcement*.
+
+### Open decision (blocks ready)
+
+The doc's **loading mechanism and home category are unresolved** and require a
+user decision — this is an architecture/token-cost tradeoff, not a filename
+choice:
+
+- **Loading:** added to AGENTS.md's mandatory session-start reading (always
+  grounded, higher baseline tokens) vs. on-demand load when a ticket task begins
+  (lower baseline, must be triggered).
+- **Home:** `ai-docs/mental-model/`, `ai-docs/ref/`, or a new category.
+
+Until resolved, this ticket stays out of `ready/`.
 
 ## Phases
 
@@ -53,8 +70,17 @@ decision point re-derives concept meaning, which is itself part of the weight.
 Write the single concept doc. Then strip the duplicated conceptual glosses from
 `ticket-conventions.md` and `lead-write-ticket.md`'s judge tables, replacing them
 with a reference to the concept doc — removing only *restatements*, never a
-guardrail verify() does not yet own. Confirm net token reduction on the
-write-ticket path and that no hard invariant was softened in the move.
+guardrail verify() does not yet own.
+
+**Acceptance check (measurement boundary stated).** Compare the token count of
+the write-ticket base path (`lead-write-ticket.md` + `ticket-conventions.md`)
+before vs. after the gloss removal; confirm a net reduction on *that* path. State
+the boundary explicitly: the win is per-write-invocation gloss savings, while the
+concept doc adds a session-level baseline (whichever loading mechanism the Open
+Decision picks) — so amortization clearly wins only for multi-ticket sessions, and
+a session that never touches tickets pays baseline for no gloss savings. Also
+confirm no hard invariant was softened in the move (each removed line is a
+restatement, not a guardrail).
 
 ## Spec Impact
 
@@ -65,3 +91,20 @@ write-ticket path and that no hard invariant was softened in the move.
   referenced doc; convention + playbook stop re-glossing.
 - Contract-first spec: no — the doc's content is authored during implementation;
   the spec entry is a closeout describing the new grounding artifact's role.
+
+## Blocked (2026-07-23)
+
+### Design Reviewer — concern
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | loading mechanism for session-loaded is unspecified/ambiguous | important | missing |
+| 2 | net token reduction claim not squared with baseline session-load cost (measurement boundary) | minor | autonomous |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | concept doc target location/loading mechanism unspecified (architecture decision) | important |
+| 2 | Background flags Go-constants duplication source that Phase 1 does not address | minor |
+| 3 | Phase 1 verification step lacks a concrete method | minor |
