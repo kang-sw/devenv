@@ -92,12 +92,30 @@ reattach.
   own entry (so a daemon crash cannot orphan the file); the **daemon
   prunes** only entries it has positively confirmed dead. Per-terminal
   files avoid multi-writer races.
-- Identity = **PID + starttime (or nonce)**; this is the PRECONDITION for
-  kill.
+- Identity = **OS-queryable PID + start-time ONLY**; this is the
+  PRECONDITION for kill. A nonce is explicitly NOT a kill-gate option: a
+  nonce is verifiable only over IPC, and IPC is dead exactly when the
+  IPC-unreachable kill decision (reconcile rows 4/5) is being made, so it
+  cannot gate the kill path.
 - **2-tier kill**: prefer graceful IPC request to have the helper
-  `child.kill()` its shell and exit; fall back to PID SIGKILL only when IPC
-  is unreachable. Use a **Windows Job Object** so killing the helper
-  reliably takes the shell subtree.
+  `child.kill()` its shell and exit; fall back to a verified-PID kill only
+  when IPC is unreachable. To close the verify-to-kill TOCTOU race (a PID
+  reused between start-time verification and the SIGKILL call), the
+  fallback path captures the process via a **stable OS handle** at
+  verification time — Linux `pidfd`, Windows process handle — and issues
+  the kill THROUGH that handle, not by re-resolving the PID.
+  Windows: the **helper-owned** Job Object (NOT daemon-owned) so killing
+  the helper reliably takes the shell subtree; the helper spawns the shell
+  detached with **breakaway-from-job** semantics. Rationale: a
+  daemon-owned Job Object would close when the daemon exits and re-kill the
+  shell, silently reintroducing the exact bug this ticket fixes on the
+  primary Windows dogfooding platform.
+- **Registry-write ordering**: the helper spawns the shell only AFTER its
+  own registry entry (PID + start-time) is durably written (atomic
+  temp-rename) AND the helper's PID has been handshaked back to the
+  daemon. This closes the orphan-leak window where a daemon crash mid-spawn
+  would otherwise leave a live shell with no registry entry to reconcile
+  against.
 - Keep `MAX_TERMINAL_SESSIONS = 16`, enforced after reconcile counts
   adopted live sessions.
 
@@ -136,6 +154,14 @@ short grace window (e.g. 30s, or until one reattach) and deliver the last
 output + exit code before self-exiting — so a pane shows WHY it ended
 instead of silently vanishing.
 
+**Implementation note:** the current daemon-side WS attach guard rejects
+`!is_live()` sessions with `StatusCode::GONE` (`terminal.rs:454`), and
+session listing filters to live sessions only (`terminal.rs:148`,
+`list_for_work_root`'s `.filter(... && session.is_live())`). BOTH gates must
+be relaxed so an in-grace exited session (reconcile row 2) is still visible
+to the client and accepts one final reattach to deliver its buffered output
+and exit code, instead of being treated as already gone.
+
 ## Non-goals / notes
 
 - No on-disk text persistence (scrollback is memory-only in the helper
@@ -146,11 +172,16 @@ instead of silently vanishing.
 
 ## Open questions
 
-- IPC framing/protocol choice (length-prefixed frames? line protocol?
-  existing schema reuse?).
+- **IPC framing/protocol choice — resolution checkpoint.** Pin the choice
+  (ad hoc length-prefixed frames vs. reusing the existing terminal message
+  schema) at Phase 1 kickoff; not a design-time blocker, but must be decided
+  before implementation starts.
 - Exact grace window value.
-- Cross-platform detach mechanics (setsid/double-fork on Unix vs. Job
-  Object + detached process on Windows).
+- Cross-platform detach mechanics — largely DECIDED: Unix uses
+  setsid/double-fork; Windows uses a helper-owned Job Object + detached
+  breakaway spawn (see Decided design). What remains open here is residual
+  specifics only (e.g. exact Windows API calls / crate choice), not a fork
+  in the approach.
 
 ## Phases
 
@@ -158,3 +189,13 @@ instead of silently vanishing.
 
 - Completion: a live terminal survives a daemon restart and reattaches via
   the existing frontend resume-by-id path, verified by an acceptance test.
+- Completion additionally requires a test proving reconcile rows 3 and 5
+  (identity-mismatch / PID-reuse) NEVER kill an unverified process — the
+  drop-entry-only behavior must be exercised, not just asserted in prose.
+- Platform scope: the Unix path (setsid/double-fork detach, pidfd-gated
+  kill) is verified end-to-end in Phase 1. Windows detach + the
+  helper-owned Job Object breakaway are also IN Phase 1 scope, because
+  Windows is the motivating dogfooding platform and a Unix-only result
+  would not solve the pain this ticket exists for. Exception: this MAY
+  split into a Phase 2 if the Job-Object breakaway work proves
+  independently large — decide at Phase 1 kickoff, not mid-phase.
