@@ -896,6 +896,29 @@ lookup — no `session_key`/root, no gate. An unknown or empty `type`, or a `pha
 other than `content`/`intent`, is rejected with an error listing valid values.
 {#260720-tickets-checklist-tool}
 
+`tickets.verify(paths)` runs the deterministic mechanical guardrail set over one
+or more ticket files and returns a structured verdict — overall `OK`, plus each
+finding's guardrail, file, and a fix-oriented message — without judging prose
+quality or design soundness. It is the single home for the file-state-
+deterministic checks that were otherwise scattered across the ticket mutation
+tools: stem-format regex, status/directory consistency against the canonical
+five status directories (`idea`/`todo`/`ready`/`.done`/`.dropped`, not the
+looser legacy set), file existence, frontmatter fence integrity, ready-landing
+sage-review posture presence and terminal value, close-date field presence for
+`.done`/`.dropped`, and phase/Result heading structural well-formedness. Those
+are hard findings that fail the verdict (`OK: false`). Missing spec addressing on
+a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
+failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
+a hard block is separate deferred scope. verify performs no prose or design
+judgment and does not attempt the append-only phase-Result convention, which is a
+diff-level property a single-file snapshot cannot see. It is callable standalone
+for mid-edit red-green feedback, and the identical check runs as the `git.commit`
+ticket-verify gate (`#260723-git-commit-ticket-verify-gate`), so a standalone
+call and the commit gate return the same verdict for identical input. A residual
+mutation-tool check that enforces one of these rules (the ready-move sage-posture
+check) shares the same underlying predicate rather than duplicating it.
+Capability range: `>=0.35.1-dev <0.36.0`. {#260723-tickets-verify-tool}
+
 The Sage Review Gate is split into two sequential, non-looping stage gates
 keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
 ticket: a design-sketch review at `todo/` landing (tolerant of missing detail;
@@ -1071,6 +1094,19 @@ the transcript at the point context compaction is likely to trigger. The trailer
 is omitted only when no session key is present; structured JSON output is
 unaffected.
 {#260708-git-commit-session-key-tip}
+
+Before the commit is written, `git.commit` runs the `tickets.verify`
+(`#260723-tickets-verify-tool`) mechanical guardrail set over the staged ticket
+files as a commit-time gate. When a staged ticket file fails a hard guardrail,
+the commit is refused and the failing guardrail, file, and fix message are
+returned instead; no commit is written and `HEAD` does not move. This makes the
+verify floor non-bypassable for ticket-touching commits — a hand-edited ticket
+that never went through a mutation tool is still caught at commit — closing the
+direct-file-edit bypass that prose-only guardrails left open. A soft warning
+(missing spec addressing) does not block the commit; it lands with the warning
+surfaced. The gate is non-overridable: there is no flag that lets a hard-failing
+ticket commit through. A commit that stages no ticket files is unaffected.
+Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 

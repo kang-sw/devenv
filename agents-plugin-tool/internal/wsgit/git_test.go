@@ -3,6 +3,8 @@ package wsgit
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -600,6 +602,99 @@ func TestParseTicketEditionAdditions(t *testing.T) {
 	changes := parseTicketResultAdditions([]byte("diff --git a/ai-docs/tickets/ready/260503-feat-demo.md b/ai-docs/tickets/ready/260503-feat-demo.md\n+++ b/ai-docs/tickets/ready/260503-feat-demo.md\n+#### Edition (def456) - 2026-05-05\n+Follow-up tweak.\n"))
 	if len(changes) != 1 || changes[0].Stem != "260503-feat-demo" || changes[0].ResultHeading != "#### Edition (def456) - 2026-05-05" {
 		t.Fatalf("changes = %#v", changes)
+	}
+}
+
+// TestCommitBlockedByVerifierNeverReachesCommit exercises the commit-gate
+// backstop: a Verifier that vetoes the staged ticket path must stop Commit
+// before it stages further ticket-change detection or issues `git commit`,
+// mirroring TestCommitRefusesUnrelatedStagedPaths's assert-on-call-count
+// style. Uses a real t.TempDir() root (unlike the fake "/repo" used
+// elsewhere in this file) with an actual invalid-shaped ticket file on disk,
+// since the commit-gate's whole point is vetoing real staged ticket content.
+func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
+	root := t.TempDir()
+	ticketPath := "ai-docs/tickets/todo/not-a-valid-stem.md"
+	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Bad\n---\n\nBody.\n")
+
+	runner := &sequenceRunner{outs: [][]byte{
+		{}, // pre-status
+		{}, // add
+		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
+	}}
+	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
+	client := Client{Runner: runner, Verifier: func(gotRoot string, gotPaths []string) error {
+		if gotRoot != root {
+			t.Fatalf("verifier root = %q, want %q", gotRoot, root)
+		}
+		if len(gotPaths) != 1 || gotPaths[0] != ticketPath {
+			t.Fatalf("verifier paths = %#v, want [%q]", gotPaths, ticketPath)
+		}
+		return verifyErr
+	}}
+
+	_, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{ticketPath},
+		Title:     "test: blocked by verifier",
+		AIContext: []string{"User intent: prove the commit gate blocks an invalid ticket."},
+	})
+	if !errors.Is(err, verifyErr) {
+		t.Fatalf("Commit error = %v, want %v", err, verifyErr)
+	}
+	if len(runner.calls) != 3 {
+		t.Fatalf("runner.calls = %#v, want exactly 3 (pre-status, add, post-status) — verifier must block before ticket-change detection or `git commit`", runner.calls)
+	}
+	for _, call := range runner.calls {
+		if len(call.args) > 0 && call.args[0] == "commit" {
+			t.Fatalf("Commit issued `git commit` despite a blocking Verifier: %#v", runner.calls)
+		}
+	}
+}
+
+// TestCommitProceedsWhenVerifierNilDefaultsToNoOp asserts the DI seam's
+// backward-compat default: a Client built without a Verifier (the zero
+// value, as every pre-existing Client{Runner: ...} test literal in this file
+// still constructs) must commit exactly as before this gate existed.
+func TestCommitProceedsWhenVerifierNilDefaultsToNoOp(t *testing.T) {
+	root := t.TempDir()
+	ticketPath := "ai-docs/tickets/todo/260503-feat-demo.md"
+	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Demo\n---\n\nBody.\n")
+
+	runner := &sequenceRunner{outs: [][]byte{
+		{}, // pre-status
+		{}, // add
+		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
+		{},                 // detectTicketChanges name-status
+		{},                 // detectTicketChanges unified diff
+		{},                 // commit -m
+		[]byte("abc123\n"), // rev-parse HEAD
+	}}
+	client := Client{Runner: runner}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{ticketPath},
+		Title:     "test: nil verifier is a no-op",
+		AIContext: []string{"User intent: prove nil Verifier does not change existing Commit behavior."},
+	})
+	if err != nil {
+		t.Fatalf("Commit returned error with nil Verifier: %v", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
+	}
+	if len(runner.calls) != 7 || runner.calls[5].args[0] != "commit" {
+		t.Fatalf("runner.calls = %#v, want `git commit` to run at call index 5", runner.calls)
+	}
+}
+
+func mustWriteGitTestFixture(t *testing.T, root, relPath, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

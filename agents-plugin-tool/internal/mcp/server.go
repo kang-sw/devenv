@@ -894,7 +894,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
-		result, err := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
+		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:               stringList(params.Arguments["paths"]),
 			Title:               title,
 			Description:         description,
@@ -1260,6 +1260,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", commitErr)
 		}
 		return toolTextResponse(req.ID, formatSageRecord(result, commitRes.Hash), nil)
+	case "tickets.verify":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		result, err := wsdoc.TicketVerify(root, stringList(params.Arguments["paths"]))
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatTicketVerify(result), err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2432,6 +2445,48 @@ func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
 	fmt.Fprintf(&b, "%s: %s\n  %s -> %s\n", verb, stem, result.OldPath, result.NewPath)
 	if result.Tip != "" {
 		fmt.Fprintf(&b, "tip: %s\n", result.Tip)
+	}
+	return b.String()
+}
+
+// verifyAdapter adapts wsdoc.TicketVerify's richer VerifyResult into the
+// plain-error shape wsgit.Client.Verifier expects, so wsgit.Commit can veto a
+// commit without importing internal/wsdoc directly (see
+// {#260720-wsdoc-commit-boundary}). Wired into both the git.commit dispatch
+// case below and the CLI gitCommit handler (via VerifyAdapter) so every
+// ws.git.commit entry point is gated identically.
+func verifyAdapter(root string, paths []string) error {
+	result, err := wsdoc.TicketVerify(root, paths)
+	if err != nil {
+		return err
+	}
+	if result.OK {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("ticket verify failed:\n")
+	for _, finding := range result.Findings {
+		fmt.Fprintf(&b, "- [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+	}
+	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+}
+
+// formatTicketVerify renders a wsdoc.VerifyResult for the standalone
+// tickets.verify tool: an overall PASS/FAIL line followed by one bullet per
+// finding (hard, hyphenated FAIL) and warning (soft, WARN) — mirroring
+// formatTicketMutate/formatSageGate's plain-text style.
+func formatTicketVerify(result wsdoc.VerifyResult) string {
+	var b strings.Builder
+	if result.OK {
+		b.WriteString("verify: PASS\n")
+	} else {
+		b.WriteString("verify: FAIL\n")
+	}
+	for _, finding := range result.Findings {
+		fmt.Fprintf(&b, "  FAIL [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+	}
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(&b, "  WARN [%s] %s: %s\n", warning.Guardrail, warning.Path, warning.Message)
 	}
 	return b.String()
 }
@@ -3841,6 +3896,18 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "tickets.verify",
+			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; spec-address is reported as a warning only, never a block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"paths":  stringArrayProperty("Ticket file paths to verify (ai-docs/tickets/<status>/<stem>.md)."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"paths"},
+			},
+		},
+		{
 			"name":        "path.generate",
 			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
 			"inputSchema": map[string]any{
@@ -4080,7 +4147,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "tickets.sage_gate", "tickets.sage_record", "path.generate", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "tickets.sage_gate", "tickets.sage_record", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",

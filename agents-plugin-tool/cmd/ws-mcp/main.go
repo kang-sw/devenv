@@ -237,6 +237,7 @@ func runtimeCapabilityCommandNames() []string {
 		"tickets.list",
 		"tickets.move",
 		"tickets.status",
+		"tickets.verify",
 	}
 	if mcp.NoAgentMode() {
 		commands = filterNoAgentCommands(commands)
@@ -487,7 +488,7 @@ func gitCommit(args []string) {
 		}
 		body = text
 	}
-	result, err := wsgit.NewClient().Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
+	result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: mcp.VerifyAdapter}.Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
 		Paths:               paths,
 		Title:               *title,
 		Description:         body,
@@ -522,6 +523,8 @@ func ticketsCommand(args []string) {
 		ticketsMove(args[1:])
 	case "create":
 		ticketsCreate(args[1:])
+	case "verify":
+		ticketsVerify(args[1:])
 	default:
 		ticketsUsage()
 		os.Exit(2)
@@ -529,7 +532,7 @@ func ticketsCommand(args []string) {
 }
 
 func ticketsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create|verify>")
 }
 
 func ticketsList(args []string) {
@@ -670,6 +673,23 @@ func ticketsCreate(args []string) {
 		InitialState: *initialState,
 	})
 	printTextOrFatal("tickets create", mcp.FormatTicketCreate(result), err)
+}
+
+func ticketsVerify(args []string) {
+	fs := flag.NewFlagSet("tickets verify", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	format := fs.String("format", "", `output format: text or json`)
+	var paths multiFlag
+	fs.Var(&paths, "path", "ticket path to verify; may be repeated")
+	_ = fs.Parse(args)
+	paths = append(paths, fs.Args()...)
+
+	result, err := wsdoc.TicketVerify(defaultRoot(*root), paths)
+	if outputJSON(*format) {
+		printJSONOrFatal("tickets verify", result, err)
+		return
+	}
+	printTextOrFatal("tickets verify", mcp.FormatTicketVerify(result), err)
 }
 
 func specsCommand(args []string) {

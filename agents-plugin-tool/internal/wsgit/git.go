@@ -33,8 +33,20 @@ func (ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]by
 	return out, nil
 }
 
+// Verifier is an optional structural hook Client.Commit invokes after staging
+// and status validation, before the commit lands, so a caller can veto a
+// commit whose staged paths fail a domain-specific check (e.g. ticket-file
+// well-formedness). wsgit intentionally stays free of an internal/wsdoc
+// import here (see {#260720-wsdoc-commit-boundary} in
+// ai-docs/mental-model/mcp-runtime.md); a caller that needs ticket
+// verification wires wsdoc.TicketVerify in through an adapter that produces
+// this plain-error shape, mirroring how Runner keeps wsgit free of an
+// os/exec-specific dependency at the type level.
+type Verifier func(root string, paths []string) error
+
 type Client struct {
-	Runner Runner
+	Runner   Runner
+	Verifier Verifier
 }
 
 func NewClient() Client { return Client{Runner: ExecRunner{}} }
@@ -44,6 +56,13 @@ func (c Client) runner() Runner {
 		return ExecRunner{}
 	}
 	return c.Runner
+}
+
+func (c Client) verifier() Verifier {
+	if c.Verifier == nil {
+		return func(string, []string) error { return nil }
+	}
+	return c.Verifier
 }
 
 type StatusResult struct {
@@ -452,6 +471,13 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	}
 	status := ParseStatus(statusOut)
 	if err := validateCommitStatus(status, opts.Paths); err != nil {
+		return CommitResult{}, err
+	}
+	// Verify runs after staging (so a blocked commit leaves the invalid state
+	// staged for the caller to fix and re-verify, not reverted) and before the
+	// commit message/`git commit` itself, matching validateCommitStatus's
+	// gate position.
+	if err := c.verifier()(root, opts.Paths); err != nil {
 		return CommitResult{}, err
 	}
 	ticketChanges := detectTicketChanges(ctx, runner, root)
