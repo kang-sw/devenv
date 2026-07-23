@@ -30,6 +30,10 @@ pub fn registry_entry_path(registry_dir: &Path, terminal_id: &str) -> PathBuf {
     registry_dir.join(format!("{terminal_id}.json"))
 }
 
+pub fn registry_socket_path(registry_dir: &Path, terminal_id: &str) -> PathBuf {
+    registry_dir.join(format!("{terminal_id}.sock"))
+}
+
 /// Atomic temp-rename write, 0600 on Unix. Synchronous (`std::fs`) - callers
 /// on the daemon side (boot reconcile, at startup, before serving traffic)
 /// should offload via `spawn_blocking`; the helper process calls this
@@ -50,8 +54,20 @@ pub fn write_registry_entry(registry_dir: &Path, entry: &TerminalRegistryEntry) 
     Ok(())
 }
 
+// CONTRACT (260723 Phase-1 review finding M-d): the helper's own
+// delete-on-exit cleanup (`run_terminal_helper`'s end, after
+// `serve_connections` returns) removes both its registry `.json` and its
+// `.sock` file - but a hard-killed helper (verified-PID kill fallback tier)
+// never runs that cleanup at all, so its `.sock` file would otherwise be
+// orphaned under `<registry_dir>` forever. Every daemon-side caller of this
+// function (boot-reconcile's row-4 kill-then-drop, and any future
+// verified-kill path) is exactly the case where the helper's own cleanup
+// did NOT run, so pruning the `.sock` here too is the right single choke
+// point - disk hygiene only, the `.json` is what boot reconcile actually
+// keys its identity check off of.
 pub fn delete_registry_entry(registry_dir: &Path, terminal_id: &str) {
     let _ = fs::remove_file(registry_entry_path(registry_dir, terminal_id));
+    let _ = fs::remove_file(registry_socket_path(registry_dir, terminal_id));
 }
 
 /// Directory scan tolerant of partial failure: a whole-directory-unreadable
@@ -173,6 +189,28 @@ mod tests {
 
         delete_registry_entry(&dir, "term_a");
         assert!(scan_registry_dir(&dir).is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // CONTRACT (260723 Phase-1 review finding M-d): a hard-killed helper
+    // (verified-PID kill fallback) never reaches its own delete-on-exit
+    // cleanup, so the daemon-side `delete_registry_entry` call site must
+    // prune the stray `.sock` file itself, not just the `.json` - otherwise
+    // `<registry_dir>` accumulates orphaned socket files indefinitely.
+    #[test]
+    fn delete_registry_entry_also_prunes_a_stray_socket_file() {
+        let dir = temp_dir("delete-socket");
+        write_registry_entry(&dir, &sample_entry("term_a")).expect("write entry");
+        let socket_path = registry_socket_path(&dir, "term_a");
+        fs::write(&socket_path, b"not a real socket, just a stand-in file")
+            .expect("write stand-in socket file");
+        assert!(socket_path.exists(), "stand-in socket file must exist before delete");
+
+        delete_registry_entry(&dir, "term_a");
+
+        assert!(scan_registry_dir(&dir).is_empty(), "json entry must be gone");
+        assert!(!socket_path.exists(), "stale .sock file must be pruned alongside the .json entry");
 
         let _ = fs::remove_dir_all(&dir);
     }
