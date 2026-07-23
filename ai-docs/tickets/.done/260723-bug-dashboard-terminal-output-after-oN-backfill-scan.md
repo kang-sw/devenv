@@ -120,6 +120,28 @@ scan + clone + allocation on every wake purely to read `status` and
 - `cargo build --workspace` and `cargo test -p ws-dashboard-daemon` both
   green.
 
+### Result (66c17fd8) - 2026-07-23
+
+`output_after` O(N) `filter(seq>after)` scan replaced with clamped
+index-arithmetic `skip` (u64 clamp before `as usize` cast); byte-identical
+result via the gapless-contiguous-sequence invariant. Cost O(N)->O(1)+O(K).
+Added CONTRACT comment on the invariant dependency.
+
+New private `status_and_next_sequence` accessor replaces the redundant
+per-wake `output_after(u64::MAX)` full-ring scan in
+`send_terminal_socket_status`.
+
+No public signature/struct-field change; call sites 432/863/is_range_truncated
+628 untouched. Behavior-preserving; Spec Impact None (internal perf refactor;
+spec stem 260516-ws-web-dashboard-terminal-io-transport intentionally not
+edited - no observable contract change).
+
+Verification: `cargo build --workspace` clean; `cargo test -p
+ws-dashboard-daemon` = lib 90 pass (+2 pre-existing ignored) / routes 165 /
+server 15; `--lib terminal` 12 pass incl. new
+`output_after_index_arithmetic_matches_old_filter_semantics_across_eviction`;
+single opus review clean. mental-model updated (e0b1244d).
+
 ## Relation
 
 Sibling to the frontend O(N) rerender idea tickets filed 260723

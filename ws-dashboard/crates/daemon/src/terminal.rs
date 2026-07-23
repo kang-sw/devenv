@@ -604,19 +604,34 @@ impl TerminalSession {
         )
     }
 
+    // CONTRACT: this replaces a `filter(|c| c.sequence > after)` scan with
+    // direct index arithmetic. It is only valid because `append_output`
+    // (see below) maintains a gapless, strictly-contiguous `sequence`
+    // numbering (each push consumes exactly one `next_sequence` value) and
+    // only ever evicts from the front (`pop_front`, never mid-deque
+    // removal). If either invariant changes, this shortcut must be
+    // revisited.
     fn output_after(&self, after: u64) -> TerminalOutputView {
         let inner = self.inner.lock().expect("terminal session lock poisoned");
+        let front_seq = inner.output.front().map(|chunk| chunk.sequence);
+        let skip = match front_seq {
+            Some(front_seq) => after
+                .saturating_add(1)
+                .saturating_sub(front_seq)
+                .min(inner.output.len() as u64) as usize,
+            None => 0,
+        };
         TerminalOutputView {
             terminal_id: self.id.clone(),
             status: inner.status,
             next_sequence: inner.next_sequence,
-            chunks: inner
-                .output
-                .iter()
-                .filter(|chunk| chunk.sequence > after)
-                .cloned()
-                .collect(),
+            chunks: inner.output.iter().skip(skip).cloned().collect(),
         }
+    }
+
+    fn status_and_next_sequence(&self) -> (TerminalStatus, u64) {
+        let inner = self.inner.lock().expect("terminal session lock poisoned");
+        (inner.status, inner.next_sequence)
     }
 
     // Reports whether a client resuming from `after` has missed retained
@@ -896,19 +911,19 @@ async fn send_terminal_socket_status(
     exit: bool,
     truncated: bool,
 ) -> Result<(), ()> {
-    let output = session.output_after(u64::MAX);
+    let (status, next_sequence) = session.status_and_next_sequence();
     let message = if exit {
         TerminalWebSocketServerMessage::Exit {
             terminal_id: session.id.clone(),
-            status: output.status,
-            next_sequence: output.next_sequence,
+            status,
+            next_sequence,
             truncated,
         }
     } else {
         TerminalWebSocketServerMessage::Status {
             terminal_id: session.id.clone(),
-            status: output.status,
-            next_sequence: output.next_sequence,
+            status,
+            next_sequence,
             truncated,
         }
     };
@@ -1295,6 +1310,62 @@ mod terminal_portability_skeleton_tests {
             "contiguous resume at the retention boundary must not be reported as truncated"
         );
         assert_eq!(cursor, newest_retained);
+    }
+
+    // `output_after` was rewritten from a `filter(|c| c.sequence > after)`
+    // scan to index arithmetic (see the CONTRACT comment on `output_after`).
+    // This proves the new skip-based implementation returns byte-identical
+    // `Vec<TerminalOutputChunk>` results to the old filter semantics, across
+    // a deque pushed past `MAX_OUTPUT_CHUNKS` (eviction forced), for every
+    // representative class of `after` value: before the retained window,
+    // both eviction-boundary values, mid-window, both ends of the "no new
+    // data" boundary, and near-`u64::MAX`.
+    #[test]
+    fn output_after_index_arithmetic_matches_old_filter_semantics_across_eviction() {
+        let session = fake_terminal_session();
+        for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
+            session.append_output("x".to_owned());
+        }
+        let (front_seq, next_sequence) = {
+            let inner = session.inner.lock().expect("terminal session lock poisoned");
+            (
+                inner
+                    .output
+                    .front()
+                    .expect("output non-empty after eviction")
+                    .sequence,
+                inner.next_sequence,
+            )
+        };
+        let mid_window = front_seq + (next_sequence - 1 - front_seq) / 2;
+
+        let cases = [
+            0,                    // before-window
+            front_seq - 1,        // at-boundary: still contiguous, nothing missed
+            front_seq,            // at-boundary: first evicted chunk excluded
+            mid_window,           // mid-window
+            next_sequence - 1,    // at-next_sequence - 1: last valid, empty result
+            next_sequence,        // at-next_sequence: no new data, empty result
+            u64::MAX - 1,         // near-u64::MAX
+            u64::MAX,             // exactly u64::MAX
+        ];
+
+        for after in cases {
+            let expected: Vec<TerminalOutputChunk> = {
+                let inner = session.inner.lock().expect("terminal session lock poisoned");
+                inner
+                    .output
+                    .iter()
+                    .filter(|chunk| chunk.sequence > after)
+                    .cloned()
+                    .collect()
+            };
+            let actual = session.output_after(after).chunks;
+            assert_eq!(
+                actual, expected,
+                "output_after({after}) mismatched old filter(seq > after) semantics"
+            );
+        }
     }
 
     // Test-only `Write` impl that forwards each write's bytes over a plain
