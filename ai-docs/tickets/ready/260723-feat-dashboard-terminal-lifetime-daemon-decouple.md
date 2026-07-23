@@ -2,6 +2,8 @@
 title: Decouple dashboard terminal (PTY) lifetime from daemon process
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # idea: Decouple dashboard terminal (PTY) lifetime from daemon process
@@ -11,6 +13,31 @@ related-mental-model:
 > select this ahead of the default FIFO ordering. Rationale: it removes the
 > "daemon restart kills all live terminals" pain that currently blocks
 > efficient multi-workspace Windows dogfooding.
+
+## Spec Impact
+
+New observable behavior: terminal (shell) sessions now SURVIVE a dashboard
+daemon restart and reattach via the existing frontend resume-by-id path.
+Previously a daemon restart killed all live terminals (SIGHUP). This is a
+new caller-visible guarantee, not merely an internal refactor, so it
+qualifies for spec addressing.
+
+Target spec: `ws-web-dashboard/index.md`, anchors
+`260523-ws-dashboard-terminal-tab-restore` ("Terminal Tab Restore" — its
+current text assumes a daemon restart always leaves no daemon-alive
+terminal to reattach to, which this change invalidates for the boot-reconcile
+"adopt" case) and `260516-ws-web-dashboard-terminal-registry-pty-spawn`
+("Terminal Registry And PTY Spawn" — daemon ownership/persistence framing).
+Both anchors exist today and are the most likely amendment targets; no new
+spec file is needed.
+
+Deferral note: the actual spec-document edit is performed during
+implementation's doc pre-pass (lead-update-spec judge), not here; this
+section only declares the impact for the ready-gate.
+
+Not in scope for the spec update: on-disk persistence remains a non-goal,
+and scrollback stays memory-only in the helper ring, so the spec impact is
+about session survival/reattach, not durable history.
 
 ## Problem
 
