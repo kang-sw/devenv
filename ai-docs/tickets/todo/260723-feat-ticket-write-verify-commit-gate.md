@@ -4,8 +4,8 @@ related:
   260627-bug-write-ticket-bypasses-tickets-create: closes the exact bypass hole its prose-only fix left open
   260624-feat-tickets-template-tool-and-convention-diet: prior offload of ticket text into MCP tools; this continues by moving validation to a gate
 parent: 260723-epic-ticket-write-reshape
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # ticket.verify + commit-gate mechanical backstop, then must-not-forget mutation-tool collapse
@@ -29,8 +29,16 @@ The ticket-write path has three structural problems:
 
 `git.commit` already runs a validation step (`validateCommitStatus`) before
 `git commit -m`, but it does **zero** ticket-content validation. That slot is the
-natural host for a deterministic verify gate — the one chokepoint every path
-(tool-mediated or hand-edited) must pass.
+natural host for a deterministic verify gate.
+
+**Chokepoint scope (must resolve in Phase 1).** Hosting verify inside
+`ws/git.commit` covers every commit routed through that tool, but a raw
+`git commit` from the shell after a hand-edit bypasses it — re-opening a
+`260627`-class hole on the shell path. Before leaning on the "every path" premise,
+confirm the true universal chokepoint: a git pre-commit hook that runs verify, or
+a workflow mandate that all ticket-touching commits go through `ws/git.commit`.
+The Drop criterion already sanctions abandoning the `git.commit` host if no
+equivalent chokepoint exists.
 
 ## Decisions
 
@@ -45,18 +53,22 @@ natural host for a deterministic verify gate — the one chokepoint every path
   bundles a catastrophic-to-forget follow-on; free the rest to free-edit under the
   verify floor. Seed classification matches today's hard/soft choices (ready→sage
   is hard; close→phases-resolved is soft).
-- **sage stamp is lead single-writer.** Reviewers return verdict prose only (no
-  frontmatter write — avoids the concurrent design/completeness write race); a
-  thin lead-only `sage.stamp` writes `completed`/`blocked` and renders the
-  `## Blocked` companion.
+- **sage stamp is lead single-writer.** This *preserves* today's property — per
+  the current `sage-gate-record-tools` spec the lead-called `tickets.sage_record`
+  is already the sole frontmatter writer and reviewers already return verdicts
+  only. `sage.stamp` is the thin, explicitly-named lead-only replacement for
+  `sage_record`'s write (writes `completed`/`blocked`, renders the `## Blocked`
+  companion); the single-writer property is what keeps reviewers from racing if
+  they were ever allowed to raw-edit — it is not fixing a race that exists today.
 
 ### Rejected alternatives
 
 - *Delete all ticket mutation tools, keep only verify* — rejected: something must
   still write frontmatter / move files; deletion targets *validation*, not
   *mutation*, and high-stakes fiddly writes (sage stamp) keep a thin tool.
-- *Reviewers raw-edit the sage posture* — rejected: concurrent reviewers race on
-  the same frontmatter; the lead is the single writer instead.
+- *Reviewers raw-edit the sage posture* — rejected: concurrent reviewers would
+  race on the same frontmatter; the lead-single-writer property (already true via
+  `sage_record`) is preserved by `sage.stamp` instead.
 
 ## Phases
 
@@ -64,8 +76,19 @@ natural host for a deterministic verify gate — the one chokepoint every path
 
 Add a deterministic `ticket.verify(paths)` that runs the mechanical guardrail set
 (stem regex, status/dir consistency, frontmatter fence integrity, ready-landing
-sage-posture presence/value, ready-landing spec-address presence, phase/Result
-structure, close date-field presence). Host it at `wsgit.Client.Commit` after
+sage-posture presence/value, phase/Result **structural presence** only, close
+date-field presence). Two scope boundaries, both settled by design review:
+
+- **spec-address stays soft-warn here, not hard.** verify surfaces a
+  non-blocking warning when a ready-landing ticket lacks spec addressing, matching
+  today's `tickets.move` tip. Promoting it to a hard reject is deferred scope
+  owned by `260723-feat-ready-spec-address-hard-gate` (blocked on the collocator);
+  this ticket must not land that promotion.
+- **phase/Result is presence/well-formedness only.** The append-only convention
+  ("do not edit phase text after a `### Result`; append `#### Edition`") is a
+  diff-level property a snapshot check cannot enforce; verify does not attempt it.
+
+Host it at `wsgit.Client.Commit` after
 staging and before `git commit -m`, as a sibling of `validateCommitStatus`, so
 every ticket-touching commit is gated; keep it callable standalone for mid-edit
 feedback. This phase is purely additive — existing tools stay — and immediately
@@ -73,9 +96,29 @@ closes the `260627` direct-file-edit bypass hole. Returns actionable prose on
 failure (which guardrail, which file, what to fix), with a bounded
 retry/escalation contract so the red-green loop cannot thrash indefinitely.
 
+**Single source of truth.** verify is the one home for these mechanical rules;
+where a residual mutation tool (e.g. the ready-move sage-posture check) still
+enforces the same rule, it delegates to verify rather than duplicating logic —
+otherwise the phase re-creates the scatter the epic set out to remove.
+
+**Escalation terminal behavior.** The bounded retry/escalation contract must
+never let an invalid commit through — "bounded" means the red-green loop stops
+and requires a human/lead fix, not an override that lands a bad ticket. The
+non-bypassable guarantee wins over loop convenience.
+
+**Acceptance check:** each hard guardrail fires on a deliberately invalid ticket
+fixture (bad stem, wrong status dir, missing ready sage-posture, malformed
+frontmatter, malformed phase/Result headings); a commit staging such a ticket is
+blocked at the gate; the spec-address case emits a *warning*, not a block; and a
+standalone `ticket.verify(paths)` call returns the same verdict as the gate for
+identical input (call-site parity). Go test coverage for these cases passes.
+
 ### Phase 2: must-not-forget mutation-tool collapse + action-time obligation prose
 
-With the verify floor in place, collapse the mutation surface:
+With the verify floor in place, collapse the mutation surface. Produce the
+**complete per-tool keep/collapse disposition** by applying the must-not-forget
+filter tool-by-tool (not only the seed cases below); the seed classification is
+ready→sage hard, close→phases soft. Concretely:
 
 - Rename `tickets.create` → an attention-salient name (e.g. `create_empty` /
   `create_template`) whose return prose states it yields a *valid empty skeleton +
@@ -86,6 +129,15 @@ With the verify floor in place, collapse the mutation surface:
 - Add the thin lead-only `sage.stamp` tool; reviewers stop writing frontmatter.
 - Replace front-loaded playbook procedure with **action-time obligation prose**:
   each tool/gate return surfaces the must-know follow-on for that action.
+
+**Acceptance check:** the renamed create tool's return prose states the
+"valid empty skeleton + initial posture" caveat; `tickets.close` on a ticket with
+unresolved phases soft-warns without blocking; a ready move still hard-blocks on
+missing/blocked sage posture; `sage.stamp` writes the posture + `## Blocked`
+companion and is exercised only via the lead path (reviewers no longer write
+frontmatter); and the write-ticket path's front-loaded procedure prose is
+measurably reduced (net token count on the base path drops). Go tests cover the
+close soft-warn and ready hard-block cases.
 
 ## Spec Impact
 
