@@ -457,7 +457,8 @@ dropped tickets live in hidden archive dirs and git history.
   (`260703`, and `260627` shares that backlog reasoning).
 - `260723-feat-goal-step-rename-and-goal-loop-completion` (ready, feat) -
   reshape `lead-drain-ready-queue` into `lead-goal-step`: goal-primary
-  identity + rename (P1 mechanical blast-radius sweep), and body posture (P2):
+  identity + rename (P1 mechanical blast-radius sweep — shipped `dc29d4aa`), and
+  body posture (P2, pending):
   blocked-progress clean conclusion distinct from hard-gate pause, a lead
   ticket-curation authority clause (no new ticket-system state — selector reads
   ticket state/bodies for advanceable-now + record-blocker-before-yield), and

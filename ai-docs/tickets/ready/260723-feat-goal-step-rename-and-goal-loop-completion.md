@@ -270,6 +270,37 @@ guard + wsflow package tests + both Python test suites green (run with
 `-count=1` / fresh regen to avoid a cached pass — cf. the `260722` v0.34.4 stale
 manifest incident); `go test ./...` green (test-list update only).
 
+### Result (dc29d4aa) - 2026-07-23
+
+Renamed `lead-drain-ready-queue` → `lead-goal-step` across the full verified
+blast radius (both skill directories, both `name:` frontmatter, manifest key +
+hash, `substitutionMirroredSkills`, both Python test suites, spec + mental-model
+prose, `wsflow-mirroring.md`) and repositioned identity: SKILL.md body / spec
+`{#260703-...}` / mental-model now lead with "advance a goal-pursuit run by one
+step; `ready/` is the sole progress gate" and demote the single-cycle shim to the
+degenerate non-goal case. H1 is `# Goal Step`. wsflow mirror regenerated
+byte-identical; drift guard + manifest guard green.
+
+Verification: `go test ./... -count=1` (agents-plugin-tool, 12 pkgs ok),
+`python3 -m unittest discover agents-plugin-wsflow/tests` (9 ok),
+`python3 -m unittest discover agents-plugin/tests` (43 ok); blast-radius grep
+clean except the two preserved date-keyed anchor IDs; `spec_index.verify` ok.
+Partitioned review (correctness + fit) both clean.
+
+Deviation: the survey plan directed folding the settled rename-reposition text
+into `{#260703-...}` and deleting the `{#260723-lead-goal-step-rename-reposition}`
+anchor. Coordinator review caught that this violates spec-conventions ("an anchor
+is authored once and stable forever") and would orphan this ticket's `spec:`
+addressing — the anchor was re-attached (settled, no `🚧`) to the folded prose,
+stacked alongside `{#260703-...}`. Both date-keyed drain anchors
+(`{#260703-drain-ready-queue-skill}`, `{#260707-drain-goal-branch-staging}`) left
+byte-identical.
+
+Deferred: Phase 2 (body posture) unshipped. Version bump on dev-merge
+(`bump-ws-version.sh`) — not yet applied; due when this branch merges. Sequencing
+with `260722` Phase 2 (shared SKILL.md, now at the new path) still to resolve at
+that phase's proceed time.
+
 ### Phase 2: Blocked-progress completion term + autonomous in-scope bug capture
 
 Add to the (renamed) skill body: (a) the lead ticket-curation authority clause;
