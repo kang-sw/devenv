@@ -83,3 +83,45 @@ accepted before the Windows surface is production-correct.
 
 Prefer whichever is smallest and platform-scoped. None of the above is
 decided; this ticket captures the finding for triage.
+
+## Result (32fe13af) - 2026-07-23
+
+FIXED and verified on native Windows.
+
+**Root cause confirmed.** As diagnosed in `## Finding`: on Windows the
+detached terminal-helper inherited the daemon's listening `TcpListener`
+socket handle (Rust `std::process::Command` spawns with
+`bInheritHandles=TRUE`, and the listener was not marked non-inheritable),
+so a surviving helper pinned the daemon's fixed port and a same-port
+restart failed to bind with `os error 10048` (WSAEADDRINUSE).
+
+**Fix.** Commit `32fe13af` ("fix(daemon): mark Windows listen socket
+non-inheritable so helpers can't pin the port"). Fix direction (a) was
+taken: the daemon's bound `TcpListener` socket is marked non-inheritable
+on Windows via `SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0)` in
+the new `crate::terminal_platform::windows::mark_socket_non_inheritable`,
+called right after bind in `crates/daemon/src/server.rs`. No-op on Unix
+(the listener already gets CLOEXEC there). This is the smallest,
+platform-scoped fix; the helper needs no inherited handles because it
+communicates over a named-pipe/socket PATH.
+
+**Native-Windows verification (2026-07-23).** Re-ran the same acceptance
+method as the original walk (binary rebuilt from tip `32fe13af`, driven
+from PowerShell): create a terminal on the server-local Windows daemon,
+run a marker, hard-kill the daemon (`Stop-Process -Force`), then restart a
+daemon on the SAME port 4300.
+
+- `samePortRebindSucceeded=True`, and the daemon stderr contained NO
+  `os error 10048` — the same-port rebind that previously failed now
+  succeeds. This is the defect this ticket exists for, now cleared.
+- `helperSurvivedKill=True` — the detached helper still survives the
+  daemon kill; Job-Object breakaway is unaffected by the fix.
+- Reconcile re-adoption intact: adopted terminal status `running`, same
+  helper pid, same start_time.
+- Same live shell: the post-restart marker (`HOTFIX-MARKER-2`) was
+  observed and the pre-kill marker (`HOTFIX-MARKER-1`) was NOT replayed.
+- Clean teardown, no leftover processes.
+- Overall: PASS.
+
+**Merge status.** The fix is committed on `goal/drain-ready-queue` and
+rides the held `goal/drain-ready-queue -> ws-dashboard-dev` merge.

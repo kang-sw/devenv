@@ -287,3 +287,14 @@ same-port-restart bug must be fixed or explicitly accepted before the
 Windows surface is production-correct, since a real deployment restarts the
 daemon on its same fixed configured port. This bears on the held final
 `goal/drain-ready-queue -> ws-dashboard-dev` merge decision.
+
+**Follow-up - 2026-07-23.** The same-port-restart defect was hotfixed in
+commit `32fe13af` (mark the Windows listen socket non-inheritable so
+surviving helpers cannot pin the daemon's port) and re-verified on native
+Windows: a same-port 4300 restart now rebinds successfully with no
+`os error 10048`, and survive + reconcile + same-shell all still PASS. See
+the closed bug ticket
+`260723-bug-dashboard-terminal-helper-inherits-daemon-listen-socket` for
+the full verification. The previously-owed live-Windows acceptance is now
+substantially cleared; the only remaining gate is the held
+`goal/drain-ready-queue -> ws-dashboard-dev` final merge.
