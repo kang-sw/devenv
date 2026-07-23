@@ -114,7 +114,7 @@ pub mod unix {
 #[cfg(windows)]
 pub mod windows {
     use super::*;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
@@ -192,31 +192,39 @@ pub mod windows {
         Ok(unsafe { OwnedHandle::from_raw_handle(job as *mut _) })
     }
 
-    /// Spawns `command` with `CREATE_BREAKAWAY_FROM_JOB` (so the shell
-    /// detaches from any job the helper's own parent might already be in),
-    /// then immediately assigns the new process into `job` (the helper's
-    /// own kill-on-close job). Stable `std::process::Command` +
-    /// `CommandExt::creation_flags` is sufficient for the breakaway itself -
-    /// no raw `CreateProcessW` is needed.
+    /// Assigns an already-spawned process into `job` (the helper's own
+    /// kill-on-close job) via its raw handle, so that killing/closing the
+    /// helper's Job Object handle reliably takes that process down too.
     ///
-    /// KNOWN SIMPLIFICATION: there is a narrow window between spawn and job
-    /// assignment during which a pathologically fast child could itself
-    /// spawn a grandchild that escapes the job. `std::process::Child` does
-    /// not expose the primary thread handle needed for a suspended-create +
-    /// `ResumeThread` bracket without dropping to raw `CreateProcessW`; this
-    /// Stage-2 leg (cross-compile-checked only, no live Windows E2E in this
-    /// session per Decision B) accepts that window rather than adding a raw
-    /// `CreateProcessW` path. Revisit if this race matters in practice.
-    pub fn spawn_into_job(mut command: Command, job: &OwnedHandle) -> io::Result<std::process::Child> {
-        command.creation_flags(CREATE_BREAKAWAY_FROM_JOB);
-        let child = command.spawn()?;
-        let ok = unsafe {
-            AssignProcessToJobObject(job.as_raw_handle() as HANDLE, child.as_raw_handle() as HANDLE)
-        };
+    /// CONTRACT (260723 Phase-1 review finding I2): this takes a raw handle
+    /// rather than spawning a `std::process::Command` itself (the original
+    /// shape this primitive was sketched with in the plan) because the
+    /// helper spawns its PTY-owned shell through `portable_pty::SlavePty::
+    /// spawn_command` (see `terminal_helper_process.rs::spawn_shell`), not
+    /// a bare `std::process::Command` - `portable_pty`'s Windows (ConPTY)
+    /// backend does the actual `CreateProcessW` call internally and only
+    /// exposes the resulting child via `portable_pty::Child::as_raw_handle`.
+    /// Assigning post-spawn is the integration point that actually fits;
+    /// `CREATE_BREAKAWAY_FROM_JOB` is not applicable here since
+    /// `portable_pty::CommandBuilder` has no creation-flags hook to carry it
+    /// (breakaway at daemon->helper spawn time is unrelated and already
+    /// handled by `spawn_detached`, above).
+    ///
+    /// KNOWN SIMPLIFICATION: there is a narrow window between the shell's
+    /// spawn and this assignment call during which a pathologically fast
+    /// child could itself spawn a grandchild that escapes the job.
+    /// `portable_pty` exposes neither the suspended-create + `ResumeThread`
+    /// bracket nor `PROC_THREAD_ATTRIBUTE_JOB_LIST` needed to close this
+    /// window without bypassing `portable_pty`'s `CreateProcessW` call
+    /// entirely. This Stage-2 leg (cross-compile-checked only, no live
+    /// Windows E2E in this session per Decision B) accepts that window;
+    /// revisit if it matters in practice.
+    pub fn assign_into_job(job: &OwnedHandle, handle: RawHandle) -> io::Result<()> {
+        let ok = unsafe { AssignProcessToJobObject(job.as_raw_handle() as HANDLE, handle as HANDLE) };
         if ok == FALSE {
             return Err(io::Error::last_os_error());
         }
-        Ok(child)
+        Ok(())
     }
 
     pub fn process_start_time(pid: u32) -> Option<u64> {

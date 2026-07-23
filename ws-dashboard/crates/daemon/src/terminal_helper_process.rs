@@ -82,6 +82,15 @@ struct SharedState {
     writer_tx: Mutex<Option<std_mpsc::Sender<WriterCommand>>>,
     shell_started: AtomicBool,
     exited_at: Mutex<Option<Instant>>,
+    // CONTRACT (260723 Phase-1 review finding I2, Windows Job-Object
+    // wiring): must be kept alive for the helper's whole lifetime (see
+    // `terminal_platform::windows::create_kill_on_close_job`'s doc comment)
+    // - dropping it closes the Job Object handle, which tears down every
+    // process still assigned to it. Populated once, in `spawn_shell`.
+    // Windows-only: Unix gets the equivalent guarantee from `setsid()` +
+    // PTY-master-close instead (see `terminal_platform::unix`).
+    #[cfg(windows)]
+    job: Mutex<Option<std::os::windows::io::OwnedHandle>>,
 }
 
 impl SharedState {
@@ -177,6 +186,8 @@ pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()>
         writer_tx: Mutex::new(None),
         shell_started: AtomicBool::new(false),
         exited_at: Mutex::new(None),
+        #[cfg(windows)]
+        job: Mutex::new(None),
     });
 
     let result = serve_connections(&args, &mut listener, &shared).await;
@@ -376,6 +387,44 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
     );
     let child = pair.slave.spawn_command(command)?;
     drop(pair.slave);
+
+    // CONTRACT (260723 Phase-1 review finding I2, Windows Job-Object
+    // wiring): assign the newly spawned shell into a fresh helper-owned
+    // kill-on-close Job Object so the verified-PID kill fallback tier
+    // (`terminal_platform::kill_verified` against an IPC-unreachable
+    // helper, e.g. boot-reconcile row 4) reliably takes the shell subtree
+    // down too, not just the helper itself - `TerminateProcess` alone does
+    // not tear down child processes on Windows, so without this wiring a
+    // hard-killed helper would orphan its shell indefinitely. No-op on
+    // Unix, which already gets that guarantee from `setsid()` + PTY-
+    // master-close (see `terminal_platform::unix`).
+    #[cfg(windows)]
+    {
+        if let Some(raw_handle) = child.as_raw_handle() {
+            match crate::terminal_platform::windows::create_kill_on_close_job() {
+                Ok(job) => {
+                    if let Err(error) =
+                        crate::terminal_platform::windows::assign_into_job(&job, raw_handle)
+                    {
+                        tracing::warn!(
+                            %error,
+                            "failed to assign terminal shell into kill-on-close job object"
+                        );
+                    }
+                    *shared.job.lock().expect("job lock poisoned") = Some(job);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "failed to create kill-on-close job object for terminal shell"
+                    );
+                }
+            }
+        } else {
+            tracing::warn!("terminal shell child exposed no raw handle; skipping job-object assignment");
+        }
+    }
+
     let reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
 
