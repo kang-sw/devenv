@@ -6,6 +6,12 @@ related-mental-model:
 
 # idea: Decouple dashboard terminal (PTY) lifetime from daemon process
 
+> **Drain priority — TOP.** Designated by the user (2026-07-23) as the
+> highest-priority pickup for the active `/lead-drain-ready-queue` run:
+> select this ahead of the default FIFO ordering. Rationale: it removes the
+> "daemon restart kills all live terminals" pain that currently blocks
+> efficient multi-workspace Windows dogfooding.
+
 ## Problem
 
 Dashboard daemon restart kills all live terminals. During multi-workspace
@@ -118,3 +124,10 @@ instead of silently vanishing.
 - Exact grace window value.
 - Cross-platform detach mechanics (setsid/double-fork on Unix vs. Job
   Object + detached process on Windows).
+
+## Phases
+
+### Phase 1: Server-side per-terminal supervisor decoupling
+
+- Completion: a live terminal survives a daemon restart and reattaches via
+  the existing frontend resume-by-id path, verified by an acceptance test.
