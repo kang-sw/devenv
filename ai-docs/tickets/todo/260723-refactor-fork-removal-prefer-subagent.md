@@ -4,8 +4,8 @@ related:
   260605-research-ws-native-subagent-pivot: native-subagent direction; fork is the delegation substrate this removes
   260625-research-fork-posture-leak-system-guarantee: resolved by deletion — fork inherits the lead's deferral stance
   260629-research-fork-worker-persona-bleed: resolved by deletion — fork inherits lead identity, worse on Opus 4.8
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Delete the fork delegation construct; reshape lead-prefer-subagent to fresh-spawn + central authoring whitelist
@@ -37,10 +37,18 @@ Survey of the live tree confirms deletion is clean:
   test string-assertions. Deletion touches prompt text + a few test assertions,
   not runtime code.
 - Only two live skills mention fork: `lead-prefer-subagent` (the rule) and
-  `lead-goal-step` (a one-line pointer). No other playbook uses it. The rendered
-  sources are `lead-prefer-subagent/SKILL.md` (~12-22),
-  `agents-plugin/rsrc/lead-workflow-manual/native-spawn-binding.codex.md`, and the
-  builtin override default `prompt.PreferSubagentInvocationGuidance.codex`.
+  `lead-goal-step` (a one-line pointer). No other playbook uses it. The primary
+  edit site is `lead-prefer-subagent/SKILL.md` (~8-22).
+- **Idiom precision (verified during design review).** Two spawn idioms must not
+  be conflated: `spawn_agent(fork_context:true, ...)` / full-history is the
+  **fork to delete**; `fork_turns: "none"` is the **fresh self-contained spawn to
+  keep**. `native-spawn-binding.codex.md:7` uses `fork_turns:"none"` — it is the
+  surviving fresh-spawn binding, **not** a deletion target.
+- **Already retired:** the builtin override default
+  `prompt.PreferSubagentInvocationGuidance.codex` returns an empty map today
+  (`playbook_tools.go:458-467`); its fork-guidance seed was retired when the
+  prefer-subagent body was inlined into SKILL.md. There is nothing live to delete
+  there — the earlier "deletion is clean" survey overstated this one point.
 - The one substantive rule already routes standing-role authoring
   (implementer/reviewer) to fresh spawn unconditionally; fork remains only for a
   vague "other work" carve-out whose own failure-recovery clause already re-runs
@@ -81,20 +89,42 @@ Survey of the live tree confirms deletion is clean:
 
 ### Phase 1: Remove fork from prefer-subagent and reshape to fresh + central whitelist
 
-Delete fork prose from `lead-prefer-subagent/SKILL.md`, the codex
-`native-spawn-binding` source, and the builtin override default; drop the
-`lead-goal-step` pointer. Rewrite the posture to: fresh spawn by default;
-authoring/mutation of durable artifacts stays with the context-holder session per
-a central whitelist; remove the fork-availability posture gate. Update the
-test string-assertions that pin fork rendering. Note in `260625` / `260629` that
-they are resolved-by-deletion.
+Primary edit site is `lead-prefer-subagent/SKILL.md` (~8-22):
+
+- **Rewrite the opening invariant, not just excise fork sentences.** SKILL.md:8's
+  "no inline reads/edits/... cannot act inline" directly contradicts the new
+  lead-inline authoring whitelist; this is a *semantic reversal* of the skill's
+  core posture, so the opening invariant is rewritten to admit the
+  context-holder-authors carve-out.
+- Delete the `fork_context:true` / full-history fork prose and the
+  fork-availability posture gate. Reshape to: fresh spawn by default;
+  authoring/mutation of durable artifacts stays with the context-holder session
+  per a central whitelist.
+- **Do not touch `native-spawn-binding.codex.md:7`** — its `fork_turns:"none"` is
+  the fresh-spawn binding to keep. **No override to delete** — the
+  `PreferSubagentInvocationGuidance.codex` default is already an empty map.
+- Drop the `lead-goal-step:124` fork pointer (leave the unrelated git "fork
+  point" term at `:90`).
+- **Tests:** remove the `fork_context:true` assertions
+  (`prefer_mercenary_phase2_test.go:318,385`; `playbook_tools_test.go:832`);
+  **keep** `playbook_tools_test.go:592,605` which pin the surviving
+  `fork_turns:"none"` fresh-spawn binding.
+- Note in `260625` / `260629` that they are resolved-by-deletion.
+
+**Acceptance check:** the Go test suite passes with the updated string
+assertions, and a `fork` scan over the rendered `lead-prefer-subagent` SKILL.md,
+the codex `native-spawn-binding` source, and the `PreferSubagentInvocationGuidance.codex`
+builtin default returns zero remaining fork-delegation references (excluding
+unrelated git "fork point" senses). The `lead-goal-step` pointer no longer names
+fork.
 
 ## Spec Impact
 
 - Target spec area: `workflow-skills` (the `lead-prefer-subagent` delegation
-  posture and fresh-vs-fork routing description), plus the `prompt-bundle` /
-  `mcp-tools` mention of the `PreferSubagentInvocationGuidance.codex` override
-  default that seeds fork guidance.
+  posture and fresh-vs-fork routing description). Also check whether
+  `prompt-bundle` / `mcp-tools` still describe the `PreferSubagentInvocationGuidance.codex`
+  override as seeding fork guidance and correct it if stale — the runtime default
+  is already an empty map.
 - Expected caller-visible change: the documented delegation posture drops the
   fork path; delegates are fresh spawns, with a central authoring/mutation
   whitelist retaining that class in the context-holder session.
