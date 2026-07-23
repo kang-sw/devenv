@@ -119,6 +119,14 @@ HTTP fallback; only the execution moves off the shared async worker
 thread). Per the spec-impact rule, an internal refactor preserving all
 caller-visible behavior does not qualify for spec addressing.
 
+One nuance surfaced by design review: a mid-flight write failure now
+surfaces asynchronously via the existing `output_signal`/`is_live` path
+(the reader thread marks the session exited/error, which the socket task
+already observes) instead of as a synchronous `Gone` from `write_input`.
+The synchronous `Gone` response for an already-closed terminal is
+preserved. This is an internal error-surfacing-locus nuance, not a
+behavior change visible to callers.
+
 ## Phases
 
 ### Phase 1: Move blocking PTY write + resize off the async worker
@@ -128,6 +136,29 @@ suite passes; `write_input` and `resize` no longer block a Tokio worker
 thread (writes/resizes are handed to a per-session dedicated blocking
 writer thread); terminal input/output behavior is unchanged and in-order
 over both WS and HTTP fallback.
+
+Constraints on the completion boundary:
+
+- **Non-blocking handoff (required):** the async→writer-thread enqueue
+  MUST be non-blocking — an unbounded channel, or `try_send` with a
+  defined full-channel policy. A bounded channel whose `send()` blocks a
+  Tokio worker thread is explicitly forbidden (it would reintroduce the
+  pool starvation this ticket fixes). `MAX_INPUT_BYTES` already caps
+  per-message size, so unbounded growth is human-typing-rate bounded on a
+  live terminal.
+- **Shutdown ordering (required):** `terminate()`/`mark_error()`/
+  `mark_exited()` must FIRST unblock any stalled write (kill child / drop
+  the master so `write_all` returns EIO/EPIPE), and must NEVER join the
+  writer thread while holding the session mutex; detaching rather than
+  joining is acceptable degradation if a pathological pipe never
+  unblocks. (Avoids a teardown deadlock.)
+- **Preserve synchronous fast-path:** keep the cheap `status==Running` /
+  writer-present check synchronous in `write_input` so an already-closed
+  terminal still returns `Gone` immediately.
+- **Test requirement:** add a targeted unit/integration test for the new
+  per-session writer-thread/channel path — covering in-order delivery AND
+  error/session-teardown handling — since the existing daemon suite
+  exercises none of `write_input`/`resize`.
 
 ## Relation
 
