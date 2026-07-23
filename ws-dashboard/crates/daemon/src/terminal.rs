@@ -1,9 +1,7 @@
-use std::collections::{HashMap, VecDeque};
-use std::io::{Read, Write};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
-use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{
     ws::{Message, WebSocket, WebSocketUpgrade},
@@ -13,14 +11,22 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::{SinkExt, StreamExt};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::{watch, Mutex as AsyncMutex};
 use ws_dashboard_core::WorkRootId;
 
 use crate::router::AppState;
+use crate::terminal_helper_ipc::{write_ndjson, NdjsonReader};
+use crate::terminal_helper_protocol::{
+    DaemonToHelperMessage, HelperToDaemonMessage, TerminalHelperOutputChunk, TerminalHelperStatus,
+};
+use crate::terminal_ipc_transport::{IpcReadHalf, IpcWriteHalf};
+use crate::terminal_reconcile::{classify, IdentityStatus, IpcStatus, ReconcileRow};
+use crate::terminal_registry_file::{
+    delete_registry_entry, scan_registry_dir, TerminalRegistryEntry,
+};
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 const MAX_TERMINAL_SESSIONS: usize = 16;
@@ -31,6 +37,14 @@ const MIN_ROWS: u16 = 1;
 const MAX_COLUMNS: u16 = 300;
 const MAX_ROWS: u16 = 120;
 const DEFAULT_BROWSER_PTY_TERM: &str = "xterm-256color";
+
+// CONTRACT: the daemon-local grace window is a display/attach-gating
+// convenience only; the helper is the authoritative timer (see
+// `terminal_helper_process.rs::GRACE_WINDOW`) and self-exits/deletes its
+// registry entry independently of whatever the daemon believes here.
+const DAEMON_GRACE_WINDOW_MS: u64 = 30_000;
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_millis(3_000);
+pub(crate) const DEFAULT_RECONCILE_CONNECT_TIMEOUT: Duration = Duration::from_millis(400);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPlatform {
@@ -134,18 +148,133 @@ where
     })
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TerminalRegistry {
     sessions: Arc<RwLock<HashMap<String, Arc<TerminalSession>>>>,
+    helper_binary: PathBuf,
+    registry_dir: PathBuf,
+    connect_timeout: Duration,
+}
+
+impl Default for TerminalRegistry {
+    fn default() -> Self {
+        Self::new(
+            default_helper_binary(),
+            default_registry_dir(),
+            DEFAULT_CONNECT_TIMEOUT,
+        )
+    }
+}
+
+pub(crate) fn default_helper_binary() -> PathBuf {
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ws-dashboard"))
+}
+
+pub(crate) fn default_registry_dir() -> PathBuf {
+    crate::persistent_state::default_state_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("terminals")
 }
 
 impl TerminalRegistry {
+    pub fn new(helper_binary: PathBuf, registry_dir: PathBuf, connect_timeout: Duration) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            helper_binary,
+            registry_dir,
+            connect_timeout,
+        }
+    }
+
+    // CONTRACT (ticket "Boot reconcile policy" / server.rs wiring): must run
+    // to completion BEFORE `build_router`/`axum::serve` starts accepting
+    // connections - callers must await this before constructing `AppState`.
+    // Scans `registry_dir` for `<termid>.json` entries left behind by
+    // helpers that survived a prior daemon's exit, applies the 6-row table
+    // (`terminal_reconcile::classify`) per entry, and returns a registry
+    // pre-populated with every adopted (row 1/2) session.
+    pub async fn boot_reconcile(
+        helper_binary: PathBuf,
+        registry_dir: PathBuf,
+        connect_timeout: Duration,
+    ) -> Self {
+        let registry = Self::new(helper_binary, registry_dir.clone(), connect_timeout);
+        let scan_dir = registry_dir.clone();
+        let entries = tokio::task::spawn_blocking(move || scan_registry_dir(&scan_dir))
+            .await
+            .unwrap_or_default();
+
+        let mut seen_ids = std::collections::HashSet::new();
+        for entry in entries {
+            // Duplicate-entry defense: the one-file-per-terminal-id scan
+            // shape structurally prevents true duplicates, but keep the
+            // guard so a corrupted directory (e.g. hand-edited during
+            // debugging) degrades to "first wins" instead of double-adopt.
+            if !seen_ids.insert(entry.terminal_id.clone()) {
+                continue;
+            }
+            registry.reconcile_entry(entry).await;
+        }
+        registry
+    }
+
+    async fn reconcile_entry(&self, entry: TerminalRegistryEntry) {
+        // Unverified identity NEVER even attempts an IPC connection, let
+        // alone a kill - `classify` encodes this short-circuit, but the
+        // check is duplicated here explicitly so no connect attempt can
+        // slip in before it (see `terminal_reconcile.rs` rows 3/5).
+        let identity = identity_status(entry.pid, entry.start_time);
+        if !matches!(identity, IdentityStatus::VerifiedOurs) {
+            delete_registry_entry(&self.registry_dir, &entry.terminal_id);
+            return;
+        }
+
+        let connected = connect_and_handshake(&entry.socket_path, self.connect_timeout).await;
+        let ipc_status = match &connected {
+            Some(connected) if connected.status == TerminalStatus::Running => {
+                IpcStatus::ReachableShellAlive
+            }
+            Some(_) => IpcStatus::ReachableShellExited,
+            None => IpcStatus::Unreachable,
+        };
+
+        match classify(identity, ipc_status) {
+            ReconcileRow::AdoptLive | ReconcileRow::AdoptGrace => {
+                let connected =
+                    connected.expect("adopt rows are only reachable with a live connection");
+                let session = TerminalSession::from_connection(
+                    entry.terminal_id.clone(),
+                    WorkRootId::from(entry.work_root_id.clone()),
+                    entry.title.clone(),
+                    entry.cwd_hint.clone(),
+                    entry.created_at_ms,
+                    connected,
+                    entry.columns,
+                    entry.rows,
+                );
+                self.insert_unchecked(session);
+            }
+            ReconcileRow::KillVerified => {
+                let pid = entry.pid;
+                let start_time = entry.start_time;
+                let _ = tokio::task::spawn_blocking(move || {
+                    crate::terminal_platform::kill_verified(pid, start_time)
+                })
+                .await;
+                delete_registry_entry(&self.registry_dir, &entry.terminal_id);
+            }
+            ReconcileRow::DropNoSuchProcess | ReconcileRow::DropPidReused => {
+                unreachable!("identity already verified above; classify cannot return this row")
+            }
+        }
+    }
+
     fn list_for_work_root(&self, work_root_id: &WorkRootId) -> Vec<TerminalSessionView> {
         self.sessions
             .read()
             .expect("terminal registry lock poisoned")
             .values()
-            .filter(|session| &session.work_root_id == work_root_id && session.is_live())
+            .filter(|session| &session.work_root_id == work_root_id && session.admits_attach())
             .map(|session| session.view())
             .collect()
     }
@@ -171,6 +300,18 @@ impl TerminalRegistry {
         Ok(())
     }
 
+    // Boot-reconcile-only insertion path: adopted sessions must all land in
+    // the registry before the cap is evaluated against any *new*
+    // `create_terminal` call (see `boot_reconcile`'s doc comment) - applying
+    // `insert`'s cap check here could evict a legitimately-adopted live
+    // session for no better reason than scan order.
+    fn insert_unchecked(&self, session: Arc<TerminalSession>) {
+        self.sessions
+            .write()
+            .expect("terminal registry lock poisoned")
+            .insert(session.id.clone(), session);
+    }
+
     fn remove(&self, terminal_id: &str) -> Option<Arc<TerminalSession>> {
         self.sessions
             .write()
@@ -178,26 +319,122 @@ impl TerminalRegistry {
             .remove(terminal_id)
     }
 
+    // CONTRACT (risk signal, ticket 260723 Phase 1 plan): returns every
+    // removed session so callers can explicitly request its kill. Before
+    // the PTY lived out-of-process, dropping the last `Arc<TerminalSession>`
+    // here implicitly closed the PTY master (SIGHUP) and that was enough -
+    // dropping this thin daemon-side proxy now does NOTHING to a detached
+    // helper, which would otherwise keep running orphaned forever. Callers
+    // MUST kill each returned session (see the three `remove_for_work_roots`
+    // call sites in `git_worktree.rs`/`resources.rs`/`root_picker.rs`).
     pub fn remove_for_work_roots(
         &self,
-        work_root_ids: &std::collections::BTreeSet<WorkRootId>,
-    ) -> usize {
+        work_root_ids: &BTreeSet<WorkRootId>,
+    ) -> Vec<Arc<TerminalSession>> {
         let mut sessions = self
             .sessions
             .write()
             .expect("terminal registry lock poisoned");
-        let before = sessions.len();
-        sessions.retain(|_, session| !work_root_ids.contains(&session.work_root_id));
-        before - sessions.len()
+        let mut removed = Vec::new();
+        sessions.retain(|_, session| {
+            if work_root_ids.contains(&session.work_root_id) {
+                removed.push(session.clone());
+                false
+            } else {
+                true
+            }
+        });
+        removed
     }
 }
 
-struct TerminalSession {
+fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
+    match crate::terminal_platform::process_start_time(pid) {
+        Some(observed) if observed == start_time => IdentityStatus::VerifiedOurs,
+        Some(_) => IdentityStatus::PidReused,
+        None => IdentityStatus::NoSuchProcess,
+    }
+}
+
+/// Result of a successful connect + handshake against a helper's IPC
+/// listener: the still-open reader/writer halves plus the identity and
+/// initial status the helper reported. Shared by fresh `create_terminal`
+/// spawns and boot-reconcile adoption - both need exactly this handshake
+/// shape (see `terminal_helper_process.rs::handle_connection`).
+struct HandshakeConnection {
+    reader: NdjsonReader<IpcReadHalf>,
+    writer: IpcWriteHalf,
+    pid: u32,
+    start_time: u64,
+    status: TerminalStatus,
+    next_sequence: u64,
+}
+
+async fn connect_and_handshake(socket_path: &Path, timeout: Duration) -> Option<HandshakeConnection> {
+    let deadline = Instant::now() + timeout;
+    let stream = loop {
+        match crate::terminal_ipc_transport::connect(socket_path).await {
+            Ok(stream) => break stream,
+            Err(_) => {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
+    let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
+    let mut reader = NdjsonReader::new(read_half);
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let handshake = match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
+        Ok(Ok(Some(message))) => message,
+        _ => return None,
+    };
+    let HelperToDaemonMessage::Handshake { pid, start_time } = handshake else {
+        return None;
+    };
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let status_message = match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
+        Ok(Ok(Some(message))) => message,
+        _ => return None,
+    };
+    let (status, next_sequence) = match status_message {
+        HelperToDaemonMessage::Status {
+            status,
+            next_sequence,
+        } => (status.into(), next_sequence),
+        HelperToDaemonMessage::Exit {
+            status,
+            next_sequence,
+        } => (status.into(), next_sequence),
+        _ => return None,
+    };
+
+    write_ndjson(&mut write_half, &DaemonToHelperMessage::HandshakeAck)
+        .await
+        .ok()?;
+
+    Some(HandshakeConnection {
+        reader,
+        writer: write_half,
+        pid,
+        start_time,
+        status,
+        next_sequence,
+    })
+}
+
+pub struct TerminalSession {
     id: String,
     work_root_id: WorkRootId,
     title: String,
     cwd_hint: Option<String>,
     created_at_ms: u64,
+    pid: u32,
+    start_time: u64,
+    write_half: Arc<AsyncMutex<IpcWriteHalf>>,
     inner: Mutex<TerminalSessionInner>,
     output_signal: watch::Sender<u64>,
 }
@@ -206,47 +443,16 @@ struct TerminalSessionInner {
     status: TerminalStatus,
     columns: u16,
     rows: u16,
+    // CONTRACT: this is a daemon-side *cache*, not the source of truth - the
+    // helper owns the authoritative bounded ring (see
+    // `terminal_helper_process.rs::RingState`) and pushes every chunk over
+    // IPC as it is produced. On (re)connect (fresh create or boot-reconcile
+    // adopt) the helper re-pushes its whole retained ring from sequence 1,
+    // which doubles as this cache's bootstrap/backfill without a dedicated
+    // request/response round trip for the common case.
     output: VecDeque<TerminalOutputChunk>,
     next_sequence: u64,
-    writer_tx: Option<mpsc::Sender<TerminalWriterCommand>>,
-    master: Option<Box<dyn MasterPty + Send>>,
-    child: Option<Box<dyn Child + Send + Sync>>,
-}
-
-// CONTRACT: PTY writes must never block a Tokio worker thread (see ticket
-// 260723-bug-dashboard-terminal-blocking-pty-write-thread-starvation). Each
-// live terminal session owns exactly one dedicated blocking OS thread that
-// serializes writes to the PTY master; `write_input` only ever performs a
-// non-blocking `mpsc::Sender::send` handoff onto this thread, never a direct
-// blocking `write_all`.
-enum TerminalWriterCommand {
-    Write(Vec<u8>),
-}
-
-// Detached, unjoined thread (mirrors `spawn_reader`'s style below): a stalled
-// `write_all` on a full OS pipe buffer is unblocked by the *child process*
-// dying (see `terminate`/`mark_error`/`mark_exited` ordering), not by
-// anything this thread does on its own, so there is nothing useful to join.
-fn spawn_writer_thread(writer: Box<dyn Write + Send>) -> mpsc::Sender<TerminalWriterCommand> {
-    let (tx, rx) = mpsc::channel::<TerminalWriterCommand>();
-    thread::spawn(move || run_writer_thread(rx, writer));
-    tx
-}
-
-// Pulled out of `spawn_writer_thread` so tests can drive the loop on a
-// `thread::Builder` handle they retain and `.join()` (safe in test code,
-// since no session mutex is held across the join) to assert a failing write
-// stops the loop cleanly without panicking, without giving production code
-// a joinable handle to misuse.
-fn run_writer_thread(rx: mpsc::Receiver<TerminalWriterCommand>, mut writer: Box<dyn Write + Send>) {
-    while let Ok(TerminalWriterCommand::Write(data)) = rx.recv() {
-        if writer.write_all(&data).and_then(|()| writer.flush()).is_err() {
-            // A write failure correlates with process death; the reader
-            // thread already observes that independently and reports it via
-            // `mark_error`/`mark_exited`, so this thread just stops quietly.
-            break;
-        }
-    }
+    grace_until_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -284,6 +490,13 @@ pub struct TerminalOutputChunk {
 // chunk semantics as the HTTP backfill route; status frames report terminal
 // lifecycle changes; exit frames end the live attachment without making the
 // browser connection own the daemon process lifecycle.
+//
+// STABILITY (ticket 260723 Phase 1, Decision A): this type and
+// `TerminalWebSocketClientMessage` are the ONLY browser-facing wire types.
+// The daemon<->helper protocol (`terminal_helper_protocol.rs`) is a
+// deliberately separate type hierarchy; nothing in this phase changes the
+// shape or semantics of these two enums or `TerminalSessionView`/
+// `TerminalOutputChunk` below.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TerminalWebSocketServerMessage {
@@ -327,6 +540,17 @@ pub enum TerminalStatus {
     Exited,
     Terminated,
     Error,
+}
+
+impl From<TerminalHelperStatus> for TerminalStatus {
+    fn from(status: TerminalHelperStatus) -> Self {
+        match status {
+            TerminalHelperStatus::Running => TerminalStatus::Running,
+            TerminalHelperStatus::Exited => TerminalStatus::Exited,
+            TerminalHelperStatus::Terminated => TerminalStatus::Terminated,
+            TerminalHelperStatus::Error => TerminalStatus::Error,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -386,19 +610,24 @@ pub async fn create_terminal(
     };
 
     match TerminalSession::spawn(
+        &state.terminals.helper_binary,
+        &state.terminals.registry_dir,
+        state.terminals.connect_timeout,
         work_root_id,
         root_path,
         request.title.unwrap_or_else(|| "Terminal".to_owned()),
         columns,
         rows,
         request.cwd_hint,
-    ) {
+    )
+    .await
+    {
         Ok(session) => {
             let view = session.view();
             match state.terminals.insert(session.clone()) {
                 Ok(()) => Json(view).into_response(),
                 Err(error) => {
-                    session.terminate();
+                    session.terminate().await;
                     error.into_response()
                 }
             }
@@ -443,7 +672,7 @@ pub async fn terminal_input(
     if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
         return terminal_access_error(error);
     }
-    match session.write_input(request.data.as_bytes()) {
+    match session.write_input(request.data.as_bytes()).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => error.into_response(),
     }
@@ -463,15 +692,9 @@ pub async fn terminal_resize(
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
     };
-    // `resize()`'s body stays synchronous (it must return the
-    // `TerminalSessionView` for the JSON response), but the blocking
-    // `master.resize()` syscall itself must not run on a Tokio worker
-    // thread - offload the whole call via `spawn_blocking`, mirroring the
-    // existing idiom in `git_toolbar.rs`/`root_picker.rs`/`resources.rs`.
-    match tokio::task::spawn_blocking(move || session.resize(columns, rows)).await {
-        Ok(Ok(view)) => Json(view).into_response(),
-        Ok(Err(error)) => error.into_response(),
-        Err(_) => terminal_error(StatusCode::INTERNAL_SERVER_ERROR, "terminal resize failed"),
+    match session.resize(columns, rows).await {
+        Ok(view) => Json(view).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -485,15 +708,16 @@ pub async fn terminal_websocket(
     // pre-upgrade gate in router.rs. Implementation must reject unknown or
     // closed opaque terminal ids before accepting the WebSocket attachment.
     // The Axum WebSocketUpgrade extractor is accepted only after
-    // TerminalRegistry::get confirms a live session; terminal_socket_task owns
-    // output backfill, resize/input frames, and close propagation.
+    // TerminalRegistry::get confirms a live-or-in-grace session;
+    // terminal_socket_task owns output backfill, resize/input frames, and
+    // close propagation.
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
     if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
         return terminal_access_error(error);
     }
-    if !session.is_live() {
+    if !session.admits_attach() {
         return terminal_error(StatusCode::GONE, "terminal is closed");
     }
     upgrade
@@ -514,12 +738,16 @@ pub async fn close_terminal(
     let Some(session) = state.terminals.remove(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
-    session.terminate();
+    session.terminate().await;
     StatusCode::NO_CONTENT.into_response()
 }
 
 impl TerminalSession {
-    fn spawn(
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn(
+        helper_binary: &Path,
+        registry_dir: &Path,
+        connect_timeout: Duration,
         work_root_id: WorkRootId,
         root_path: PathBuf,
         title: String,
@@ -528,56 +756,90 @@ impl TerminalSession {
         cwd_hint: Option<String>,
     ) -> Result<Arc<Self>, TerminalError> {
         let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
-        let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows,
-                cols: columns,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+        let id = opaque_terminal_id();
+        let socket_path = registry_dir.join(format!("{id}.sock"));
+
+        let mut command = std::process::Command::new(helper_binary);
+        command
+            .arg("terminal-helper")
+            .arg("--registry-dir")
+            .arg(registry_dir)
+            .arg("--terminal-id")
+            .arg(&id)
+            .arg("--work-root-id")
+            .arg(work_root_id.as_str())
+            .arg("--cwd")
+            .arg(&spawn_cwd)
+            .arg("--title")
+            .arg(&title)
+            .arg("--columns")
+            .arg(columns.to_string())
+            .arg("--rows")
+            .arg(rows.to_string())
+            .arg("--socket-path")
+            .arg(&socket_path);
+        if let Some(hint) = normalized_cwd_hint.as_deref() {
+            command.arg("--cwd-hint").arg(hint);
+        }
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        tokio::task::spawn_blocking(move || crate::terminal_platform::spawn_detached(command))
+            .await
+            .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
-        let mut command = CommandBuilder::new(default_shell());
-        command.cwd(spawn_cwd);
-        command.env(
-            "TERM",
-            browser_pty_term(|key| {
-                std::env::var_os(key).map(|value| value.to_string_lossy().into_owned())
-            }),
-        );
-        let child = pair
-            .slave
-            .spawn_command(command)
-            .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
-        drop(pair.slave);
-        let reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
-        let session = Arc::new(Self {
-            id: opaque_terminal_id(),
+
+        let connected = connect_and_handshake(&socket_path, connect_timeout)
+            .await
+            .ok_or(TerminalError::BadRequest("terminal spawn failed"))?;
+
+        Ok(Self::from_connection(
+            id,
             work_root_id,
             title,
-            cwd_hint: normalized_cwd_hint,
-            created_at_ms: now_ms(),
+            normalized_cwd_hint,
+            now_ms(),
+            connected,
+            columns,
+            rows,
+        ))
+    }
+
+    fn from_connection(
+        id: String,
+        work_root_id: WorkRootId,
+        title: String,
+        cwd_hint: Option<String>,
+        created_at_ms: u64,
+        connected: HandshakeConnection,
+        columns: u16,
+        rows: u16,
+    ) -> Arc<Self> {
+        let grace_until_ms = (connected.status != TerminalStatus::Running)
+            .then(|| now_ms() + DAEMON_GRACE_WINDOW_MS);
+        let session = Arc::new(Self {
+            id,
+            work_root_id,
+            title,
+            cwd_hint,
+            created_at_ms,
+            pid: connected.pid,
+            start_time: connected.start_time,
+            write_half: Arc::new(AsyncMutex::new(connected.writer)),
             inner: Mutex::new(TerminalSessionInner {
-                status: TerminalStatus::Running,
+                status: connected.status,
                 columns,
                 rows,
                 output: VecDeque::new(),
-                next_sequence: 1,
-                writer_tx: Some(spawn_writer_thread(writer)),
-                master: Some(pair.master),
-                child: Some(child),
+                next_sequence: connected.next_sequence,
+                grace_until_ms,
             }),
             output_signal: watch::channel(0).0,
         });
-        spawn_reader(session.clone(), reader);
-        Ok(session)
+        spawn_ipc_reader_task(session.clone(), connected.reader);
+        session
     }
 
     fn view(&self) -> TerminalSessionView {
@@ -604,12 +866,26 @@ impl TerminalSession {
         )
     }
 
+    // CONTRACT (grace-reattach, ticket "Boot reconcile policy" row 2): a
+    // session that has exited but is still inside its grace window remains
+    // visible/attachable even though `is_live()` is false. Every OTHER
+    // `is_live()` call site (`write_input`, `resize`, eviction `retain`)
+    // deliberately keeps the strict Running-only check - only the WS
+    // upgrade gate and the work-root listing use this relaxed predicate.
+    fn admits_attach(&self) -> bool {
+        let inner = self.inner.lock().expect("terminal session lock poisoned");
+        inner.status == TerminalStatus::Running
+            || inner
+                .grace_until_ms
+                .is_some_and(|deadline| now_ms() < deadline)
+    }
+
     // CONTRACT: this replaces a `filter(|c| c.sequence > after)` scan with
-    // direct index arithmetic. It is only valid because `append_output`
-    // (see below) maintains a gapless, strictly-contiguous `sequence`
-    // numbering (each push consumes exactly one `next_sequence` value) and
-    // only ever evicts from the front (`pop_front`, never mid-deque
-    // removal). If either invariant changes, this shortcut must be
+    // direct index arithmetic. It is only valid because `append_output_from_
+    // helper` (see below) maintains a gapless, strictly-contiguous
+    // `sequence` numbering (each push consumes exactly one `next_sequence`
+    // value) and only ever evicts from the front (`pop_front`, never mid-
+    // deque removal). If either invariant changes, this shortcut must be
     // revisited.
     fn output_after(&self, after: u64) -> TerminalOutputView {
         let inner = self.inner.lock().expect("terminal session lock poisoned");
@@ -645,129 +921,153 @@ impl TerminalSession {
         after > 0 && inner.output.front().is_some_and(|chunk| chunk.sequence > after + 1)
     }
 
-    fn write_input(&self, input: &[u8]) -> Result<(), TerminalError> {
+    async fn write_input(&self, input: &[u8]) -> Result<(), TerminalError> {
         if input.len() > MAX_INPUT_BYTES {
             return Err(TerminalError::BadRequest("terminal input too large"));
         }
-        // Fast path stays synchronous and cheap: an already-closed terminal
-        // must still return `Gone` immediately, without touching the writer
-        // channel. Only the actual PTY write is handed off.
-        let inner = self.inner.lock().expect("terminal session lock poisoned");
-        if inner.status != TerminalStatus::Running {
+        // Fast path stays cheap: an already-closed terminal must return
+        // `Gone` without touching the IPC connection at all.
+        if !self.is_live() {
             return Err(TerminalError::Gone("terminal is closed"));
         }
-        let Some(writer_tx) = inner.writer_tx.as_ref() else {
-            return Err(TerminalError::Gone("terminal is closed"));
-        };
-        // Non-blocking handoff to the dedicated writer thread (see
-        // `spawn_writer_thread`). `send` on an unbounded `mpsc` channel never
-        // blocks the caller. A send error means the writer thread already
-        // exited (e.g. after a prior write failure) - best-effort, not a
-        // synchronous error; the reader thread's `mark_error`/`mark_exited`
-        // is the authoritative signal for that case, surfaced asynchronously
-        // via `output_signal`/`is_live`.
-        let _ = writer_tx.send(TerminalWriterCommand::Write(input.to_vec()));
+        // The daemon<->helper wire is NDJSON/UTF-8 text (see
+        // `terminal_helper_protocol.rs`); the browser contract already
+        // types terminal input as UTF-8 `String` (`TerminalInputRequest`,
+        // `TerminalWebSocketClientMessage::Input`) for the primary paths.
+        // The WS binary-frame path funnels arbitrary bytes through here too
+        // - a lossy conversion is a deliberate, documented simplification
+        // for this phase rather than adding a base64 wire encoding.
+        let data = String::from_utf8_lossy(input).into_owned();
+        let mut writer = self.write_half.lock().await;
+        let _ = write_ndjson(&mut *writer, &DaemonToHelperMessage::Input { data }).await;
         Ok(())
     }
 
-    fn resize(&self, columns: u16, rows: u16) -> Result<TerminalSessionView, TerminalError> {
-        let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-        if inner.status != TerminalStatus::Running {
+    async fn resize(&self, columns: u16, rows: u16) -> Result<TerminalSessionView, TerminalError> {
+        if !self.is_live() {
             return Err(TerminalError::Gone("terminal is closed"));
         }
-        let Some(master) = inner.master.as_mut() else {
-            return Err(TerminalError::Gone("terminal is closed"));
-        };
-        master
-            .resize(PtySize {
-                rows,
-                cols: columns,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|_| TerminalError::BadRequest("terminal resize failed"))?;
-        inner.columns = columns;
-        inner.rows = rows;
-        drop(inner);
+        {
+            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+            inner.columns = columns;
+            inner.rows = rows;
+        }
+        let mut writer = self.write_half.lock().await;
+        let _ = write_ndjson(&mut *writer, &DaemonToHelperMessage::Resize { columns, rows }).await;
+        drop(writer);
         Ok(self.view())
     }
 
-    fn terminate(&self) {
+    // 2-tier kill (ticket-pinned): prefer a graceful IPC request first (the
+    // helper `child.kill()`s its own shell and exits cleanly); ALWAYS follow
+    // up with a verified-PID kill after a short delay regardless of whether
+    // the graceful write appeared to succeed - a hung-but-still-connected
+    // helper can accept the write into its socket buffer without ever
+    // processing it, and an already-gone helper simply makes the verified
+    // kill a harmless no-op (identity will not verify).
+    pub(crate) async fn terminate(&self) {
         let next_sequence = {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
             inner.status = TerminalStatus::Terminated;
-            // Kill/wait the child (and drop the master) BEFORE dropping the
-            // writer channel: this is what actually unblocks a `write_all`
-            // stuck on a full OS pipe buffer inside the writer thread.
-            // Dropping the channel sender first does nothing for an
-            // already-blocked syscall - see shutdown-ordering constraint.
-            if let Some(mut child) = inner.child.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            inner.master = None;
-            inner.writer_tx = None;
             inner.next_sequence
         };
+        {
+            let mut writer = self.write_half.lock().await;
+            let _ = write_ndjson(&mut *writer, &DaemonToHelperMessage::GracefulShutdown).await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let pid = self.pid;
+        let start_time = self.start_time;
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::terminal_platform::kill_verified(pid, start_time)
+        })
+        .await;
         let _ = self.output_signal.send(next_sequence);
     }
 
-    fn append_output(&self, data: String) {
+    fn append_output_from_helper(&self, chunk: TerminalHelperOutputChunk) {
         let next_sequence = {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-            if data.is_empty() {
-                return;
-            }
-            let sequence = inner.next_sequence;
-            inner.next_sequence += 1;
             inner.output.push_back(TerminalOutputChunk {
-                sequence,
-                data,
+                sequence: chunk.sequence,
+                data: chunk.data,
                 stream: "pty".to_owned(),
             });
             while inner.output.len() > MAX_OUTPUT_CHUNKS {
                 inner.output.pop_front();
             }
+            inner.next_sequence = inner.next_sequence.max(chunk.sequence + 1);
             inner.next_sequence
         };
         let _ = self.output_signal.send(next_sequence);
     }
 
-    fn mark_error(&self) {
-        let next_sequence = {
+    fn apply_helper_status(&self, status: TerminalStatus, next_sequence: u64) {
+        let seq = {
+            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+            inner.status = status;
+            inner.next_sequence = inner.next_sequence.max(next_sequence);
+            if status != TerminalStatus::Running && inner.grace_until_ms.is_none() {
+                inner.grace_until_ms = Some(now_ms() + DAEMON_GRACE_WINDOW_MS);
+            }
+            inner.next_sequence
+        };
+        let _ = self.output_signal.send(seq);
+    }
+
+    // The IPC connection dropped unexpectedly (helper crashed, or otherwise
+    // vanished without a clean `Exit` message) - distinct from a
+    // daemon-initiated `terminate()`, which already set `Terminated` before
+    // ever touching the connection.
+    fn mark_ipc_closed(&self) {
+        let seq = {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
             if inner.status == TerminalStatus::Running {
                 inner.status = TerminalStatus::Error;
-                // Same shutdown ordering as `terminate`: unblock a stalled
-                // writer-thread write before dropping the channel/master.
-                if let Some(mut child) = inner.child.take() {
-                    let _ = child.kill();
-                }
-                inner.master = None;
-                inner.writer_tx = None;
+                inner.grace_until_ms = Some(now_ms() + DAEMON_GRACE_WINDOW_MS);
             }
             inner.next_sequence
         };
-        let _ = self.output_signal.send(next_sequence);
+        let _ = self.output_signal.send(seq);
     }
+}
 
-    fn mark_exited(&self) {
-        let next_sequence = {
-            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-            if inner.status == TerminalStatus::Running {
-                inner.status = TerminalStatus::Exited;
-                // Same shutdown ordering as `terminate`: unblock a stalled
-                // writer-thread write before dropping the channel/master.
-                if let Some(mut child) = inner.child.take() {
-                    let _ = child.wait();
+fn spawn_ipc_reader_task(
+    session: Arc<TerminalSession>,
+    mut reader: NdjsonReader<IpcReadHalf>,
+) {
+    tokio::spawn(async move {
+        loop {
+            match reader.read_message::<HelperToDaemonMessage>().await {
+                Ok(Some(HelperToDaemonMessage::Handshake { .. })) => {
+                    // Only meaningful at connect time; `connect_and_handshake`
+                    // already consumed the one handshake message this
+                    // connection will ever send.
                 }
-                inner.master = None;
-                inner.writer_tx = None;
+                Ok(Some(HelperToDaemonMessage::Output(chunk))) => {
+                    session.append_output_from_helper(chunk);
+                }
+                Ok(Some(HelperToDaemonMessage::Status {
+                    status,
+                    next_sequence,
+                })) => session.apply_helper_status(status.into(), next_sequence),
+                Ok(Some(HelperToDaemonMessage::Exit {
+                    status,
+                    next_sequence,
+                })) => session.apply_helper_status(status.into(), next_sequence),
+                Ok(Some(HelperToDaemonMessage::BackfillResponse { .. })) => {
+                    // Not consumed in Stage 1 - the push-on-connect
+                    // mechanism (see `TerminalSessionInner::output`'s
+                    // CONTRACT comment) already covers the adopt/reattach
+                    // bootstrap case this would otherwise serve.
+                }
+                Ok(None) | Err(_) => {
+                    session.mark_ipc_closed();
+                    break;
+                }
             }
-            inner.next_sequence
-        };
-        let _ = self.output_signal.send(next_sequence);
-    }
+        }
+    });
 }
 
 async fn terminal_socket_task(
@@ -813,7 +1113,7 @@ async fn terminal_socket_task(
                             let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
-                        if session.write_input(&bytes).is_err() {
+                        if session.write_input(&bytes).await.is_err() {
                             let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
@@ -833,7 +1133,7 @@ async fn terminal_socket_task(
                 if send_output_backfill(&session, &mut sender, &mut cursor).await.is_err() {
                     break;
                 }
-                if !session.is_live() {
+                if !session.admits_attach() {
                     break;
                 }
             }
@@ -846,17 +1146,11 @@ async fn handle_terminal_socket_client_message(
     message: TerminalWebSocketClientMessage,
 ) -> Result<(), TerminalError> {
     match message {
-        TerminalWebSocketClientMessage::Input { data } => session.write_input(data.as_bytes()),
+        TerminalWebSocketClientMessage::Input { data } => session.write_input(data.as_bytes()).await,
         TerminalWebSocketClientMessage::Resize { columns, rows } => {
             let (columns, rows) = validate_size(columns, rows)
                 .map_err(|_| TerminalError::BadRequest("invalid terminal size"))?;
-            // Same rationale as the HTTP `terminal_resize` handler: offload
-            // the blocking `master.resize()` call so it never runs on this
-            // Tokio worker.
-            tokio::task::spawn_blocking(move || session.resize(columns, rows))
-                .await
-                .map_err(|_| TerminalError::BadRequest("terminal resize failed"))?
-                .map(|_| ())
+            session.resize(columns, rows).await.map(|_| ())
         }
     }
 }
@@ -941,23 +1235,6 @@ async fn send_socket_json(
         .map_err(|_| ())
 }
 
-fn spawn_reader(session: Arc<TerminalSession>, mut reader: Box<dyn Read + Send>) {
-    thread::spawn(move || {
-        let mut buffer = [0_u8; 4096];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => session.append_output(String::from_utf8_lossy(&buffer[..n]).into_owned()),
-                Err(_) => {
-                    session.mark_error();
-                    return;
-                }
-            }
-        }
-        session.mark_exited();
-    });
-}
-
 fn validate_size(columns: u16, rows: u16) -> Result<(u16, u16), ()> {
     if (MIN_COLUMNS..=MAX_COLUMNS).contains(&columns) && (MIN_ROWS..=MAX_ROWS).contains(&rows) {
         Ok((columns, rows))
@@ -1017,7 +1294,10 @@ fn terminal_access_error(error: WorkRootAccessError) -> Response {
     terminal_error(error.status(), error.message())
 }
 
-fn default_shell() -> PathBuf {
+// CONTRACT: called from `terminal_helper_process.rs` (the helper picks its
+// own shell) as well as `terminal.rs`'s own tests - it must stay pure/
+// testable and must not assume it is running inside the daemon process.
+pub(crate) fn default_shell() -> PathBuf {
     #[cfg(windows)]
     {
         select_terminal_shell(TerminalPlatform::Windows, |key| std::env::var_os(key)).program
@@ -1028,7 +1308,7 @@ fn default_shell() -> PathBuf {
     }
 }
 
-fn browser_pty_term(env: impl Fn(&str) -> Option<String>) -> String {
+pub(crate) fn browser_pty_term(env: impl Fn(&str) -> Option<String>) -> String {
     env("TERM")
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty() && value != "dumb")
@@ -1186,37 +1466,54 @@ mod terminal_portability_skeleton_tests {
         );
     }
 
-    // Builds a TerminalSession without spawning a real PTY, so the ring
-    // buffer eviction / truncation-detection contract can be exercised
-    // deterministically and fast, independent of the environment's PTY
-    // availability (see Phase 4 plan: no PTY-based e2e coverage needed for
-    // this backend-only cursor/eviction logic).
-    fn fake_terminal_session() -> TerminalSession {
+    // Builds a TerminalSession without spawning a real helper process, so
+    // the ring buffer eviction / truncation-detection contract can be
+    // exercised deterministically and fast, independent of a real PTY/IPC
+    // round trip. `tokio::io::duplex()` gives `write_half` a real (but
+    // unattached-to-any-helper) in-memory duplex half - cross-platform,
+    // unlike a Unix socketpair; none of these tests send through it.
+    async fn fake_terminal_session() -> TerminalSession {
+        let (_peer, local) = tokio::io::duplex(4096);
+        let (_read_half, write_half) =
+            crate::terminal_ipc_transport::split(Box::new(local) as crate::terminal_ipc_transport::BoxedIpcStream);
         TerminalSession {
             id: opaque_terminal_id(),
             work_root_id: WorkRootId::from("fake-work-root".to_owned()),
             title: "fake".to_owned(),
             cwd_hint: None,
             created_at_ms: now_ms(),
+            pid: std::process::id(),
+            start_time: 0,
+            write_half: Arc::new(AsyncMutex::new(write_half)),
             inner: Mutex::new(TerminalSessionInner {
                 status: TerminalStatus::Running,
                 columns: default_columns(),
                 rows: default_rows(),
                 output: VecDeque::new(),
                 next_sequence: 1,
-                writer_tx: None,
-                master: None,
-                child: None,
+                grace_until_ms: None,
             }),
             output_signal: watch::channel(0).0,
         }
     }
 
-    #[test]
-    fn is_range_truncated_never_fires_on_fresh_after_zero_attach() {
-        let session = fake_terminal_session();
+    fn push_chunk(session: &TerminalSession, data: &str) {
+        session.append_output_from_helper(TerminalHelperOutputChunk {
+            sequence: {
+                let mut inner = session.inner.lock().expect("terminal session lock poisoned");
+                let sequence = inner.next_sequence;
+                inner.next_sequence += 1;
+                sequence
+            },
+            data: data.to_owned(),
+        });
+    }
+
+    #[tokio::test]
+    async fn is_range_truncated_never_fires_on_fresh_after_zero_attach() {
+        let session = fake_terminal_session().await;
         for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
-            session.append_output("x".to_owned());
+            push_chunk(&session, "x");
         }
         // A fresh pane always requests after=0 ("send me everything you
         // have"), even against a terminal that has already evicted far more
@@ -1226,11 +1523,11 @@ mod terminal_portability_skeleton_tests {
         assert!(!session.is_range_truncated(0));
     }
 
-    #[test]
-    fn is_range_truncated_fires_only_for_a_genuine_resume_past_eviction() {
-        let session = fake_terminal_session();
+    #[tokio::test]
+    async fn is_range_truncated_fires_only_for_a_genuine_resume_past_eviction() {
+        let session = fake_terminal_session().await;
         for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
-            session.append_output("x".to_owned());
+            push_chunk(&session, "x");
         }
         let oldest_retained = session
             .inner
@@ -1262,11 +1559,11 @@ mod terminal_portability_skeleton_tests {
     // true (the oldest retained chunk can never exceed the newest retained
     // chunk's sequence by more than zero), so the buggy ordering would
     // silently flip this assertion to `false`.
-    #[test]
-    fn plan_output_backfill_computes_truncation_from_requested_cursor_not_advanced_cursor() {
-        let session = fake_terminal_session();
+    #[tokio::test]
+    async fn plan_output_backfill_computes_truncation_from_requested_cursor_not_advanced_cursor() {
+        let session = fake_terminal_session().await;
         for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
-            session.append_output("x".to_owned());
+            push_chunk(&session, "x");
         }
         let oldest_retained = session
             .inner
@@ -1320,11 +1617,11 @@ mod terminal_portability_skeleton_tests {
     // representative class of `after` value: before the retained window,
     // both eviction-boundary values, mid-window, both ends of the "no new
     // data" boundary, and near-`u64::MAX`.
-    #[test]
-    fn output_after_index_arithmetic_matches_old_filter_semantics_across_eviction() {
-        let session = fake_terminal_session();
+    #[tokio::test]
+    async fn output_after_index_arithmetic_matches_old_filter_semantics_across_eviction() {
+        let session = fake_terminal_session().await;
         for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
-            session.append_output("x".to_owned());
+            push_chunk(&session, "x");
         }
         let (front_seq, next_sequence) = {
             let inner = session.inner.lock().expect("terminal session lock poisoned");
@@ -1368,127 +1665,169 @@ mod terminal_portability_skeleton_tests {
         }
     }
 
-    // Test-only `Write` impl that forwards each write's bytes over a plain
-    // `mpsc` channel the test polls with `recv_timeout`, so the assertion
-    // exercises the real writer thread's ordering guarantee without a real
-    // PTY and without a flaky sleep-based race.
-    struct RecordingWriter {
-        tx: mpsc::Sender<Vec<u8>>,
-    }
-
-    impl Write for RecordingWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let _ = self.tx.send(buf.to_vec());
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    // Test-only `Write` impl that always fails, used to prove the writer
-    // thread's loop exits cleanly (no panic, no unwrap on the write error)
-    // instead of looping forever or crashing the thread abnormally.
-    struct FailingWriter;
-
-    impl Write for FailingWriter {
-        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "boom"))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn write_input_delivers_chunks_in_order_over_the_writer_thread() {
-        let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
-        let writer_tx = spawn_writer_thread(Box::new(RecordingWriter { tx: record_tx }));
-        let session = fake_terminal_session();
+    #[tokio::test]
+    async fn write_input_returns_gone_synchronously_after_terminal_status_is_not_running() {
+        let session = fake_terminal_session().await;
         {
             let mut inner = session.inner.lock().expect("terminal session lock poisoned");
-            inner.writer_tx = Some(writer_tx);
+            inner.status = TerminalStatus::Terminated;
         }
-
-        session.write_input(b"first").expect("write first");
-        session.write_input(b"second").expect("write second");
-        session.write_input(b"third").expect("write third");
-
-        let timeout = std::time::Duration::from_secs(2);
-        assert_eq!(
-            record_rx.recv_timeout(timeout).expect("first chunk delivered"),
-            b"first"
-        );
-        assert_eq!(
-            record_rx.recv_timeout(timeout).expect("second chunk delivered"),
-            b"second"
-        );
-        assert_eq!(
-            record_rx.recv_timeout(timeout).expect("third chunk delivered"),
-            b"third"
-        );
-    }
-
-    #[test]
-    fn writer_thread_loop_stops_without_panicking_on_write_error() {
-        let (tx, rx) = mpsc::channel::<TerminalWriterCommand>();
-        // Unlike `spawn_writer_thread` (detached, never joined in
-        // production - see shutdown-ordering constraint), the test retains
-        // a `JoinHandle` via `run_writer_thread` directly so it can assert
-        // the loop returns normally (no panic) instead of only inferring it
-        // from a timing-sensitive absence of a crash.
-        let handle = thread::spawn(move || run_writer_thread(rx, Box::new(FailingWriter)));
-
-        tx.send(TerminalWriterCommand::Write(b"doomed".to_vec()))
-            .expect("channel receiver still alive before the failing write");
-        drop(tx);
-
-        handle
-            .join()
-            .expect("writer thread must not panic when the underlying write fails");
-    }
-
-    #[test]
-    fn write_input_returns_gone_synchronously_after_terminate_without_touching_channel() {
-        let session = fake_terminal_session();
-        let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
-        let writer_tx = spawn_writer_thread(Box::new(RecordingWriter { tx: record_tx }));
-        {
-            let mut inner = session.inner.lock().expect("terminal session lock poisoned");
-            inner.writer_tx = Some(writer_tx);
-        }
-
-        session.terminate();
 
         assert!(matches!(
-            session.write_input(b"too-late"),
+            session.write_input(b"too-late").await,
             Err(TerminalError::Gone("terminal is closed"))
         ));
-        // The synchronous `status != Running` fast-path must short-circuit
-        // before ever reaching the channel: nothing should have been
-        // forwarded to the (now-dropped) writer thread.
-        assert!(record_rx.try_recv().is_err());
     }
 
-    #[test]
-    fn write_input_returns_gone_synchronously_after_mark_error_without_touching_channel() {
-        let session = fake_terminal_session();
-        let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
-        let writer_tx = spawn_writer_thread(Box::new(RecordingWriter { tx: record_tx }));
+    #[tokio::test]
+    async fn admits_attach_stays_true_through_grace_window_after_exit() {
+        let session = fake_terminal_session().await;
+        session.apply_helper_status(TerminalStatus::Exited, 1);
+
+        assert!(!session.is_live(), "exited session is not `is_live`");
+        assert!(
+            session.admits_attach(),
+            "exited session inside its grace window must still admit attach"
+        );
+    }
+
+    #[tokio::test]
+    async fn admits_attach_becomes_false_once_grace_window_elapses() {
+        let session = fake_terminal_session().await;
+        session.apply_helper_status(TerminalStatus::Exited, 1);
         {
             let mut inner = session.inner.lock().expect("terminal session lock poisoned");
-            inner.writer_tx = Some(writer_tx);
+            inner.grace_until_ms = Some(0); // already elapsed
         }
 
-        session.mark_error();
+        assert!(!session.admits_attach());
+    }
 
-        assert!(matches!(
-            session.write_input(b"too-late"),
-            Err(TerminalError::Gone("terminal is closed"))
+    // CONTRACT (260723 Phase 1 binding item #2): rows 3 (identity-mismatch:
+    // NoSuchProcess) and 5 (identity-mismatch: PidReused) of the 6-row
+    // boot-reconcile table must be exercised end-to-end through the real
+    // async `TerminalRegistry::boot_reconcile`, not merely through the pure
+    // `terminal_reconcile::classify` unit tests - `reconcile_entry` has its
+    // own explicit pre-`classify` short-circuit (see the CONTRACT comment on
+    // `reconcile_entry`) that only these tests actually drive.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn boot_reconcile_drops_entry_without_touching_anything_when_pid_does_not_exist() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-boot-reconcile-row3-{}-{}",
+            std::process::id(),
+            now_ms()
         ));
-        assert!(record_rx.try_recv().is_err());
+        let entry = TerminalRegistryEntry {
+            terminal_id: "term_row3_no_such_process".to_owned(),
+            work_root_id: "root-row3".to_owned(),
+            // Implausibly high pid: exceeds any realistic /proc/sys/kernel/pid_max
+            // (2^22 default ceiling), so no real process can ever hold it.
+            pid: 0x7fff_fffe,
+            start_time: 123,
+            socket_path: registry_dir.join("term_row3_no_such_process.sock"),
+            created_at_ms: now_ms(),
+            title: "Row 3".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write row-3 registry entry");
+
+        let registry = TerminalRegistry::boot_reconcile(
+            // Rows 3/5 short-circuit on identity failure before
+            // `helper_binary` is ever touched (no spawn happens on this
+            // path), so an unused placeholder is deliberate here - unlike
+            // the real-process E2E test, this unit test cannot use
+            // `CARGO_BIN_EXE_ws-dashboard` anyway (that env var is only
+            // compile-time-defined inside integration test/bench targets,
+            // not the lib crate's own `#[cfg(test)]` unit tests).
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(200),
+        )
+        .await;
+
+        assert!(
+            registry.get(&entry.terminal_id).is_none(),
+            "row 3 (NoSuchProcess) must never be adopted into the live registry"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "row 3 must delete the stale registry entry file"
+        );
+
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn boot_reconcile_drops_entry_and_never_kills_a_foreign_process_on_pid_reuse() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-boot-reconcile-row5-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        // A real, unrelated process is alive under `entry.pid`, but the
+        // recorded `start_time` deliberately does not match it - simulating
+        // the OS having recycled the pid for a different process since the
+        // helper that owned this registry entry exited.
+        let mut foreign = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .expect("spawn foreign process for row-5 pid-reuse simulation");
+        let foreign_pid = foreign.id();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let entry = TerminalRegistryEntry {
+            terminal_id: "term_row5_pid_reused".to_owned(),
+            work_root_id: "root-row5".to_owned(),
+            pid: foreign_pid,
+            start_time: 1,
+            socket_path: registry_dir.join("term_row5_pid_reused.sock"),
+            created_at_ms: now_ms(),
+            title: "Row 5".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write row-5 registry entry");
+
+        let registry = TerminalRegistry::boot_reconcile(
+            // Rows 3/5 short-circuit on identity failure before
+            // `helper_binary` is ever touched (no spawn happens on this
+            // path), so an unused placeholder is deliberate here - unlike
+            // the real-process E2E test, this unit test cannot use
+            // `CARGO_BIN_EXE_ws-dashboard` anyway (that env var is only
+            // compile-time-defined inside integration test/bench targets,
+            // not the lib crate's own `#[cfg(test)]` unit tests).
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(200),
+        )
+        .await;
+
+        assert!(
+            registry.get(&entry.terminal_id).is_none(),
+            "row 5 (PidReused) must never be adopted into the live registry"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "row 5 must delete the stale registry entry file"
+        );
+        assert!(
+            foreign
+                .try_wait()
+                .expect("poll foreign process status")
+                .is_none(),
+            "row 5 must never kill the foreign process merely occupying a reused pid"
+        );
+
+        let _ = foreign.kill();
+        let _ = foreign.wait();
+        let _ = std::fs::remove_dir_all(&registry_dir);
     }
 }
 

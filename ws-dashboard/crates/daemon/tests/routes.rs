@@ -135,6 +135,22 @@ fn terminal_test_command_profiles_have_exit_sequences() {
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+// CONTRACT (260723 Phase 1 risk signal "helper binary path resolution must
+// not hardcode current_exe()"): `TerminalRegistry::default()`'s production
+// fallback resolves the helper binary via `std::env::current_exe()`, which
+// inside THIS test binary would resolve to the `routes` test executable
+// itself, not `ws-dashboard` - any test that actually creates and drives a
+// real terminal must go through this constructor instead, pointed at the
+// Cargo-provided real compiled binary. Each call gets its own isolated
+// registry directory so concurrent tests never share terminal socket paths.
+fn test_terminal_registry() -> TerminalRegistry {
+    TerminalRegistry::new(
+        PathBuf::from(env!("CARGO_BIN_EXE_ws-dashboard")),
+        temp_fixture_path("terminal-registry"),
+        Duration::from_secs(5),
+    )
+}
+
 fn app_state() -> AppState {
     app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled())
 }
@@ -155,7 +171,7 @@ fn app_state_with_opened_and_store(
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
-        terminals: TerminalRegistry::default(),
+        terminals: test_terminal_registry(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -177,7 +193,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: TerminalRegistry::default(),
+        terminals: test_terminal_registry(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -403,7 +419,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: TerminalRegistry::default(),
+        terminals: test_terminal_registry(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -7987,7 +8003,7 @@ fn app_state_with_activity_cache_and_codex_home(
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: TerminalRegistry::default(),
+        terminals: test_terminal_registry(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         document_events: DocumentEventHub::default(),
@@ -13248,6 +13264,44 @@ async fn terminal_websocket_rejects_unknown_and_closed_terminals_before_upgrade(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
+    // Grace-reattach (260723 confirmed decision): an exited-but-in-grace
+    // terminal still admits a WebSocket attach so a reconnecting client can
+    // observe the final output/exit frame instead of racing a hard reject.
+    // `admits_attach()` only turns false once the grace window elapses, so
+    // this attach must succeed rather than 410.
+    let mut in_grace_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("in-grace websocket request");
+    in_grace_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut in_grace_socket, in_grace_response) =
+        tokio_tungstenite::connect_async(in_grace_request)
+            .await
+            .expect("in-grace websocket upgrades");
+    assert_eq!(in_grace_response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    in_grace_socket
+        .close(None)
+        .await
+        .expect("close in-grace websocket");
+
+    // Once the session is explicitly closed (removed from the registry
+    // rather than merely exited-in-grace) a further attach must reject
+    // before upgrade, same as any other unknown terminal id.
+    let close_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("close terminal request"),
+        )
+        .await
+        .expect("close terminal response");
+    assert_eq!(close_response.status(), StatusCode::NO_CONTENT);
+
     let mut closed_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
         .into_client_request()
         .expect("closed websocket request");
@@ -13259,7 +13313,7 @@ async fn terminal_websocket_rejects_unknown_and_closed_terminals_before_upgrade(
         .expect_err("closed websocket rejects");
     match error {
         tokio_tungstenite::tungstenite::Error::Http(response) => {
-            assert_eq!(response.status(), StatusCode::GONE);
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
         }
         other => panic!("unexpected closed websocket error: {other}"),
     }
@@ -13718,7 +13772,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
             default_model: default_model.map(str::to_owned),
             timeout_ms: 5_000,
         })),
-        terminals: TerminalRegistry::default(),
+        terminals: test_terminal_registry(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),

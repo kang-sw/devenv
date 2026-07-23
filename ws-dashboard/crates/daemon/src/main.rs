@@ -10,6 +10,14 @@ async fn main() -> anyhow::Result<()> {
         print!("{}", Cli::remote_deployment_guide());
         return Ok(());
     }
+    // CONTRACT: the hidden `terminal-helper` re-exec target (260723 terminal
+    // lifetime supervisor decouple) is checked BEFORE `into_serve_config`,
+    // which only understands the `serve` command - this is an internal
+    // dispatch branch, never a documented CLI surface.
+    if let Some(args) = cli.terminal_helper_args() {
+        let args = args.clone();
+        return ws_dashboard_daemon::terminal_helper_process::run_terminal_helper(args).await;
+    }
     // CONTRACT: `_guard` (not `_`) keeps the file sink's `WorkerGuard` alive
     // for the process lifetime — a bare `_` binding would drop it
     // immediately and silently disable the non-blocking writer's flush.

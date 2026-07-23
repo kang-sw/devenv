@@ -578,7 +578,18 @@ pub async fn git_worktree_remove_submit(
     }
 
     let ids: BTreeSet<WorkRootId> = std::iter::once(work_root_id.clone()).collect();
-    state.terminals.remove_for_work_roots(&ids);
+    // CONTRACT (260723 Phase 1 risk signal): dropping the returned sessions
+    // no longer kills their shells by itself now that the PTY lives in a
+    // detached helper - each removed session must be explicitly told to
+    // terminate. This is awaited (not `tokio::spawn`-detached) so the kill
+    // attempt is guaranteed to run to completion before the route responds;
+    // a fire-and-forget spawn observably leaked helper processes whenever
+    // the enclosing task/runtime tore down before the spawned task got
+    // scheduled (confirmed via `ps` after the `routes.rs` suite - see
+    // 260723 Phase 1 dogfood ticket).
+    for session in state.terminals.remove_for_work_roots(&ids) {
+        session.terminate().await;
+    }
     state.codex_sessions.remove_for_work_roots(&ids);
     state.claude_sessions.remove_for_work_roots(&ids);
 

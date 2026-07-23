@@ -2186,6 +2186,7 @@ dependencies = [
  "axum",
  "clap",
  "futures-util",
+ "libc",
  "portable-pty",
  "rand 0.8.6",
  "reqwest",
@@ -2200,6 +2201,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "windows-sys 0.60.2",
  "ws-dashboard-core",
  "ws-dashboard-harness-core",
 ]
