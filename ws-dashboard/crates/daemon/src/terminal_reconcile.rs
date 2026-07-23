@@ -22,6 +22,23 @@
 //      this module, in `terminal_registry_file::scan_registry_dir` (skip
 //      that single entry, keep scanning the rest of the directory).
 //
+// CONTRACT (260723 Phase-1 review finding M-c, numbering note): the list
+// above enumerates outcomes in THIS module's own order, which does not
+// match the ticket's literal 6-row table numbering 1:1 - the ticket's row 3
+// is "IPC reachable + identity mismatch (PID reused)" and its row 6 is "PID
+// gone (`NoSuchProcess`)"; item 3 above is the ticket's row 6, and item 5
+// above (`PidReused`) actually covers BOTH the ticket's row 3 (reachable +
+// mismatch) and row 5 (unreachable + mismatch), because `identity` is
+// checked before `ipc` is ever consulted (see `classify` below and
+// `reconcile_entry`'s matching pre-check in `terminal.rs`) - a mismatched
+// identity drops the entry regardless of what IPC reachability would have
+// been, so those two ticket rows are provably the same code branch here,
+// not two independently-reachable outcomes. `tests::row_3_...` /
+// `tests::row_5_...` below name themselves after THIS list's order, not the
+// ticket's row numbers - keep that in mind when cross-checking ticket-row
+// coverage against test names in this module or in `terminal.rs`'s
+// `boot_reconcile_drops_entry_*` tests.
+//
 // Three-line invariant this table encodes:
 //   Adopt = IPC-reachable && identity-ours.
 //   Kill  = identity-verified-ours && IPC-dead.

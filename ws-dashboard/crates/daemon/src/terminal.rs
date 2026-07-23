@@ -1708,13 +1708,23 @@ mod terminal_portability_skeleton_tests {
         assert!(!session.admits_attach());
     }
 
-    // CONTRACT (260723 Phase 1 binding item #2): rows 3 (identity-mismatch:
-    // NoSuchProcess) and 5 (identity-mismatch: PidReused) of the 6-row
-    // boot-reconcile table must be exercised end-to-end through the real
-    // async `TerminalRegistry::boot_reconcile`, not merely through the pure
+    // CONTRACT (260723 Phase 1 binding item #2): the ticket's 6-row
+    // boot-reconcile table's "never kill on unverified identity" rows must
+    // be exercised end-to-end through the real async
+    // `TerminalRegistry::boot_reconcile`, not merely through the pure
     // `terminal_reconcile::classify` unit tests - `reconcile_entry` has its
     // own explicit pre-`classify` short-circuit (see the CONTRACT comment on
     // `reconcile_entry`) that only these tests actually drive.
+    //
+    // NOTE (260723 Phase-1 review finding M-c, numbering): the two tests
+    // below are named after `terminal_reconcile.rs`'s own list order, NOT
+    // the ticket's literal row numbers - the first test
+    // (`..._when_pid_does_not_exist`) covers the ticket's row 6 (PID gone),
+    // and the second (`..._on_pid_reuse`) covers BOTH the ticket's row 3
+    // (reachable + identity mismatch) and row 5 (unreachable + identity
+    // mismatch), which are provably the same `PidReused` code branch here
+    // since identity is checked before IPC is ever consulted - see the
+    // matching numbering note atop `terminal_reconcile.rs`.
     #[cfg(unix)]
     #[tokio::test]
     async fn boot_reconcile_drops_entry_without_touching_anything_when_pid_does_not_exist() {
