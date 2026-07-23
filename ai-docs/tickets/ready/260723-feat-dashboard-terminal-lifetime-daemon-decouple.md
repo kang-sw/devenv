@@ -199,3 +199,12 @@ and exit code, instead of being treated as already gone.
   would not solve the pain this ticket exists for. Exception: this MAY
   split into a Phase 2 if the Job-Object breakaway work proves
   independently large — decide at Phase 1 kickoff, not mid-phase.
+
+#### Edition (kickoff) — 2026-07-23
+
+Phase 1 kickoff open questions resolved (autonomous goal run; user confirmed autonomous proceed and the platform direction on 2026-07-23):
+
+- **Decision A — IPC framing: NDJSON (newline-delimited JSON) carrying a dedicated helper-facing message enum.** Reuses the in-repo precedent in `crates/daemon/src/codex_app_server.rs` (`AsyncBufReadExt::lines()` + `serde_json`, zero new crate deps). Message shapes borrow from `TerminalWebSocketServerMessage` / `TerminalWebSocketClientMessage` (Output/Status/Exit ↔ Input/Resize) but are declared as SEPARATE Rust types so browser-facing WS field changes cannot bleed into the helper wire contract. Transport stays as already decided: Unix domain socket / Windows named pipe (tokio "net" feature, already present). Rejected: ad-hoc length-prefixed binary frames — no in-repo precedent, the codex precedent explicitly rejects Content-Length-style framing, higher Phase-1 cost.
+- **Decision B — platform scope: BOTH Unix and Windows land in this phase; the optional Phase-2 split is NOT taken.** The user confirmed the daemon's primary deployment is native Windows, so the Windows Job-Object breakaway detach is pulled into scope rather than deferred. Verification is split by capability: the Unix path (setsid/double-fork detach + pidfd-gated kill) is verified end-to-end IN this session; the Windows path (helper-owned Job Object + `CREATE_BREAKAWAY_FROM_JOB` + stable OpenProcess-handle kill) is implemented, cross-compile-checked, and unit-tested in this session, with LIVE native-Windows end-to-end acceptance completed on the user's native-Windows dogfooding host (this session has no native-Windows daemon host; cf. 260703-chore-windows-branch-pinned-acceptance). Both legs sit behind the existing `TerminalPlatform` abstraction (`terminal.rs`); the helper architecture, registry-file identity model (PID + start-time), IPC protocol, and the 6-row reconcile state machine are platform-independent and shared.
+
+Implementation is staged for reviewability on a single effort: (1) helper process + NDJSON IPC + registry-file identity + 6-row reconcile + Unix detach (E2E-verified here), then (2) the Windows detach leg layered on the same abstraction (statically verified here, live-verified by user dogfood).
