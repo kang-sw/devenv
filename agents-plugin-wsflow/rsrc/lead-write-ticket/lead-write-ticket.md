@@ -155,11 +155,11 @@ Mechanics: see **On: Spec-address Check**; stop condition is `judge: missing-spe
 
 ### judge: initial-status
 
-`idea/`: topic is exploratory or underspecified.
-`todo/`: scope and goal are accepted actionable backlog, or the ticket is a non-actionable coordination artifact.
-`ready/`: spec-addressed implementation-ready status.
+`idea/`: exploratory or underspecified.
+`todo/`: accepted actionable backlog, or a non-actionable coordination artifact.
+`ready/`: already spec-addressed.
 `todo/` `spec:` links: optional recovery hints.
-Uncertain: prefer `idea/`.
+Uncertain: prefer `idea/`. See the workflow manual's Ticket System Concepts section for what each status directory means.
 
 ### judge: contract-first-spec
 

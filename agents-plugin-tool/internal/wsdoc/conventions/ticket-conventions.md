@@ -31,7 +31,7 @@ rules and hard invariants only.
 
 ## Epic Tickets
 
-See the workflow manual's **Ticket System Concepts** section for epic-vs-workset rationale and epic body-content guidance.
+See the workflow manual's **Ticket System Concepts** section for epic-vs-workset rationale.
 
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
