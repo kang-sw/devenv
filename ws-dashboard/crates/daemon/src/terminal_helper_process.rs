@@ -477,3 +477,97 @@ fn now_ms() -> u64 {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }
+
+// CONTRACT (260723 Phase-1 review finding M-b): `RingState` is the helper's
+// own *authoritative* output ring (the ticket-pinned source of truth for
+// scrollback, distinct from the daemon-side mirror cache in `terminal.rs`,
+// which already has thorough eviction/truncation coverage). It is pure,
+// synchronous, dependency-free logic, so it is cheap to unit-test directly
+// here rather than only indirectly through a real PTY/IPC round trip.
+#[cfg(test)]
+mod ring_state_tests {
+    use super::*;
+
+    #[test]
+    fn append_assigns_gapless_sequence_numbers_starting_at_one() {
+        let mut ring = RingState::new();
+        ring.append("a".to_owned());
+        ring.append("b".to_owned());
+        ring.append("c".to_owned());
+        let chunks = ring.backfill_after(0);
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.sequence).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(ring.next_sequence, 4);
+    }
+
+    #[test]
+    fn append_ignores_empty_chunks_without_consuming_a_sequence_number() {
+        let mut ring = RingState::new();
+        ring.append("a".to_owned());
+        ring.append(String::new());
+        ring.append("b".to_owned());
+        let chunks = ring.backfill_after(0);
+        assert_eq!(chunks.len(), 2, "empty chunk must not be retained: {chunks:?}");
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.sequence).collect::<Vec<_>>(),
+            vec![1, 2],
+            "skipping the empty append must not create a sequence gap"
+        );
+    }
+
+    #[test]
+    fn backfill_after_returns_only_chunks_strictly_newer_than_the_cursor() {
+        let mut ring = RingState::new();
+        for label in ["a", "b", "c", "d"] {
+            ring.append(label.to_owned());
+        }
+        assert_eq!(ring.backfill_after(4).len(), 0, "nothing newer than the latest sequence");
+        assert_eq!(
+            ring.backfill_after(2)
+                .into_iter()
+                .map(|chunk| chunk.data)
+                .collect::<Vec<_>>(),
+            vec!["c".to_owned(), "d".to_owned()]
+        );
+        assert_eq!(ring.backfill_after(0).len(), 4, "after=0 means the full retained ring");
+    }
+
+    #[test]
+    fn append_evicts_from_the_front_once_past_max_output_chunks() {
+        let mut ring = RingState::new();
+        for _ in 0..(MAX_OUTPUT_CHUNKS + 250) {
+            ring.append("x".to_owned());
+        }
+        assert_eq!(
+            ring.output.len(),
+            MAX_OUTPUT_CHUNKS,
+            "ring must never retain more than MAX_OUTPUT_CHUNKS chunks"
+        );
+        let oldest_retained = ring.output.front().expect("ring non-empty").sequence;
+        let newest_retained = ring.output.back().expect("ring non-empty").sequence;
+        assert_eq!(
+            oldest_retained,
+            (MAX_OUTPUT_CHUNKS + 250) as u64 - MAX_OUTPUT_CHUNKS as u64 + 1,
+            "eviction must only ever drop from the front, in append order"
+        );
+        assert_eq!(newest_retained, (MAX_OUTPUT_CHUNKS + 250) as u64);
+    }
+
+    #[test]
+    fn backfill_after_a_cursor_predating_eviction_silently_returns_only_what_remains() {
+        // `RingState` itself has no truncation-detection concept (that lives
+        // daemon-side, see `terminal.rs::is_range_truncated`) - this pins
+        // down exactly what it DOES return for a stale cursor: everything
+        // still retained, nothing more, nothing panics.
+        let mut ring = RingState::new();
+        for _ in 0..(MAX_OUTPUT_CHUNKS + 250) {
+            ring.append("x".to_owned());
+        }
+        let oldest_retained = ring.output.front().expect("ring non-empty").sequence;
+        let chunks = ring.backfill_after(1);
+        assert_eq!(chunks.len(), MAX_OUTPUT_CHUNKS);
+        assert_eq!(chunks.first().expect("non-empty").sequence, oldest_retained);
+    }
+}
