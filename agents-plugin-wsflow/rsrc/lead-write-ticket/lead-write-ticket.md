@@ -141,11 +141,11 @@ Applies to a single edit target; **Cascade Edit** reuses this logic across multi
 
 ### judge: ticket-category
 
-`epic`: hierarchical milestone or decomposition board whose child tickets collectively deliver one parent outcome.
-`workset`: non-hierarchical operating context grouping independent or cross-cutting tickets for coordination, sequencing, or focus.
+`epic`: hierarchical decomposition board whose child tickets collectively deliver one parent outcome.
+`workset`: non-hierarchical grouping of independent or cross-cutting tickets for coordination, sequencing, or focus.
 `research`: investigation or findings capture without phases.
-`bug`/`feat`/`refactor`/`chore`: actionable implementation unit with phases and verification.
-Default: if the user asks for a board without decomposition ownership, choose `workset`; if they ask for parent outcome breakdown, choose `epic`.
+`bug`/`feat`/`refactor`/`chore`: actionable implementation unit with phases and verification; the four prefixes are mechanically identical — see the workflow manual's Ticket System Concepts section for plain-word prefix guidance.
+Default: if the user asks for a board without decomposition ownership, choose `workset`; if they ask for parent outcome breakdown, choose `epic`. See the workflow manual's Ticket System Concepts section for epic-vs-workset rationale.
 
 ### judge: spec-address-gate
 

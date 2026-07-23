@@ -171,6 +171,96 @@ For external API questions, run scoped host-native exploration or official docs
 lookup directly with exact library/version context and cited evidence; do not
 route them through {{.McpNamespace}} MCP tools.
 
+## Ticket System Concepts
+
+Meaning and rationale behind the ticket system's structural concepts. Exact
+syntax and hard invariants live in `ticket-conventions.md` (via
+`{{.McpNamespace}}/convention.read(name: "ticket-conventions")`) and are
+enforced where that document notes; this section explains *why* the shape
+exists so those rules read as intentional rather than arbitrary.
+
+### Status directories
+
+A ticket's status is its directory, not a frontmatter field. `idea/` is a
+rough capture surface for underspecified or exploratory topics — nothing yet
+needs to be actionable. `todo/` is accepted backlog: the intent is
+recoverable and worth doing, but implementation has not started and a spec
+contract may not exist yet. `ready/` is the implementation-ready status: the
+ticket's caller-visible behavior is addressed by a spec (existing or newly
+declared), so a fresh session can proceed without inventing product
+decisions. `.done/` and `.dropped/` are terminal: completed work and
+abandoned scope, respectively.
+
+### Type prefix: feat / bug / refactor / chore
+
+`feat`, `bug`, `refactor`, and `chore` are **mechanically identical** in the
+workflow — same phase model, same spec-address gate, same sage-review stage
+requirements (see `judge: ticket-category`). The prefix is a categorization
+label for human and agent scanning, not a behavioral switch. Pick by
+plain-word fit: `feat` introduces a new capability or behavior; `bug`
+corrects behavior that deviates from intent; `refactor` restructures
+internals with no intended external behavior change; `chore` covers
+maintenance, tooling, or housekeeping outside product behavior. Do not read a
+different verification depth, phase count, or workflow routing into the
+choice.
+
+### Sage review
+
+Sage review is an independent-reviewer gate a ticket passes through before a
+stage boundary is treated as settled: a **design** review gates the `todo/`
+stage (does the approach still make sense), and a **completeness** review
+gates the `ready/` stage (is the ticket's contract and verification story
+actually complete). A ticket that reaches `ready/` without a prior `todo/`
+design pass runs both stages together. Stage applicability follows category:
+`research`/`workset` need neither stage (nothing decompositional to review),
+`epic` needs design only (epics never reach implementation, so completeness
+never applies), and actionable categories (`bug`/`feat`/`refactor`/`chore`)
+need both.
+
+Posture (per-stage, stored in ticket frontmatter) resolves the gate:
+`pending` falls back to the project's configured default; `skipped` means
+the stage will not run; `blocked` means a prior review found unresolved
+issues and the gate stops until they are addressed; `recommended` asks
+before running; `required` always runs; `completed` means the stage already
+ran and passed.
+
+### Spec addressing
+
+Entering `ready/` (for non-`epic`, non-`research`, non-`workset` tickets)
+requires each phase's caller-visible behavior to be addressed by a spec: an
+existing confirmed `spec:` stem, a `spec-remove:` entry, or a `## Spec
+Impact` section describing what a spec will need to cover. The purpose is to
+stop implementation from starting against an undocumented or unstable
+contract — either point at an already-addressed spec area, or explicitly
+declare the ticket only needs post-implementation closeout documentation.
+`idea/` and `todo/` tickets may hold `spec:` links as optional recovery
+hints; the check only applies at the `ready/` boundary.
+
+### Phases
+
+A phase is one complete, reviewable, verifiable behavior slice — sized so a
+fresh session with no other context can finish it, review it, verify it, and
+hand it off cleanly. Setup, API, UI, tests, legacy skeleton artifacts, and
+investigation are phase ingredients folded into that slice unless one of them
+is itself the reviewable deliverable. A phase write-up states its completed
+behavior, deferred scope, and verification boundary. Phases accumulate
+`### Result` (and later `#### Edition`) entries as work lands, giving the
+ticket a durable record of what actually happened per phase versus what was
+planned. Epics and worksets do not carry implementation phases; phase-level
+detail belongs in the child or included tickets they reference.
+
+### Epic vs. workset
+
+Both are board artifacts, not implementation targets, and both skip the
+ready spec-address gate — but they organize differently. An `epic` is
+hierarchical: child tickets collectively deliver one parent outcome, and
+cross-child invariant decisions live in the epic body. A `workset` is
+non-hierarchical: it groups independent or cross-cutting tickets for
+coordination, sequencing, or focus without owning decomposition — included
+tickets are listed, never made children. Choose `epic` when the request is a
+parent-outcome breakdown; choose `workset` when it is a coordination/focus
+grouping with no decomposition ownership.
+
 <!-- ws:full-only:start -->
 ## Planned Or Specialized
 
