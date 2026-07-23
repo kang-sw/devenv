@@ -1,7 +1,6 @@
 ---
 title: "Promote ready spec-address from soft-warn to a hard gate"
 related:
-  260723-epic-ticket-write-reshape: parent direction (kept as related; epic membership tracked via parent below)
   260723-research-spec-collocator-subagent: blocker — the hard gate needs the collocator's ergonomic path before it can land
 parent: 260723-epic-ticket-write-reshape
 ---
