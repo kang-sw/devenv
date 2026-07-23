@@ -455,19 +455,16 @@ dropped tickets live in hidden archive dirs and git history.
   blocked pending further investigation/decision (`260627`,
   `260710-bug-project-index...`), two backlogged by user decision
   (`260703`, and `260627` shares that backlog reasoning).
-- `260723-feat-goal-step-rename-and-goal-loop-completion` (ready, feat) -
-  reshape `lead-drain-ready-queue` into `lead-goal-step`: goal-primary
-  identity + rename (P1 mechanical blast-radius sweep), and body posture (P2):
-  blocked-progress clean conclusion distinct from hard-gate pause, a lead
-  ticket-curation authority clause (no new ticket-system state — selector reads
-  ticket state/bodies for advanceable-now + record-blocker-before-yield), and
-  bounded autonomous in-scope bug capture (goal-relevant→ready via ticket-write
-  path, unrelated→idea, respect deferral). Contract-first spec authored in
-  `workflow-skills.md` (`260723-lead-goal-step-rename-reposition`,
-  `-goal-step-ticket-curation-authority`,
-  `-goal-step-blocked-progress-conclusion`). Coordinate with `260722` Phase 2
-  (shared SKILL.md path). dead-weight non-goal branch removal is out of scope
-  (separate ticket).
+- `260722-feat-goal-run-autonomy-posture` (todo, feat) - Phase 1 (goal-run
+  autonomy posture in the drain body) shipped v0.34.5; Phase 2 (just-in-time
+  posture tips at `git.commit` + `enter.implement`, Go + spec) still pending.
+  Note: `260723` reshape landed, so Phase 2's target SKILL.md moved to
+  `agents-plugin/skills/lead-goal-step/SKILL.md` (was `lead-drain-ready-queue`)
+  and its spec anchors are now the settled `260723-goal-step-*` set — re-point
+  Phase 2's file/spec references at its proceed time.
+- `260723`-follow-up: dead-weight non-goal defensive-branch removal in
+  `lead-goal-step` is deferred to its own (not-yet-created) ticket; `260723`
+  itself is done (both phases shipped on the goal-step-reshape branch).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

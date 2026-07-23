@@ -24,9 +24,9 @@ workflow-reference roles:
 lead-add-rule
 lead-bootstrap
 lead-discuss
-lead-drain-ready-queue
 lead-forge-mental-model
 lead-forge-spec
+lead-goal-step
 lead-implement
 lead-check-blockers
 lead-proceed
@@ -53,7 +53,7 @@ The directly invocable surface is narrowed to 14 entry skills the user invokes a
 `/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
-`lead-verify-discussion`, `lead-tune`, and `lead-drain-ready-queue`. The remaining
+`lead-verify-discussion`, `lead-tune`, and `lead-goal-step`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -422,14 +422,20 @@ must not force full workflow-skill ceremony onto this checkpoint unless its
 actual output or end state is unclear.
 {#260512-discussion-verification-skill}
 
-`lead-drain-ready-queue` pulls one item from the `ready/` ticket queue and
-hands it to `lead-proceed` as an explicit target, so the caller does not
-depend on `lead-proceed`'s own target-from-conversation routing to guess
-which ticket is meant. It is a single-cycle shim, not a loop: one
-invocation resolves at most one ready ticket and stops — it does not poll
-or repeat internally. Repeated draining across the whole `ready/` backlog
-is the caller's responsibility (for example, a standing `/goal` directive
-whose Stop-hook re-invokes this skill each turn until the queue is empty).
+`lead-goal-step` advances a goal-pursuit run by one step: select and
+dispatch exactly one ticket from `ready/`, the sole progress gate —
+nothing advances until a ticket reaches `ready/`. The skill name does not
+drive loop behavior; the `/goal` Stop-hook's continue-vs-stop decision is
+AI judgment over the body prose, not the name. Invoked without an active
+goal run, it degenerates to a single-cycle shim, not a loop: one
+invocation resolves at most one ready ticket and hands it to
+`lead-proceed` as an explicit target, so the caller does not depend on
+`lead-proceed`'s own target-from-conversation routing to guess which
+ticket is meant — it does not poll or repeat internally. Repeated
+draining across the whole `ready/` backlog is the caller's
+responsibility (for example, a standing `/goal` directive whose Stop-hook
+re-invokes this skill each turn until the queue is empty).
+{#260723-lead-goal-step-rename-reposition}
 
 Ticket selection is itself delegated, not done by the lead: the skill
 spawns a light-tier Explore-style subagent to list `ready/`, prefer a
@@ -449,34 +455,28 @@ invocation — including simple tasks like commits — to a subagent per
 `lead-prefer-subagent`, conserving lead context across a long-running
 goal, rather than restating that posture's body. The skill's body is
 inlined as static text directly in
-`agents-plugin/skills/lead-drain-ready-queue/SKILL.md` (no rsrc playbook, no
+`agents-plugin/skills/lead-goal-step/SKILL.md` (no rsrc playbook, no
 `playbook.print` indirection), matching the `lead-verify-discussion`/
 `lead-prefer-subagent` inline-body shape, and is mirrored byte-identically
 into `agents-plugin-wsflow`.
 {#260703-drain-ready-queue-skill}
 
-> [!note] Planned 🚧
-> This shim is renamed `lead-goal-step` and repositioned so the goal-pursuit
-> step is its primary identity; the standalone single-cycle drain becomes a
-> degenerate case, with the `ready/` queue stated explicitly as the sole progress
-> gate. The skill name does not drive loop behavior — the `/goal` Stop-hook's
-> continue-vs-stop decision is AI judgment over the body prose, not the name.
-> {#260723-lead-goal-step-rename-reposition}
->
-> The step also gains explicit lead ticket-curation authority: as part of
-> advancing the goal the lead may autonomously edit existing tickets (record
-> findings, restructure, re-triage status) and create + link new tickets via the
-> normal ticket-write path, within the goal-run autonomy bounds. In-scope bug
-> capture rides this authority: a bug found mid-run that blocks or is directly
-> relevant to the current goal is promoted to `ready/` (via the ticket-write path,
-> so the sage ready-landing gate is not bypassed) for a later loop iteration to
-> fix; an incidental/unrelated bug is captured at `idea/`; an explicitly deferred
-> bug is captured only. This routing is skill-intrinsic and is judged separately
-> from any downstream project's own dogfood-capture convention. No new
-> ticket-system state field is introduced.
-> {#260723-goal-step-ticket-curation-authority}
+The step also carries explicit lead ticket-curation authority: as part of
+advancing the goal the lead may autonomously edit existing tickets (record
+findings, restructure, re-triage status) and create + link new tickets via the
+normal ticket-write path (`lead-write-ticket`), within the goal-run autonomy
+bounds above. In-scope bug capture rides this authority: a bug found mid-run
+that blocks or is directly relevant to the current goal is promoted to
+`ready/` (via the ticket-write path, so the sage ready-landing gate is not
+bypassed) for a later loop iteration to fix; an incidental/unrelated bug is
+captured at `idea/`; an explicitly deferred bug is captured only, not queued
+to `ready/`. This routing is skill-intrinsic and is judged separately from
+any downstream project's own dogfood-capture convention. No new
+ticket-system state field is introduced — a recorded blocker and a captured
+bug are both ordinary ticket edits.
+{#260723-goal-step-ticket-curation-authority}
 
-`lead-drain-ready-queue` adds goal-branch staging on top of the base
+`lead-goal-step` adds goal-branch staging on top of the base
 single-cycle shim above, activated only when the lead itself observes both
 an active `/goal` Stop-hook reminder in the current turn and a current
 branch that is not already `goal/*`; the ticket-selection subagent stays
@@ -513,21 +513,26 @@ creation, no `merge_confirm` override, and no new persisted state —
 "currently checked out on a `goal/*` branch" is the entire signal.
 {#260707-drain-goal-branch-staging}
 
-> [!note] Planned 🚧
-> The goal run gains a second clean terminal beside "`ready/` queue empty": a
-> blocked-progress conclusion. When no remaining `ready/` ticket can advance —
-> every path needs a human decision — the step concludes the run with an explicit
-> blocker report instead of looping (otherwise the `/goal` Stop-hook re-surfaces
-> the reminder and the loop thrashes waiting for an away human). This stays
-> distinct from a hard-gate pause: the discriminator is "is there any work I could
-> still do without the human?" — work remains with only a final
-> irreversible/destructive action awaiting sign-off → pause; no advanceable work
-> remains anywhere → conclude. A ticket the lead cannot advance is recorded as
-> blocked on the ticket itself (an ordinary edit — e.g. sage's rendered Blocked
-> section, or a recorded blocker note) and the selection step reads ticket
-> state/bodies to judge "advanceable now" and skips it, rather than the body-blind
-> FIFO pick; so one blocked ticket does not terminate the run while others remain
-> workable. {#260723-goal-step-blocked-progress-conclusion}
+The goal run gains a second clean terminal beside "`ready/` queue empty": a
+blocked-progress conclusion. When every remaining `ready/` ticket is
+blocked — no path can advance without a human decision — the step concludes
+the run with an explicit blocker report instead of looping (otherwise the
+`/goal` Stop-hook re-surfaces the reminder and the loop thrashes waiting for
+an away human). This conclusion never runs the empty-queue completion's
+merge-approval flow — merging here would misrepresent unfinished, blocked
+work as a completed goal. This stays distinct from a hard-gate pause: the
+discriminator is "is there any work I could still do without the human?" —
+work remains with only a final irreversible/destructive action awaiting
+sign-off → pause; no advanceable work remains anywhere → conclude; a
+hard-gate pause must never be reclassified as goal-complete through this
+conclusion. A ticket the lead cannot advance is recorded as blocked on the
+ticket itself (an ordinary edit — e.g. sage's rendered Blocked section, or a
+recorded blocker note) before the turn yields — this record-before-yielding
+step is not skippable, since an unrecorded blocker causes the next turn's
+selector to re-pick the same stuck ticket — and the selection step reads
+ticket state/bodies to judge "advanceable now" and skips it, rather than the
+body-blind FIFO pick; so one blocked ticket does not terminate the run while
+others remain workable. {#260723-goal-step-blocked-progress-conclusion}
 
 `lead-verify-design` is removed; its `SKILL.md` and rsrc playbook were deleted
 entirely (delete-don't-diet decision, `260630-epic-skill-playbook-diet`). Its
