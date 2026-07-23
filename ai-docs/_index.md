@@ -223,10 +223,13 @@ dropped tickets live in hidden archive dirs and git history.
   collapse. 2 phases. Spec addressing via `## Spec Impact` (`mcp-tools`,
   Contract-first: no). Sage review completed. Open: true universal commit
   chokepoint (pre-commit hook vs routing mandate) to resolve in Phase 1.
-- `260723-feat-ticket-system-concept-doc` (todo, feat, child of 260723-epic) -
-  **sage review blocked**: needs a user decision on the concept doc's loading
-  mechanism (AGENTS.md mandatory session-load vs on-demand) and home category
-  before promotion; not implementation-ready.
+- `260723-feat-ticket-system-concept-doc` (ready, feat, child of 260723-epic) -
+  single ticket-system concept doc homed in the `workflow_manual` bundle
+  (session-once grounding, host-neutral), playbook references it instead of
+  re-glossing. Spec addressing via `## Spec Impact` (`documentation-system` /
+  `workflow-manual`, Contract-first: no). Sage review completed (re-authored after
+  initial block: loading resolved to workflow_manual per user). Open knob: inline
+  vs referenced manual payload (Phase 1).
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
