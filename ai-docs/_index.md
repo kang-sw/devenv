@@ -232,13 +232,17 @@ dropped tickets live in hidden archive dirs and git history.
   `260723-git-commit-ticket-verify-gate` + mcp-tools rename/close/sage_stamp doc;
   mental-model `mcp-runtime` updated. Version 0.35.2. Chokepoint resolved by
   hosting at `git.commit` (shell raw-commit bypass tracked as epic Caveat).
-- `260723-feat-ticket-system-concept-doc` (ready, feat, child of 260723-epic) -
-  single ticket-system concept doc homed in the `workflow_manual` bundle
-  (session-once grounding, host-neutral), playbook references it instead of
-  re-glossing. Spec addressing via `## Spec Impact` (`documentation-system` /
-  `workflow-manual`, Contract-first: no). Sage review completed (re-authored after
-  initial block: loading resolved to workflow_manual per user). Open knob: inline
-  vs referenced manual payload (Phase 1).
+- `260723-feat-ticket-system-concept-doc` (feat, child of 260723-epic) -
+  **landed** (`c1d1b5a0`), pending move to `.done`. Added a `## Ticket System
+  Concepts` section (status dirs, type prefixes, sage review, spec addressing,
+  phases, epic-vs-workset) to the `lead-workflow-manual` bundle (tight inline,
+  session-once grounding) and de-duplicated the scattered glosses from
+  `ticket-conventions.md` + `lead-write-ticket.md` judge tables — unenforced hard
+  invariants kept verbatim, guardrails left in `ticket.verify`, Go constants
+  untouched. Base-path size effectively flat; the win is structural (single
+  concept home; sage-review/type-prefix documented for the first time). Spec
+  closeout `documentation-system {#260723-ticket-system-concept-grounding}` +
+  mcp-tools workflow_manual cross-ref. Shipped in ws 0.35.3.
 - `260723-research-reviewer-worktree-isolation` (idea, research) - captured from
   T2 Phase 1 review: a review subagent left an uncommitted `if false` edit in the
   shared working tree, producing a sibling reviewer's false critical. Research
