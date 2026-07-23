@@ -378,21 +378,54 @@ func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview, to string) 
 		return result, nil
 	}
 
-	if designRequired {
-		switch design {
-		case "completed", "skipped":
-		default:
-			return result, sageReviewStageError("sage-review-design", design)
+	// design is reported before completeness (readyPostureProblems preserves
+	// that order), matching the earlier inline switch's early-return order.
+	if problems := readyPostureProblems(result); len(problems) > 0 {
+		first := problems[0]
+		if first.Blocked {
+			return result, sageReviewBlockedError(first.Field)
 		}
-	}
-	if completenessRequired {
-		switch completeness {
-		case "completed", "skipped":
-		default:
-			return result, sageReviewStageError("sage-review-completeness", completeness)
-		}
+		return result, sageReviewStageError(first.Field, first.Posture)
 	}
 	return result, nil
+}
+
+// readyPostureProblem describes one required sage-review stage that is not
+// yet in a ready-eligible terminal posture (completed, skipped).
+type readyPostureProblem struct {
+	Field   string // "sage-review-design" | "sage-review-completeness"
+	Posture string
+	Blocked bool
+}
+
+// readyPostureProblems reports, in design-before-completeness order, which of
+// postures' required stages block a ticket from landing at ready/. postures
+// must already be category-gated (an empty field means that stage does not
+// apply to the ticket's category), matching currentSageReviewPostures'
+// output shape. Pure: no I/O, no writes. This is the single implementation
+// of the ready-landing terminal-posture rule, shared by
+// prepareSageReviewForUpwardMove's ready-promotion check (which wraps the
+// result in its own sageReviewStageError/sageReviewBlockedError types) and
+// TicketVerify's ready-sage-posture guardrail.
+func readyPostureProblems(postures sageReviewPostures) []readyPostureProblem {
+	var problems []readyPostureProblem
+	for _, stage := range []struct {
+		field   string
+		posture string
+	}{
+		{"sage-review-design", postures.Design},
+		{"sage-review-completeness", postures.Completeness},
+	} {
+		switch stage.posture {
+		case "", "completed", "skipped":
+			// "" means the stage does not apply to this ticket's category.
+		case "blocked":
+			problems = append(problems, readyPostureProblem{Field: stage.field, Posture: stage.posture, Blocked: true})
+		default:
+			problems = append(problems, readyPostureProblem{Field: stage.field, Posture: stage.posture})
+		}
+	}
+	return problems
 }
 
 // currentSageReviewPostures returns the effective per-stage posture for a
