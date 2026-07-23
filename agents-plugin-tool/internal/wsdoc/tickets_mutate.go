@@ -95,7 +95,17 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 	if err := atomicGitMove(root, runner, oldPath, newPath); err != nil {
 		return TicketMutateResult{}, err
 	}
-	return TicketMutateResult{OldPath: oldPath, NewPath: newPath}, nil
+	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
+	// Soft, non-blocking tip only (must-not-forget SOFT seed) — reuses
+	// tickets_verify.go's ticketUnresolvedPhaseWarning so the phase/Result
+	// scan logic is not duplicated between tickets.close and tickets.verify's
+	// .done/.dropped branch.
+	if raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(newPath))); err == nil {
+		if warning := ticketUnresolvedPhaseWarning(string(raw)); warning != "" {
+			result.Tip = appendTip(result.Tip, warning)
+		}
+	}
+	return result, nil
 }
 
 func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketMutateResult, error) {

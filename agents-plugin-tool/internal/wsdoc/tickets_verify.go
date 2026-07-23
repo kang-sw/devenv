@@ -127,6 +127,9 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 		if problem := ticketCloseDateFieldProblem(fm, status); problem != "" {
 			addFinding("close-date-field", problem)
 		}
+		if warning := ticketUnresolvedPhaseWarning(text); warning != "" {
+			addWarning("unresolved-phases", warning)
+		}
 	}
 
 	for _, problem := range ticketPhaseHeadingProblems(text) {
@@ -161,6 +164,49 @@ func ticketFrontmatterFenceProblem(raw string) string {
 		}
 	}
 	return "missing closing frontmatter fence"
+}
+
+// ticketUnresolvedPhaseWarning reports a soft, non-blocking warning listing
+// any "### Phase N: <title>" heading (not marked [dropped] anywhere in the
+// heading line) that has no "### Result" heading before the next Phase
+// heading or EOF. This is the SOFT seed of the must-not-forget filter
+// (ticket 260723 Phase 2): a closed ticket with an unresolved phase is very
+// likely a mistake, but it is a close/verify-time advisory, never a hard
+// block — unlike the ready-landing sage-posture guardrail, which stays HARD.
+// Reuses the same prefix-based line scan as ticketPhaseHeadingProblems
+// (single source of truth for what counts as a Phase/Result heading line) so
+// tickets.close's own tip (tickets_mutate.go) and tickets.verify's .done/
+// .dropped branch never re-scatter this logic.
+func ticketUnresolvedPhaseWarning(raw string) string {
+	var unresolved []string
+	var current string
+	var currentResolved bool
+	flush := func() {
+		if current != "" && !currentResolved {
+			unresolved = append(unresolved, current)
+		}
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "### Phase "):
+			flush()
+			if strings.Contains(trimmed, "[dropped]") {
+				current, currentResolved = "", false
+				continue
+			}
+			current, currentResolved = trimmed, false
+		case strings.HasPrefix(trimmed, "### Result"):
+			if current != "" {
+				currentResolved = true
+			}
+		}
+	}
+	flush()
+	if len(unresolved) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("closed with unresolved phase heading(s) (no ### Result before close): %s", strings.Join(unresolved, "; "))
 }
 
 // ticketCloseDateFieldProblem checks the dated close field (completed for

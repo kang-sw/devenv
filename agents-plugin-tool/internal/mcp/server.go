@@ -62,9 +62,16 @@ const bootstrapToolName = "ferrule"
 // gated the same way as its sibling workflow_manual: it is a cheaper view of
 // the same lead-bootstrap/recovery surface, not a general todo/agenda
 // accessor, so it stays lead-only even though the underlying todo.*/agenda.*
-// data is itself scope-open.
+// data is itself scope-open. tickets.sage_stamp (260723 Phase 2, renamed from
+// tickets.sage_record) is listed explicitly because it stays inside the
+// `tickets.*` prefix (no dedicated prefix to gate on): it is the sole
+// terminal writer of sage-review posture + the ## Blocked companion, and
+// reviewers must never write frontmatter directly (single-writer property,
+// {#260720-sage-gate-record-tools}) — this is new enforcement, not a
+// preserved no-op, since the pre-rename tickets.sage_record was reachable by
+// a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -1160,7 +1167,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
-	case "tickets.create":
+	case "tickets.create_empty":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
@@ -1228,7 +1235,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			commitHash = commitRes.Hash
 		}
 		return toolTextResponse(req.ID, formatSageGate(result, commitHash), nil)
-	case "tickets.sage_record":
+	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
@@ -2432,10 +2439,15 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 	return b.String()
 }
 
+// formatTicketCreate's next_instruction line carries the acceptance-check
+// caveat verbatim ("valid empty skeleton + initial posture") so a caller
+// never mistakes tickets.create_empty for a full mutation orchestrator —
+// tickets.template owns the body skeleton, and this tool never renders one.
 func formatTicketCreate(res wsdoc.TicketCreateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n", res.Path)
 	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
+	b.WriteString("next_instruction: This is a valid empty skeleton + initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
 	return b.String()
 }
 
@@ -2446,7 +2458,25 @@ func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
 	if result.Tip != "" {
 		fmt.Fprintf(&b, "tip: %s\n", result.Tip)
 	}
+	if instruction := ticketMutateNextInstruction(verb, result); instruction != "" {
+		fmt.Fprintf(&b, "next_instruction: %s\n", instruction)
+	}
 	return b.String()
+}
+
+// ticketMutateNextInstruction surfaces the action-time follow-on for a
+// tickets.close/tickets.move result, replacing front-loaded playbook prose
+// that used to restate these obligations up front (260723 Phase 2). It
+// returns "" when there is no must-know follow-on beyond the plain tip.
+func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) string {
+	switch {
+	case verb == "moved" && strings.Contains(filepath.ToSlash(result.NewPath), "/ready/"):
+		return "Call tickets.sage_gate(stem, landing) next to resolve the sage-review gate for this promotion."
+	case verb == "closed" && strings.Contains(result.Tip, "unresolved phase"):
+		return "This is a soft warning only (no block); resolve or explicitly accept the unresolved phase(s) before treating this ticket as truly closed."
+	default:
+		return ""
+	}
 }
 
 // verifyAdapter adapts wsdoc.TicketVerify's richer VerifyResult into the
@@ -2488,6 +2518,12 @@ func formatTicketVerify(result wsdoc.VerifyResult) string {
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(&b, "  WARN [%s] %s: %s\n", warning.Guardrail, warning.Path, warning.Message)
 	}
+	switch {
+	case !result.OK:
+		b.WriteString("next_instruction: Fix every FAIL finding above; these are the same hard guardrails git.commit enforces and will block a commit.\n")
+	case len(result.Warnings) > 0:
+		b.WriteString("next_instruction: PASS with warnings above; they do not block a commit but should be addressed or explicitly accepted.\n")
+	}
 	return b.String()
 }
 
@@ -2519,7 +2555,7 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no."
 	case "run":
-		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_record(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
+		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
@@ -3835,8 +3871,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "tickets.create",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"name":        "tickets.create_empty",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Yields only a valid empty skeleton + initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3883,8 +3919,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "tickets.sage_record",
-			"description": "Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, commits with the canonical title, and returns the applied posture and commit ref.",
+			"name":        "tickets.sage_stamp",
+			"description": "Lead-only. Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, commits with the canonical title, and returns the applied posture and commit ref. This is the thin, lead-only replacement for the former tickets.sage_record write; reviewers never call this tool.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4147,7 +4183,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "tickets.sage_gate", "tickets.sage_record", "tickets.verify", "path.generate", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",

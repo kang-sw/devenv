@@ -339,6 +339,62 @@ func TestTicketVerifyFileNotFoundIsHardFinding(t *testing.T) {
 	}
 }
 
+func TestTicketVerifyUnresolvedPhaseIsSoftWarnOnly(t *testing.T) {
+	root := t.TempDir()
+	body := "---\ntitle: Closed with open phase\ncompleted: 2026-07-23\n---\n\n" +
+		"## Phases\n\n" +
+		"### Phase 1: First\n\n" +
+		"### Result (abc123) - 2026-07-23\n\n" +
+		"Done.\n\n" +
+		"### Phase 2: Second\n\n" +
+		"Never resolved.\n"
+	path := "ai-docs/tickets/.done/260723-feat-openphase.md"
+	mustWrite(t, root, path, body)
+
+	result, err := TicketVerify(root, []string{path})
+	if err != nil {
+		t.Fatalf("TicketVerify returned error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("result.OK = false, want true: unresolved-phases must warn, not block; findings=%#v", result.Findings)
+	}
+	if guardrails := findingGuardrails(t, result.Findings); containsGuardrail(guardrails, "unresolved-phases") {
+		t.Fatalf("findings = %#v, unresolved-phases must never be a hard finding", result.Findings)
+	}
+	warningGuardrails := make([]string, 0, len(result.Warnings))
+	for _, w := range result.Warnings {
+		warningGuardrails = append(warningGuardrails, w.Guardrail)
+	}
+	if !containsGuardrail(warningGuardrails, "unresolved-phases") {
+		t.Fatalf("warnings = %#v, want an unresolved-phases warning", result.Warnings)
+	}
+}
+
+func TestTicketVerifyUnresolvedPhaseSkipsDroppedPhases(t *testing.T) {
+	root := t.TempDir()
+	body := "---\ntitle: Closed with dropped phase\ndropped: 2026-07-23\n---\n\n" +
+		"## Phases\n\n" +
+		"### Phase 1: First [dropped]\n\n" +
+		"Never run.\n"
+	path := "ai-docs/tickets/.dropped/260723-feat-droppedphase.md"
+	mustWrite(t, root, path, body)
+
+	result, err := TicketVerify(root, []string{path})
+	if err != nil {
+		t.Fatalf("TicketVerify returned error: %v", err)
+	}
+	if guardrails := findingGuardrails(t, result.Findings); containsGuardrail(guardrails, "unresolved-phases") {
+		t.Fatalf("findings = %#v, a [dropped] phase must not be flagged", result.Findings)
+	}
+	warningGuardrails := make([]string, 0, len(result.Warnings))
+	for _, w := range result.Warnings {
+		warningGuardrails = append(warningGuardrails, w.Guardrail)
+	}
+	if containsGuardrail(warningGuardrails, "unresolved-phases") {
+		t.Fatalf("warnings = %#v, a [dropped] phase must not be flagged", result.Warnings)
+	}
+}
+
 // TestTicketVerifyMessagesAreActionable is a light smoke check that finding
 // messages carry enough text to act on, not just a bare guardrail label.
 func TestTicketVerifyMessagesAreActionable(t *testing.T) {

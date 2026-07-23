@@ -24,7 +24,7 @@ Scope
 - Ready promotion requires spec addressing (`judge: spec-address-gate`), not mandatory planned spec text.
 
 Movement
-- Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.
+- Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create_empty` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.
 
 ## On: invoke
 
@@ -44,7 +44,7 @@ Movement
 
 ### 3. Populate
 
-1. New ticket: call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`; fall back to manual file creation only when the tool is unavailable or errors.
+1. New ticket: call `{{.McpNamespace}}/tickets.create_empty(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")` and follow its returned next_instruction.
 2. Existing ticket: apply the requested change — phase update, content update, or status move — directly to the loaded body.
 3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.append` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
 4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
@@ -65,8 +65,8 @@ Movement
 
 ### 6. Sage Review Gate
 
-1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow the returned action: `skip` (done), `stop_blocked` (report and stop), `ask` (relay the returned question, then call again with the answer), `run` (spawn the returned reviewer(s) via **Reviewer Spawn**). Posture, legacy-field migration, config fallback, and category×stage selection are tool-owned.
-2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_record(stem, stage, verdicts)`; it aggregates, writes frontmatter, renders any Blocked section, and commits. Follow its returned confirmation.
+1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
+2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)` and follow its returned next_instruction.
 
 ### 7. Handoff
 
@@ -77,11 +77,9 @@ Movement
 For each reviewer named by `tickets.sage_gate`:
 1. Call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")` or `"ticket-reviewer-completeness")`; it returns a file path. Do not read the rendered file in the lead context.
 2. Spawn a native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
-3. Parse `verdict:` (`pass`, `concern`, or `block`) from the result; return it to `tickets.sage_record`.
+3. Parse `verdict:` (`pass`, `concern`, or `block`) from the result; return it to `tickets.sage_stamp`.
 
 ## On: Move
-
-Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` over native `git mv`; fall back only when the MCP tool is unavailable or errors.
 
 1. `.done/` via `tickets.close` writes `completed:` automatically; a native `git mv` fallback requires adding it manually.
 2. Workset → `ready/` as the only requested change: make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.

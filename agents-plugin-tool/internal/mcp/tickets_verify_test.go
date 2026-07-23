@@ -42,6 +42,9 @@ func TestTicketsVerifyGitCommitCallSiteParityBlocksInvalidTicket(t *testing.T) {
 	if !strings.Contains(verifyText, "[stem]") || !strings.Contains(verifyText, badPath) {
 		t.Fatalf("tickets.verify text = %q, want a stem guardrail finding for %s", verifyText, badPath)
 	}
+	if !strings.Contains(verifyText, "next_instruction: Fix every FAIL finding above") {
+		t.Fatalf("tickets.verify text = %q, want the FAIL-branch next_instruction", verifyText)
+	}
 
 	if !toolIsError(t, byID["2"]) {
 		t.Fatalf("git.commit was not blocked by the same invalid ticket: %s", byID["2"])
@@ -131,6 +134,9 @@ func TestTicketsVerifySpecAddressWarningDoesNotBlockCommit(t *testing.T) {
 	}
 	if !strings.Contains(verifyText, "WARN [spec-address]") {
 		t.Fatalf("tickets.verify text = %q, want a spec-address warning line", verifyText)
+	}
+	if !strings.Contains(verifyText, "next_instruction: PASS with warnings above") {
+		t.Fatalf("tickets.verify text = %q, want the PASS-with-warnings next_instruction", verifyText)
 	}
 
 	if toolIsError(t, byID["2"]) {
