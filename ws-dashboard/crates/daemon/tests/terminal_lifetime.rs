@@ -577,6 +577,77 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
     let _ = std::fs::remove_dir_all(&work_root);
 }
 
+// Leak-safe cleanup guard for the live-EOF test below. The daemon spawns its
+// PTY helper detached via `setsid()` + double-fork, so the helper outlives the
+// daemon's `kill_on_drop`/SIGKILL and would LEAK on any panic path between
+// terminal-create and the shell's normal exit (e.g. a readiness `poll_output_*`
+// timeout unwinding before the trailing cleanup ever runs). This guard fires on
+// Drop - on BOTH the success path and any unwind - and best-effort reaps a
+// still-live helper by the identity the helper itself persisted: its
+// `<terminal_id>.json` registry entry (written under `WS_DASHBOARD_STATE_HOME`)
+// carries the helper's real `pid` and `startTime`. It verifies the PID's
+// `/proc` start-time matches before signalling, so a recycled PID is never
+// killed. Then it removes the temp dirs.
+//
+// CONTRACT: the identity-verified reap (pid + /proc start-time match) closes the
+// PID-reuse window entirely. The only residual risk is a panic in the razor-thin
+// window after `create_terminal` returns but before the helper has flushed its
+// registry `.json`; such an untracked helper is left to the OS, which EOF-exits
+// it once its orphaned PTY master is dropped. Fix #1 (the marker handshake)
+// makes the panic path rare regardless, so this guard is defense in depth.
+struct HelperReaper {
+    state_home: PathBuf,
+    work_root: PathBuf,
+}
+
+impl Drop for HelperReaper {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Ok(entries) = std::fs::read_dir(&self.state_home) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+                    continue;
+                }
+                let Ok(raw) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                    continue;
+                };
+                // Only `<terminal_id>.json` registry entries carry `pid`/`startTime`;
+                // sibling state files (e.g. `opened-workroots.json`) are skipped here.
+                let (Some(pid), Some(start_time)) = (
+                    value.get("pid").and_then(serde_json::Value::as_u64),
+                    value.get("startTime").and_then(serde_json::Value::as_u64),
+                ) else {
+                    continue;
+                };
+                if proc_start_time(pid) != Some(start_time) {
+                    // PID gone or recycled for another process - never signal a stranger.
+                    continue;
+                }
+                let _ = std::process::Command::new("kill")
+                    .arg("-KILL")
+                    .arg(pid.to_string())
+                    .status();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&self.state_home);
+        let _ = std::fs::remove_dir_all(&self.work_root);
+    }
+}
+
+// Mirror of `terminal_platform::unix::process_start_time`: `/proc/<pid>/stat`
+// field 22 (`starttime`), read after the `)` that closes the (possibly
+// space-containing) comm field. `None` if the process is gone.
+#[cfg(unix)]
+fn proc_start_time(pid: u64) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(')')?.1;
+    after_comm.split_whitespace().nth(19)?.parse().ok()
+}
+
 // CONTRACT (260724 dead-shell Phase 3, Unix-regression leg): guard the LIVE,
 // steady-state PTY-master-EOF exit-detection path. Phase 1 added a
 // `#[cfg(windows)]` process-handle "reaper" thread (blocks on
@@ -599,6 +670,15 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
 //     and a socket is attached, so `exited` arrives in real time over the PTY-
 //     EOF reader path. We assert specifically on `exited` (not merely
 //     "non-running") to pin which path is being guarded.
+//
+// Readiness before sending `exit` uses the same echo-marker handshake the
+// sibling `terminal_survives_...` test uses (send `echo <marker>`, poll the
+// terminal's real output until the marker appears): observing the marker in
+// output is a DETERMINISTIC proof the interactive shell finished startup and is
+// executing input, so the subsequent `exit` is reliably processed rather than
+// buffered/re-typed by an async line editor (ZLE) mid-startup. It deliberately
+// does NOT use an output-timing/quiet-gap heuristic, which is load-sensitive on
+// hosts with a heavy async prompt (e.g. p10k zsh) and can time out under load.
 #[tokio::test]
 async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
     let client = reqwest::Client::new();
@@ -606,6 +686,16 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
     std::fs::create_dir_all(&state_home).expect("create state home dir");
     let work_root = temp_fixture_path("root-live-eof");
     std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    // Leak-safe cleanup: reaps any still-live detached helper and removes the
+    // temp dirs on EVERY exit path, including a panic that unwinds before the
+    // trailing normal cleanup. Declared before `daemon` so it drops LAST (after
+    // `daemon`'s `kill_on_drop` has taken the daemon down), then reaps the
+    // orphaned helper the daemon kill could not reach. See `HelperReaper`.
+    let _reaper = HelperReaper {
+        state_home: state_home.clone(),
+        work_root: work_root.clone(),
+    };
 
     // --- One live daemon; create a terminal and attach a WebSocket to witness
     // its exit in real time.
@@ -634,49 +724,30 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
         "live-eof websocket upgrade"
     );
 
-    // --- Wait until the interactive shell is genuinely idle at a ready prompt
-    // before sending `exit`. On Unix the default shell here is an interactive
-    // shell (e.g. zsh) whose rc / prompt / line-editor (ZLE) load
-    // asynchronously; input delivered during that startup window is buffered
-    // and re-processed unreliably (bracketed-paste + ZLE re-typing the buffer
-    // one keystroke at a time), so an `exit` sent too early can sit unexecuted
-    // for seconds. We therefore never send input during startup - we passively
-    // watch the live socket until the startup output burst settles into a quiet
-    // gap (shell-agnostic readiness), which means the shell is idle and ready
-    // to accept and immediately execute a command. Skipped on Windows, where
-    // the shell is line-buffered cmd (no ZLE re-processing race) and exit
-    // detection additionally rides the Phase-1 handle-wait reaper.
-    #[cfg(not(windows))]
-    {
-        let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-        let mut saw_startup_output = false;
-        while tokio::time::Instant::now() < ready_deadline {
-            match tokio::time::timeout(Duration::from_millis(400), socket.next()).await {
-                Ok(Some(Ok(TungsteniteMessage::Text(payload)))) => {
-                    let value: serde_json::Value =
-                        serde_json::from_str(&payload).expect("readiness frame JSON");
-                    assert_eq!(value["terminalId"], terminal_id);
-                    if value["type"] == "output" {
-                        saw_startup_output = true;
-                    }
-                }
-                Ok(Some(Ok(_))) => {}
-                Ok(Some(Err(err))) => panic!("readiness websocket error: {err}"),
-                Ok(None) => break,
-                Err(_elapsed) => {
-                    // 400ms with no frame: if the startup burst has begun and
-                    // then gone quiet, the shell is idle at a ready prompt.
-                    if saw_startup_output {
-                        break;
-                    }
-                }
-            }
-        }
-        assert!(
-            saw_startup_output,
-            "interactive shell produced no startup output before the readiness deadline"
-        );
-    }
+    // --- Readiness handshake before sending `exit`. On Unix the default shell
+    // here is an interactive shell (e.g. zsh) whose rc / prompt / line-editor
+    // (ZLE) load asynchronously; input delivered during that startup window is
+    // buffered and re-processed unreliably (bracketed-paste + ZLE re-typing the
+    // buffer one keystroke at a time), so an `exit` sent too early can sit
+    // unexecuted for seconds. Rather than guess readiness from output timing (a
+    // quiet-gap heuristic that is load-sensitive and times out under a heavy
+    // async prompt), we use the proven marker handshake the sibling
+    // `terminal_survives_...` test relies on: send `echo <marker>` and poll the
+    // terminal's ACTUAL output until the marker appears. Seeing the marker is a
+    // deterministic proof the shell finished startup and is executing input, so
+    // the `exit` that follows is reliably processed. `poll_output_until_contains`
+    // panics on its own timeout; the `HelperReaper` guard above makes that panic
+    // path leak-safe.
+    let ready_marker = "LIVE-EOF-READY-MARKER";
+    send_input(
+        &client,
+        &daemon.base_url,
+        &terminal_id,
+        &echo_marker_command(ready_marker),
+    )
+    .await;
+    let (_, _) =
+        poll_output_until_contains(&client, &daemon.base_url, &terminal_id, 0, ready_marker).await;
 
     // --- Make the shell exit normally so the PTY master EOFs. Sent over the
     // live WebSocket so the whole exit is witnessed on one live connection.
@@ -697,11 +768,13 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
     let mut saw_exited = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
-        let Some(message) = tokio::time::timeout(Duration::from_millis(500), socket.next())
-            .await
-            .unwrap_or(None)
-        else {
-            continue;
+        let message = match tokio::time::timeout(Duration::from_millis(500), socket.next()).await {
+            Ok(Some(message)) => message,
+            // Stream ended: no further frames will ever arrive, so stop
+            // waiting immediately instead of busy-spinning to the deadline.
+            Ok(None) => break,
+            // Per-poll timeout: keep waiting until the outer deadline.
+            Err(_elapsed) => continue,
         };
         let message = message.expect("live-eof websocket message");
         let TungsteniteMessage::Text(payload) = message else {
@@ -720,7 +793,13 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
                 }
             }
             Some("exit") => {
-                saw_exited = true;
+                // Pin the exited path too: an exit frame carrying e.g.
+                // `terminated`/`error` must NOT satisfy this guard (mirror the
+                // status arm's ==`exited` check). The exit frame ends the live
+                // attachment either way, so break regardless.
+                if value["status"] == "exited" {
+                    saw_exited = true;
+                }
                 break;
             }
             _ => {}
