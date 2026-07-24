@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.36.0 - 2026-07-24
+
+### Added
+- **`tickets.verify` MCP tool** and a `git.commit` ticket-verify gate: commits
+  that touch a ticket now run guardrail checks (stem/status-dir agreement,
+  frontmatter and phase/Result heading well-formedness, ready-landing sage
+  posture, close date-field presence) and are vetoed when a hard check fails;
+  spec-address and unresolved-phase issues warn without blocking.
+- Ticket-system concept documentation folded into the workflow manual, giving a
+  single grounding for status/epic/workset/phase vocabulary.
+- **Windows MCP process-lifecycle hardening**: the `ws-mcp serve` process now
+  self-terminates when its parent launcher dies (preventing an orphaned server
+  from holding a stale `state.sqlite` lock that broke the next connection), the
+  launcher records a `last-abnormal-exit` breadcrumb on a non-zero Windows child
+  exit, and the release CI workflow now runs `go test ./...` on Windows.
+
+### Changed
+- Renamed the MCP tools `tickets.create` -> **`tickets.create_empty`** and
+  `tickets.sage_record` -> **`tickets.sage_stamp`**, and gated `sage_stamp`
+  lead-only so reviewers can no longer write ticket frontmatter directly
+  (preserving the single-writer property). This is a minor bump because it
+  changes caller-visible MCP tool names and adds a new tool.
+- Removed the `fork` delegation path; `lead-prefer-subagent` is reshaped around
+  fresh-spawn plus a central capability whitelist.
+- SQLite discipline: `journal_mode=WAL` is now re-asserted on every store open,
+  and point reads and multi-row scans retry on transient `SQLITE_BUSY`/
+  `SQLITE_LOCKED` (previously only writes retried).
+
+### Fixed
+- **Windows mid-session MCP disconnect** root cause: a panic in a request
+  handler goroutine now recovers into a JSON-RPC error and persists a crash
+  trace instead of tearing down the whole `serve` process. An always-on crash
+  sink and lifecycle log were added so future disconnects leave evidence.
+- `tickets.close` now soft-warns when phases are unresolved.
+
 ## v0.35.0 - 2026-07-23
 
 ### Changed
