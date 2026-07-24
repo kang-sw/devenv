@@ -276,3 +276,59 @@ evaluate wiring the already-present but unused `orchestrator_lock.go` (or
 `busy_timeout`/`wal_autocheckpoint` tuning) to coordinate concurrent server
 processes over the shared `state.sqlite`. Hardening/robustness, not a confirmed
 disconnect cause — sequence after Phase 1 confirms or rules out contention's role.
+
+### Result (6539b0c0) - 2026-07-24
+
+Implemented the two low-risk hardening items in
+`agents-plugin-tool/internal/wsstore/store.go`; item 3 evaluated to no-action
+(below). **Item 1 (point-read retry):** wrapped all previously-unretried read
+paths in the existing `withSQLiteRetry` helper — the ticket cited 4
+(`AgentDefinition`, `ExecJob`, `Artifact`, `PruneExpired`) but a full audit found
+3 more (`PruneAgentInstances`, `Count`, `retryTombstones`), 7 total, all now
+covered. Single-row closures return `sql.ErrNoRows` unwrapped (not busy/locked,
+so not retried) preserving each method's found/not-found contract; multi-row
+closures reset their accumulator slice at the top of each attempt (no
+double-append on retry) with `defer rows.Close()` scoped per attempt. Reads take
+no `writeMu` — SQLite/WAL already permits concurrent readers with a single
+writer and `SetMaxOpenConns(1)` serializes this process; the retry only exists to
+survive *another process's* writer holding the lock. **Item 2 (WAL re-assert):**
+removed the `if setJournalMode` (new-DB-only) gate in `configure()` so
+`PRAGMA journal_mode=WAL` is issued unconditionally on every open — a cheap no-op
+when already WAL, and it migrates any legacy non-WAL `state.sqlite` to WAL on
+next open. Removed the now-dead `newDB`/`setJournalMode` plumbing and the unused
+`fileExists` helper.
+
+**Item 3 (evaluate lock/tuning): no action, by design.** Wiring
+`internal/wsstate/orchestrator_lock.go` (`AcquireOrchestratorLock`, still
+zero non-test callers) was rejected from source analysis: it is a coarse
+whole-process singleton `O_EXCL` lock on a *different* file (`orchestrator.lock`,
+not `state.sqlite`), structurally mismatched to the fine-grained per-operation
+reader/writer contention this phase targets — repurposing it would add redundant
+per-query filesystem locking or wrongly forbid the multiple-concurrent-server
+scenario the ticket treats as supported. Raising `busy_timeout` above 5000ms or
+adding `wal_autocheckpoint` tuning was also declined: no source evidence of
+insufficiency (short-transaction discipline throughout; no unbounded `-wal`
+growth signal). Both remain revisitable only on field/load evidence
+(lock-holds exceeding 5s, or `-wal` bloat). "Evaluate wiring … or tuning" thus
+resolves to *evaluated, no change* — the deliverable the phase asked for.
+
+Verification: `go build ./...` clean; `go test ./internal/wsstore/...` and full
+`go test ./...` green (all packages, `-count=3` no flakiness). New tests:
+`TestIndependentHandleContentionRetriesPointRead` (single-row) and
+`...MultiRowRead` force real `SQLITE_BUSY` on a reader via a
+`locking_mode=EXCLUSIVE` holder (WAL readers don't block on `BEGIN IMMEDIATE`),
+`TestManagerOpenReassertsWALOnPreExistingNonWALDatabase`, plus WAL idempotence
+assertions on `TestOpenCloseReopenCreatesWorktreeDatabase`. Adversarial review
+verdict SHIP (no blockers/majors) and empirically confirmed both contention
+tests fail if the retry wrap is removed (non-vacuous). Fully cross-platform; no
+launcher/OS-process code touched.
+
+---
+
+**Ticket complete.** All four phases have `### Result` sections and are merged
+into the goal branch: Phase 1 (request-goroutine panic recovery + always-on
+crash trace, the confirmed disconnect trigger), Phase 2 (launcher
+`last-abnormal-exit` breadcrumb), Phase 3a (Windows server-side parent-death
+self-termination; Job Object backstop 3b deferred pending real-Windows
+evidence), Phase 4 (SQLite point-read retry + unconditional WAL re-assert). Moved
+to `.done/`.
