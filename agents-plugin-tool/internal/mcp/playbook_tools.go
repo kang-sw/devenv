@@ -453,6 +453,10 @@ const (
 	preferSubagentPlaybookName  = "lead-prefer-subagent"
 	preferSubagentPlaybookTitle = "Prefer Subagent"
 	preferSubagentEnabledValue  = "on"
+
+	goalFanOutStepPlaybookName = "lead-goal-fan-out-step"
+	goalStepPlaybookName       = "lead-goal-step"
+	goalStepPlaybookTitle      = "Goal Step"
 )
 
 // builtinPromptOverrideDefaults returns code-owned default override values for
@@ -877,9 +881,17 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
-// The workflow manual has one code-side pragmatic concatenation hook: when the
-// global workflow.prefer_subagent preference is on, append the normally-rendered
-// lead-prefer-subagent playbook wrapped in a playbook boundary.
+// It has two code-side pragmatic concatenation hooks that append a
+// skills-tree SKILL.md body (via wsrsrc.LoadSkillBody) wrapped in a visible
+// <playbook name=... title=...> boundary, applied post-substitution so the
+// appended static prose (no {{.}} placeholders) never trips the
+// undeclared-var guard:
+//  1. lead-workflow-manual: gated by the global workflow.prefer_subagent
+//     preference — appends lead-prefer-subagent only when the preference is on.
+//  2. lead-goal-fan-out-step: unconditional on the name — always appends
+//     lead-goal-step, since the fan-out overlay transcludes goal-step's full
+//     contract verbatim rather than restating it.
+//
 // printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
 //
 // rsrcRoot is a call-site-overridable seam for root_override support.
@@ -891,25 +903,34 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 	if err != nil {
 		return "", "", err
 	}
-	if name != workflowManualPlaybookName {
-		return body, recommendedTier, nil
+	if name == workflowManualPlaybookName {
+		enabled, err := workflowPreferSubagentEnabled(configOpts)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
+		}
+		if enabled {
+			skillsRoot, err := wsrsrc.ResolveSkillsRoot()
+			if err != nil {
+				return "", "", fmt.Errorf("resolve skills root for appended %s: %w", preferSubagentPlaybookName, err)
+			}
+			appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, preferSubagentPlaybookName)
+			if err != nil {
+				return "", "", fmt.Errorf("load appended %s: %w", preferSubagentPlaybookName, err)
+			}
+			body += "\n\n" + wrapRenderedPlaybookForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
+		}
 	}
-	enabled, err := workflowPreferSubagentEnabled(configOpts)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
+	if name == goalFanOutStepPlaybookName {
+		skillsRoot, err := wsrsrc.ResolveSkillsRoot()
+		if err != nil {
+			return "", "", fmt.Errorf("resolve skills root for appended %s: %w", goalStepPlaybookName, err)
+		}
+		appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, goalStepPlaybookName)
+		if err != nil {
+			return "", "", fmt.Errorf("load appended %s: %w", goalStepPlaybookName, err)
+		}
+		body += "\n\n" + wrapRenderedPlaybookForConcatenation(goalStepPlaybookName, goalStepPlaybookTitle, appendBody)
 	}
-	if !enabled {
-		return body, recommendedTier, nil
-	}
-	skillsRoot, err := wsrsrc.ResolveSkillsRoot()
-	if err != nil {
-		return "", "", fmt.Errorf("resolve skills root for appended %s: %w", preferSubagentPlaybookName, err)
-	}
-	appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, preferSubagentPlaybookName)
-	if err != nil {
-		return "", "", fmt.Errorf("load appended %s: %w", preferSubagentPlaybookName, err)
-	}
-	body += "\n\n" + wrapRenderedPlaybookForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
 	return body, recommendedTier, nil
 }
 

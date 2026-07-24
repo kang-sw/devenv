@@ -427,6 +427,69 @@ round-trip, not that N worktrees + mini-leads coexist and juggle cleanly); treat
 as prototype-validate — run it, judge the concurrency behavior, and fold any friction
 back into the body doctrine before shipping.
 
+### Result (2816a82c) - 2026-07-24
+
+The entry skill and serve-time transclusion landed; the batch≥2 end-to-end dry
+run is **deferred** (see Deferred below). Delta:
+
+- **Transclusion branch.** `printPlaybook`
+  (`agents-plugin-tool/internal/mcp/playbook_tools.go`) gained a second,
+  **unconditional-on-name** transclusion branch beside the config-gated
+  `lead-workflow-manual`/`prefer_subagent` precedent it generalizes. Serving
+  `lead-goal-fan-out-step` now `LoadSkillBody(skillsRoot, "lead-goal-step")` and
+  appends it via `wrapRenderedPlaybookForConcatenation("lead-goal-step", "Goal
+  Step", body)` **after** substitution, so goal-step's static body never trips the
+  `{{.`-undeclared-var guard. `printPlaybook` was refactored into two independent
+  mutually-exclusive `if name == …` blocks (new constants
+  `goalFanOutStepPlaybookName` / `goalStepPlaybookName` / `goalStepPlaybookTitle`).
+  `lead-goal-step` is pulled from the skills tree (not rsrc, not hash-verified) —
+  the same accepted integrity trade-off as the existing `lead-prefer-subagent`
+  transclusion.
+- **Entry skill.** Thin shim `agents-plugin/skills/lead-goal-fan-out-step/SKILL.md`
+  (modeled on `lead-discuss`/`lead-goal-step`) wires `workflow_manual` +
+  `playbook.print`. The already-finalized overlay body
+  (`agents-plugin/rsrc/lead-goal-fan-out-step/lead-goal-fan-out-step.md`, batch-parallel
+  delta only, `kind: print`, `delegates: true`) was left byte-identical — only wired,
+  not rewritten.
+- **Manifests.** Added `lead-goal-fan-out-step` hash entries to **both**
+  `agents-plugin/rsrc/manifest.json` (regen `WS_REGEN_MANIFEST=1`) and
+  `agents-plugin/skills/manifest.json` (regen `WSRSRC_REGEN_SKILLS=1`). The rsrc
+  entry also cleared pre-existing `TestShippedManifestUpToDate` drift (the overlay
+  file had shipped in Phase-1's merge without a manifest entry).
+- **Registration.** Registered as an entry skill; the directly-invocable count in
+  `ai-docs/spec/workflow-skills.md` (`#260610-entry-skill-surface-reduction`) bumped
+  14 → 15 and added to the `#260505-lead-skill-namespace-surface` list, with a new
+  `#260724-goal-fan-out-step-transclusion` prose entry under `## Planning Workflow
+  Skills`.
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./internal/mcp/...`, and
+`go test ./cmd/ws-mcp/...` all green. New
+`TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally` asserts overlay
+presence, boundary-tag presence, overlay-**before**-boundary ordering, and a
+**lockstep** compare against a live `LoadSkillBody("lead-goal-step")` read (so a
+future goal-step edit auto-reflects with no fixture update). Direct render evidence:
+`printPlaybook("lead-goal-fan-out-step")` produced a 14534-byte body — overlay
+first (offsets 0–6210, ending in its delegate footer), then the visible `<playbook
+name="lead-goal-step" title="Goal Step">` boundary at offset 6210, then goal-step's
+base contract verbatim. Partitioned review (correctness/fit/test): correctness
+clean first pass; the test partition's ordering-assertion gap and the fit partition's
+missing spec updates were both fixed in this same commit and re-verified.
+
+Specs updated in-commit: `ai-docs/spec/plugin-runtime.md` (serve-time skill-body
+transclusion in `printPlaybook`, generalizing the `lead-prefer-subagent`
+concatenation precedent; skills-tree body not hash-verified) and
+`ai-docs/spec/workflow-skills.md` (entry + namespace-surface registration + count
+bump).
+
+Deferred to keep the phase reviewable: (a) the **batch≥2 concurrent-mini-lead dry
+run** (the ticket frames it as prototype-validate; the wiring, depth-2 recursion, and
+mint/merge round-trip are proven by this session's own fan-out-shaped delegation, but
+the N-worktree juggling exercise is a live-run validation better executed once the
+version bump ships the new print surface into a running server). (b) Phase 3 wsflow
+mirror — `TestWsflowRsrcMirrorUpToDate` is currently red because the overlay + shim
+are not yet mirrored into `agents-plugin-wsflow/`; that is Phase 3's explicit scope,
+not a regression (the failure predates this branch for the overlay file).
+
 ### Phase 3: wsflow exposure verification + mirror
 
 First probe the wsflow reduced runtime for exposure of `ferrule`,
