@@ -24,6 +24,7 @@ import {
   type HotkeyDispatchContext,
   type HotkeyUserConfig,
 } from "./hotkeys.js";
+import { AGENT_GUI_SUSPENDED } from "./agentGuiSuspended.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -191,7 +192,12 @@ const EXPECTED_DEFAULT_KEYMAP: readonly {
   // `t` Terminal group (spec: "t n")
   { keys: ["t", "n"], commandId: "terminal.create" },
   // `a` Agent-chat group (spec: "a n")
-  { keys: ["a", "n"], commandId: "agentChat.create" },
+  // Agent GUI suspended (260713): while suspended the `a n` binding is not
+  // registered, so the expected table must assert its ABSENCE to stay
+  // meaningful against `buildDefaultHotkeyBindings`.
+  ...(AGENT_GUI_SUSPENDED
+    ? []
+    : [{ keys: ["a", "n"], commandId: "agentChat.create" }]),
   // `g` Git group (spec: "g r"/"g f"/"g p"/"g l"/"g b"/"g c")
   { keys: ["g", "r"], commandId: "git.refresh" },
   { keys: ["g", "f"], commandId: "git.fetch" },
