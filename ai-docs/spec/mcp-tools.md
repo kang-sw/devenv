@@ -28,6 +28,23 @@ Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
 
+An unexpected panic while handling a request does not terminate the serve
+process. {#260724-serve-request-panic-resilience} The per-request handler
+recovers the panic, returns a JSON-RPC error (reserved server-error code
+`-32000`, message `internal error: request handler panicked (<method>)`) for
+that one request, and keeps serving subsequent requests on the same process and
+stdio connection. The client-visible error names only the failed method; the
+panic value and stack never appear in the response. Because a recovered panic is
+a JSON-RPC error rather than a tool-level failure, it is not an `isError: true`
+result. The panic value and full stack are persisted to an always-on crash file
+at `<cache-root>/crash/mcp-panic.log` (cache root honoring `WS_CACHE_HOME`),
+appended as one JSON line per panic with no rotation; if that file cannot be
+resolved or written, the trace falls back to process stderr so it is never
+silently dropped. The crash file is always written regardless of environment;
+when `WS_MCP_DEBUG_LOG` is set the same event is additionally mirrored there.
+This closes the failure mode where a single request-handler panic crashed the
+whole server mid-session with no persisted trace.
+
 Setup calls are request-order fences. When `ws.setup` or the advertised setup
 alias appears in the stdio stream, the server completes earlier in-flight
 requests, applies setup synchronously, writes that setup response, and only then
