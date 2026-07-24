@@ -317,11 +317,22 @@ async function runInTerminal(page: Page, command: string) {
 // path left the terminal passthrough guard intact - focuses the currently
 // active terminal surface and confirms a fresh echo round-trips through it,
 // rather than only asserting the overlay's own DOM disappeared.
+//
+// `.first()`-scoped rather than a bare `.terminal-surface`/`.xterm-rows`
+// locator: exactly one terminal pane exists at every call site today, but
+// once 260724-idea-dashboard-hotkey-leader-dispatch-gap is fixed, dismissal
+// path 1's `<leader> t n` will start actually creating a second terminal
+// pane, and a bare locator would become an ambiguous Playwright strict-mode
+// multi-match. `.first()` targets whichever terminal surface is currently
+// frontmost, matching this helper's intent - prove *the active* terminal
+// still accepts input after a dismissal path, not a specific pane identity -
+// and stays valid once that bug is fixed.
 async function expectTerminalNotBlocked(page: Page, tag: string) {
-  await page.locator(".terminal-surface").click();
+  const surface = page.locator(".terminal-surface").first();
+  await surface.click();
   await page.keyboard.type(commandPlan.echo(tag));
   await page.keyboard.press("Enter");
-  await expect(page.locator(".xterm-rows")).toContainText(tag, {
+  await expect(surface.locator(".xterm-rows")).toContainText(tag, {
     timeout: 5_000,
   });
 }
@@ -2745,6 +2756,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // no product source changes accompany this step.
     const overlay = page.locator(".which-key-overlay");
     const rows = overlay.locator(".which-key-overlay-row");
+    const toolbar = page.locator(".workbench-toolbar");
+    // The currently-selected workRoot's own nav row - clicking it re-selects
+    // the same workRoot (a real, idempotent, harmless dispatch) purely to
+    // set a known `data-last-command-id` value; see dismissal path 1 below.
+    const selectedResourceRow = page
+      .locator('.resource-row[data-command-id="resource.select"].resource-row-selected')
+      .first();
 
     // The leader-trigger keydown handler skips capture while focus sits
     // inside an editable element or a `.terminal-pane` (hotkeys.ts
@@ -2757,11 +2775,14 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // --- Appearance delay: absent before 250ms, present after it ---------
     await focusNeutral();
     await page.keyboard.press("Control+Space");
-    await page.waitForTimeout(120); // still inside the 250ms appearance delay
+    // Checked immediately after the leader press (not raced against the
+    // 250ms boundary with a fixed intermediate sleep, which would carry
+    // CI-jitter flakiness) - at effectively 0ms elapsed the overlay is
+    // certainly still inside its appearance delay.
     await expect(overlay).toHaveCount(0);
     await expect(overlay).toBeVisible({ timeout: 1_000 });
     note(
-      "which-key overlay: absent before the 250ms appearance delay elapsed, visible after it",
+      "which-key overlay: absent immediately after the leader press (still inside the 250ms appearance delay), visible once the delay elapses",
     );
 
     // --- Rows reflect live registry contents, and narrow on partial input -
@@ -2807,6 +2828,19 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // call site, not the shared bus the leader listener dispatches through.
     // That gap is a hotkey-config-framework dispatch defect, not a
     // which-key-overlay defect, and out of this ticket's scope to fix.
+    //
+    // CONTRACT (regression guard): `data-last-command-id` is a single global
+    // "most recent dispatched command" value, already left at
+    // "terminal.create" by the real terminal-create button click earlier in
+    // this test. Asserting it equals "terminal.create" without first
+    // resetting it would pass vacuously even if `<leader> t n` dispatched
+    // nothing at all - it would not distinguish this path from dismissal
+    // path 2 (unmatched key, no dispatch). Re-selecting the already-selected
+    // workRoot first is a real, idempotent, harmless dispatch that sets a
+    // known-different baseline ("resource.select"), so the assertion below
+    // proves a genuine transition caused by the leader sequence.
+    await selectedResourceRow.click();
+    await expect(toolbar).toHaveAttribute("data-last-command-id", "resource.select");
     await focusNeutral();
     await page.keyboard.press("Control+Space");
     await expect(overlay).toBeVisible({ timeout: 1_000 });
@@ -2814,12 +2848,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(rows).toHaveCount(1);
     await page.keyboard.press("n");
     await expect(overlay).toHaveCount(0);
-    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
-      "data-last-command-id",
-      "terminal.create",
-    );
+    await expect(toolbar).toHaveAttribute("data-last-command-id", "terminal.create");
     note(
-      "which-key overlay dismissal path 1 (match): <leader> t n resolved (dispatched terminal.create through the command bus) and left no stale overlay DOM",
+      "which-key overlay dismissal path 1 (match): <leader> t n transitioned data-last-command-id from a known " +
+        "different baseline (resource.select) to terminal.create, proving it resolved and dispatched through the " +
+        "command bus, and left no stale overlay DOM",
     );
     await expectTerminalNotBlocked(page, "WHICHKEY-MATCH-OK");
 
