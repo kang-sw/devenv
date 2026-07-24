@@ -97,6 +97,7 @@ func serve(args []string) {
 	}
 
 	server := mcp.NewServer(defaultRoot(*root), version, sourceCommit)
+	startParentDeathWatch()
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)

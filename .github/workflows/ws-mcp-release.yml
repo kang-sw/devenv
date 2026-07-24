@@ -101,6 +101,9 @@ jobs:
         with:
           go-version-file: agents-plugin-tool/go.mod
 
+      - name: Run Go tests (Windows)
+        run: go test ./...
+
       - name: Build Windows executable
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
