@@ -114,6 +114,12 @@ without asking; do not set an explicit merge target — the checked-out goal
 branch is picked up automatically. When no goal-staging context is active,
 hand off exactly as before: no merge-confirm override, no staging branch.
 
+**One finished ticket is not a finished goal.** Only the three terminal
+states above end the run — an advanceable ticket still in `ready/` (one
+with no recorded blocker) does not. End such a cycle by naming the
+continuation — the next `lead-goal-step` selection — never with a
+wrap-up that reads as complete.
+
 Record the blocker before yielding — this step is not skippable. When this
 turn's downstream work concludes the dispatched ticket cannot advance
 further without a human decision, record that blocker onto the ticket
