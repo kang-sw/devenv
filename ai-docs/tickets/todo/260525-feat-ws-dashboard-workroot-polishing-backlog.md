@@ -4,6 +4,10 @@ parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 spec:
   - 260524-ws-dashboard-git-worktree-creation
   - 260524-ws-dashboard-git-aware-workroot-toolbar
+  - 260722-ws-dashboard-git-worktree-removal
+  - 260722-ws-dashboard-worktree-removal-hide-ux
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # ws dashboard WorkRoot polishing backlog
@@ -23,7 +27,9 @@ when they become implementation-ready.
 
 ### Phase 1: WorkRoot lifecycle polish
 
-**Priority (2026-07-22):** worktree delete is the immediate priority item in
+**Priority (2026-07-22)** *(fulfilled — the daemon remove op + Phase 3 UX
+shipped, see Result (bf7deab0); retained for historical context)***:** worktree
+delete is the immediate priority item in
 this ticket. The atomic `git worktree remove` operation (force-gated on
 uncommitted/untracked changes, plus dashboard registry cleanup and active
 terminal-session accounting) described below is scoped and ready; Phase 3
@@ -83,10 +89,13 @@ recovery.
   dogfood, Windows): the 5s interval timer (`gitToolbar.ts:231-253`) plus
   focus/visibility-triggered refreshes have no in-flight/single-flight
   guard, client- or server-side, so overlapping `git status`/`git branch`
-  invocations against the same repo can race on the index lock. See
-  `260711-idea-dashboard-git-status-polling-index-lock-contention` for the
-  full investigation and candidate fix directions (single-flight guard,
-  `--no-optional-locks`, and/or a longer-term watch-based rearchitecture).
+  invocations against the same repo can race on the index lock. **Update
+  2026-07-24:** the near-term `--no-optional-locks` fix already SHIPPED via
+  `260714-bug-git-status-poll-index-lock-staleness` (`.done/`; the toolbar
+  poll now passes `--no-optional-locks`, documented in the Git-Aware WorkRoot
+  Toolbar spec). Remaining open direction narrowed to the long-term
+  watch-based rearchitecture (single-flight guard deprioritized) — see
+  `260711-idea-dashboard-git-status-polling-index-lock-contention` (`todo/`).
 
 This phase should preserve the current safety decision that dashboard-triggered
 pulls use `git pull --ff-only` and never attempt conflict resolution.
@@ -133,7 +142,7 @@ Verification should include resource model tests for the branch
 unmerged/dangling check and browser coverage for the confirmation modal
 (both warning states) and the hide/unhide flow.
 
-### Result (bf7deab0)
+### Result (bf7deab0) - 2026-07-22
 
 Shipped the worktree-removal slice: Phase 3 UX (B-1/B-2/B-3) plus the Phase 1
 daemon `git worktree remove` op it depends on. Commits: `f0843859` (daemon
@@ -178,3 +187,69 @@ SCOPE REMAINING (ticket stays in `ready/`, do NOT move it to `.done/`):
 Phase 1 full WorkRoot lifecycle polish + placement migration (only the
 daemon remove-op was borrowed for this slice), and Phase 2 git toolbar
 polish / index.lock handling.
+
+### Result (1bb24f25) - 2026-07-24
+
+Shipped the Phase 1 worktree default-placement migration slice (the
+"Long-term worktree placement direction" item): new-worktree Auto placement
+moved from `<root>/.git/ws-worktree/<name>` to
+`<root>/.ws-dashboard/worktrees/<name>`. Commits: `ea64fded` (survey plan),
+`1bb24f25` (implementation).
+
+Daemon (`crates/daemon/src/git_worktree.rs`): `GitWorkspaceContext` gains a
+`worktree_base_dir` computed once in `resolve_workspace_git` from
+`common_dir.parent()/.ws-dashboard/worktrees` (falls back to the old
+`common_dir/ws-worktree` shape only if `common_dir` unexpectedly has no
+parent); `resolve_preview_with_context`'s `Auto` arm now joins that field
+instead of recomputing `common_dir.join("ws-worktree")`. New best-effort
+`ensure_worktree_base_dir_excluded` helper appends `/.ws-dashboard/worktrees/`
+to `<root>/.git/info/exclude` (idempotent, silent on I/O failure) so the new
+in-tree placement stays invisible to the root repo's `git status` — preserving
+the free invisibility the old `.git/`-internal placement had. The now-dead
+`common_dir` struct field was removed. UI base-dir labels and the spec's
+"Automatic path naming" prose (`260524-ws-dashboard-git-worktree-creation`)
+updated to `.ws-dashboard/worktrees`.
+
+Migration risk confirmed low: `discovery.rs` finds worktrees via
+`git worktree list --porcelain`, not a path pattern, so pre-existing
+`.git/ws-worktree/*` worktrees keep working with no backfill.
+
+Verification: daemon `git_worktree` suite (14/14 pass) including a NEW
+`git status --porcelain` cleanliness assertion in `routes.rs`, independently
+confirmed load-bearing (fails without the `.git/info/exclude` step); frontend
+`test:git` green.
+
+e2e status correction: an earlier assumption (carried into the survey plan
+from the prior Phase 3 Result) that `dashboard-acceptance.spec.ts` is
+type-check-only because the `openWorkRoot` locator ambiguity blocks it is
+STALE — `260722-bug-e2e-open-work-root-locator-ambiguity` was already fixed
+and closed (`e2290cdd`) before this slice. The test partition re-ran Playwright
+and confirmed the suite runs past this diff's touched worktree steps
+(B-1 data-loss scratch path / hide-unhide) successfully; the suite fails only
+later at an unrelated agent-chat assertion, out of scope for this slice.
+
+Review: 3-partition (correctness clean, fit clean, test 1 Important + 1 Minor).
+Important = the stale e2e "type-check-only" characterization above, adopted by
+recording the accurate status here (no code change). Minor = no test for the
+`common_dir.parent()`-is-`None` fallback branch, plan-sanctioned out of scope.
+
+SCOPE REMAINING after this slice: broad Phase 1 WorkRoot lifecycle polish
+(unavailable/recovery states, remove/forget copy, refresh timing,
+pinned-directory behavior, workspace grouping) and Phase 2 git toolbar polish
+(remaining index.lock watch-based rearchitecture). The placement migration is
+now DONE.
+
+### Status demoted ready -> todo (2026-07-24)
+
+Both concrete implementation-ready slices this ticket carried have now shipped
+(worktree remove op + Phase 3 removal/hide UX in Result bf7deab0; default
+placement migration in Result 1bb24f25). A combined sage review on 2026-07-24
+(design + completeness) returned `concern`/`concern`: the ticket is coherent as
+a deliberate living backlog, but its remaining Phase 1/Phase 2 scope is
+"candidate areas" with no concrete chosen behavior, so a goal-loop step that
+picks it as a `ready/` implementation target would stall at proceed with nothing
+buildable. Per that finding this ticket is demoted to `todo/` (accepted backlog);
+re-promote a concrete slice to `ready/` — or split one out — once an owner
+concretizes which polish item matters and its target behavior. Sage-review
+frontmatter is left `required` so that future ready re-promotion re-runs the
+gate against the concretized scope.

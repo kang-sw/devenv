@@ -172,7 +172,7 @@ pub async fn git_worktree_add_options(
                 },
                 branches: Vec::new(),
                 defaults: GitWorktreeDefaults {
-                    worktree_base_dir_label: ".git/ws-worktree".to_owned(),
+                    worktree_base_dir_label: ".ws-dashboard/worktrees".to_owned(),
                 },
             })
             .into_response()
@@ -621,7 +621,7 @@ fn options_for_context(
         },
         branches: context.branches.clone(),
         defaults: GitWorktreeDefaults {
-            worktree_base_dir_label: ".git/ws-worktree".to_owned(),
+            worktree_base_dir_label: ".ws-dashboard/worktrees".to_owned(),
         },
     }
 }
@@ -659,10 +659,7 @@ fn resolve_preview_with_context(
         GitWorktreeBranchRequest::Manual { name } => name.trim().to_owned(),
     };
     let target_path = match &request.path {
-        GitWorktreePathRequest::Auto => context
-            .common_dir
-            .join("ws-worktree")
-            .join(&filesystem_name),
+        GitWorktreePathRequest::Auto => context.worktree_base_dir.join(&filesystem_name),
         GitWorktreePathRequest::Custom { target_path } => PathBuf::from(target_path.trim()),
     };
     let target_path_label = target_path.display().to_string();
@@ -737,11 +734,11 @@ fn resolve_preview_with_context(
 #[derive(Clone, Debug)]
 struct GitWorkspaceContext {
     root_path: PathBuf,
-    common_dir: PathBuf,
     root_label: String,
     branches: Vec<GitWorktreeBranchOption>,
     branch_names: BTreeSet<String>,
     checked_out_branches: BTreeSet<String>,
+    worktree_base_dir: PathBuf,
 }
 
 #[derive(Debug)]
@@ -794,8 +791,12 @@ fn resolve_workspace_git(
         message: "workspace is not a Git workRoot".to_owned(),
         root_label: Some(root.label.clone()),
     })?;
-    let base = common_dir.join("ws-worktree");
-    let _ = fs::create_dir_all(&base);
+    let worktree_base_dir = common_dir
+        .parent()
+        .map(|root| root.join(".ws-dashboard").join("worktrees"))
+        .unwrap_or_else(|| common_dir.join("ws-worktree"));
+    let _ = fs::create_dir_all(&worktree_base_dir);
+    ensure_worktree_base_dir_excluded(&common_dir);
     let current = git_text(&root_path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
     let branches = git_branches(&root_path, &current);
     let branch_names = branches.iter().map(|branch| branch.name.clone()).collect();
@@ -806,12 +807,36 @@ fn resolve_workspace_git(
         .collect();
     Ok(GitWorkspaceContext {
         root_path,
-        common_dir,
         root_label: root.label.clone(),
         branches,
         branch_names,
         checked_out_branches,
+        worktree_base_dir,
     })
+}
+
+/// Best-effort, idempotent local-only ignore entry for the default worktree
+/// placement directory. Silent on any I/O failure; never blocks worktree
+/// creation. `common_dir` is `<root>/.git` for a non-worktree common dir.
+fn ensure_worktree_base_dir_excluded(common_dir: &Path) {
+    const ENTRY: &str = "/.ws-dashboard/worktrees/";
+    let exclude_path = common_dir.join("info").join("exclude");
+    let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
+    if existing.lines().any(|line| line.trim() == ENTRY) {
+        return;
+    }
+    if let Some(parent) = exclude_path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(ENTRY);
+    updated.push('\n');
+    let _ = fs::write(&exclude_path, updated);
 }
 
 fn git_branches(root: &Path, current: &str) -> Vec<GitWorktreeBranchOption> {

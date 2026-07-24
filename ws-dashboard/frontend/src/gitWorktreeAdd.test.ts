@@ -40,7 +40,7 @@ const responses: unknown[] = [
     workspaceId: "workspace-local-abc",
     git: { available: true, rootLabel: "repo" },
     branches: [{ name: "main", checkedOut: true, current: true }],
-    defaults: { worktreeBaseDirLabel: ".git/ws-worktree" },
+    defaults: { worktreeBaseDirLabel: ".ws-dashboard/worktrees" },
   },
   {
     branchName: "feature-one",
@@ -132,7 +132,7 @@ responses.push(
     workspaceId: "workspace-same",
     git: { available: true, rootLabel: "repo" },
     branches: [{ name: "main", checkedOut: true, current: true }],
-    defaults: { worktreeBaseDirLabel: ".git/ws-worktree" },
+    defaults: { worktreeBaseDirLabel: ".ws-dashboard/worktrees" },
   },
   {
     branchName: "feature-one",
