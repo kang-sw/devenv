@@ -183,6 +183,20 @@ the contract or binary identity changes, while install or repair paths still
 fail closed into full validation before handoff.
 {#260506-launcher-hot-path-compatibility-cache}
 
+The launcher persists durable failure breadcrumbs into the runtime directory
+(`WS_MCP_RUNTIME_DIR`, or `.runtime/<os>-<arch>/`). On any pre-handoff failure it
+writes `last-launch-error`, and it clears that file before every successful
+handoff, so the file exists only when the most recent launch actually failed. On
+Windows, where the launcher stays resident as a blocking parent of the runtime
+process instead of exec-replacing itself, a non-zero runtime exit code
+additionally writes a `last-abnormal-exit` breadcrumb recording that exit code to
+the same runtime directory. The abnormal-exit breadcrumb complements, and never
+overwrites, `last-launch-error`: the two answer different questions — startup
+failure versus mid-session abnormal termination — and coexist. A clean exit
+(including stdin-EOF shutdown) writes no abnormal-exit breadcrumb. Both are
+best-effort and never mask the underlying exit status.
+{#260724-launcher-abnormal-exit-breadcrumb}
+
 ## Release Asset Build And Checksum Pipeline {#260505-release-asset-build-checksum-pipeline}
 
 The runtime build script produces cross-platform `ws-mcp-*` release assets for

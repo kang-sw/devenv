@@ -416,6 +416,55 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
         self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
 
+    def test_windows_abnormal_exit_writes_complementary_breadcrumb(self):
+        launcher = load_launcher()
+
+        launcher.host_os = lambda: "windows"
+        launcher.host_arch = lambda: "amd64"
+        launcher.bootstrap_runtime_forced = lambda: False
+        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
+        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
+        launcher.compatibility_stamp_current = lambda *args: True
+        launcher.detect_project_root = lambda plugin_dir: None
+        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
+        launcher.note = lambda message: None
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            with mock.patch.object(launcher.subprocess, "call", return_value=3221225477):
+                with mock.patch.dict(
+                    launcher.os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir}, clear=True
+                ):
+                    self.assertEqual(launcher.main(), 3221225477)
+
+            abnormal_exit = Path(runtime_dir) / "last-abnormal-exit"
+            launch_error = Path(runtime_dir) / "last-launch-error"
+            self.assertTrue(abnormal_exit.exists())
+            self.assertIn("3221225477", abnormal_exit.read_text(encoding="utf-8"))
+            self.assertFalse(launch_error.exists())
+
+    def test_windows_clean_exit_does_not_write_breadcrumb(self):
+        launcher = load_launcher()
+
+        launcher.host_os = lambda: "windows"
+        launcher.host_arch = lambda: "amd64"
+        launcher.bootstrap_runtime_forced = lambda: False
+        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
+        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
+        launcher.compatibility_stamp_current = lambda *args: True
+        launcher.detect_project_root = lambda plugin_dir: None
+        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
+        launcher.note = lambda message: None
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            with mock.patch.object(launcher.subprocess, "call", return_value=0):
+                with mock.patch.dict(
+                    launcher.os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir}, clear=True
+                ):
+                    self.assertEqual(launcher.main(), 0)
+
+            abnormal_exit = Path(runtime_dir) / "last-abnormal-exit"
+            self.assertFalse(abnormal_exit.exists())
+
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()
 

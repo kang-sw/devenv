@@ -46,6 +46,23 @@ def clear_launch_breadcrumb() -> None:
         pass
 
 
+def write_exit_breadcrumb(exit_code: int) -> None:
+    # Best-effort durable record of a mid-session abnormal child exit, so a
+    # Windows-side crash leaves a readable reason in the runtime dir. This
+    # complements (never overwrites) last-launch-error, which only reflects
+    # startup failures.
+    if _BREADCRUMB_DIR is None:
+        return
+    try:
+        _BREADCRUMB_DIR.mkdir(parents=True, exist_ok=True)
+        (_BREADCRUMB_DIR / "last-abnormal-exit").write_text(
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} ws-mcp-launcher: child exited abnormally with code {exit_code}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def fail(message: str) -> None:
     print(f"ws-mcp-launcher: {message}", file=sys.stderr)
     write_launch_breadcrumb(message)
@@ -865,7 +882,10 @@ def main() -> int:
     apply_skills_root_env(plugin_dir, os.environ)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":
-        return subprocess.call(args)
+        exit_code = subprocess.call(args)
+        if exit_code != 0:
+            write_exit_breadcrumb(exit_code)
+        return exit_code
     os.execvpe(str(binary), args, os.environ)
     return 1
 
