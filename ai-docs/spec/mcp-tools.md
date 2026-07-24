@@ -1132,12 +1132,26 @@ bodies.
 named playbook as a context-injected, harness-rendered prompt, writes it to a
 worktree-scoped temporary file, and returns that file path together with a
 `recommended-tier` line carrying the playbook's first-class frontmatter tier (when
-declared). The caller hands the path to a host-native subagent or a mercenary and
-routes the recommended tier to whichever path it picks — as a host model-selection
-guide for a native subagent, or as `mercenary.register`'s pass-through `tier` for a
-mercenary. `playbook.print` surfaces the same `recommended-tier` line. It
-carries no routing or strategy decision — the caller selects `name`, and the
-tool only materializes a rendered copy. `root_override`, when set, rebinds both the
+declared). When the tier resolves through the shared per-harness `(backend,
+model, effort)` config seam (`#260609-playbook-harness-rendering`), the payload
+also carries an additive `recommended-model` line, and — only when the resolved
+effort is non-empty — a `recommended-reasoning-effort` line; a resolver error
+omits both additive lines but never the `recommended-tier` line, and neither
+additive line is ever emitted with an empty value. The caller hands the path to
+a host-native subagent or a mercenary and routes these bindings to whichever
+path it picks: for a native subagent, `recommended-model`/
+`recommended-reasoning-effort` are the host model-selection binding (Codex
+binds them to the native `spawn_agent.model` / `spawn_agent.reasoning_effort`
+spawn parameters — never `effort`; if the native surface cannot accept the
+exact binding, the caller reports the binding as unavailable rather than
+silently dropping it, since the mercenary path is the explicit exact-binding
+fallback); for a mercenary, `recommended-tier` remains the value passed to
+`mercenary.register`'s pass-through `tier` (`recommended-model`/
+`recommended-reasoning-effort` are not consumed by mercenary registration,
+which takes no model/effort fields). `playbook.print` surfaces the same
+`recommended-tier`/`recommended-model`/`recommended-reasoning-effort` lines. The
+tool carries no routing or strategy decision — the caller selects `name`, and
+the tool only materializes a rendered copy. `root_override`, when set, rebinds both the
 auto-include resolution root and the child-key binding root for a delegate
 running in a different worktree. When the calling `session_key` is lead-scoped
 and the playbook frontmatter declares a delegate-eligible role, the render mints
