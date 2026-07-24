@@ -4,6 +4,7 @@ related:
   260724-bug-dashboard-terminal-dead-shell-undetected-steady-state: verifies
 sage-review-design: skipped
 sage-review-completeness: skipped
+completed: 2026-07-25
 ---
 
 ## Context
@@ -195,3 +196,8 @@ shipped within the existing WS transport contract (dead-shell Phase 1); it
 introduces no new observable behavior, protocol, or API surface and therefore
 addresses no spec entry. Closeout-only spec impact — no spec text is added or
 changed.
+
+
+## Resolution (2026-07-25)
+
+Native-Windows `#[cfg(windows)]` live-ConPTY reaper acceptance test landed (`crates/daemon/tests/terminal_windows_reaper_acceptance.rs`, Result `f5891a7e`). Ran on a real Windows host via the scratch-worktree `powershell.exe` cargo harness: baseline PASS (1.15s), non-vacuity mutation (reaper `transition(Exited)` neutralized) → FAIL/hang to the 15s deadline, revert → PASS. Linux stays green (file `#![cfg(windows)]`-gated → 0 tests). Reviews (correctness + test) clean, 3 accepted minors (all fail-loud, never false-green). Test-only; no product code touched; closeout-only spec impact.
