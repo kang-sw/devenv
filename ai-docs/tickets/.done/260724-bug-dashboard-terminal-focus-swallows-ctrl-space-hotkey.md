@@ -9,6 +9,7 @@ related:
   260517-bug-ws-dashboard-terminal-focus-browser-gate-regression: related
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # Ctrl+Space hotkey swallowed when a terminal pane has focus
@@ -121,3 +122,54 @@ Verify:
   becomes visible — confirming leader mode was entered — and that no
   stray control byte was written into the terminal's rendered output as
   a side effect.
+
+### Result (334f41cf) - 2026-07-24
+
+- **Fix.** Reordered `ws-dashboard/frontend/src/App.tsx#handleKeydown` so the
+  leader-*entry* trigger (`Ctrl+Space`) is evaluated before the
+  `shouldSkipHotkeyCapture` terminal/editable-target passthrough guard, so a
+  terminal-focused (or editable-focused) `Ctrl+Space` now opens the dashboard
+  leader/which-key mode instead of being swallowed. The IME-composition skip
+  still precedes the trigger, so a composing `Ctrl+Space` is still suppressed.
+  `shouldSkipHotkeyCapture`'s body is untouched: non-trigger keys and standalone
+  bindings still pass through to a focused terminal exactly as before, and the
+  leader-*continuation* branch is unchanged and still checked first.
+- **Structure.** The guarded-stage ordering was extracted into an exported pure
+  function `decideKeydownGuardStage(evt)` in
+  `ws-dashboard/frontend/src/hotkeys.ts` (decision
+  `"enter-leader" | "skip-passthrough" | "fall-through"`) as the single source
+  of truth; `handleKeydown` dispatches side effects
+  (`enterLeaderPending` + `preventDefault` + `stopPropagation` / return /
+  fall-through to standalone matching) based on the returned decision. This
+  extraction is byte-for-byte behavior-preserving vs the inline reorder
+  (confirmed by correctness re-review).
+- **Tests.** `hotkeys.test.ts` gained four runnable ordering-regression cases
+  directly against `decideKeydownGuardStage` (Ctrl+Space + terminal focus ->
+  `enter-leader`; `"t"` + terminal focus -> `skip-passthrough`; Ctrl+Space +
+  composing -> `skip-passthrough`; plain `"t"` with no guarded target ->
+  `fall-through`) — these would fail if the ordering regressed. The pre-existing
+  terminal-passthrough case is unchanged. An E2E step was added to
+  `dashboard-acceptance.spec.ts` (focus a terminal pane, press
+  `Control+Space`, assert the `.which-key-overlay` becomes visible and the
+  terminal still round-trips input, i.e. no stray control byte leaked).
+- **Verification.** `npm run build` clean (no type errors);
+  `npm run test:hotkeys` green (incl. the four new cases); `npx tsc -b --noEmit`
+  exit 0. The E2E was structurally verified (parses/lists) but NOT run, because
+  the Playwright browser suite is independently RED on the unrelated bug
+  `260713`; the ordering is nonetheless runnably guarded now by the new
+  `hotkeys.test.ts` unit cases (not E2E-only).
+- **Reviews.** Correctness review clean (plus a re-review confirming the
+  extraction is behavior-preserving — `preventDefault` + `stopPropagation` both
+  retained on `enter-leader`, no argument-shape mismatch). Test review clean
+  after resolving two minors (removed a byte-for-byte duplicate assertion; made
+  the ordering guard runnable via the extraction).
+- **Spec.** `260722-ws-dashboard-which-key-hint-overlay` sentence in
+  `ai-docs/spec/ws-web-dashboard/index.md` updated: the terminal-focus/IME guard
+  applies to leader-continuation keys and standalone bindings, but the
+  leader-entry trigger is checked before that guard and is never blocked by
+  terminal/editable focus.
+- **Commits.** Plan `a7a89f55`; implementation `334f41cf` (reorder + tests +
+  spec + E2E) and `491e1c30` (pure-function extraction + runnable ordering unit
+  guard + duplicate removal). Branch `impl/terminal-focus-ctrl-space-hotkey`,
+  merging into `goal/drain-ready-queue`. No plugin version bump (only
+  `ws-dashboard/frontend/` + `ai-docs/`).
