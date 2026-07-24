@@ -6,15 +6,19 @@ sage-review-design: completed
 sage-review-completeness: completed
 ---
 
-## Blocked (2026-07-24)
+## Blocked (2026-07-24) — native-Windows leg tracked under the chore acceptance ticket
 
-The native-Windows reaper acceptance leg of Phase 3 cannot be executed
-autonomously. It needs the user's real Windows host (the PowerShell /
-`powershell.exe` dogfood harness) and must NOT touch the production Windows
-daemon on port 4300. It awaits explicit user go-ahead to run the Windows
-dogfood harness. This note exists so goal-drain selection skips this ticket
-until the user enables the Windows leg. The Phase 3 Unix-regression leg is
-COMPLETE (`e2990574`); only the native-Windows acceptance leg remains.
+The Windows-harness confirmation gate is now lifted (the user's goal directive
+authorizes autonomous Windows E2E testing). The one remaining piece of this
+ticket — the native-Windows reaper acceptance leg of Phase 3 — is being
+satisfied by the dedicated end-of-drain acceptance ticket
+`260724-chore-dashboard-windows-terminal-reaper-native-acceptance`, whose
+`#[cfg(windows)]` live-ConPTY test exercises exactly this reaper path (that
+chore ticket `verifies:` this one). To avoid double-dispatch, goal-drain
+selection should SKIP this ticket (the `## Blocked` heading is retained solely
+for that skip signal); it will be closed when the chore's acceptance test lands
+and its Result is recorded here. The Phase 3 Unix-regression leg is already
+COMPLETE (`e2990574`).
 
 ## Symptom
 

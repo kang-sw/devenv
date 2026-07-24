@@ -37,24 +37,28 @@ sage-settled-design pre-authorization does **not** apply to this ticket — trea
 any newly surfaced binding design decision or sensitive action conservatively
 and surface it rather than assuming pre-authorization.
 
-## Blocked (2026-07-24)
+## Unblocked (2026-07-24)
 
-This end-of-drain acceptance ticket is blocked on the user's real Windows
-dogfood harness. Its Phase 1 is a single coherent acceptance activity —
-author a `#[cfg(windows)]` live-ConPTY acceptance test, run it on real
-Windows via `powershell.exe` in a `D:\<scratch>` worktree, AND prove
-non-vacuity by mutation — that is inherently runtime-iterated against real
-ConPTY behavior; authoring it blind on Linux (cross-compile only) would land
-an unverified test and violate evidence-before-claims, so the whole ticket
-is gated together on the harness rather than split. It must NOT be advanced
-autonomously: per the standing goal-run Windows-harness commitment, do not
-fire cargo at the user's Windows box without explicit user confirmation;
-sage review was explicitly skipped for this ticket so there is no
-sage-settled pre-authorization for the native run. Unblock condition: the
-user confirms/enables the Windows dogfood harness (per
-`ai-docs/_index.local.md`) and green-lights the native run; then a single
-session authors + runs + mutation-proves + records the Result. This note
-exists so goal-drain selection skips the ticket until the user clears it.
+The sole blocker recorded here — the standing "surface a confirmation before
+firing cargo at the Windows box" gate — is now lifted by an explicit user goal
+directive: "windows dashboard is now freely disposable (user is offline),
+freely test windows side dashboard for E2E test. repeat until all autonomously
+proceedable tickets drained." That is the green-light this ticket's prior
+Blocked note named as its unblock condition. The native-cargo scratch-worktree
+harness in `ai-docs/_index.local.md` is validated and low-risk (`cargo test` on
+a scratch worktree launches no daemon and needs no bind-mode/token handling).
+
+Proceeding autonomously per the goal run: author the `#[cfg(windows)]`
+live-ConPTY acceptance test, fetch this branch into a `/mnt/d/<scratch>`
+worktree, run it on real Windows via `powershell.exe`, prove non-vacuity by
+mutation, and record the Result. Constraints still in force (from
+`_index.local.md`): scratch worktree ONLY — never the primary
+`D:\dbg-ws-dashboard-dev` checkout; `command git worktree remove --force` on
+completion; never touch the `:4300` production gateway daemon. Because sage
+review was explicitly skipped for this ticket, any newly surfaced binding
+design decision or additional sensitive action beyond this scratch-worktree
+`cargo test` run is still surfaced conservatively rather than assumed
+pre-authorized.
 
 ## Goal
 
