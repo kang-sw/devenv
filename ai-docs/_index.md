@@ -157,7 +157,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
 | `260722-feat-dashboard-hotkey-config-framework` | done | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
 | `260722-feat-dashboard-settings-panel` | ready | Dashboard general settings modal: section registry, shared namespaced prefs store, Terminal-style first section |
-| `260722-feat-dashboard-which-key-hint-overlay` | ready | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry |
+| `260722-feat-dashboard-which-key-hint-overlay` | done | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry (both phases done, incl. Playwright verification) |
+| `260724-idea-dashboard-hotkey-leader-dispatch-gap` | idea | Global leader-key `executeCommand` call has no registered handler for `terminal.create` and most other default leaf commandIds, so leader-sub dispatch silently no-ops for them |
 | `260722-feat-dashboard-hint-click-fast-jump` | ready | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-idea-dashboard-git-status-diff-inspector` | idea | Dedicated right-sidebar surface to inspect changed files' contents and diffs, focused via `<leader> g s` |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |

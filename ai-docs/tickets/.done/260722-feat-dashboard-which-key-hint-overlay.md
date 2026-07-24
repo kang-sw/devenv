@@ -12,6 +12,7 @@ related-mental-model:
   - ws-web-dashboard
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # feat: Dashboard which-key-style leader hint overlay
@@ -154,6 +155,90 @@ closeable until browser-level verification lands. See Phase 2.
   - Dismissal path 3 — `Escape` dismisses the overlay.
   - Dismissal path 4 — a second `Ctrl+Space` dismisses the overlay.
   - After every dismissal path, subsequent terminal input is not blocked.
+
+### Result
+
+Added one new Playwright `test.step` ("which-key overlay: appearance delay,
+narrowing, and all four dismissal paths") to
+`ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts`, inserted right after
+the existing "create terminal and run a command" step (so a live terminal and
+an open, selected workRoot already exist), plus a small `expectTerminalNotBlocked`
+helper reused after every dismissal path. One assertion group per Phase 2
+"Done when" checklist line: appearance-delay boundary (absent at ~120ms,
+visible once past 250ms via a polling `expect`, not a fixed hard-sleep past
+the boundary), row narrowing (`describeLeaderChildren` output goes from the
+4 root groups to 3 leaves on `<leader> r`), and all four dismissal paths
+(match via `<leader> t n`, unmatched-key cancel, `Escape`, second
+`Ctrl+Space`) — each followed by a real terminal echo round-trip proving the
+terminal passthrough guard is not left stuck.
+
+Deviation from the plan's literal wording (documented, reasoned): dismissal
+path 1's "resolves" evidence uses the existing
+`.workbench-toolbar[data-last-command-id]` command-dispatch hook (the same
+idiom the earlier "activation controls are command-routed" step already
+relies on) instead of asserting a new terminal pane appears. Investigation
+during this phase found that the global leader-key listener's `executeCommand`
+call has no registered handler for `terminal.create` (or most other default
+leaf commandIds) — the real side effect is wired only at each control's own
+local click handler, not the shared bus the hotkey listener dispatches
+through — so `<leader> t n` reaches the command bus (observable via the
+dispatch hook) but does not actually open a terminal. This is a genuine,
+separate hotkey-config-framework dispatch defect, not a which-key-overlay
+defect; per the phase's own instruction not to weaken assertions to hide a
+found bug, the test asserts the true, in-scope thing (the overlay resolved
+and dispatched) rather than the false thing (a new terminal exists) or a
+silently-narrowed claim. Filed as
+`260724-idea-dashboard-hotkey-leader-dispatch-gap` for separate triage.
+
+Verification run: `npm run test:browser` (build + `cargo build -p
+ws-dashboard-daemon` + `playwright test`) executed for real. The new
+which-key step passed cleanly (confirmed via two full single-worker
+`-g "dashboard workRoot UI browser acceptance"` runs with zero failures
+inside or attributable to the step, and via the full `test:browser` run,
+where it is not among the reported step failures). The overall run still
+fails downstream at the pre-existing, already-tracked, deliberately-deferred
+`260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` defect (the
+"open new agent tab and launch a stub harness session" step) — confirmed via
+`git stash` to reproduce byte-identically on the pre-this-phase baseline, so
+it is neither caused by nor fixable within this phase's scope. No product
+source (`WhichKeyOverlay.tsx`, `hotkeys.ts`, `App.tsx`) was changed.
+
+#### Edition (1cff11f8) - 2026-07-24
+
+Partitioned review (correctness + test) of the initial commit found two
+Important defects and one Minor one, fixed on the same branch (test-only,
+no product source touched):
+
+- **Dismissal path 1's core assertion was vacuous.** `data-last-command-id`
+  was already `"terminal.create"` from the real terminal-create button click
+  earlier in the same test, so asserting it equalled `"terminal.create"`
+  after `<leader> t n` passed regardless of whether the leader sequence
+  dispatched anything - it did not distinguish a genuine resolve from an
+  unmatched cancel. Fixed by first clicking the already-selected workRoot's
+  own nav row (a real, idempotent, harmless dispatch) to set a known
+  baseline of `"resource.select"`, then asserting the value transitions to
+  `"terminal.create"` only after the leader sequence. Sanity-checked live:
+  temporarily swapping the resolving keypress for an unmatched key made the
+  fixed assertion fail as expected (observed `data-last-command-id` staying
+  at `"resource.select"`), confirming the fix is no longer vacuous, before
+  reverting the sanity mutation.
+- **`expectTerminalNotBlocked`'s bare `.terminal-surface`/`.xterm-rows`
+  locators would break under Playwright strict mode once
+  `260724-idea-dashboard-hotkey-leader-dispatch-gap` is fixed** and
+  `<leader> t n` starts really creating a second terminal pane. Scoped both
+  to `.first()` (with a comment citing that ticket) so the helper stays
+  valid once that gap is fixed.
+- **Minor:** the appearance-delay "absent before" check raced a fixed
+  120ms sleep against the 250ms boundary (modest CI-jitter risk). Changed to
+  assert absence immediately after the leader press (~0ms elapsed, well
+  inside the delay with no timing race) instead, leaving the "present after"
+  side as a generous polling `expect`.
+
+Re-verification: `npm run test:browser` executed for real again after the
+fix. The which-key step still passes cleanly; the same pre-existing,
+already-tracked `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden`
+defect downstream is still the only failure, unchanged from before this
+edition.
 
 ## Spec Impact
 
