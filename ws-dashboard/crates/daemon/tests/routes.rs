@@ -6647,7 +6647,7 @@ async fn git_worktree_add_previews_and_submits_new_branch_with_resource_refresh(
     assert!(preview["targetPathLabel"]
         .as_str()
         .expect("target label")
-        .contains("ws-worktree"));
+        .contains("ws-dashboard/worktrees"));
 
     let submit = git_worktree_submit_json(
         app.clone(),
@@ -6675,6 +6675,12 @@ async fn git_worktree_add_previews_and_submits_new_branch_with_resource_refresh(
     assert!(
         !body.contains(primary.to_string_lossy().as_ref()),
         "submit response must not leak primary path"
+    );
+
+    let root_status = git_stdout(&primary, &["status", "--porcelain"]);
+    assert!(
+        !root_status.contains(".ws-dashboard"),
+        "new worktree directory must not appear untracked in the root repo's git status: {root_status}"
     );
 
     remove_static_fixture(&base);

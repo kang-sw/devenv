@@ -1076,8 +1076,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // --- B-1 dirty state: an untracked file surfaces the RED data-loss banner. ---
     const worktreeDir = path.join(
       gitWorkRoot,
-      ".git",
-      "ws-worktree",
+      ".ws-dashboard",
+      "worktrees",
       "Browser-Gate-Branch",
     );
     const scratchFile = path.join(worktreeDir, "scratch-uncommitted.txt");

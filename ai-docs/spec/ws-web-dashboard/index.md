@@ -610,9 +610,10 @@ modal collects a worktree name, branch resolution, and target path resolution.
 Automatic branch naming derives a branch-compatible candidate from the
 worktree name, then the daemon previews whether submit will create a new branch,
 check out an existing branch, or block the request. Automatic path naming
-targets the workspace Git root's `.git/ws-worktree/<branch-compatible-name>`
-convention. Custom path selection may reuse the folder picker in target-path
-or parent-directory mode without adding broad file-manager operations.
+targets the workspace Git root's
+`.ws-dashboard/worktrees/<branch-compatible-name>` convention. Custom path
+selection may reuse the folder picker in target-path or parent-directory mode
+without adding broad file-manager operations.
 
 Submit revalidates the preview, runs the corresponding `git worktree add`
 operation, refreshes canonical dashboard resources, activates the created
