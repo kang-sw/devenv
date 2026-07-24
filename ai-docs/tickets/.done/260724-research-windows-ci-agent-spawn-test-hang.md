@@ -4,6 +4,27 @@ related:
   260724-bug-windows-mcp-mid-session-disconnect: origin
 related-mental-model:
   - mcp-runtime
+completed: 2026-07-24
+---
+
+## Resolution (2026-07-24)
+
+Superseded by real CI evidence. The predicted `internal/wsagent`
+backend-spawn hang **did not reproduce** on the GitHub Actions Windows runner
+(the v0.36.0 tag run showed `internal/wsagent ok` at ~125s); the local hang was
+an artifact of an incomplete tree copied off the `\\wsl.localhost` UNC path
+under a WSL-launched `powershell.exe`, not a real Windows defect.
+
+The actual Windows CI breakage was two unrelated, deterministic test issues in
+`internal/mcp`, both fixed in v0.36.1 (commit `74e1ac5b`):
+- a shipped-doc content assertion failing under a CRLF checkout — fixed with a
+  repo-root `.gitattributes` (`* text=auto eol=lf`);
+- an exec.shell cwd assertion missing when the runner returned an 8.3 short-name
+  temp path — fixed with `EvalSymlinks`-based path canonicalization.
+
+The v0.36.1 release workflow is fully green (build + windows-smoke). No
+CI-step rescoping was needed. Closed as resolved.
+
 ---
 
 # Windows CI `go test ./...` hangs on agent-backend-spawn tests
