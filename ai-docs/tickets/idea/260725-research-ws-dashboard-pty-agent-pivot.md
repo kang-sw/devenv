@@ -40,6 +40,32 @@ This pairs with the agent-GUI suspension already landed:
 - Tier 2 wire-out ticket
   `260725-refactor-dashboard-agent-gui-physical-module-isolation`.
 
+## Design invariant (load-bearing): no PTY wheel reinvention
+
+THE most important design decision for this pivot: do NOT reinvent a different
+PTY wheel. Substantial terminal-usability work already exists in this codebase.
+The PTY-agent MUST be an ADDITIVE layer that sits ON TOP OF the existing
+terminal infrastructure — reusing it wholesale — plus a few extra features. It
+must NOT introduce a parallel or second PTY subsystem, a forked helper process,
+or a separate terminal implementation.
+
+Reused wholesale:
+
+- the terminal registry + detached per-terminal helper process
+  (`ws-dashboard terminal-helper`),
+- NDJSON IPC (Unix socket / Windows named pipe),
+- the output ring + cursoring,
+- the reconcile/reap lifecycle,
+- the frontend xterm pane with owner-auth WebSocket + HTTP-poll fallback
+  transport,
+- Dockview tabs.
+
+The agent is simply a terminal whose spawned executable is an agent CLI instead
+of a shell — via argv/env passthrough at the
+`terminal_helper_process.rs::spawn_shell` seam (the enabling refactor already
+noted below) — plus the thin decoration/profile layer (hook injection, model
+selection, tab-label attention). The plumbing stays single-sourced.
+
 ## Recorded Design Reversal (flag prominently for sage/design review)
 
 This pivot REVERSES two recorded steers. That tension must be surfaced, not
@@ -156,15 +182,23 @@ KEEP / reuse:
 
 NOTE: spec `#260516-ws-web-dashboard-terminal-pane` states "The terminal pane
 is a shell terminal substrate only; it does not hardcode Codex, Claude, or
-other agent presets" (index.md ~L1964-1965). This implies the PTY-agent likely
-adds a SIBLING surface/kind rather than mutating the terminal pane — called out
-below as an open design choice.
+other agent presets" (index.md ~L1964-1965). Per the "no PTY wheel
+reinvention" invariant above, the additive layer must not FORK the terminal
+pane's substrate; it may add a sibling profile/kind over the same
+single-sourced plumbing. The remaining choice — profile/kind flag vs thin
+wrapper component — is called out below as an open design choice.
 
 ## Open Questions (for sage/design; do NOT resolve here)
 
-- Sibling agent surface/kind vs reusing the terminal pane, given the
-  shell-substrate-only spec line
-  (`#260516-ws-web-dashboard-terminal-pane`).
+- How THIN the additive layer is. The "no PTY wheel reinvention" invariant
+  above SETTLES the substrate question — same substrate, no new PTY plumbing.
+  What remains open is only the shape of the thin layer: whether the agent is
+  expressed as a `kind`/profile flag on the same terminal pane vs a thin
+  wrapper component over the identical infra. The
+  shell-substrate-only spec line (`#260516-ws-web-dashboard-terminal-pane`)
+  tension remains noted, but framed as: the additive layer must not FORK the
+  terminal pane's substrate — it may add a sibling profile/kind over the same
+  plumbing, but the plumbing stays single-sourced.
 - Model picker vs the "dashboard is not model authority" invariant — how to
   delegate to ws-runtime aliases.
 - Deriving running / awaiting-interaction from PTY output-idle timing without
