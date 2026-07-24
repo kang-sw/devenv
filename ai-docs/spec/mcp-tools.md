@@ -1640,9 +1640,11 @@ session binding, path indexes, byte counts, retention visibility, leases,
 tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
 transcripts, backend raw output, and final output bodies remain file-backed.
 
-SQLite state-store configure, migration, and short write paths use bounded
-retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
-process-local write serialization. Runtime migrations must keep transactions
+SQLite state-store configure, migration, point-read, and short write paths use
+bounded retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
+process-local write serialization. `journal_mode=WAL` is re-asserted on every
+store open, not only at database creation, so a pre-existing non-WAL database is
+migrated to WAL on next open. Runtime migrations must keep transactions
 short and must not hold a transaction across subprocess or model execution.
 
 ## Tool Profile Gating {#260505-tool-profile-gating}
