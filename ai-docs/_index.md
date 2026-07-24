@@ -262,11 +262,6 @@ dropped tickets live in hidden archive dirs and git history.
   `260524-research-visual-design-system-refresh`,
   `260524-research-react-aria-ui-primitives`). No remaining open child of the
   old epic was left orphaned.
-- `260622-feat-playbook-render-tier-label` (ready, feat) - make
-  `playbook.render` expose harness-resolved native spawn `model` and
-  `reasoning_effort` metadata, then teach the Codex workflow manual to pass
-  those exact fields. Spec addressing via `## Spec Impact` (`mcp-tools.md` and
-  `workflow-skills.md`, Contract-first: no).
 - `260702-bug-config-unset-asymmetry` (`.done/`, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
