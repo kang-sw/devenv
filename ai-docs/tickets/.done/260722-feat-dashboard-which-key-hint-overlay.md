@@ -12,6 +12,7 @@ related-mental-model:
   - ws-web-dashboard
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # feat: Dashboard which-key-style leader hint overlay
