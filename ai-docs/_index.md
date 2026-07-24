@@ -220,6 +220,15 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260724-bug-dashboard-terminal-dead-shell-undetected-steady-state` (ready,
+  bug) - Windows dogfood finding: a shell that dies without PTY EOF leaves a
+  zombie pane. Fix is a `#[cfg(windows)]` reaper thread blocking on the
+  shell's duplicated process HANDLE (`WaitForSingleObject`), plus frontend
+  retain-with-clear retirement + idempotent close. Sage combined = passed
+  (design+completeness). Spec addressing via `## Spec Impact`
+  (`ws-web-dashboard/index.md`, Contract-first: no). Related to
+  `260723-feat-dashboard-terminal-lifetime-daemon-decouple` (introduced-by).
+  Ready for `ws:lead-proceed`; Phase 3 acceptance needs native-Windows access.
 - `260714-bug-git-status-poll-index-lock-staleness` (`.done/`, bug) - closed
   2026-07-20: Phase 1 (`--no-optional-locks` on the poll's `git status` call
   in `git_toolbar.rs`, plus spec update) landed as commit `18e97569`,
