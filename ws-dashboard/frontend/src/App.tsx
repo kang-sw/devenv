@@ -1670,18 +1670,15 @@ export function App() {
         return;
       }
 
-      if (
-        shouldSkipHotkeyCapture({
-          isComposing: event.isComposing || event.key === "Process",
-          key: event.key,
-          targetIsEditable,
-          targetInsideTerminalPane,
-        })
-      ) {
-        return;
-      }
+      const isComposing = event.isComposing || event.key === "Process";
 
+      // The leader-entry trigger is checked before shouldSkipHotkeyCapture's
+      // terminal/editable-target passthrough guard so Ctrl+Space can open
+      // the leader overlay even while a terminal pane (or editable field)
+      // has focus. Only the IME-composition skip stays ahead of it, since a
+      // composing IME session must still suppress trigger recognition.
       if (
+        !isComposing &&
         isLeaderTriggerKeydown({
           key: event.key,
           ctrlKey: event.ctrlKey,
@@ -1697,6 +1694,17 @@ export function App() {
         setLeaderUiState(leaderStateRef.current);
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+
+      if (
+        shouldSkipHotkeyCapture({
+          isComposing,
+          key: event.key,
+          targetIsEditable,
+          targetInsideTerminalPane,
+        })
+      ) {
         return;
       }
 

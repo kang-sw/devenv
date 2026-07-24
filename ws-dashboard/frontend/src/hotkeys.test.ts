@@ -853,4 +853,45 @@ assertEqual(
   "a plain keydown outside any guarded target does not skip capture",
 );
 
+// Two-direction regression: the leader-entry trigger (Ctrl+Space) must be
+// checked in `App.tsx#handleKeydown` *before* `shouldSkipHotkeyCapture`, so
+// it reaches `enterLeaderPending` even while a terminal pane has focus,
+// while every other (non-trigger) key must still be skipped by the guard
+// exactly as before.
+assertEqual(
+  isLeaderTriggerKeydown({
+    key: " ",
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+  }),
+  true,
+  "Ctrl+Space is recognized as the leader trigger regardless of terminal focus " +
+    "(it is checked ahead of shouldSkipHotkeyCapture, not gated by it)",
+);
+assertEqual(
+  shouldSkipHotkeyCapture({
+    isComposing: false,
+    key: " ",
+    targetIsEditable: false,
+    targetInsideTerminalPane: true,
+  }),
+  true,
+  "shouldSkipHotkeyCapture alone would still skip a terminal-focused Ctrl+Space " +
+    "- this documents why handleKeydown's check *order* (trigger before guard), " +
+    "not the guard body, is what fixes the bug",
+);
+assertEqual(
+  shouldSkipHotkeyCapture({
+    isComposing: false,
+    key: "t",
+    targetIsEditable: false,
+    targetInsideTerminalPane: true,
+  }),
+  true,
+  "a non-trigger key ('t') with terminal focus is still skipped by the guard " +
+    "(standalone bindings and ordinary keys keep passing through to the terminal)",
+);
+
 console.log("hotkeys.test.ts passed");
