@@ -315,7 +315,6 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	for _, want := range []string{
 		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
 		"Maximum-delegation posture for this session",
-		"spawn_agent(fork_context:true, message:<prompt>)",
 		"</playbook>",
 	} {
 		if !strings.Contains(onText, want) {
@@ -348,8 +347,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 // (TestWorkflowPreferSubagentWorkflowManualClaudeOmitsCodexGuidance): the
 // PreferSubagentInvocationGuidance override point and its Codex-only builtin
 // default were retired when the skill body was inlined, so Claude and Codex
-// now both see the same host-conditional prose, including the literal
-// spawn_agent fallback wording.
+// now both see the same body.
 func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
@@ -382,9 +380,6 @@ func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testin
 	}
 	for _, want := range []string{
 		"Maximum-delegation posture for this session",
-		"spawn_agent(fork_context:true, message:<prompt>)",
-		"`agent_type: explorer`",
-		"`agent_type: worker`",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Claude appended playbook must include static skill body %q:\n%s", want, text)

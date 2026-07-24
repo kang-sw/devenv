@@ -124,5 +124,5 @@ stuck ticket instead of skipping it.
 
 Conserve lead context for the long-running goal this serves: beyond
 selection, delegate everything else too — including simple tasks like
-commits — to an appropriately tiered subagent or forked subagent, following
+commits — to an appropriately tiered subagent, following
 `lead-prefer-subagent`.

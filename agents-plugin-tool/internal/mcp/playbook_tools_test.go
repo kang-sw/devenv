@@ -829,7 +829,6 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	for _, want := range []string{
 		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
 		"Maximum-delegation posture for this session",
-		"spawn_agent(fork_context:true, message:<prompt>)",
 	} {
 		if !strings.Contains(bodyOn, want) {
 			t.Fatalf("wsflow workflow manual with prefer-subagent on missing %q:\n%s", want, bodyOn)
