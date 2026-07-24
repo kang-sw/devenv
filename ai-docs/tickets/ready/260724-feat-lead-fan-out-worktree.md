@@ -331,6 +331,50 @@ child note; note appears in `session.children`; delegate/leaf key is rejected; n
 survives a re-read (restart/compaction persistence). Deferred: any child-self-note
 path.
 
+### Result (c522438c) - 2026-07-24
+
+`session.note(session_key, child_session_key, text)` shipped as a lead-only MCP
+tool. Delta:
+
+- **Field.** Additive `Note string json:"note,omitempty"` on `sessionRecord`,
+  `sessionChild`, and `sessionChildOutput` in
+  `agents-plugin-tool/internal/mcp/{session_auth.go,server.go}`, mirroring the
+  existing `Overrides`/`Agenda`/`Todos` fields. Written by a new `setNote` method
+  through the existing `mutateRecord` atomic RMW — it lands on the **child's own**
+  per-session record file (keyed by `child_session_key`), so concurrent
+  agenda/todo/override writes are not clobbered. No new store, no schema version bump.
+- **Surface.** Surfaced in `session.children` output (compact text line + JSON
+  `note` field). Handler `handleSessionNote` + dispatch case + schema added beside
+  `session.children`.
+- **Gating.** Lead-only for free via the existing `session.*` prefix block in
+  `roleAllowsTool`; no new gate code. Deliberately no lineage check that the child
+  descends from the caller — mirrors `session.children`'s trust model (a valid
+  `session_key` authorizes).
+- **Clear discipline.** Empty `text` is a legitimate "clear the note" write; the
+  `omitempty` tag makes an empty note disappear from output (no separate clear verb).
+- **Manifest.** `session.note` added to **both** `agents-plugin/runtime.json` and
+  `agents-plugin-wsflow/runtime.json` `tools` maps in this same phase (not deferred
+  to Phase 3): `agents-plugin-wsflow/runtime.json` declares
+  `runtime_capabilities.match: exact` and `session.note` is not
+  `noAgentHiddenTool`-gated, so omitting either entry breaks
+  `TestRuntimeCapabilitiesCommandReportsWsflowContractSurface`. Version strings were
+  left untouched — only the `tools` map content was edited.
+
+Verification: `go build ./...` clean; `go test ./internal/mcp/...` green including
+4 new `TestSessionNote*` tests (set/update appears in children; delegate+leaf
+rejected; empty-text clears; survives fresh server instance = disk persistence);
+`go test ./cmd/ws-mcp/...` green including the exact-match runtime-surface tests;
+`go vet` clean. Single full-scope review: clean, one non-blocking minor (the
+`session.*` gate skips unrecognized keys — a pre-existing documented design
+property this tool inherits, not introduced here).
+
+Specs updated in the impl commit: `ai-docs/spec/mcp-tools.md` (tool entry beside
+`#260619-session-key-lineage-children`) and `ai-docs/spec/plugin-runtime.md`
+(record-file persistence note). No deviations from the survey plan.
+
+Deferred to later phases: the `<stem>: <state>` board convention (Phase 2 skill-body
+doctrine) and wsflow reduced-runtime exposure probe (Phase 3).
+
 ### Phase 2: `lead-goal-fan-out-step` entry skill + goal-step transclusion
 
 Two coupled pieces:
