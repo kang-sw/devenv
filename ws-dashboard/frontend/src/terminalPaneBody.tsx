@@ -53,6 +53,14 @@ export type TerminalPaneActions = {
   onVisualRestoreEntryFor: (
     pane: TerminalPaneState,
   ) => TerminalVisualRestoreEntry | undefined;
+  // Returns pane.nextSequence "as of right now", including any output
+  // frame cursor advance still batched (not yet applied to `pane` itself)
+  // in the App-level pending-cursor accumulator (260723 Phase 1). Needed
+  // because the debounced visual-capture effect below reads a cursor value
+  // synchronously off its own liveRef, independent of App's rAF-batched
+  // setTerminalPanes flush - reading straight off `pane.nextSequence` there
+  // could observe a stale, not-yet-flushed cursor.
+  getPendingNextSequence: (pane: TerminalPaneState) => number;
   // Fired from the debounced capture effect once per ~900ms of quiet PTY
   // output. Persists (or replaces) this pane's entry in the browser-local
   // visual-restore snapshot, keyed by `pane.logicalKey`.
@@ -703,7 +711,9 @@ export function TerminalPaneBody({
       liveRef.current.actions.onVisualCapture(liveRef.current.pane, {
         serialized,
         viewportY: terminal.buffer.active.viewportY,
-        nextSequence: liveRef.current.pane.nextSequence,
+        nextSequence: liveRef.current.actions.getPendingNextSequence(
+          liveRef.current.pane,
+        ),
       });
     }, terminalVisualRestoreDebounceMs);
     return () => {

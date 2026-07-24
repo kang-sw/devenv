@@ -583,6 +583,31 @@ export function markTerminalOutputCursor(
   return { ...pane, nextSequence, localCreatedAtMs: Date.now() };
 }
 
+// Applies a batch of pending per-logicalKey output-cursor advances
+// (260723 Phase 1) in one pass, mirroring markTerminalOutputCursor's own
+// no-op contract: if nothing in `pending` actually advances any pane's
+// cursor (missing key, duplicate/already-covered sequence), the same
+// `panes` object reference is returned so an all-no-op flush never forces
+// an extra render. `pending` maps logicalKey -> the max chunkSequence seen
+// for that key since the last flush (callers are responsible for
+// collapsing duplicate/out-of-order chunks per key before calling this).
+export function flushPendingOutputCursors(
+  panes: Record<string, TerminalPaneState>,
+  pending: ReadonlyMap<string, number>,
+): Record<string, TerminalPaneState> {
+  if (pending.size === 0) return panes;
+  let next = panes;
+  for (const [logicalKey, chunkSequence] of pending) {
+    const pane = next[logicalKey];
+    if (!pane) continue;
+    const advanced = markTerminalOutputCursor(pane, chunkSequence);
+    if (advanced === pane) continue;
+    if (next === panes) next = { ...panes };
+    next[logicalKey] = advanced;
+  }
+  return next;
+}
+
 export function appendTerminalWebSocketMessage(
   pane: TerminalPaneState,
   message: TerminalWebSocketServerMessage,
