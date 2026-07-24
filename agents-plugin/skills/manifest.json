@@ -9,6 +9,7 @@
     "lead-discuss/agents/openai.yaml": "25bf5112c8b0d204f522e117248c26e683d6e4543bfd21a43a2d0e08eff15f69",
     "lead-forge-mental-model/SKILL.md": "9789b9385f2232961abaa3e4959cf080a822c208d5c02318f8ce24a965e148af",
     "lead-forge-spec/SKILL.md": "f0d773f9dd44a56bd155d7c1af27a62f0b2b0fa4df829f63c9df2978d94f4889",
+    "lead-goal-fan-out-step/SKILL.md": "f6b84f2d6c69ddd38143d002b3634dad4414af7a9fb835ccfcd3047471e2e348",
     "lead-goal-step/SKILL.md": "226ea400e920a46c5ceb9a9e5ae78e6c775fa5d75d30e4c43f287e18b9a7f7e1",
     "lead-prefer-subagent/SKILL.md": "c1741fad39a9dcf2c946944095fa9677d606cdddc5fa90dcf9466bbdf3ab73f1",
     "lead-proceed/SKILL.md": "f28d3a8822e94a81ff7a7e6ea9569f360d2a8546fffba0c5eaf3d86a6e019cb8",
