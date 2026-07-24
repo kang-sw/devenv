@@ -1,6 +1,7 @@
 ---
 title: "Windows wsflow MCP mid-session disconnects under high concurrency"
 sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Windows wsflow MCP mid-session disconnects under high concurrency
@@ -85,12 +86,26 @@ Server — Go `ws-mcp` (`agents-plugin-tool/`):
 
 ## Constraints
 
-- This dev environment is Linux/WSL2; Windows-specific confirmation and testing
-  (Job Object, orphaning, repro under concurrency) require a Windows host and
-  cannot be fully validated here. Phase 1 is cross-platform and lands/verifies
-  independently of a Windows host.
+- This dev environment is Linux/WSL2 with `powershell.exe` interop available, so
+  Windows-side behavior (Job Object reaping, orphaning, concurrency repro) can be
+  exercised by spawning real Windows processes from WSL — Phases 2-4 are not
+  blocked on a separate Windows host for local validation, though a Windows CI
+  runner is still needed for automated coverage. Phase 1 is fully cross-platform.
 - Launcher edits must be applied to `agents-plugin/bin/ws-mcp-launcher.py` and
   kept byte-identical with the `agents-plugin-wsflow` mirror.
+
+## Spec Impact
+
+- Target spec area: `mcp-tools.md` (the `ws-mcp serve --stdio` process contract)
+  for the panic-resilience behavior, and `plugin-runtime.md` (launcher/serve
+  diagnostics) for crash-trace persistence and the abnormal-child-exit breadcrumb.
+- Expected caller-visible change: a panic in a single tool handler returns a
+  JSON-RPC error for that one request instead of terminating the serve session;
+  crash traces and abnormal child-exit reasons are persisted to a documented
+  runtime-dir location instead of vanishing to inherited stderr.
+- Contract-first spec: no — a robustness fix reflected into the specs at
+  implementation/closeout, not a new caller-facing API requiring an upfront
+  contract.
 
 ## Phases
 
@@ -98,13 +113,22 @@ Server — Go `ws-mcp` (`agents-plugin-tool/`):
 
 Add `recover()` to the per-request goroutine at `internal/mcp/server.go:172-184`.
 On panic: (a) fail only that request with a JSON-RPC error (do not crash the
-process), and (b) persist the panic value + stack to disk — reuse the
-`WS_MCP_DEBUG_LOG` sink and/or a dedicated crash file under the runtime dir.
-This is the single highest-value change: it both prevents session-wide death from
-one bad handler and captures the smoking gun the investigation lacked. Cross-
-platform; verifiable with a deliberately-panicking test handler. Reject silently
-swallowing panics — the trace must be persisted and the request must return a
-visible error.
+process), and (b) persist the panic value + full stack to an **always-on**
+dedicated crash file under the runtime dir. The always-on file is the required
+sink, because the downstream that hit this never set `WS_MCP_DEBUG_LOG` (an
+opt-in no-op when unset, `server.go:256-259`) — which is exactly why no trace
+exists today; `WS_MCP_DEBUG_LOG` may mirror the event as an optional secondary.
+Specify the crash-file path and overwrite/rotation behavior so the "documented
+runtime-dir location" in Spec Impact is concrete and reviewable.
+
+`recover()` converts the crash to a per-request error but skips the panicking
+handler's own defers (tx rollback, store/file close). Confirm the per-operation
+store open/close model (`store.go:181`) bounds any connection / `-wal` / `-shm`
+leak so a recovered panic cannot wedge the process, and add a regression test
+that a deliberately-panicking write handler is followed by a **successful
+subsequent request on the same process**. Reject silently swallowing panics — the
+trace must be persisted and the request must return a visible error. This is the
+single highest-value change and is fully cross-platform.
 
 ### Phase 2: Launcher-side abnormal-exit diagnostics
 
@@ -122,7 +146,8 @@ launcher deterministically reaps the server (eliminates orphans/stale locks —
 blocks hypothesis A), and/or add server-side parent-death detection so an orphaned
 serve process self-terminates. Full removal of the intermediate process is likely
 infeasible (no true `exec` on Windows), so Job Object is the pragmatic path.
-Repro-dependent; requires a Windows host to validate.
+Repro-dependent; validate locally via `powershell.exe` interop from WSL (real
+Windows process spawning), with a Windows CI runner for automated regression.
 
 ### Phase 4: SQLite multi-process discipline
 
