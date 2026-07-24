@@ -197,6 +197,20 @@ failure versus mid-session abnormal termination — and coexist. A clean exit
 best-effort and never mask the underlying exit status.
 {#260724-launcher-abnormal-exit-breadcrumb}
 
+On Windows, the `ws-mcp serve` process watches its parent (the resident
+launcher) and self-terminates if that parent dies, so a force-killed launcher
+cannot leave an orphaned server holding a stale `state.sqlite` lock that would
+break the next connection. The server records the captured parent PID once at
+serve startup (immune to later parent-PID changes) and, on detecting parent
+exit, writes a `process.parent_exited` event to the always-on
+`<cache-root>/crash/mcp-lifecycle.log` sink before exiting. This mechanism does
+**not** reap the server's own child processes — in particular mercenary async
+workers are independent OS processes and intentionally survive an MCP
+disconnect. On POSIX this is a no-op: the launcher `exec`-replaces itself with
+the runtime binary, so the server is already the host-supervised process with no
+intermediate parent to outlive.
+{#260724-windows-process-lifecycle-hardening}
+
 ## Release Asset Build And Checksum Pipeline {#260505-release-asset-build-checksum-pipeline}
 
 The runtime build script produces cross-platform `ws-mcp-*` release assets for
