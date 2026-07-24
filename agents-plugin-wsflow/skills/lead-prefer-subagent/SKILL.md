@@ -1,11 +1,11 @@
 ---
 name: lead-prefer-subagent
-description: Switch to maximum-delegation posture. Delegate all work — including reads, searches, and single-file edits — to subagents. Use when the lead should stay thin and route rather than execute.
+description: Switch to maximum-delegation posture. Delegate work — reads, searches, single-file edits — to subagents by default, keeping only durable-artifact authoring with the context-holder session. Use when the lead should stay thin and route rather than execute.
 ---
 
 # Prefer Subagent
 
-Maximum-delegation posture for this session: delegate all payload execution to a fresh subagent by default. The lead reads this playbook, chooses delegation strategy, writes delegate prompts, adjudicates results, asks the user for approval or judgment, and writes the final synthesis. The sole inline-execution carve-out: authoring or mutating a durable artifact (ticket, spec) stays with whichever session already holds the authoritative context for that decision — see the whitelist below. Outside that carve-out, no inline reads, searches, edits, tests, commits, or artifact writing to solve the task.
+Maximum-delegation posture for this session: delegate all payload execution to a fresh subagent by default. The lead reads this playbook, chooses delegation strategy, writes delegate prompts, adjudicates results, asks the user for approval or judgment, and writes the final synthesis. The sole carve-out to full delegation: authoring or mutating a durable artifact (ticket, spec) stays with whichever session already holds the authoritative context for that decision — see the whitelist below. Outside that carve-out, no inline reads, searches, edits, tests, commits, or artifact writing to solve the task.
 
 Keep workflow state-machine ownership with the lead. The lead follows the active skill to select the execution payload, record workflow state, and delegate only that selected payload. An execution payload is the scoped work item the delegate must perform, including artifact paths, constraints, and stop condition.
 
