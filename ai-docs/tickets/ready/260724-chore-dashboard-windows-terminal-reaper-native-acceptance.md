@@ -98,6 +98,96 @@ on completion; never touch the `:4300` production gateway daemon).
 - Keep the Linux build green: the new test is `#[cfg(windows)]`-gated so
   `cargo test -p ws-dashboard-daemon` on Linux is unaffected; confirm it.
 
+### Result (f5891a7e) - 2026-07-24
+
+Implemented and ran the `#[cfg(windows)]` acceptance test on a real Windows
+host. Added
+`ws-dashboard/crates/daemon/tests/terminal_windows_reaper_acceptance.rs` as a
+dedicated integration test (not a co-located `#[cfg(test)] mod` inside
+`terminal_helper_process.rs` — see the survey plan's Job-Object self-kill
+hazard finding): it spawns the real `ws-dashboard terminal-helper` subprocess,
+drives the IPC handshake so it spawns a real ConPTY-backed shell, kills that
+shell's OS process out-of-band via `taskkill` (never through
+`kill_shell_if_running`/`child.kill()`), and asserts the reaper wakes and
+reports `Exit{status: Exited}` over IPC within a bounded 15s deadline.
+
+**Commit range**: `3841ee6b..f5891a7e` on `impl/terminal-windows-reaper-native-acceptance`
+(base `7b1faba5`):
+- `3841ee6b` — initial test file.
+- `8f081e38` — fix: filter the ConPTY host process out of shell-pid
+  discovery (see finding below).
+- `f5891a7e` — fix: borrow-checker error in the same discovery helper,
+  only surfaced by the real-Windows compile (see finding below).
+
+**Linux verification** (this session, before every Windows round-trip):
+`cargo test -p ws-dashboard-daemon` stayed green throughout (124 lib + 166
+routes + 15 server + 3 terminal_lifetime tests passing); the new file
+reported `0 passed; 0 failed` under `#![cfg(windows)]` at every commit,
+confirming the Linux build is unaffected.
+
+**Real-Windows execution**: scratch worktree `/mnt/d/dbg-ws-reaper-acceptance`
+(detached, fetched over the Linux filesystem path from this WSL worktree per
+`ai-docs/_index.local.md`), built/run via
+`powershell.exe -NoProfile -Command "cd D:\dbg-ws-reaper-acceptance\ws-dashboard; cargo test -p ws-dashboard-daemon --test terminal_windows_reaper_acceptance"`.
+Removed with `command git worktree remove --force` on completion; the primary
+`D:\dbg-ws-dashboard-dev` checkout and the `:4300` production gateway daemon
+were never touched.
+
+- **Baseline PASS** (commit `f5891a7e`): `test result: ok. 1 passed; 0
+  failed; ... finished in 1.15s` (a second run after the mutation-revert
+  below; the first baseline run measured `1.12s`). Wall-clock for the full
+  `cargo test` invocation including a cold `cargo test --no-run` dependency
+  compile was `4m 11s`; subsequent incremental reruns after small source
+  edits were `2-13s` wall-clock each.
+- **Non-vacuity mutation** (Implementation Plan step 8): temporarily replaced
+  the single `shared.transition(TerminalHelperStatus::Exited);` line in
+  `spawn_process_exit_reaper` (`terminal_helper_process.rs`) with a comment,
+  as an uncommitted, local-only edit in the scratch worktree (never
+  committed, reverted via `git checkout --` immediately after). Rebuilt and
+  reran: `test result: FAILED. 0 passed; 1 failed; ... finished in 16.63s`,
+  with the panic `windows dead-shell reaper did not wake within 15s: the
+  out-of-band-killed shell's exit was never observed over IPC` — hangs to
+  exactly the bounded `EXIT_WAIT_TIMEOUT` deadline as expected, confirming
+  the assertion is genuinely pinned on the reaper's wake and not vacuously
+  satisfied by some other path.
+- **Revert + re-PASS**: reverted the mutation (`git checkout --
+  crates/daemon/src/terminal_helper_process.rs`, confirmed working tree
+  clean), rebuilt, reran: `test result: ok. 1 passed; 0 failed; ... finished
+  in 1.15s`. Non-vacuity proof complete: PASS -> mutated FAIL/timeout ->
+  reverted PASS.
+
+**Findings surfaced during the Windows run** (both fixed in the commits
+above, no reaper/product code touched):
+1. **ConPTY host process is a sibling child, not an intermediary.** The
+   survey plan's Codebase Finding (citing `portable-pty`'s
+   `CreatePseudoConsole` call) expected the shell to be the *only* direct
+   child of the helper process. On real Windows,
+   `Get-CimInstance -Filter "ParentProcessId=<helper>"` legitimately
+   returned **two** direct children: the real shell and `OpenConsole.exe`
+   (the modern Windows Terminal ConPTY host, successor to `conhost.exe`),
+   confirmed by name via a temporary uncommitted diagnostic edit to the
+   scratch copy's discovery query (reverted before applying the real fix).
+   Fixed by filtering discovered children to the known shell executables
+   `select_terminal_shell` (`terminal.rs`) can pick
+   (`pwsh.exe`/`powershell.exe`/`cmd.exe`) before asserting exactly one
+   match — this is precisely the fallback the plan's own Codebase Findings
+   pre-authorized ("useful as a filter/sanity check ... in case more than
+   one child process ever shows up"), now confirmed necessary rather than
+   theoretical.
+2. **Borrow-checker error invisible on Linux.** The first fix for (1)
+   introduced a real `E0505` "cannot move out of `children` because it is
+   borrowed" compile error, which never surfaced on Linux because the whole
+   file is `#![cfg(windows)]`-gated and Linux never type-/borrow-checks the
+   gated body — only a real-Windows compile catches it. This is a durable
+   ceiling on what Linux-side verification can prove for this file: it can
+   only confirm the file *compiles to an empty, valid test binary*, not that
+   the gated body itself is even well-typed. Recorded here as a forward
+   note for anyone extending this file.
+
+No reaper or product-code behavior change resulted from this ticket; the
+reaper genuinely wakes on a real out-of-band Windows process kill, exactly as
+designed.
+
 ## Spec Impact
 
 Test-only. This ticket adds a runtime acceptance test for behavior already
