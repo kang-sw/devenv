@@ -3,7 +3,8 @@ title: lead-fan-out-worktree — lead-cognition parallel worktree orchestration 
 related:
   260605-epic-ws-playbook-factory-pivot: rides on the epic's landed session-auth + native-subagent architecture; not a pivot-migration milestone itself
   260605-research-ws-native-subagent-pivot: source of the session-key/scope/render-mint decisions this feature builds on (delegate scope, playbook.render root_override, session.children lineage)
-sage-review-design: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # lead-fan-out-worktree — lead-cognition parallel worktree orchestration overlay + session.note scratchpad
@@ -72,10 +73,11 @@ each rung additive:
 - `session.note(session_key, child_session_key, text)` — the **lead** annotates a
   child key with a free-form one-line note. `session_key` is the lead's key
   (authorizes); `child_session_key` is the target.
-- Note text is stored as an **additive field on the existing per-session record
-  k/v store** (the same `<cache-root>/keys/<key>.json` file that backs
-  agenda/todo/overrides) — no new schema, and durable across process restart /
-  compaction.
+- Note text is stored as an **additive field on the child's own per-session
+  record** (`<cache-root>/keys/<child_session_key>.json`, the same store that backs
+  agenda/todo/overrides) — keyed by `child_session_key`, not the lead's record, so
+  the `session.children` handler reads each child's `Note` directly. No new
+  schema; durable across process restart / compaction. Pin this locus in Phase 1.
 - The note is **surfaced in `session.children` output** alongside each child's
   existing `key/scope/parent/depth/live/root`.
 - **Lead-only gating is correct and free:** `session.*` is already rejected for
@@ -92,6 +94,17 @@ revived lead recovers its key, then `session.children` re-discovers children via
 lineage), and (b) current models' attention concentrating on recent context, so
 an early-spawned child falling out of focus is re-findable from the durable board
 rather than the warm window.
+
+**Re-attach boundary (recovery, not resume).** Re-discovering a child session
+*key* via lineage is not the same as recovering the *harness agent handle* needed
+to rejoin that child's in-flight run — the handle lives in the lead transcript
+and may not survive compaction. So the durable board tells a revived lead that a
+child exists and its last self-reported note, but not how to resume a live turn.
+The (1-min) recovery procedure for an orphaned-but-live child is therefore
+**branch-state reconciliation at merge time** (inspect the child's worktree branch
+— commits present, tests) and treat the ticket as complete/incomplete from that
+git evidence, rather than attempting to resume the subagent. The playbook body
+must encode this; do not promise live-run resume across compaction.
 
 **Ship to both ws and wsflow (option B).** orchestra rides **100% native
 subagents + session-auth core** (no `mercenary.*`, no `exec.*`). Only the
@@ -179,14 +192,26 @@ for status re-hydration; (f) one aggregate verification pass at the end; (g) nam
 the (1b)→(2) escalation, don't build it. Register as an entry skill (namespace
 list + directly-invocable count). Depends on Phase 1.
 
+Verification: the shim resolves through `workflow_manual` + `playbook.print(name:
+"lead-fan-out-worktree")` — body renders with includes resolved and correct
+ws/wsflow namespace substitution; entry-skill registration is reflected in the
+namespace list and the bumped directly-invocable count; and one end-to-end
+(1-min) dry run — lead creates a worktree, mints a `delegate` child, dispatches a
+native subagent, round-trips `session.note` + `session.children`, and
+serial-merges the returned branch — completes without a wrong-root or containment
+surprise.
+
 ### Phase 3: wsflow exposure verification + mirror
 
-Confirm the wsflow reduced runtime exposes `ferrule`, `session.children`,
-`session.note`, and `playbook.render` mint; if any is stripped, open its exposure
-as part of this phase. Run the wsflow mirror-drift tests
-(`python3 -m unittest discover agents-plugin-wsflow/tests`) and
-`ai-docs/ref/wsflow-mirroring.md` discipline for the new lead-* skill + session
-tool surface. Depends on Phases 1-2.
+First probe the wsflow reduced runtime for exposure of `ferrule`,
+`session.children`, `session.note`, and `playbook.render` mint. This probe fixes
+the phase's remaining scope: for each tool found stripped, opening its wsflow
+exposure is in-scope for this phase (mechanical exposure of an already-existing
+tool per the established mirroring pattern, not new design). Completion boundary:
+all four exposed in wsflow **and** the wsflow mirror-drift tests
+(`python3 -m unittest discover agents-plugin-wsflow/tests`) green for the new
+lead-* skill + session-tool surface, following `ai-docs/ref/wsflow-mirroring.md`.
+Depends on Phases 1-2.
 
 ## Spec Impact
 
