@@ -7,6 +7,8 @@ related:
   260722-feat-dashboard-hotkey-config-framework: prerequisite
   260721-feat-dashboard-suppress-browser-shortcuts: related
   260517-bug-ws-dashboard-terminal-focus-browser-gate-regression: related
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Ctrl+Space hotkey swallowed when a terminal pane has focus
