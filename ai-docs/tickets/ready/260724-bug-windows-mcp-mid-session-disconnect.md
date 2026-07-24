@@ -171,6 +171,46 @@ startup-only `last-launch-error`. Optionally redirect the Windows child's stderr
 to a timestamped runtime-dir file so a Go-side crash stack survives even before
 Phase 1 ships. Keep the wsflow mirror byte-identical.
 
+### Result (5f240b05) - 2026-07-24
+
+Implemented in `agents-plugin/bin/ws-mcp-launcher.py` (and byte-identically
+mirrored into `agents-plugin-wsflow/bin/ws-mcp-launcher.py`): a new best-effort
+`write_exit_breadcrumb(exit_code)` and a Windows-branch change to the handoff
+block — `subprocess.call` now captures the child exit code and, when non-zero,
+writes `last-abnormal-exit` (exit code + timestamp) into the runtime dir
+(`WS_MCP_RUNTIME_DIR` / `.runtime/<os>-<arch>/`), then returns that code. The
+breadcrumb complements, never overwrites, the startup-only `last-launch-error`
+(distinct filename), and a clean exit (code 0, incl. stdin-EOF shutdown) writes
+nothing. The POSIX `os.execvpe` exec-replace path is byte-for-byte unchanged.
+
+The optional Windows-child stderr-to-file redirect from the phase plan was
+evaluated and **dropped**: Phase 1's always-on `<cache-root>/crash/mcp-panic.log`
+already persists the confirmed root-cause trigger (recovered request-goroutine
+panic) with full stack, so unbounded stderr capture is unjustified without field
+evidence of a remaining gap (an abnormal-exit breadcrumb paired with an *empty*
+Phase 1 crash file). Revisit only if that pairing is observed.
+
+Regression tests `test_windows_abnormal_exit_writes_complementary_breadcrumb` and
+`test_windows_clean_exit_does_not_write_breadcrumb` drive full `main()` with
+`host_os="windows"`, patching `subprocess.call` to a non-zero code
+(`3221225477` = `0xC0000005`) and `0`; they assert the exit code is returned, the
+breadcrumb presence/absence, and that `last-launch-error` is not collided with.
+Adversarial review mutation-tested both to confirm neither passes vacuously;
+verdict clean aside from the doc pass (now landed in `b7d91a37`) and a trivial
+unused-local cleanup (applied).
+
+Verification: `python3 -m unittest discover agents-plugin/tests` = 45 pass;
+`agents-plugin-wsflow/tests` = 9 pass; launcher `diff` = zero differences.
+
+Doc pass (`b7d91a37`): added spec anchor
+`{#260724-launcher-abnormal-exit-breadcrumb}` to `plugin-runtime.md` documenting
+both breadcrumbs, and corrected the stale mental-model claim that the wsflow
+launcher "intentionally diverges" and skipped canonical fixes — disproven by the
+byte-identical diff and contradictory with the adjacent keep-in-sync rule.
+
+Deferred (unchanged): Phase 3 Windows Job Object / parent-death detection,
+Phase 4 SQLite point-read retry + WAL re-assert.
+
 ### Phase 3: Windows process-lifecycle hardening
 
 Assign the Go child to a Windows Job Object with kill-on-close so terminating the
