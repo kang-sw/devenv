@@ -2,6 +2,8 @@
 title: Terminal PTY read pump corrupts UTF-8 multibyte sequences split across read() boundaries
 spec:
   - 260516-ws-web-dashboard-terminal-io-transport
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Terminal PTY read pump corrupts UTF-8 multibyte sequences split across read() boundaries
@@ -76,16 +78,29 @@ each raw `read()` in isolation:
   prefix and read into its remaining capacity).
 - Decode the combined bytes with `std::str::from_utf8`. On `Ok`, emit the
   whole decoded string and clear the carry-over. On `Err(e)`, emit the valid
-  prefix (`e.valid_up_to()`) via `append_output`, and move the remaining
-  trailing bytes (`combined[e.valid_up_to()..]`) into the carry-over buffer
-  for the next iteration — those bytes are the start of a multi-byte
-  sequence that the next `read()` will complete.
-- Bound the carry-over: a UTF-8 sequence is at most 4 bytes, so the
-  carry-over never exceeds 3 bytes in the well-formed case. If a `read()`
-  returns bytes whose prefix cannot be valid UTF-8 continuation (a
-  genuinely malformed/non-UTF-8 stream, not just a split boundary), fall
-  back to `String::from_utf8_lossy` for just that undecodable leading
-  span so the pump can never wedge or grow the carry-over unbounded.
+  prefix `combined[..e.valid_up_to()]` via `append_output`, then use
+  `e.error_len()` as the precise discriminator for what follows that prefix
+  — this is Rust's canonical signal for "incomplete tail" vs. "malformed
+  span", and reading it literally is what prevents an unbounded carry-over
+  wedge:
+  - `error_len() == None`: the bytes from `valid_up_to()` to the end of
+    `combined` are an INCOMPLETE multi-byte sequence at end-of-buffer (a
+    genuine read-boundary split, not corruption) → carry
+    `combined[e.valid_up_to()..]` over to prepend to the next `read()`, and
+    stop processing this chunk (nothing left to loop over).
+  - `error_len() == Some(n)`: the `n` bytes starting at `valid_up_to()` are
+    a GENUINELY MALFORMED span, not a split boundary → emit exactly those
+    `n` bytes via `String::from_utf8_lossy` (yields exactly one U+FFFD),
+    do NOT carry them over, then continue decoding the remainder
+    `combined[e.valid_up_to() + n..]` by looping `str::from_utf8` again on
+    that remainder (repeating the same `Ok`/`Err`/`error_len()` dispatch).
+    This loop-and-advance-past-the-malformed-span step is what stops the
+    same byte offset from failing every iteration and wedging the pump.
+- Because `error_len() == None` is the only branch that carries bytes
+  forward, and a UTF-8 sequence is at most 4 bytes, the carry-over is
+  bounded to at most 3 bytes at all times — it can never grow unbounded,
+  since the `Some(n)` branch always consumes and advances past its
+  malformed span within the same iteration instead of carrying it.
 - On `Ok(0)` (EOF/shell exit), flush any remaining carry-over bytes with
   `String::from_utf8_lossy` before breaking the loop — those bytes are
   genuinely truncated at EOF, not merely split across two reads, so lossy
@@ -111,10 +126,35 @@ shared `RingState`'s `backfill_after(0)` and assert the reassembled text:
 - equals the original multi-byte string exactly, and
 - contains no `\u{FFFD}` (U+FFFD replacement character).
 
-Also add a companion assertion/test note that legitimate EOF-truncated bytes
-(a read boundary that is also the true end of the byte stream — genuinely
-malformed/incomplete UTF-8, not a split boundary) still degrade to lossy
-replacement rather than hanging or panicking, and that ANSI/CSI
-escape-sequence splitting across reads is out of scope per the Background
-excludes note (no test asserts on ANSI byte-splitting behavior — it was
-already correct before this change and unaffected by it).
+Test-harness notes for the implementer (not behavioral, but avoids surprise):
+`spawn_reader_thread` discards its `JoinHandle` and signals completion only
+by transitioning the shared `RingState.status` to `Exited` — the test has no
+handle to `.join()`, so it must poll `status_and_next_sequence()` (or an
+equivalent status read) until it observes `Exited` before reading back
+output, or `spawn_reader_thread` may be refactored to return the
+`JoinHandle` for a direct join. This test is also the first one in this
+module to construct a full `SharedState` literal (every field, including the
+`ring`/`notify`/`child`/`master`/`writer_tx` mutexes and the `#[cfg(windows)]
+job` field) rather than a bare `RingState` — existing `ring_state_tests`
+only ever construct `RingState` directly.
+
+Also add these companion cases:
+
+- Legitimate EOF-truncated bytes (a read boundary that is also the true end
+  of the byte stream — genuinely malformed/incomplete UTF-8, not a split
+  boundary) still degrade to lossy replacement rather than hanging or
+  panicking.
+- Malformed-interior-byte fallback (the `error_len() == Some(n)` branch
+  above): feed a stream containing a genuinely invalid byte
+  mid-stream — not a clean split-at-buffer-end and not EOF truncation, e.g.
+  a lone continuation byte or invalid leading byte sandwiched between two
+  valid ASCII/multi-byte spans within a single `read()` chunk — and assert
+  that (a) the output contains exactly one U+FFFD for that malformed span,
+  (b) the carry-over does not grow unbounded (the pump keeps advancing
+  rather than re-failing at the same offset), and (c) the valid text before
+  and after the malformed span still decodes correctly and reaches the
+  ring unmodified.
+- ANSI/CSI escape-sequence splitting across reads is out of scope per the
+  Background excludes note (no test asserts on ANSI byte-splitting
+  behavior — it was already correct before this change and unaffected by
+  it).
