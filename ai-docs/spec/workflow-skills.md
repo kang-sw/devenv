@@ -122,14 +122,8 @@ Codex-facing workflow skill guidance presents MCP primitives as the primary ws
 runtime surface. Promptless `ws.mercenary.register(name: "<agent-name>")` is the
 general-purpose named-agent form; role-specific delegates obtain a self-contained
 prompt from `ws/playbook.render` and run natively by default or as a mercenary via
-`system_prompt_text` plus the render-returned `recommended-tier` (`tier`). For the
-native path, Codex guidance binds the render-returned `recommended-model` and
-(when present) `recommended-reasoning-effort` lines to the native spawn call's
-`spawn_agent.model` and `spawn_agent.reasoning_effort` parameters — never
-`effort` — and honestly reports when the native spawn surface cannot accept the
-exact binding rather than silently dropping it, since the mercenary path above
-is the explicit exact-binding fallback. The removed
-`prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
+`system_prompt_text` plus the render-returned `recommended-tier` (`tier`). The
+removed `prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
 appear in shipped skill text. CLI adapter syntax belongs only in compatibility or
 testing references. {#260507-mcp-centric-workflow-language}
 

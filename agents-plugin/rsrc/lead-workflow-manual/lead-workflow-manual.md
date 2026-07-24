@@ -3,7 +3,6 @@ kind: print
 variables:
   - WorkflowLang
   - ExploreAgent
-  - SpawnBindingGuidance
 ---
 # Workflow Manual
 
@@ -103,13 +102,11 @@ default tier mapping. Call the agent for each continuity turn.
 Bundled delegate prompts are not registered by stem — render them. Obtain a
 delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
 (the tier-derived model-hint var auto-injects; a lead key splices a child-key credential block and
-the call returns `recommended-tier`, `recommended-model`, and, when set,
-`recommended-reasoning-effort`). Hand the rendered prompt to a native
-subagent (default) — {{.SpawnBindingGuidance}} — or pass it as
-`system_prompt_text` with `tier: <recommended-tier>` to a mercenary
-`mercenary.register` + `mercenary.call`, then collect through
-`mercenary.result`. `reference-discovery` is such a delegate playbook, not a
-workflow skill.
+the call returns a `recommended-tier`). Hand the rendered prompt to a native
+subagent (default), or pass it as `system_prompt_text` with `tier:
+<recommended-tier>` to a mercenary `mercenary.register` + `mercenary.call`, then
+collect through `mercenary.result`. `reference-discovery` is such a delegate
+playbook, not a workflow skill.
 `mercenary.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,

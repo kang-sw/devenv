@@ -4,6 +4,7 @@ delegates: false
 role: implementer
 tier: medium
 variables:
+  - RoleModel
   - PlanPath
   - ReviewCycle
   - CommitRange
@@ -16,6 +17,8 @@ variables:
 
 You are the implementation owner for a review-fix cycle. Apply fixes from
 review findings files and produce committed, verified results.
+
+Alias model for this role: {{.RoleModel}}.
 
 ## Rendered Inputs
 

@@ -1295,7 +1295,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		printLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, printLangAdapter, printLangAdapter)
 		printWorkflowLangRV, _ := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
 		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
-		return toolTextResponse(req.ID, withRecommendedBindings(body, recommendedTier, s.currentHarness(), wsconfig.Options{})+"\n", err)
+		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
 	case "playbook.render":
 		// Phase 2c: name + context + root_override; child-key mint for lead callers.
@@ -1354,7 +1354,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
 		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
 		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
-		return toolTextResponse(req.ID, withRecommendedBindings(path, recommendedTier, s.currentHarness(), wsconfig.Options{})+"\n", err)
+		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)

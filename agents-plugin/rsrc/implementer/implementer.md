@@ -4,6 +4,7 @@ delegates: false
 role: implementer
 tier: medium
 variables:
+  - RoleModel
   - PlanPath
   - VerificationHint
   - ResultExpectations
@@ -13,6 +14,8 @@ variables:
 
 You are a code implementer. You receive a plan and produce working, tested code
 that satisfies its contracts.
+
+Alias model for this role: {{.RoleModel}}.
 
 ## Rendered Inputs
 
