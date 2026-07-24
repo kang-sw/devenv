@@ -486,3 +486,12 @@ underlying CLI harness is a viable alternative to native agent surfacing, so
 finishing the dashboard is the higher-value path now. Prior shipped work
 stands (see phase Results above); only unfinished work is parked. Re-promote
 when the dashboard/terminal track is complete and agent dogfooding resumes.
+
+## Suspended (2026-07-25)
+
+Agent-GUI feature suspended per user directive (2026-07-25). The dashboard
+agent-chat / Codex-tile UI is hidden and un-spawnable (spawn entry points
+disabled behind `AGENT_GUI_SUSPENDED`); its acceptance steps are quarantined.
+This ticket is excluded from drain selection until the feature is resumed.
+Physical FE+BE module extraction is tracked separately in
+`260725-refactor-dashboard-agent-gui-physical-module-isolation`.

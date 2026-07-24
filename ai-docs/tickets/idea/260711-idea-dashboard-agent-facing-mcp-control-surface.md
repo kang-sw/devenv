@@ -198,3 +198,12 @@ Activity track (`260620`) and the command-bus UI
   any later spec must keep the dashboard as a control-surface consumer of
   the existing ferrule/session-key model per `260622`, not a competing
   authority.
+
+## Suspended (2026-07-25)
+
+Agent-GUI feature suspended per user directive (2026-07-25). The dashboard
+agent-chat / Codex-tile UI is hidden and un-spawnable (spawn entry points
+disabled behind `AGENT_GUI_SUSPENDED`); its acceptance steps are quarantined.
+This ticket is excluded from drain selection until the feature is resumed.
+Physical FE+BE module extraction is tracked separately in
+`260725-refactor-dashboard-agent-gui-physical-module-isolation`.
