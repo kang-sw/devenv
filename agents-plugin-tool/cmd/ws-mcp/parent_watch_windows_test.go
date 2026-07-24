@@ -12,7 +12,11 @@ import (
 // arms watchProcessExit against it, kills it, and asserts the callback fires
 // within a bounded timeout.
 func TestWatchProcessExit_FiresOnRealExit(t *testing.T) {
-	helper := exec.Command("cmd", "/c", "timeout", "/t", "10", "/nobreak")
+	// ping -n keeps a headless process alive ~1s per echo without needing a
+	// console; unlike `timeout`, it survives the redirected stdin that go test
+	// hands its children (timeout exits immediately under redirection, which
+	// would leave nothing to kill and make Process.Kill return ACCESS_DENIED).
+	helper := exec.Command("ping", "127.0.0.1", "-n", "20")
 	if err := helper.Start(); err != nil {
 		t.Fatalf("start helper: %v", err)
 	}
@@ -45,7 +49,7 @@ func TestWatchProcessExit_FiresOnRealExit(t *testing.T) {
 // theoretically reassign the PID before OpenProcess runs), but in practice a
 // freshly-reaped PID is not immediately reused within a test's lifetime.
 func TestWatchProcessExit_NeverOpenablePID(t *testing.T) {
-	helper := exec.Command("cmd", "/c", "timeout", "/t", "10", "/nobreak")
+	helper := exec.Command("ping", "127.0.0.1", "-n", "20")
 	if err := helper.Start(); err != nil {
 		t.Fatalf("start helper: %v", err)
 	}
