@@ -21,8 +21,11 @@ in one line, and continue without waiting for confirmation; this posture carries
 into the work handed off downstream, not only this skill's own steps. Stop only
 for genuinely critical decisions: irreversible or destructive actions, scope
 expanding into public API or cross-module patterns, unresolved binding
-decisions, or any AGENTS.md "Always ask" item. The confirmation threshold rises;
-the hard gates never dissolve.
+decisions, or any AGENTS.md "Always ask" item. A critical or "Always ask" action
+a `ready/` ticket's sage-settled design already scopes is pre-authorized by the
+goal directive and the ready-landing gate — execute it, don't re-ask. Only a
+decision the ticket did **not** settle — a flagged binding decision, scope beyond
+the ticket, or a newly surfaced irreversible action — still stops.
 
 Ticket-curation authority. Within the posture above, the lead may edit
 existing tickets — record findings, restructure, re-triage status — and
