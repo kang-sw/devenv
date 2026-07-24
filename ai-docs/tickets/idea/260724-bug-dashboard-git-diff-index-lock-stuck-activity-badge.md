@@ -2,6 +2,8 @@
 title: Dashboard git-diff poll takes .git/index.lock (agent lock errors) and activity badge has no timeout (stuck "loading" forever)
 related:
   260714-bug-git-status-poll-index-lock-staleness: prior fix hardened the sibling git-status call but wrongly asserted `git diff --numstat` was lock-free plumbing and left it unguarded — this ticket corrects that residual
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Dashboard git-diff poll takes .git/index.lock (agent lock errors) and activity badge has no timeout (stuck "loading" forever)
