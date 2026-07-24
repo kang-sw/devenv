@@ -1,0 +1,9 @@
+# Normalize line endings to LF on checkout for all platforms.
+#
+# The ws plugin ships text docs (skills, rsrc payloads, mental models) whose
+# content is asserted byte-for-byte by the Go test suite. Without this, a
+# Windows checkout under core.autocrlf converts them to CRLF, and shipped-doc
+# content assertions (e.g. internal/mcp playbook tests) fail on Windows CI while
+# passing on Linux/macOS. `text=auto` still lets git auto-detect and leave
+# binary files untouched.
+* text=auto eol=lf

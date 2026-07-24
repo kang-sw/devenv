@@ -1870,10 +1870,10 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 	}
 	text := toolText(t, byID["2"])
 	shellText := toolText(t, byID["9"])
-	if !strings.Contains(shellText, "shell-shape") || !strings.Contains(shellText, execToolJSONPath(root)) {
+	if !strings.Contains(shellText, "shell-shape") || !containsResolvedPath(shellText, root) {
 		t.Fatalf("shell response = %s", byID["9"])
 	}
-	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "status: succeeded") || !strings.Contains(text, execToolJSONPath(filepath.Join(root, "sub"))) || !strings.Contains(text, "========== stdout ==========") || !strings.Contains(text, "========== stderr ==========") || !strings.Contains(text, "err") {
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "status: succeeded") || !containsResolvedPath(text, filepath.Join(root, "sub")) || !strings.Contains(text, "========== stdout ==========") || !strings.Contains(text, "========== stderr ==========") || !strings.Contains(text, "err") {
 		t.Fatalf("spawn response = %s", byID["2"])
 	}
 	launch := execToolResponse{ExecKey: execKeyFromText(t, text)}
@@ -2109,12 +2109,23 @@ func mcpLargeShellArgs() map[string]any {
 	return map[string]any{"command": "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"}
 }
 
-// execToolJSONPath returns the path as it appears in a tool response's decoded
-// text. The assertions match against toolText() output, which json-decodes the
-// content "text" field, so Windows paths already carry native single
-// backslashes — no JSON backslash-escaping is applied here.
-func execToolJSONPath(path string) string {
-	return path
+// containsResolvedPath reports whether haystack mentions directory p, tolerating
+// the gap between the path t.TempDir() returns and the form a shell prints for
+// the same directory. On Windows CI the temp root can come back as an 8.3 short
+// name (C:\Users\RUNNER~1\...) while `cd` prints the long name
+// (C:\Users\runneradmin\...); on macOS t.TempDir() lives under a /var ->
+// /private/var symlink. filepath.EvalSymlinks canonicalizes both forms, so we
+// accept either the raw or the resolved path. The assertions match against
+// toolText() output, which json-decodes the content "text" field, so Windows
+// paths carry native single backslashes with no extra escaping.
+func containsResolvedPath(haystack, p string) bool {
+	if strings.Contains(haystack, p) {
+		return true
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil && resolved != p {
+		return strings.Contains(haystack, resolved)
+	}
+	return false
 }
 
 // TestMercenaryDefaultHideAndOnVisibility verifies that:
