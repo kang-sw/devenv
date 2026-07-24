@@ -163,6 +163,67 @@ export function resolveTerminalMountWrite(
   return { kind: "none" };
 }
 
+// 260723 Phase 1 (load-bearing correctness fix): what `TerminalPaneBody`'s
+// delta-write effect should do about `pane.output` on a given render, now
+// that `pane.output` can be front-trimmed (see
+// `TerminalPaneState.outputTrimOffset` in terminals.ts). Extracted as a pure
+// function - same rationale as `resolveTerminalMountWrite` above - so the
+// currentEnd/localStart/clamp arithmetic is unit testable without a React/
+// xterm harness; the actual `terminal.clear()`/`terminal.write()`/ref-update
+// side effects stay at the call site.
+//
+// `writtenAbsolute` is the absolute stream position (NOT a raw string
+// length) of the last character already written to the emulator - the same
+// absolute coordinate space `pane.outputTrimOffset` lives in, so
+// `pane.outputTrimOffset + pane.output.length` (`currentEnd` below) is always
+// directly comparable to it, independent of how many times `pane.output` has
+// been front-trimmed since.
+//
+// - `currentEnd > writtenAbsolute`: new output arrived since the last write.
+//   `localStart = writtenAbsolute - pane.outputTrimOffset` is where the
+//   not-yet-written tail starts *within the current (possibly trimmed)*
+//   `pane.output`. If `localStart` is still `>= 0`, every not-yet-written
+//   character is still present in `pane.output` - write just that slice
+//   (`kind: "tail"`), no clear needed, so no already-rendered content is
+//   ever re-drawn or lost.
+//   If `localStart` would be negative, a trim has evicted some characters
+//   that were never written to the emulator (the pane fell far enough behind
+//   that a front-trim outran the delta-write effect) - what is on screen can
+//   no longer be trusted as a valid prefix of the *current* `pane.output`, so
+//   this clears and redumps the entire retained `pane.output` (`kind:
+//   "reset"`) rather than risk a silent gap.
+// - `currentEnd < writtenAbsolute`: defensive parity with the pre-260723
+//   effect's own "output got shorter" clear+redump branch - not reachable via
+//   any current append/trim path (both only grow `currentEnd`), kept for the
+//   same reason the original branch existed.
+// - `currentEnd === writtenAbsolute`: nothing new - no-op.
+export type TerminalDeltaWrite =
+  | { kind: "noop"; nextWrittenAbsolute: number }
+  | { kind: "tail"; text: string; nextWrittenAbsolute: number }
+  | { kind: "reset"; text: string; nextWrittenAbsolute: number };
+
+export function resolveTerminalDeltaWrite(
+  pane: { output: string; outputTrimOffset: number },
+  writtenAbsolute: number,
+): TerminalDeltaWrite {
+  const currentEnd = pane.outputTrimOffset + pane.output.length;
+  if (currentEnd > writtenAbsolute) {
+    const localStart = writtenAbsolute - pane.outputTrimOffset;
+    if (localStart < 0) {
+      return { kind: "reset", text: pane.output, nextWrittenAbsolute: currentEnd };
+    }
+    return {
+      kind: "tail",
+      text: pane.output.slice(localStart),
+      nextWrittenAbsolute: currentEnd,
+    };
+  }
+  if (currentEnd < writtenAbsolute) {
+    return { kind: "reset", text: pane.output, nextWrittenAbsolute: currentEnd };
+  }
+  return { kind: "noop", nextWrittenAbsolute: writtenAbsolute };
+}
+
 function parseTerminalVisualRestoreEntry(
   value: unknown,
 ): TerminalVisualRestoreEntry | null {

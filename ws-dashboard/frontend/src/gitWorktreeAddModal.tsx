@@ -216,7 +216,7 @@ export function GitWorktreeAddModal({
   const autoPathDisplay =
     preview?.targetPathLabel ??
     (worktreeName.trim()
-      ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}`
+      ? `${options?.defaults.worktreeBaseDirLabel ?? ".ws-dashboard/worktrees"}/${worktreeName.trim()}`
       : "");
   return (
     <ModalOverlay

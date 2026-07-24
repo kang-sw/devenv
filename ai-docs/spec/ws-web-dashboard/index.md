@@ -489,6 +489,9 @@ are:
 
 - `GET`/`POST .../work-roots/{workRootId}/terminals` — list / create.
 - `GET .../terminals/{terminalId}/output` — output poll (carries `?after=`).
+- `POST .../terminals/output/batch` — batched output poll (260723 Phase 1);
+  request `{"cursors": [{"terminalId": "<id>", "after": <u64>}, ...]}`,
+  response `{"results": {"<terminalId>": <TerminalOutputView>, ...}}`.
 - `POST .../terminals/{terminalId}/input` — raw input.
 - `POST .../terminals/{terminalId}/resize` — PTY resize.
 - `DELETE .../terminals/{terminalId}` — close.
@@ -507,14 +510,20 @@ Key properties:
   linked daemon, so a subsequent output poll for that id surfaces the upstream
   `404`.
 - **Body-parsing aliases match axum.** The `server-local` aliases that parse a
-  JSON body (create, input, resize) enforce the same `application/json`
-  content-type boundary and classify malformed bodies the same way the unscoped
-  `Json` extractor does (`415` for a missing/non-JSON content type, `422` for a
-  data error, `400` for a syntax error), staying byte-for-byte equivalent to the
-  legacy route.
+  JSON body (create, input, resize, and the batch output route) enforce the
+  same `application/json` content-type boundary and classify malformed bodies
+  the same way the unscoped `Json` extractor does (`415` for a missing/non-JSON
+  content type, `422` for a data error, `400` for a syntax error), staying
+  byte-for-byte equivalent to the legacy route.
 - **Owner-auth + bearer gating.** Terminal input, resize, and close are mutating
   host control; they preserve owner auth at the local gateway (router placement)
   and bearer auth to the linked daemon, and are never reachable without both.
+- **Batch omits, never errors.** The batch output route never fails as a whole
+  for a bad cursor: an unknown `terminalId` or one whose work root is currently
+  offline/unavailable (same `resolve_online_available_work_root` gate as the
+  single-ID route, applied per cursor) is silently omitted from `results` -
+  still `200`, possibly with a partial or empty map. Callers must treat a
+  missing key as "no update this tick", not as an error signal.
 - **Live socket route.** `.../terminals/{terminalId}/socket` is the live
   WebSocket transport, described in
   [Remote Terminal WebSocket Gatewaying](#remote-terminal-websocket-gatewaying).
@@ -610,9 +619,10 @@ modal collects a worktree name, branch resolution, and target path resolution.
 Automatic branch naming derives a branch-compatible candidate from the
 worktree name, then the daemon previews whether submit will create a new branch,
 check out an existing branch, or block the request. Automatic path naming
-targets the workspace Git root's `.git/ws-worktree/<branch-compatible-name>`
-convention. Custom path selection may reuse the folder picker in target-path
-or parent-directory mode without adding broad file-manager operations.
+targets the workspace Git root's
+`.ws-dashboard/worktrees/<branch-compatible-name>` convention. Custom path
+selection may reuse the folder picker in target-path or parent-directory mode
+without adding broad file-manager operations.
 
 Submit revalidates the preview, runs the corresponding `git worktree add`
 operation, refreshes canonical dashboard resources, activates the created
@@ -684,10 +694,15 @@ a merge or rebase conflict state.
 Status refresh stays host-light: the dashboard refreshes immediately on
 selected WorkRoot changes, visibility return, explicit fetch/push/pull,
 branch switch, and branch create, then polls conservatively only for the
-selected visible WorkRoot. That poll's `git status` call passes
-`--no-optional-locks`, so it never takes the repository's `.git/index.lock`
-(`260714-bug-git-status-poll-index-lock-staleness`); mutating routes
-(switch/fetch/push/pull) are unaffected and still take locks as needed. All
+selected visible WorkRoot. That poll uses only lock-free git reads: the
+`git status` summary passes `--no-optional-locks`
+(`260714-bug-git-status-poll-index-lock-staleness`) and the change-line
+summary uses the plumbing `git diff-index --numstat` form
+(`260724-bug-dashboard-git-diff-index-lock-stuck-activity-badge`) instead of
+porcelain `git diff --numstat`, which did opportunistically rewrite the index
+and take `.git/index.lock`; so the poll never takes the repository's
+`.git/index.lock`. Mutating routes (switch/fetch/push/pull) are unaffected and
+still take locks as needed. All
 Git toolbar routes remain owner-authenticated,
 address workRoots by opaque `workRootId`, keep Git work off async workers, and
 avoid exposing host paths in command logs or bounded browser-visible errors.
@@ -864,8 +879,12 @@ The popup is a read-only presentation layer over the live hotkey binding
 registry: it defines no bindings and no dispatch path of its own, and it
 reflects the registry's current contents — including a user's own
 rebindings — automatically. It does not capture or consume keyboard input;
-the existing leader-press capture path (including its terminal-focus/IME
-guard) is unchanged and remains the sole input-handling surface.
+the existing leader-press capture path is unchanged and remains the sole
+input-handling surface. That path's terminal-focus/IME guard applies to
+leader-*continuation* keys and standalone bindings, but the leader-*entry*
+trigger (`Ctrl+Space` from idle) is checked before that guard and is never
+blocked by terminal or editable-target focus, so the popup can always be
+opened regardless of where focus currently sits.
 
 > [!note] Implementation Gap · 2026-07-22
 > Browser-level (Playwright) verification of the popup's appear/narrow/
@@ -1091,6 +1110,12 @@ height. Under constrained widths the badge compacts, truncates, or hides
 secondary text rather than wrapping the toolbar and reducing workbench body
 space. Switching workRoots must not briefly render the previous workRoot's
 activity state.
+
+The badge's activity fetch is bounded by a client-side timeout: a daemon
+response that stalls without ever returning transitions the badge to its
+existing error state and lets the next poll retry, rather than leaving it stuck
+in its loading state indefinitely
+(`260724-bug-dashboard-git-diff-index-lock-stuck-activity-badge`).
 
 ### WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
 
@@ -1925,6 +1950,16 @@ The dashboard workbench renders daemon-owned terminal sessions in terminal panes
 for the selected workRoot. Creating a terminal opens or focuses a terminal pane,
 and refresh can reconstruct visible terminal panes from daemon live session
 state plus browser arrangement where available.
+
+A terminal session that has exited, terminated, or errored is visually retired
+in place — the pane grays out and its control relabels to an explicit clear
+affordance — rather than being auto-removed, so the final scrollback stays
+readable until the owner clears it. Retirement follows the session's reported
+status even while the browser is on the HTTP-polling fallback path, and a
+coarse reconciliation poll additionally retires panes the daemon no longer
+lists. Clearing or closing an already-retired or already-gone pane is
+idempotent: it resolves as success without surfacing a terminal-close error.
+{#260724-terminal-pane-dead-session-retire}
 
 The terminal pane is a shell terminal substrate only; it does not hardcode
 Codex, Claude, or other agent presets.

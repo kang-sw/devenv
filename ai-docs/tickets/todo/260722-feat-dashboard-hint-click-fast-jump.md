@@ -96,3 +96,24 @@ without leaving the keyboard to hunt for it with the mouse.
   another server's worktree); fast-jump mode cancels cleanly (e.g. Escape)
   without residual overlay state; interaction latency stays acceptable with
   a realistically large number of open panes/targets.
+
+## Blocked (2026-07-24)
+
+Blocked on the finalized Sequencing decision (Decisions, Agenda A): this layer-4
+feature "ships after the hotkey config framework, the which-key hint overlay,
+and the command bar integration are in place." Current prerequisite status:
+
+- `260722-feat-dashboard-hotkey-config-framework` — **.done** (the registry /
+  leader-key spine the trigger binds onto is available).
+- `260722-feat-dashboard-which-key-hint-overlay` — **ready**, Phase 1 landed but
+  Phase 2 (Playwright verification) still unresolved (itself blocked on
+  `260722-bug-e2e-open-work-root-locator-ambiguity`).
+- `260711-idea-dashboard-command-bus-quick-open-shortcuts` (the command bar
+  integration) — **todo**, all three phases unresolved: **not in place**.
+
+Because the command bar integration is not yet implemented, shipping this last
+layer now would violate the owner's finalized epic ordering. That ordering is a
+settled decision, so it is not a lead-resolvable, goal-run-autonomous step;
+advancing this ticket must wait until the command bar integration lands (and,
+per the sequencing, the which-key overlay completes). Skipped by the goal-drain
+loop until then.

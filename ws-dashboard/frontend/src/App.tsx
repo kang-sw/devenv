@@ -96,13 +96,12 @@ import {
   buildDefaultHotkeyBindings,
   buildLeaderTree,
   chordFromKeydownEvent,
+  decideKeydownGuardStage,
   describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
-  isLeaderTriggerKeydown,
   loadHotkeyUserConfig,
   resolveHotkeyCommand,
-  shouldSkipHotkeyCapture,
   stepLeaderState,
   HotkeyRegistry,
   type HotkeyBinding,
@@ -189,18 +188,20 @@ import {
   type WorkRootFileEntryView,
 } from "./workRootFiles";
 import {
-  appendTerminalOutput,
+  applyTerminalOutputBatch,
+  applyTerminalOutputBatchError,
   appendTerminalWebSocketMessage,
-  canApplyTerminalOutputPoll,
   closeTerminal,
   createTerminal,
-  fetchTerminalOutput,
+  fetchTerminalOutputBatch,
   listTerminals,
-  markTerminalOutputCursor,
+  createOutputCursorFlushScheduler,
+  flushPendingOutputCursors,
   markTerminalPaneCloseError,
   markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
   loadTerminalRestoreIntents,
+  nextTerminalOutputPollIntervalMs,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
   removeTerminalPanesForWorkRoot,
@@ -209,12 +210,12 @@ import {
   sendTerminalInput,
   saveTerminalRestoreIntents,
   shouldPollTerminalOutput,
-  terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalRestoreIntentsForWorkRoot,
   terminalRestoreIntentsFromPanes,
   terminalPaneLogicalKey,
   type TerminalCreateOptions,
+  type OutputCursorFlushScheduler,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
@@ -441,6 +442,14 @@ async function requestWorkspaceRemoval(
 const terminalOutputPollIntervalMs = 120;
 const workRootActivityRefreshIntervalMs = 3_000;
 const workRootActivityRecentRefreshLimit = 30;
+// Coarse backstop for the daemon-side `admits_attach()` drop-off (260724
+// Phase 2): once a dead session's post-exit grace window elapses, it stops
+// appearing in `listTerminals` output with no accompanying WS frame for a
+// pane stuck in HTTP fallback. Far coarser than `terminalOutputPollIntervalMs`
+// on purpose - this only needs to notice a gone session eventually, not drive
+// keystroke-latency-sensitive polling - sized in the same seconds-scale
+// order of magnitude as `workRootActivityRefreshIntervalMs` above.
+const terminalListReconciliationPollIntervalMs = 5_000;
 
 export function App() {
   // Per-server cache of the last resolved resources tree, keyed by
@@ -1660,26 +1669,23 @@ export function App() {
         return;
       }
 
-      if (
-        shouldSkipHotkeyCapture({
-          isComposing: event.isComposing || event.key === "Process",
-          key: event.key,
-          targetIsEditable,
-          targetInsideTerminalPane,
-        })
-      ) {
-        return;
-      }
+      // `decideKeydownGuardStage` (hotkeys.ts) is the single source of truth
+      // for this ordering: the leader-entry trigger (Ctrl+Space, when not
+      // IME-composing) is decided before the terminal/editable-target
+      // passthrough guard, so Ctrl+Space can open the leader overlay even
+      // while a terminal pane (or editable field) has focus.
+      const guardStage = decideKeydownGuardStage({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        isComposing: event.isComposing,
+        targetIsEditable,
+        targetInsideTerminalPane,
+      });
 
-      if (
-        isLeaderTriggerKeydown({
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-          altKey: event.altKey,
-        })
-      ) {
+      if (guardStage === "enter-leader") {
         leaderStateRef.current = enterLeaderPending(
           framework.leaderTree,
           Date.now(),
@@ -1687,6 +1693,10 @@ export function App() {
         setLeaderUiState(leaderStateRef.current);
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+
+      if (guardStage === "skip-passthrough") {
         return;
       }
 
@@ -3607,6 +3617,41 @@ function WorkbenchShell({
   const [terminalPanes, setTerminalPanes] = useState<
     Record<string, TerminalPaneState>
   >({});
+  // Batches per-chunk "output" cursor advances (260723 Phase 1): each
+  // WebSocket "output" frame previously called setTerminalPanes
+  // synchronously via markTerminalOutputCursor (one rerender per PTY
+  // chunk); this scheduler instead accumulates the max chunkSequence seen
+  // per logicalKey and flushes them all in a single setTerminalPanes call
+  // once per animation frame (see flushPendingOutputCursorsNow below).
+  // Several call sites still flush this synchronously - see that function's
+  // own comment for why a rAF-only flush would reintroduce the stale-cursor
+  // race markTerminalOutputCursor's doc comment describes. Extracted into
+  // createOutputCursorFlushScheduler (terminals.ts, fix-cycle 1) so the
+  // scheduling lifecycle itself - not just flushPendingOutputCursors's pure
+  // batch-apply math - is unit-testable against the shipped implementation;
+  // constructed lazily via the same ref-if-null pattern already used for
+  // resourceRefreshCoordinatorRef above, since setTerminalPanes is a stable
+  // useState setter and this must not be re-created across renders.
+  const outputCursorFlushSchedulerRef =
+    useRef<OutputCursorFlushScheduler | null>(null);
+  if (!outputCursorFlushSchedulerRef.current) {
+    outputCursorFlushSchedulerRef.current = createOutputCursorFlushScheduler({
+      requestAnimationFrame: (callback) => requestAnimationFrame(callback),
+      cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+      applyBatch: (pending) =>
+        setTerminalPanes((current) =>
+          flushPendingOutputCursors(current, pending),
+        ),
+    });
+  }
+  // Defensive backstop: cancel a scheduled-but-unfired flush frame on this
+  // component's own unmount so it never fires a setTerminalPanes update
+  // against a torn-down tree.
+  useEffect(() => {
+    return () => {
+      outputCursorFlushSchedulerRef.current?.cancel();
+    };
+  }, []);
   const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{
     paneId: string;
     sequence: number;
@@ -3767,6 +3812,13 @@ function WorkbenchShell({
     if (closedRefs.length === 0) {
       return;
     }
+    // A closed work root drops its terminal panes from browser-side state
+    // without an explicit close (the daemon session is left running for a
+    // future same-logicalKey reattach - see removeTerminalPanesForWorkRoot's
+    // own doc comment). Flush any pending output-cursor advance first so a
+    // stale entry can never survive into a later flush against a
+    // freshly-recreated pane that reuses the same logicalKey.
+    flushPendingOutputCursorsNow();
     for (const { rootKey, rootId, serverRoute } of closedRefs) {
       setTerminalPanes((current) =>
         removeTerminalPanesForWorkRoot(current, rootId, serverRoute),
@@ -3878,6 +3930,57 @@ function WorkbenchShell({
   // testing), gated per-root on `terminalsReadyRootKeys` so a restored
   // terminal-pane order is never destructively pruned before that root's
   // `listTerminals` call has resolved at least once.
+  //
+  // 260723 Phase 1: `terminalPanes`/`agentChatPanes` also churn on every PTY
+  // output chunk (`nextSequence` advances via the batched-cursor flush
+  // above), but this effect only cares about pane *identity*
+  // (paneId/workRootId/serverRoute) - cursor-only churn must never
+  // re-trigger it (that O(open roots x panes) rescan on every chunk is
+  // exactly the rerender-rate bug this phase fixes). Each signature string
+  // below is a sorted, joined identity-fields-only string, recomputed every
+  // render (cheap - no allocation beyond the string) purely to detect
+  // whether the *identity set* changed; the two `useMemo`s then produce
+  // structured arrays that only change reference when their signature
+  // changes, and the effect's own dependency array below keys on those
+  // structured arrays instead of the raw, cursor-churning
+  // `terminalPanes`/`agentChatPanes` state.
+  const terminalPaneIdentitySignature = Object.values(terminalPanes)
+    .map(
+      (pane) =>
+        `${pane.paneId}|${pane.session.workRootId}|${pane.session.serverRoute ?? ""}`,
+    )
+    .sort()
+    .join(",");
+  const agentChatPaneIdentitySignature = Object.values(agentChatPanes)
+    .map(
+      (pane) => `${pane.paneId}|${pane.workRootId}|${pane.serverRoute ?? ""}`,
+    )
+    .sort()
+    .join(",");
+  const terminalPaneIdentities = useMemo(
+    () =>
+      Object.values(terminalPanes).map((pane) => ({
+        paneId: pane.paneId,
+        workRootId: pane.session.workRootId,
+        serverRoute: pane.session.serverRoute,
+      })),
+    // Deliberately keyed on the identity signature (change-detector), not
+    // terminalPanes itself - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [terminalPaneIdentitySignature],
+  );
+  const agentChatPaneIdentities = useMemo(
+    () =>
+      Object.values(agentChatPanes).map((pane) => ({
+        paneId: pane.paneId,
+        workRootId: pane.workRootId,
+        serverRoute: pane.serverRoute,
+      })),
+    // Deliberately keyed on the identity signature (change-detector), not
+    // agentChatPanes itself - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentChatPaneIdentitySignature],
+  );
   useEffect(() => {
     for (const rootKey of openWorkRootKeys) {
       const ref = openWorkRootRefs[rootKey];
@@ -3895,13 +3998,13 @@ function WorkbenchShell({
           .map((pane) => pane.id),
       );
       const liveTerminalPaneIds = new Set(
-        Object.values(terminalPanes)
+        terminalPaneIdentities
           .filter(
-            (pane) =>
-              pane.session.workRootId === ref.rootId &&
-              (pane.session.serverRoute ?? "server-local") === ref.serverRoute,
+            (identity) =>
+              identity.workRootId === ref.rootId &&
+              (identity.serverRoute ?? "server-local") === ref.serverRoute,
           )
-          .map((pane) => pane.paneId),
+          .map((identity) => identity.paneId),
       );
       // CONTRACT: agentChat panes must be included in this revalidation's
       // live-pane-id set for the same reason terminal/readonly panes are -
@@ -3919,13 +4022,13 @@ function WorkbenchShell({
       // correctly applied, then silently reverted by this effect re-running
       // (it depends on `activePaneByRoot`) moments later.
       const liveAgentChatPaneIds = new Set(
-        Object.values(agentChatPanes)
+        agentChatPaneIdentities
           .filter(
-            (pane) =>
-              pane.workRootId === ref.rootId &&
-              (pane.serverRoute ?? "server-local") === ref.serverRoute,
+            (identity) =>
+              identity.workRootId === ref.rootId &&
+              (identity.serverRoute ?? "server-local") === ref.serverRoute,
           )
-          .map((pane) => pane.paneId),
+          .map((identity) => identity.paneId),
       );
       const livePaneIds = new Set<string>([
         ...liveTerminalPaneIds,
@@ -4047,11 +4150,11 @@ function WorkbenchShell({
       });
     }
   }, [
-    terminalPanes,
+    terminalPaneIdentities,
     readOnlyFilePanes,
     readOnlyFilePaneOrderByGroup,
     terminalPaneOrderByGroup,
-    agentChatPanes,
+    agentChatPaneIdentities,
     agentChatPaneOrderByGroup,
     openWorkRootKeys,
     openWorkRootRefs,
@@ -4218,6 +4321,7 @@ function WorkbenchShell({
             focusedTerminalPaneIdRef.current === pane.paneId,
           onVisualRestoreEntryFor: (pane) =>
             terminalVisualRestoreRef.current[pane.logicalKey],
+          getPendingNextSequence: pendingNextSequenceFor,
           onVisualCapture: (pane, capture) => {
             const entry = {
               logicalKey: pane.logicalKey,
@@ -4386,20 +4490,7 @@ function WorkbenchShell({
           }
           return;
         }
-        setTerminalPanes((current) =>
-          persistTerminalPanesForWorkRoot(
-            rootId,
-            reconcileListedTerminalSessions(
-              current,
-              rootId,
-              sessions,
-              listStartedAtMs,
-              serverRoute,
-              terminalVisualRestoreRef.current,
-            ),
-            serverRoute,
-          ),
-        );
+        applyListedTerminalSessions(rootId, serverRoute, sessions, listStartedAtMs);
         setTerminalPaneOrderByGroup((current) =>
           placeTerminalSessions(
             current,
@@ -4847,75 +4938,151 @@ function WorkbenchShell({
         }))
     : [];
 
+  // Read the same way as `livePollPanesRef` above (a ref refreshed every
+  // render, not a `useEffect` dependency) so the coarse reconciliation
+  // backstop's own interval effect below stays stable across every
+  // `terminalPanes` render instead of tearing down/recreating on output.
+  // Only "fallback" counts - not "connecting"/"disconnected" - so the
+  // backstop never fires for a pane that simply has not finished its first
+  // connect attempt yet (the live socket path already covers that case).
+  const terminalFallbackPresentRef = useRef(false);
+  terminalFallbackPresentRef.current = workbenchModel
+    ? Object.values(terminalPanes).some(
+        (pane) =>
+          pane.session.workRootId === workbenchModel.root.id &&
+          (pane.session.serverRoute ?? "server-local") ===
+            workbenchModel.root.resourcePath.serverId &&
+          pane.socketStatus === "fallback",
+      )
+    : false;
+
   useEffect(() => {
     if (!workbenchModel) {
       return;
     }
-    // Track in-flight requests per PTY so a slow response never stacks
-    // overlapping polls for the same terminal.
-    const inFlight = new Set<string>();
+    // 260723 Phase 1: one in-flight guard for the whole batch, not one per
+    // terminal - a single outstanding request now covers every
+    // fallback-polling pane in this work root/serverRoute.
+    let batchInFlight = false;
     let cancelled = false;
+    // Currently-scheduled `window.setInterval` cadence, so the timer is only
+    // torn down and recreated when Step 3's adaptive interval actually
+    // changes (crossing `terminalOutputPollBackoffPaneThreshold` in either
+    // direction), not on every tick.
+    let scheduledIntervalMs = terminalOutputPollIntervalMs;
+    let timer = window.setInterval(poll, scheduledIntervalMs);
 
-    const poll = () => {
-      for (const pane of livePollPanesRef.current) {
-        if (inFlight.has(pane.terminalId)) {
-          continue;
-        }
-        inFlight.add(pane.terminalId);
-        void fetchTerminalOutput(
-          pane.terminalId,
-          pane.nextSequence,
-          pane.serverRoute,
-        )
-          .then((output) => {
-            if (cancelled) {
-              return;
-            }
-            setTerminalPanes((current) => {
-              const existing = current[pane.logicalKey];
-              if (!existing) {
-                return current;
-              }
-              // Skip the state replacement when a poll changed nothing so
-              // React does not re-render the whole workbench tree every cycle
-              // while terminals are quiet. A stale error still counts as a
-              // change so a successful poll clears it.
-              if (!canApplyTerminalOutputPoll(existing, pane.nextSequence)) {
-                return current;
-              }
-              if (!terminalOutputPollChangedState(existing, output)) {
-                return current;
-              }
-              return {
-                ...current,
-                [pane.logicalKey]: appendTerminalOutput(existing, output),
-              };
-            });
-          })
-          .catch((error) => {
-            if (cancelled) {
-              return;
-            }
-            const message =
-              error instanceof Error ? error.message : "terminal output failed";
-            setTerminalPanes((current) => {
-              const existing = current[pane.logicalKey];
-              if (!existing || existing.error === message) {
-                return current;
-              }
-              return {
-                ...current,
-                [pane.logicalKey]: { ...existing, error: message },
-              };
-            });
-          })
-          .finally(() => {
-            inFlight.delete(pane.terminalId);
-          });
+    function rescheduleIfIntervalChanged() {
+      const nextIntervalMs = nextTerminalOutputPollIntervalMs(
+        livePollPanesRef.current.length,
+        terminalOutputPollIntervalMs,
+      );
+      if (nextIntervalMs === scheduledIntervalMs) {
+        return;
       }
-    };
+      scheduledIntervalMs = nextIntervalMs;
+      window.clearInterval(timer);
+      timer = window.setInterval(poll, scheduledIntervalMs);
+    }
 
-    const timer = window.setInterval(poll, terminalOutputPollIntervalMs);
+    function poll() {
+      rescheduleIfIntervalChanged();
+      const panes = livePollPanesRef.current;
+      if (panes.length === 0 || batchInFlight) {
+        return;
+      }
+      batchInFlight = true;
+      const requests = panes.map((pane) => ({
+        logicalKey: pane.logicalKey,
+        terminalId: pane.terminalId,
+        nextSequence: pane.nextSequence,
+      }));
+      // Every pane in `livePollPanesRef.current` already shares one
+      // work root and one `serverRoute` (see the ref's own build-up above),
+      // so the whole tick's cursors fit in a single batched POST with no
+      // per-server splitting.
+      const serverRoute = panes[0]?.serverRoute;
+      void fetchTerminalOutputBatch(
+        panes.map((pane) => ({
+          terminalId: pane.terminalId,
+          after: pane.nextSequence,
+        })),
+        serverRoute,
+      )
+        .then((results) => {
+          if (cancelled) {
+            return;
+          }
+          setTerminalPanes((current) =>
+            applyTerminalOutputBatch(current, requests, results),
+          );
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          const message =
+            error instanceof Error ? error.message : "terminal output failed";
+          setTerminalPanes((current) =>
+            applyTerminalOutputBatchError(current, requests, message),
+          );
+        })
+        .finally(() => {
+          batchInFlight = false;
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
+
+  // Coarse (seconds-scale) reconciliation backstop for the daemon-side
+  // `admits_attach()` drop-off (260724 Phase 2): the live WS status/exit
+  // frame already covers a socket-connected pane's exit per the ticket
+  // contract, so this only exists for a pane stuck in HTTP fallback, whose
+  // dead session can otherwise silently stop appearing in `listTerminals`
+  // output (once the daemon's post-exit grace window elapses) with no
+  // accompanying signal. Skips the network call entirely on every tick
+  // where no pane in the active root is currently in "fallback" transport.
+  useEffect(() => {
+    if (!workbenchModel) {
+      return;
+    }
+    const rootId = workbenchModel.root.id;
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    let cancelled = false;
+    let inFlight = false;
+
+    function poll() {
+      if (cancelled || inFlight || !terminalFallbackPresentRef.current) {
+        return;
+      }
+      inFlight = true;
+      const listStartedAtMs = Date.now();
+      void listTerminals(rootId, serverRoute)
+        .then((sessions) => {
+          if (cancelled) {
+            return;
+          }
+          applyListedTerminalSessions(
+            rootId,
+            serverRoute,
+            sessions,
+            listStartedAtMs,
+          );
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    }
+
+    const timer = window.setInterval(
+      poll,
+      terminalListReconciliationPollIntervalMs,
+    );
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -5082,6 +5249,38 @@ function WorkbenchShell({
       ),
     );
     return nextPanes;
+  }
+
+  // Shared apply-path for a `listTerminals` response (260724 Phase 2):
+  // prunes panes for this work root/serverRoute that dropped out of the
+  // daemon's live list (unless locally created after `listStartedAtMs`,
+  // via `reconcileListedTerminalSessions`) and merges in any listed
+  // session, then persists the resulting restore intents. Used by both the
+  // one-shot mount/work-root-switch effect and the coarse fallback
+  // reconciliation backstop below so the two call sites cannot drift.
+  // Deliberately does not call `placeTerminalSessions`/
+  // `setTerminalPaneOrderByGroup` - that is initial-placement policy for
+  // freshly-discovered panes, not needed on a reconciliation-only tick.
+  function applyListedTerminalSessions(
+    rootId: string,
+    serverRoute: string | null | undefined,
+    sessions: TerminalSessionView[],
+    listStartedAtMs: number,
+  ) {
+    setTerminalPanes((current) =>
+      persistTerminalPanesForWorkRoot(
+        rootId,
+        reconcileListedTerminalSessions(
+          current,
+          rootId,
+          sessions,
+          listStartedAtMs,
+          serverRoute,
+          terminalVisualRestoreRef.current,
+        ),
+        serverRoute,
+      ),
+    );
   }
 
   function createTerminalPane(options: TerminalCreateOptions = {}) {
@@ -5505,24 +5704,62 @@ function WorkbenchShell({
     );
   }
 
+  // Flushes every pending output-cursor advance into terminalPanes in a
+  // single setTerminalPanes call, and cancels any scheduled rAF flush so a
+  // stale frame never re-flushes an already-cleared Map (a no-op if the
+  // frame already fired, since this is also the rAF callback itself - see
+  // the scheduling call below). Delegates to
+  // outputCursorFlushSchedulerRef.current.flushNow() (terminals.ts,
+  // fix-cycle 1 extraction) - kept as a same-named wrapper so every call
+  // site below is unchanged. This must run synchronously - not deferred to
+  // "whenever the next frame lands" - at every point where a pane's cursor
+  // must already be current: before a non-"output" socket message's own
+  // cursor merge (appendTerminalWebSocketMessage's Math.max would otherwise
+  // compare against a stale pane.nextSequence), before a pane closes
+  // (closeTerminalPane), and before a pane's browser-side state is dropped
+  // outside of an explicit close (the work-root-close effect below) - that
+  // last path intentionally leaves the daemon session running for a
+  // same-logicalKey reattach, so a stale pending entry left in the Map
+  // would otherwise misapply to the freshly-recreated pane on a later
+  // flush. This is the exact stale-cursor race markTerminalOutputCursor's
+  // own doc comment documents, reintroduced at the batching layer instead
+  // of the per-chunk layer if any of these call sites were skipped.
+  function flushPendingOutputCursorsNow() {
+    outputCursorFlushSchedulerRef.current?.flushNow();
+  }
+
+  // Read-side counterpart to the scheduler's pending batch, exposed through
+  // TerminalPaneActions.getPendingNextSequence (see the construction site
+  // below) for terminalPaneBody.tsx's debounced visual-capture effect. That
+  // effect reads pane.nextSequence synchronously off its own liveRef inside
+  // a window.setTimeout callback, independent of this component's rAF
+  // scheduling, so a "flush right before that specific read" ordering is
+  // not reachable across the App/child boundary - flushing App-side state
+  // would not be visible to the child's liveRef until a subsequent render.
+  // Reading the pending Map directly here sidesteps that entirely.
+  function pendingNextSequenceFor(pane: TerminalPaneState): number {
+    return (
+      outputCursorFlushSchedulerRef.current?.pendingNextSequenceFor(pane) ??
+      pane.nextSequence
+    );
+  }
+
   function applyTerminalSocketMessage(
     pane: TerminalPaneState,
     message: TerminalWebSocketServerMessage,
   ) {
     if (message.type === "output") {
-      setTerminalPanes((current) =>
-        current[pane.logicalKey]
-          ? {
-              ...current,
-              [pane.logicalKey]: markTerminalOutputCursor(
-                current[pane.logicalKey],
-                message.chunk.sequence,
-              ),
-            }
-          : current,
+      outputCursorFlushSchedulerRef.current?.accumulate(
+        pane.logicalKey,
+        message.chunk.sequence,
       );
       return;
     }
+    // Non-"output" frames (status/exit) merge their own nextSequence via
+    // appendTerminalWebSocketMessage's Math.max - flush any pending
+    // "output" advance first so that merge sees a current pane.nextSequence
+    // instead of racing a batched-but-not-yet-applied one.
+    flushPendingOutputCursorsNow();
     setTerminalPanes((current) =>
       current[pane.logicalKey]
         ? {
@@ -5606,6 +5843,12 @@ function WorkbenchShell({
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
+    // Flush synchronously before the async close proceeds: the pane is
+    // logically closing at this call, and any pending "output" cursor
+    // advance for it must be applied now (the .then() below removes the
+    // pane from state once closeTerminal resolves - a still-batched
+    // advance for a now-removed logicalKey would otherwise silently drop).
+    flushPendingOutputCursorsNow();
     void closeTerminal(pane.session.terminalId, pane.session.serverRoute)
       .then(() =>
         setTerminalPanes((current) =>

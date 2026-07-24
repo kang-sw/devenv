@@ -157,7 +157,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
 | `260722-feat-dashboard-hotkey-config-framework` | done | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
 | `260722-feat-dashboard-settings-panel` | ready | Dashboard general settings modal: section registry, shared namespaced prefs store, Terminal-style first section |
-| `260722-feat-dashboard-which-key-hint-overlay` | ready | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry |
+| `260722-feat-dashboard-which-key-hint-overlay` | done | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry (both phases done, incl. Playwright verification) |
+| `260724-idea-dashboard-hotkey-leader-dispatch-gap` | idea | Global leader-key `executeCommand` call has no registered handler for `terminal.create` and most other default leaf commandIds, so leader-sub dispatch silently no-ops for them |
 | `260722-feat-dashboard-hint-click-fast-jump` | ready | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-idea-dashboard-git-status-diff-inspector` | idea | Dedicated right-sidebar surface to inspect changed files' contents and diffs, focused via `<leader> g s` |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
@@ -220,6 +221,24 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260724-bug-dashboard-terminal-dead-shell-undetected-steady-state` (ready,
+  bug) - Windows dogfood finding: a shell that dies without PTY EOF leaves a
+  zombie pane. Fix is a `#[cfg(windows)]` reaper thread blocking on the
+  shell's duplicated process HANDLE (`WaitForSingleObject`), plus frontend
+  retain-with-clear retirement + idempotent close. Sage combined = passed
+  (design+completeness). Spec addressing via `## Spec Impact`
+  (`ws-web-dashboard/index.md`, Contract-first: no). Related to
+  `260723-feat-dashboard-terminal-lifetime-daemon-decouple` (introduced-by).
+  Phase 1 (Windows reaper, `b07f40ad`), Phase 2 (frontend retain-with-clear
+  retirement + idempotent close, `2b4d0e0b`; spec
+  `#260724-terminal-pane-dead-session-retire`), and the Phase 3 Unix-regression
+  leg (`terminal_live_pty_eof_exit_flips_status_to_exited`, `e2990574`) landed
+  on `goal/drain-ready-queue`. Only the Phase 3 native-Windows acceptance leg
+  remains - Blocked (2026-07-24) on the user's real Windows dogfood harness
+  (PowerShell), so goal-drain skips this ticket until the user enables the
+  Windows leg; the leg is also carved out as the
+  `260724-chore-dashboard-windows-terminal-reaper-native-acceptance` ready
+  chore, runnable via the validated dogfood harness in `_index.local.md`.
 - `260714-bug-git-status-poll-index-lock-staleness` (`.done/`, bug) - closed
   2026-07-20: Phase 1 (`--no-optional-locks` on the poll's `git status` call
   in `git_toolbar.rs`, plus spec update) landed as commit `18e97569`,

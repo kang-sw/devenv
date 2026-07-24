@@ -112,6 +112,25 @@ impl SharedState {
     }
 
     fn kill_shell_if_running(&self) {
+        // Stamp the ring `Terminated` BEFORE killing the child so a
+        // concurrent exit observer that wakes on child death finds a
+        // non-`Running` ring and its own `transition(Exited)` becomes a
+        // genuine no-op (see `transition`'s `Running`-only guard) instead of
+        // racing an `Exited` status over this intentional, daemon-initiated
+        // kill. On Windows the #[cfg(windows)] handle-wait reaper
+        // (`spawn_shell`) is exactly such an observer; the reader thread's
+        // PTY-EOF `transition(Exited)` is another. Only the status flag is
+        // set here - the PTY master and writer channel are deliberately torn
+        // down AFTER the child is killed below, because only child death
+        // reliably unblocks a writer thread stuck on a full OS pipe buffer
+        // (mental-model "Common Mistakes"); tearing them down first would
+        // reintroduce that starvation.
+        {
+            let mut ring = self.ring.lock().expect("ring lock poisoned");
+            if ring.status == TerminalHelperStatus::Running {
+                ring.status = TerminalHelperStatus::Terminated;
+            }
+        }
         if let Some(mut child) = self.child.lock().expect("child lock poisoned").take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -420,8 +439,31 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
                     );
                 }
             }
+
+            // Event-driven exit detection that does NOT depend on PTY EOF.
+            // On Windows a shell can die while ConPTY keeps the PTY master
+            // pipe open (conhost holding it), so the reader thread's
+            // EOF-triggered `transition(Exited)` (`spawn_reader_thread`) may
+            // never fire and the terminal would wrongly stay `Running`
+            // forever. Duplicate the shell's process handle into a handle we
+            // own (distinct from the `Child`'s, which `kill_shell_if_running`
+            // closes) and hand it to a detached reaper thread that blocks on
+            // it and drives the same exit path on wake.
+            match crate::terminal_platform::windows::duplicate_process_handle(raw_handle) {
+                Ok(handle) => spawn_process_exit_reaper(shared.clone(), handle),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "failed to duplicate terminal shell handle for exit reaper; \
+                         falling back to PTY-EOF-only exit detection"
+                    );
+                }
+            }
         } else {
-            tracing::warn!("terminal shell child exposed no raw handle; skipping job-object assignment");
+            tracing::warn!(
+                "terminal shell child exposed no raw handle; skipping job-object assignment \
+                 and exit reaper (PTY-EOF-only exit detection)"
+            );
         }
     }
 
@@ -431,6 +473,9 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
     *shared.child.lock().expect("child lock poisoned") = Some(child);
     *shared.master.lock().expect("master lock poisoned") = Some(pair.master);
     *shared.writer_tx.lock().expect("writer_tx lock poisoned") = Some(spawn_writer_thread(writer));
+    // Detached, never joined in production - matches `spawn_process_exit_reaper`'s
+    // style below. The returned `JoinHandle` exists purely so tests can join it
+    // deterministically instead of polling `status_and_next_sequence()`.
     spawn_reader_thread(shared, reader);
     Ok(())
 }
@@ -454,19 +499,131 @@ fn run_writer_thread(rx: std_mpsc::Receiver<WriterCommand>, mut writer: Box<dyn 
     }
 }
 
-fn spawn_reader_thread(shared: Arc<SharedState>, mut reader: Box<dyn Read + Send>) {
+// CONTRACT (260724-bug-dashboard-terminal-utf8-multibyte-read-boundary
+// -corruption): a raw `read()` from the PTY has no notion of codepoint
+// boundaries - the OS can (and, for wide multi-byte glyphs like CJK or
+// emoji, routinely does) split a single UTF-8 sequence across two `read()`
+// calls. Decoding each read independently via `String::from_utf8_lossy`
+// therefore corrupts every such boundary into U+FFFD even though the bytes
+// are perfectly valid once reassembled. `carry` holds the tail of the
+// previous read that was a genuinely incomplete-but-valid-so-far sequence
+// (bounded to <=3 bytes - the longest a valid UTF-8 lead byte's encoding
+// can run is 4 bytes total, so at most 3 can be pending) and is prepended
+// to the next read's bytes before decoding. A truly malformed byte (not a
+// split) is NOT carried - it is replaced with exactly one U+FFFD and
+// decoding resumes past it, which is what prevents an unrecoverable byte
+// from wedging the carry-over forever.
+fn spawn_reader_thread(shared: Arc<SharedState>, mut reader: Box<dyn Read + Send>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut buffer = [0_u8; 4096];
+        let mut scratch = [0_u8; 4096];
+        let mut carry: Vec<u8> = Vec::new();
         loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => shared.append_output(String::from_utf8_lossy(&buffer[..n]).into_owned()),
+            match reader.read(&mut scratch) {
+                Ok(0) => {
+                    // Genuine EOF: any still-pending carry is a sequence
+                    // truncated at the true end of the stream (not a
+                    // read-boundary split awaiting more bytes, since there
+                    // are no more bytes) - degrade it to lossy replacement
+                    // rather than dropping it silently.
+                    if !carry.is_empty() {
+                        shared.append_output(String::from_utf8_lossy(&carry).into_owned());
+                        carry.clear();
+                    }
+                    break;
+                }
+                Ok(n) => {
+                    let mut combined = std::mem::take(&mut carry);
+                    combined.extend_from_slice(&scratch[..n]);
+                    let mut remaining: &[u8] = &combined;
+                    loop {
+                        match std::str::from_utf8(remaining) {
+                            Ok(valid) => {
+                                shared.append_output(valid.to_owned());
+                                break;
+                            }
+                            Err(error) => {
+                                let valid_up_to = error.valid_up_to();
+                                if valid_up_to > 0 {
+                                    shared.append_output(
+                                        std::str::from_utf8(&remaining[..valid_up_to])
+                                            .expect("bytes before valid_up_to are always valid UTF-8")
+                                            .to_owned(),
+                                    );
+                                }
+                                match error.error_len() {
+                                    None => {
+                                        // Incomplete trailing sequence at the
+                                        // end of this read's bytes: a
+                                        // genuine read-boundary split. Carry
+                                        // it forward for the next read
+                                        // instead of guessing.
+                                        carry = remaining[valid_up_to..].to_vec();
+                                        break;
+                                    }
+                                    Some(malformed_len) => {
+                                        // A genuinely malformed span (not a
+                                        // split): emit exactly one U+FFFD for
+                                        // it, then keep decoding the
+                                        // remainder of THIS SAME read - do
+                                        // not carry the malformed bytes.
+                                        let malformed_end = valid_up_to + malformed_len;
+                                        shared.append_output(
+                                            String::from_utf8_lossy(&remaining[valid_up_to..malformed_end])
+                                                .into_owned(),
+                                        );
+                                        remaining = &remaining[malformed_end..];
+                                        if remaining.is_empty() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Err(_) => {
                     shared.transition(TerminalHelperStatus::Error);
                     return;
                 }
             }
         }
+        shared.transition(TerminalHelperStatus::Exited);
+    })
+}
+
+// Windows-only, event-driven shell-exit detection independent of PTY EOF.
+//
+// The reader thread (`spawn_reader_thread`) is the ONLY exit trigger on
+// Unix, keyed off PTY master EOF. On Windows/ConPTY a shell process can
+// terminate while conhost keeps the master pipe open, so that EOF may never
+// arrive and the terminal would remain `Running` forever - the reported
+// zombie-pane bug. This reaper closes that gap at the source: it owns an
+// independent `DuplicateHandle` copy of the shell process handle (NOT the
+// borrowed `Child::as_raw_handle`, which `kill_shell_if_running` closes when
+// it drops the `Child`) and blocks on it in the kernel (zero idle CPU, zero
+// poll latency). The instant the shell process exits it drives the SAME
+// `SharedState::transition(Exited)` the PTY-EOF reader uses, so the existing
+// `Exit` IPC -> `apply_helper_status` -> WebSocket exit-frame pipeline is
+// reused unchanged.
+//
+// Windows-only by design: a second Unix `waitpid`-based reaper would race
+// and steal the reap from `portable_pty`'s own `Child::wait()` in
+// `kill_shell_if_running`, whereas Windows process handles admit many
+// concurrent independent waiters. Gated at the call site (`spawn_shell`'s
+// `#[cfg(windows)]` block).
+//
+// Detached and never joined. On a daemon-initiated kill the ring is already
+// `Terminated` (`kill_shell_if_running` stamps it before `child.kill()`), so
+// this `transition(Exited)` is a genuine no-op; on a spontaneous shell death
+// it is the authoritative exit signal. Exactly one shell is ever spawned per
+// helper (`shell_started` compare_exchange), so exactly one reaper exists,
+// and every helper-exit path runs `kill_shell_if_running`, which kills the
+// shell and unblocks this wait - so neither the thread nor the duplicated
+// handle leaks.
+#[cfg(windows)]
+fn spawn_process_exit_reaper(shared: Arc<SharedState>, handle: std::os::windows::io::OwnedHandle) {
+    thread::spawn(move || {
+        crate::terminal_platform::windows::wait_for_process_exit(&handle);
         shared.transition(TerminalHelperStatus::Exited);
     });
 }
@@ -569,5 +726,295 @@ mod ring_state_tests {
         let chunks = ring.backfill_after(1);
         assert_eq!(chunks.len(), MAX_OUTPUT_CHUNKS);
         assert_eq!(chunks.first().expect("non-empty").sequence, oldest_retained);
+    }
+}
+
+// Regression coverage for the "make the guard real" invariant: the kill path
+// stamps the ring `Terminated` before `child.kill()` so a racing exit
+// observer (the #[cfg(windows)] handle-wait reaper, or the PTY-EOF reader)
+// waking on the daemon-initiated kill runs `transition(Exited)` as a genuine
+// no-op instead of overwriting the intentional `Terminated`. Both the guard
+// and the stamp are cross-platform pure state logic (no OS/PTY dependency),
+// so they are exercised directly here, NOT windows-gated.
+#[cfg(test)]
+mod kill_path_guard_tests {
+    use super::*;
+
+    fn shared_state_for_test() -> SharedState {
+        SharedState {
+            pid: 0,
+            start_time: 0,
+            ring: Mutex::new(RingState::new()),
+            notify: Notify::new(),
+            child: Mutex::new(None),
+            master: Mutex::new(None),
+            writer_tx: Mutex::new(None),
+            shell_started: AtomicBool::new(false),
+            exited_at: Mutex::new(None),
+            #[cfg(windows)]
+            job: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn transition_is_a_no_op_once_the_ring_has_left_running() {
+        let shared = shared_state_for_test();
+        // Drive the ring out of `Running` directly (isolating this test to
+        // `transition`'s guard, independent of how the kill path gets there).
+        shared.ring.lock().expect("ring lock poisoned").status = TerminalHelperStatus::Terminated;
+
+        // A racing exit observer waking after the daemon-initiated kill must
+        // NOT downgrade the intentional `Terminated` back to `Exited`.
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Terminated,
+            "transition(Exited) must be a genuine no-op once the ring is non-Running \
+             - removing transition's Running-only guard would fail this"
+        );
+    }
+
+    #[test]
+    fn transition_from_running_still_reaches_exited() {
+        // Negative control: the guard is specifically the non-`Running` gate,
+        // not a blanket freeze - a `Running` ring DOES transition, so the
+        // no-op above is genuinely conditional on prior state, not a
+        // transition() that never mutates.
+        let shared = shared_state_for_test();
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Running,
+            "fresh ring starts Running"
+        );
+
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Exited,
+            "a Running ring must still transition to Exited"
+        );
+    }
+
+    #[test]
+    fn kill_shell_if_running_stamps_terminated() {
+        // The load-bearing half of the kill-path reorder that is testable on
+        // Linux: `kill_shell_if_running` must leave the ring `Terminated`
+        // (not `Running`, not `Exited`). Removing the pre-kill `Terminated`
+        // stamp would leave the ring `Running` here and fail this assertion.
+        // (The child is `None` in this unit test - wiring a real PTY child in
+        // is disproportionate; the before/after-`child.kill()` write-unblock
+        // ordering is a separate writer-starvation concern, not the guard
+        // invariant under review, and combined with the two tests above this
+        // fully covers the reaper's "Exited becomes a no-op" reliance.)
+        let shared = shared_state_for_test();
+
+        shared.kill_shell_if_running();
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Terminated,
+            "kill path must stamp Terminated so a racing exit observer's Exited is a no-op"
+        );
+    }
+}
+
+// Regression coverage for 260724-bug-dashboard-terminal-utf8-multibyte-read
+// -boundary-corruption: `spawn_reader_thread`'s carry-over decode loop must
+// reassemble a UTF-8 sequence that a raw `read()` split across two chunks,
+// must not hang/panic when a sequence is genuinely truncated at EOF, and
+// must recover (not wedge) from a single malformed byte sandwiched between
+// valid spans in one read. Self-contained like `kill_path_guard_tests` -
+// duplicates `shared_state_for_test()` rather than widening that module's
+// private helper's visibility.
+#[cfg(test)]
+mod reader_thread_utf8_tests {
+    use super::*;
+    use std::io;
+
+    fn shared_state_for_test() -> SharedState {
+        SharedState {
+            pid: 0,
+            start_time: 0,
+            ring: Mutex::new(RingState::new()),
+            notify: Notify::new(),
+            child: Mutex::new(None),
+            master: Mutex::new(None),
+            writer_tx: Mutex::new(None),
+            shell_started: AtomicBool::new(false),
+            exited_at: Mutex::new(None),
+            #[cfg(windows)]
+            job: Mutex::new(None),
+        }
+    }
+
+    /// A fake `Read` that returns a scripted sequence of chunks, then `Ok(0)`
+    /// (EOF) once the script is exhausted - enough to drive all three
+    /// required carry-over cases (mid-codepoint split, EOF truncation,
+    /// malformed interior byte) without a real PTY.
+    struct ScriptedReader {
+        chunks: VecDeque<Vec<u8>>,
+    }
+
+    impl ScriptedReader {
+        fn new(chunks: Vec<Vec<u8>>) -> Self {
+            Self { chunks: chunks.into_iter().collect() }
+        }
+    }
+
+    impl Read for ScriptedReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self.chunks.pop_front() {
+                Some(chunk) => {
+                    assert!(chunk.len() <= buf.len(), "test chunk must fit the scratch buffer");
+                    buf[..chunk.len()].copy_from_slice(&chunk);
+                    Ok(chunk.len())
+                }
+                None => Ok(0),
+            }
+        }
+    }
+
+    fn backfill_text(shared: &SharedState) -> String {
+        shared
+            .ring
+            .lock()
+            .expect("ring lock poisoned")
+            .backfill_after(0)
+            .into_iter()
+            .map(|chunk| chunk.data)
+            .collect()
+    }
+
+    #[test]
+    fn split_mid_codepoint_reassembles_exactly() {
+        // "안녕" (3-byte codepoints each) + "🎉" (4-byte codepoint) = 10
+        // bytes total. Split after byte 8 - inside the emoji's 4-byte
+        // sequence (2 bytes present, 2 pending) - so the first read ends
+        // mid-codepoint exactly like a real PTY read boundary can.
+        let original = "안녕🎉";
+        let bytes = original.as_bytes();
+        assert_eq!(bytes.len(), 10, "fixture assumption: 3 + 3 + 4 bytes");
+        let chunk1 = bytes[0..8].to_vec();
+        let chunk2 = bytes[8..10].to_vec();
+
+        let shared = Arc::new(shared_state_for_test());
+        let handle = spawn_reader_thread(shared.clone(), Box::new(ScriptedReader::new(vec![chunk1, chunk2])));
+        handle.join().expect("reader thread must not panic on a mid-codepoint split");
+
+        let reassembled = backfill_text(&shared);
+        assert_eq!(reassembled, original, "split-then-carried bytes must reassemble byte-for-byte");
+        assert!(
+            !reassembled.contains('\u{FFFD}'),
+            "a genuine read-boundary split must never surface a replacement character: {reassembled:?}"
+        );
+    }
+
+    #[test]
+    fn eof_truncated_tail_degrades_to_lossy_without_hanging() {
+        // "A" + the first 2 of "🎉"'s 4 bytes, then EOF with no further
+        // chunk - a sequence that is truncated at the TRUE end of the
+        // stream, not merely split across reads.
+        //
+        // NOTE: this is a no-hang/no-wedge guard, NOT a carry-over
+        // regression guard - a truly EOF-truncated sequence is lossily
+        // replaced by the OLD per-read `from_utf8_lossy` implementation
+        // too, so this test's assertions pass unchanged against the old
+        // code. `split_codepoint_across_reads_then_clean_eof_reassembles_
+        // without_replacement` below is the test that actually fails
+        // against the old implementation for the "split, then EOF" shape.
+        let emoji_bytes = "🎉".as_bytes();
+        let mut chunk = b"A".to_vec();
+        chunk.extend_from_slice(&emoji_bytes[..2]);
+
+        let shared = Arc::new(shared_state_for_test());
+        let handle = spawn_reader_thread(shared.clone(), Box::new(ScriptedReader::new(vec![chunk])));
+        // A hang here would fail via the test harness's own timeout - no
+        // extra polling/timeout plumbing needed.
+        handle.join().expect("reader thread must not panic on EOF truncation");
+
+        let reassembled = backfill_text(&shared);
+        assert!(reassembled.starts_with('A'), "the valid prefix before the truncated tail must survive: {reassembled:?}");
+        assert!(
+            reassembled.contains('\u{FFFD}'),
+            "a sequence truncated at true EOF must degrade to lossy replacement: {reassembled:?}"
+        );
+    }
+
+    #[test]
+    fn split_codepoint_across_reads_then_clean_eof_reassembles_without_replacement() {
+        // "X" + "한" (3-byte codepoint) + "Y", with the FIRST read cutting
+        // "한" after only 2 of its 3 bytes and the SECOND read supplying
+        // the completing byte plus the trailing "Y", followed immediately
+        // by a clean EOF (no further chunk). This is the carry-then-
+        // complete-at-EOF shape: unlike the truncation test above, the
+        // sequence genuinely finishes, so the OLD per-read
+        // `from_utf8_lossy` implementation (which sees only "X" + 2
+        // dangling lead bytes in read 1, then a lone continuation byte +
+        // "Y" in read 2) corrupts this into replacement characters even
+        // though every byte is present and valid once reassembled -
+        // reverting the carry-over would fail this test's exact-equality
+        // assertion.
+        let original = "X한Y";
+        let bytes = original.as_bytes();
+        assert_eq!(bytes.len(), 5, "fixture assumption: 1 + 3 + 1 bytes");
+        let chunk1 = bytes[0..3].to_vec(); // "X" + first 2 bytes of "한"
+        let chunk2 = bytes[3..5].to_vec(); // completing byte of "한" + "Y"
+
+        let shared = Arc::new(shared_state_for_test());
+        let handle = spawn_reader_thread(shared.clone(), Box::new(ScriptedReader::new(vec![chunk1, chunk2])));
+        handle
+            .join()
+            .expect("reader thread must not panic on a split-then-clean-EOF codepoint");
+
+        let reassembled = backfill_text(&shared);
+        assert_eq!(
+            reassembled, original,
+            "a codepoint split across reads must reassemble exactly once the completing read \
+             arrives, even when that read is immediately followed by a clean EOF: {reassembled:?}"
+        );
+        assert!(
+            !reassembled.contains('\u{FFFD}'),
+            "carry survives to a real completion here - there must be no replacement character: {reassembled:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_interior_byte_yields_exactly_one_replacement_and_does_not_wedge() {
+        // A valid multi-byte codepoint ("한", 3 bytes) straddles the read
+        // boundary (read 1 ends after 2 of its bytes), read 2 supplies the
+        // completing byte, then a single invalid lead byte (0xFF is never
+        // valid UTF-8, so `error_len() == Some(1)`), then more valid text -
+        // all still within read 2. This exercises BOTH the carry-then-
+        // complete path AND the malformed-span-does-not-wedge path in one
+        // shot: the OLD per-read `from_utf8_lossy` implementation sees "한"
+        // as two dangling/lone bytes across two independent reads and
+        // produces several replacement characters instead of exactly one,
+        // so the exact-string assertion below fails against the old code.
+        let mut chunk1 = b"before".to_vec();
+        chunk1.extend_from_slice(&"한".as_bytes()[..2]); // incomplete: 2 of 3 bytes
+
+        let mut chunk2 = vec!["한".as_bytes()[2]]; // completing byte of "한"
+        chunk2.push(0xFF); // malformed, not a split - error_len() == Some(1)
+        chunk2.extend_from_slice(b"after");
+
+        let shared = Arc::new(shared_state_for_test());
+        let handle = spawn_reader_thread(shared.clone(), Box::new(ScriptedReader::new(vec![chunk1, chunk2])));
+        handle.join().expect("reader thread must not panic on a malformed interior byte");
+
+        let reassembled = backfill_text(&shared);
+        let expected = "before한\u{FFFD}after";
+        assert_eq!(
+            reassembled, expected,
+            "the straddling codepoint must reassemble intact, exactly one U+FFFD must stand in \
+             for the malformed byte, and no text may be dropped, duplicated, or reordered: \
+             {reassembled:?}"
+        );
+        assert_eq!(
+            reassembled.matches('\u{FFFD}').count(),
+            1,
+            "exactly one replacement character for the single malformed byte: {reassembled:?}"
+        );
     }
 }

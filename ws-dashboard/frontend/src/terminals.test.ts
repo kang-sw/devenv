@@ -1,12 +1,18 @@
 import {
   appendTerminalOutput,
   appendTerminalWebSocketMessage,
+  applyTerminalOutputBatch,
+  applyTerminalOutputBatchError,
   canApplyTerminalOutputPoll,
   clampTerminalSize,
   closeTerminal,
   createTerminal,
   fetchTerminalOutput,
+  fetchTerminalOutputBatch,
+  flushPendingOutputCursors,
   listTerminals,
+  createOutputCursorFlushScheduler,
+  nextTerminalOutputPollIntervalMs,
   resizeTerminal,
   sendTerminalInput,
   markTerminalOutputCursor,
@@ -22,7 +28,11 @@ import {
   saveTerminalRestoreIntents,
   terminalCloseEndpoint,
   terminalInputEndpoint,
+  terminalOutputBatchEndpoint,
+  terminalOutputCharacterBudget,
   terminalOutputEndpoint,
+  terminalOutputPollBackoffPaneThreshold,
+  terminalOutputPollBackoffMultiplier,
   terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalPaneId,
@@ -36,7 +46,10 @@ import {
   shouldPollTerminalOutput,
   validateTerminalSize,
   workRootTerminalsEndpoint,
+  type TerminalOutputView,
+  type TerminalPaneState,
   type TerminalSessionView,
+  type TerminalWebSocketServerMessage,
 } from "./terminals.js";
 import { LOCAL_DASHBOARD_SERVER_ROUTE } from "./resourceModel.js";
 
@@ -82,6 +95,11 @@ assertEqual(
   "output endpoint encodes cursor",
 );
 assertEqual(
+  terminalOutputBatchEndpoint(),
+  "/api/dashboard/terminals/output/batch",
+  "batch output endpoint has no per-terminal path segment",
+);
+assertEqual(
   terminalInputEndpoint("term/abc"),
   "/api/dashboard/terminals/term%2Fabc/input",
   "input endpoint encodes id",
@@ -110,6 +128,11 @@ assertEqual(
   terminalOutputEndpoint("term/abc", 12, "server-remote-1"),
   "/api/dashboard/servers/server-remote-1/terminals/term%2Fabc/output?after=12",
   "server-scoped terminal output endpoint encodes server id",
+);
+assertEqual(
+  terminalOutputBatchEndpoint("server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/terminals/output/batch",
+  "server-scoped batch output endpoint encodes server id",
 );
 assertEqual(
   terminalInputEndpoint("term/abc", "server-remote-1"),
@@ -326,6 +349,24 @@ assertEqual(
   true,
   "stale list responses preserve panes created after the list started",
 );
+// Complements the above: a pane dropping out of a listTerminals response is
+// pruned only when it predates pruneStartedAtMs (260724 Phase 2 coarse
+// reconciliation backstop's own boundary condition) - a pane that already
+// existed before the list request started (localCreatedAtMs <=
+// pruneStartedAtMs) and is absent from the response is genuinely gone from
+// the daemon and must be pruned, not preserved.
+assertEqual(
+  Boolean(
+    reconcileListedTerminalSessions(
+      { [pane.logicalKey]: { ...pane, localCreatedAtMs: 5 } },
+      "root-local-abc",
+      [],
+      10,
+    )[pane.logicalKey],
+  ),
+  false,
+  "a pane created before the list started is pruned once it drops out of a listTerminals response",
+);
 const withOutput = appendTerminalOutput(pane, {
   terminalId: "term_abc",
   status: "running",
@@ -416,6 +457,303 @@ assertEqual(
   true,
   "markTerminalOutputCursor is a no-op at the exact boundary (chunkSequence === nextSequence - 1)",
 );
+
+// 260723 Phase 1 - flushPendingOutputCursors: App.tsx no longer calls
+// setTerminalPanes synchronously per output chunk; it batches
+// (logicalKey -> max chunkSequence seen) into a ref Map and flushes the
+// whole batch through this helper once per animation frame (or
+// synchronously at the correctness-critical call sites - see the
+// close-mid-burst regression test below). These assertions pin the
+// helper's own equivalence contract: N pending advances (including
+// duplicate/out-of-order sequences for one key) collapse into a single
+// patch, each pane's cursor lands at the max sequence seen for its key, an
+// unrelated pane in the same batch advances independently, and an
+// all-no-op flush (missing keys, or already-covered sequences) returns the
+// exact same `panes` reference so it never forces an extra render.
+const sessionB: TerminalSessionView = {
+  terminalId: "term_def",
+  workRootId: "root-local-def",
+  title: "Terminal B",
+  status: "running",
+  columns: 80,
+  rows: 24,
+  createdAtMs: 1,
+  cwdHint: null,
+};
+const paneA = terminalPaneFromSession(session);
+const paneB = terminalPaneFromSession(sessionB);
+const panesForFlush: Record<string, TerminalPaneState> = {
+  [paneA.logicalKey]: paneA,
+  [paneB.logicalKey]: paneB,
+};
+
+const pendingBatch = new Map<string, number>();
+// Simulate several accumulate() calls landing within one animation frame -
+// repeated, duplicate, and out-of-order chunk sequences for the same
+// logicalKey - mirroring App.tsx's accumulation contract
+// (`Math.max(existing ?? -1, chunkSequence)` per logicalKey).
+for (const seq of [2, 0, 4, 1, 4]) {
+  const existing = pendingBatch.get(paneA.logicalKey);
+  pendingBatch.set(
+    paneA.logicalKey,
+    existing === undefined ? seq : Math.max(existing, seq),
+  );
+}
+pendingBatch.set(paneB.logicalKey, 9);
+
+const flushed = flushPendingOutputCursors(panesForFlush, pendingBatch);
+assertEqual(
+  flushed !== panesForFlush,
+  true,
+  "flushPendingOutputCursors returns a new panes object when any pending advance actually changes a cursor",
+);
+assertEqual(
+  flushed[paneA.logicalKey].nextSequence,
+  5,
+  "flushPendingOutputCursors advances pane A to the max pending chunk sequence + 1, collapsing duplicate/out-of-order writes",
+);
+assertEqual(
+  flushed[paneB.logicalKey].nextSequence,
+  10,
+  "flushPendingOutputCursors advances an unrelated pane B from the same batched flush independently",
+);
+
+assertEqual(
+  flushPendingOutputCursors(panesForFlush, new Map()) === panesForFlush,
+  true,
+  "flushPendingOutputCursors short-circuits to the same panes reference for an empty pending map",
+);
+assertEqual(
+  flushPendingOutputCursors(
+    panesForFlush,
+    new Map([["missing-logical-key", 3]]),
+  ) === panesForFlush,
+  true,
+  "flushPendingOutputCursors is a no-op (same reference) when every pending key is missing from panes",
+);
+assertEqual(
+  flushPendingOutputCursors(flushed, new Map([[paneA.logicalKey, 1]])) ===
+    flushed,
+  true,
+  "flushPendingOutputCursors returns the same panes reference when every pending advance is already covered by the current cursor",
+);
+
+// Close-mid-burst regression (260723 Phase 1's correctness requirement):
+// an "output" chunk (sequence 9) lands in the pending batch but has not
+// yet been flushed into pane.nextSequence, and is immediately followed by
+// an "exit" socket message whose own reported nextSequence (5) lags behind
+// that already-delivered chunk - the same class of stale-trailing-frame
+// race markTerminalOutputCursor's own doc comment documents.
+// applyTerminalSocketMessage's non-"output" branch must flush the pending
+// batch (flushPendingOutputCursorsNow) BEFORE merging the exit message via
+// appendTerminalWebSocketMessage, so the final cursor is the true max
+// across both sources, never regressing to the (possibly stale)
+// message.nextSequence alone.
+const burstPane = terminalPaneFromSession(session);
+const burstPending = new Map<string, number>([[burstPane.logicalKey, 9]]);
+const burstPanes: Record<string, TerminalPaneState> = {
+  [burstPane.logicalKey]: burstPane,
+};
+const exitMessage: TerminalWebSocketServerMessage = {
+  type: "exit",
+  terminalId: burstPane.session.terminalId,
+  status: "exited",
+  nextSequence: 5,
+  truncated: false,
+};
+
+const withoutFlush = appendTerminalWebSocketMessage(
+  burstPanes[burstPane.logicalKey],
+  exitMessage,
+);
+assertEqual(
+  withoutFlush.nextSequence,
+  5,
+  "regression baseline: merging the exit message without first flushing the pending batch loses the already-delivered chunk 9's cursor advance",
+);
+
+const burstFlushed = flushPendingOutputCursors(burstPanes, burstPending);
+const withFlush = appendTerminalWebSocketMessage(
+  burstFlushed[burstPane.logicalKey],
+  exitMessage,
+);
+assertEqual(
+  withFlush.nextSequence,
+  10,
+  "flush-before-merge (App.tsx's non-output branch order) preserves the batched chunk's cursor advance across a mid-burst close/exit message",
+);
+
+// rAF scheduling-lifecycle contract (260723 Phase 1, fix-cycle 1 test-
+// partition finding): the prior version of this block hand-reimplemented
+// the scheduling algorithm against a fake rAF pair instead of driving the
+// shipped closures, so a regression introduced only in App.tsx's real
+// wiring (a broken cancel/null sequence, a dropped unmount-cleanup effect)
+// would not have been caught by any test. createOutputCursorFlushScheduler
+// (terminals.ts) is now the single implementation of that lifecycle - both
+// App.tsx's outputCursorFlushSchedulerRef and this test construct it via the
+// same factory, so this block exercises the actual shipped code, not a
+// mirror of it. Uses a deterministic fake requestAnimationFrame/
+// cancelAnimationFrame pair (no browser/jsdom dependency) to pin: (a) at
+// most one frame scheduled per batch; (b) a synchronous flushNow() cancels
+// the pending frame and nulls the internal frame id (observed indirectly:
+// a subsequent accumulate() schedules a genuinely new frame, which is only
+// possible if the internal id was reset to null - if flushNow forgot the
+// cancel/null step, the internal id would stay set and no further frame
+// would ever be requested); (c) cancel() (the unmount-cleanup path) cancels
+// an in-flight frame without applying its batch; (d) a late/already-fired
+// frame callback can never re-apply an already-consumed batch, because
+// flushNow swaps in a fresh empty pending Map before calling applyBatch.
+{
+  let requestedFrameCount = 0;
+  let nextFrameId = 1;
+  const scheduled = new Map<number, () => void>();
+  const cancelled = new Set<number>();
+  function fakeRequestAnimationFrame(cb: () => void): number {
+    requestedFrameCount += 1;
+    const id = nextFrameId++;
+    scheduled.set(id, cb);
+    return id;
+  }
+  function fakeCancelAnimationFrame(id: number): void {
+    cancelled.add(id);
+    scheduled.delete(id);
+  }
+
+  const applied: Array<Map<string, number>> = [];
+  const scheduler = createOutputCursorFlushScheduler({
+    requestAnimationFrame: fakeRequestAnimationFrame,
+    cancelAnimationFrame: fakeCancelAnimationFrame,
+    applyBatch: (pending) => applied.push(new Map(pending)),
+  });
+
+  // (a) at most one frame scheduled per batch: repeated/duplicate/
+  // out-of-order accumulates for the same and a second logicalKey, within
+  // one un-flushed batch, must not request more than one frame.
+  scheduler.accumulate("k1", 1);
+  assertEqual(requestedFrameCount, 1, "the first accumulate schedules a frame");
+  scheduler.accumulate("k1", 2);
+  scheduler.accumulate("k2", 5);
+  assertEqual(
+    requestedFrameCount,
+    1,
+    "further accumulates within the same batch reuse the already-scheduled frame",
+  );
+  assertEqual(
+    scheduled.size,
+    1,
+    "only one frame is actually pending in the fake scheduler",
+  );
+
+  // (b) synchronous flushNow() cancels the pending frame and nulls the
+  // frame id. Nulling is not directly observable, so it is pinned via its
+  // required consequence: the very next accumulate() must request a
+  // genuinely new frame. If the cancel-or-null step were dropped, the
+  // internal frame id would remain set forever and this next assertion
+  // (requestedFrameCount advancing to 2) would fail.
+  scheduler.flushNow();
+  assertEqual(applied.length, 1, "the synchronous flush actually applied a batch");
+  assertDeepEqual(
+    Object.fromEntries(applied[0]),
+    { k1: 2, k2: 5 },
+    "the synchronous flush applies the accumulated max-per-key batch",
+  );
+  assertEqual(
+    cancelled.has(1),
+    true,
+    "the synchronous flush cancels the previously-scheduled frame",
+  );
+  assertEqual(
+    scheduled.size,
+    0,
+    "no frame remains scheduled after the synchronous flush",
+  );
+
+  scheduler.accumulate("k3", 7);
+  assertEqual(
+    requestedFrameCount,
+    2,
+    "a fresh frame is requested for the post-flush batch, proving the frame id was nulled by the prior flushNow (this fails if the cancel/null step is removed)",
+  );
+
+  // (c) cancel() (mirrors the App-level unmount-cleanup effect) cancels an
+  // in-flight frame without applying its pending batch.
+  assertEqual(scheduled.size, 1, "a frame is pending before cancel()");
+  scheduler.cancel();
+  assertEqual(
+    cancelled.has(2),
+    true,
+    "cancel() cancels the scheduled frame",
+  );
+  assertEqual(scheduled.size, 0, "no frame remains scheduled after cancel()");
+  assertEqual(
+    applied.length,
+    1,
+    "cancel() does not apply the pending batch (only flushNow/the rAF callback does)",
+  );
+
+  // (d) a late/already-fired frame cannot re-apply an already-consumed
+  // batch. Capture the exact callback requestAnimationFrame was given for a
+  // fresh batch, flush it synchronously (as the real correctness call
+  // sites do, ahead of the frame firing), then invoke the captured callback
+  // directly - simulating the frame firing anyway despite being cancelled.
+  // The fresh-empty-Map swap inside flushNow means this must be a no-op.
+  scheduler.accumulate("k4", 3);
+  const capturedCallback = scheduled.get(3);
+  assertEqual(
+    capturedCallback !== undefined,
+    true,
+    "the third requested frame's callback was captured for the late-fire simulation",
+  );
+  scheduler.flushNow();
+  assertEqual(applied.length, 2, "the second synchronous flush applied its own batch");
+  assertDeepEqual(
+    Object.fromEntries(applied[1]),
+    { k3: 7, k4: 3 },
+    // cancel() only cancels the scheduled frame - it deliberately does not
+    // discard the pending Map (only flushNow's fresh-empty-Map swap does),
+    // so k3's un-flushed advance (accumulated before cancel()) survives and
+    // is included in this next flush alongside k4.
+    "the second flush applies every advance accumulated since the last flush, including one accumulated before an intervening cancel()",
+  );
+  capturedCallback?.();
+  assertEqual(
+    applied.length,
+    2,
+    "a late/already-fired frame callback cannot re-apply an already-consumed batch",
+  );
+
+  // pendingNextSequenceFor: read-side counterpart, exercised against a
+  // pane whose logicalKey has (and has not) an un-flushed pending advance.
+  scheduler.accumulate("k5", 4);
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "k5",
+      nextSequence: 0,
+    }),
+    5,
+    "pendingNextSequenceFor reflects an un-flushed pending advance (chunkSequence + 1)",
+  );
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "k5",
+      nextSequence: 9,
+    }),
+    9,
+    "pendingNextSequenceFor never regresses below the pane's own current cursor",
+  );
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "no-pending-entry",
+      nextSequence: 3,
+    }),
+    3,
+    "pendingNextSequenceFor falls back to pane.nextSequence when there is no pending entry",
+  );
+  scheduler.cancel();
+}
 
 const idleOutput = {
   terminalId: "term_abc",
@@ -769,6 +1107,25 @@ await (async () => {
   throw error;
 });
 
+// Regression (260724 Phase 2): a 404 from close_terminal means the terminal
+// is already gone (the manual-close call raced the daemon's own auto-reap,
+// or the pane's already-retired session was cleared a second time) rather
+// than a real failure - closeTerminal must resolve normally instead of
+// throwing, so idempotency lives at this single shared helper and every
+// caller (closeTerminalPane in App.tsx today) inherits it for free.
+await (async () => {
+  installFetchMock({ error: "not found" }, 404);
+  await closeTerminal("term-already-gone");
+  assertEqual(
+    recorded().method,
+    "DELETE",
+    "closeTerminal still issues the DELETE request on a 404 response",
+  );
+})().catch((error) => {
+  console.error(error);
+  throw error;
+});
+
 // Regression: resizeTerminal must stitch the caller's serverRoute onto the
 // returned session when the daemon response omits the serverRoute field, so a
 // resize never collapses a linked-terminal pane back onto the local route.
@@ -803,3 +1160,310 @@ await (async () => {
   console.error(error);
   throw error;
 });
+
+// 260723 Phase 1 - appendTerminalOutput bound test: repeated over-budget
+// appends stay at/under `terminalOutputCharacterBudget`, the front (oldest
+// characters) is what gets trimmed - never the back (newest) - and
+// `outputTrimOffset` advances by exactly the trimmed character count K, so
+// the delta-write effect can still reconstruct every character's absolute
+// stream position after the trim.
+{
+  const basePane = terminalPaneFromSession(session);
+  const firstChunk = "a".repeat(terminalOutputCharacterBudget - 10);
+  const firstOutput: TerminalOutputView = {
+    terminalId: session.terminalId,
+    status: "running",
+    nextSequence: 1,
+    chunks: [{ sequence: 0, data: firstChunk, stream: "pty" }],
+  };
+  const afterFirst = appendTerminalOutput(basePane, firstOutput);
+  assertEqual(
+    afterFirst.output.length,
+    terminalOutputCharacterBudget - 10,
+    "an under-budget append is never trimmed",
+  );
+  assertEqual(
+    afterFirst.outputTrimOffset,
+    0,
+    "an under-budget append leaves outputTrimOffset at 0",
+  );
+
+  const secondChunk = "b".repeat(30);
+  const secondOutput: TerminalOutputView = {
+    terminalId: session.terminalId,
+    status: "running",
+    nextSequence: 2,
+    chunks: [{ sequence: 1, data: secondChunk, stream: "pty" }],
+  };
+  const afterSecond = appendTerminalOutput(afterFirst, secondOutput);
+  assertEqual(
+    afterSecond.output.length,
+    terminalOutputCharacterBudget,
+    "an over-budget append is trimmed back down to exactly the bound",
+  );
+  assertEqual(
+    afterSecond.outputTrimOffset,
+    20,
+    "outputTrimOffset advances by exactly the trimmed character count K (here 20)",
+  );
+  assertEqual(
+    afterSecond.output.endsWith(secondChunk),
+    true,
+    "the newest characters (the just-appended chunk) are always retained",
+  );
+  assertEqual(
+    afterSecond.output.startsWith("a"),
+    true,
+    "the retained prefix is trimmed from the front (oldest 'a' run), never from the back",
+  );
+
+  // A third, small append stays comfortably under budget again and must not
+  // re-trigger a trim - outputTrimOffset holds steady once the bound is no
+  // longer exceeded.
+  const thirdOutput: TerminalOutputView = {
+    terminalId: session.terminalId,
+    status: "running",
+    nextSequence: 2,
+    chunks: [],
+  };
+  const afterThird = appendTerminalOutput(afterSecond, thirdOutput);
+  assertEqual(
+    afterThird.output.length,
+    terminalOutputCharacterBudget,
+    "an idle append at exactly the budget stays at the budget",
+  );
+  assertEqual(
+    afterThird.outputTrimOffset,
+    20,
+    "outputTrimOffset does not advance again when no further trim is needed",
+  );
+}
+
+// 260723 Phase 1 - N-pane single-tick batching: `fetchTerminalOutputBatch`
+// issues exactly one HTTP request per tick carrying every pane's cursor
+// (never one request per pane), and `applyTerminalOutputBatch` applies the
+// single response to all N panes correctly in one pass: a pane whose cursor
+// genuinely advances, a pane present in `results` but idle (quiet-pane
+// skip, same object reference preserved), and a pane omitted from `results`
+// entirely (unknown/inaccessible per the daemon's own contract - left
+// untouched, never turned into an error).
+await (async () => {
+  const paneA = terminalPaneFromSession({
+    ...session,
+    terminalId: "term-batch-a",
+  });
+  const paneB = terminalPaneFromSession({
+    ...session,
+    terminalId: "term-batch-b",
+  });
+  const paneC = terminalPaneFromSession({
+    ...session,
+    terminalId: "term-batch-c",
+  });
+  const panes: Record<string, TerminalPaneState> = {
+    [paneA.logicalKey]: paneA,
+    [paneB.logicalKey]: paneB,
+    [paneC.logicalKey]: paneC,
+  };
+  const requests = [paneA, paneB, paneC].map((pane) => ({
+    logicalKey: pane.logicalKey,
+    terminalId: pane.session.terminalId,
+    nextSequence: pane.nextSequence,
+  }));
+
+  let fetchCallCount = 0;
+  // A plain `let` re-assigned only from inside the nested fetch mock below
+  // (never re-assigned in this function's own linear flow) narrows to `null`
+  // forever under TS's control-flow analysis, regardless of when the mock
+  // actually runs - wrapping the recorded value in an object property
+  // side-steps that narrowing quirk.
+  const recorded: { body: { cursors: unknown[] } | null } = { body: null };
+  (globalThis as { fetch: typeof fetch }).fetch = (async (
+    _input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    fetchCallCount += 1;
+    recorded.body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as { cursors: unknown[] })
+        : null;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: {
+          "term-batch-a": {
+            terminalId: "term-batch-a",
+            status: "running",
+            nextSequence: 3,
+            chunks: [{ sequence: 1, data: "hi", stream: "pty" }],
+          },
+          // term-batch-b: present in results but idle - no new chunks,
+          // unchanged status, unchanged cursor.
+          "term-batch-b": {
+            terminalId: "term-batch-b",
+            status: "running",
+            nextSequence: 0,
+            chunks: [],
+          },
+          // term-batch-c intentionally omitted from results, simulating an
+          // unknown/inaccessible terminal id the daemon silently drops per
+          // the batch route's own contract.
+        },
+      }),
+    } as Response;
+  }) as typeof fetch;
+
+  const results = await fetchTerminalOutputBatch(
+    requests.map((request) => ({
+      terminalId: request.terminalId,
+      after: request.nextSequence,
+    })),
+  );
+  assertEqual(
+    fetchCallCount,
+    1,
+    "exactly one HTTP request covers every pane in the tick, never one per pane",
+  );
+  assertEqual(
+    recorded.body?.cursors.length,
+    3,
+    "the single batched request body carries all N panes' cursors",
+  );
+
+  const applied = applyTerminalOutputBatch(panes, requests, results);
+  assertEqual(
+    applied !== panes,
+    true,
+    "a batch containing at least one real change returns a new panes object",
+  );
+  assertEqual(
+    applied[paneA.logicalKey].output,
+    "hi",
+    "pane A's cursor advance is applied from the single batched response",
+  );
+  assertEqual(
+    applied[paneA.logicalKey].nextSequence,
+    3,
+    "pane A's cursor advances to the batched response's nextSequence",
+  );
+  assertEqual(
+    applied[paneB.logicalKey] === paneB,
+    true,
+    "an idle pane present in results is skipped (same object reference), not re-rendered",
+  );
+  assertEqual(
+    applied[paneC.logicalKey] === paneC,
+    true,
+    "a pane omitted from results (unknown/inaccessible) is left untouched",
+  );
+  assertEqual(
+    applied[paneC.logicalKey].error,
+    null,
+    "a pane omitted from results is treated as a skip, never turned into an error",
+  );
+  assertEqual(
+    applyTerminalOutputBatch(panes, requests, {}) === panes,
+    true,
+    "an all-omitted batch (empty results) is a same-reference no-op",
+  );
+})().catch((error) => {
+  console.error(error);
+  throw error;
+});
+
+// 260723 Phase 1 - batch-wide HTTP failure fallback: when the batch request
+// itself fails (network/transport - the daemon never fails the batch as a
+// whole for a per-terminal reason), every pane that was part of the request
+// gets its OWN `error` field set independently, matching the pre-batch
+// per-pane failure semantics - not a single shared/global error.
+{
+  const paneA = terminalPaneFromSession({
+    ...session,
+    terminalId: "term-batch-err-a",
+  });
+  const paneB = terminalPaneFromSession({
+    ...session,
+    terminalId: "term-batch-err-b",
+  });
+  const panes: Record<string, TerminalPaneState> = {
+    [paneA.logicalKey]: paneA,
+    [paneB.logicalKey]: paneB,
+  };
+  const requests = [paneA, paneB].map((pane) => ({
+    logicalKey: pane.logicalKey,
+    terminalId: pane.session.terminalId,
+    nextSequence: pane.nextSequence,
+  }));
+
+  const failed = applyTerminalOutputBatchError(
+    panes,
+    requests,
+    "terminal output failed",
+  );
+  assertEqual(
+    failed !== panes,
+    true,
+    "a failed batch returns a new panes object",
+  );
+  assertEqual(
+    failed[paneA.logicalKey].error,
+    "terminal output failed",
+    "pane A gets its own error field set",
+  );
+  assertEqual(
+    failed[paneB.logicalKey].error,
+    "terminal output failed",
+    "pane B independently gets its own error field set too (per-pane, not shared)",
+  );
+  assertEqual(
+    failed[paneA.logicalKey] !== failed[paneB.logicalKey],
+    true,
+    "each pane's updated state is its own object, not a shared reference",
+  );
+  assertEqual(
+    applyTerminalOutputBatchError(failed, requests, "terminal output failed") ===
+      failed,
+    true,
+    "re-applying the same error message to already-erroring panes is a same-reference no-op",
+  );
+}
+
+// 260723 Phase 1 Step 3 - nextTerminalOutputPollIntervalMs: a pure step
+// function of the current fallback-polling pane count, so back-off (above
+// threshold) and recovery (back at/below threshold) are both just
+// "recompute" with no separate/divergent recovery path.
+{
+  const baseMs = 120;
+  assertEqual(
+    nextTerminalOutputPollIntervalMs(1, baseMs),
+    baseMs,
+    "a small pane count uses the base interval",
+  );
+  assertEqual(
+    nextTerminalOutputPollIntervalMs(terminalOutputPollBackoffPaneThreshold, baseMs),
+    baseMs,
+    "a pane count exactly at the threshold does not back off",
+  );
+  assertEqual(
+    nextTerminalOutputPollIntervalMs(
+      terminalOutputPollBackoffPaneThreshold + 1,
+      baseMs,
+    ),
+    baseMs * terminalOutputPollBackoffMultiplier,
+    "a pane count one above the threshold backs off by the configured multiplier",
+  );
+  assertEqual(
+    nextTerminalOutputPollIntervalMs(
+      terminalOutputPollBackoffPaneThreshold + 5,
+      baseMs,
+    ),
+    baseMs * terminalOutputPollBackoffMultiplier,
+    "further-above-threshold pane counts stay backed off at the same multiplier",
+  );
+  assertEqual(
+    nextTerminalOutputPollIntervalMs(terminalOutputPollBackoffPaneThreshold, baseMs),
+    baseMs,
+    "dropping back to the threshold recovers the base interval (same pure function, both directions)",
+  );
+}

@@ -2051,6 +2051,19 @@ button {
   padding: var(--ws-space-06);
 }
 
+/* 260724 Phase 2: pane whose session.status is exited/terminated/error -
+   retain-with-clear, not auto-remove, so the dead shell's final scrollback
+   stays readable but visually reads as inert. Reuses the existing
+   disabled/muted color tokens rather than introducing new raw colors (see
+   `.resource-row-muted`). */
+.terminal-pane-retired .terminal-surface {
+  opacity: 0.6;
+}
+
+.terminal-pane-retired .terminal-status-line {
+  color: var(--ws-color-text-disabled);
+}
+
 .dockview-workbench-tab-active {
   background: transparent;
   box-shadow: none;

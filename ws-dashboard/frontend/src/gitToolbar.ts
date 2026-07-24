@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "./fetchWithTimeout.js";
 import { localCompatibleDashboardApiRoute } from "./resourceModel.js";
 export type WorkRootGitStatus = {
   available: boolean;
@@ -78,9 +79,10 @@ export async function fetchWorkRootGitStatus(
   workRootId: string,
   serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId, serverRoute)}/status`, {
-    headers: { Accept: "application/json" },
-  });
+  const response = await fetchWithTimeout(
+    `${gitBase(workRootId, serverRoute)}/status`,
+    { headers: { Accept: "application/json" } },
+  );
   return readJson<WorkRootGitStatus>(response, "git status failed");
 }
 
@@ -88,9 +90,10 @@ export async function fetchWorkRootGitBranches(
   workRootId: string,
   serverRoute?: string | null,
 ): Promise<GitBranchList> {
-  const response = await fetch(`${gitBase(workRootId, serverRoute)}/branches`, {
-    headers: { Accept: "application/json" },
-  });
+  const response = await fetchWithTimeout(
+    `${gitBase(workRootId, serverRoute)}/branches`,
+    { headers: { Accept: "application/json" } },
+  );
   return readJson<GitBranchList>(response, "git branches failed");
 }
 

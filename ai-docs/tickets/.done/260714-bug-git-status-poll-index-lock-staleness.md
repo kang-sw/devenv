@@ -200,3 +200,20 @@ Closeout note: the described change landed as commit `18e97569`
 confirmed fully merged and pushed — reachable from `goal/drain-ready-queue`,
 `goal/ws-dashboard-tickets`, `ws-dashboard-dev`, and
 `remotes/origin/ws-dashboard-dev`.
+
+#### Correction (37b92ff2) - 2026-07-24
+
+Investigation finding item 2 above asserted that `git diff --numstat` on the
+poll path "is read-only plumbing that does not touch the index or its lock."
+That is empirically false and was refuted by
+`260724-bug-dashboard-git-diff-index-lock-stuck-activity-badge`: porcelain
+`git diff --numstat HEAD --` opportunistically refreshes and rewrites the
+on-disk index (taking `.git/index.lock`) for stat-dirty-but-content-clean
+tracked files, and the effect is not suppressible by `--no-optional-locks` or
+`GIT_OPTIONAL_LOCKS=0` (both are honored by `status` but ignored by `diff`).
+This left the sibling `diff` sub-call in `changes_for_path` an unguarded,
+lock-taking poll invocation even after this ticket's `status`-only fix. The
+follow-up ticket corrected it by swapping to the plumbing form
+`git diff-index -M --numstat HEAD --` (`-M` restores rename-detection parity so
+the parsed output stays byte-identical). This note does not alter this ticket's
+frozen Result; the sibling call was simply out of this ticket's stated scope.

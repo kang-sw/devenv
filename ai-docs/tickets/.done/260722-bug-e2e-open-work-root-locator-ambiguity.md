@@ -3,6 +3,7 @@ title: ws-dashboard e2e - openWorkRoot locator ambiguity (rootPicker.open vs emp
 sage-review-design: completed
 sage-review-completeness: completed
 related: 260525-feat-ws-dashboard-workroot-polishing-backlog
+completed: 2026-07-24
 ---
 
 # ws-dashboard e2e - openWorkRoot locator ambiguity (rootPicker.open vs empty-state CTA) red-lines acceptance suite

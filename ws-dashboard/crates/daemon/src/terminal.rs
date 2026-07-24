@@ -588,6 +588,35 @@ pub struct TerminalOutputQuery {
     after: u64,
 }
 
+// CONTRACT (260723 Phase 1 batch fallback poll): one HTTP round trip carries
+// every fallback-polling pane's cursor instead of one request per terminal.
+// `terminal_id` is per-cursor (not per-request) because a single batch
+// request already spans every terminal a browser tab is polling for one
+// work root's serverRoute.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputCursor {
+    terminal_id: String,
+    #[serde(default)]
+    after: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputBatchRequest {
+    cursors: Vec<TerminalOutputCursor>,
+}
+
+// CONTRACT: unknown or currently-inaccessible (offline/unavailable work root)
+// terminal IDs are silently omitted from `results`, never a per-ID error and
+// never a whole-batch failure - the same per-terminal auth/work-root gating
+// as the single-ID `terminal_output` handler, just non-fatal per cursor.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputBatchResponse {
+    results: HashMap<String, TerminalOutputView>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct TerminalWebSocketQuery {
     #[serde(default)]
@@ -664,6 +693,28 @@ pub async fn terminal_output(
         return terminal_access_error(error);
     }
     Json(session.output_after(query.after)).into_response()
+}
+
+// CONTRACT (260723 Phase 1): a batch never fails as a whole - a missing
+// registry entry or a per-terminal work-root access error just drops that
+// one cursor from `results` and moves on to the next, mirroring
+// `terminal_output`'s own per-terminal gating without ever returning
+// non-200 for the request as a whole.
+pub async fn terminal_output_batch(
+    State(state): State<AppState>,
+    Json(request): Json<TerminalOutputBatchRequest>,
+) -> Response {
+    let mut results = HashMap::with_capacity(request.cursors.len());
+    for cursor in request.cursors {
+        let Some(session) = state.terminals.get(&cursor.terminal_id) else {
+            continue;
+        };
+        if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+            continue;
+        }
+        results.insert(cursor.terminal_id, session.output_after(cursor.after));
+    }
+    Json(TerminalOutputBatchResponse { results }).into_response()
 }
 
 pub async fn terminal_input(
