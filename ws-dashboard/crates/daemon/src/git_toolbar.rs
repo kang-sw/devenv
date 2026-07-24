@@ -716,7 +716,10 @@ mod tests {
 
         // Modified tracked file: +2 lines, -0.
         fs::write(dir.join("tracked.txt"), "one\ntwo\nthree\n").expect("modify tracked.txt");
-        // Staged pure rename (content unchanged).
+        // Staged pure rename (identical content => identical blob OID). This is
+        // an *exact* rename, matched by git's exact-rename pass independent of
+        // `-M`'s similarity threshold, so the 0/0 result is deterministic and
+        // not marginal-similarity sensitive (see the follow-up flake probe).
         run_git(&dir, &["mv", "rename-me.txt", "renamed.txt"]).expect("git mv rename");
         // Mode-only change (content unchanged).
         #[cfg(unix)]
@@ -740,6 +743,55 @@ mod tests {
             "removed lines (rename detected, mode-only)"
         );
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Real-world-scenario guard for the ticket's Phase 1 requirement: while an
+    /// agent holds `.git/index.lock` mid-`git add`/`commit` in the same
+    /// worktree, the dashboard poll must (a) still return the correct summary
+    /// and (b) leave that externally-held lock byte-for-byte untouched — never
+    /// waiting on it, deleting it, or clobbering it. This exercises the whole
+    /// `changes_for_path` (both the `diff-index` and the sibling
+    /// `git status --porcelain=v1 --no-optional-locks` plumbing calls), which
+    /// the index byte-compare test could not: that test pins that the *index*
+    /// is not rewritten, whereas this one pins that a *pre-existing external
+    /// lock* is not disturbed and does not corrupt the poll result.
+    #[test]
+    fn changes_for_path_leaves_externally_held_index_lock_untouched() {
+        let dir = init_fixture_repo();
+        fs::write(dir.join("tracked.txt"), "one\ntwo\n").expect("modify tracked.txt");
+        fs::write(dir.join("new.txt"), "new\n").expect("write new.txt");
+
+        // Baseline summary with no lock present.
+        let expected = changes_for_path(&dir);
+        assert_eq!(expected.modified_files, 1, "baseline modified files");
+        assert_eq!(expected.untracked_files, 1, "baseline untracked files");
+        assert_eq!(expected.added_lines, 1, "baseline added lines");
+
+        // Simulate an agent holding the index lock mid-operation.
+        let lock_path = dir.join(".git").join("index.lock");
+        let lock_bytes = b"STRAY-AGENT-LOCK\n".to_vec();
+        fs::write(&lock_path, &lock_bytes).expect("create stray index.lock");
+
+        let with_lock = changes_for_path(&dir);
+
+        // (a) The poll result is unaffected by the externally-held lock.
+        assert_eq!(
+            with_lock, expected,
+            "summary must be identical whether or not an external index.lock is held"
+        );
+        // (b) The externally-held lock is left exactly as the agent wrote it.
+        assert!(
+            lock_path.exists(),
+            "external index.lock must not be deleted"
+        );
+        assert_eq!(
+            fs::read(&lock_path).expect("read index.lock"),
+            lock_bytes,
+            "external index.lock must be left byte-for-byte untouched"
+        );
+
+        fs::remove_file(&lock_path).ok();
         fs::remove_dir_all(&dir).ok();
     }
 }
