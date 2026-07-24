@@ -37,6 +37,25 @@ sage-settled-design pre-authorization does **not** apply to this ticket — trea
 any newly surfaced binding design decision or sensitive action conservatively
 and surface it rather than assuming pre-authorization.
 
+## Blocked (2026-07-24)
+
+This end-of-drain acceptance ticket is blocked on the user's real Windows
+dogfood harness. Its Phase 1 is a single coherent acceptance activity —
+author a `#[cfg(windows)]` live-ConPTY acceptance test, run it on real
+Windows via `powershell.exe` in a `D:\<scratch>` worktree, AND prove
+non-vacuity by mutation — that is inherently runtime-iterated against real
+ConPTY behavior; authoring it blind on Linux (cross-compile only) would land
+an unverified test and violate evidence-before-claims, so the whole ticket
+is gated together on the harness rather than split. It must NOT be advanced
+autonomously: per the standing goal-run Windows-harness commitment, do not
+fire cargo at the user's Windows box without explicit user confirmation;
+sage review was explicitly skipped for this ticket so there is no
+sage-settled pre-authorization for the native run. Unblock condition: the
+user confirms/enables the Windows dogfood harness (per
+`ai-docs/_index.local.md`) and green-lights the native run; then a single
+session authors + runs + mutation-proves + records the Result. This note
+exists so goal-drain selection skips the ticket until the user clears it.
+
 ## Goal
 
 Add a `#[cfg(windows)]` acceptance test in the daemon crate that:
