@@ -6,6 +6,7 @@ related:
   260629-research-fork-worker-persona-bleed: resolved by deletion — fork inherits lead identity, worse on Opus 4.8
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # Delete the fork delegation construct; reshape lead-prefer-subagent to fresh-spawn + central authoring whitelist
@@ -117,6 +118,49 @@ the codex `native-spawn-binding` source, and the `PreferSubagentInvocationGuidan
 builtin default returns zero remaining fork-delegation references (excluding
 unrelated git "fork point" senses). The `lead-goal-step` pointer no longer names
 fork.
+
+### Result (d6669070) - 2026-07-24
+
+Deleted the fork delegation construct and reshaped `lead-prefer-subagent` to two
+clean poles (fresh spawn + context-holder carve-out); single-phase ticket
+complete. Delegated implementer + survey plan + partitioned review + one
+fix-relay; landed on `impl/fork-removal-prefer-subagent`, merged into the goal
+staging branch.
+
+- Opening invariant reversed (SKILL.md:8): "cannot act inline" → delegate every
+  payload to a fresh subagent by default, sole carve-out being durable-artifact
+  (ticket/spec) authoring staying with the context-holder session (lead-inline
+  or the delegated subagent's own continuing session), never a fresh
+  summary-only spawn — a central whitelist overlay owned by the skill, not
+  interwoven per-skill. Fork clauses (fresh-vs-fork rule, fork-failure
+  re-dispatch, fork definition, `spawn_agent(fork_context:true,...)` guidance,
+  fork-availability posture gate) all deleted.
+- Kept intact as designed: `native-spawn-binding.codex.md`'s `fork_turns:"none"`
+  fresh-spawn idiom (verified untouched); `builtinPromptOverrideDefaults()`
+  already returned an empty map (no Go change). Dropped-fork-prompt-authoring
+  framing (old SKILL.md:22 anti-persona-bleed wording) removed as a plan-scoped
+  judgment call — a fresh spawn inherits no identity, so it has no fresh-spawn
+  equivalent; the generic return-format contract was preserved.
+- Both edited skills are substitution-mirrored: edited canonical only,
+  regenerated the `agents-plugin-wsflow` mirror + skills manifest via the
+  env-gated `-count=1` regen tests; drift guards green.
+- Tests: removed the 3 `fork_context:true` assertions
+  (`prefer_mercenary_phase2_test.go` ×2, `playbook_tools_test.go` ×1) plus stale
+  `agent_type` assertions; kept the `fork_turns:"none"` assertions. Full
+  `go test ./...` and the wsflow python suite (9) pass; acceptance `fork` scan
+  returns zero delegation references.
+- Review: correctness / fit / test all clean; two minors fixed in `44541e6d`
+  (carve-out wording precision; frontmatter `description` no longer literally
+  contradicts the carve-out).
+- Doc closeout: implementation corrected three stale sites describing the retired
+  `PreferSubagentInvocationGuidance.codex` fork-seeding as live (`mcp-tools.md`
+  `{#260619-delegation-section-override-point}`, mental-model `prompt-bundle.md`
+  + `workflow-skills.md`). Doc-pre-pass caught one more those missed — the
+  `workflow-skills` spec `{#260505-workflow-primitive-reference}` "literal Codex
+  `spawn_agent` fallback wording" claim — corrected it and added anchor
+  `{#260724-prefer-subagent-fresh-spawn-delegation-posture}` (`6f552285`).
+- `260625` / `260629` appended resolved-by-deletion notes. Commit range
+  `65bdaf9b`(plan)`..HEAD`.
 
 ## Spec Impact
 
