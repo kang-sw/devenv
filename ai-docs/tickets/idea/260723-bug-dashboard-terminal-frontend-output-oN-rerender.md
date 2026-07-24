@@ -65,7 +65,8 @@ effect firing once per animation frame per output-active terminal even when
 other open terminals/roots are idle; the second alone still leaves one
 `setTerminalPanes` call (and one `App` render) per PTY output chunk:
 
-1. **Batch/coalesce the per-chunk `setTerminalPanes` write.** In
+1. **Batch/coalesce the per-chunk `setTerminalPanes` write, with a
+   synchronous flush on close/unmount/capture.** In
    `applyTerminalSocketMessage`'s `"output"` branch (`App.tsx:5508-5524`),
    stop calling `setTerminalPanes` synchronously for every `"output"`
    message. Instead, accumulate pending `(logicalKey -> chunkSequence)`
@@ -75,31 +76,72 @@ other open terminals/roots are idle; the second alone still leaves one
    `requestAnimationFrame`. This bounds the state-commit rate for terminal
    output to at most one per frame, regardless of chunk volume or terminal
    count, and bounds `App` re-render frequency the same way.
-   `markTerminalOutputCursor` (`terminals.ts:577-583`) itself is a pure
+   `markTerminalOutputCursor` (`terminals.ts:577-584`) itself is a pure
    function and needs no change; only its call site and cadence change.
+
+   **Correctness requirement (must not be deferred to a follow-up):**
+   `markTerminalOutputCursor`'s own doc comment (`terminals.ts:569-576`)
+   documents that it exists specifically to fix a prior race where "a socket
+   closed mid-batch left the cursor stale and caused duplicate output on
+   resume." `pane.nextSequence` — off the exact `terminalPanes` state this
+   change batches — is read directly at two teardown/persist points:
+   `onVisualCapture` (wired at `App.tsx:4226`, sourced from the debounced
+   capture effect in `terminalPaneBody.tsx:703-706` reading
+   `liveRef.current.pane.nextSequence`) and the output-poll cursor source
+   (`livePollPanesRef` at `App.tsx:4846`, reading `pane.nextSequence`).
+   Deferring a pending cursor advance to "whenever the next rAF happens to
+   fire" means a socket close, pane unmount, or a visual-capture debounce
+   tick landing between an output chunk and that pending flush reads/persists
+   a STALE cursor — reintroducing the exact bug `markTerminalOutputCursor`
+   was written to fix. The batching implementation MUST flush the pending
+   Map synchronously (apply it via the same `setTerminalPanes` updater
+   immediately, and cancel the scheduled `requestAnimationFrame`) — not wait
+   for the next frame — at minimum:
+   - before the debounced visual-capture callback in `terminalPaneBody.tsx`
+     reads `liveRef.current.pane.nextSequence` (either flush immediately
+     before that read, or have the capture read the pending Map directly),
+   - on any non-`"output"` socket message for that pane (status/exit; the
+     other branch of `applyTerminalSocketMessage`, `App.tsx:5526-5537`, via
+     `appendTerminalWebSocketMessage`) — a close/exit racing an unflushed
+     pending advance must not compute its own cursor merge from a stale
+     base, and
+   - on pane unmount / `closeTerminalPane` (`App.tsx:5608`).
 
 2. **Stop the `App.tsx:3881-4063` revalidation effect from re-running on
    cursor-only `terminalPanes`/`agentChatPanes` changes.** Even with
    batching, one commit per frame still re-fires this effect on every frame
    that has output, which is wasteful since the effect body only needs pane
-   *membership*, not per-pane cursor state. Derive a small
-   `useMemo`-computed "live pane identity signature" for each of
-   `terminalPanes` and `agentChatPanes` — e.g. a stable string key built
-   from the sorted list of `{paneId, workRootId, serverRoute}` per pane —
-   and use that memoized value (not the raw `terminalPanes`/`agentChatPanes`
-   objects) as the effect's dependency, replacing `terminalPanes` /
-   `agentChatPanes` at `App.tsx:4050` / `4054`, and as the source the effect
-   reads to build `liveTerminalPaneIds` / `liveAgentChatPaneIds`
-   (`App.tsx:3897-3905`, `3921-3929`). Because the `useMemo` dependency is
-   the identity signature, an output-cursor-only update (same pane ids,
-   different `nextSequence`) produces the same memoized value and the effect
-   does not re-run.
+   *membership*, not per-pane cursor state. Use two memo layers, not a bare
+   string used as the data source:
+   - a cheap string "pane identity signature" recomputed every render
+     directly from `terminalPanes` / `agentChatPanes` (e.g. built from the
+     sorted `{paneId, workRootId, serverRoute}` triples per pane) — this is
+     only a change-detector, not something the effect body reads fields off;
+   - a `useMemo`-computed STRUCTURED array of `{paneId, workRootId,
+     serverRoute}` per pane, keyed (as the `useMemo` dependency) on that
+     signature string, so the array only gets a new reference when
+     membership actually changes.
 
-Leave the `App.tsx:4833-4848` `livePollPanesRef` scan alone for this phase —
-it is a plain per-render assignment (no `JSON.stringify`, no cross-root
-loop) and is already bounded by the render-rate cap from change (1);
-revisit only if the Verification measurement below shows it still
-contributes measurably.
+   The effect depends on, and `liveTerminalPaneIds` / `liveAgentChatPaneIds`
+   (`App.tsx:3897-3905`, `3921-3929`) are built from, the STRUCTURED
+   memoized arrays — replacing the raw `terminalPanes`/`agentChatPanes`
+   dependency-array entries at `App.tsx:4050` / `4054` — not the bare
+   signature string (a string cannot be iterated back into per-pane
+   `workRootId`/`serverRoute` fields). Because an output-cursor-only update
+   produces the same signature string, the structured `useMemo` returns the
+   same array reference and the effect does not re-run.
+
+`App.tsx:4833-4848`'s `livePollPanesRef` scan already reads `pane.nextSequence`
+as the poll cursor, so under rAF coalescing that value can lag the true
+latest chunk by up to one frame. This is intentionally left unchanged in this
+phase — it is a plain per-render assignment (no `JSON.stringify`, no
+cross-root loop) and is bounded by the render-rate cap from change (1) — but
+note explicitly what "lag by one frame" costs here: at most one redundant
+`output`-poll fetch for an already-delivered range, which
+`appendTerminalWebSocketMessage`'s `Math.max(pane.nextSequence, ...)` merge
+already dedupes into a no-op (not duplicate output). That is acceptable and
+is a different case from the `onVisualCapture`/close-path risk above, which
+is a correctness requirement, not a tolerable inefficiency.
 
 **Verification:**
 
@@ -110,6 +152,18 @@ contributes measurably.
   each pane's cursor advanced to the max sequence seen — proving the batched
   updater is equivalent to N sequential `markTerminalOutputCursor` calls
   with fewer commits.
+- Close-mid-burst regression test (unit or e2e): a socket close/exit message
+  arrives for a pane between an output chunk being queued and its rAF flush
+  firing → the pending advance is applied synchronously before the
+  close/exit is processed → the persisted/reported cursor is not stale →
+  resuming that terminal does not re-deliver already-seen output. This is
+  the specific scenario the correctness requirement above exists to prevent
+  and must be exercised explicitly, not just implied by the batching unit
+  test.
+- rAF lifecycle test: the scheduled `requestAnimationFrame` is cancelled
+  (`cancelAnimationFrame`) on pane unmount / terminal close and on the
+  owning effect's cleanup, so no batched flush fires against, or throws for,
+  an already-torn-down pane.
 - Behavior/perf measurement (manual or e2e; `App.tsx` has no existing
   component-level unit harness — see `ws-dashboard/frontend/e2e/`): with 2+
   terminals open across 2+ work roots, drive a burst of output chunks (e.g.
