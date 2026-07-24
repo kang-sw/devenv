@@ -9,6 +9,8 @@ related:
     suspect
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # dashboard terminal frontend: per-pane HTTP short-poll fallback is O(N) when WebSockets drop
