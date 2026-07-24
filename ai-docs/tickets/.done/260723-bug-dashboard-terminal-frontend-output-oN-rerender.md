@@ -176,6 +176,22 @@ is a correctness requirement, not a tolerable inefficiency.
   - its fire count does not scale with the number of *other* open
     terminals/roots that received no output during the burst.
 
+### Result (c637c5e6) - 2026-07-24
+
+Batched the per-chunk terminal output-cursor writes off the synchronous render path and stopped the workbench revalidation effect from re-firing on cursor-only churn.
+
+- Extracted `createOutputCursorFlushScheduler` into `terminals.ts` (accumulate / flushNow / cancel / pendingNextSequenceFor), driven by `flushPendingOutputCursors` (a pure batch applying `markTerminalOutputCursor` per pending key, max-sequence-per-key, returning the same reference on an all-no-op flush). The `"output"` socket branch now accumulates into a pending `Map<logicalKey, chunkSequence>` and commits once per `requestAnimationFrame` instead of calling `setTerminalPanes` per chunk, bounding `App` re-render and the `App.tsx` revalidation effect to at most one commit per frame regardless of output volume or open-terminal count.
+- Correctness invariant honored: the pending batch is flushed synchronously (cancelling and nulling the scheduled frame) at every teardown/persist site — the non-`"output"` socket branch (before its `appendTerminalWebSocketMessage` merge), `closeTerminalPane`, and the work-root-close effect — and the debounced visual-capture read consumes the pending-adjusted cursor via a new `TerminalPaneActions.getPendingNextSequence`, so no teardown/capture path reads a stale cursor (which would reintroduce the duplicate-output-on-resume race `markTerminalOutputCursor` exists to fix). A `WorkbenchShell` unmount effect cancels any in-flight frame.
+- The revalidation effect now depends on membership-signature-memoized structured identity arrays (`terminalPaneIdentities`/`agentChatPaneIdentities`) instead of raw `terminalPanes`/`agentChatPanes`, so cursor-only updates no longer re-run the O(open roots x panes) rescan. The `livePollPanesRef` scan (one-frame cursor lag) is left unchanged per the ticket and confirmed benign (the poll set excludes socket-connected panes; a stale-cursor poll is dropped as a no-op by the `Math.max` merge).
+
+Files: `App.tsx`, `terminals.ts`, `terminalPaneBody.tsx`, `terminals.test.ts`.
+
+Verification: `npm run build` (tsc -b && vite build) green; `npm run test:terminals` green including new tests — batched-updater equivalence (duplicate/out-of-order collapse to max-per-key, multi-pane independent advance, all-no-op same-reference), close-mid-burst regression (flush-before-merge yields the correct cursor vs a real 5-vs-10 stale baseline), and an rAF-lifecycle test driving the extracted shipped scheduler (single-frame guard, cancel+null on flush, cancel on teardown, consumed batch not re-applied), verified as a genuine negative control. `test:browser` was not used as a gate: the dashboard-acceptance suite is independently red at spec:2938 on the unrelated pre-existing bug 260713.
+
+Review: partitioned correctness/fit/test. Correctness clean (invariant verified at every enumerated site; 2 accepted forward-looking robustness minors). Fit clean. Test raised one Important — the original rAF-lifecycle test exercised a hand-written mirror rather than the shipped closures — fixed by extracting the scheduler into `terminals.ts` and rewriting the test against the shipped factory (review-fix commit 192c84f9); re-review confirmed the fix and that the extraction is behavior-preserving. One test-minor (close-mid-burst branches hand-constructed; no App.tsx component-level unit harness) accepted.
+
+Doc: no spec change (internal render-performance, caller-visible terminal-output behavior preserved); added mental-model note `ws-web-dashboard/terminal-render.md` capturing the flush-or-pending-read invariant.
+
 ## Out of Scope
 
 The daemon-side blocking-PTY-write root cause (the primary fix for

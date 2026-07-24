@@ -196,7 +196,8 @@ import {
   createTerminal,
   fetchTerminalOutput,
   listTerminals,
-  markTerminalOutputCursor,
+  createOutputCursorFlushScheduler,
+  flushPendingOutputCursors,
   markTerminalPaneCloseError,
   markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
@@ -215,6 +216,7 @@ import {
   terminalRestoreIntentsFromPanes,
   terminalPaneLogicalKey,
   type TerminalCreateOptions,
+  type OutputCursorFlushScheduler,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
@@ -3607,6 +3609,41 @@ function WorkbenchShell({
   const [terminalPanes, setTerminalPanes] = useState<
     Record<string, TerminalPaneState>
   >({});
+  // Batches per-chunk "output" cursor advances (260723 Phase 1): each
+  // WebSocket "output" frame previously called setTerminalPanes
+  // synchronously via markTerminalOutputCursor (one rerender per PTY
+  // chunk); this scheduler instead accumulates the max chunkSequence seen
+  // per logicalKey and flushes them all in a single setTerminalPanes call
+  // once per animation frame (see flushPendingOutputCursorsNow below).
+  // Several call sites still flush this synchronously - see that function's
+  // own comment for why a rAF-only flush would reintroduce the stale-cursor
+  // race markTerminalOutputCursor's doc comment describes. Extracted into
+  // createOutputCursorFlushScheduler (terminals.ts, fix-cycle 1) so the
+  // scheduling lifecycle itself - not just flushPendingOutputCursors's pure
+  // batch-apply math - is unit-testable against the shipped implementation;
+  // constructed lazily via the same ref-if-null pattern already used for
+  // resourceRefreshCoordinatorRef above, since setTerminalPanes is a stable
+  // useState setter and this must not be re-created across renders.
+  const outputCursorFlushSchedulerRef =
+    useRef<OutputCursorFlushScheduler | null>(null);
+  if (!outputCursorFlushSchedulerRef.current) {
+    outputCursorFlushSchedulerRef.current = createOutputCursorFlushScheduler({
+      requestAnimationFrame: (callback) => requestAnimationFrame(callback),
+      cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+      applyBatch: (pending) =>
+        setTerminalPanes((current) =>
+          flushPendingOutputCursors(current, pending),
+        ),
+    });
+  }
+  // Defensive backstop: cancel a scheduled-but-unfired flush frame on this
+  // component's own unmount so it never fires a setTerminalPanes update
+  // against a torn-down tree.
+  useEffect(() => {
+    return () => {
+      outputCursorFlushSchedulerRef.current?.cancel();
+    };
+  }, []);
   const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{
     paneId: string;
     sequence: number;
@@ -3767,6 +3804,13 @@ function WorkbenchShell({
     if (closedRefs.length === 0) {
       return;
     }
+    // A closed work root drops its terminal panes from browser-side state
+    // without an explicit close (the daemon session is left running for a
+    // future same-logicalKey reattach - see removeTerminalPanesForWorkRoot's
+    // own doc comment). Flush any pending output-cursor advance first so a
+    // stale entry can never survive into a later flush against a
+    // freshly-recreated pane that reuses the same logicalKey.
+    flushPendingOutputCursorsNow();
     for (const { rootKey, rootId, serverRoute } of closedRefs) {
       setTerminalPanes((current) =>
         removeTerminalPanesForWorkRoot(current, rootId, serverRoute),
@@ -3878,6 +3922,57 @@ function WorkbenchShell({
   // testing), gated per-root on `terminalsReadyRootKeys` so a restored
   // terminal-pane order is never destructively pruned before that root's
   // `listTerminals` call has resolved at least once.
+  //
+  // 260723 Phase 1: `terminalPanes`/`agentChatPanes` also churn on every PTY
+  // output chunk (`nextSequence` advances via the batched-cursor flush
+  // above), but this effect only cares about pane *identity*
+  // (paneId/workRootId/serverRoute) - cursor-only churn must never
+  // re-trigger it (that O(open roots x panes) rescan on every chunk is
+  // exactly the rerender-rate bug this phase fixes). Each signature string
+  // below is a sorted, joined identity-fields-only string, recomputed every
+  // render (cheap - no allocation beyond the string) purely to detect
+  // whether the *identity set* changed; the two `useMemo`s then produce
+  // structured arrays that only change reference when their signature
+  // changes, and the effect's own dependency array below keys on those
+  // structured arrays instead of the raw, cursor-churning
+  // `terminalPanes`/`agentChatPanes` state.
+  const terminalPaneIdentitySignature = Object.values(terminalPanes)
+    .map(
+      (pane) =>
+        `${pane.paneId}|${pane.session.workRootId}|${pane.session.serverRoute ?? ""}`,
+    )
+    .sort()
+    .join(",");
+  const agentChatPaneIdentitySignature = Object.values(agentChatPanes)
+    .map(
+      (pane) => `${pane.paneId}|${pane.workRootId}|${pane.serverRoute ?? ""}`,
+    )
+    .sort()
+    .join(",");
+  const terminalPaneIdentities = useMemo(
+    () =>
+      Object.values(terminalPanes).map((pane) => ({
+        paneId: pane.paneId,
+        workRootId: pane.session.workRootId,
+        serverRoute: pane.session.serverRoute,
+      })),
+    // Deliberately keyed on the identity signature (change-detector), not
+    // terminalPanes itself - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [terminalPaneIdentitySignature],
+  );
+  const agentChatPaneIdentities = useMemo(
+    () =>
+      Object.values(agentChatPanes).map((pane) => ({
+        paneId: pane.paneId,
+        workRootId: pane.workRootId,
+        serverRoute: pane.serverRoute,
+      })),
+    // Deliberately keyed on the identity signature (change-detector), not
+    // agentChatPanes itself - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentChatPaneIdentitySignature],
+  );
   useEffect(() => {
     for (const rootKey of openWorkRootKeys) {
       const ref = openWorkRootRefs[rootKey];
@@ -3895,13 +3990,13 @@ function WorkbenchShell({
           .map((pane) => pane.id),
       );
       const liveTerminalPaneIds = new Set(
-        Object.values(terminalPanes)
+        terminalPaneIdentities
           .filter(
-            (pane) =>
-              pane.session.workRootId === ref.rootId &&
-              (pane.session.serverRoute ?? "server-local") === ref.serverRoute,
+            (identity) =>
+              identity.workRootId === ref.rootId &&
+              (identity.serverRoute ?? "server-local") === ref.serverRoute,
           )
-          .map((pane) => pane.paneId),
+          .map((identity) => identity.paneId),
       );
       // CONTRACT: agentChat panes must be included in this revalidation's
       // live-pane-id set for the same reason terminal/readonly panes are -
@@ -3919,13 +4014,13 @@ function WorkbenchShell({
       // correctly applied, then silently reverted by this effect re-running
       // (it depends on `activePaneByRoot`) moments later.
       const liveAgentChatPaneIds = new Set(
-        Object.values(agentChatPanes)
+        agentChatPaneIdentities
           .filter(
-            (pane) =>
-              pane.workRootId === ref.rootId &&
-              (pane.serverRoute ?? "server-local") === ref.serverRoute,
+            (identity) =>
+              identity.workRootId === ref.rootId &&
+              (identity.serverRoute ?? "server-local") === ref.serverRoute,
           )
-          .map((pane) => pane.paneId),
+          .map((identity) => identity.paneId),
       );
       const livePaneIds = new Set<string>([
         ...liveTerminalPaneIds,
@@ -4047,11 +4142,11 @@ function WorkbenchShell({
       });
     }
   }, [
-    terminalPanes,
+    terminalPaneIdentities,
     readOnlyFilePanes,
     readOnlyFilePaneOrderByGroup,
     terminalPaneOrderByGroup,
-    agentChatPanes,
+    agentChatPaneIdentities,
     agentChatPaneOrderByGroup,
     openWorkRootKeys,
     openWorkRootRefs,
@@ -4218,6 +4313,7 @@ function WorkbenchShell({
             focusedTerminalPaneIdRef.current === pane.paneId,
           onVisualRestoreEntryFor: (pane) =>
             terminalVisualRestoreRef.current[pane.logicalKey],
+          getPendingNextSequence: pendingNextSequenceFor,
           onVisualCapture: (pane, capture) => {
             const entry = {
               logicalKey: pane.logicalKey,
@@ -5505,24 +5601,62 @@ function WorkbenchShell({
     );
   }
 
+  // Flushes every pending output-cursor advance into terminalPanes in a
+  // single setTerminalPanes call, and cancels any scheduled rAF flush so a
+  // stale frame never re-flushes an already-cleared Map (a no-op if the
+  // frame already fired, since this is also the rAF callback itself - see
+  // the scheduling call below). Delegates to
+  // outputCursorFlushSchedulerRef.current.flushNow() (terminals.ts,
+  // fix-cycle 1 extraction) - kept as a same-named wrapper so every call
+  // site below is unchanged. This must run synchronously - not deferred to
+  // "whenever the next frame lands" - at every point where a pane's cursor
+  // must already be current: before a non-"output" socket message's own
+  // cursor merge (appendTerminalWebSocketMessage's Math.max would otherwise
+  // compare against a stale pane.nextSequence), before a pane closes
+  // (closeTerminalPane), and before a pane's browser-side state is dropped
+  // outside of an explicit close (the work-root-close effect below) - that
+  // last path intentionally leaves the daemon session running for a
+  // same-logicalKey reattach, so a stale pending entry left in the Map
+  // would otherwise misapply to the freshly-recreated pane on a later
+  // flush. This is the exact stale-cursor race markTerminalOutputCursor's
+  // own doc comment documents, reintroduced at the batching layer instead
+  // of the per-chunk layer if any of these call sites were skipped.
+  function flushPendingOutputCursorsNow() {
+    outputCursorFlushSchedulerRef.current?.flushNow();
+  }
+
+  // Read-side counterpart to the scheduler's pending batch, exposed through
+  // TerminalPaneActions.getPendingNextSequence (see the construction site
+  // below) for terminalPaneBody.tsx's debounced visual-capture effect. That
+  // effect reads pane.nextSequence synchronously off its own liveRef inside
+  // a window.setTimeout callback, independent of this component's rAF
+  // scheduling, so a "flush right before that specific read" ordering is
+  // not reachable across the App/child boundary - flushing App-side state
+  // would not be visible to the child's liveRef until a subsequent render.
+  // Reading the pending Map directly here sidesteps that entirely.
+  function pendingNextSequenceFor(pane: TerminalPaneState): number {
+    return (
+      outputCursorFlushSchedulerRef.current?.pendingNextSequenceFor(pane) ??
+      pane.nextSequence
+    );
+  }
+
   function applyTerminalSocketMessage(
     pane: TerminalPaneState,
     message: TerminalWebSocketServerMessage,
   ) {
     if (message.type === "output") {
-      setTerminalPanes((current) =>
-        current[pane.logicalKey]
-          ? {
-              ...current,
-              [pane.logicalKey]: markTerminalOutputCursor(
-                current[pane.logicalKey],
-                message.chunk.sequence,
-              ),
-            }
-          : current,
+      outputCursorFlushSchedulerRef.current?.accumulate(
+        pane.logicalKey,
+        message.chunk.sequence,
       );
       return;
     }
+    // Non-"output" frames (status/exit) merge their own nextSequence via
+    // appendTerminalWebSocketMessage's Math.max - flush any pending
+    // "output" advance first so that merge sees a current pane.nextSequence
+    // instead of racing a batched-but-not-yet-applied one.
+    flushPendingOutputCursorsNow();
     setTerminalPanes((current) =>
       current[pane.logicalKey]
         ? {
@@ -5606,6 +5740,12 @@ function WorkbenchShell({
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
+    // Flush synchronously before the async close proceeds: the pane is
+    // logically closing at this call, and any pending "output" cursor
+    // advance for it must be applied now (the .then() below removes the
+    // pane from state once closeTerminal resolves - a still-batched
+    // advance for a now-removed logicalKey would otherwise silently drop).
+    flushPendingOutputCursorsNow();
     void closeTerminal(pane.session.terminalId, pane.session.serverRoute)
       .then(() =>
         setTerminalPanes((current) =>

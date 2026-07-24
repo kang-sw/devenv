@@ -6,7 +6,9 @@ import {
   closeTerminal,
   createTerminal,
   fetchTerminalOutput,
+  flushPendingOutputCursors,
   listTerminals,
+  createOutputCursorFlushScheduler,
   resizeTerminal,
   sendTerminalInput,
   markTerminalOutputCursor,
@@ -36,7 +38,9 @@ import {
   shouldPollTerminalOutput,
   validateTerminalSize,
   workRootTerminalsEndpoint,
+  type TerminalPaneState,
   type TerminalSessionView,
+  type TerminalWebSocketServerMessage,
 } from "./terminals.js";
 import { LOCAL_DASHBOARD_SERVER_ROUTE } from "./resourceModel.js";
 
@@ -416,6 +420,303 @@ assertEqual(
   true,
   "markTerminalOutputCursor is a no-op at the exact boundary (chunkSequence === nextSequence - 1)",
 );
+
+// 260723 Phase 1 - flushPendingOutputCursors: App.tsx no longer calls
+// setTerminalPanes synchronously per output chunk; it batches
+// (logicalKey -> max chunkSequence seen) into a ref Map and flushes the
+// whole batch through this helper once per animation frame (or
+// synchronously at the correctness-critical call sites - see the
+// close-mid-burst regression test below). These assertions pin the
+// helper's own equivalence contract: N pending advances (including
+// duplicate/out-of-order sequences for one key) collapse into a single
+// patch, each pane's cursor lands at the max sequence seen for its key, an
+// unrelated pane in the same batch advances independently, and an
+// all-no-op flush (missing keys, or already-covered sequences) returns the
+// exact same `panes` reference so it never forces an extra render.
+const sessionB: TerminalSessionView = {
+  terminalId: "term_def",
+  workRootId: "root-local-def",
+  title: "Terminal B",
+  status: "running",
+  columns: 80,
+  rows: 24,
+  createdAtMs: 1,
+  cwdHint: null,
+};
+const paneA = terminalPaneFromSession(session);
+const paneB = terminalPaneFromSession(sessionB);
+const panesForFlush: Record<string, TerminalPaneState> = {
+  [paneA.logicalKey]: paneA,
+  [paneB.logicalKey]: paneB,
+};
+
+const pendingBatch = new Map<string, number>();
+// Simulate several accumulate() calls landing within one animation frame -
+// repeated, duplicate, and out-of-order chunk sequences for the same
+// logicalKey - mirroring App.tsx's accumulation contract
+// (`Math.max(existing ?? -1, chunkSequence)` per logicalKey).
+for (const seq of [2, 0, 4, 1, 4]) {
+  const existing = pendingBatch.get(paneA.logicalKey);
+  pendingBatch.set(
+    paneA.logicalKey,
+    existing === undefined ? seq : Math.max(existing, seq),
+  );
+}
+pendingBatch.set(paneB.logicalKey, 9);
+
+const flushed = flushPendingOutputCursors(panesForFlush, pendingBatch);
+assertEqual(
+  flushed !== panesForFlush,
+  true,
+  "flushPendingOutputCursors returns a new panes object when any pending advance actually changes a cursor",
+);
+assertEqual(
+  flushed[paneA.logicalKey].nextSequence,
+  5,
+  "flushPendingOutputCursors advances pane A to the max pending chunk sequence + 1, collapsing duplicate/out-of-order writes",
+);
+assertEqual(
+  flushed[paneB.logicalKey].nextSequence,
+  10,
+  "flushPendingOutputCursors advances an unrelated pane B from the same batched flush independently",
+);
+
+assertEqual(
+  flushPendingOutputCursors(panesForFlush, new Map()) === panesForFlush,
+  true,
+  "flushPendingOutputCursors short-circuits to the same panes reference for an empty pending map",
+);
+assertEqual(
+  flushPendingOutputCursors(
+    panesForFlush,
+    new Map([["missing-logical-key", 3]]),
+  ) === panesForFlush,
+  true,
+  "flushPendingOutputCursors is a no-op (same reference) when every pending key is missing from panes",
+);
+assertEqual(
+  flushPendingOutputCursors(flushed, new Map([[paneA.logicalKey, 1]])) ===
+    flushed,
+  true,
+  "flushPendingOutputCursors returns the same panes reference when every pending advance is already covered by the current cursor",
+);
+
+// Close-mid-burst regression (260723 Phase 1's correctness requirement):
+// an "output" chunk (sequence 9) lands in the pending batch but has not
+// yet been flushed into pane.nextSequence, and is immediately followed by
+// an "exit" socket message whose own reported nextSequence (5) lags behind
+// that already-delivered chunk - the same class of stale-trailing-frame
+// race markTerminalOutputCursor's own doc comment documents.
+// applyTerminalSocketMessage's non-"output" branch must flush the pending
+// batch (flushPendingOutputCursorsNow) BEFORE merging the exit message via
+// appendTerminalWebSocketMessage, so the final cursor is the true max
+// across both sources, never regressing to the (possibly stale)
+// message.nextSequence alone.
+const burstPane = terminalPaneFromSession(session);
+const burstPending = new Map<string, number>([[burstPane.logicalKey, 9]]);
+const burstPanes: Record<string, TerminalPaneState> = {
+  [burstPane.logicalKey]: burstPane,
+};
+const exitMessage: TerminalWebSocketServerMessage = {
+  type: "exit",
+  terminalId: burstPane.session.terminalId,
+  status: "exited",
+  nextSequence: 5,
+  truncated: false,
+};
+
+const withoutFlush = appendTerminalWebSocketMessage(
+  burstPanes[burstPane.logicalKey],
+  exitMessage,
+);
+assertEqual(
+  withoutFlush.nextSequence,
+  5,
+  "regression baseline: merging the exit message without first flushing the pending batch loses the already-delivered chunk 9's cursor advance",
+);
+
+const burstFlushed = flushPendingOutputCursors(burstPanes, burstPending);
+const withFlush = appendTerminalWebSocketMessage(
+  burstFlushed[burstPane.logicalKey],
+  exitMessage,
+);
+assertEqual(
+  withFlush.nextSequence,
+  10,
+  "flush-before-merge (App.tsx's non-output branch order) preserves the batched chunk's cursor advance across a mid-burst close/exit message",
+);
+
+// rAF scheduling-lifecycle contract (260723 Phase 1, fix-cycle 1 test-
+// partition finding): the prior version of this block hand-reimplemented
+// the scheduling algorithm against a fake rAF pair instead of driving the
+// shipped closures, so a regression introduced only in App.tsx's real
+// wiring (a broken cancel/null sequence, a dropped unmount-cleanup effect)
+// would not have been caught by any test. createOutputCursorFlushScheduler
+// (terminals.ts) is now the single implementation of that lifecycle - both
+// App.tsx's outputCursorFlushSchedulerRef and this test construct it via the
+// same factory, so this block exercises the actual shipped code, not a
+// mirror of it. Uses a deterministic fake requestAnimationFrame/
+// cancelAnimationFrame pair (no browser/jsdom dependency) to pin: (a) at
+// most one frame scheduled per batch; (b) a synchronous flushNow() cancels
+// the pending frame and nulls the internal frame id (observed indirectly:
+// a subsequent accumulate() schedules a genuinely new frame, which is only
+// possible if the internal id was reset to null - if flushNow forgot the
+// cancel/null step, the internal id would stay set and no further frame
+// would ever be requested); (c) cancel() (the unmount-cleanup path) cancels
+// an in-flight frame without applying its batch; (d) a late/already-fired
+// frame callback can never re-apply an already-consumed batch, because
+// flushNow swaps in a fresh empty pending Map before calling applyBatch.
+{
+  let requestedFrameCount = 0;
+  let nextFrameId = 1;
+  const scheduled = new Map<number, () => void>();
+  const cancelled = new Set<number>();
+  function fakeRequestAnimationFrame(cb: () => void): number {
+    requestedFrameCount += 1;
+    const id = nextFrameId++;
+    scheduled.set(id, cb);
+    return id;
+  }
+  function fakeCancelAnimationFrame(id: number): void {
+    cancelled.add(id);
+    scheduled.delete(id);
+  }
+
+  const applied: Array<Map<string, number>> = [];
+  const scheduler = createOutputCursorFlushScheduler({
+    requestAnimationFrame: fakeRequestAnimationFrame,
+    cancelAnimationFrame: fakeCancelAnimationFrame,
+    applyBatch: (pending) => applied.push(new Map(pending)),
+  });
+
+  // (a) at most one frame scheduled per batch: repeated/duplicate/
+  // out-of-order accumulates for the same and a second logicalKey, within
+  // one un-flushed batch, must not request more than one frame.
+  scheduler.accumulate("k1", 1);
+  assertEqual(requestedFrameCount, 1, "the first accumulate schedules a frame");
+  scheduler.accumulate("k1", 2);
+  scheduler.accumulate("k2", 5);
+  assertEqual(
+    requestedFrameCount,
+    1,
+    "further accumulates within the same batch reuse the already-scheduled frame",
+  );
+  assertEqual(
+    scheduled.size,
+    1,
+    "only one frame is actually pending in the fake scheduler",
+  );
+
+  // (b) synchronous flushNow() cancels the pending frame and nulls the
+  // frame id. Nulling is not directly observable, so it is pinned via its
+  // required consequence: the very next accumulate() must request a
+  // genuinely new frame. If the cancel-or-null step were dropped, the
+  // internal frame id would remain set forever and this next assertion
+  // (requestedFrameCount advancing to 2) would fail.
+  scheduler.flushNow();
+  assertEqual(applied.length, 1, "the synchronous flush actually applied a batch");
+  assertDeepEqual(
+    Object.fromEntries(applied[0]),
+    { k1: 2, k2: 5 },
+    "the synchronous flush applies the accumulated max-per-key batch",
+  );
+  assertEqual(
+    cancelled.has(1),
+    true,
+    "the synchronous flush cancels the previously-scheduled frame",
+  );
+  assertEqual(
+    scheduled.size,
+    0,
+    "no frame remains scheduled after the synchronous flush",
+  );
+
+  scheduler.accumulate("k3", 7);
+  assertEqual(
+    requestedFrameCount,
+    2,
+    "a fresh frame is requested for the post-flush batch, proving the frame id was nulled by the prior flushNow (this fails if the cancel/null step is removed)",
+  );
+
+  // (c) cancel() (mirrors the App-level unmount-cleanup effect) cancels an
+  // in-flight frame without applying its pending batch.
+  assertEqual(scheduled.size, 1, "a frame is pending before cancel()");
+  scheduler.cancel();
+  assertEqual(
+    cancelled.has(2),
+    true,
+    "cancel() cancels the scheduled frame",
+  );
+  assertEqual(scheduled.size, 0, "no frame remains scheduled after cancel()");
+  assertEqual(
+    applied.length,
+    1,
+    "cancel() does not apply the pending batch (only flushNow/the rAF callback does)",
+  );
+
+  // (d) a late/already-fired frame cannot re-apply an already-consumed
+  // batch. Capture the exact callback requestAnimationFrame was given for a
+  // fresh batch, flush it synchronously (as the real correctness call
+  // sites do, ahead of the frame firing), then invoke the captured callback
+  // directly - simulating the frame firing anyway despite being cancelled.
+  // The fresh-empty-Map swap inside flushNow means this must be a no-op.
+  scheduler.accumulate("k4", 3);
+  const capturedCallback = scheduled.get(3);
+  assertEqual(
+    capturedCallback !== undefined,
+    true,
+    "the third requested frame's callback was captured for the late-fire simulation",
+  );
+  scheduler.flushNow();
+  assertEqual(applied.length, 2, "the second synchronous flush applied its own batch");
+  assertDeepEqual(
+    Object.fromEntries(applied[1]),
+    { k3: 7, k4: 3 },
+    // cancel() only cancels the scheduled frame - it deliberately does not
+    // discard the pending Map (only flushNow's fresh-empty-Map swap does),
+    // so k3's un-flushed advance (accumulated before cancel()) survives and
+    // is included in this next flush alongside k4.
+    "the second flush applies every advance accumulated since the last flush, including one accumulated before an intervening cancel()",
+  );
+  capturedCallback?.();
+  assertEqual(
+    applied.length,
+    2,
+    "a late/already-fired frame callback cannot re-apply an already-consumed batch",
+  );
+
+  // pendingNextSequenceFor: read-side counterpart, exercised against a
+  // pane whose logicalKey has (and has not) an un-flushed pending advance.
+  scheduler.accumulate("k5", 4);
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "k5",
+      nextSequence: 0,
+    }),
+    5,
+    "pendingNextSequenceFor reflects an un-flushed pending advance (chunkSequence + 1)",
+  );
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "k5",
+      nextSequence: 9,
+    }),
+    9,
+    "pendingNextSequenceFor never regresses below the pane's own current cursor",
+  );
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "no-pending-entry",
+      nextSequence: 3,
+    }),
+    3,
+    "pendingNextSequenceFor falls back to pane.nextSequence when there is no pending entry",
+  );
+  scheduler.cancel();
+}
 
 const idleOutput = {
   terminalId: "term_abc",
