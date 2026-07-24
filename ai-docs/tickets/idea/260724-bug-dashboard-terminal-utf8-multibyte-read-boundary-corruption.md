@@ -2,8 +2,8 @@
 title: Terminal PTY read pump corrupts UTF-8 multibyte sequences split across read() boundaries
 spec:
   - 260516-ws-web-dashboard-terminal-io-transport
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Terminal PTY read pump corrupts UTF-8 multibyte sequences split across read() boundaries
