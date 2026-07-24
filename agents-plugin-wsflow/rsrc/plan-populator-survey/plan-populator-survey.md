@@ -4,7 +4,6 @@ delegates: false
 role: delegate
 tier: medium
 variables:
-  - RoleModel
   - target_kind
   - ticket_path
   - selected_phase
@@ -14,8 +13,6 @@ variables:
 # Plan Populator — Survey Delegate
 
 You are turning an accepted target into a light implementation plan.
-
-Alias model for this role: {{.RoleModel}}.
 
 ## Render Inputs
 
