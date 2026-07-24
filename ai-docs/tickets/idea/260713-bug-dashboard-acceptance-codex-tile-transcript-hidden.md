@@ -135,3 +135,7 @@ underlying CLI harness is a viable alternative to native agent surfacing, so
 finishing the dashboard is the higher-value path now. Prior shipped work
 stands (see phase Results above); only unfinished work is parked. Re-promote
 when the dashboard/terminal track is complete and agent dogfooding resumes.
+
+## Now blocks a ready ticket (2026-07-24)
+
+Since the 2714 resize-frame fix landed, this failure is no longer masked: it now aborts the serial `dashboard-acceptance.spec.ts` suite at line ~2938 and blocks `260722-refactor-dashboard-app-tsx-leaf-extraction` from reaching its full `test:browser`-green closure bar (and prevents the post-2938 terminal-restore / dockview-split acceptance steps from running at all). Root cause is still untraced (an ancestor — likely Dockview inactive-pane visibility toggling — hides the transcript), so this stays in `idea/` pending investigation; flagging that it now gates a completed ready ticket's closure and is worth prioritizing.

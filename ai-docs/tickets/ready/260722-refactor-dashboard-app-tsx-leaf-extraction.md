@@ -151,6 +151,16 @@ Forward: buildWorkbenchEditorGroups now lives in a testable neutral module
 group-assignment / agentChat-append-last branching is a worthwhile
 follow-up.
 
+## Blocked (2026-07-24)
+
+Both original verification prerequisites are now resolved — `260722-bug-e2e-open-work-root-locator-ambiguity` and `260722-bug-e2e-terminal-resize-frame-assertion-fails` are both in `.done/` — and the refactor itself is confirmed behavior-preserving: Phase 2's `AgentChatPaneBody` extraction (commit `edb8ae6d`) is a verified pure move (identical JSX, `agent-chat-pane-transcript` class, `data-testid`, and `if (pane.session)` gate; `styles.css` untouched), all `test:*` suites are green, and every browser-acceptance step reachable before the abort point passed (git worktree add/remove modals, dockview structure, per-root split isolation).
+
+Full `test:browser` green — this ticket's stated closure bar — is now blocked by an INDEPENDENT pre-existing bug: `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` (currently `idea/`). Now that the 2714 resize-frame fix has landed, the serial acceptance suite advances to `dashboard-acceptance.spec.ts:2938` and fails there (the codex agent-chat transcript stays `hidden`, governed by a Dockview ancestor this refactor never touched; 260713 was filed 2026-07-13, nine days before this refactor, and independently reproduced the identical failure on pre-refactor baselines). Because the suite runs `mode: "serial"`, that failure also prevents the post-2938 acceptance steps (terminal restore/reattach, dockview split-durability) from executing, so they cannot be browser-validated until 260713 is fixed.
+
+Two of the four ticket-named manual-smoke modals — SettingsModal and LinkedServerModal — additionally have no automated acceptance coverage and are genuinely human-smoke-only.
+
+Closure therefore awaits, and cannot be completed autonomously: (1) `260713` fixed so the acceptance suite reaches green and validates the post-2938 terminal-restore / dockview-split steps, and (2) a human manual smoke of the SettingsModal and LinkedServerModal open/close flows. Skip this ticket in goal-drain selection until a human clears these.
+
 ## Spec Impact
 
 No spec addressing: this is a behavior-preserving refactor with no
