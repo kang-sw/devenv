@@ -202,6 +202,43 @@ fails downstream at the pre-existing, already-tracked, deliberately-deferred
 it is neither caused by nor fixable within this phase's scope. No product
 source (`WhichKeyOverlay.tsx`, `hotkeys.ts`, `App.tsx`) was changed.
 
+#### Edition (1cff11f8) - 2026-07-24
+
+Partitioned review (correctness + test) of the initial commit found two
+Important defects and one Minor one, fixed on the same branch (test-only,
+no product source touched):
+
+- **Dismissal path 1's core assertion was vacuous.** `data-last-command-id`
+  was already `"terminal.create"` from the real terminal-create button click
+  earlier in the same test, so asserting it equalled `"terminal.create"`
+  after `<leader> t n` passed regardless of whether the leader sequence
+  dispatched anything - it did not distinguish a genuine resolve from an
+  unmatched cancel. Fixed by first clicking the already-selected workRoot's
+  own nav row (a real, idempotent, harmless dispatch) to set a known
+  baseline of `"resource.select"`, then asserting the value transitions to
+  `"terminal.create"` only after the leader sequence. Sanity-checked live:
+  temporarily swapping the resolving keypress for an unmatched key made the
+  fixed assertion fail as expected (observed `data-last-command-id` staying
+  at `"resource.select"`), confirming the fix is no longer vacuous, before
+  reverting the sanity mutation.
+- **`expectTerminalNotBlocked`'s bare `.terminal-surface`/`.xterm-rows`
+  locators would break under Playwright strict mode once
+  `260724-idea-dashboard-hotkey-leader-dispatch-gap` is fixed** and
+  `<leader> t n` starts really creating a second terminal pane. Scoped both
+  to `.first()` (with a comment citing that ticket) so the helper stays
+  valid once that gap is fixed.
+- **Minor:** the appearance-delay "absent before" check raced a fixed
+  120ms sleep against the 250ms boundary (modest CI-jitter risk). Changed to
+  assert absence immediately after the leader press (~0ms elapsed, well
+  inside the delay with no timing race) instead, leaving the "present after"
+  side as a generous polling `expect`.
+
+Re-verification: `npm run test:browser` executed for real again after the
+fix. The which-key step still passes cleanly; the same pre-existing,
+already-tracked `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden`
+defect downstream is still the only failure, unchanged from before this
+edition.
+
 ## Spec Impact
 
 - No new spec surface. This ticket is a presentation-only discoverability layer
