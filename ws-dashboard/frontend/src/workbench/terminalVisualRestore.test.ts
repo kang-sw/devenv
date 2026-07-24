@@ -4,10 +4,18 @@ import {
   terminalVisualRestoreMaxSerializedLength,
   upsertTerminalVisualRestoreEntry,
   upsertTerminalVisualRestoreEntryInSnapshot,
+  resolveTerminalDeltaWrite,
   resolveTerminalMountWrite,
   type TerminalVisualRestoreEntry,
   type TerminalVisualRestoreSnapshot,
 } from "./terminalVisualRestore.js";
+import {
+  appendTerminalOutput,
+  terminalOutputCharacterBudget,
+  terminalPaneFromSession,
+  type TerminalOutputView,
+  type TerminalSessionView,
+} from "../terminals.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -262,5 +270,124 @@ const smallEntry: TerminalVisualRestoreEntry = {
     write,
     { kind: "none" },
     "no restore entry and empty pane.output yields the none kind",
+  );
+}
+
+// resolveTerminalDeltaWrite: the four deterministic branch cases in
+// isolation, independent of any real pane/append history.
+{
+  assertDeepEqual(
+    resolveTerminalDeltaWrite({ output: "abc", outputTrimOffset: 0 }, 3),
+    { kind: "noop", nextWrittenAbsolute: 3 },
+    "currentEnd === writtenAbsolute is a no-op",
+  );
+  assertDeepEqual(
+    resolveTerminalDeltaWrite({ output: "abcdef", outputTrimOffset: 0 }, 3),
+    { kind: "tail", text: "def", nextWrittenAbsolute: 6 },
+    "ordinary growth with no trim writes just the new tail slice",
+  );
+  assertDeepEqual(
+    resolveTerminalDeltaWrite({ output: "ab", outputTrimOffset: 0 }, 5),
+    { kind: "reset", text: "ab", nextWrittenAbsolute: 2 },
+    "currentEnd < writtenAbsolute (defensive parity with the pre-260723 shrink branch) forces a clear+redump",
+  );
+  // Clamped/reset scenario (260723 Phase 1 load-bearing case): writtenAbsolute
+  // stayed behind while `outputTrimOffset` advanced well past it (the effect
+  // fell far enough behind that a trim evicted characters before they were
+  // ever written) - `localStart` would go negative, so the whole
+  // currently-retained buffer must be redumped via a full clear+write rather
+  // than slicing into content that no longer exists in `pane.output`.
+  assertDeepEqual(
+    resolveTerminalDeltaWrite({ output: "TAIL-CONTENT", outputTrimOffset: 500 }, 0),
+    { kind: "reset", text: "TAIL-CONTENT", nextWrittenAbsolute: 512 },
+    "a writtenAbsolute stuck before the current outputTrimOffset triggers a full clear+redump, never a negative/garbage slice",
+  );
+}
+
+// 260723 Phase 1 - the load-bearing trim-boundary regression: drive a real
+// pane through `appendTerminalOutput` far enough to trim multiple times
+// (small, realistic per-poll chunk sizes against the actual production
+// `terminalOutputCharacterBudget`), simulating the delta-write effect firing
+// on every single append (the common case - React commits the state update
+// and the effect runs before the next append arrives). The simulated
+// "emulator" - built purely from `resolveTerminalDeltaWrite`'s decisions,
+// exactly mirroring what `terminal.write`/`terminal.clear` would do - is
+// compared against `fullStream`, the true never-trimmed source of everything
+// ever appended, NOT against `pane.output`: a real xterm buffer keeps
+// growing forever (bounded separately by its own line-based scrollback, not
+// by this character budget), so it must still hold every character `pane`
+// ever saw even after `pane.output` itself has been front-trimmed down to a
+// bounded tail. Asserting `emulator === fullStream` at every step - through
+// several trims - is exactly "no silent gap, no duplication": a bug that
+// diffs against a stale/shifted index (the pre-260723 raw-length
+// comparison) would either skip characters (a gap, emulator falls behind
+// fullStream) or repeat them (emulator overtakes/duplicates fullStream).
+{
+  const trimBoundarySession: TerminalSessionView = {
+    terminalId: "term_trim_boundary",
+    workRootId: "root-trim-boundary",
+    title: "Trim boundary",
+    status: "running",
+    columns: 80,
+    rows: 24,
+    createdAtMs: 1,
+    cwdHint: null,
+  };
+  const chunkSize = 4_000;
+  // Comfortably more chunks than needed to trim at least once, and to keep
+  // trimming several times past that first trim.
+  const totalChunks = Math.ceil((terminalOutputCharacterBudget * 1.5) / chunkSize);
+
+  let pane = terminalPaneFromSession(trimBoundarySession);
+  let writtenAbsolute = 0;
+  let emulator = "";
+  let fullStream = "";
+  let resetCount = 0;
+
+  for (let index = 0; index < totalChunks; index += 1) {
+    // Deterministic, distinguishable-per-chunk filler so a duplicated or
+    // skipped chunk would show up as a content mismatch, not just a length
+    // mismatch.
+    const marker = `|C${index}|`;
+    const chunkData = (marker + "x".repeat(chunkSize)).slice(0, chunkSize);
+    fullStream += chunkData;
+    const output: TerminalOutputView = {
+      terminalId: trimBoundarySession.terminalId,
+      status: "running",
+      nextSequence: index + 1,
+      chunks: [{ sequence: index, data: chunkData, stream: "pty" }],
+    };
+    pane = appendTerminalOutput(pane, output);
+
+    const resolved = resolveTerminalDeltaWrite(pane, writtenAbsolute);
+    if (resolved.kind === "reset") {
+      resetCount += 1;
+      emulator = resolved.text;
+    } else if (resolved.kind === "tail") {
+      emulator += resolved.text;
+    }
+    writtenAbsolute = resolved.nextWrittenAbsolute;
+
+    assertEqual(
+      emulator,
+      fullStream,
+      `emulator content must exactly match the full never-trimmed stream after append ${index} (no gap, no duplication)`,
+    );
+  }
+
+  assertEqual(
+    pane.outputTrimOffset > 0,
+    true,
+    "the drive loop actually caused at least one trim (test precondition)",
+  );
+  assertEqual(
+    resetCount,
+    0,
+    "an ordinary per-append trim (effect never falls behind) always resolves to the cheap tail write, never a spurious full clear+redump",
+  );
+  assertEqual(
+    fullStream.endsWith(pane.output),
+    true,
+    "the retained pane.output is exactly the tail of the full untrimmed stream - nothing skipped, nothing corrupted",
   );
 }

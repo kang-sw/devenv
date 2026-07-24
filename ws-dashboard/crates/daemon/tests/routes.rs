@@ -4456,6 +4456,214 @@ async fn server_scoped_terminal_local_aliases_match_legacy_lifecycle() {
     remove_static_fixture(&scoped_root);
 }
 
+// 260723 Phase 1 batch fallback poll: a mixed batch of a valid terminal, an
+// unknown terminal id, and a terminal whose work root has since gone offline
+// (inaccessible, but still registered) must return `200` with only the valid
+// entry present in `results` - never a per-id error and never a whole-batch
+// failure. Exercised against both the unscoped route and its server-local
+// scoped alias, matching the existing lifecycle-parity test's shape above.
+#[tokio::test]
+async fn terminal_output_batch_omits_unknown_and_inaccessible_ids() {
+    let legacy_root = temp_fixture_path("terminal-output-batch-legacy-root");
+    let scoped_root = temp_fixture_path("terminal-output-batch-scoped-root");
+    let legacy_offline_root = temp_fixture_path("terminal-output-batch-legacy-offline-root");
+    let scoped_offline_root = temp_fixture_path("terminal-output-batch-scoped-offline-root");
+    fs::create_dir_all(&legacy_root).expect("create legacy root");
+    fs::create_dir_all(&scoped_root).expect("create scoped root");
+    fs::create_dir_all(&legacy_offline_root).expect("create legacy offline root");
+    fs::create_dir_all(&scoped_offline_root).expect("create scoped offline root");
+
+    let (legacy_app, legacy_cookie) = paired_test_app().await;
+    let (scoped_app, scoped_cookie) = paired_test_app().await;
+
+    let legacy_work_root =
+        open_work_root_for_test(legacy_app.clone(), legacy_cookie.as_str(), &legacy_root).await;
+    let scoped_work_root =
+        open_work_root_for_test(scoped_app.clone(), scoped_cookie.as_str(), &scoped_root).await;
+    let legacy_offline_work_root = open_work_root_for_test(
+        legacy_app.clone(),
+        legacy_cookie.as_str(),
+        &legacy_offline_root,
+    )
+    .await;
+    let scoped_offline_work_root = open_work_root_for_test(
+        scoped_app.clone(),
+        scoped_cookie.as_str(),
+        &scoped_offline_root,
+    )
+    .await;
+
+    let legacy_terminal =
+        create_terminal_for_test(legacy_app.clone(), legacy_cookie.as_str(), &legacy_work_root)
+            .await;
+    let scoped_terminal =
+        create_terminal_for_test(scoped_app.clone(), scoped_cookie.as_str(), &scoped_work_root)
+            .await;
+    let legacy_offline_terminal = create_terminal_for_test(
+        legacy_app.clone(),
+        legacy_cookie.as_str(),
+        &legacy_offline_work_root,
+    )
+    .await;
+    let scoped_offline_terminal = create_terminal_for_test(
+        scoped_app.clone(),
+        scoped_cookie.as_str(),
+        &scoped_offline_work_root,
+    )
+    .await;
+
+    // Take the offline-designated work root offline so its terminal becomes
+    // inaccessible (`WorkRootAccessError::Offline`) without being removed
+    // from the terminal registry - the batch handler must still skip it.
+    let (legacy_offline_status, _, _) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/work-roots/{legacy_offline_work_root}/activation"),
+        &legacy_cookie,
+        serde_json::json!({ "activation": "offline" }),
+    )
+    .await;
+    assert_eq!(legacy_offline_status, StatusCode::OK);
+    let (scoped_offline_status, _, _) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/work-roots/{scoped_offline_work_root}/activation"),
+        &scoped_cookie,
+        serde_json::json!({ "activation": "offline" }),
+    )
+    .await;
+    assert_eq!(scoped_offline_status, StatusCode::OK);
+
+    let (legacy_batch_status, _, legacy_batch) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        "/api/dashboard/terminals/output/batch".to_owned(),
+        &legacy_cookie,
+        serde_json::json!({
+            "cursors": [
+                { "terminalId": legacy_terminal, "after": 0 },
+                { "terminalId": legacy_offline_terminal, "after": 0 },
+                { "terminalId": "unknown-terminal-id", "after": 0 },
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(legacy_batch_status, StatusCode::OK);
+    let legacy_results = legacy_batch["results"]
+        .as_object()
+        .expect("legacy batch results object");
+    assert_eq!(
+        legacy_results.len(),
+        1,
+        "only the valid terminal is present in results"
+    );
+    assert!(legacy_results.contains_key(legacy_terminal.as_str()));
+    assert_eq!(
+        legacy_results[legacy_terminal.as_str()]["terminalId"],
+        legacy_terminal
+    );
+    assert!(legacy_results[legacy_terminal.as_str()]["chunks"].is_array());
+    assert!(!legacy_results.contains_key(legacy_offline_terminal.as_str()));
+    assert!(!legacy_results.contains_key("unknown-terminal-id"));
+
+    let (scoped_batch_status, _, scoped_batch) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-local/terminals/output/batch".to_owned(),
+        &scoped_cookie,
+        serde_json::json!({
+            "cursors": [
+                { "terminalId": scoped_terminal, "after": 0 },
+                { "terminalId": scoped_offline_terminal, "after": 0 },
+                { "terminalId": "unknown-terminal-id", "after": 0 },
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(scoped_batch_status, StatusCode::OK);
+    let scoped_results = scoped_batch["results"]
+        .as_object()
+        .expect("scoped batch results object");
+    assert_eq!(
+        scoped_results.len(),
+        1,
+        "scoped alias also omits unknown/inaccessible ids"
+    );
+    assert!(scoped_results.contains_key(scoped_terminal.as_str()));
+    assert!(!scoped_results.contains_key(scoped_offline_terminal.as_str()));
+    assert!(!scoped_results.contains_key("unknown-terminal-id"));
+
+    // Malformed batch bodies classify identically between the legacy route
+    // and its server-local alias (missing content type / data error / syntax
+    // error), matching the JSON-body boundary parity already pinned for the
+    // other terminal mutation aliases above.
+    async fn send_raw_batch(
+        app: axum::Router,
+        uri: &str,
+        cookie: &str,
+        content_type: Option<&str>,
+        body: &str,
+    ) -> StatusCode {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header(header::COOKIE, cookie);
+        if let Some(content_type) = content_type {
+            builder = builder.header(header::CONTENT_TYPE, content_type);
+        }
+        app.oneshot(
+            builder
+                .body(Body::from(body.to_owned()))
+                .expect("raw batch request"),
+        )
+        .await
+        .expect("raw batch response")
+        .status()
+    }
+    let legacy_missing = send_raw_batch(
+        legacy_app.clone(),
+        "/api/dashboard/terminals/output/batch",
+        &legacy_cookie,
+        None,
+        "{}",
+    )
+    .await;
+    let scoped_missing = send_raw_batch(
+        scoped_app.clone(),
+        "/api/dashboard/servers/server-local/terminals/output/batch",
+        &scoped_cookie,
+        None,
+        "{}",
+    )
+    .await;
+    assert_eq!(scoped_missing, legacy_missing);
+    assert_eq!(scoped_missing, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    let legacy_syntax = send_raw_batch(
+        legacy_app.clone(),
+        "/api/dashboard/terminals/output/batch",
+        &legacy_cookie,
+        Some("application/json"),
+        "{",
+    )
+    .await;
+    let scoped_syntax = send_raw_batch(
+        scoped_app.clone(),
+        "/api/dashboard/servers/server-local/terminals/output/batch",
+        &scoped_cookie,
+        Some("application/json"),
+        "{",
+    )
+    .await;
+    assert_eq!(scoped_syntax, legacy_syntax);
+    assert_eq!(scoped_syntax, StatusCode::BAD_REQUEST);
+
+    remove_static_fixture(&legacy_root);
+    remove_static_fixture(&scoped_root);
+    remove_static_fixture(&legacy_offline_root);
+    remove_static_fixture(&scoped_offline_root);
+}
+
 // Forward the full terminal lifecycle to a real linked daemon and confirm the
 // close propagates upstream (the remote terminal is gone afterward).
 #[tokio::test]

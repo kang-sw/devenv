@@ -14,6 +14,7 @@ import {
   TerminalPrefsContext,
 } from "./terminalPrefs.js";
 import {
+  resolveTerminalDeltaWrite,
   resolveTerminalMountWrite,
   terminalVisualRestoreDebounceMs,
   terminalVisualRestoreScrollbackLines,
@@ -89,7 +90,12 @@ export function TerminalPaneBody({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
-  const writtenLengthRef = useRef(0);
+  // Absolute stream position (not a raw string length - see
+  // `resolveTerminalDeltaWrite`) of the last character already written to
+  // this pane's emulator. Stays in the same absolute coordinate space as
+  // `pane.outputTrimOffset` so it remains directly comparable across any
+  // number of front-trims (260723 Phase 1).
+  const writtenAbsoluteRef = useRef(0);
   const lastForwardedSizeRef = useRef<
     { columns: number; rows: number; transport: "socket" | "http" } | null
   >(null);
@@ -164,24 +170,31 @@ export function TerminalPaneBody({
     serializeAddonRef.current = serializeAddon;
     terminal.open(container);
     terminalRef.current = terminal;
-    writtenLengthRef.current = 0;
+    // `pane.outputTrimOffset` is always 0 at genuine mount time in practice
+    // (this component only unmounts/remounts on a real terminal close/
+    // reopen, never a mere visibility toggle - see the type-level comment on
+    // `TerminalPaneBody` above - and `terminalPaneFromSession` always seeds a
+    // fresh pane at offset 0), but seeding from the live value here keeps
+    // `writtenAbsoluteRef`'s meaning correct by construction rather than by
+    // that invariant holding elsewhere.
+    writtenAbsoluteRef.current = liveRef.current.pane.outputTrimOffset;
 
     // A reattached pane with a matching persisted visual-restore snapshot
     // (id-reattach to a still-alive daemon terminal) writes that serialized
     // buffer - scrollback, cursor position, styles - plus its scroll
     // viewport offset, instead of the plain-text `pane.output` replay below.
-    // `writtenLengthRef` stays at 0 in both branches: the delta-write effect
-    // tracks `pane.output` length independent of whichever initial write
-    // happened here, so a restored snapshot's own escape-sequence text is
-    // never diffed against `pane.output` (which starts at "" for a freshly
-    // reattached pane either way). New sessions spawned via the
-    // restore-intent fallback have no matching entry and fall through to the
-    // existing replay path unchanged.
+    // `writtenAbsoluteRef` stays at `pane.outputTrimOffset` in both branches:
+    // the delta-write effect tracks `pane.output` independent of whichever
+    // initial write happened here, so a restored snapshot's own
+    // escape-sequence text is never diffed against `pane.output` (which
+    // starts at "" for a freshly reattached pane either way). New sessions
+    // spawned via the restore-intent fallback have no matching entry and
+    // fall through to the existing replay path unchanged.
     //
     // The three-way branch selection itself (restore vs. replay vs. no-op)
     // is pure and lives in `resolveTerminalMountWrite` (`workbench/terminalVisualRestore.ts`)
     // so it is unit testable independent of xterm/DOM; only the actual
-    // `terminal.write`/`scrollToLine`/`writtenLengthRef` side effects stay here.
+    // `terminal.write`/`scrollToLine`/`writtenAbsoluteRef` side effects stay here.
     const restoreEntry = liveRef.current.actions.onVisualRestoreEntryFor(
       liveRef.current.pane,
     );
@@ -201,7 +214,8 @@ export function TerminalPaneBody({
       // Replay PTY output buffered before this surface mounted so reselecting
       // a terminal tab restores its emulator contents.
       terminal.write(mountWrite.text);
-      writtenLengthRef.current = mountWrite.text.length;
+      writtenAbsoluteRef.current =
+        liveRef.current.pane.outputTrimOffset + mountWrite.text.length;
     }
 
     // Keyboard input originates from the focused emulator surface and reaches
@@ -590,7 +604,10 @@ export function TerminalPaneBody({
         ) as TerminalWebSocketServerMessage;
         if (message.type === "output") {
           terminalRef.current?.write(message.chunk.data);
-          writtenLengthRef.current += message.chunk.data.length;
+          // The live socket path never trims `pane.output`, so this stays a
+          // plain running total in the same absolute coordinate space as
+          // `writtenAbsoluteRef`'s other writers - no offset math needed here.
+          writtenAbsoluteRef.current += message.chunk.data.length;
           if (liveRef.current.actions.isActivePane(liveRef.current.pane)) {
             refocusActiveTerminal();
           }
@@ -670,20 +687,25 @@ export function TerminalPaneBody({
   }, [terminalPrefs]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
-  // sequences render as terminal behavior rather than raw text.
+  // sequences render as terminal behavior rather than raw text. The
+  // branch/offset decision is pure (`resolveTerminalDeltaWrite`, 260723 Phase
+  // 1 load-bearing fix for `appendTerminalOutput`'s front-trim bound) - this
+  // effect only performs the resulting `terminal.clear()`/`terminal.write()`/
+  // ref-update side effects.
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) {
       return;
     }
-    if (pane.output.length > writtenLengthRef.current) {
-      terminal.write(pane.output.slice(writtenLengthRef.current));
-      writtenLengthRef.current = pane.output.length;
-    } else if (pane.output.length < writtenLengthRef.current) {
-      terminal.clear();
-      terminal.write(pane.output);
-      writtenLengthRef.current = pane.output.length;
+    const resolved = resolveTerminalDeltaWrite(pane, writtenAbsoluteRef.current);
+    if (resolved.kind === "noop") {
+      return;
     }
+    if (resolved.kind === "reset") {
+      terminal.clear();
+    }
+    terminal.write(resolved.text);
+    writtenAbsoluteRef.current = resolved.nextWrittenAbsolute;
   }, [pane.output]);
 
   // Debounced capture of this pane's serialized visual buffer (scrollback,

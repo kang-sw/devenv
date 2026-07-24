@@ -47,7 +47,8 @@ use crate::servers::{
     server_scoped_codex_session_control, server_scoped_codex_session_interrupt,
     server_scoped_codex_session_prompt, server_scoped_codex_session_transcript,
     server_scoped_codex_sessions, server_scoped_terminal_input, server_scoped_terminal_output,
-    server_scoped_terminal_resize, server_scoped_terminal_websocket, server_scoped_terminals,
+    server_scoped_terminal_output_batch, server_scoped_terminal_resize,
+    server_scoped_terminal_websocket, server_scoped_terminals,
     server_scoped_work_root_activity, server_scoped_work_root_activity_events,
     server_scoped_work_root_activity_transcript,
     server_scoped_work_root_files, server_scoped_write_work_root_file, start_ssh_dashboard_server,
@@ -63,7 +64,7 @@ use crate::codex_routes::{
 };
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_resize, terminal_websocket, TerminalRegistry,
+    terminal_output_batch, terminal_resize, terminal_websocket, TerminalRegistry,
 };
 use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
@@ -261,6 +262,10 @@ pub fn build_router(state: AppState) -> Router {
             get(server_scoped_terminal_output),
         )
         .route(
+            "/api/dashboard/servers/{server_route}/terminals/output/batch",
+            post(server_scoped_terminal_output_batch),
+        )
+        .route(
             "/api/dashboard/servers/{server_route}/terminals/{terminal_id}/socket",
             get(server_scoped_terminal_websocket),
         )
@@ -357,6 +362,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/terminals/{terminal_id}/output",
             get(terminal_output),
+        )
+        .route(
+            "/api/dashboard/terminals/output/batch",
+            post(terminal_output_batch),
         )
         .route(
             "/api/dashboard/terminals/{terminal_id}/input",

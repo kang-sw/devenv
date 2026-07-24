@@ -189,12 +189,12 @@ import {
   type WorkRootFileEntryView,
 } from "./workRootFiles";
 import {
-  appendTerminalOutput,
+  applyTerminalOutputBatch,
+  applyTerminalOutputBatchError,
   appendTerminalWebSocketMessage,
-  canApplyTerminalOutputPoll,
   closeTerminal,
   createTerminal,
-  fetchTerminalOutput,
+  fetchTerminalOutputBatch,
   listTerminals,
   createOutputCursorFlushScheduler,
   flushPendingOutputCursors,
@@ -202,6 +202,7 @@ import {
   markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
   loadTerminalRestoreIntents,
+  nextTerminalOutputPollIntervalMs,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
   removeTerminalPanesForWorkRoot,
@@ -210,7 +211,6 @@ import {
   sendTerminalInput,
   saveTerminalRestoreIntents,
   shouldPollTerminalOutput,
-  terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalRestoreIntentsForWorkRoot,
   terminalRestoreIntentsFromPanes,
@@ -4947,71 +4947,78 @@ function WorkbenchShell({
     if (!workbenchModel) {
       return;
     }
-    // Track in-flight requests per PTY so a slow response never stacks
-    // overlapping polls for the same terminal.
-    const inFlight = new Set<string>();
+    // 260723 Phase 1: one in-flight guard for the whole batch, not one per
+    // terminal - a single outstanding request now covers every
+    // fallback-polling pane in this work root/serverRoute.
+    let batchInFlight = false;
     let cancelled = false;
+    // Currently-scheduled `window.setInterval` cadence, so the timer is only
+    // torn down and recreated when Step 3's adaptive interval actually
+    // changes (crossing `terminalOutputPollBackoffPaneThreshold` in either
+    // direction), not on every tick.
+    let scheduledIntervalMs = terminalOutputPollIntervalMs;
+    let timer = window.setInterval(poll, scheduledIntervalMs);
 
-    const poll = () => {
-      for (const pane of livePollPanesRef.current) {
-        if (inFlight.has(pane.terminalId)) {
-          continue;
-        }
-        inFlight.add(pane.terminalId);
-        void fetchTerminalOutput(
-          pane.terminalId,
-          pane.nextSequence,
-          pane.serverRoute,
-        )
-          .then((output) => {
-            if (cancelled) {
-              return;
-            }
-            setTerminalPanes((current) => {
-              const existing = current[pane.logicalKey];
-              if (!existing) {
-                return current;
-              }
-              // Skip the state replacement when a poll changed nothing so
-              // React does not re-render the whole workbench tree every cycle
-              // while terminals are quiet. A stale error still counts as a
-              // change so a successful poll clears it.
-              if (!canApplyTerminalOutputPoll(existing, pane.nextSequence)) {
-                return current;
-              }
-              if (!terminalOutputPollChangedState(existing, output)) {
-                return current;
-              }
-              return {
-                ...current,
-                [pane.logicalKey]: appendTerminalOutput(existing, output),
-              };
-            });
-          })
-          .catch((error) => {
-            if (cancelled) {
-              return;
-            }
-            const message =
-              error instanceof Error ? error.message : "terminal output failed";
-            setTerminalPanes((current) => {
-              const existing = current[pane.logicalKey];
-              if (!existing || existing.error === message) {
-                return current;
-              }
-              return {
-                ...current,
-                [pane.logicalKey]: { ...existing, error: message },
-              };
-            });
-          })
-          .finally(() => {
-            inFlight.delete(pane.terminalId);
-          });
+    function rescheduleIfIntervalChanged() {
+      const nextIntervalMs = nextTerminalOutputPollIntervalMs(
+        livePollPanesRef.current.length,
+        terminalOutputPollIntervalMs,
+      );
+      if (nextIntervalMs === scheduledIntervalMs) {
+        return;
       }
-    };
+      scheduledIntervalMs = nextIntervalMs;
+      window.clearInterval(timer);
+      timer = window.setInterval(poll, scheduledIntervalMs);
+    }
 
-    const timer = window.setInterval(poll, terminalOutputPollIntervalMs);
+    function poll() {
+      rescheduleIfIntervalChanged();
+      const panes = livePollPanesRef.current;
+      if (panes.length === 0 || batchInFlight) {
+        return;
+      }
+      batchInFlight = true;
+      const requests = panes.map((pane) => ({
+        logicalKey: pane.logicalKey,
+        terminalId: pane.terminalId,
+        nextSequence: pane.nextSequence,
+      }));
+      // Every pane in `livePollPanesRef.current` already shares one
+      // work root and one `serverRoute` (see the ref's own build-up above),
+      // so the whole tick's cursors fit in a single batched POST with no
+      // per-server splitting.
+      const serverRoute = panes[0]?.serverRoute;
+      void fetchTerminalOutputBatch(
+        panes.map((pane) => ({
+          terminalId: pane.terminalId,
+          after: pane.nextSequence,
+        })),
+        serverRoute,
+      )
+        .then((results) => {
+          if (cancelled) {
+            return;
+          }
+          setTerminalPanes((current) =>
+            applyTerminalOutputBatch(current, requests, results),
+          );
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          const message =
+            error instanceof Error ? error.message : "terminal output failed";
+          setTerminalPanes((current) =>
+            applyTerminalOutputBatchError(current, requests, message),
+          );
+        })
+        .finally(() => {
+          batchInFlight = false;
+        });
+    }
+
     return () => {
       cancelled = true;
       window.clearInterval(timer);

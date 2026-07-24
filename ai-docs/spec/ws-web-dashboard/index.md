@@ -489,6 +489,9 @@ are:
 
 - `GET`/`POST .../work-roots/{workRootId}/terminals` — list / create.
 - `GET .../terminals/{terminalId}/output` — output poll (carries `?after=`).
+- `POST .../terminals/output/batch` — batched output poll (260723 Phase 1);
+  request `{"cursors": [{"terminalId": "<id>", "after": <u64>}, ...]}`,
+  response `{"results": {"<terminalId>": <TerminalOutputView>, ...}}`.
 - `POST .../terminals/{terminalId}/input` — raw input.
 - `POST .../terminals/{terminalId}/resize` — PTY resize.
 - `DELETE .../terminals/{terminalId}` — close.
@@ -507,14 +510,20 @@ Key properties:
   linked daemon, so a subsequent output poll for that id surfaces the upstream
   `404`.
 - **Body-parsing aliases match axum.** The `server-local` aliases that parse a
-  JSON body (create, input, resize) enforce the same `application/json`
-  content-type boundary and classify malformed bodies the same way the unscoped
-  `Json` extractor does (`415` for a missing/non-JSON content type, `422` for a
-  data error, `400` for a syntax error), staying byte-for-byte equivalent to the
-  legacy route.
+  JSON body (create, input, resize, and the batch output route) enforce the
+  same `application/json` content-type boundary and classify malformed bodies
+  the same way the unscoped `Json` extractor does (`415` for a missing/non-JSON
+  content type, `422` for a data error, `400` for a syntax error), staying
+  byte-for-byte equivalent to the legacy route.
 - **Owner-auth + bearer gating.** Terminal input, resize, and close are mutating
   host control; they preserve owner auth at the local gateway (router placement)
   and bearer auth to the linked daemon, and are never reachable without both.
+- **Batch omits, never errors.** The batch output route never fails as a whole
+  for a bad cursor: an unknown `terminalId` or one whose work root is currently
+  offline/unavailable (same `resolve_online_available_work_root` gate as the
+  single-ID route, applied per cursor) is silently omitted from `results` -
+  still `200`, possibly with a partial or empty map. Callers must treat a
+  missing key as "no update this tick", not as an error signal.
 - **Live socket route.** `.../terminals/{terminalId}/socket` is the live
   WebSocket transport, described in
   [Remote Terminal WebSocket Gatewaying](#remote-terminal-websocket-gatewaying).

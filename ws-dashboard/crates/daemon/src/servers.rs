@@ -50,8 +50,9 @@ use crate::root_picker::{
 use crate::router::AppState;
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_resize, terminal_websocket, CreateTerminalRequest, TerminalInputRequest,
-    TerminalOutputQuery, TerminalResizeRequest, TerminalWebSocketQuery,
+    terminal_output_batch, terminal_resize, terminal_websocket, CreateTerminalRequest,
+    TerminalInputRequest, TerminalOutputBatchRequest, TerminalOutputQuery, TerminalResizeRequest,
+    TerminalWebSocketQuery,
 };
 use crate::claude_routes::{
     claude_session_interrupt, claude_session_prompt, claude_session_transcript,
@@ -839,6 +840,14 @@ impl ServerScopedForwardOperation {
         }
     }
 
+    fn terminal_output_batch() -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: "/api/dashboard/terminals/output/batch".to_owned(),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
     fn terminal_input(terminal_id: &str) -> Self {
         Self {
             method: Method::POST,
@@ -1488,6 +1497,22 @@ pub async fn server_scoped_terminal_output(
     }
     forward_server_scoped_operation(state, server_route, operation, HeaderMap::new(), Bytes::new())
         .await
+}
+
+pub async fn server_scoped_terminal_output_batch(
+    State(state): State<AppState>,
+    AxumPath(server_route): AxumPath<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::terminal_output_batch();
+    if server_route == LOCAL_SERVER_ID {
+        return match parse_json_alias_body::<TerminalOutputBatchRequest>(&headers, &body) {
+            Ok(request) => terminal_output_batch(State(state), Json(request)).await,
+            Err(response) => response,
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
 }
 
 pub async fn server_scoped_terminal_input(
