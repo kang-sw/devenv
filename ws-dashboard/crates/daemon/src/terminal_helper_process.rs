@@ -650,3 +650,94 @@ mod ring_state_tests {
         assert_eq!(chunks.first().expect("non-empty").sequence, oldest_retained);
     }
 }
+
+// Regression coverage for the "make the guard real" invariant: the kill path
+// stamps the ring `Terminated` before `child.kill()` so a racing exit
+// observer (the #[cfg(windows)] handle-wait reaper, or the PTY-EOF reader)
+// waking on the daemon-initiated kill runs `transition(Exited)` as a genuine
+// no-op instead of overwriting the intentional `Terminated`. Both the guard
+// and the stamp are cross-platform pure state logic (no OS/PTY dependency),
+// so they are exercised directly here, NOT windows-gated.
+#[cfg(test)]
+mod kill_path_guard_tests {
+    use super::*;
+
+    fn shared_state_for_test() -> SharedState {
+        SharedState {
+            pid: 0,
+            start_time: 0,
+            ring: Mutex::new(RingState::new()),
+            notify: Notify::new(),
+            child: Mutex::new(None),
+            master: Mutex::new(None),
+            writer_tx: Mutex::new(None),
+            shell_started: AtomicBool::new(false),
+            exited_at: Mutex::new(None),
+            #[cfg(windows)]
+            job: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn transition_is_a_no_op_once_the_ring_has_left_running() {
+        let shared = shared_state_for_test();
+        // Drive the ring out of `Running` directly (isolating this test to
+        // `transition`'s guard, independent of how the kill path gets there).
+        shared.ring.lock().expect("ring lock poisoned").status = TerminalHelperStatus::Terminated;
+
+        // A racing exit observer waking after the daemon-initiated kill must
+        // NOT downgrade the intentional `Terminated` back to `Exited`.
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Terminated,
+            "transition(Exited) must be a genuine no-op once the ring is non-Running \
+             - removing transition's Running-only guard would fail this"
+        );
+    }
+
+    #[test]
+    fn transition_from_running_still_reaches_exited() {
+        // Negative control: the guard is specifically the non-`Running` gate,
+        // not a blanket freeze - a `Running` ring DOES transition, so the
+        // no-op above is genuinely conditional on prior state, not a
+        // transition() that never mutates.
+        let shared = shared_state_for_test();
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Running,
+            "fresh ring starts Running"
+        );
+
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Exited,
+            "a Running ring must still transition to Exited"
+        );
+    }
+
+    #[test]
+    fn kill_shell_if_running_stamps_terminated() {
+        // The load-bearing half of the kill-path reorder that is testable on
+        // Linux: `kill_shell_if_running` must leave the ring `Terminated`
+        // (not `Running`, not `Exited`). Removing the pre-kill `Terminated`
+        // stamp would leave the ring `Running` here and fail this assertion.
+        // (The child is `None` in this unit test - wiring a real PTY child in
+        // is disproportionate; the before/after-`child.kill()` write-unblock
+        // ordering is a separate writer-starvation concern, not the guard
+        // invariant under review, and combined with the two tests above this
+        // fully covers the reaper's "Exited becomes a no-op" reliance.)
+        let shared = shared_state_for_test();
+
+        shared.kill_shell_if_running();
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Terminated,
+            "kill path must stamp Terminated so a racing exit observer's Exited is a no-op"
+        );
+    }
+}
