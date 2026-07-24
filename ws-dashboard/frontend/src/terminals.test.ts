@@ -8,6 +8,7 @@ import {
   fetchTerminalOutput,
   flushPendingOutputCursors,
   listTerminals,
+  createOutputCursorFlushScheduler,
   resizeTerminal,
   sendTerminalInput,
   markTerminalOutputCursor,
@@ -545,23 +546,33 @@ assertEqual(
   "flush-before-merge (App.tsx's non-output branch order) preserves the batched chunk's cursor advance across a mid-burst close/exit message",
 );
 
-// rAF scheduling-lifecycle contract (260723 Phase 1): the actual
-// pendingOutputCursorFrameRef/flushPendingOutputCursorsNow closures live in
-// App.tsx, scoped to the component (see the plan's Codebase Findings -
-// there is no App.tsx component-level test harness), so they cannot be
-// imported into this plain-node test file. This block pins the same
-// scheduling algorithm in isolation, against a deterministic fake
-// requestAnimationFrame/cancelAnimationFrame pair (no browser/jsdom
-// dependency): schedule at most one frame per batch, and a synchronous
-// flush (mirroring closeTerminalPane / the non-"output" branch / the
-// work-root-close effect) always cancels and nulls the scheduled frame so
-// a stale frame can never re-flush an already-cleared Map, and firing an
-// already-consumed frame id is a no-op.
+// rAF scheduling-lifecycle contract (260723 Phase 1, fix-cycle 1 test-
+// partition finding): the prior version of this block hand-reimplemented
+// the scheduling algorithm against a fake rAF pair instead of driving the
+// shipped closures, so a regression introduced only in App.tsx's real
+// wiring (a broken cancel/null sequence, a dropped unmount-cleanup effect)
+// would not have been caught by any test. createOutputCursorFlushScheduler
+// (terminals.ts) is now the single implementation of that lifecycle - both
+// App.tsx's outputCursorFlushSchedulerRef and this test construct it via the
+// same factory, so this block exercises the actual shipped code, not a
+// mirror of it. Uses a deterministic fake requestAnimationFrame/
+// cancelAnimationFrame pair (no browser/jsdom dependency) to pin: (a) at
+// most one frame scheduled per batch; (b) a synchronous flushNow() cancels
+// the pending frame and nulls the internal frame id (observed indirectly:
+// a subsequent accumulate() schedules a genuinely new frame, which is only
+// possible if the internal id was reset to null - if flushNow forgot the
+// cancel/null step, the internal id would stay set and no further frame
+// would ever be requested); (c) cancel() (the unmount-cleanup path) cancels
+// an in-flight frame without applying its batch; (d) a late/already-fired
+// frame callback can never re-apply an already-consumed batch, because
+// flushNow swaps in a fresh empty pending Map before calling applyBatch.
 {
+  let requestedFrameCount = 0;
   let nextFrameId = 1;
   const scheduled = new Map<number, () => void>();
   const cancelled = new Set<number>();
   function fakeRequestAnimationFrame(cb: () => void): number {
+    requestedFrameCount += 1;
     const id = nextFrameId++;
     scheduled.set(id, cb);
     return id;
@@ -570,42 +581,25 @@ assertEqual(
     cancelled.add(id);
     scheduled.delete(id);
   }
-  function fireFrame(id: number) {
-    const cb = scheduled.get(id);
-    scheduled.delete(id);
-    cb?.();
-  }
 
-  const pending = new Map<string, number>();
-  // Ref-object pattern (mirroring App.tsx's `useRef<number | null>(null)`
-  // for `pendingOutputCursorFrameRef`) rather than a bare `let`, so a read
-  // of `.current` after a nested-function call is never stale.
-  const frameRef: { current: number | null } = { current: null };
-  let flushCount = 0;
-  function flushNow() {
-    if (frameRef.current !== null) {
-      fakeCancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
-    if (pending.size === 0) return;
-    pending.clear();
-    flushCount += 1;
-  }
-  function accumulate(key: string, seq: number) {
-    pending.set(key, Math.max(pending.get(key) ?? -1, seq));
-    if (frameRef.current === null) {
-      frameRef.current = fakeRequestAnimationFrame(flushNow);
-    }
-  }
+  const applied: Array<Map<string, number>> = [];
+  const scheduler = createOutputCursorFlushScheduler({
+    requestAnimationFrame: fakeRequestAnimationFrame,
+    cancelAnimationFrame: fakeCancelAnimationFrame,
+    applyBatch: (pending) => applied.push(new Map(pending)),
+  });
 
-  accumulate("k1", 1);
-  const scheduledFrameId = frameRef.current;
-  accumulate("k1", 2);
-  accumulate("k2", 5);
+  // (a) at most one frame scheduled per batch: repeated/duplicate/
+  // out-of-order accumulates for the same and a second logicalKey, within
+  // one un-flushed batch, must not request more than one frame.
+  scheduler.accumulate("k1", 1);
+  assertEqual(requestedFrameCount, 1, "the first accumulate schedules a frame");
+  scheduler.accumulate("k1", 2);
+  scheduler.accumulate("k2", 5);
   assertEqual(
-    scheduledFrameId,
-    frameRef.current,
-    "accumulate schedules at most one frame per batch (subsequent accumulates within the same frame reuse it)",
+    requestedFrameCount,
+    1,
+    "further accumulates within the same batch reuse the already-scheduled frame",
   );
   assertEqual(
     scheduled.size,
@@ -613,48 +607,115 @@ assertEqual(
     "only one frame is actually pending in the fake scheduler",
   );
 
-  flushNow();
-  assertEqual(flushCount, 1, "the synchronous flush actually ran");
+  // (b) synchronous flushNow() cancels the pending frame and nulls the
+  // frame id. Nulling is not directly observable, so it is pinned via its
+  // required consequence: the very next accumulate() must request a
+  // genuinely new frame. If the cancel-or-null step were dropped, the
+  // internal frame id would remain set forever and this next assertion
+  // (requestedFrameCount advancing to 2) would fail.
+  scheduler.flushNow();
+  assertEqual(applied.length, 1, "the synchronous flush actually applied a batch");
+  assertDeepEqual(
+    Object.fromEntries(applied[0]),
+    { k1: 2, k2: 5 },
+    "the synchronous flush applies the accumulated max-per-key batch",
+  );
   assertEqual(
-    scheduledFrameId !== null && cancelled.has(scheduledFrameId),
+    cancelled.has(1),
     true,
     "the synchronous flush cancels the previously-scheduled frame",
   );
   assertEqual(
-    frameRef.current,
-    null,
-    "the frame ref is nulled after a synchronous flush",
-  );
-  assertEqual(
-    pending.size,
+    scheduled.size,
     0,
-    "the pending map is cleared after a synchronous flush",
+    "no frame remains scheduled after the synchronous flush",
   );
 
-  accumulate("k3", 7);
-  const secondFrameId = frameRef.current;
+  scheduler.accumulate("k3", 7);
   assertEqual(
-    secondFrameId !== null,
+    requestedFrameCount,
+    2,
+    "a fresh frame is requested for the post-flush batch, proving the frame id was nulled by the prior flushNow (this fails if the cancel/null step is removed)",
+  );
+
+  // (c) cancel() (mirrors the App-level unmount-cleanup effect) cancels an
+  // in-flight frame without applying its pending batch.
+  assertEqual(scheduled.size, 1, "a frame is pending before cancel()");
+  scheduler.cancel();
+  assertEqual(
+    cancelled.has(2),
     true,
-    "a fresh frame is scheduled for the post-flush batch",
+    "cancel() cancels the scheduled frame",
   );
-  fireFrame(secondFrameId as number);
+  assertEqual(scheduled.size, 0, "no frame remains scheduled after cancel()");
   assertEqual(
-    flushCount,
+    applied.length,
+    1,
+    "cancel() does not apply the pending batch (only flushNow/the rAF callback does)",
+  );
+
+  // (d) a late/already-fired frame cannot re-apply an already-consumed
+  // batch. Capture the exact callback requestAnimationFrame was given for a
+  // fresh batch, flush it synchronously (as the real correctness call
+  // sites do, ahead of the frame firing), then invoke the captured callback
+  // directly - simulating the frame firing anyway despite being cancelled.
+  // The fresh-empty-Map swap inside flushNow means this must be a no-op.
+  scheduler.accumulate("k4", 3);
+  const capturedCallback = scheduled.get(3);
+  assertEqual(
+    capturedCallback !== undefined,
+    true,
+    "the third requested frame's callback was captured for the late-fire simulation",
+  );
+  scheduler.flushNow();
+  assertEqual(applied.length, 2, "the second synchronous flush applied its own batch");
+  assertDeepEqual(
+    Object.fromEntries(applied[1]),
+    { k3: 7, k4: 3 },
+    // cancel() only cancels the scheduled frame - it deliberately does not
+    // discard the pending Map (only flushNow's fresh-empty-Map swap does),
+    // so k3's un-flushed advance (accumulated before cancel()) survives and
+    // is included in this next flush alongside k4.
+    "the second flush applies every advance accumulated since the last flush, including one accumulated before an intervening cancel()",
+  );
+  capturedCallback?.();
+  assertEqual(
+    applied.length,
     2,
-    "the frame firing naturally runs exactly one flush",
+    "a late/already-fired frame callback cannot re-apply an already-consumed batch",
+  );
+
+  // pendingNextSequenceFor: read-side counterpart, exercised against a
+  // pane whose logicalKey has (and has not) an un-flushed pending advance.
+  scheduler.accumulate("k5", 4);
+  assertEqual(
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "k5",
+      nextSequence: 0,
+    }),
+    5,
+    "pendingNextSequenceFor reflects an un-flushed pending advance (chunkSequence + 1)",
   );
   assertEqual(
-    frameRef.current,
-    null,
-    "the frame ref is nulled once its own frame has fired",
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "k5",
+      nextSequence: 9,
+    }),
+    9,
+    "pendingNextSequenceFor never regresses below the pane's own current cursor",
   );
-  fireFrame(secondFrameId as number);
   assertEqual(
-    flushCount,
-    2,
-    "firing an already-consumed (and no longer scheduled) frame id again is a no-op",
+    scheduler.pendingNextSequenceFor({
+      ...paneA,
+      logicalKey: "no-pending-entry",
+      nextSequence: 3,
+    }),
+    3,
+    "pendingNextSequenceFor falls back to pane.nextSequence when there is no pending entry",
   );
+  scheduler.cancel();
 }
 
 const idleOutput = {

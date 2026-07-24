@@ -608,6 +608,100 @@ export function flushPendingOutputCursors(
   return next;
 }
 
+// Extracted rAF output-cursor flush scheduler (260723 Phase 1, fix-cycle 1
+// test-partition finding): owns the same "accumulate per-chunk advances,
+// coalesce into at most one animation frame, flush synchronously at
+// correctness-critical call sites, never re-apply an already-consumed batch"
+// lifecycle App.tsx previously inlined as component-local
+// (pendingOutputCursorRef / pendingOutputCursorFrameRef /
+// flushPendingOutputCursorsNow / the unmount-cleanup effect). Extracting it
+// here - mirroring how flushPendingOutputCursors itself was already pulled
+// out of the per-chunk call site - lets a unit test drive the exact shipped
+// scheduling logic (with a fake requestAnimationFrame/cancelAnimationFrame
+// pair) instead of only a hand-written mirror of the algorithm. Deliberately
+// does not import flushPendingOutputCursors itself: committing the batch is
+// the caller's concern (App.tsx wires `applyBatch` to
+// `setTerminalPanes((current) => flushPendingOutputCursors(current, pending))`),
+// keeping this factory framework-agnostic (no React, no TerminalPaneState
+// dependency on the write side).
+export type OutputCursorFlushSchedulerDeps = {
+  requestAnimationFrame: (callback: () => void) => number;
+  cancelAnimationFrame: (handle: number) => void;
+  // Receives the accumulated (logicalKey -> max chunkSequence) batch and
+  // commits it. Called at most once per accumulate()-triggered frame, or
+  // synchronously from flushNow().
+  applyBatch: (pending: ReadonlyMap<string, number>) => void;
+};
+
+export type OutputCursorFlushScheduler = {
+  // Records an "output" chunk's sequence for `logicalKey`, collapsing
+  // duplicate/out-of-order sequences via Math.max (mirrors
+  // flushPendingOutputCursors's own per-key contract), and schedules exactly
+  // one animation frame per batch - a no-op if a frame is already scheduled.
+  accumulate: (logicalKey: string, chunkSequence: number) => void;
+  // Cancels any scheduled frame (a no-op if none is scheduled) and, only if
+  // the pending batch is non-empty, hands it to applyBatch synchronously -
+  // swapping in a fresh empty Map first so a stale/already-fired frame
+  // callback can never re-apply an already-consumed batch. Safe to pass
+  // directly as the requestAnimationFrame callback.
+  flushNow: () => void;
+  // Cancels a scheduled frame (if any) WITHOUT flushing - a defensive
+  // teardown/unmount backstop so no batched flush ever fires against a
+  // torn-down tree.
+  cancel: () => void;
+  // Read-side counterpart for a pane that may have an un-flushed pending
+  // advance, mirroring markTerminalOutputCursor's chunkSequence + 1 math.
+  pendingNextSequenceFor: (pane: TerminalPaneState) => number;
+};
+
+export function createOutputCursorFlushScheduler(
+  deps: OutputCursorFlushSchedulerDeps,
+): OutputCursorFlushScheduler {
+  let pending = new Map<string, number>();
+  let frameId: number | null = null;
+
+  function flushNow() {
+    if (frameId !== null) {
+      deps.cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+    if (pending.size === 0) {
+      return;
+    }
+    const batch = pending;
+    pending = new Map();
+    deps.applyBatch(batch);
+  }
+
+  return {
+    accumulate(logicalKey, chunkSequence) {
+      const existing = pending.get(logicalKey);
+      pending.set(
+        logicalKey,
+        existing === undefined
+          ? chunkSequence
+          : Math.max(existing, chunkSequence),
+      );
+      if (frameId === null) {
+        frameId = deps.requestAnimationFrame(flushNow);
+      }
+    },
+    flushNow,
+    cancel() {
+      if (frameId !== null) {
+        deps.cancelAnimationFrame(frameId);
+        frameId = null;
+      }
+    },
+    pendingNextSequenceFor(pane) {
+      const value = pending.get(pane.logicalKey);
+      return value === undefined
+        ? pane.nextSequence
+        : Math.max(pane.nextSequence, value + 1);
+    },
+  };
+}
+
 export function appendTerminalWebSocketMessage(
   pane: TerminalPaneState,
   message: TerminalWebSocketServerMessage,

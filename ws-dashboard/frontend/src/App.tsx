@@ -196,6 +196,7 @@ import {
   createTerminal,
   fetchTerminalOutput,
   listTerminals,
+  createOutputCursorFlushScheduler,
   flushPendingOutputCursors,
   markTerminalPaneCloseError,
   markTerminalPaneVisibilityGated,
@@ -215,6 +216,7 @@ import {
   terminalRestoreIntentsFromPanes,
   terminalPaneLogicalKey,
   type TerminalCreateOptions,
+  type OutputCursorFlushScheduler,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
@@ -3610,23 +3612,36 @@ function WorkbenchShell({
   // Batches per-chunk "output" cursor advances (260723 Phase 1): each
   // WebSocket "output" frame previously called setTerminalPanes
   // synchronously via markTerminalOutputCursor (one rerender per PTY
-  // chunk); this ref instead accumulates the max chunkSequence seen per
-  // logicalKey and flushes them all in a single setTerminalPanes call once
-  // per animation frame (see flushPendingOutputCursorsNow below). Several
-  // call sites still flush this synchronously - see that function's own
-  // comment for why a rAF-only flush would reintroduce the stale-cursor
-  // race markTerminalOutputCursor's doc comment describes.
-  const pendingOutputCursorRef = useRef<Map<string, number>>(new Map());
-  const pendingOutputCursorFrameRef = useRef<number | null>(null);
+  // chunk); this scheduler instead accumulates the max chunkSequence seen
+  // per logicalKey and flushes them all in a single setTerminalPanes call
+  // once per animation frame (see flushPendingOutputCursorsNow below).
+  // Several call sites still flush this synchronously - see that function's
+  // own comment for why a rAF-only flush would reintroduce the stale-cursor
+  // race markTerminalOutputCursor's doc comment describes. Extracted into
+  // createOutputCursorFlushScheduler (terminals.ts, fix-cycle 1) so the
+  // scheduling lifecycle itself - not just flushPendingOutputCursors's pure
+  // batch-apply math - is unit-testable against the shipped implementation;
+  // constructed lazily via the same ref-if-null pattern already used for
+  // resourceRefreshCoordinatorRef above, since setTerminalPanes is a stable
+  // useState setter and this must not be re-created across renders.
+  const outputCursorFlushSchedulerRef =
+    useRef<OutputCursorFlushScheduler | null>(null);
+  if (!outputCursorFlushSchedulerRef.current) {
+    outputCursorFlushSchedulerRef.current = createOutputCursorFlushScheduler({
+      requestAnimationFrame: (callback) => requestAnimationFrame(callback),
+      cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+      applyBatch: (pending) =>
+        setTerminalPanes((current) =>
+          flushPendingOutputCursors(current, pending),
+        ),
+    });
+  }
   // Defensive backstop: cancel a scheduled-but-unfired flush frame on this
   // component's own unmount so it never fires a setTerminalPanes update
   // against a torn-down tree.
   useEffect(() => {
     return () => {
-      if (pendingOutputCursorFrameRef.current !== null) {
-        cancelAnimationFrame(pendingOutputCursorFrameRef.current);
-        pendingOutputCursorFrameRef.current = null;
-      }
+      outputCursorFlushSchedulerRef.current?.cancel();
     };
   }, []);
   const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{
@@ -5586,16 +5601,18 @@ function WorkbenchShell({
     );
   }
 
-  // Flushes every pending output-cursor advance (pendingOutputCursorRef)
-  // into terminalPanes in a single setTerminalPanes call, and cancels any
-  // scheduled rAF flush so a stale frame never re-flushes an
-  // already-cleared Map (a no-op if the frame already fired, since this is
-  // also the rAF callback itself - see the scheduling call below). This
-  // must run synchronously - not deferred to "whenever the next frame
-  // lands" - at every point where a pane's cursor must already be current:
-  // before a non-"output" socket message's own cursor merge
-  // (appendTerminalWebSocketMessage's Math.max would otherwise compare
-  // against a stale pane.nextSequence), before a pane closes
+  // Flushes every pending output-cursor advance into terminalPanes in a
+  // single setTerminalPanes call, and cancels any scheduled rAF flush so a
+  // stale frame never re-flushes an already-cleared Map (a no-op if the
+  // frame already fired, since this is also the rAF callback itself - see
+  // the scheduling call below). Delegates to
+  // outputCursorFlushSchedulerRef.current.flushNow() (terminals.ts,
+  // fix-cycle 1 extraction) - kept as a same-named wrapper so every call
+  // site below is unchanged. This must run synchronously - not deferred to
+  // "whenever the next frame lands" - at every point where a pane's cursor
+  // must already be current: before a non-"output" socket message's own
+  // cursor merge (appendTerminalWebSocketMessage's Math.max would otherwise
+  // compare against a stale pane.nextSequence), before a pane closes
   // (closeTerminalPane), and before a pane's browser-side state is dropped
   // outside of an explicit close (the work-root-close effect below) - that
   // last path intentionally leaves the daemon session running for a
@@ -5605,20 +5622,10 @@ function WorkbenchShell({
   // own doc comment documents, reintroduced at the batching layer instead
   // of the per-chunk layer if any of these call sites were skipped.
   function flushPendingOutputCursorsNow() {
-    const frameId = pendingOutputCursorFrameRef.current;
-    if (frameId !== null) {
-      cancelAnimationFrame(frameId);
-      pendingOutputCursorFrameRef.current = null;
-    }
-    if (pendingOutputCursorRef.current.size === 0) {
-      return;
-    }
-    const pending = pendingOutputCursorRef.current;
-    pendingOutputCursorRef.current = new Map();
-    setTerminalPanes((current) => flushPendingOutputCursors(current, pending));
+    outputCursorFlushSchedulerRef.current?.flushNow();
   }
 
-  // Read-side counterpart to pendingOutputCursorRef, exposed through
+  // Read-side counterpart to the scheduler's pending batch, exposed through
   // TerminalPaneActions.getPendingNextSequence (see the construction site
   // below) for terminalPaneBody.tsx's debounced visual-capture effect. That
   // effect reads pane.nextSequence synchronously off its own liveRef inside
@@ -5628,10 +5635,10 @@ function WorkbenchShell({
   // would not be visible to the child's liveRef until a subsequent render.
   // Reading the pending Map directly here sidesteps that entirely.
   function pendingNextSequenceFor(pane: TerminalPaneState): number {
-    const pending = pendingOutputCursorRef.current.get(pane.logicalKey);
-    return pending === undefined
-      ? pane.nextSequence
-      : Math.max(pane.nextSequence, pending + 1);
+    return (
+      outputCursorFlushSchedulerRef.current?.pendingNextSequenceFor(pane) ??
+      pane.nextSequence
+    );
   }
 
   function applyTerminalSocketMessage(
@@ -5639,18 +5646,10 @@ function WorkbenchShell({
     message: TerminalWebSocketServerMessage,
   ) {
     if (message.type === "output") {
-      const existing = pendingOutputCursorRef.current.get(pane.logicalKey);
-      pendingOutputCursorRef.current.set(
+      outputCursorFlushSchedulerRef.current?.accumulate(
         pane.logicalKey,
-        existing === undefined
-          ? message.chunk.sequence
-          : Math.max(existing, message.chunk.sequence),
+        message.chunk.sequence,
       );
-      if (pendingOutputCursorFrameRef.current === null) {
-        pendingOutputCursorFrameRef.current = requestAnimationFrame(
-          flushPendingOutputCursorsNow,
-        );
-      }
       return;
     }
     // Non-"output" frames (status/exit) merge their own nextSequence via
