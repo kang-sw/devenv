@@ -694,10 +694,15 @@ a merge or rebase conflict state.
 Status refresh stays host-light: the dashboard refreshes immediately on
 selected WorkRoot changes, visibility return, explicit fetch/push/pull,
 branch switch, and branch create, then polls conservatively only for the
-selected visible WorkRoot. That poll's `git status` call passes
-`--no-optional-locks`, so it never takes the repository's `.git/index.lock`
-(`260714-bug-git-status-poll-index-lock-staleness`); mutating routes
-(switch/fetch/push/pull) are unaffected and still take locks as needed. All
+selected visible WorkRoot. That poll uses only lock-free git reads: the
+`git status` summary passes `--no-optional-locks`
+(`260714-bug-git-status-poll-index-lock-staleness`) and the change-line
+summary uses the plumbing `git diff-index --numstat` form
+(`260724-bug-dashboard-git-diff-index-lock-stuck-activity-badge`) instead of
+porcelain `git diff --numstat`, which did opportunistically rewrite the index
+and take `.git/index.lock`; so the poll never takes the repository's
+`.git/index.lock`. Mutating routes (switch/fetch/push/pull) are unaffected and
+still take locks as needed. All
 Git toolbar routes remain owner-authenticated,
 address workRoots by opaque `workRootId`, keep Git work off async workers, and
 avoid exposing host paths in command logs or bounded browser-visible errors.

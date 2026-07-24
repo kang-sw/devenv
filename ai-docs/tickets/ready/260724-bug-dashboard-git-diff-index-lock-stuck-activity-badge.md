@@ -135,7 +135,7 @@ Degrades the Windows dogfooding surface for this dashboard:
 
 ## Approach (proposed, not yet sage-gated)
 
-### Phase 1 (proposed): Stop `changes_for_path`'s `diff` call from taking the index lock
+### Phase 1: Stop `changes_for_path`'s `diff` call from taking the index lock
 
 Replace `git diff --numstat HEAD --`
 (`ws-dashboard/crates/daemon/src/git_toolbar.rs:442`) with the plumbing
@@ -164,7 +164,52 @@ ticket:
 - `ai-docs/spec/ws-web-dashboard/index.md:697-699` currently reads as if the
   whole poll is lock-free, when only the `status` sub-call is.
 
-### Phase 2 (proposed): Add a timeout/abort path for the activity badge (and audit the same gap elsewhere)
+### Result (37b92ff2) - 2026-07-24
+
+`changes_for_path`'s poll `diff` sub-call
+(`ws-dashboard/crates/daemon/src/git_toolbar.rs`) was swapped from porcelain
+`git diff --numstat HEAD --` to plumbing
+`git --no-optional-locks diff-index -M --numstat HEAD --`.
+
+- **`-M` is load-bearing for parity, not optional.** Bare
+  `diff-index --numstat` omits rename detection (porcelain `diff` has it on by
+  default), which splits a pure rename into delete+add and changes the badge
+  totals; `-M` restores byte-identical `<added>\t<removed>\t<path>` output while
+  staying lock-free. Mode-only / stat-dirty-content-clean files emit
+  `0\t0\tpath`, correctly summing to zero.
+- **`--no-optional-locks` kept as defense-in-depth only.** Re-verified
+  empirically (git 2.43.0, index inode+hash diffed immediately before/after) that
+  the flag and `GIT_OPTIONAL_LOCKS=0` are ignored by porcelain `diff` (it still
+  rewrites `.git/index`), and honored only by `status` — matching the ticket's
+  Finding table. The plumbing `diff-index` form is what actually removes the lock
+  take; the flag costs nothing where it isn't honored and future-proofs across
+  git versions.
+- **Commits:** `37b92ff2` (fix) + `ed830e08` (tests).
+- **Tests added** (all in `git_toolbar.rs`): an index-rewrite regression pin
+  (fails against the old `git diff --numstat` command, passes against
+  `diff-index`), an output-parity test across modified / rename / mode-change
+  cases, and an external-held-lock robustness test confirming no
+  `.git/index.lock` is created while `git_status`/`changes_for_path` run
+  concurrently with an external process holding the lock.
+- **Verification:** `cargo test -p ws-dashboard-daemon git_toolbar` green (4
+  passed); full daemon suite green modulo the known unrelated
+  `terminal_boot_reconcile...` flake. Reviews clean (an observed rename flake was
+  ruled environmental; the external-lock test was added on review request).
+- **Doc closeout (this phase):** spec corrected — the
+  `260524-ws-dashboard-git-aware-workroot-toolbar` section now scopes the
+  lock-free claim to both poll sub-calls and notes the `diff` sub-call was not
+  lock-free until this change (behavior-preserving, no caller-visible contract
+  change). Prior ticket `260714-bug-git-status-poll-index-lock-staleness` gained
+  an appended `#### Correction (37b92ff2)` note retracting its "`git diff
+  --numstat` is read-only plumbing" claim. Mental model
+  `ws-web-dashboard/index.md` gained a Module Contract invariant recording the
+  lock-free poll-form requirement and the `--no-optional-locks`-ineffective-on-
+  `diff` gotcha.
+
+**Defect 2 / Phase 2 (frontend `AbortController`/timeout for the activity badge)
+remains open and is independently advanceable; this ticket stays in `ready/`.**
+
+### Phase 2: Add a timeout/abort path for the activity badge (and audit the same gap elsewhere)
 
 Add a client-side fetch timeout via `AbortController`/`AbortSignal` to
 `fetchWorkRootActivity` (`ws-dashboard/frontend/src/workRootActivity.ts:423-436`)
