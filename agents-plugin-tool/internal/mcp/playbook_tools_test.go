@@ -854,7 +854,13 @@ func TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally(t *testing.T)
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	if !strings.Contains(body, `<playbook name="lead-goal-step" title="Goal Step">`) {
+	const overlaySubstr = "Degenerate to serial when you cannot fan out."
+	const boundaryTag = `<playbook name="lead-goal-step" title="Goal Step">`
+
+	if !strings.Contains(body, overlaySubstr) {
+		t.Fatalf("lead-goal-fan-out-step body missing overlay procedure text %q:\n%s", overlaySubstr, body)
+	}
+	if !strings.Contains(body, boundaryTag) {
 		t.Fatalf("lead-goal-fan-out-step body missing appended lead-goal-step boundary:\n%s", body)
 	}
 	if !strings.Contains(body, "</playbook>") {
@@ -862,6 +868,16 @@ func TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally(t *testing.T)
 	}
 	if !strings.Contains(body, "Goal-pursuit step; `ready/` is the sole progress gate.") {
 		t.Fatalf("lead-goal-fan-out-step body missing lead-goal-step procedure text:\n%s", body)
+	}
+
+	// Ordering: the overlay body must appear BEFORE the transcluded
+	// lead-goal-step boundary, so a regression that dropped the overlay or
+	// reversed append order fails loudly instead of merely losing a
+	// substring check.
+	overlayIdx := strings.Index(body, overlaySubstr)
+	boundaryIdx := strings.Index(body, boundaryTag)
+	if overlayIdx < 0 || boundaryIdx < 0 || overlayIdx >= boundaryIdx {
+		t.Fatalf("expected overlay text (index %d) before lead-goal-step boundary (index %d):\n%s", overlayIdx, boundaryIdx, body)
 	}
 
 	// Lockstep: the appended block must equal exactly what LoadSkillBody

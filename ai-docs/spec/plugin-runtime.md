@@ -296,6 +296,35 @@ adding one tool to `tools()` requires the matching `tools` entry in both
 exact-match contract fails closed on any surface drift, not just missing
 entries.
 
+## Serve-Time Skill-Body Transclusion {#260724-serve-time-skill-body-transclusion}
+
+`printPlaybook` (the `playbook.print` MCP tool's implementation) has a
+code-side pragmatic-concatenation mechanism: after the normal
+render-plus-substitute pass, for specific serving playbook names it loads a
+second body straight from the skills tree via `wsrsrc.LoadSkillBody` and
+appends it, wrapped in a visible `<playbook name="..." title="...">` boundary
+(`wrapRenderedPlaybookForConcatenation`), rather than inlining that content
+into the rsrc source or duplicating it in prose. The append happens after
+`substitutePlaybookVars` runs on the primary body, because the appended
+skills-tree body is static prose with no `{{.` placeholders and must not trip
+the undeclared-var guard. Two call sites currently use this mechanism, gated
+differently:
+
+- `lead-workflow-manual` appends `lead-prefer-subagent` only when the global
+  `workflow.prefer_subagent` preference resolves to `on`.
+- `lead-goal-fan-out-step` (`#260724-goal-fan-out-step-transclusion` in
+  `workflow-skills.md`) appends `lead-goal-step` unconditionally — every
+  serve, no config-flag check — since the fan-out overlay's whole point is to
+  transclude goal-step's contract verbatim rather than restate it.
+
+The appended skills-tree body is read live off disk at serve time (not
+manifest-hash-verified, an accepted trade-off shared with the
+`lead-prefer-subagent` precedent): editing the source `SKILL.md` changes the
+next `playbook.print` response with no separate build or regen step, but also
+means `agents-plugin/skills/manifest.json`'s drift gate does not catch a
+content change here the way `agents-plugin/rsrc/manifest.json` catches drift
+in ordinary rsrc playbook bodies.
+
 ## Post-Compaction Session Restoration {#260626-post-compaction-session-restoration}
 
 Context compaction discards in-flight routing and implementation context from the
