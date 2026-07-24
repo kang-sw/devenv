@@ -58,3 +58,13 @@ complete. This nearly happened this session and was caught only by the user.
 - (c) Is persona-bleed reducible by prompt structure at all, or is it
   model-intrinsic — this session's template-correct failure suggests prompt alone
   is insufficient.
+
+## Resolved by deletion (260723-refactor-fork-removal-prefer-subagent)
+
+`260723-refactor-fork-removal-prefer-subagent` Phase 1 deleted the fork
+delegation construct from `lead-prefer-subagent` entirely — no partial
+retention behind a flag. Question (a) is answered by removal rather than by a
+model-conditioned routing rule: fresh spawn is now the only delegated-payload
+path, so a fork's lead-voice persona-bleed has nothing left to reproduce
+against. Questions (b) and (c) no longer apply to `lead-prefer-subagent`
+routing since there is no fork worker-report contract left to strengthen.

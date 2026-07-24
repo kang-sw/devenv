@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,9 +63,16 @@ const bootstrapToolName = "ferrule"
 // gated the same way as its sibling workflow_manual: it is a cheaper view of
 // the same lead-bootstrap/recovery surface, not a general todo/agenda
 // accessor, so it stays lead-only even though the underlying todo.*/agenda.*
-// data is itself scope-open.
+// data is itself scope-open. tickets.sage_stamp (260723 Phase 2, renamed from
+// tickets.sage_record) is listed explicitly because it stays inside the
+// `tickets.*` prefix (no dedicated prefix to gate on): it is the sole
+// terminal writer of sage-review posture + the ## Blocked companion, and
+// reviewers must never write frontmatter directly (single-writer property,
+// {#260720-sage-gate-record-tools}) — this is new enforcement, not a
+// preserved no-op, since the pre-rename tickets.sage_record was reachable by
+// a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -115,6 +123,12 @@ var debugEvents = struct {
 	sync.Mutex
 	events []map[string]any
 }{}
+
+// testPanicHook is always nil in production. Only _test.go files in this
+// package set it, to exercise goroutine-level panic recovery (server.go's
+// recover-defer in ServeStdio) through a real dispatched tools/call request
+// instead of a synthetic panic.
+var testPanicHook func(toolName string)
 
 func NewServer(root, version string, sourceCommit ...string) *Server {
 	commit := "dev"
@@ -170,6 +184,21 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			defer wg.Done()
 			defer cancel()
 			defer requests.Delete(id)
+			// This defer is appended after the three above, so on unwind it
+			// runs FIRST (Go LIFO defer order): a panic inside s.handle is
+			// caught and converted into a visible JSON-RPC error before
+			// wg.Done/cancel/requests.Delete fire, so it fails only this
+			// request instead of crashing the ws-mcp serve process.
+			defer func() {
+				if r := recover(); r != nil {
+					stack := debug.Stack()
+					recordPanic(req.Method, id, r, stack)
+					resp := errorResponse(req.ID, -32000, fmt.Sprintf("internal error: request handler panicked (%s)", req.Method))
+					if err := writeResponse(resp); err != nil {
+						appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+					}
+				}
+			}()
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
 				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}
@@ -260,6 +289,117 @@ func appendDebugEvent(event string, fields map[string]any) {
 	}
 	defer file.Close()
 	_, _ = file.Write(append(raw, '\n'))
+}
+
+// crashLogPath resolves the always-on, cross-platform panic-trace sink under
+// the shared cache root (WS_CACHE_HOME or ~/.cache/ws@...), the same
+// root-independent seam sessionStore.keysDir uses for the keys/ dir: a
+// panicking request may not know which project root it belonged to, so the
+// crash file lives in a flat top-level dir under CacheRoot(), not under any
+// per-project layout. It creates the directory (0o755) if needed and returns
+// the fixed file path; callers append-only (no rotation), matching the
+// existing WS_MCP_DEBUG_LOG sink's precedent.
+func crashLogPath() (string, error) {
+	dir, err := crashDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mcp-panic.log"), nil
+}
+
+// crashDir resolves and creates the always-on, cross-platform crash-dir sink
+// under the shared cache root (WS_CACHE_HOME or ~/.cache/ws@...). Shared by
+// crashLogPath (mcp-panic.log) and RecordLifecycleEvent (mcp-lifecycle.log) so
+// both sinks live in the same durable, root-independent location family.
+func crashDir() (string, error) {
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(cacheRoot, "crash")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create crash log dir: %w", err)
+	}
+	return dir, nil
+}
+
+// recordPanic persists a recovered request-goroutine panic to the always-on
+// crash file (required sink) and mirrors it into the in-memory debug ring
+// (and, if WS_MCP_DEBUG_LOG is set, that opt-in secondary log) via
+// appendDebugEvent. Unlike appendDebugEvent's best-effort mirror, failure to
+// resolve or write the crash file falls back to stderr so a broken/unwritable
+// cache home never fully swallows the trace.
+func recordPanic(method, id string, recovered any, stack []byte) {
+	fields := map[string]any{
+		"id":     id,
+		"method": method,
+		"panic":  fmt.Sprint(recovered),
+		"stack":  string(stack),
+	}
+	record := map[string]any{
+		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
+		"event": "request.panic",
+	}
+	for key, value := range fields {
+		record[key] = value
+	}
+	if raw, err := json.Marshal(record); err == nil {
+		if path, err := crashLogPath(); err == nil {
+			if file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+				_, writeErr := file.Write(append(raw, '\n'))
+				closeErr := file.Close()
+				if writeErr != nil || closeErr != nil {
+					fmt.Fprintf(os.Stderr, "mcp: failed to append crash log %s: write=%v close=%v\n", path, writeErr, closeErr)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "mcp: failed to open crash log %s: %v\n", path, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "mcp: failed to resolve crash log path: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "mcp: failed to marshal crash record: %v\n", err)
+	}
+
+	appendDebugEvent("request.panic", fields)
+}
+
+// RecordLifecycleEvent persists a serve-process lifecycle event (e.g. detected
+// parent-process death) to the always-on crash-dir sink (<cache-root>/crash/
+// mcp-lifecycle.log), the same durable location family as recordPanic, and
+// mirrors it into the in-memory debug ring / opt-in WS_MCP_DEBUG_LOG via
+// appendDebugEvent. Exported so cmd/ws-mcp's Windows parent-death watcher can
+// leave a durable trace before it self-terminates the orphaned process. Failure
+// to resolve or write the file falls back to stderr so a broken cache home
+// never fully swallows the trace.
+func RecordLifecycleEvent(event string, fields map[string]any) {
+	record := map[string]any{
+		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
+		"event": event,
+	}
+	for key, value := range fields {
+		record[key] = value
+	}
+	if raw, err := json.Marshal(record); err == nil {
+		if dir, err := crashDir(); err == nil {
+			path := filepath.Join(dir, "mcp-lifecycle.log")
+			if file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+				_, writeErr := file.Write(append(raw, '\n'))
+				closeErr := file.Close()
+				if writeErr != nil || closeErr != nil {
+					fmt.Fprintf(os.Stderr, "mcp: failed to append lifecycle log %s: write=%v close=%v\n", path, writeErr, closeErr)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "mcp: failed to open lifecycle log %s: %v\n", path, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "mcp: failed to resolve lifecycle log path: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "mcp: failed to marshal lifecycle record: %v\n", err)
+	}
+
+	appendDebugEvent(event, fields)
 }
 
 func recentDebugEvents(limit int) []map[string]any {
@@ -379,6 +519,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 			}
 		}
+	}
+
+	if testPanicHook != nil {
+		testPanicHook(params.Name)
 	}
 
 	switch params.Name {
@@ -894,7 +1038,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
-		result, err := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
+		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:               stringList(params.Arguments["paths"]),
 			Title:               title,
 			Description:         description,
@@ -1160,7 +1304,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
-	case "tickets.create":
+	case "tickets.create_empty":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
@@ -1228,7 +1372,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			commitHash = commitRes.Hash
 		}
 		return toolTextResponse(req.ID, formatSageGate(result, commitHash), nil)
-	case "tickets.sage_record":
+	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
@@ -1260,6 +1404,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", commitErr)
 		}
 		return toolTextResponse(req.ID, formatSageRecord(result, commitRes.Hash), nil)
+	case "tickets.verify":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		result, err := wsdoc.TicketVerify(root, stringList(params.Arguments["paths"]))
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatTicketVerify(result), err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2419,10 +2576,15 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 	return b.String()
 }
 
+// formatTicketCreate's next_instruction line carries the acceptance-check
+// caveat verbatim ("valid empty skeleton + initial posture") so a caller
+// never mistakes tickets.create_empty for a full mutation orchestrator —
+// tickets.template owns the body skeleton, and this tool never renders one.
 func formatTicketCreate(res wsdoc.TicketCreateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n", res.Path)
 	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
+	b.WriteString("next_instruction: This is a valid empty skeleton + initial posture only, not a full mutation orchestrator; call tickets.template for the body skeleton before treating this ticket as populated.\n")
 	return b.String()
 }
 
@@ -2432,6 +2594,72 @@ func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
 	fmt.Fprintf(&b, "%s: %s\n  %s -> %s\n", verb, stem, result.OldPath, result.NewPath)
 	if result.Tip != "" {
 		fmt.Fprintf(&b, "tip: %s\n", result.Tip)
+	}
+	if instruction := ticketMutateNextInstruction(verb, result); instruction != "" {
+		fmt.Fprintf(&b, "next_instruction: %s\n", instruction)
+	}
+	return b.String()
+}
+
+// ticketMutateNextInstruction surfaces the action-time follow-on for a
+// tickets.close/tickets.move result, replacing front-loaded playbook prose
+// that used to restate these obligations up front (260723 Phase 2). It
+// returns "" when there is no must-know follow-on beyond the plain tip.
+func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) string {
+	switch {
+	case verb == "moved" && strings.Contains(filepath.ToSlash(result.NewPath), "/ready/"):
+		return "Call tickets.sage_gate(stem, landing) next to resolve the sage-review gate for this promotion."
+	case verb == "closed" && strings.Contains(result.Tip, "unresolved phase"):
+		return "This is a soft warning only (no block); resolve or explicitly accept the unresolved phase(s) before treating this ticket as truly closed."
+	default:
+		return ""
+	}
+}
+
+// verifyAdapter adapts wsdoc.TicketVerify's richer VerifyResult into the
+// plain-error shape wsgit.Client.Verifier expects, so wsgit.Commit can veto a
+// commit without importing internal/wsdoc directly (see
+// {#260720-wsdoc-commit-boundary}). Wired into both the git.commit dispatch
+// case below and the CLI gitCommit handler (via VerifyAdapter) so every
+// ws.git.commit entry point is gated identically.
+func verifyAdapter(root string, paths []string) error {
+	result, err := wsdoc.TicketVerify(root, paths)
+	if err != nil {
+		return err
+	}
+	if result.OK {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("ticket verify failed:\n")
+	for _, finding := range result.Findings {
+		fmt.Fprintf(&b, "- [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+	}
+	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+}
+
+// formatTicketVerify renders a wsdoc.VerifyResult for the standalone
+// tickets.verify tool: an overall PASS/FAIL line followed by one bullet per
+// finding (hard, hyphenated FAIL) and warning (soft, WARN) — mirroring
+// formatTicketMutate/formatSageGate's plain-text style.
+func formatTicketVerify(result wsdoc.VerifyResult) string {
+	var b strings.Builder
+	if result.OK {
+		b.WriteString("verify: PASS\n")
+	} else {
+		b.WriteString("verify: FAIL\n")
+	}
+	for _, finding := range result.Findings {
+		fmt.Fprintf(&b, "  FAIL [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+	}
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(&b, "  WARN [%s] %s: %s\n", warning.Guardrail, warning.Path, warning.Message)
+	}
+	switch {
+	case !result.OK:
+		b.WriteString("next_instruction: Fix every FAIL finding above; these are the same hard guardrails git.commit enforces and will block a commit.\n")
+	case len(result.Warnings) > 0:
+		b.WriteString("next_instruction: PASS with warnings above; they do not block a commit but should be addressed or explicitly accepted.\n")
 	}
 	return b.String()
 }
@@ -2464,7 +2692,7 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no."
 	case "run":
-		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_record(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
+		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
@@ -3780,8 +4008,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "tickets.create",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"name":        "tickets.create_empty",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Yields only a valid empty skeleton + initial posture, not a full mutation orchestrator — populate the body via tickets.template. Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3828,8 +4056,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "tickets.sage_record",
-			"description": "Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, commits with the canonical title, and returns the applied posture and commit ref.",
+			"name":        "tickets.sage_stamp",
+			"description": "Lead-only. Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, commits with the canonical title, and returns the applied posture and commit ref. This is the thin, lead-only replacement for the former tickets.sage_record write; reviewers never call this tool.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3838,6 +4066,18 @@ func tools() []map[string]any {
 					"verdicts": objectArrayProperty("Reviewer verdicts: [{reviewer, verdict, issues:[{title, severity, resolution}]}]. verdict is pass|concern|block."),
 				},
 				"required": []string{"stem", "stage", "verdicts"},
+			},
+		},
+		{
+			"name":        "tickets.verify",
+			"description": "Run the ticket-write guardrails (stem/status-dir, frontmatter fence integrity, ready-landing sage-review posture, phase/Result heading well-formedness, close date-field presence) against ticket-shaped paths without staging or committing. These are the same hard guardrails git.commit enforces before it will commit a ticket-touching change; spec-address is reported as a warning only, never a block. Non-ticket paths are silently skipped. Use standalone for mid-edit red/green feedback before staging.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"paths":  stringArrayProperty("Ticket file paths to verify (ai-docs/tickets/<status>/<stem>.md)."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"paths"},
 			},
 		},
 		{
@@ -4080,7 +4320,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "tickets.sage_gate", "tickets.sage_record", "path.generate", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",

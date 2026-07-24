@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,7 +111,7 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	}
 }
 
-func TestServeStdioSageRecordDispatch(t *testing.T) {
+func TestServeStdioSageStampDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sr.md"),
@@ -122,7 +123,7 @@ func TestServeStdioSageRecordDispatch(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 9801, root, nil))
 
-	resp := callToolWithKey(t, server, 9802, key, "tickets.sage_record", map[string]any{
+	resp := callToolWithKey(t, server, 9802, key, "tickets.sage_stamp", map[string]any{
 		"stem":  "260101-feat-sr",
 		"stage": "design",
 		"verdicts": []any{
@@ -130,17 +131,61 @@ func TestServeStdioSageRecordDispatch(t *testing.T) {
 		},
 	})
 	if !strings.Contains(resp, "verdict: pass") || !strings.Contains(resp, "sage-review-design: completed") || !strings.Contains(resp, "commit:") {
-		t.Fatalf("sage_record dispatch response:\n%s", resp)
+		t.Fatalf("sage_stamp dispatch response:\n%s", resp)
 	}
 
 	// Missing verdict for the requested stage must surface as a tool error, not a
 	// silent completed write.
-	errResp := callToolWithKey(t, server, 9803, key, "tickets.sage_record", map[string]any{
+	errResp := callToolWithKey(t, server, 9803, key, "tickets.sage_stamp", map[string]any{
 		"stem":     "260101-feat-sr",
 		"stage":    "combined",
 		"verdicts": []any{map[string]any{"reviewer": "design", "verdict": "pass"}},
 	})
 	if !strings.Contains(errResp, "both design and completeness") {
 		t.Fatalf("expected missing-verdict error, got:\n%s", errResp)
+	}
+}
+
+// TestServeStdioSageStampDelegateKeyBlocked confirms the new lead-only gate
+// (260723 Phase 2): a delegate-scoped session key must be rejected at the
+// keyed capability gate, mirroring TestWorkflowManualDelegateKeyBlocked. This
+// is genuinely new enforcement — the pre-rename tickets.sage_record carried
+// no isLeadOnlyTool entry, so a delegate key could reach it.
+func TestServeStdioSageStampDelegateKeyBlocked(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-blocked.md"),
+		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatalf("mint delegate key: %v", err)
+	}
+
+	rawResp := callToolOnce(t, server, 9804, "tickets.sage_stamp", map[string]any{
+		"session_key": delegateKey,
+		"stem":        "260101-feat-blocked",
+		"stage":       "design",
+		"verdicts": []any{
+			map[string]any{"reviewer": "design", "verdict": "pass"},
+		},
+	})
+	if !strings.Contains(rawResp, "tool not available in current") {
+		t.Errorf("delegate key: expected lead-only rejection, got:\n%s", rawResp)
+	}
+	if !strings.Contains(rawResp, "-32601") {
+		t.Errorf("delegate key: expected JSON-RPC error code -32601, got:\n%s", rawResp)
+	}
+	// The rejection must be a pure gate error, not a partial write.
+	body, readErr := os.ReadFile(filepath.Join(root, "ai-docs", "tickets", "todo", "260101-feat-blocked.md"))
+	if readErr != nil {
+		t.Fatalf("read ticket: %v", readErr)
+	}
+	if strings.Contains(string(body), "sage-review-design: completed") {
+		t.Errorf("delegate key: rejected call must not have written frontmatter:\n%s", body)
 	}
 }

@@ -71,3 +71,16 @@ Cross-reference `260605-research-ws-native-subagent-pivot`: the pivot makes
 harness-native subagents (forks included) the sole delegation substrate, so a
 reliable fork-execution guarantee is load-bearing for the whole direction, not
 just for prefer-subagent.
+
+## Resolved by deletion (260723-refactor-fork-removal-prefer-subagent)
+
+`lead-prefer-subagent` no longer offers a fork delegation path at all —
+`260723-refactor-fork-removal-prefer-subagent` Phase 1 deleted the
+`spawn_agent(fork_context:true, ...)` construct and the fork/fresh-spawn
+decision rule, reshaping the posture to fresh-spawn-by-default plus a narrow
+central authoring/mutation whitelist for durable artifacts. With no fork
+mechanism left to route through, the posture-leak this ticket investigates has
+no surviving reproduction path; the third research direction listed above
+("prefer fresh spawns over forks for any work that does not strictly need
+inherited conversation context") is effectively the outcome taken, just
+without a fork option remaining at all.

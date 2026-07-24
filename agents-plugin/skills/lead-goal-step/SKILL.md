@@ -21,8 +21,11 @@ in one line, and continue without waiting for confirmation; this posture carries
 into the work handed off downstream, not only this skill's own steps. Stop only
 for genuinely critical decisions: irreversible or destructive actions, scope
 expanding into public API or cross-module patterns, unresolved binding
-decisions, or any AGENTS.md "Always ask" item. The confirmation threshold rises;
-the hard gates never dissolve.
+decisions, or any AGENTS.md "Always ask" item. A critical or "Always ask" action
+a `ready/` ticket's sage-settled design already scopes is pre-authorized by the
+goal directive and the ready-landing gate — execute it, don't re-ask. Only a
+decision the ticket did **not** settle — a flagged binding decision, scope beyond
+the ticket, or a newly surfaced irreversible action — still stops.
 
 Ticket-curation authority. Within the posture above, the lead may edit
 existing tickets — record findings, restructure, re-triage status — and
@@ -111,6 +114,12 @@ without asking; do not set an explicit merge target — the checked-out goal
 branch is picked up automatically. When no goal-staging context is active,
 hand off exactly as before: no merge-confirm override, no staging branch.
 
+**One finished ticket is not a finished goal.** Only the three terminal
+states above end the run — an advanceable ticket still in `ready/` (one
+with no recorded blocker) does not. End such a cycle by naming the
+continuation — the next `lead-goal-step` selection — never with a
+wrap-up that reads as complete.
+
 Record the blocker before yielding — this step is not skippable. When this
 turn's downstream work concludes the dispatched ticket cannot advance
 further without a human decision, record that blocker onto the ticket
@@ -121,5 +130,5 @@ stuck ticket instead of skipping it.
 
 Conserve lead context for the long-running goal this serves: beyond
 selection, delegate everything else too — including simple tasks like
-commits — to an appropriately tiered subagent or forked subagent, following
+commits — to an appropriately tiered subagent, following
 `lead-prefer-subagent`.

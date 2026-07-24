@@ -35,6 +35,13 @@ func TestOpenCloseReopenCreatesWorktreeDatabase(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("state db missing: %v", err)
 	}
+	var mode string
+	if err := store.db.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal_mode after create = %q, want wal", mode)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +52,73 @@ func TestOpenCloseReopenCreatesWorktreeDatabase(t *testing.T) {
 	defer reopened.Close()
 	if reopened.Path() != path {
 		t.Fatalf("reopened path = %q, want %q", reopened.Path(), path)
+	}
+	if err := reopened.db.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal_mode after reopen = %q, want wal", mode)
+	}
+}
+
+// TestManagerOpenReassertsWALOnPreExistingNonWALDatabase covers the gap
+// item 2 closes: configure() previously only issued `PRAGMA
+// journal_mode=WAL` when creating a brand-new state.sqlite file, so a
+// pre-existing database left in SQLite's default rollback-journal mode
+// (e.g. created before WAL support existed, or restored from a
+// rollback-journal-mode backup) stayed in that mode forever. This test
+// creates such a pre-existing non-WAL file by hand at the exact worktree
+// path Manager.Open would use, then asserts a subsequent Manager.Open
+// re-asserts WAL.
+func TestManagerOpenReassertsWALOnPreExistingNonWALDatabase(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
+
+	// Bootstrap once to deterministically resolve the worktree layout/path,
+	// then tear the file down so it can be recreated by hand in non-WAL mode.
+	bootstrap, err := manager.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := bootstrap.Path()
+	if err := bootstrap.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		_ = os.Remove(path + suffix)
+	}
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.SetMaxOpenConns(1)
+	ctx := context.Background()
+	if _, err := raw.ExecContext(ctx, `CREATE TABLE probe(id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	var mode string
+	if err := raw.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if strings.EqualFold(mode, "wal") {
+		t.Fatalf("test setup: raw db unexpectedly already in wal mode (%s)", mode)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := manager.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.db.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal_mode after reopening pre-existing non-WAL db = %q, want wal", mode)
 	}
 }
 
@@ -810,6 +884,212 @@ func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
 	}
 	if _, ok, err := store.AgentDefinition(ctx, "contended"); err != nil || !ok {
 		t.Fatalf("agent definition after contended write ok=%t err=%v", ok, err)
+	}
+}
+
+// TestIndependentHandleContentionRetriesPointRead is the read-path
+// counterpart to TestIndependentHandleContentionRetriesShortWrite above.
+// Unlike a write, a plain SELECT does NOT observe SQLITE_BUSY against
+// another connection's ordinary `BEGIN IMMEDIATE` hold once the database is
+// in WAL mode (verified empirically: WAL's whole point is that readers see
+// the last-committed snapshot without waiting on an in-flight writer) — so
+// the write-path test's exact contention setup cannot be reused verbatim for
+// a read. Instead this test uses `PRAGMA locking_mode=EXCLUSIVE`, acquired
+// by a holder connection *before* any reading connection has opened the
+// file, which does force a genuine SQLITE_BUSY on the reader's very first
+// statement; releasing it by closing the holder (the reliable way to
+// downgrade out of exclusive locking mode) lets the contended read recover.
+// This proves AgentDefinition's new retry wrap (store.go) is actually
+// exercised for a real SQLITE_BUSY condition, not just compiled.
+func TestIndependentHandleContentionRetriesPointRead(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+
+	seed, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: "contended-read", PublicName: "contended-read", StatePath: "contended-read", SchemaVersion: 1, Status: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	path := seed.Path()
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	holder, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.SetMaxOpenConns(1)
+	if _, err := holder.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `PRAGMA locking_mode=EXCLUSIVE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `UPDATE agent_defs SET updated_at = updated_at WHERE agent_key = 'contended-read'`); err != nil {
+		t.Fatal(err)
+	}
+
+	freshDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer freshDB.Close()
+	freshDB.SetMaxOpenConns(1)
+	if _, err := freshDB.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	freshStore := &Store{db: freshDB, path: path, now: time.Now, writeMu: &sync.Mutex{}}
+
+	busySeen := make(chan struct{}, 1)
+	previousHook := sqliteRetryBusyHook
+	sqliteRetryBusyHook = func(error) {
+		select {
+		case busySeen <- struct{}{}:
+		default:
+		}
+	}
+	defer func() { sqliteRetryBusyHook = previousHook }()
+
+	type readResult struct {
+		def   AgentDefinition
+		found bool
+		err   error
+	}
+	resCh := make(chan readResult, 1)
+	go func() {
+		def, found, err := freshStore.AgentDefinition(ctx, "contended-read")
+		resCh <- readResult{def, found, err}
+	}()
+
+	select {
+	case <-busySeen:
+	case res := <-resCh:
+		t.Fatalf("contended read finished before observing busy retry: found=%t err=%v", res.found, res.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for busy retry on point read")
+	}
+
+	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case res := <-resCh:
+		if res.err != nil || !res.found {
+			t.Fatalf("contended read did not recover: found=%t err=%v", res.found, res.err)
+		}
+		if res.def.AgentKey != "contended-read" {
+			t.Fatalf("contended read returned wrong def: %+v", res.def)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("contended read timed out")
+	}
+}
+
+// TestIndependentHandleContentionRetriesMultiRowRead is the multi-row
+// counterpart, exercising retryTombstones's QueryContext+drain wrap using
+// the same prior-exclusive-holder technique as
+// TestIndependentHandleContentionRetriesPointRead. retryTombstones is used
+// (rather than PruneExpired/PruneAgentInstances) because it has no
+// preceding write step: PruneExpired/PruneAgentInstances each start with a
+// beginPruneRun INSERT, which would itself already absorb the write-vs-write
+// contention (an existing, already-tested retry path) before ever reaching
+// the new read wrap, making it impossible to isolate the read-specific
+// retry with this technique.
+func TestIndependentHandleContentionRetriesMultiRowRead(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+
+	seed, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.recordTombstone(ctx, "tomb-1", "", "test", fmt.Errorf("boom")); err != nil {
+		t.Fatal(err)
+	}
+	path := seed.Path()
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	holder, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.SetMaxOpenConns(1)
+	if _, err := holder.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `PRAGMA locking_mode=EXCLUSIVE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `UPDATE artifact_tombstones SET attempts = attempts WHERE artifact_id = 'tomb-1'`); err != nil {
+		t.Fatal(err)
+	}
+
+	freshDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer freshDB.Close()
+	freshDB.SetMaxOpenConns(1)
+	if _, err := freshDB.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	freshStore := &Store{db: freshDB, path: path, now: time.Now, writeMu: &sync.Mutex{}}
+
+	busySeen := make(chan struct{}, 1)
+	previousHook := sqliteRetryBusyHook
+	sqliteRetryBusyHook = func(error) {
+		select {
+		case busySeen <- struct{}{}:
+		default:
+		}
+	}
+	defer func() { sqliteRetryBusyHook = previousHook }()
+
+	resCh := make(chan error, 1)
+	go func() {
+		result := &PruneResult{}
+		resCh <- freshStore.retryTombstones(ctx, result, 10)
+	}()
+
+	select {
+	case <-busySeen:
+	case err := <-resCh:
+		t.Fatalf("contended multi-row read finished before observing busy retry: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for busy retry on multi-row read")
+	}
+
+	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-resCh:
+		if err != nil {
+			t.Fatalf("contended multi-row read did not recover: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("contended multi-row read timed out")
 	}
 }
 

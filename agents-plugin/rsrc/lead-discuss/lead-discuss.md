@@ -27,7 +27,7 @@ Conversation
 - Summarize decision rationale when explaining stances; do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
 - Discussion persistence writes only confirmed decisions; ticket cleanup goes through `lead-write-ticket`'s Open Decision Queue.
-- Ticket creation must route through `lead-write-ticket` (`ws/tickets.create`); do not create ticket files directly.
+- Ticket creation must route through `lead-write-ticket` (`ws/tickets.create_empty`); do not create ticket files directly.
 - "Save a preference" / "remember a setting" → `{{.SkillNamespace}}:lead-tune`; `{{.SkillNamespace}}:lead-add-rule` is for repo-level rules only.
 
 ## On: invoke

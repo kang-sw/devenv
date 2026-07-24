@@ -18,7 +18,7 @@ Scope
 - Keep `lead-sprint` responsible for routing, session continuity, and episode closure.
 - Route general implementation through `{{.SkillNamespace}}:lead-proceed` or the lead-implement procedure; do not weaken their gates.
 - Allow `sprint-edit` only for one-context, lead-owned, small interactive edits.
-- Ticket creation must route through `lead-write-ticket` (which calls `ws/tickets.create`); do not create ticket files directly via `convention.read` + `Write`.
+- Ticket creation must route through `lead-write-ticket` (which calls `ws/tickets.create_empty`); do not create ticket files directly via `convention.read` + `Write`.
 - Routing preference disambiguation: requests to "save a preference" or "remember a setting" route to `{{.SkillNamespace}}:lead-tune` (ws workflow preferences). `{{.SkillNamespace}}:lead-add-rule` is for repo-level coding/architecture rules only.
 
 Episodes

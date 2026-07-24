@@ -44,6 +44,35 @@ Workflow skills read these conventions before editing the matching document
 system. Shared skill text uses this MCP surface instead of hard-coded
 repository-local convention paths.
 
+## Ticket-System Concept Grounding {#260723-ticket-system-concept-grounding}
+
+Ticket-system concepts — what each status directory means, the (non-behavioral)
+distinction between type prefixes, the sage-review rationale and posture
+semantics, the purpose of spec addressing, the phase model, and the
+epic-vs-workset distinction — are explained once in a "Ticket System Concepts"
+section of the `lead-workflow-manual` bundle, surfaced to a lead session through
+`ws/workflow_manual` at bootstrap (the session-once grounding call). Because the
+manual is loaded once per session, convention and playbook documents carry only
+the mechanical rules, hard invariants, and a pointer to the concept section; they
+do not re-gloss concept meaning per invocation.
+
+The grounding doc obeys a strict layering separation:
+
+- **Concepts live in the manual.** Prose meaning is authored once in the bundle,
+  dual-maintained across `agents-plugin/rsrc/` and `agents-plugin-wsflow/rsrc/`.
+- **Guardrails live in enforcement.** Any invariant a tool can mechanically check
+  stays in `ticket.verify` and the mutation tools; the concept doc must not soften
+  a hard guardrail into descriptive prose. An invariant enforced only by prose
+  (e.g. phase numbers never renumbered, Result/Edition text frozen once written,
+  worksets never change `parent:`) stays verbatim in the convention doc, not moved
+  into the concept section.
+- **Mechanical content stays in Go.** The template/checklist/sage constants remain
+  the mechanical source of truth; the concept doc explains meaning, not structure.
+- **Type prefixes are categorization guidance only.** `feat`/`bug`/`refactor`/
+  `chore` are mechanically identical (all actionable-and-phased); the concept doc
+  gives plain-word "which prefix fits" guidance and states the identity explicitly
+  so no behavioral divergence is inferred.
+
 ## Reference Document Ownership {#260524-reference-document-ownership}
 
 Reference documents under `ai-docs/ref/` are operational runbooks, stable

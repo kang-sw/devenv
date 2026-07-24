@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.35.0-dev"
+var version = "0.35.8-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -97,6 +97,7 @@ func serve(args []string) {
 	}
 
 	server := mcp.NewServer(defaultRoot(*root), version, sourceCommit)
+	startParentDeathWatch()
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
@@ -232,11 +233,12 @@ func runtimeCapabilityCommandNames() []string {
 		"specs.list",
 		"specs.status",
 		"tickets.close",
-		"tickets.create",
+		"tickets.create-empty",
 		"tickets.find",
 		"tickets.list",
 		"tickets.move",
 		"tickets.status",
+		"tickets.verify",
 	}
 	if mcp.NoAgentMode() {
 		commands = filterNoAgentCommands(commands)
@@ -487,7 +489,7 @@ func gitCommit(args []string) {
 		}
 		body = text
 	}
-	result, err := wsgit.NewClient().Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
+	result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: mcp.VerifyAdapter}.Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
 		Paths:               paths,
 		Title:               *title,
 		Description:         body,
@@ -520,8 +522,10 @@ func ticketsCommand(args []string) {
 		ticketsClose(args[1:])
 	case "move":
 		ticketsMove(args[1:])
-	case "create":
-		ticketsCreate(args[1:])
+	case "create-empty":
+		ticketsCreateEmpty(args[1:])
+	case "verify":
+		ticketsVerify(args[1:])
 	default:
 		ticketsUsage()
 		os.Exit(2)
@@ -529,7 +533,7 @@ func ticketsCommand(args []string) {
 }
 
 func ticketsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create-empty|verify>")
 }
 
 func ticketsList(args []string) {
@@ -650,8 +654,8 @@ func ticketsMove(args []string) {
 	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), err)
 }
 
-func ticketsCreate(args []string) {
-	fs := flag.NewFlagSet("tickets create", flag.ExitOnError)
+func ticketsCreateEmpty(args []string) {
+	fs := flag.NewFlagSet("tickets create-empty", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	stem := fs.String("stem", "", "semantic ticket stem without date prefix")
 	initialState := fs.String("initial-state", "", "ticket status: idea, todo, or ready")
@@ -669,7 +673,24 @@ func ticketsCreate(args []string) {
 		Stem:         *stem,
 		InitialState: *initialState,
 	})
-	printTextOrFatal("tickets create", mcp.FormatTicketCreate(result), err)
+	printTextOrFatal("tickets create-empty", mcp.FormatTicketCreate(result), err)
+}
+
+func ticketsVerify(args []string) {
+	fs := flag.NewFlagSet("tickets verify", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	format := fs.String("format", "", `output format: text or json`)
+	var paths multiFlag
+	fs.Var(&paths, "path", "ticket path to verify; may be repeated")
+	_ = fs.Parse(args)
+	paths = append(paths, fs.Args()...)
+
+	result, err := wsdoc.TicketVerify(defaultRoot(*root), paths)
+	if outputJSON(*format) {
+		printJSONOrFatal("tickets verify", result, err)
+		return
+	}
+	printTextOrFatal("tickets verify", mcp.FormatTicketVerify(result), err)
 }
 
 func specsCommand(args []string) {

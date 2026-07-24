@@ -172,6 +172,26 @@ only, regenerated `agents-plugin-wsflow` via `WS_REGEN_WSFLOW_SKILLS`; drift
 guard + wsflow package tests (9) pass. Posture text is namespace-clean so it
 clears the generation eligibility guard. Spec documentation deferred to Phase 2.
 
+#### Edition (32f38e75) - 2026-07-24
+
+Refined the shipped posture body with a ready-ticket pre-authorization carve-out:
+a critical/"Always ask" action a `ready/` ticket's sage-settled design already
+scopes is pre-authorized by the goal directive + the ready-landing gate and is
+executed without re-asking; only decisions the ticket did NOT settle still stop.
+Prompted by a dogfood surprise — a `/goal` drain stopped to re-request approval
+for the deletion a ready ticket was authored and sage-gated to perform (the
+approval already happened once, at authoring + the sage ready-landing gate). This
+narrows, not nullifies: the "Wording constraint" and rejected "blanket
+auto-proceed" still hold for anything the ticket did not itself settle. The skill
+edit is `agents-plugin/skills/lead-goal-step/SKILL.md` (the renamed home of the
+former `lead-drain-ready-queue` body, per `260723-lead-goal-step-rename-reposition`).
+
+Consequence for Phase 2 (unstarted): the spec drain anchor and the
+`git.commit`/`enter.implement` tip wording must carry this carve-out — do NOT
+spec "every AGENTS.md 'Always ask' item always fires" verbatim, or the spec and
+tips will drift from the shipped body. The carve-out is: already-approved-by-the-
+ticket actions proceed; ticket-unsettled decisions still stop.
+
 ### Phase 2: Just-in-time reinforcement tips (Go) + spec documentation
 
 Inject a `goal/*`-conditional posture tip at two decision-point handlers:

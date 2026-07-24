@@ -6,6 +6,7 @@ related:
 parent: 260723-epic-ticket-write-reshape
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-23
 ---
 
 # ticket.verify + commit-gate mechanical backstop, then must-not-forget mutation-tool collapse
@@ -113,6 +114,51 @@ blocked at the gate; the spec-address case emits a *warning*, not a block; and a
 standalone `ticket.verify(paths)` call returns the same verdict as the gate for
 identical input (call-site parity). Go test coverage for these cases passes.
 
+### Result (9744429) - 2026-07-23
+
+`wsdoc.TicketVerify(root, paths)` ships seven hard guardrails (stem, status-dir
+against the canonical five dirs, file-exists, frontmatter-fence integrity,
+ready-landing sage-review posture, close-date field, phase/Result heading
+well-formedness) plus a soft spec-address warning, exposed as a standalone
+`tickets.verify` MCP tool + CLI subcommand and wired as a commit-time gate on
+`wsgit.Client.Commit`. Spec addressing recorded under `260723-tickets-verify-tool`
+and `260723-git-commit-ticket-verify-gate` (commit `44e530a`).
+
+- **Import boundary preserved.** The gate uses a `Verifier func(root, paths)
+  error` seam on `wsgit.Client` (mirroring the existing `Runner` field) so
+  `internal/wsdoc` never imports `internal/wsgit`, honoring
+  `{#260720-wsdoc-commit-boundary}`; MCP dispatch and the CLI each construct the
+  client with a `verifyAdapter`.
+- **Single source of truth.** A pure `readyPostureProblems` predicate extracted
+  in `tickets_mutate.go` is shared by both the ready-move check and verify. Its
+  signature deviates from the plan's illustrative `(fm, stem)` form — it takes
+  resolved posture values + required-ness so a hand-authored ready ticket with a
+  genuinely unset required stage reports "unset" rather than being misread as
+  not-applicable; caught by `TicketVerifyReadySagePostureGuardrail/missing`
+  before shipping.
+- spec-address is soft-warn only (never fails `OK`); phase/Result is
+  presence/well-formedness only (append-only not attempted); the gate is
+  non-overridable (an invalid staged ticket blocks the commit, `HEAD` unmoved).
+- **Deviation:** added `tickets.verify` to both `runtime.json` trees and
+  `runtimeCapabilityCommandNames()` (outside the plan's file list) — required by
+  the launcher-contract test, a mechanical same-pattern addition matching sibling
+  `tickets.*` tools.
+
+Verification: `go build ./...`, `go vet ./...`, `go test ./...` all clean (12
+packages, 0 failures). Review (partitioned): fit clean; test clean + 3 minor
+coverage-gap notes; correctness's lone "critical" was a **false alarm** — a
+review subagent left an uncommitted `if false` edit disabling the stem guardrail
+in the shared working tree, which a sibling reviewer then ran tests against. The
+committed tip `9744429` has the correct `ticketStemRE` check and passes the stem
+tests; the stray edit was discarded and the tree re-verified green.
+
+Deferred (minor, none blocking Phase 2): (1) an empty ticket file in
+`todo/`/`idea/` passes verify (documented choice); (2) phase/Result match could
+over-fire on `### Results summary` (low likelihood; convention uses the exact
+form); (3) three narrow-branch test gaps (missing-opening-fence,
+`sageReviewStageError` default branch, `.dropped` happy-path). The shared-worktree
+reviewer-contamination hazard is captured separately as an `idea/` ticket.
+
 ### Phase 2: must-not-forget mutation-tool collapse + action-time obligation prose
 
 With the verify floor in place, collapse the mutation surface. Produce the
@@ -139,6 +185,59 @@ frontmatter); and the write-ticket path's front-loaded procedure prose is
 measurably reduced (net token count on the base path drops). Go tests cover the
 close soft-warn and ready hard-block cases.
 
+### Result (fcb96383) - 2026-07-23
+
+Collapsed the ticket mutation surface behind the Phase 1 verify floor. Complete
+per-tool disposition applied via the must-not-forget filter:
+
+- `tickets.create` → renamed **`tickets.create_empty`** (MCP tool; CLI
+  `create-empty`), kept thin with its unchanged design-review hard block; the
+  schema description and `formatTicketCreate` return prose both state the "valid
+  empty skeleton + initial posture, not a full mutation orchestrator" caveat.
+- `tickets.sage_record` → renamed **`tickets.sage_stamp`** (kept in the
+  `tickets.*` family, reusing `wsdoc.SageRecord`'s `(stem, stage, verdicts[])`
+  contract verbatim) and newly gated **lead-only** via `isLeadOnlyTool` — the
+  pre-rename tool had no such gate; reviewers never call it. This is the thin
+  lead-only replacement named `sage.stamp` in the plan text.
+- `tickets.close` → **freed** to free-edit + soft warn: new
+  `ticketUnresolvedPhaseWarning` predicate, wired as a non-blocking tip in
+  `TicketsClose` and a soft `unresolved-phases` warning in `TicketVerify`'s
+  `.done`/`.dropped` branch; never a hard block.
+- `tickets.move` ready-landing sage-posture stays **hard**, single-sourced
+  through `readyPostureProblems` (delegates to the verify floor, no duplication).
+- `tickets.verify` (Phase 1) gains the same soft unresolved-phases warning plus
+  `next_instruction` lines on FAIL/WARN; `tickets.sage_gate` unchanged.
+
+Front-loaded playbook procedure replaced with **action-time obligation prose**:
+`formatTicketCreate`/`ticketMutateNextInstruction`/`formatTicketVerify` emit
+`next_instruction:` only when a real follow-on exists; `lead-write-ticket.md`
+dropped 205→203 lines / 2069→2006 words. Rename rippled across all caller
+surfaces (MCP dispatch/schema/allowlist/`isLeadOnlyTool`, CLI subcommand + usage
++ `runtimeCapabilityCommandNames()`, both `runtime.json` trees, rsrc prose +
+regenerated manifests in both plugin trees). Spec (`mcp-tools`) and mental-model
+(`mcp-runtime`) updated on contact; ticket-number-keyed spec anchors deliberately
+not renamed.
+
+- **Naming deviation from plan.** The plan wrote `sage.stamp` (new `sage.*`
+  namespace); implemented as `tickets.sage_stamp` in the existing `tickets.*`
+  family per explicit caller decision, reusing `SageRecord`'s contract verbatim
+  rather than authoring a new write. `tickets.create` renamed to `create_empty`
+  (the plan's `create_empty`/`create_template` option A).
+
+Commits `f3748b09..5e7d9511` (5) + review-fix `fcb96383`; version bumped
+0.35.1→0.35.2. Review (partitioned): correctness clean; fit clean (2 minor — a
+stale pre-rename comment, fixed in `fcb96383`; and this closeout); test found one
+critical — the `create_empty` caveat prose had no asserting test — closed in
+`fcb96383`, which also added the missing `ticketMutateNextInstruction` /
+`formatTicketVerify` next_instruction branch tests. `go build`/`go vet`/`go test
+./...` all green (12 packages).
+
+By-design notes carried forward: a `.dropped` ticket with unfinished phases
+always soft-warns (dropping implies unfinished — intended); the `### Result`
+prefix also matches `### Results…` (suppression-only, low likelihood). The
+shared-worktree reviewer-contamination hazard from Phase 1 remains tracked in
+`idea/260723-research-reviewer-worktree-isolation`.
+
 ## Spec Impact
 
 - Target spec area: `mcp-tools` — new `ticket.verify` contract, the commit-gate
@@ -150,3 +249,8 @@ close soft-warn and ready hard-block cases.
 - Contract-first spec: no — the exact tool signatures and prose are still
   design-level and will be refined during implementation; the ticket phases carry
   the behavioral intent and the spec update follows as closeout.
+
+
+## Resolution (2026-07-23)
+
+Both phases landed. Phase 1: deterministic tickets.verify mechanical floor + non-bypassable git.commit gate (closes 260627 direct-edit bypass). Phase 2: mutation-tool collapse — tickets.create_empty / tickets.sage_stamp (lead-only) renames, tickets.close soft-warn on unresolved phases, ready-move sage-posture hard-block preserved (single-sourced via readyPostureProblems), front-loaded playbook prose replaced by action-time next_instruction prose. Shipped in ws 0.35.2. Partitioned review clean after closing one test-coverage critical (create_empty caveat assertion, fcb96383).

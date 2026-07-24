@@ -182,7 +182,6 @@ func (m Manager) Open(root string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	newDB := !fileExists(path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -191,7 +190,7 @@ func (m Manager) Open(root string) (*Store, error) {
 	store := &Store{db: db, path: path, layout: layout, now: m.now, writeMu: writeLock(path)}
 	openMu.Lock()
 	defer openMu.Unlock()
-	if err := store.configure(context.Background(), newDB); err != nil {
+	if err := store.configure(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -217,7 +216,6 @@ func (m Manager) OpenWorktreeKey(worktreeKey string) (*Store, error) {
 		return nil, err
 	}
 	path := filepath.Join(layout.WorktreeDir, "state.sqlite")
-	newDB := !fileExists(path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -226,7 +224,7 @@ func (m Manager) OpenWorktreeKey(worktreeKey string) (*Store, error) {
 	store := &Store{db: db, path: path, layout: layout, now: m.now, writeMu: writeLock(path)}
 	openMu.Lock()
 	defer openMu.Unlock()
-	if err := store.configure(context.Background(), newDB); err != nil {
+	if err := store.configure(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -243,15 +241,13 @@ func (s *Store) Path() string { return s.path }
 
 func (s *Store) Layout() wsstate.Layout { return s.layout }
 
-func (s *Store) configure(ctx context.Context, setJournalMode bool) error {
+func (s *Store) configure(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	statements := []string{
+		`PRAGMA journal_mode=WAL`,
 		`PRAGMA busy_timeout=5000`,
 		`PRAGMA foreign_keys=ON`,
-	}
-	if setJournalMode {
-		statements = append([]string{`PRAGMA journal_mode=WAL`}, statements...)
 	}
 	for _, stmt := range statements {
 		if err := withSQLiteRetry(ctx, func() error {
@@ -629,11 +625,14 @@ func (s *Store) agentRetentionEligibleAt(now string) string {
 }
 
 func (s *Store) AgentDefinition(ctx context.Context, agentKey string) (AgentDefinition, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT d.agent_key, d.public_name, d.state_path, d.schema_version, d.backend, d.harness, d.tier, d.model, d.effort, d.session_id, d.status, d.created_at, d.last_seen_at, d.last_call_at, d.last_output_path, d.prompt_refs_json, d.system_prompt_path, d.capabilities_json, d.ephemeral, COALESCE(i.instance_id, '') FROM agent_defs d LEFT JOIN agent_instances i ON i.agent_key = d.agent_key AND i.state_path = d.state_path WHERE d.agent_key = ?`, agentKey)
 	var def AgentDefinition
 	var promptRefsJSON, capabilitiesJSON string
 	var ephemeral int
-	if err := row.Scan(&def.AgentKey, &def.PublicName, &def.StatePath, &def.SchemaVersion, &def.Backend, &def.Harness, &def.Tier, &def.Model, &def.Effort, &def.SessionID, &def.Status, &def.CreatedAt, &def.LastSeenAt, &def.LastCallAt, &def.LastOutputPath, &promptRefsJSON, &def.SystemPromptPath, &capabilitiesJSON, &ephemeral, &def.InstanceID); err != nil {
+	err := withSQLiteRetry(ctx, func() error {
+		row := s.db.QueryRowContext(ctx, `SELECT d.agent_key, d.public_name, d.state_path, d.schema_version, d.backend, d.harness, d.tier, d.model, d.effort, d.session_id, d.status, d.created_at, d.last_seen_at, d.last_call_at, d.last_output_path, d.prompt_refs_json, d.system_prompt_path, d.capabilities_json, d.ephemeral, COALESCE(i.instance_id, '') FROM agent_defs d LEFT JOIN agent_instances i ON i.agent_key = d.agent_key AND i.state_path = d.state_path WHERE d.agent_key = ?`, agentKey)
+		return row.Scan(&def.AgentKey, &def.PublicName, &def.StatePath, &def.SchemaVersion, &def.Backend, &def.Harness, &def.Tier, &def.Model, &def.Effort, &def.SessionID, &def.Status, &def.CreatedAt, &def.LastSeenAt, &def.LastCallAt, &def.LastOutputPath, &promptRefsJSON, &def.SystemPromptPath, &capabilitiesJSON, &ephemeral, &def.InstanceID)
+	})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return AgentDefinition{}, false, nil
 		}
@@ -786,11 +785,14 @@ func execArtifactState(job ExecJob) string {
 }
 
 func (s *Store) ExecJob(ctx context.Context, key string) (ExecJob, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT exec_key, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, updated_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state FROM exec_jobs WHERE exec_key = ?`, key)
 	var job ExecJob
 	var argvJSON string
 	var stdinPresent, cancelRequested, lostWorker, pinned int
-	if err := row.Scan(&job.ExecKey, &job.Status, &job.LeaseID, &job.SchemaVersion, &job.Root, &job.WorkingDir, &argvJSON, &job.Command, &job.Shell, &job.EnvJSON, &stdinPresent, &job.StdinBytes, &job.PID, &job.StartedAt, &job.UpdatedAt, &job.CompletedAt, &job.ExitCode, &job.Error, &cancelRequested, &lostWorker, &job.StdoutPath, &job.StderrPath, &job.CombinedPath, &job.StdoutBytes, &job.StderrBytes, &job.CombinedBytes, &pinned, &job.ExpiresAt, &job.CleanupState); err != nil {
+	err := withSQLiteRetry(ctx, func() error {
+		row := s.db.QueryRowContext(ctx, `SELECT exec_key, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, updated_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state FROM exec_jobs WHERE exec_key = ?`, key)
+		return row.Scan(&job.ExecKey, &job.Status, &job.LeaseID, &job.SchemaVersion, &job.Root, &job.WorkingDir, &argvJSON, &job.Command, &job.Shell, &job.EnvJSON, &stdinPresent, &job.StdinBytes, &job.PID, &job.StartedAt, &job.UpdatedAt, &job.CompletedAt, &job.ExitCode, &job.Error, &cancelRequested, &lostWorker, &job.StdoutPath, &job.StderrPath, &job.CombinedPath, &job.StdoutBytes, &job.StderrBytes, &job.CombinedBytes, &pinned, &job.ExpiresAt, &job.CleanupState)
+	})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ExecJob{}, false, nil
 		}
@@ -857,7 +859,9 @@ func (s *Store) Artifact(ctx context.Context, id string) (Artifact, bool, error)
 	var a Artifact
 	var pinned int
 	var expires, last string
-	err := s.db.QueryRowContext(ctx, `SELECT artifact_id, kind, path, owner_actor_id, state, byte_count, pinned, expires_at, last_accessed_at FROM artifacts WHERE artifact_id = ?`, id).Scan(&a.ArtifactID, &a.Kind, &a.Path, &a.OwnerActorID, &a.State, &a.ByteCount, &pinned, &expires, &last)
+	err := withSQLiteRetry(ctx, func() error {
+		return s.db.QueryRowContext(ctx, `SELECT artifact_id, kind, path, owner_actor_id, state, byte_count, pinned, expires_at, last_accessed_at FROM artifacts WHERE artifact_id = ?`, id).Scan(&a.ArtifactID, &a.Kind, &a.Path, &a.OwnerActorID, &a.State, &a.ByteCount, &pinned, &expires, &last)
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return Artifact{}, false, nil
 	}
@@ -881,7 +885,11 @@ func (s *Store) PruneExpired(ctx context.Context, opts PruneOptions) (PruneResul
 	if err != nil {
 		return result, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	type candidate struct{ id, path string }
+	var candidates []candidate
+	err = withSQLiteRetry(ctx, func() error {
+		candidates = nil
+		rows, err := s.db.QueryContext(ctx, `
 SELECT artifact_id, path FROM artifacts
 WHERE pinned = 0
   AND state NOT IN (?, ?, ?, ?)
@@ -889,23 +897,21 @@ WHERE pinned = 0
   AND expires_at <= ?
 ORDER BY expires_at ASC
 LIMIT ?`,
-		ArtifactStateActive, ArtifactStateRunning, ArtifactStateCancelRequested, ArtifactStateLeased, now.Format(time.RFC3339Nano), limit)
-	if err != nil {
-		_ = s.finishPruneRun(ctx, runID, result, err)
-		return result, err
-	}
-	defer rows.Close()
-	type candidate struct{ id, path string }
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.id, &c.path); err != nil {
-			_ = s.finishPruneRun(ctx, runID, result, err)
-			return result, err
+			ArtifactStateActive, ArtifactStateRunning, ArtifactStateCancelRequested, ArtifactStateLeased, now.Format(time.RFC3339Nano), limit)
+		if err != nil {
+			return err
 		}
-		candidates = append(candidates, c)
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var c candidate
+			if err := rows.Scan(&c.id, &c.path); err != nil {
+				return err
+			}
+			candidates = append(candidates, c)
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		_ = s.finishPruneRun(ctx, runID, result, err)
 		return result, err
 	}
@@ -951,7 +957,11 @@ func (s *Store) PruneAgentInstances(ctx context.Context, opts PruneOptions) (Age
 		}
 		return s.finishPruneRun(ctx, runID, pruneResult, runErr)
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	type candidate struct{ id, path string }
+	var candidates []candidate
+	err = withSQLiteRetry(ctx, func() error {
+		candidates = nil
+		rows, err := s.db.QueryContext(ctx, `
 SELECT i.instance_id, i.state_path FROM agent_instances i
 LEFT JOIN agent_defs d ON d.agent_key = i.agent_key AND d.state_path = i.state_path
 WHERE d.agent_key IS NULL
@@ -963,22 +973,20 @@ WHERE d.agent_key IS NULL
   AND (i.retention_next_check_at = '' OR i.retention_next_check_at <= ?)
 ORDER BY i.retention_eligible_at ASC
 LIMIT ?`, now, now, limit)
-	if err != nil {
-		_ = finish(AgentInstanceCleanupResult{}, err)
-		return AgentInstanceCleanupResult{}, err
-	}
-	defer rows.Close()
-	type candidate struct{ id, path string }
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.id, &c.path); err != nil {
-			_ = finish(AgentInstanceCleanupResult{}, err)
-			return AgentInstanceCleanupResult{}, err
+		if err != nil {
+			return err
 		}
-		candidates = append(candidates, c)
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var c candidate
+			if err := rows.Scan(&c.id, &c.path); err != nil {
+				return err
+			}
+			candidates = append(candidates, c)
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		_ = finish(AgentInstanceCleanupResult{}, err)
 		return AgentInstanceCleanupResult{}, err
 	}
@@ -1061,7 +1069,9 @@ func (s *Store) Count(ctx context.Context, table string) (int, error) {
 		return 0, fmt.Errorf("unsupported count table %q", table)
 	}
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count)
+	err := withSQLiteRetry(ctx, func() error {
+		return s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count)
+	})
 	return count, err
 }
 
@@ -1106,21 +1116,25 @@ ON CONFLICT(artifact_id) DO UPDATE SET
 }
 
 func (s *Store) retryTombstones(ctx context.Context, result *PruneResult, limit int) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT artifact_id, path FROM artifact_tombstones WHERE next_retry_at <= ? ORDER BY updated_at ASC LIMIT ?`, s.now().UTC().Format(time.RFC3339Nano), limit)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
 	type retry struct{ id, path string }
 	var retries []retry
-	for rows.Next() {
-		var r retry
-		if err := rows.Scan(&r.id, &r.path); err != nil {
+	err := withSQLiteRetry(ctx, func() error {
+		retries = nil
+		rows, err := s.db.QueryContext(ctx, `SELECT artifact_id, path FROM artifact_tombstones WHERE next_retry_at <= ? ORDER BY updated_at ASC LIMIT ?`, s.now().UTC().Format(time.RFC3339Nano), limit)
+		if err != nil {
 			return err
 		}
-		retries = append(retries, r)
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var r retry
+			if err := rows.Scan(&r.id, &r.path); err != nil {
+				return err
+			}
+			retries = append(retries, r)
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		return err
 	}
 	for _, r := range retries {
@@ -1151,11 +1165,6 @@ func removeArtifactPath(path string) error {
 		return nil
 	}
 	return err
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func boolInt(v bool) int {

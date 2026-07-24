@@ -130,6 +130,53 @@ func TestTicketsCloseAppendsResolutionSection(t *testing.T) {
 	}
 }
 
+func TestTicketsCloseUnresolvedPhaseSoftWarnTip(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-openphase"
+	body := "---\ntitle: Open phase\n---\n\n" +
+		"## Phases\n\n" +
+		"### Phase 1: First\n\n" +
+		"Never resolved.\n"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), body)
+	runner := &mockGitRunner{}
+
+	result, err := TicketsClose(root, runner, TicketCloseOptions{
+		TicketStem: stem,
+		Status:     "done",
+		Today:      "2026-01-15",
+	})
+	if err != nil {
+		t.Fatalf("TicketsClose: %v", err)
+	}
+	if !strings.Contains(result.Tip, "unresolved phase") {
+		t.Fatalf("Tip = %q, want an unresolved-phase soft-warn tip", result.Tip)
+	}
+}
+
+func TestTicketsCloseResolvedPhasesHaveNoTip(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-resolvedphase"
+	body := "---\ntitle: Resolved phase\n---\n\n" +
+		"## Phases\n\n" +
+		"### Phase 1: First\n\n" +
+		"### Result (abc123) - 2026-01-15\n\n" +
+		"Done.\n"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), body)
+	runner := &mockGitRunner{}
+
+	result, err := TicketsClose(root, runner, TicketCloseOptions{
+		TicketStem: stem,
+		Status:     "done",
+		Today:      "2026-01-15",
+	})
+	if err != nil {
+		t.Fatalf("TicketsClose: %v", err)
+	}
+	if result.Tip != "" {
+		t.Fatalf("Tip = %q, want empty when every phase has a Result", result.Tip)
+	}
+}
+
 func TestTicketsCloseRejectsAlreadyClosedTicket(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-closed"

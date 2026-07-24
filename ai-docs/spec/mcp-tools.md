@@ -28,6 +28,23 @@ Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
 
+An unexpected panic while handling a request does not terminate the serve
+process. {#260724-serve-request-panic-resilience} The per-request handler
+recovers the panic, returns a JSON-RPC error (reserved server-error code
+`-32000`, message `internal error: request handler panicked (<method>)`) for
+that one request, and keeps serving subsequent requests on the same process and
+stdio connection. The client-visible error names only the failed method; the
+panic value and stack never appear in the response. Because a recovered panic is
+a JSON-RPC error rather than a tool-level failure, it is not an `isError: true`
+result. The panic value and full stack are persisted to an always-on crash file
+at `<cache-root>/crash/mcp-panic.log` (cache root honoring `WS_CACHE_HOME`),
+appended as one JSON line per panic with no rotation; if that file cannot be
+resolved or written, the trace falls back to process stderr so it is never
+silently dropped. The crash file is always written regardless of environment;
+when `WS_MCP_DEBUG_LOG` is set the same event is additionally mirrored there.
+This closes the failure mode where a single request-handler panic crashed the
+whole server mid-session with no persisted trace.
+
 Setup calls are request-order fences. When `ws.setup` or the advertised setup
 alias appears in the stdio stream, the server completes earlier in-flight
 requests, applies setup synchronously, writes that setup response, and only then
@@ -419,6 +436,15 @@ mode-gating marker that only this tool's handler consumes; it is independent of 
 prompt override-marker engine and the product-mode markers. The handler owns mode
 branching and the Session State scaffolding only; all manual prose lives in the
 rsrc.
+
+The rendered manual body carries a **Ticket System Concepts** grounding section
+(status-directory meaning, type-prefix categorization, sage-review rationale and
+posture semantics, spec addressing, the phase model, and epic-vs-workset), so a
+lead session receives ticket-system concepts once per session rather than through
+per-invocation glosses in convention and playbook documents. The layering that
+keeps this section concept-only (guardrails stay in enforcement, mechanical
+content stays in Go) is specified in the documentation-system spec under
+Ticket-System Concept Grounding (`260723-ticket-system-concept-grounding`).
 
 > Known residual: `playbook.print(name: "lead-workflow-manual")` — and printing the
 > repointed lead skills — is not role-gated and re-exposes the gated bootstrap line
@@ -820,7 +846,12 @@ dropped tickets.
 (status=dropped), writing the appropriate `completed:` or `dropped:` date into
 frontmatter and optionally appending a `## Resolution (YYYY-MM-DD)` body section.
 The operation is atomic: the frontmatter write, `git add`, and `git mv` happen as
-one staged change set, and the tool never commits. {#260620-ticket-close-tool}
+one staged change set, and the tool never commits. It is free-edit on phase
+completeness: closing with an unresolved `### Phase N: <title>` heading (one
+with no `### Result` heading before the next Phase heading or EOF, and not
+marked `[dropped]`) returns a soft, non-blocking tip naming the unresolved
+phase(s) — never a hard block, mirroring `tickets.move`'s ready-gate spec-
+address tip. {#260620-ticket-close-tool}
 
 `tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
@@ -853,23 +884,27 @@ a retrying caller cannot mistake a blocked move for a fully unresolved,
 unchanged ticket.
 {#260620-ticket-move-tool}
 
-`tickets.create` creates a dated ticket stub at a caller-specified initial state
-(`idea`, `todo`, or `ready`). It auto-prefixes today's date to form the full
-ticket stem, writes a minimal frontmatter stub (`title: ""` placeholder;
-resolved `sage-review-design:` posture for `todo/+` states when the ticket's
-category requires design review), and returns the created path and a
-caller-facing tip that names the posture. It does not stamp
-`sage-review-completeness` at creation time, even for `state: "ready"` —
-completeness is evaluated only at ready-promotion time via `tickets.move`,
-which has a "from" state to validate against. Creating directly at `ready/`
-for a category requiring design review still enforces the never-skippable
-design invariant: if the freshly resolved design posture is not terminal
-(`completed` or `skipped`), the call is rejected with an action-oriented error
-instead of silently stamping a non-terminal posture and succeeding. Terminal
-states (`done`, `dropped`) and an empty stem are rejected with errors. The tool
-is not idempotent: a duplicate path returns an error. The `idea/` tip directs
-the caller to promote through `todo/` so the resolved posture can be stamped.
-{#260622-create-ticket-tool}
+`tickets.create_empty` (renamed from `tickets.create`, 260723 Phase 2) creates
+a dated ticket stub at a caller-specified initial state (`idea`, `todo`, or
+`ready`). It auto-prefixes today's date to form the full ticket stem, writes a
+minimal frontmatter stub (`title: ""` placeholder; resolved
+`sage-review-design:` posture for `todo/+` states when the ticket's category
+requires design review), and returns the created path and a caller-facing tip
+that names the posture. The attention-salient rename and the tool's own
+return prose both state the caveat this name exists to enforce: it yields
+only a valid empty skeleton + initial posture, not a full mutation
+orchestrator — `tickets.template` remains the separate tool that supplies the
+body skeleton. It does not stamp `sage-review-completeness` at creation time,
+even for `state: "ready"` — completeness is evaluated only at ready-promotion
+time via `tickets.move`, which has a "from" state to validate against.
+Creating directly at `ready/` for a category requiring design review still
+enforces the never-skippable design invariant: if the freshly resolved design
+posture is not terminal (`completed` or `skipped`), the call is rejected with
+an action-oriented error instead of silently stamping a non-terminal posture
+and succeeding. Terminal states (`done`, `dropped`) and an empty stem are
+rejected with errors. The tool is not idempotent: a duplicate path returns an
+error. The `idea/` tip directs the caller to promote through `todo/` so the
+resolved posture can be stamped. {#260622-create-ticket-tool}
 
 `tickets.template` returns the typed body skeleton for a given ticket type.
 `type` is required; accepted values are `feat`, `bug`, `refactor`, `chore`,
@@ -895,6 +930,33 @@ renumbers the trailing items accordingly. Like `tickets.template` it is a pure
 lookup — no `session_key`/root, no gate. An unknown or empty `type`, or a `phase`
 other than `content`/`intent`, is rejected with an error listing valid values.
 {#260720-tickets-checklist-tool}
+
+`tickets.verify(paths)` runs the deterministic mechanical guardrail set over one
+or more ticket files and returns a structured verdict — overall `OK`, plus each
+finding's guardrail, file, and a fix-oriented message — without judging prose
+quality or design soundness. It is the single home for the file-state-
+deterministic checks that were otherwise scattered across the ticket mutation
+tools: stem-format regex, status/directory consistency against the canonical
+five status directories (`idea`/`todo`/`ready`/`.done`/`.dropped`, not the
+looser legacy set), file existence, frontmatter fence integrity, ready-landing
+sage-review posture presence and terminal value, close-date field presence for
+`.done`/`.dropped`, and phase/Result heading structural well-formedness. Those
+are hard findings that fail the verdict (`OK: false`). Missing spec addressing on
+a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
+failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
+a hard block is separate deferred scope. An unresolved `### Phase N:` heading
+(no `### Result` before the next Phase heading or EOF, not marked `[dropped]`)
+on a `.done`/`.dropped` ticket is likewise a soft **warning** only, matching
+`tickets.close`'s own tip — the SOFT seed of the 260723 Phase 2 must-not-forget
+filter, deliberately never promoted to a hard block. verify performs no prose or design
+judgment and does not attempt the append-only phase-Result convention, which is a
+diff-level property a single-file snapshot cannot see. It is callable standalone
+for mid-edit red-green feedback, and the identical check runs as the `git.commit`
+ticket-verify gate (`#260723-git-commit-ticket-verify-gate`), so a standalone
+call and the commit gate return the same verdict for identical input. A residual
+mutation-tool check that enforces one of these rules (the ready-move sage-posture
+check) shares the same underlying predicate rather than duplicating it.
+Capability range: `>=0.35.1-dev <0.36.0`. {#260723-tickets-verify-tool}
 
 The Sage Review Gate is split into two sequential, non-looping stage gates
 keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
@@ -963,7 +1025,7 @@ stamping. The migration write persists both new fields on that first touch
 in place.
 {#260624-sage-review-gate}
 
-`tickets.sage_gate` and `tickets.sage_record` are the two root-aware tools the
+`tickets.sage_gate` and `tickets.sage_stamp` are the two root-aware tools the
 `lead-write-ticket` playbook calls to run the gate above; both require
 `session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
 decision for a ticket and returns `{ action, ask_prompt?, reviewers?, mode? }`
@@ -976,13 +1038,22 @@ still-pending `recommended` stage is asked separately (design first) so one
 answer never resolves another stage. A declined `ask` and a config-fallback
 resolution each persist the resolved posture and commit. The tool never spawns
 reviewers — for `run` it names the reviewer(s) to dispatch and leaves spawning
-to the lead. `tickets.sage_record(stem, stage, verdicts)` aggregates the
-supplied stage verdicts into the final posture, writes the frontmatter field(s),
-renders any `## Blocked` section from a Go-owned template whose output is
-byte-identical to the prior playbook templates, commits with the canonical
-title, and returns the applied posture plus the commit reference. A `stage`
-whose expected reviewer verdict is absent from `verdicts` is rejected with an
-error rather than recording a passing posture for a review that did not run.
+to the lead. `tickets.sage_stamp(stem, stage, verdicts)` (renamed from
+`tickets.sage_record`, 260723 Phase 2) aggregates the supplied stage verdicts
+into the final posture, writes the frontmatter field(s), renders any
+`## Blocked` section from a Go-owned template whose output is byte-identical
+to the prior playbook templates, commits with the canonical title, and returns
+the applied posture plus the commit reference. A `stage` whose expected
+reviewer verdict is absent from `verdicts` is rejected with an error rather
+than recording a passing posture for a review that did not run.
+`tickets.sage_stamp` is **lead-only** (`isLeadOnlyTool`): it is the sole
+terminal writer of sage-review posture and the `## Blocked` companion, and a
+delegate/leaf-scoped session key is rejected at the keyed capability gate
+before dispatch — reviewers never write frontmatter directly, preserving the
+lead-single-writer property this spec anchor already established. This is
+new, code-enforced gating as of 260723 Phase 2: the pre-rename
+`tickets.sage_record` carried no `isLeadOnlyTool` entry, so a delegate-scoped
+key could reach it even though no reviewer playbook ever called it.
 Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
@@ -1071,6 +1142,19 @@ the transcript at the point context compaction is likely to trigger. The trailer
 is omitted only when no session key is present; structured JSON output is
 unaffected.
 {#260708-git-commit-session-key-tip}
+
+Before the commit is written, `git.commit` runs the `tickets.verify`
+(`#260723-tickets-verify-tool`) mechanical guardrail set over the staged ticket
+files as a commit-time gate. When a staged ticket file fails a hard guardrail,
+the commit is refused and the failing guardrail, file, and fix message are
+returned instead; no commit is written and `HEAD` does not move. This makes the
+verify floor non-bypassable for ticket-touching commits — a hand-edited ticket
+that never went through a mutation tool is still caught at commit — closing the
+direct-file-edit bypass that prose-only guardrails left open. A soft warning
+(missing spec addressing) does not block the commit; it lands with the warning
+surfaced. The gate is non-overridable: there is no flag that lets a hard-failing
+ticket commit through. A commit that stages no ticket files is unaffected.
+Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
@@ -1317,11 +1401,11 @@ preferences. A user adds standing preferences by storing an override under
 tree. Delegation posture is controlled by `"workflow.prefer_subagent"` rather
 than a freeform prompt override.
 
-Shipped lead-prefer-subagent uses the generic empty extension point
-`PreferSubagentInvocationGuidance` for harness invocation details. Codex receives
-a code-owned builtin default under `prompt.PreferSubagentInvocationGuidance.codex`
-for its `spawn_agent(fork_context:true, ...)` binding, while Claude uses the
-empty shared seed unless configured otherwise.
+The former `PreferSubagentInvocationGuidance` extension point is retired:
+`lead-prefer-subagent`'s body moved to a static inlined SKILL.md (see
+`#260505-workflow-primitive-reference`), read directly via `LoadSkillBody`
+with no override-marker pass, so there is no per-harness invocation-guidance
+slot for it anymore. `builtinPromptOverrideDefaults()` returns an empty map.
 {#260619-delegation-section-override-point}
 
 > [!note] Constraints
@@ -1556,9 +1640,11 @@ session binding, path indexes, byte counts, retention visibility, leases,
 tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
 transcripts, backend raw output, and final output bodies remain file-backed.
 
-SQLite state-store configure, migration, and short write paths use bounded
-retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
-process-local write serialization. Runtime migrations must keep transactions
+SQLite state-store configure, migration, point-read, and short write paths use
+bounded retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
+process-local write serialization. `journal_mode=WAL` is re-asserted on every
+store open, not only at database creation, so a pre-existing non-WAL database is
+migrated to WAL on next open. Runtime migrations must keep transactions
 short and must not hold a transaction across subprocess or model execution.
 
 ## Tool Profile Gating {#260505-tool-profile-gating}

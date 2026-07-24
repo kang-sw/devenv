@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.35.0`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.35.0`).
+Active plugin package: `agents-plugin/` (`ws@0.35.8`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.35.8`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -212,24 +212,48 @@ dropped tickets live in hidden archive dirs and git history.
 - `260723-epic-ticket-write-reshape` (todo, epic) - coordinates the ticket-write
   reshape: verify-commit gate as mechanical floor, must-not-forget tool collapse,
   concept-doc consolidation. Board artifact, not an implementation target.
-- `260723-refactor-fork-removal-prefer-subagent` (ready, refactor) - delete the
-  fork delegation construct (zero Go impl; unreliable per 260625/260629, dropped
-  260626-*); reshape `lead-prefer-subagent` to fresh-spawn + central
-  authoring/mutation whitelist (overlay). Spec addressing via `## Spec Impact`
-  (`workflow-skills`, Contract-first: no). Sage review completed.
-- `260723-feat-ticket-write-verify-commit-gate` (ready, feat, child of
-  260723-epic) - deterministic `ticket.verify` at `git.commit`'s validation slot
-  (mechanical floor; closes 260627 bypass), then must-not-forget mutation-tool
-  collapse. 2 phases. Spec addressing via `## Spec Impact` (`mcp-tools`,
-  Contract-first: no). Sage review completed. Open: true universal commit
-  chokepoint (pre-commit hook vs routing mandate) to resolve in Phase 1.
-- `260723-feat-ticket-system-concept-doc` (ready, feat, child of 260723-epic) -
-  single ticket-system concept doc homed in the `workflow_manual` bundle
-  (session-once grounding, host-neutral), playbook references it instead of
-  re-glossing. Spec addressing via `## Spec Impact` (`documentation-system` /
-  `workflow-manual`, Contract-first: no). Sage review completed (re-authored after
-  initial block: loading resolved to workflow_manual per user). Open knob: inline
-  vs referenced manual payload (Phase 1).
+- `260723-refactor-fork-removal-prefer-subagent` (refactor) - **landed**
+  (`d6669070`), moved to `.done`. Deleted the fork delegation construct and
+  reshaped `lead-prefer-subagent` to two clean poles: fresh spawn by default +
+  a central authoring/mutation whitelist overlay (durable-artifact authoring
+  stays with the context-holder session, never a fresh summary-only spawn).
+  Opening invariant reversed; `native-spawn-binding.codex.md` `fork_turns:"none"`
+  kept; `builtinPromptOverrideDefaults()` already empty (no Go change). Dropped
+  the `lead-goal-step` fork pointer; removed 3 `fork_context:true` test
+  assertions (kept `fork_turns:"none"`); corrected 4 stale doc sites; spec
+  `{#260724-prefer-subagent-fresh-spawn-delegation-posture}`. Resolves
+  260625/260629 by deletion. Review clean; this drained the ready queue.
+- `260723-feat-ticket-write-verify-commit-gate` (feat, child of 260723-epic) -
+  **both phases landed** (`fcb96383`), pending move to `.done`. Phase 1
+  (`9744429`): deterministic `tickets.verify` + non-bypassable `git.commit` gate
+  (mechanical floor; closes 260627 direct-edit bypass). Phase 2: mutation-tool
+  collapse — `tickets.create`→`tickets.create_empty`, `tickets.sage_record`→
+  `tickets.sage_stamp` (now lead-only via `isLeadOnlyTool`, genuine new
+  enforcement — the old tool was delegate-callable), `tickets.close` freed to soft
+  unresolved-phase warn, ready-move sage-posture stays hard (single-sourced via
+  `readyPostureProblems`), front-loaded playbook prose replaced by action-time
+  `next_instruction` prose. User-approved naming: single `create_empty`;
+  `sage_stamp` in the `tickets.*` family reusing `SageRecord`'s
+  `(stem,stage,verdicts[])`. Spec `260723-tickets-verify-tool` /
+  `260723-git-commit-ticket-verify-gate` + mcp-tools rename/close/sage_stamp doc;
+  mental-model `mcp-runtime` updated. Version 0.35.2. Chokepoint resolved by
+  hosting at `git.commit` (shell raw-commit bypass tracked as epic Caveat).
+- `260723-feat-ticket-system-concept-doc` (feat, child of 260723-epic) -
+  **landed** (`c1d1b5a0`), pending move to `.done`. Added a `## Ticket System
+  Concepts` section (status dirs, type prefixes, sage review, spec addressing,
+  phases, epic-vs-workset) to the `lead-workflow-manual` bundle (tight inline,
+  session-once grounding) and de-duplicated the scattered glosses from
+  `ticket-conventions.md` + `lead-write-ticket.md` judge tables — unenforced hard
+  invariants kept verbatim, guardrails left in `ticket.verify`, Go constants
+  untouched. Base-path size effectively flat; the win is structural (single
+  concept home; sage-review/type-prefix documented for the first time). Spec
+  closeout `documentation-system {#260723-ticket-system-concept-grounding}` +
+  mcp-tools workflow_manual cross-ref. Shipped in ws 0.35.3.
+- `260723-research-reviewer-worktree-isolation` (idea, research) - captured from
+  T2 Phase 1 review: a review subagent left an uncommitted `if false` edit in the
+  shared working tree, producing a sibling reviewer's false critical. Research
+  read-only reviewer profiles vs per-agent worktree isolation vs a pre-dispatch
+  clean-tree assertion.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
