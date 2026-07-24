@@ -29,17 +29,35 @@ var playbookTerminologyTable = map[string]map[string]string{
 		"ExploreAgent":  "the Explore agent",
 		"SpawnIdiom":    `Agent({subagent_type: "general-purpose", ...})`,
 		"ContinueIdiom": "SendMessage(to: <agentId>)",
+		"SpawnBindingGuidance": "honor `recommended-model` (and `recommended-reasoning-effort`, when present) via" +
+			" the host's native model-selection surface; if the exact binding cannot be applied, report that the" +
+			" binding is unavailable rather than silently dropping it — the mercenary path above is the explicit" +
+			" exact-binding fallback",
 	},
 	"codex": {
 		"ExploreAgent":  "an explorer subagent",
 		"SpawnIdiom":    "creating a new Codex task",
 		"ContinueIdiom": "resuming the agent using its task id",
+		// Codex-specialized: names literal native spawn parameter spellings
+		// (spawn_agent.model / spawn_agent.reasoning_effort, never `effort`) per
+		// the ticket's "Codex-specialized workflow-manual guidance" requirement;
+		// this table already carries per-harness API parameter spellings
+		// (SpawnIdiom, ContinueIdiom), so it is the established mechanism —
+		// this key still names no model identifiers.
+		"SpawnBindingGuidance": "bind `recommended-model` to `spawn_agent.model` and `recommended-reasoning-effort`" +
+			" (when present) to `spawn_agent.reasoning_effort` (never `effort`); if the native spawn surface" +
+			" cannot accept the exact binding, report that the binding is unavailable rather than silently" +
+			" dropping it — the mercenary path above is the explicit exact-binding fallback",
 	},
 	// "" = host-neutral fallback for unknown/undetected harness.
 	"": {
 		"ExploreAgent":  "an exploration agent",
 		"SpawnIdiom":    "spawning a subagent",
 		"ContinueIdiom": "resuming the agent using its returned id",
+		"SpawnBindingGuidance": "honor `recommended-model` (and `recommended-reasoning-effort`, when present) via" +
+			" the host's native model-selection surface; if the exact binding cannot be applied, report that the" +
+			" binding is unavailable rather than silently dropping it — the mercenary path above is the explicit" +
+			" exact-binding fallback",
 	},
 }
 
@@ -83,18 +101,31 @@ func terminologyForHarness(harness string) map[string]string {
 	return playbookTerminologyTable[""]
 }
 
-// resolveTierModel resolves a single tier string to a concrete per-harness
-// model via the shared config seam, returning "" on resolver error. This is
-// the one call site both resolveRoleModelVar (playbook's own declared tier)
-// and resolveTierModelVars (the four fixed-tier vars) route through, so
-// 260622-feat-playbook-render-tier-label can reuse it later for
-// recommended-tier's own tier→model resolution without a parallel
-// implementation.
-func resolveTierModel(harness, tier string, configOpts wsconfig.Options) string {
-	_, model, _, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, tier, "", "", harness)
+// resolveTierModelAndEffort resolves a single tier string to a concrete
+// per-harness model and effort via the shared config seam, returning
+// ("", "") on resolver error. This is the single call site through which
+// resolveTierModel (and, transitively, resolveRoleModelVar and
+// resolveTierModelVars) as well as withRecommendedBindings's own
+// recommended-model/recommended-reasoning-effort resolution route, so no
+// parallel implementation of ResolveAgentForHarnessConfig call semantics
+// exists (260622-feat-playbook-render-tier-label).
+func resolveTierModelAndEffort(harness, tier string, configOpts wsconfig.Options) (model, effort string) {
+	_, model, effort, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, tier, "", "", harness)
 	if err != nil {
-		return ""
+		return "", ""
 	}
+	return model, effort
+}
+
+// resolveTierModel resolves a single tier string to a concrete per-harness
+// model via the shared config seam, returning "" on resolver error. Thin
+// wrapper over resolveTierModelAndEffort that discards effort; kept so
+// resolveRoleModelVar (playbook's own declared tier) and
+// resolveTierModelVars (the four fixed-tier vars) are unaffected by the
+// effort-resolving seam added for recommended-tier's own tier→model
+// resolution.
+func resolveTierModel(harness, tier string, configOpts wsconfig.Options) string {
+	model, _ := resolveTierModelAndEffort(harness, tier, configOpts)
 	return model
 }
 
@@ -299,6 +330,34 @@ func withRecommendedTier(payload, tier string) string {
 		return payload
 	}
 	return payload + "\nrecommended-tier: " + strings.TrimSpace(tier)
+}
+
+// withRecommendedBindings extends withRecommendedTier's payload with resolved
+// `recommended-model` and, when present, `recommended-reasoning-effort` lines,
+// additive after the `recommended-tier` line which stays verbatim (delegates
+// to withRecommendedTier first so its own test and byte-for-byte behavior are
+// untouched). Both new lines route through the same resolveTierModelAndEffort
+// seam used by RoleModel and the fixed-tier vars — no parallel resolution
+// path. A resolver error or empty tier omits the model/effort lines entirely
+// but leaves the stable recommended-tier line intact; no line is ever emitted
+// with an empty value (empty effort is a legitimate "no override", not an
+// error, and simply omits the effort line).
+func withRecommendedBindings(payload, tier, harness string, configOpts wsconfig.Options) string {
+	payload = withRecommendedTier(payload, tier)
+	trimmedTier := strings.TrimSpace(tier)
+	if trimmedTier == "" {
+		return payload
+	}
+	model, effort := resolveTierModelAndEffort(harness, trimmedTier, configOpts)
+	model = strings.TrimSpace(model)
+	effort = strings.TrimSpace(effort)
+	if model != "" {
+		payload += "\nrecommended-model: " + model
+	}
+	if effort != "" {
+		payload += "\nrecommended-reasoning-effort: " + effort
+	}
+	return payload
 }
 
 // childRoleForPlaybookRole maps a playbook frontmatter role string to the child key scope.

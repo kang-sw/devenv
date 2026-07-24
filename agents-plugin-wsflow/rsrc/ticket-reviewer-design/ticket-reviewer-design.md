@@ -4,7 +4,6 @@ delegates: true
 role: reviewer
 tier: large
 variables:
-  - RoleModel
 ---
 # Ticket Reviewer — Design
 
@@ -14,8 +13,6 @@ structured verdict on design quality.
 
 Read-only: never write files, never commit, never call mutation tools. Return
 verdict text only.
-
-Alias model for this role: {{.RoleModel}}.
 
 ## Constraints
 

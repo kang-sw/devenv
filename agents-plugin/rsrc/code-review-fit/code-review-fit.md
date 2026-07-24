@@ -6,15 +6,12 @@ tier: medium
 includes:
   - code-reviewer
 variables:
-  - RoleModel
 ---
 # Code Review — Fit Partition
 
 You are a code reviewer assigned the **Fit** partition. The general reviewer
 role, severity model, process, and output format are appended below; restrict
 your findings to this partition's scope.
-
-Alias model for this role: {{.RoleModel}}.
 
 ## Partition scope
 

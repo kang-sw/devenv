@@ -7,6 +7,7 @@ related-mental-model:
   - workflow-skills
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # feat: playbook render exposes native spawn model and reasoning effort
@@ -96,6 +97,18 @@ remain authoritative at render time.
   effort, unresolved-value fallback, exact output compatibility, Codex rendered
   guidance, resource manifests, wsflow mirroring, and the full relevant test
   suites.
+
+### Result (343a4765) - 2026-07-24
+
+`playbook.render`/`playbook.print` now emit additive `recommended-model` and (only when the resolved effort is non-empty) `recommended-reasoning-effort` lines alongside the preserved `recommended-tier` line, resolved through a shared `resolveTierModelAndEffort` seam over `wsconfig.ResolveAgentForHarnessConfig` (the same seam behind the former RoleModel var and the 260714 fixed-tier render vars). A resolver error omits both additive lines but never `recommended-tier`; neither additive line is ever emitted empty; an empty tier leaves the payload byte-for-byte unchanged (backward compatible).
+
+Codex-specialized workflow-manual guidance (new `SpawnBindingGuidance` entry in the per-harness `playbookTerminologyTable` idiom mechanism, referenced from `lead-workflow-manual.md`) maps those lines to the native `spawn_agent.model` / `spawn_agent.reasoning_effort` parameters — never the invalid `effort` spelling — and instructs the lead to report an unavailable exact binding rather than claim success, with the mercenary path as the exact-binding fallback. Shared playbook bodies stay host-neutral.
+
+The delegate-body `Alias model for this role: {{.RoleModel}}` echo and the now-unused `RoleModel` frontmatter were removed from all 12 shipped delegates (render output is the single pre-spawn binding source; a child need not be told its launch model). `agents-plugin/rsrc/manifest.json` and the `agents-plugin-wsflow/` mirror were regenerated, not hand-edited.
+
+Deviations: none substantive. Partitioned review (correctness/fit/test) surfaced one Important + minor doc-drift the change itself introduced — a stale "RoleModel is declared in the prompt" clause in `lead-implement.md` (Delegate dispatch step 2) and a stale `{{.RoleModel}}`-usage claim in `prompt-bundle.md` — both fixed (a481f1b4, 343a4765).
+
+Verification: `go build ./...`, `go vet ./...`, and full `go test ./... -count=1` (all 12 packages) green, including the wsflow mirror parity test (`TestWsflowRsrcMirrorUpToDate`), new `TestWithRecommendedBindings` (default/overridden Codex mapping, Claude empty-effort omission, resolver-error tier-only fallback, empty-tier passthrough), and `TestPlaybookPrintGoldenLeadWorkflowManualSpawnBindingGuidancePerHarness` (Codex names the literal spawn params; Claude leaks neither). Specs updated on contact: `ai-docs/spec/mcp-tools.md` (`#260609-playbook-tools`) and `ai-docs/spec/workflow-skills.md` (`#260507-mcp-centric-workflow-language`). Commit range 2c240d13..343a4765 (9 commits).
 
 ## Spec Impact
 
