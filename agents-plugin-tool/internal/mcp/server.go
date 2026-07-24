@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,6 +124,12 @@ var debugEvents = struct {
 	events []map[string]any
 }{}
 
+// testPanicHook is always nil in production. Only _test.go files in this
+// package set it, to exercise goroutine-level panic recovery (server.go's
+// recover-defer in ServeStdio) through a real dispatched tools/call request
+// instead of a synthetic panic.
+var testPanicHook func(toolName string)
+
 func NewServer(root, version string, sourceCommit ...string) *Server {
 	commit := "dev"
 	if len(sourceCommit) > 0 && sourceCommit[0] != "" {
@@ -177,6 +184,21 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			defer wg.Done()
 			defer cancel()
 			defer requests.Delete(id)
+			// This defer is appended after the three above, so on unwind it
+			// runs FIRST (Go LIFO defer order): a panic inside s.handle is
+			// caught and converted into a visible JSON-RPC error before
+			// wg.Done/cancel/requests.Delete fire, so it fails only this
+			// request instead of crashing the ws-mcp serve process.
+			defer func() {
+				if r := recover(); r != nil {
+					stack := debug.Stack()
+					recordPanic(req.Method, id, r, stack)
+					resp := errorResponse(req.ID, -32000, fmt.Sprintf("internal error: request handler panicked (%s)", req.Method))
+					if err := writeResponse(resp); err != nil {
+						appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+					}
+				}
+			}()
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
 				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}
@@ -267,6 +289,67 @@ func appendDebugEvent(event string, fields map[string]any) {
 	}
 	defer file.Close()
 	_, _ = file.Write(append(raw, '\n'))
+}
+
+// crashLogPath resolves the always-on, cross-platform panic-trace sink under
+// the shared cache root (WS_CACHE_HOME or ~/.cache/ws@...), the same
+// root-independent seam sessionStore.keysDir uses for the keys/ dir: a
+// panicking request may not know which project root it belonged to, so the
+// crash file lives in a flat top-level dir under CacheRoot(), not under any
+// per-project layout. It creates the directory (0o755) if needed and returns
+// the fixed file path; callers append-only (no rotation), matching the
+// existing WS_MCP_DEBUG_LOG sink's precedent.
+func crashLogPath() (string, error) {
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(cacheRoot, "crash")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create crash log dir: %w", err)
+	}
+	return filepath.Join(dir, "mcp-panic.log"), nil
+}
+
+// recordPanic persists a recovered request-goroutine panic to the always-on
+// crash file (required sink) and mirrors it into the in-memory debug ring
+// (and, if WS_MCP_DEBUG_LOG is set, that opt-in secondary log) via
+// appendDebugEvent. Unlike appendDebugEvent's best-effort mirror, failure to
+// resolve or write the crash file falls back to stderr so a broken/unwritable
+// cache home never fully swallows the trace.
+func recordPanic(method, id string, recovered any, stack []byte) {
+	fields := map[string]any{
+		"id":     id,
+		"method": method,
+		"panic":  fmt.Sprint(recovered),
+		"stack":  string(stack),
+	}
+	record := map[string]any{
+		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
+		"event": "request.panic",
+	}
+	for key, value := range fields {
+		record[key] = value
+	}
+	if raw, err := json.Marshal(record); err == nil {
+		if path, err := crashLogPath(); err == nil {
+			if file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+				_, writeErr := file.Write(append(raw, '\n'))
+				closeErr := file.Close()
+				if writeErr != nil || closeErr != nil {
+					fmt.Fprintf(os.Stderr, "mcp: failed to append crash log %s: write=%v close=%v\n", path, writeErr, closeErr)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "mcp: failed to open crash log %s: %v\n", path, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "mcp: failed to resolve crash log path: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "mcp: failed to marshal crash record: %v\n", err)
+	}
+
+	appendDebugEvent("request.panic", fields)
 }
 
 func recentDebugEvents(limit int) []map[string]any {
@@ -386,6 +469,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 			}
 		}
+	}
+
+	if testPanicHook != nil {
+		testPanicHook(params.Name)
 	}
 
 	switch params.Name {
