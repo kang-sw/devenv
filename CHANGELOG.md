@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.36.1 - 2026-07-24
+
+### Fixed
+- Windows release CI (`go test ./...`) now passes. Two tests failed only on
+  Windows (both green on Linux, so the release build was never blocked): a
+  shipped-doc content assertion broke under a CRLF checkout, and an exec.shell
+  cwd assertion missed when the CI runner returned an 8.3 short-name temp path.
+  Added a repo-root `.gitattributes` (`* text=auto eol=lf`) so text — including
+  the plugin's shipped docs — checks out as LF on every platform, and made the
+  temp-path assertion tolerant of 8.3 short names and symlinked temp roots.
+
 ## v0.36.0 - 2026-07-24
 
 ### Added
