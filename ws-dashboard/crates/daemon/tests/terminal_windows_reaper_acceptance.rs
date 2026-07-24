@@ -125,6 +125,11 @@ async fn connect_with_retry(
     }
 }
 
+/// Shell executables `select_terminal_shell` (`terminal.rs`) can pick on
+/// Windows, in the order it tries them: `pwsh.exe` if on PATH, else
+/// `powershell.exe` if on PATH, else the `COMSPEC`/fallback `cmd.exe`.
+const KNOWN_SHELL_EXECUTABLES: [&str; 3] = ["pwsh.exe", "powershell.exe", "cmd.exe"];
+
 /// Discovers the shell's real OS child PID with no new Cargo dependency, by
 /// polling `Get-CimInstance Win32_Process -Filter "ParentProcessId=<helper
 /// pid>"` via `powershell.exe`. No message in the helper<->daemon IPC
@@ -133,15 +138,31 @@ async fn connect_with_retry(
 /// (Task Manager, an OOM killer, a human running `taskkill`) would identify
 /// the process, which is exactly the out-of-band kill this test performs
 /// next.
+///
+/// CONTRACT (discovered empirically running this test on real Windows -
+/// portable-pty's `CreatePseudoConsole` spawns the shell as a direct child
+/// with no intermediary, per the plan's Codebase Findings, but that is not
+/// the ONLY direct child of the helper): modern Windows additionally spawns
+/// a ConPTY host process (`OpenConsole.exe`, the Windows Terminal successor
+/// to `conhost.exe`) as a SIBLING direct child of the helper to back the
+/// pseudo console. `ParentProcessId=<helper pid>` therefore legitimately
+/// returns two children in the common case, not one. Filtering to
+/// `KNOWN_SHELL_EXECUTABLES` - exactly the executables `select_terminal_
+/// shell` itself can choose - is what the plan's own Codebase Findings
+/// anticipated as the fallback for "more than one child process ever shows
+/// up"; this is that fallback, now confirmed necessary rather than merely
+/// theoretical.
 async fn discover_shell_pid(helper_pid: u32) -> u32 {
     let mut last_failure: Option<String> = None;
+    let mut last_seen: Vec<(u32, String)> = Vec::new();
     for _ in 0..CHILD_DISCOVERY_ATTEMPTS {
         let output = Command::new("powershell.exe")
             .args([
                 "-NoProfile",
                 "-Command",
                 &format!(
-                    "(Get-CimInstance Win32_Process -Filter \"ParentProcessId={helper_pid}\").ProcessId"
+                    "(Get-CimInstance Win32_Process -Filter \"ParentProcessId={helper_pid}\") \
+                     | Select-Object ProcessId,Name | ConvertTo-Csv -NoTypeInformation"
                 ),
             ])
             .stdin(Stdio::null())
@@ -160,37 +181,53 @@ async fn discover_shell_pid(helper_pid: u32) -> u32 {
             continue;
         }
 
+        // `ConvertTo-Csv -NoTypeInformation` on Windows PowerShell emits a
+        // `"ProcessId","Name"` header line followed by one double-quoted,
+        // comma-separated line per process - skip the header, then split
+        // each remaining line on the first comma and strip quotes.
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let pids: Vec<u32> = stdout
+        let children: Vec<(u32, String)> = stdout
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty())
-            .map(|line| {
-                line.parse::<u32>().unwrap_or_else(|error| {
-                    panic!("unexpected non-numeric child-pid line {line:?}: {error}")
-                })
+            .skip(1)
+            .filter_map(|line| {
+                let mut fields = line.splitn(2, ',');
+                let pid = fields.next()?.trim_matches('"').parse::<u32>().ok()?;
+                let name = fields.next()?.trim_matches('"').to_owned();
+                Some((pid, name))
             })
             .collect();
 
-        match pids.as_slice() {
+        let shell_children: Vec<&(u32, String)> = children
+            .iter()
+            .filter(|(_, name)| {
+                KNOWN_SHELL_EXECUTABLES
+                    .iter()
+                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            })
+            .collect();
+        last_seen = children;
+
+        match shell_children.as_slice() {
             [] => {
                 tokio::time::sleep(CHILD_DISCOVERY_INTERVAL).await;
                 continue;
             }
-            [single] => return *single,
+            [(pid, _)] => return *pid,
             multiple => panic!(
-                "expected exactly one shell child of helper pid {helper_pid}, found {}: {:?} \
-                 (portable-pty spawns the shell as a direct CreateProcessW child with no \
-                 intermediary, so this should not normally happen - see the plan's Codebase \
-                 Findings on portable-pty's win/psuedocon.rs)",
+                "expected exactly one shell-named child (one of {KNOWN_SHELL_EXECUTABLES:?}) of \
+                 helper pid {helper_pid}, found {}: {:?}; all observed direct children were {:?}",
                 multiple.len(),
-                multiple
+                multiple,
+                last_seen
             ),
         }
     }
     panic!(
-        "no shell child of helper pid {helper_pid} appeared within {:?} ({CHILD_DISCOVERY_ATTEMPTS} \
-         attempts, {CHILD_DISCOVERY_INTERVAL:?} apart); last powershell failure: {last_failure:?}",
+        "no shell child (one of {KNOWN_SHELL_EXECUTABLES:?}) of helper pid {helper_pid} appeared \
+         within {:?} ({CHILD_DISCOVERY_ATTEMPTS} attempts, {CHILD_DISCOVERY_INTERVAL:?} apart); \
+         last powershell failure: {last_failure:?}; last observed direct children: {last_seen:?}",
         CHILD_DISCOVERY_INTERVAL * CHILD_DISCOVERY_ATTEMPTS
     );
 }
