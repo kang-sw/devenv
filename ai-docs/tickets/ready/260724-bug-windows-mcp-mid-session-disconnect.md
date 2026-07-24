@@ -130,6 +130,38 @@ subsequent request on the same process**. Reject silently swallowing panics — 
 trace must be persisted and the request must return a visible error. This is the
 single highest-value change and is fully cross-platform.
 
+### Result (325f368f) - 2026-07-24
+
+Implemented in `agents-plugin-tool/internal/mcp/server.go`: the per-request
+goroutine in `ServeStdio` gained a fourth `recover()` defer, appended after the
+existing `wg.Done`/`cancel`/`requests.Delete` defers so Go LIFO runs it first on
+unwind. On panic it writes a JSON-RPC error (code `-32000`, message `internal
+error: request handler panicked (<method>)`) on the serialized response path and
+the process keeps serving. New `crashLogPath()`/`recordPanic()` helpers persist
+the panic value + `debug.Stack()` as one JSON line to an always-on
+`<cache-root>/crash/mcp-panic.log` (resolved via `wsstate.CacheRoot`, no
+rotation), with a stderr fallback if the file is unwritable, and mirror the event
+through the existing `appendDebugEvent` (so `WS_MCP_DEBUG_LOG` still receives it
+when set). Regression test `TestServeStdioRecoversPanicAndPersistsCrashTrace`
+drives a real dispatched `todo.append` panic via a package-level `testPanicHook`
+seam and asserts (a) the panicking request returns the `-32000` JSON-RPC error,
+(b) a subsequent `runtime.info` on the same process succeeds, and (c) the crash
+file contains the panic text.
+
+Verification: `go build ./...` clean; `go test ./...` all 12 packages pass.
+
+Deviation from plan framing: the ticket phrasing "recover() skips the panicking
+handler's own defers" overstates Go semantics — inner defers (e.g. `defer
+store.Close()`) still run during unwind, so per-operation store open/close already
+bounds the connection/`-wal`/`-shm` lifetime; no store-cleanup code was needed,
+only confirmation. Reviews (correctness/fit/test) all clean; 5 minor findings
+recorded, none requiring a fix (keyed-tool panic case, crash-file-unwritable
+branch, and concurrent-panics case all judged out of Phase 1 scope).
+
+Deferred to later phases (unchanged): Phase 2 launcher abnormal-exit breadcrumb,
+Phase 3 Windows Job Object / parent-death detection, Phase 4 SQLite point-read
+retry + WAL re-assert.
+
 ### Phase 2: Launcher-side abnormal-exit diagnostics
 
 On the Windows branch, record the Go child's exit code/reason on abnormal
