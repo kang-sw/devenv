@@ -576,3 +576,184 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
     let _ = std::fs::remove_dir_all(&state_home);
     let _ = std::fs::remove_dir_all(&work_root);
 }
+
+// CONTRACT (260724 dead-shell Phase 3, Unix-regression leg): guard the LIVE,
+// steady-state PTY-master-EOF exit-detection path. Phase 1 added a
+// `#[cfg(windows)]` process-handle "reaper" thread (blocks on
+// `WaitForSingleObject`, drives `transition(Exited)` on shell death) plus a
+// kill-path reorder; that reaper is compiled OUT on Unix. On Unix, exit
+// detection still relies entirely on the pre-existing path: the helper's PTY
+// reader sees `read()==Ok(0)` (EOF) when the shell dies and calls
+// `transition(Exited)`. This test proves that path was NOT regressed by the
+// Phase 1 wiring: with a SINGLE live daemon and a WebSocket attached, a shell
+// that exits normally must flip the terminal's status to `exited` over the
+// live socket via the reader EOF path - no daemon restart, no boot-reconcile.
+//
+// It is deliberately the third, distinct case the other two tests do NOT cover:
+//   * `terminal_survives_simulated_daemon_restart_and_reattaches_by_id` keeps
+//     the shell ALIVE across a restart (survive-restart; it never exits).
+//   * `terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_reattach`
+//     lets the shell exit during the daemon-DOWN window and discovers `exited`
+//     later via BOOT-RECONCILE row 2 (AdoptGrace), not a live witness.
+//   * THIS test is the live-witness case: the shell exits while a daemon is up
+//     and a socket is attached, so `exited` arrives in real time over the PTY-
+//     EOF reader path. We assert specifically on `exited` (not merely
+//     "non-running") to pin which path is being guarded.
+#[tokio::test]
+async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
+    let client = reqwest::Client::new();
+    let state_home = temp_fixture_path("state-live-eof");
+    std::fs::create_dir_all(&state_home).expect("create state home dir");
+    let work_root = temp_fixture_path("root-live-eof");
+    std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    // --- One live daemon; create a terminal and attach a WebSocket to witness
+    // its exit in real time.
+    let daemon = spawn_real_daemon(&state_home).await;
+    let work_root_id = open_work_root(&client, &daemon.base_url, &work_root).await;
+    let terminal_id = create_terminal(&client, &daemon.base_url, &work_root_id).await;
+
+    let mut request = format!(
+        "ws://{}/api/dashboard/terminals/{terminal_id}/socket?after=0",
+        daemon
+            .base_url
+            .strip_prefix("http://")
+            .expect("daemon base url is http")
+    )
+    .into_client_request()
+    .expect("live-eof websocket request");
+    request
+        .headers_mut()
+        .insert(axum::http::header::HOST, "127.0.0.1".parse().unwrap());
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("live-eof websocket upgrades");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::SWITCHING_PROTOCOLS,
+        "live-eof websocket upgrade"
+    );
+
+    // --- Wait until the interactive shell is genuinely idle at a ready prompt
+    // before sending `exit`. On Unix the default shell here is an interactive
+    // shell (e.g. zsh) whose rc / prompt / line-editor (ZLE) load
+    // asynchronously; input delivered during that startup window is buffered
+    // and re-processed unreliably (bracketed-paste + ZLE re-typing the buffer
+    // one keystroke at a time), so an `exit` sent too early can sit unexecuted
+    // for seconds. We therefore never send input during startup - we passively
+    // watch the live socket until the startup output burst settles into a quiet
+    // gap (shell-agnostic readiness), which means the shell is idle and ready
+    // to accept and immediately execute a command. Skipped on Windows, where
+    // the shell is line-buffered cmd (no ZLE re-processing race) and exit
+    // detection additionally rides the Phase-1 handle-wait reaper.
+    #[cfg(not(windows))]
+    {
+        let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+        let mut saw_startup_output = false;
+        while tokio::time::Instant::now() < ready_deadline {
+            match tokio::time::timeout(Duration::from_millis(400), socket.next()).await {
+                Ok(Some(Ok(TungsteniteMessage::Text(payload)))) => {
+                    let value: serde_json::Value =
+                        serde_json::from_str(&payload).expect("readiness frame JSON");
+                    assert_eq!(value["terminalId"], terminal_id);
+                    if value["type"] == "output" {
+                        saw_startup_output = true;
+                    }
+                }
+                Ok(Some(Ok(_))) => {}
+                Ok(Some(Err(err))) => panic!("readiness websocket error: {err}"),
+                Ok(None) => break,
+                Err(_elapsed) => {
+                    // 400ms with no frame: if the startup burst has begun and
+                    // then gone quiet, the shell is idle at a ready prompt.
+                    if saw_startup_output {
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(
+            saw_startup_output,
+            "interactive shell produced no startup output before the readiness deadline"
+        );
+    }
+
+    // --- Make the shell exit normally so the PTY master EOFs. Sent over the
+    // live WebSocket so the whole exit is witnessed on one live connection.
+    let exit_command = if cfg!(windows) { "exit\r\n" } else { "exit\n" };
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "input", "data": exit_command })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .expect("send exit input over live websocket");
+
+    // --- Drain frames until we witness the terminal go `exited`. Generous
+    // bounded deadline (real OS processes; consistent with the other tests'
+    // 3-5s socket-drain windows) so slow shell teardown under concurrent test
+    // load never produces a false failure.
+    let mut saw_exited = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        let Some(message) = tokio::time::timeout(Duration::from_millis(500), socket.next())
+            .await
+            .unwrap_or(None)
+        else {
+            continue;
+        };
+        let message = message.expect("live-eof websocket message");
+        let TungsteniteMessage::Text(payload) = message else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).expect("live-eof websocket frame JSON");
+        assert_eq!(value["terminalId"], terminal_id);
+        match value["type"].as_str() {
+            // The PTY-EOF path transitions to `Exited`; assert specifically on
+            // that (not merely non-running) so this guards the exact path.
+            Some("status") => {
+                if value["status"] == "exited" {
+                    saw_exited = true;
+                    break;
+                }
+            }
+            Some("exit") => {
+                saw_exited = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_exited,
+        "live PTY-EOF exit path must flip status to `exited` over the live socket"
+    );
+
+    socket.close(None).await.expect("close live-eof websocket");
+
+    // Cleanup: the shell has already exited, so the terminal row may already
+    // be gone; tolerate either NO_CONTENT (still present) or NOT_FOUND (already
+    // reaped). Then hard-kill the daemon and drop the temp dirs.
+    let close_response = client
+        .delete(format!(
+            "{}/api/dashboard/terminals/{terminal_id}",
+            daemon.base_url
+        ))
+        .send()
+        .await
+        .expect("close live-eof terminal request");
+    assert!(
+        matches!(
+            close_response.status(),
+            reqwest::StatusCode::NO_CONTENT | reqwest::StatusCode::NOT_FOUND
+        ),
+        "close live-eof terminal: unexpected status {}",
+        close_response.status()
+    );
+
+    daemon.kill_hard().await;
+    let _ = std::fs::remove_dir_all(&state_home);
+    let _ = std::fs::remove_dir_all(&work_root);
+}
