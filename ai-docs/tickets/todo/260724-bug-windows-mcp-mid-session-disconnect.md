@@ -1,7 +1,7 @@
 ---
 title: "Windows wsflow MCP mid-session disconnects under high concurrency"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Windows wsflow MCP mid-session disconnects under high concurrency
