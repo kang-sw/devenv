@@ -121,6 +121,12 @@ until merge, so the parent's `ready/` still lists tickets that are already in
 flight. The batch selection must therefore exclude tickets already dispatched this
 run and not yet merged, read off the board (below). Serial goal-step never hits this
 because it holds only one ticket at a time and yields after dispatch.
+Encoding (pinned, resolving the sage-review minor): each board note leads with its
+ticket stem and a state word — `"<stem>: dispatched"` at dispatch, advanced to
+`"<stem>: merged"` (or `"<stem>: blocked"`) as it resolves — so the in-flight set the
+selection excludes is exactly the children whose note is still `dispatched`.
+`session.note` stays free-form text; this stem/state convention is a skill-body
+concern (Phase 2 body doctrine), not a tool schema field.
 
 **Single model, graceful serial degenerate — no degradation rung.** This skill
 exists only for the flat mini-lead juggling above. There is **no** contained-
@@ -318,9 +324,12 @@ Add `session.note(session_key, child_session_key, text)` storing a per-child not
 as an additive field on the existing per-session record store, surfaced in
 `session.children` output. Lead-only via the existing `session.*` prefix gate.
 Finalize exact field name / empty-omit discipline / clear-verb during
-implementation. Tests: lead writes/updates a child note; note appears in
-`session.children`; delegate/leaf key is rejected; note survives a re-read
-(restart/compaction persistence). Deferred: any child-self-note path.
+implementation. The field stays **convention-agnostic free-form text** — the
+`<stem>: <state>` board convention that makes it the in-flight-exclusion ledger is a
+skill-body concern (Phase 2), not a tool schema field. Tests: lead writes/updates a
+child note; note appears in `session.children`; delegate/leaf key is rejected; note
+survives a re-read (restart/compaction persistence). Deferred: any child-self-note
+path.
 
 ### Phase 2: `lead-goal-fan-out-step` entry skill + goal-step transclusion
 
@@ -353,18 +362,26 @@ lead mints one `lead`-scope key per worker bound to that worktree root (`ferrule
 `workflow_manual` + `playbook.print("lead-proceed")` and holds at the merge gate;
 (d) workers never merge — a per-branch merge subagent serial-merges from the lead's
 worktree; (e) worktree topology as intent-prose; (f) `session.note` +
-`session.children` for status/in-flight re-hydration; (g) one aggregate verification
-pass, then hand back to goal-step's terminal logic. Depends on Phase 1.
+`session.children` for status/in-flight re-hydration, using the pinned `<stem>:
+<state>` board convention so the exclusion set is a plain scan for still-`dispatched`
+children; (g) one aggregate verification pass, then hand back to goal-step's terminal
+logic. Depends on Phase 1.
 
 Verification: the shim resolves through `workflow_manual` + `playbook.print(name:
 "lead-goal-fan-out-step")` — body renders with correct ws/wsflow namespace
 substitution **and** the appended `<playbook name="lead-goal-step">` block; entry-skill
 registration is reflected in the namespace list and the bumped directly-invocable
-count; and one end-to-end dry run — lead creates a worktree, mints a `lead`-scope
-key, dispatches a native mini-lead that itself spawns an implement/review
-sub-subagent and commits to its branch, round-trips `session.note` +
-`session.children`, and serial-merges the returned branch via a merge subagent —
-completes without a wrong-root, precondition-gate, or containment surprise.
+count; and one end-to-end **batch≥2** dry run — lead selects two mutually-independent
+`ready/` tickets, creates two worktrees, mints two `lead`-scope keys, and dispatches
+two concurrent native mini-leads that each spawn their own implement/review
+sub-subagent and commit to their own branch, round-trips `session.note` +
+`session.children` across both, and serial-merges both returned branches via merge
+subagents — completes without a wrong-root, precondition-gate, or containment
+surprise. This batch≥2 run is where the N-way concurrency claim is actually
+exercised (a single-worktree run proves only depth-2 recursion and the mint/merge
+round-trip, not that N worktrees + mini-leads coexist and juggle cleanly); treat it
+as prototype-validate — run it, judge the concurrency behavior, and fold any friction
+back into the body doctrine before shipping.
 
 ### Phase 3: wsflow exposure verification + mirror
 
