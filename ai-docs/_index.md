@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.35.3`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.35.3`).
+Active plugin package: `agents-plugin/` (`ws@0.35.4`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.35.4`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -212,11 +212,17 @@ dropped tickets live in hidden archive dirs and git history.
 - `260723-epic-ticket-write-reshape` (todo, epic) - coordinates the ticket-write
   reshape: verify-commit gate as mechanical floor, must-not-forget tool collapse,
   concept-doc consolidation. Board artifact, not an implementation target.
-- `260723-refactor-fork-removal-prefer-subagent` (ready, refactor) - delete the
-  fork delegation construct (zero Go impl; unreliable per 260625/260629, dropped
-  260626-*); reshape `lead-prefer-subagent` to fresh-spawn + central
-  authoring/mutation whitelist (overlay). Spec addressing via `## Spec Impact`
-  (`workflow-skills`, Contract-first: no). Sage review completed.
+- `260723-refactor-fork-removal-prefer-subagent` (refactor) - **landed**
+  (`d6669070`), moved to `.done`. Deleted the fork delegation construct and
+  reshaped `lead-prefer-subagent` to two clean poles: fresh spawn by default +
+  a central authoring/mutation whitelist overlay (durable-artifact authoring
+  stays with the context-holder session, never a fresh summary-only spawn).
+  Opening invariant reversed; `native-spawn-binding.codex.md` `fork_turns:"none"`
+  kept; `builtinPromptOverrideDefaults()` already empty (no Go change). Dropped
+  the `lead-goal-step` fork pointer; removed 3 `fork_context:true` test
+  assertions (kept `fork_turns:"none"`); corrected 4 stale doc sites; spec
+  `{#260724-prefer-subagent-fresh-spawn-delegation-posture}`. Resolves
+  260625/260629 by deletion. Review clean; this drained the ready queue.
 - `260723-feat-ticket-write-verify-commit-gate` (feat, child of 260723-epic) -
   **both phases landed** (`fcb96383`), pending move to `.done`. Phase 1
   (`9744429`): deterministic `tickets.verify` + non-bypassable `git.commit` gate

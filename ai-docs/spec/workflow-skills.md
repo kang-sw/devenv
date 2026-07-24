@@ -96,10 +96,20 @@ XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
 boundary. The appended text is the static body of
 `agents-plugin/skills/lead-prefer-subagent/SKILL.md`, read directly via
 `LoadSkillBody` with no override-marker pass and no per-harness runtime
-branch: Claude and Codex both see the same host-conditional prose, including
-the literal Codex `spawn_agent` fallback wording. Explicitly invoking
-`lead-prefer-subagent` may duplicate this short posture text; that
-duplication is accepted.
+branch: Claude and Codex both see the same host-neutral posture prose.
+Explicitly invoking `lead-prefer-subagent` may duplicate this short posture
+text; that duplication is accepted.
+
+Under this maximum-delegation posture the lead delegates every payload to a
+fresh, self-contained subagent by default; the sole carve-out is that
+authoring or mutating a durable artifact (ticket, spec) stays with the session
+that already holds the authoritative context for the decision — the lead when
+it was settled in the lead conversation, or the delegated subagent's own
+continuing session when settled there — never a separate fresh spawn working
+only from an after-the-fact summary. The earlier context-inheriting fork
+delegate and its Codex `spawn_agent` fork-fallback wording were removed, leaving
+two clean delegation poles: the fresh spawn and this context-holder carve-out.
+{#260724-prefer-subagent-fresh-spawn-delegation-posture}
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
 queries, generated artifact paths, runtime metadata, workflow discovery, Git
