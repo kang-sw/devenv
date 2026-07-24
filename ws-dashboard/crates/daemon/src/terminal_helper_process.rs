@@ -112,6 +112,25 @@ impl SharedState {
     }
 
     fn kill_shell_if_running(&self) {
+        // Stamp the ring `Terminated` BEFORE killing the child so a
+        // concurrent exit observer that wakes on child death finds a
+        // non-`Running` ring and its own `transition(Exited)` becomes a
+        // genuine no-op (see `transition`'s `Running`-only guard) instead of
+        // racing an `Exited` status over this intentional, daemon-initiated
+        // kill. On Windows the #[cfg(windows)] handle-wait reaper
+        // (`spawn_shell`) is exactly such an observer; the reader thread's
+        // PTY-EOF `transition(Exited)` is another. Only the status flag is
+        // set here - the PTY master and writer channel are deliberately torn
+        // down AFTER the child is killed below, because only child death
+        // reliably unblocks a writer thread stuck on a full OS pipe buffer
+        // (mental-model "Common Mistakes"); tearing them down first would
+        // reintroduce that starvation.
+        {
+            let mut ring = self.ring.lock().expect("ring lock poisoned");
+            if ring.status == TerminalHelperStatus::Running {
+                ring.status = TerminalHelperStatus::Terminated;
+            }
+        }
         if let Some(mut child) = self.child.lock().expect("child lock poisoned").take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -420,8 +439,31 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
                     );
                 }
             }
+
+            // Event-driven exit detection that does NOT depend on PTY EOF.
+            // On Windows a shell can die while ConPTY keeps the PTY master
+            // pipe open (conhost holding it), so the reader thread's
+            // EOF-triggered `transition(Exited)` (`spawn_reader_thread`) may
+            // never fire and the terminal would wrongly stay `Running`
+            // forever. Duplicate the shell's process handle into a handle we
+            // own (distinct from the `Child`'s, which `kill_shell_if_running`
+            // closes) and hand it to a detached reaper thread that blocks on
+            // it and drives the same exit path on wake.
+            match crate::terminal_platform::windows::duplicate_process_handle(raw_handle) {
+                Ok(handle) => spawn_process_exit_reaper(shared.clone(), handle),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "failed to duplicate terminal shell handle for exit reaper; \
+                         falling back to PTY-EOF-only exit detection"
+                    );
+                }
+            }
         } else {
-            tracing::warn!("terminal shell child exposed no raw handle; skipping job-object assignment");
+            tracing::warn!(
+                "terminal shell child exposed no raw handle; skipping job-object assignment \
+                 and exit reaper (PTY-EOF-only exit detection)"
+            );
         }
     }
 
@@ -467,6 +509,43 @@ fn spawn_reader_thread(shared: Arc<SharedState>, mut reader: Box<dyn Read + Send
                 }
             }
         }
+        shared.transition(TerminalHelperStatus::Exited);
+    });
+}
+
+// Windows-only, event-driven shell-exit detection independent of PTY EOF.
+//
+// The reader thread (`spawn_reader_thread`) is the ONLY exit trigger on
+// Unix, keyed off PTY master EOF. On Windows/ConPTY a shell process can
+// terminate while conhost keeps the master pipe open, so that EOF may never
+// arrive and the terminal would remain `Running` forever - the reported
+// zombie-pane bug. This reaper closes that gap at the source: it owns an
+// independent `DuplicateHandle` copy of the shell process handle (NOT the
+// borrowed `Child::as_raw_handle`, which `kill_shell_if_running` closes when
+// it drops the `Child`) and blocks on it in the kernel (zero idle CPU, zero
+// poll latency). The instant the shell process exits it drives the SAME
+// `SharedState::transition(Exited)` the PTY-EOF reader uses, so the existing
+// `Exit` IPC -> `apply_helper_status` -> WebSocket exit-frame pipeline is
+// reused unchanged.
+//
+// Windows-only by design: a second Unix `waitpid`-based reaper would race
+// and steal the reap from `portable_pty`'s own `Child::wait()` in
+// `kill_shell_if_running`, whereas Windows process handles admit many
+// concurrent independent waiters. Gated at the call site (`spawn_shell`'s
+// `#[cfg(windows)]` block).
+//
+// Detached and never joined. On a daemon-initiated kill the ring is already
+// `Terminated` (`kill_shell_if_running` stamps it before `child.kill()`), so
+// this `transition(Exited)` is a genuine no-op; on a spontaneous shell death
+// it is the authoritative exit signal. Exactly one shell is ever spawned per
+// helper (`shell_started` compare_exchange), so exactly one reaper exists,
+// and every helper-exit path runs `kill_shell_if_running`, which kills the
+// shell and unblocks this wait - so neither the thread nor the duplicated
+// handle leaks.
+#[cfg(windows)]
+fn spawn_process_exit_reaper(shared: Arc<SharedState>, handle: std::os::windows::io::OwnedHandle) {
+    thread::spawn(move || {
+        crate::terminal_platform::windows::wait_for_process_exit(&handle);
         shared.transition(TerminalHelperStatus::Exited);
     });
 }
@@ -569,5 +648,96 @@ mod ring_state_tests {
         let chunks = ring.backfill_after(1);
         assert_eq!(chunks.len(), MAX_OUTPUT_CHUNKS);
         assert_eq!(chunks.first().expect("non-empty").sequence, oldest_retained);
+    }
+}
+
+// Regression coverage for the "make the guard real" invariant: the kill path
+// stamps the ring `Terminated` before `child.kill()` so a racing exit
+// observer (the #[cfg(windows)] handle-wait reaper, or the PTY-EOF reader)
+// waking on the daemon-initiated kill runs `transition(Exited)` as a genuine
+// no-op instead of overwriting the intentional `Terminated`. Both the guard
+// and the stamp are cross-platform pure state logic (no OS/PTY dependency),
+// so they are exercised directly here, NOT windows-gated.
+#[cfg(test)]
+mod kill_path_guard_tests {
+    use super::*;
+
+    fn shared_state_for_test() -> SharedState {
+        SharedState {
+            pid: 0,
+            start_time: 0,
+            ring: Mutex::new(RingState::new()),
+            notify: Notify::new(),
+            child: Mutex::new(None),
+            master: Mutex::new(None),
+            writer_tx: Mutex::new(None),
+            shell_started: AtomicBool::new(false),
+            exited_at: Mutex::new(None),
+            #[cfg(windows)]
+            job: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn transition_is_a_no_op_once_the_ring_has_left_running() {
+        let shared = shared_state_for_test();
+        // Drive the ring out of `Running` directly (isolating this test to
+        // `transition`'s guard, independent of how the kill path gets there).
+        shared.ring.lock().expect("ring lock poisoned").status = TerminalHelperStatus::Terminated;
+
+        // A racing exit observer waking after the daemon-initiated kill must
+        // NOT downgrade the intentional `Terminated` back to `Exited`.
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Terminated,
+            "transition(Exited) must be a genuine no-op once the ring is non-Running \
+             - removing transition's Running-only guard would fail this"
+        );
+    }
+
+    #[test]
+    fn transition_from_running_still_reaches_exited() {
+        // Negative control: the guard is specifically the non-`Running` gate,
+        // not a blanket freeze - a `Running` ring DOES transition, so the
+        // no-op above is genuinely conditional on prior state, not a
+        // transition() that never mutates.
+        let shared = shared_state_for_test();
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Running,
+            "fresh ring starts Running"
+        );
+
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Exited,
+            "a Running ring must still transition to Exited"
+        );
+    }
+
+    #[test]
+    fn kill_shell_if_running_stamps_terminated() {
+        // The load-bearing half of the kill-path reorder that is testable on
+        // Linux: `kill_shell_if_running` must leave the ring `Terminated`
+        // (not `Running`, not `Exited`). Removing the pre-kill `Terminated`
+        // stamp would leave the ring `Running` here and fail this assertion.
+        // (The child is `None` in this unit test - wiring a real PTY child in
+        // is disproportionate; the before/after-`child.kill()` write-unblock
+        // ordering is a separate writer-starvation concern, not the guard
+        // invariant under review, and combined with the two tests above this
+        // fully covers the reaper's "Exited becomes a no-op" reliance.)
+        let shared = shared_state_for_test();
+
+        shared.kill_shell_if_running();
+
+        assert_eq!(
+            shared.status_and_next_sequence().0,
+            TerminalHelperStatus::Terminated,
+            "kill path must stamp Terminated so a racing exit observer's Exited is a no-op"
+        );
     }
 }

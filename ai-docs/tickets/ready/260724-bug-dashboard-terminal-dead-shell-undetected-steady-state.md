@@ -166,6 +166,59 @@ helper (`shell_started` compare_exchange at `:298-302`) means exactly one reaper
 thread; every helper-exit path runs `kill_shell_if_running` (`:195`) which kills
 the shell and unblocks the reaper, so no thread/handle leak.
 
+### Result (b07f40ad) - 2026-07-24
+
+Shipped the Windows helper-side event-driven exit reaper as designed.
+
+- **Reaper mechanism** (`b07f40ad`): added `terminal_platform::windows::duplicate_process_handle`
+  (`DuplicateHandle` with `DUPLICATE_SAME_ACCESS`, so the copy carries `SYNCHRONIZE`)
+  and `wait_for_process_exit` (`WaitForSingleObject(INFINITE)`). In
+  `terminal_helper_process::spawn_shell`'s `#[cfg(windows)]` block the shell's
+  process handle is duplicated into an `OwnedHandle` before the `Child` moves into
+  shared state and handed to a detached `spawn_process_exit_reaper` thread that
+  blocks on it and, on wake, drives the same `SharedState::transition(Exited)` the
+  PTY-EOF reader uses — reusing the existing `Exit` IPC -> daemon -> WS exit-frame
+  pipeline unchanged. Detection therefore no longer hinges solely on PTY-master
+  EOF, closing the Windows/ConPTY "conhost holds the pipe open" root cause.
+- **Kill-path reorder** (`b07f40ad`): `kill_shell_if_running` now stamps the ring
+  `Terminated` BEFORE `child.kill()` (cross-platform) so a reaper waking on the
+  intentional death finds a non-`Running` ring and its `transition(Exited)` is a
+  genuine no-op instead of overwriting the daemon's `Terminated`. The ring was
+  never actually set to `Terminated` before this change, so the original
+  "no-op when Terminated" guard was a guard that could never fire; this makes it
+  real. PTY master / writer channel are still torn down AFTER child death (writer
+  starvation ordering, unchanged).
+- **Guard tests** (`e8f9f603`): three non-vacuous, non-windows-gated unit tests in
+  a `#[cfg(test)] mod kill_path_guard_tests`: `transition(Exited)` from `Terminated`
+  stays `Terminated` (guard no-op); `transition` from `Running` still reaches
+  `Exited` (negative control proving the gate is non-`Running`, not a blanket
+  freeze); `kill_shell_if_running` leaves the ring `Terminated` (the load-bearing
+  stamp). Verified non-vacuous by mutation: dropping the `Running`-only guard fails
+  test 1, dropping the pre-kill stamp fails test 3, a never-mutating `transition`
+  fails test 2.
+
+Verification: both gates green — `cargo test -p ws-dashboard-daemon` and
+`cargo check --target x86_64-pc-windows-gnu -p ws-dashboard-daemon`. Honest
+limitation: the stamp-before-kill *ordering* against a real racing reaper is not
+unit-testable without a live PTY child plus a concurrent reaper thread; the
+`Running`-only guard test and the stamp-happens test together cover the
+pure-state reliance ("`Exited` becomes a no-op once the ring has left `Running`")
+that the ordering exists to guarantee. Native-Windows runtime acceptance (a shell
+death with no PTY EOF flipping the pane to `exited`) is explicitly deferred to
+Phase 3 and requires a real Windows host — not executable in this environment.
+
+Spec: closeout only, no new spec text. Exit-status detection on Windows/ConPTY is
+the existing WS transport contract holding
+(`#260516-ws-web-dashboard-terminal-websocket-transport` +
+`#260723-terminal-attach-grace-window`), not new behavior.
+
+Mental model: extended `ai-docs/mental-model/ws-web-dashboard/terminal.md` with a
+Module Contract capturing the dual exit-detection path (event-driven Windows
+handle-wait reaper independent of ConPTY EOF) and the make-the-guard-real kill
+ordering (`Terminated` stamped before `child.kill()`, reaper `Exited` a real
+no-op). `terminal-render.md` was assessed and correctly left untouched — it is
+the frontend render-batching sub-domain, not daemon-side lifecycle.
+
 ### Phase 2: Frontend retirement of dead panes
 
 In `frontend/src`, make panes whose `session.status` is
