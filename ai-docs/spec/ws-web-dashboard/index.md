@@ -510,11 +510,11 @@ Key properties:
   linked daemon, so a subsequent output poll for that id surfaces the upstream
   `404`.
 - **Body-parsing aliases match axum.** The `server-local` aliases that parse a
-  JSON body (create, input, resize) enforce the same `application/json`
-  content-type boundary and classify malformed bodies the same way the unscoped
-  `Json` extractor does (`415` for a missing/non-JSON content type, `422` for a
-  data error, `400` for a syntax error), staying byte-for-byte equivalent to the
-  legacy route.
+  JSON body (create, input, resize, and the batch output route) enforce the
+  same `application/json` content-type boundary and classify malformed bodies
+  the same way the unscoped `Json` extractor does (`415` for a missing/non-JSON
+  content type, `422` for a data error, `400` for a syntax error), staying
+  byte-for-byte equivalent to the legacy route.
 - **Owner-auth + bearer gating.** Terminal input, resize, and close are mutating
   host control; they preserve owner auth at the local gateway (router placement)
   and bearer auth to the linked daemon, and are never reachable without both.
