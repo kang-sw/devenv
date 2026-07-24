@@ -439,7 +439,29 @@ fn branches_for_path(root: &Path) -> GitBranchList {
 
 pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
     let mut summary = GitChangeSummary::default();
-    if let Some(numstat) = git_text(root, &["diff", "--numstat", "HEAD", "--"]) {
+    // Use the plumbing `diff-index` instead of the porcelain `diff`. The
+    // porcelain form opportunistically refreshes and rewrites the on-disk
+    // index for stat-dirty-but-content-clean files, which takes
+    // `.git/index.lock` and collides with agents' own git operations in the
+    // same worktree on every 5s poll tick. `--no-optional-locks` is verified
+    // ineffective on `diff`; only the plumbing form is lock-free (it is added
+    // here as harmless defense-in-depth, matching the sibling status call).
+    // `-M` restores the rename detection that porcelain `diff` enables by
+    // default (and plumbing does not), keeping the `<added>\t<removed>` totals
+    // byte-identical to the prior command across modified, rename, and
+    // mode-change cases. Mode-only changes surface as `0\t0\tpath`, summed
+    // harmlessly below.
+    if let Some(numstat) = git_text(
+        root,
+        &[
+            "--no-optional-locks",
+            "diff-index",
+            "-M",
+            "--numstat",
+            "HEAD",
+            "--",
+        ],
+    ) {
         for line in numstat.lines() {
             let mut parts = line.split('\t');
             summary.added_lines += parts
@@ -590,12 +612,19 @@ fn now_ms() -> u128 {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    // Disambiguates fixture directories across tests running in the same
+    // process at the same millisecond (parallel test execution).
+    static FIXTURE_SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn init_fixture_repo() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "ws-dashboard-git-toolbar-test-{}-{}",
+            "ws-dashboard-git-toolbar-test-{}-{}-{}",
             std::process::id(),
-            now_ms()
+            now_ms(),
+            FIXTURE_SEQ.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&dir).expect("create fixture dir");
         run_git(&dir, &["init", "-q"]).expect("git init");
@@ -620,6 +649,96 @@ mod tests {
         // `--no-optional-locks` must keep the poll's `git status` call from
         // ever creating `.git/index.lock`.
         assert!(!dir.join(".git").join("index.lock").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Make `tracked.txt` stat-dirty but content-clean: identical content with
+    /// an mtime pushed into the future so it no longer matches the index's
+    /// cached stat data. This is the exact state in which porcelain
+    /// `git diff --numstat` opportunistically refreshes and rewrites
+    /// `.git/index` (taking `.git/index.lock`); the plumbing `git diff-index`
+    /// form never does. Uses `File::set_modified` rather than a real sleep so
+    /// the trigger is deterministic without wall-clock delay.
+    fn make_stat_dirty_content_clean(dir: &Path) {
+        fs::write(dir.join("tracked.txt"), "one\n").expect("rewrite identical content");
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join("tracked.txt"))
+            .expect("open tracked.txt");
+        file.set_modified(SystemTime::now() + Duration::from_secs(5))
+            .expect("bump mtime into the future");
+    }
+
+    /// Non-vacuous lock pin: assert `changes_for_path` leaves `.git/index`
+    /// byte-identical. A rewrite of the index is precisely what forces git to
+    /// take `.git/index.lock` mid-call — an in-flight lock the prior test
+    /// (which only checked lock *absence after* the call) could never catch.
+    /// Reads the raw index bytes immediately before and after the call. This
+    /// FAILS against the old `git diff --numstat HEAD --` command, which
+    /// rewrites the index in this stat-dirty-content-clean state, and PASSES
+    /// against the plumbing `git diff-index` form that this fix installs.
+    #[test]
+    fn changes_for_path_does_not_rewrite_index_or_take_lock() {
+        let dir = init_fixture_repo();
+        make_stat_dirty_content_clean(&dir);
+
+        let index_path = dir.join(".git").join("index");
+        let before = fs::read(&index_path).expect("read index before");
+
+        let _summary = changes_for_path(&dir);
+
+        let after = fs::read(&index_path).expect("read index after");
+        assert_eq!(
+            before, after,
+            "changes_for_path must not rewrite .git/index (a rewrite takes .git/index.lock)"
+        );
+        assert!(!dir.join(".git").join("index.lock").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Output-parity pin across the three cases the prior test never exercised:
+    /// a modified tracked file, a staged pure rename, and a mode-only change.
+    /// The plumbing swap must keep the accumulated added/removed line totals
+    /// identical to the old porcelain command: `+2/-0` for the modification,
+    /// `0/0` for the rename (rename detection restored via `-M`), and `0/0`
+    /// for the mode change (emitted as `0\t0\tpath`, summed harmlessly).
+    #[test]
+    fn changes_for_path_line_totals_cover_modified_rename_and_mode_change() {
+        let dir = init_fixture_repo();
+
+        // Extra tracked files, committed clean, for the rename and mode cases.
+        fs::write(dir.join("rename-me.txt"), "r1\nr2\n").expect("write rename-me.txt");
+        fs::write(dir.join("mode.txt"), "x\n").expect("write mode.txt");
+        run_git(&dir, &["add", "rename-me.txt", "mode.txt"]).expect("stage extra files");
+        run_git(&dir, &["commit", "-q", "-m", "extra"]).expect("commit extra files");
+
+        // Modified tracked file: +2 lines, -0.
+        fs::write(dir.join("tracked.txt"), "one\ntwo\nthree\n").expect("modify tracked.txt");
+        // Staged pure rename (content unchanged).
+        run_git(&dir, &["mv", "rename-me.txt", "renamed.txt"]).expect("git mv rename");
+        // Mode-only change (content unchanged).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode_path = dir.join("mode.txt");
+            let mut perms = fs::metadata(&mode_path)
+                .expect("stat mode.txt")
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&mode_path, perms).expect("chmod mode.txt");
+        }
+
+        let summary = changes_for_path(&dir);
+        assert_eq!(
+            summary.added_lines, 2,
+            "added lines (modified +2, rename/mode 0)"
+        );
+        assert_eq!(
+            summary.removed_lines, 0,
+            "removed lines (rename detected, mode-only)"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
