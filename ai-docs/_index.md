@@ -229,14 +229,16 @@ dropped tickets live in hidden archive dirs and git history.
   (design+completeness). Spec addressing via `## Spec Impact`
   (`ws-web-dashboard/index.md`, Contract-first: no). Related to
   `260723-feat-dashboard-terminal-lifetime-daemon-decouple` (introduced-by).
-  Phase 1 (Windows reaper, `b07f40ad`) and Phase 2 (frontend retain-with-clear
+  Phase 1 (Windows reaper, `b07f40ad`), Phase 2 (frontend retain-with-clear
   retirement + idempotent close, `2b4d0e0b`; spec
-  `#260724-terminal-pane-dead-session-retire`) landed on
-  `goal/drain-ready-queue`. Only Phase 3 remains (Unix regression + native-
-  Windows acceptance) - stays in `ready/`; the native-Windows reaper acceptance
-  leg is also carved out as the `260724-chore-dashboard-windows-terminal-reaper-
-  native-acceptance` ready chore, runnable via the validated dogfood harness in
-  `_index.local.md`.
+  `#260724-terminal-pane-dead-session-retire`), and the Phase 3 Unix-regression
+  leg (`terminal_live_pty_eof_exit_flips_status_to_exited`, `e2990574`) landed
+  on `goal/drain-ready-queue`. Only the Phase 3 native-Windows acceptance leg
+  remains - Blocked (2026-07-24) on the user's real Windows dogfood harness
+  (PowerShell), so goal-drain skips this ticket until the user enables the
+  Windows leg; the leg is also carved out as the
+  `260724-chore-dashboard-windows-terminal-reaper-native-acceptance` ready
+  chore, runnable via the validated dogfood harness in `_index.local.md`.
 - `260714-bug-git-status-poll-index-lock-staleness` (`.done/`, bug) - closed
   2026-07-20: Phase 1 (`--no-optional-locks` on the poll's `git status` call
   in `git_toolbar.rs`, plus spec update) landed as commit `18e97569`,

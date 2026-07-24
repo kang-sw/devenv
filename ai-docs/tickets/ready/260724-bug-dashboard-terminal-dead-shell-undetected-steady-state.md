@@ -6,6 +6,16 @@ sage-review-design: completed
 sage-review-completeness: completed
 ---
 
+## Blocked (2026-07-24)
+
+The native-Windows reaper acceptance leg of Phase 3 cannot be executed
+autonomously. It needs the user's real Windows host (the PowerShell /
+`powershell.exe` dogfood harness) and must NOT touch the production Windows
+daemon on port 4300. It awaits explicit user go-ahead to run the Windows
+dogfood harness. This note exists so goal-drain selection skips this ticket
+until the user enables the Windows leg. The Phase 3 Unix-regression leg is
+COMPLETE (`e2990574`); only the native-Windows acceptance leg remains.
+
 ## Symptom
 
 Observed during dogfooding the Windows gateway (2026-07-24). On Windows the
@@ -300,6 +310,62 @@ stays in `ready/`.
   ConPTY holding the pipe) and confirm the terminal now flips to `exited` and
   the frontend pane retires — where before it stayed `running` forever. Record
   the acceptance walk in this ticket's Result (do not edit frozen text).
+
+### Result (e2990574) - 2026-07-24
+
+Phase 3 split by leg: the Unix-regression leg is COMPLETE; the native-Windows
+acceptance leg is NOT (blocked — see the `## Blocked (2026-07-24)` note).
+Branch `impl/terminal-pty-eof-exit-regression`, merging into
+`goal/drain-ready-queue`.
+
+- **Unix-regression leg — DONE.** Added `#[tokio::test]
+  terminal_live_pty_eof_exit_flips_status_to_exited` to
+  `crates/daemon/tests/terminal_lifetime.rs` (commit `e2990574`). It guards the
+  LIVE single-daemon steady-state path: create a terminal, attach a WebSocket,
+  drive the shell to exit normally so the PTY master EOFs, and assert a WS
+  exit/status frame reports `exited`. This proves the Phase-1
+  `#[cfg(windows)]`-gated reaper being compiled OUT on Unix (plus the kill-path
+  reorder) did NOT regress the pre-existing PTY-master-EOF exit-detection path.
+  Distinct from the two existing tests: `terminal_survives_*` keeps the shell
+  alive across a restart; `terminal_boot_reconcile_*` discovers exit via
+  adoption during a daemon-down window.
+- **Reliability hardening (commit `131a9ffb`).** The first cut used a novel
+  "quiet-gap" readiness heuristic that was ~40% flaky in isolation on
+  interactive `zsh`+powerlevel10k hosts (an 8s startup-output deadline that
+  times out under load, false-RED). Replaced it with the proven `echo <marker>`
+  + `poll_output_until_contains` readiness handshake (same idiom as
+  `terminal_survives_*`) → 20/20 isolation-green. Also: added a `HelperReaper`
+  `Drop` guard that reaps the detached setsid+double-fork terminal-helper on
+  panic paths (the daemon's `kill_on_drop` cannot reach it, and leaked live
+  shells self-amplified the flake); pinned `status == "exited"` on the
+  exit-frame branch; broke the drain loop on stream-end.
+- **Reaper directory fix (commit `6d8a5575`).** The `HelperReaper` initially
+  scanned `WS_DASHBOARD_STATE_HOME` flat, but registry entries live at
+  `<state_home>/terminals/<terminal_id>.json`, so it never found a pid and never
+  reaped. Pointed it at the `terminals/` subdir; verified it actually reaps on a
+  panic path (panic injection: helper pid reaped, no leak).
+- **Reviews.** Correctness+test review confirmed the assertion is non-vacuous
+  and targets the right live PTY-EOF path, and surfaced the flake + leak (both
+  fixed). A focused re-review of the `HelperReaper` SIGKILL guard confirmed the
+  `/proc/<pid>/stat` field-22 starttime parse (`rsplit_once(')')` then
+  `.nth(19)`) and the recycled-PID safety (starttime match before kill; all
+  `None` paths skip) are sound.
+- **Docs.** Mental-model footguns captured in
+  `ai-docs/mental-model/ws-web-dashboard/terminal.md` (commit `c6b4c87d`): (1)
+  do not drive terminal input during the interactive-shell startup window — use
+  the marker/poll handshake; (2) the helper detaches and survives daemon kill,
+  so tests must reap it. Spec unchanged (test-only; the dead-pane behavior was
+  specced in Phase 2). A pre-existing, independent flaky test
+  (`terminal_boot_reconcile_...`, which violates footgun #1) was spun off as
+  idea ticket
+  `260724-idea-dashboard-daemon-terminal-lifetime-test-interactive-shell-timing`
+  (commit `d140f536`) — NOT fixed here (changing an existing test's timing
+  CONTRACT is out of scope).
+- **Native-Windows acceptance leg — NOT DONE (blocked).** Rebuilding the
+  Windows binary from the goal tip and driving it via PowerShell to reproduce a
+  non-PTY-EOF shell death and confirm the `#[cfg(windows)]` reaper flips status
+  to `exited` requires the user's real Windows environment; see the
+  `## Blocked (2026-07-24)` note.
 
 ## Spec Impact
 
