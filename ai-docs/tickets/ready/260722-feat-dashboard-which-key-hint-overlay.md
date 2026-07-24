@@ -10,6 +10,8 @@ related:
     command bus
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # feat: Dashboard which-key-style leader hint overlay
@@ -128,9 +130,43 @@ closeable until browser-level verification lands. See Phase 2.
   dismissal paths — match, unmatched-key cancel, Escape, second
   `Ctrl+Space`) with Playwright acceptance coverage, closing the gap left
   open by Phase 1.
-- Blocked on: `260722-bug-e2e-open-work-root-locator-ambiguity` — the
-  acceptance suite's `openWorkRootInBrowser` locator
-  (`[data-command-id="rootPicker.open"]`) is ambiguous against the
-  `.open-work-root-empty-cta` empty-state CTA, red-lining the whole
-  acceptance suite at step 1 before this overlay's flows can even be
-  reached. This phase cannot proceed until that harness bug is fixed.
+- Prior blocker (resolved 2026-07-24): this phase was blocked on
+  `260722-bug-e2e-open-work-root-locator-ambiguity` — the acceptance suite's
+  `openWorkRootInBrowser` locator (`[data-command-id="rootPicker.open"]`) was
+  ambiguous against the `.open-work-root-empty-cta` empty-state CTA, red-lining
+  the whole acceptance suite at step 1. That bug is now fixed and its ticket is
+  in `.done/`, so the block is lifted and Phase 2 can proceed.
+- Harness entry point: extend `ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts`,
+  reusing the (now-fixed) `openWorkRootInBrowser` helper to reach a live
+  dashboard, then drive `Ctrl+Space` and assert against the shipped
+  `.which-key-overlay*` DOM (Phase 1 Result). Run via the `test:browser` npm
+  script (builds frontend + `ws-dashboard-daemon`, then `playwright test`;
+  Playwright 1.60.0 + chromium are available).
+- Done when (acceptance checklist — one Playwright assertion per line):
+  - Overlay does NOT appear before the 250ms appearance delay elapses after a
+    leader press, and DOES appear after it.
+  - Overlay rows reflect live registry contents and NARROW as a partial
+    leader-sub sequence is typed.
+  - Dismissal path 1 — a matched full sequence resolves and the overlay
+    disappears with no stale UI.
+  - Dismissal path 2 — an unmatched key cancels (flash-exit) and the overlay
+    disappears.
+  - Dismissal path 3 — `Escape` dismisses the overlay.
+  - Dismissal path 4 — a second `Ctrl+Space` dismisses the overlay.
+  - After every dismissal path, subsequent terminal input is not blocked.
+
+## Spec Impact
+
+- No new spec surface. This ticket is a presentation-only discoverability layer
+  over the hotkey config framework's existing binding registry; the underlying
+  keyboard-interaction contract (leader key, transient dashboard-command-mode,
+  terminal passthrough guard, 250ms which-key appearance delay, the four
+  dismissal paths) is owned and specified by
+  `260722-feat-dashboard-hotkey-config-framework` (§ Default Keymap &
+  Interaction Spec). Phase 1 shipped against that spec; Phase 2 adds
+  Playwright verification of the already-specified behavior and introduces no
+  new caller-visible contract.
+- Closeout only: no `spec:` addition or `spec-remove:` is required — the
+  framework spec already covers the overlay's behavior. If browser verification
+  surfaces a behavior gap versus that spec, capture it as a follow-up against
+  the framework spec, not here.
