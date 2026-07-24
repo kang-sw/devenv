@@ -4,6 +4,7 @@ import {
   buildLeaderTree,
   checkHotkeyBindingKeys,
   chordFromKeydownEvent,
+  decideKeydownGuardStage,
   describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
@@ -851,6 +852,101 @@ assertEqual(
   }),
   false,
   "a plain keydown outside any guarded target does not skip capture",
+);
+
+// Two-direction regression: the leader-entry trigger (Ctrl+Space) must be
+// checked in `App.tsx#handleKeydown` *before* `shouldSkipHotkeyCapture`, so
+// it reaches `enterLeaderPending` even while a terminal pane has focus,
+// while every other (non-trigger) key must still be skipped by the guard
+// exactly as before.
+assertEqual(
+  isLeaderTriggerKeydown({
+    key: " ",
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+  }),
+  true,
+  "Ctrl+Space is recognized as the leader trigger regardless of terminal focus " +
+    "(it is checked ahead of shouldSkipHotkeyCapture, not gated by it)",
+);
+assertEqual(
+  shouldSkipHotkeyCapture({
+    isComposing: false,
+    key: " ",
+    targetIsEditable: false,
+    targetInsideTerminalPane: true,
+  }),
+  true,
+  "shouldSkipHotkeyCapture alone would still skip a terminal-focused Ctrl+Space " +
+    "- this documents why handleKeydown's check *order* (trigger before guard), " +
+    "not the guard body, is what fixes the bug",
+);
+
+// The single source of truth for that ordering contract:
+// `decideKeydownGuardStage` is what `App.tsx#handleKeydown` actually calls,
+// so these assertions fail if the ordering ever regresses (unlike the
+// pure-function assertions above, which only document intent).
+assertEqual(
+  decideKeydownGuardStage({
+    key: " ",
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: false,
+    targetIsEditable: false,
+    targetInsideTerminalPane: true,
+  }),
+  "enter-leader",
+  "decideKeydownGuardStage: a terminal-focused Ctrl+Space still enters leader mode " +
+    "(the leader-entry trigger is checked before the passthrough guard)",
+);
+assertEqual(
+  decideKeydownGuardStage({
+    key: "t",
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: false,
+    targetIsEditable: false,
+    targetInsideTerminalPane: true,
+  }),
+  "skip-passthrough",
+  "decideKeydownGuardStage: a non-trigger key ('t') with terminal focus is still " +
+    "skipped by the passthrough guard",
+);
+assertEqual(
+  decideKeydownGuardStage({
+    key: " ",
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: true,
+    targetIsEditable: false,
+    targetInsideTerminalPane: false,
+  }),
+  "skip-passthrough",
+  "decideKeydownGuardStage: an in-progress IME composition still suppresses " +
+    "Ctrl+Space leader-entry recognition",
+);
+assertEqual(
+  decideKeydownGuardStage({
+    key: "t",
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: false,
+    targetIsEditable: false,
+    targetInsideTerminalPane: false,
+  }),
+  "fall-through",
+  "decideKeydownGuardStage: a plain keydown outside any guarded target falls " +
+    "through to standalone-binding matching",
 );
 
 console.log("hotkeys.test.ts passed");

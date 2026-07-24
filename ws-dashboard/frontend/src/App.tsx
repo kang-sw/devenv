@@ -96,13 +96,12 @@ import {
   buildDefaultHotkeyBindings,
   buildLeaderTree,
   chordFromKeydownEvent,
+  decideKeydownGuardStage,
   describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
-  isLeaderTriggerKeydown,
   loadHotkeyUserConfig,
   resolveHotkeyCommand,
-  shouldSkipHotkeyCapture,
   stepLeaderState,
   HotkeyRegistry,
   type HotkeyBinding,
@@ -1670,26 +1669,23 @@ export function App() {
         return;
       }
 
-      if (
-        shouldSkipHotkeyCapture({
-          isComposing: event.isComposing || event.key === "Process",
-          key: event.key,
-          targetIsEditable,
-          targetInsideTerminalPane,
-        })
-      ) {
-        return;
-      }
+      // `decideKeydownGuardStage` (hotkeys.ts) is the single source of truth
+      // for this ordering: the leader-entry trigger (Ctrl+Space, when not
+      // IME-composing) is decided before the terminal/editable-target
+      // passthrough guard, so Ctrl+Space can open the leader overlay even
+      // while a terminal pane (or editable field) has focus.
+      const guardStage = decideKeydownGuardStage({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        isComposing: event.isComposing,
+        targetIsEditable,
+        targetInsideTerminalPane,
+      });
 
-      if (
-        isLeaderTriggerKeydown({
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-          altKey: event.altKey,
-        })
-      ) {
+      if (guardStage === "enter-leader") {
         leaderStateRef.current = enterLeaderPending(
           framework.leaderTree,
           Date.now(),
@@ -1697,6 +1693,10 @@ export function App() {
         setLeaderUiState(leaderStateRef.current);
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+
+      if (guardStage === "skip-passthrough") {
         return;
       }
 

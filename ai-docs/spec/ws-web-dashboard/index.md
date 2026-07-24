@@ -879,8 +879,12 @@ The popup is a read-only presentation layer over the live hotkey binding
 registry: it defines no bindings and no dispatch path of its own, and it
 reflects the registry's current contents — including a user's own
 rebindings — automatically. It does not capture or consume keyboard input;
-the existing leader-press capture path (including its terminal-focus/IME
-guard) is unchanged and remains the sole input-handling surface.
+the existing leader-press capture path is unchanged and remains the sole
+input-handling surface. That path's terminal-focus/IME guard applies to
+leader-*continuation* keys and standalone bindings, but the leader-*entry*
+trigger (`Ctrl+Space` from idle) is checked before that guard and is never
+blocked by terminal or editable-target focus, so the popup can always be
+opened regardless of where focus currently sits.
 
 > [!note] Implementation Gap · 2026-07-22
 > Browser-level (Playwright) verification of the popup's appear/narrow/

@@ -2764,10 +2764,15 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       .locator('.resource-row[data-command-id="resource.select"].resource-row-selected')
       .first();
 
-    // The leader-trigger keydown handler skips capture while focus sits
-    // inside an editable element or a `.terminal-pane` (hotkeys.ts
-    // `shouldSkipHotkeyCapture`), so every leader press below first refocuses
-    // this always-present, non-editable, non-terminal toolbar button.
+    // Leader-continuation keys and standalone bindings skip capture while
+    // focus sits inside an editable element or a `.terminal-pane`
+    // (hotkeys.ts `shouldSkipHotkeyCapture`) - the leader-*entry* trigger
+    // itself is checked before that guard and is never blocked by terminal
+    // focus (see the dedicated regression step below). Every leader press
+    // here still refocuses this always-present, non-editable, non-terminal
+    // toolbar button first, to keep this step's assertions about narrowing
+    // and dismissal paths independent of that separately-covered trigger
+    // behavior.
     const focusNeutral = async () => {
       await page.locator('[data-command-id="terminal.create"]').focus();
     };
@@ -2888,6 +2893,34 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "which-key overlay dismissal path 4 (second Ctrl+Space): overlay disappeared",
     );
     await expectTerminalNotBlocked(page, "WHICHKEY-SECONDLEADER-OK");
+  });
+
+  // --- 260724-bug-dashboard-terminal-focus-swallows-ctrl-space-hotkey -----
+  await test.step("which-key overlay: Ctrl+Space opens it even with a terminal pane focused", async () => {
+    // CONTRACT: the leader-entry trigger (Ctrl+Space) must be checked in
+    // `App.tsx#handleKeydown` before the terminal/editable-target
+    // passthrough guard (`shouldSkipHotkeyCapture`), so focusing a terminal
+    // pane and pressing Ctrl+Space still opens the which-key overlay instead
+    // of leaking the chord as a stray control byte into the terminal
+    // session. Regression coverage for the dogfood-observed bug where
+    // terminal focus silently swallowed the leader trigger.
+    const overlay = page.locator(".which-key-overlay");
+    const surface = await terminalSurface(page);
+    await surface.click();
+
+    await page.keyboard.press("Control+Space");
+    await expect(overlay).toBeVisible({ timeout: 1_000 });
+    note(
+      "which-key overlay opened on Ctrl+Space while a terminal pane had focus, proving the leader-entry trigger is checked before the terminal-focus passthrough guard",
+    );
+
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+
+    // Prove no stray control byte (e.g. NUL) leaked into the terminal as a
+    // side effect of the leader chord - the terminal still round-trips real
+    // input cleanly afterwards.
+    await expectTerminalNotBlocked(page, "TERMINAL-FOCUS-LEADER-OK");
   });
 
   // --- 260711 Phase 1: agent chat tab shell + stub tile launch ------------
