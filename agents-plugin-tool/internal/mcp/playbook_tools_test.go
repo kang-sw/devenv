@@ -1853,6 +1853,49 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	}
 }
 
+// TestPlaybookPrintGoldenLeadWorkflowManualSpawnBindingGuidancePerHarness
+// verifies the Codex-specialized SpawnBindingGuidance terminology-table entry
+// (260622-feat-playbook-render-tier-label) renders only for the Codex harness:
+// Codex prose must name the literal native spawn parameters
+// `spawn_agent.model` / `spawn_agent.reasoning_effort` (never the
+// confirmed-rejected `spawn_agent.effort` spelling), while Claude's rendering
+// must stay host-neutral and leak none of those literal field names.
+func TestPlaybookPrintGoldenLeadWorkflowManualSpawnBindingGuidancePerHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+
+	codexServer := newTestServerWithHarness(t, "codex")
+	codexBody, _, err := printPlaybook(codexServer, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (codex): %v", err)
+	}
+	if !strings.Contains(codexBody, "spawn_agent.model") {
+		t.Errorf("codex body %q: expected literal 'spawn_agent.model'", codexBody)
+	}
+	if !strings.Contains(codexBody, "spawn_agent.reasoning_effort") {
+		t.Errorf("codex body %q: expected literal 'spawn_agent.reasoning_effort'", codexBody)
+	}
+	if strings.Contains(codexBody, "spawn_agent.effort") {
+		t.Errorf("codex body %q: must not use rejected 'spawn_agent.effort' spelling", codexBody)
+	}
+	if strings.Contains(codexBody, "{{.") {
+		t.Errorf("codex body %q: unsubstituted placeholder remains", codexBody)
+	}
+
+	claudeServer := newTestServerWithHarness(t, "claude")
+	claudeBody, _, err := printPlaybook(claudeServer, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (claude): %v", err)
+	}
+	for _, leaked := range []string{"spawn_agent.model", "spawn_agent.reasoning_effort", "spawn_agent.effort"} {
+		if strings.Contains(claudeBody, leaked) {
+			t.Errorf("claude body %q: must not leak literal native field name %q", claudeBody, leaked)
+		}
+	}
+	if strings.Contains(claudeBody, "{{.") {
+		t.Errorf("claude body %q: unsubstituted placeholder remains", claudeBody)
+	}
+}
+
 // TestPlaybookPrintGoldenLeadWriteSpec verifies lead-write-spec resolves
 // and is delegates:true (tip must appear).
 func TestPlaybookPrintGoldenLeadWriteSpec(t *testing.T) {

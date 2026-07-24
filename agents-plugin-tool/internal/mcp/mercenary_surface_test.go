@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -673,6 +674,71 @@ func TestWithRecommendedTier(t *testing.T) {
 	if got := withRecommendedTier("path", "large"); got != "path\nrecommended-tier: large" {
 		t.Errorf("withRecommendedTier path = %q", got)
 	}
+}
+
+// TestWithRecommendedBindings covers withRecommendedBindings' full contract
+// (260622-feat-playbook-render-tier-label Phase 1): default and overridden
+// Codex tier mappings, the Claude mapping's empty-effort omission, the
+// resolver-error fallback that still retains the stable recommended-tier
+// line, and exact backward compatibility with the pre-existing
+// recommended-tier-only payload shape when tier is empty.
+func TestWithRecommendedBindings(t *testing.T) {
+	t.Run("default codex mapping", func(t *testing.T) {
+		opts := wsconfig.Options{CacheHome: t.TempDir()}
+		got := withRecommendedBindings("body", "medium", "codex", opts)
+		want := "body\nrecommended-tier: medium\nrecommended-model: gpt-5.6-terra\nrecommended-reasoning-effort: high"
+		if got != want {
+			t.Errorf("withRecommendedBindings (codex, default) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("overridden codex mapping", func(t *testing.T) {
+		cacheHome := t.TempDir()
+		opts := wsconfig.Options{CacheHome: cacheHome}
+		if _, err := wsconfig.SetAgentsTierForHarness(opts, "medium", "", "custom-codex-model", "codex", "low"); err != nil {
+			t.Fatalf("SetAgentsTierForHarness: %v", err)
+		}
+		got := withRecommendedBindings("body", "medium", "codex", opts)
+		want := "body\nrecommended-tier: medium\nrecommended-model: custom-codex-model\nrecommended-reasoning-effort: low"
+		if got != want {
+			t.Errorf("withRecommendedBindings (codex, overridden) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("claude mapping with empty effort omits effort line", func(t *testing.T) {
+		opts := wsconfig.Options{CacheHome: t.TempDir()}
+		got := withRecommendedBindings("body", "medium", "claude", opts)
+		want := "body\nrecommended-tier: medium\nrecommended-model: sonnet"
+		if got != want {
+			t.Errorf("withRecommendedBindings (claude) = %q, want %q", got, want)
+		}
+		if strings.Contains(got, "recommended-reasoning-effort") {
+			t.Errorf("withRecommendedBindings (claude) must omit recommended-reasoning-effort, got %q", got)
+		}
+	})
+
+	t.Run("unresolved-value fallback keeps stable tier line only", func(t *testing.T) {
+		cacheHome := t.TempDir()
+		// A malformed config.json forces wsconfig.Load (and therefore
+		// ResolveAgentForHarnessConfig) into its error path, mirroring
+		// TestPlaybookPrintTierModelVarsFallbackOnResolverError's technique.
+		if err := os.WriteFile(filepath.Join(cacheHome, "config.json"), []byte("{not valid json"), 0o644); err != nil {
+			t.Fatalf("write malformed config.json: %v", err)
+		}
+		opts := wsconfig.Options{CacheHome: cacheHome}
+		got := withRecommendedBindings("body", "medium", "codex", opts)
+		want := "body\nrecommended-tier: medium"
+		if got != want {
+			t.Errorf("withRecommendedBindings (resolver error) = %q, want %q (tier line retained, no empty model/effort lines)", got, want)
+		}
+	})
+
+	t.Run("empty tier is exact backward-compatible passthrough", func(t *testing.T) {
+		opts := wsconfig.Options{CacheHome: t.TempDir()}
+		if got := withRecommendedBindings("body", "  ", "codex", opts); got != "body" {
+			t.Errorf("withRecommendedBindings with blank tier must be unchanged, got %q", got)
+		}
+	})
 }
 
 // TestRenderReturnsFrontmatterRecommendedTier verifies renderPlaybookBody surfaces
