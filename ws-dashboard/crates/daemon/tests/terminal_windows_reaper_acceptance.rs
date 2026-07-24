@@ -199,15 +199,15 @@ async fn discover_shell_pid(helper_pid: u32) -> u32 {
             })
             .collect();
 
-        let shell_children: Vec<&(u32, String)> = children
-            .iter()
+        last_seen = children.clone();
+        let shell_children: Vec<(u32, String)> = children
+            .into_iter()
             .filter(|(_, name)| {
                 KNOWN_SHELL_EXECUTABLES
                     .iter()
                     .any(|candidate| name.eq_ignore_ascii_case(candidate))
             })
             .collect();
-        last_seen = children;
 
         match shell_children.as_slice() {
             [] => {
