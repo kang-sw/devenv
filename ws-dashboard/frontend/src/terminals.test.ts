@@ -349,6 +349,24 @@ assertEqual(
   true,
   "stale list responses preserve panes created after the list started",
 );
+// Complements the above: a pane dropping out of a listTerminals response is
+// pruned only when it predates pruneStartedAtMs (260724 Phase 2 coarse
+// reconciliation backstop's own boundary condition) - a pane that already
+// existed before the list request started (localCreatedAtMs <=
+// pruneStartedAtMs) and is absent from the response is genuinely gone from
+// the daemon and must be pruned, not preserved.
+assertEqual(
+  Boolean(
+    reconcileListedTerminalSessions(
+      { [pane.logicalKey]: { ...pane, localCreatedAtMs: 5 } },
+      "root-local-abc",
+      [],
+      10,
+    )[pane.logicalKey],
+  ),
+  false,
+  "a pane created before the list started is pruned once it drops out of a listTerminals response",
+);
 const withOutput = appendTerminalOutput(pane, {
   terminalId: "term_abc",
   status: "running",
@@ -1084,6 +1102,25 @@ await (async () => {
     "closeTerminal deletes the server-scoped url",
   );
   assertEqual(recorded().method, "DELETE", "closeTerminal uses DELETE");
+})().catch((error) => {
+  console.error(error);
+  throw error;
+});
+
+// Regression (260724 Phase 2): a 404 from close_terminal means the terminal
+// is already gone (the manual-close call raced the daemon's own auto-reap,
+// or the pane's already-retired session was cleared a second time) rather
+// than a real failure - closeTerminal must resolve normally instead of
+// throwing, so idempotency lives at this single shared helper and every
+// caller (closeTerminalPane in App.tsx today) inherits it for free.
+await (async () => {
+  installFetchMock({ error: "not found" }, 404);
+  await closeTerminal("term-already-gone");
+  assertEqual(
+    recorded().method,
+    "DELETE",
+    "closeTerminal still issues the DELETE request on a 404 response",
+  );
 })().catch((error) => {
   console.error(error);
   throw error;

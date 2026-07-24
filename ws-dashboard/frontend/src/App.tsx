@@ -443,6 +443,14 @@ async function requestWorkspaceRemoval(
 const terminalOutputPollIntervalMs = 120;
 const workRootActivityRefreshIntervalMs = 3_000;
 const workRootActivityRecentRefreshLimit = 30;
+// Coarse backstop for the daemon-side `admits_attach()` drop-off (260724
+// Phase 2): once a dead session's post-exit grace window elapses, it stops
+// appearing in `listTerminals` output with no accompanying WS frame for a
+// pane stuck in HTTP fallback. Far coarser than `terminalOutputPollIntervalMs`
+// on purpose - this only needs to notice a gone session eventually, not drive
+// keystroke-latency-sensitive polling - sized in the same seconds-scale
+// order of magnitude as `workRootActivityRefreshIntervalMs` above.
+const terminalListReconciliationPollIntervalMs = 5_000;
 
 export function App() {
   // Per-server cache of the last resolved resources tree, keyed by
@@ -4482,20 +4490,7 @@ function WorkbenchShell({
           }
           return;
         }
-        setTerminalPanes((current) =>
-          persistTerminalPanesForWorkRoot(
-            rootId,
-            reconcileListedTerminalSessions(
-              current,
-              rootId,
-              sessions,
-              listStartedAtMs,
-              serverRoute,
-              terminalVisualRestoreRef.current,
-            ),
-            serverRoute,
-          ),
-        );
+        applyListedTerminalSessions(rootId, serverRoute, sessions, listStartedAtMs);
         setTerminalPaneOrderByGroup((current) =>
           placeTerminalSessions(
             current,
@@ -4943,6 +4938,24 @@ function WorkbenchShell({
         }))
     : [];
 
+  // Read the same way as `livePollPanesRef` above (a ref refreshed every
+  // render, not a `useEffect` dependency) so the coarse reconciliation
+  // backstop's own interval effect below stays stable across every
+  // `terminalPanes` render instead of tearing down/recreating on output.
+  // Only "fallback" counts - not "connecting"/"disconnected" - so the
+  // backstop never fires for a pane that simply has not finished its first
+  // connect attempt yet (the live socket path already covers that case).
+  const terminalFallbackPresentRef = useRef(false);
+  terminalFallbackPresentRef.current = workbenchModel
+    ? Object.values(terminalPanes).some(
+        (pane) =>
+          pane.session.workRootId === workbenchModel.root.id &&
+          (pane.session.serverRoute ?? "server-local") ===
+            workbenchModel.root.resourcePath.serverId &&
+          pane.socketStatus === "fallback",
+      )
+    : false;
+
   useEffect(() => {
     if (!workbenchModel) {
       return;
@@ -5019,6 +5032,57 @@ function WorkbenchShell({
         });
     }
 
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
+
+  // Coarse (seconds-scale) reconciliation backstop for the daemon-side
+  // `admits_attach()` drop-off (260724 Phase 2): the live WS status/exit
+  // frame already covers a socket-connected pane's exit per the ticket
+  // contract, so this only exists for a pane stuck in HTTP fallback, whose
+  // dead session can otherwise silently stop appearing in `listTerminals`
+  // output (once the daemon's post-exit grace window elapses) with no
+  // accompanying signal. Skips the network call entirely on every tick
+  // where no pane in the active root is currently in "fallback" transport.
+  useEffect(() => {
+    if (!workbenchModel) {
+      return;
+    }
+    const rootId = workbenchModel.root.id;
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    let cancelled = false;
+    let inFlight = false;
+
+    function poll() {
+      if (cancelled || inFlight || !terminalFallbackPresentRef.current) {
+        return;
+      }
+      inFlight = true;
+      const listStartedAtMs = Date.now();
+      void listTerminals(rootId, serverRoute)
+        .then((sessions) => {
+          if (cancelled) {
+            return;
+          }
+          applyListedTerminalSessions(
+            rootId,
+            serverRoute,
+            sessions,
+            listStartedAtMs,
+          );
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    }
+
+    const timer = window.setInterval(
+      poll,
+      terminalListReconciliationPollIntervalMs,
+    );
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -5185,6 +5249,38 @@ function WorkbenchShell({
       ),
     );
     return nextPanes;
+  }
+
+  // Shared apply-path for a `listTerminals` response (260724 Phase 2):
+  // prunes panes for this work root/serverRoute that dropped out of the
+  // daemon's live list (unless locally created after `listStartedAtMs`,
+  // via `reconcileListedTerminalSessions`) and merges in any listed
+  // session, then persists the resulting restore intents. Used by both the
+  // one-shot mount/work-root-switch effect and the coarse fallback
+  // reconciliation backstop below so the two call sites cannot drift.
+  // Deliberately does not call `placeTerminalSessions`/
+  // `setTerminalPaneOrderByGroup` - that is initial-placement policy for
+  // freshly-discovered panes, not needed on a reconciliation-only tick.
+  function applyListedTerminalSessions(
+    rootId: string,
+    serverRoute: string | null | undefined,
+    sessions: TerminalSessionView[],
+    listStartedAtMs: number,
+  ) {
+    setTerminalPanes((current) =>
+      persistTerminalPanesForWorkRoot(
+        rootId,
+        reconcileListedTerminalSessions(
+          current,
+          rootId,
+          sessions,
+          listStartedAtMs,
+          serverRoute,
+          terminalVisualRestoreRef.current,
+        ),
+        serverRoute,
+      ),
+    );
   }
 
   function createTerminalPane(options: TerminalCreateOptions = {}) {

@@ -1947,6 +1947,16 @@ for the selected workRoot. Creating a terminal opens or focuses a terminal pane,
 and refresh can reconstruct visible terminal panes from daemon live session
 state plus browser arrangement where available.
 
+A terminal session that has exited, terminated, or errored is visually retired
+in place — the pane grays out and its control relabels to an explicit clear
+affordance — rather than being auto-removed, so the final scrollback stays
+readable until the owner clears it. Retirement follows the session's reported
+status even while the browser is on the HTTP-polling fallback path, and a
+coarse reconciliation poll additionally retires panes the daemon no longer
+lists. Clearing or closing an already-retired or already-gone pane is
+idempotent: it resolves as success without surfacing a terminal-close error.
+{#260724-terminal-pane-dead-session-retire}
+
 The terminal pane is a shell terminal substrate only; it does not hardcode
 Codex, Claude, or other agent presets.
 
