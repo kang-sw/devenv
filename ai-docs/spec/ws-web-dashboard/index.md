@@ -1107,6 +1107,12 @@ secondary text rather than wrapping the toolbar and reducing workbench body
 space. Switching workRoots must not briefly render the previous workRoot's
 activity state.
 
+The badge's activity fetch is bounded by a client-side timeout: a daemon
+response that stalls without ever returning transitions the badge to its
+existing error state and lets the next poll retry, rather than leaving it stuck
+in its loading state indefinitely
+(`260724-bug-dashboard-git-diff-index-lock-stuck-activity-badge`).
+
 ### WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
 
 The WorkRoot Activity pane is a reversible workbench surface showing the

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test:routes": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/routeBasis.test.js",
     "test:api-error": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/apiError.test.js",
-    "test:resource-model": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourceModel.test.js && node ./node_modules/.tmp/route-tests/workNavOrder.test.js && node ./node_modules/.tmp/route-tests/resourceRefresh.test.js && node ./node_modules/.tmp/route-tests/linkedServers.test.js",
+    "test:resource-model": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourceModel.test.js && node ./node_modules/.tmp/route-tests/workNavOrder.test.js && node ./node_modules/.tmp/route-tests/resourceRefresh.test.js && node ./node_modules/.tmp/route-tests/linkedServers.test.js && node ./node_modules/.tmp/route-tests/fetchWithTimeout.test.js",
     "test:commands": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/commands.test.js",
     "test:root-picker": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/rootPicker.test.js",
     "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js && node ./node_modules/.tmp/route-tests/workbench/openRootLookup.test.js && node ./node_modules/.tmp/route-tests/workbench/deriveWorkbenchView.test.js && node ./node_modules/.tmp/route-tests/workbench/layoutRestore.test.js",

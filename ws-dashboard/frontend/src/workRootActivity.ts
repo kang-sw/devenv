@@ -1,4 +1,5 @@
 import { apiErrorDetail } from "./apiError.js";
+import { fetchWithTimeout } from "./fetchWithTimeout.js";
 import {
   LOCAL_DASHBOARD_SERVER_ROUTE,
   localCompatibleDashboardApiRoute,
@@ -424,9 +425,10 @@ export async function fetchWorkRootActivity(
   workRootId: string,
   options: WorkRootActivityFetchOptions = {},
 ): Promise<WorkRootActivityView> {
-  const response = await fetch(workRootActivityEndpoint(workRootId, options), {
-    headers: { Accept: "application/json" },
-  });
+  const response = await fetchWithTimeout(
+    workRootActivityEndpoint(workRootId, options),
+    { headers: { Accept: "application/json" } },
+  );
 
   if (!response.ok) {
     throw new Error(await apiErrorDetail(response));

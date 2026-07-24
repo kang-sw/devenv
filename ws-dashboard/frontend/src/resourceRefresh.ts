@@ -1,4 +1,5 @@
 import type { DashboardResourcesView, DashboardServersView } from "./resourceModel.js";
+import { fetchWithTimeout } from "./fetchWithTimeout.js";
 
 export const resourceEndpoint = "/api/dashboard/resources";
 export const serversEndpoint = "/api/dashboard/servers";
@@ -13,7 +14,7 @@ export type ResourceFetch = (
 
 export async function requestDashboardResources(
   serverId = "server-local",
-  fetchResource: ResourceFetch = fetch,
+  fetchResource: ResourceFetch = fetchWithTimeout,
 ): Promise<DashboardResourcesView> {
   const endpoint =
     serverId === "server-local"
@@ -29,7 +30,7 @@ export async function requestDashboardResources(
 }
 
 export async function requestDashboardServers(
-  fetchResource: ResourceFetch = fetch,
+  fetchResource: ResourceFetch = fetchWithTimeout,
 ): Promise<DashboardServersView> {
   const response = await fetchResource(serversEndpoint, {
     headers: { Accept: "application/json" },

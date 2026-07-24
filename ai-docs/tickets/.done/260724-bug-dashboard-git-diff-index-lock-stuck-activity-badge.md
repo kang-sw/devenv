@@ -4,6 +4,7 @@ related:
   260714-bug-git-status-poll-index-lock-staleness: prior fix hardened the sibling git-status call but wrongly asserted `git diff --numstat` was lock-free plumbing and left it unguarded — this ticket corrects that residual
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # Dashboard git-diff poll takes .git/index.lock (agent lock errors) and activity badge has no timeout (stuck "loading" forever)
@@ -227,6 +228,50 @@ Phase 1 removes the daemon as a lock contender and plausibly reduces the
 trigger for Phase 2's stalls, but Phase 2 is an independent robustness gap
 regardless of Phase 1's outcome, so the two are not strictly ordered
 relative to each other.
+
+### Result (39a46245) - 2026-07-24
+
+A new `ws-dashboard/frontend/src/fetchWithTimeout.ts` helper wraps `fetch`
+with an `AbortController` and a bounded default timeout
+(`DEFAULT_FETCH_TIMEOUT_MS`, ~8000ms, per-call override allowed), clearing the
+timer in a `finally`. On stall it aborts and lets the resulting `AbortError`
+propagate through the callers' existing `.catch`/`.finally` chains, so the
+`inFlight` guard releases and the badge reaches its existing `error` phase
+instead of hanging in `loading` forever.
+
+- **Routed through all three deadlock-prone poller families**:
+  `resourceRefresh.ts` (`requestDashboardResources`/`requestDashboardServers`),
+  `workRootActivity.ts` (`fetchWorkRootActivity` — fixing all three `App.tsx`
+  call sites with **zero `App.tsx` edits**, since the timeout lives in the
+  shared fetcher and the existing `.catch` handlers already transition to the
+  error phase), and `gitToolbar.ts`
+  (`fetchWorkRootGitStatus`/`fetchWorkRootBranches`).
+- **No happy-path or contract change**: frontend-only, additive; a fast
+  response behaves exactly as before.
+- **Commits:** `39a46245` (helper + wiring + route-test config + test) +
+  `b7014294` (mental-model).
+- **Test added**: `fetchWithTimeout.test.ts` (registered in
+  `tsconfig.route-tests.json`) proves the wrapped fetcher rejects after the
+  timeout given a never-resolving fetch and that `inFlight` is then released
+  (a subsequent call is allowed). The reviewer re-ran `test:resource-model`
+  green and empirically confirmed non-vacuity via 3 mutation probes (the test
+  hangs/fails without the timeout wrap).
+- **Verification:** frontend build clean; targeted route tests green. Reviews
+  clean — fit (one cosmetic minor on the `DEFAULT_FETCH_TIMEOUT_MS`
+  SCREAMING_SNAKE constant casing, accepted) and test-quality (four acceptable
+  minors).
+- **Deliberately out of scope**: a server-side/daemon-side request timeout
+  (`tower_http` layer or a bounded `tokio::time::timeout` around each git
+  `Command`). Phase 2 bounded only the client side; a wedged git child can
+  still hang a request unboundedly on the daemon side. Captured as follow-up
+  idea ticket
+  `260724-idea-dashboard-daemon-side-git-poll-response-timeout`.
+- **Doc closeout (this phase):** spec sentence added under the
+  `260517-ws-dashboard-workroot-activity-topbar-badge` anchor recording the
+  bounded-timeout-then-error-transition contract.
+
+Both defects are now resolved (Phase 1 merged, Phase 2 landed); this ticket
+moves to `.done/`.
 
 ## Spec Impact
 
