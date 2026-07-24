@@ -4,7 +4,6 @@ delegates: false
 role: delegate
 tier: large
 variables:
-  - RoleModel
   - target_kind
   - ticket_path
   - selected_phase
@@ -15,8 +14,6 @@ variables:
 
 You are drafting a deeper implementation plan from an accepted target.
 The plan path may contain survey output that requested research.
-
-Alias model for this role: {{.RoleModel}}.
 
 ## Render Inputs
 

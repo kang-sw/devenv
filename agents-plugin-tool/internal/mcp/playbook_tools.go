@@ -29,17 +29,35 @@ var playbookTerminologyTable = map[string]map[string]string{
 		"ExploreAgent":  "the Explore agent",
 		"SpawnIdiom":    `Agent({subagent_type: "general-purpose", ...})`,
 		"ContinueIdiom": "SendMessage(to: <agentId>)",
+		"SpawnBindingGuidance": "honor `recommended-model` (and `recommended-reasoning-effort`, when present) via" +
+			" the host's native model-selection surface; if the exact binding cannot be applied, report that the" +
+			" binding is unavailable rather than silently dropping it — the mercenary path above is the explicit" +
+			" exact-binding fallback",
 	},
 	"codex": {
 		"ExploreAgent":  "an explorer subagent",
 		"SpawnIdiom":    "creating a new Codex task",
 		"ContinueIdiom": "resuming the agent using its task id",
+		// Codex-specialized: names literal native spawn parameter spellings
+		// (spawn_agent.model / spawn_agent.reasoning_effort, never `effort`) per
+		// the ticket's "Codex-specialized workflow-manual guidance" requirement;
+		// this table already carries per-harness API parameter spellings
+		// (SpawnIdiom, ContinueIdiom), so it is the established mechanism —
+		// this key still names no model identifiers.
+		"SpawnBindingGuidance": "bind `recommended-model` to `spawn_agent.model` and `recommended-reasoning-effort`" +
+			" (when present) to `spawn_agent.reasoning_effort` (never `effort`); if the native spawn surface" +
+			" cannot accept the exact binding, report that the binding is unavailable rather than silently" +
+			" dropping it — the mercenary path above is the explicit exact-binding fallback",
 	},
 	// "" = host-neutral fallback for unknown/undetected harness.
 	"": {
 		"ExploreAgent":  "an exploration agent",
 		"SpawnIdiom":    "spawning a subagent",
 		"ContinueIdiom": "resuming the agent using its returned id",
+		"SpawnBindingGuidance": "honor `recommended-model` (and `recommended-reasoning-effort`, when present) via" +
+			" the host's native model-selection surface; if the exact binding cannot be applied, report that the" +
+			" binding is unavailable rather than silently dropping it — the mercenary path above is the explicit" +
+			" exact-binding fallback",
 	},
 }
 
