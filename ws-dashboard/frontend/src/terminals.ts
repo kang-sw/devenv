@@ -55,6 +55,17 @@ export type TerminalPaneState = {
   logicalKey: string;
   paneId: string;
   output: string;
+  // Absolute character position of `output[0]` within the pane's full,
+  // never-trimmed output history (260723 Phase 1). Advances by exactly the
+  // trimmed character count K every time `appendTerminalOutput` front-trims
+  // `output` to stay under `terminalOutputCharacterBudget`. Lets the
+  // delta-write effect in terminalPaneBody.tsx (via
+  // `resolveTerminalDeltaWrite`) compare an absolute "written so far"
+  // position against `outputTrimOffset + output.length` instead of a raw
+  // length, so a front-trim never silently drops output the emulator has not
+  // yet been given. Always `0` for a pane that has never trimmed (the common
+  // case - see `terminalPaneFromSession`).
+  outputTrimOffset: number;
   nextSequence: number;
   error: string | null;
   localCreatedAtMs: number;
@@ -122,6 +133,18 @@ export function terminalOutputEndpoint(
 ) {
   const query = new URLSearchParams({ after: String(after) });
   return `${localCompatibleDashboardApiRoute(serverRoute, ["terminals", terminalId, "output"])}?${query.toString()}`;
+}
+
+// 260723 Phase 1: one batched cursor list per fallback-poll tick, replacing
+// N per-terminal `terminalOutputEndpoint` requests. No terminalId in the
+// path - cursors are carried in the POST body instead (see
+// `fetchTerminalOutputBatch`).
+export function terminalOutputBatchEndpoint(serverRoute?: string | null) {
+  return localCompatibleDashboardApiRoute(serverRoute, [
+    "terminals",
+    "output",
+    "batch",
+  ]);
 }
 
 export function terminalInputEndpoint(
@@ -245,6 +268,31 @@ export async function fetchTerminalOutput(
   return (await response.json()) as TerminalOutputView;
 }
 
+export type TerminalOutputBatchCursor = { terminalId: string; after: number };
+
+// One HTTP round trip carrying every fallback-polling pane's cursor for a
+// single work root's serverRoute (260723 Phase 1). Mirrors
+// `fetchTerminalOutput`'s error contract; the daemon never fails the batch as
+// a whole for a bad cursor, so a thrown error here always means the request
+// itself failed (network/transport), not a per-terminal condition.
+export async function fetchTerminalOutputBatch(
+  cursors: readonly TerminalOutputBatchCursor[],
+  serverRoute?: string | null,
+): Promise<Record<string, TerminalOutputView>> {
+  const response = await fetch(terminalOutputBatchEndpoint(serverRoute), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ cursors }),
+  });
+  if (!response.ok) {
+    throw new Error(await terminalErrorMessage(response));
+  }
+  const body = (await response.json()) as {
+    results: Record<string, TerminalOutputView>;
+  };
+  return body.results;
+}
+
 export async function sendTerminalInput(
   terminalId: string,
   data: string,
@@ -339,6 +387,7 @@ export function terminalPaneFromSession(
     logicalKey,
     paneId: terminalPaneId(session.terminalId, session.serverRoute),
     output: "",
+    outputTrimOffset: 0,
     // A reattached pane with a matching visual-restore entry resumes the
     // WebSocket cursor (`terminalWebSocketCursor`) from the sequence
     // captured alongside that entry's serialized buffer, instead of 0 - this
@@ -536,14 +585,36 @@ export function mergeListedTerminalSessions(
   return next;
 }
 
+// Hard cap on `TerminalPaneState.output`'s length (260723 Phase 1). Chosen
+// generously above what a single fallback-poll tick's chunks add (bounding
+// worst-case per-pane memory instead of the O(1)-per-append unbounded growth
+// this ticket fixes), using the daemon's own `MAX_OUTPUT_CHUNKS` retention
+// bound (`terminal.rs`) as the sizing reference translated to a frontend
+// character budget rather than a chunk count, since the browser side has no
+// equivalent chunk-boundary bookkeeping to cap by count instead.
+export const terminalOutputCharacterBudget = 2_000_000;
+
 export function appendTerminalOutput(
   pane: TerminalPaneState,
   output: TerminalOutputView,
 ) {
+  const appended =
+    pane.output + output.chunks.map((chunk) => chunk.data).join("");
+  // Front-trim only, never the back: the newest output is always what a
+  // reattached/scrolled-down terminal needs most. `outputTrimOffset` absorbs
+  // exactly the trimmed character count K so the delta-write effect can still
+  // reconstruct every character's absolute position after any number of
+  // trims (see `TerminalPaneState.outputTrimOffset` and
+  // `resolveTerminalDeltaWrite`).
+  const overage = appended.length - terminalOutputCharacterBudget;
+  const trimmed = overage > 0 ? appended.slice(overage) : appended;
+  const outputTrimOffset =
+    overage > 0 ? pane.outputTrimOffset + overage : pane.outputTrimOffset;
   return {
     ...pane,
     session: { ...pane.session, status: output.status },
-    output: pane.output + output.chunks.map((chunk) => chunk.data).join(""),
+    output: trimmed,
+    outputTrimOffset,
     nextSequence: output.nextSequence,
     error: null,
     localCreatedAtMs: Date.now(),
@@ -766,6 +837,109 @@ export function terminalOutputPollChangedState(
     output.nextSequence !== pane.nextSequence ||
     pane.error !== null
   );
+}
+
+// One requested cursor from a fallback-poll tick, carrying just enough to
+// both build the batch request body (`terminalId`/`after` via
+// `TerminalOutputBatchCursor`) and re-locate/validate the pane afterward
+// (`logicalKey`, and the cursor value itself as `nextSequence` for the
+// `canApplyTerminalOutputPoll` staleness check).
+export type TerminalOutputBatchPollRequest = {
+  logicalKey: string;
+  terminalId: string;
+  nextSequence: number;
+};
+
+/**
+ * Apply one successful `fetchTerminalOutputBatch` response to every pane that
+ * was part of the request, in a single pass (260723 Phase 1 - replaces N
+ * separate `setTerminalPanes` calls, one per pane, with exactly one). Mirrors
+ * `flushPendingOutputCursors`'s same-reference no-op contract: if nothing in
+ * `results` actually changes any requested pane's state, the same `panes`
+ * object reference is returned so an all-quiet tick never forces a render.
+ *
+ * A `request` whose `terminalId` has no entry in `results` (the daemon
+ * silently omits unknown/inaccessible terminal ids - see the batch route's
+ * spec contract) is treated as "no update this tick" for that pane, not an
+ * error - the existing `pane.error` field is left exactly as-is either way,
+ * matching the single-ID poll's own skip semantics for a stale/mismatched
+ * response.
+ */
+export function applyTerminalOutputBatch(
+  panes: Record<string, TerminalPaneState>,
+  requests: readonly TerminalOutputBatchPollRequest[],
+  results: Record<string, TerminalOutputView>,
+): Record<string, TerminalPaneState> {
+  let next = panes;
+  for (const request of requests) {
+    const pane = next[request.logicalKey];
+    if (!pane) continue;
+    const output = results[request.terminalId];
+    if (!output) continue;
+    if (!canApplyTerminalOutputPoll(pane, request.nextSequence)) continue;
+    if (!terminalOutputPollChangedState(pane, output)) continue;
+    if (next === panes) next = { ...panes };
+    next[request.logicalKey] = appendTerminalOutput(pane, output);
+  }
+  return next;
+}
+
+/**
+ * Fallback for when the batch HTTP request itself fails (network/transport,
+ * not a per-terminal daemon condition - the daemon never fails the batch as a
+ * whole). Marks every pane that was part of the failed request with `message`
+ * independently, matching the pre-batch per-pane failure semantics as closely
+ * as possible (each pane keeps/gets its own `error` field; one pane's error
+ * does not become a single shared/global error). Same same-reference no-op
+ * contract as `applyTerminalOutputBatch`: a pane already showing the exact
+ * same error message is left untouched (and, if every pane is already
+ * showing it, the same `panes` reference is returned).
+ */
+export function applyTerminalOutputBatchError(
+  panes: Record<string, TerminalPaneState>,
+  requests: readonly TerminalOutputBatchPollRequest[],
+  message: string,
+): Record<string, TerminalPaneState> {
+  let next = panes;
+  for (const request of requests) {
+    const pane = next[request.logicalKey];
+    if (!pane || pane.error === message) continue;
+    if (next === panes) next = { ...panes };
+    next[request.logicalKey] = { ...pane, error: message };
+  }
+  return next;
+}
+
+// 260723 Phase 1 Step 3 (secondary guard): once more than this many panes are
+// concurrently fallback-polling in one work root/serverRoute, every poll
+// tick's batch grows proportionally - back off the tick interval so a work
+// root with many simultaneously-disconnected terminals does not multiply
+// request/response payload size at the same fixed cadence. A small,
+// deliberately conservative threshold: normal single/few-terminal usage never
+// crosses it, so the common case always polls at `baseMs`.
+export const terminalOutputPollBackoffPaneThreshold = 6;
+// Backoff factor applied once the threshold is exceeded. Chosen so the
+// backed-off interval stays snappy enough for keystroke echo (see
+// `terminalOutputPollIntervalMs`'s own doc comment in App.tsx) while
+// meaningfully reducing request frequency under load.
+export const terminalOutputPollBackoffMultiplier = 3;
+
+/**
+ * Pure decision function for Step 3's adaptive poll interval: a step function
+ * of the current fallback-polling pane count, with no hysteresis band - the
+ * same `paneCount` always yields the same interval, so back-off and recovery
+ * are both just "recompute every tick" with no separate recovery path to get
+ * out of sync. `baseMs` is threaded through (rather than hardcoded) so the
+ * caller's own constant stays the single source of truth for the
+ * un-backed-off cadence.
+ */
+export function nextTerminalOutputPollIntervalMs(
+  paneCount: number,
+  baseMs: number,
+): number {
+  return paneCount > terminalOutputPollBackoffPaneThreshold
+    ? baseMs * terminalOutputPollBackoffMultiplier
+    : baseMs;
 }
 
 export function markTerminalPaneCloseError(
