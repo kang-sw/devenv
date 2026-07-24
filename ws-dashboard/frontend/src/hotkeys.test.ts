@@ -4,6 +4,7 @@ import {
   buildLeaderTree,
   checkHotkeyBindingKeys,
   chordFromKeydownEvent,
+  decideKeydownGuardStage,
   describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
@@ -882,16 +883,70 @@ assertEqual(
     "- this documents why handleKeydown's check *order* (trigger before guard), " +
     "not the guard body, is what fixes the bug",
 );
+
+// The single source of truth for that ordering contract:
+// `decideKeydownGuardStage` is what `App.tsx#handleKeydown` actually calls,
+// so these assertions fail if the ordering ever regresses (unlike the
+// pure-function assertions above, which only document intent).
 assertEqual(
-  shouldSkipHotkeyCapture({
+  decideKeydownGuardStage({
+    key: " ",
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
     isComposing: false,
-    key: "t",
     targetIsEditable: false,
     targetInsideTerminalPane: true,
   }),
-  true,
-  "a non-trigger key ('t') with terminal focus is still skipped by the guard " +
-    "(standalone bindings and ordinary keys keep passing through to the terminal)",
+  "enter-leader",
+  "decideKeydownGuardStage: a terminal-focused Ctrl+Space still enters leader mode " +
+    "(the leader-entry trigger is checked before the passthrough guard)",
+);
+assertEqual(
+  decideKeydownGuardStage({
+    key: "t",
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: false,
+    targetIsEditable: false,
+    targetInsideTerminalPane: true,
+  }),
+  "skip-passthrough",
+  "decideKeydownGuardStage: a non-trigger key ('t') with terminal focus is still " +
+    "skipped by the passthrough guard",
+);
+assertEqual(
+  decideKeydownGuardStage({
+    key: " ",
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: true,
+    targetIsEditable: false,
+    targetInsideTerminalPane: false,
+  }),
+  "skip-passthrough",
+  "decideKeydownGuardStage: an in-progress IME composition still suppresses " +
+    "Ctrl+Space leader-entry recognition",
+);
+assertEqual(
+  decideKeydownGuardStage({
+    key: "t",
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    isComposing: false,
+    targetIsEditable: false,
+    targetInsideTerminalPane: false,
+  }),
+  "fall-through",
+  "decideKeydownGuardStage: a plain keydown outside any guarded target falls " +
+    "through to standalone-binding matching",
 );
 
 console.log("hotkeys.test.ts passed");

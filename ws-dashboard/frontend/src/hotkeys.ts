@@ -456,6 +456,51 @@ export function shouldSkipHotkeyCapture(evt: HotkeyGuardEvent): boolean {
   return false;
 }
 
+// --- Keydown guard-stage ordering (single source of truth) --------------
+//
+// `App.tsx#handleKeydown` calls this after its own leader-*pending*
+// continuation branch has already run (and returned, if applicable) - this
+// function only decides the *next* stage, where the leader-*entry* trigger
+// (`Ctrl+Space` from idle) and the terminal/editable-target passthrough
+// guard (`shouldSkipHotkeyCapture`) compete for the same keydown. The
+// leader-entry trigger is checked FIRST (when not IME-composing), so
+// entering leader mode is never blocked by terminal or editable focus;
+// every other key still passes through `shouldSkipHotkeyCapture` exactly as
+// before. Extracted as one pure function (rather than left as two
+// independently-ordered call sites in `handleKeydown`) so this ordering
+// contract is itself directly unit-testable and fails loudly if the checks
+// are ever reordered back.
+export type HotkeyKeydownGuardStageEvent = HotkeyKeydownEvent & {
+  readonly isComposing: boolean;
+  readonly targetIsEditable: boolean;
+  readonly targetInsideTerminalPane: boolean;
+};
+
+export type HotkeyKeydownGuardStageDecision =
+  | "enter-leader"
+  | "skip-passthrough"
+  | "fall-through";
+
+export function decideKeydownGuardStage(
+  evt: HotkeyKeydownGuardStageEvent,
+): HotkeyKeydownGuardStageDecision {
+  const isComposing = evt.isComposing || evt.key === "Process";
+  if (!isComposing && isLeaderTriggerKeydown(evt)) {
+    return "enter-leader";
+  }
+  if (
+    shouldSkipHotkeyCapture({
+      isComposing,
+      key: evt.key,
+      targetIsEditable: evt.targetIsEditable,
+      targetInsideTerminalPane: evt.targetInsideTerminalPane,
+    })
+  ) {
+    return "skip-passthrough";
+  }
+  return "fall-through";
+}
+
 // --- Persistence ----------------------------------------------------------
 //
 // Follows the `workRootFiles.ts` `browserStorage()`/versioned-JSON/defensive-

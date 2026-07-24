@@ -96,13 +96,12 @@ import {
   buildDefaultHotkeyBindings,
   buildLeaderTree,
   chordFromKeydownEvent,
+  decideKeydownGuardStage,
   describeLeaderChildren,
   enterLeaderPending,
   findStandaloneMatch,
-  isLeaderTriggerKeydown,
   loadHotkeyUserConfig,
   resolveHotkeyCommand,
-  shouldSkipHotkeyCapture,
   stepLeaderState,
   HotkeyRegistry,
   type HotkeyBinding,
@@ -1670,23 +1669,23 @@ export function App() {
         return;
       }
 
-      const isComposing = event.isComposing || event.key === "Process";
+      // `decideKeydownGuardStage` (hotkeys.ts) is the single source of truth
+      // for this ordering: the leader-entry trigger (Ctrl+Space, when not
+      // IME-composing) is decided before the terminal/editable-target
+      // passthrough guard, so Ctrl+Space can open the leader overlay even
+      // while a terminal pane (or editable field) has focus.
+      const guardStage = decideKeydownGuardStage({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        isComposing: event.isComposing,
+        targetIsEditable,
+        targetInsideTerminalPane,
+      });
 
-      // The leader-entry trigger is checked before shouldSkipHotkeyCapture's
-      // terminal/editable-target passthrough guard so Ctrl+Space can open
-      // the leader overlay even while a terminal pane (or editable field)
-      // has focus. Only the IME-composition skip stays ahead of it, since a
-      // composing IME session must still suppress trigger recognition.
-      if (
-        !isComposing &&
-        isLeaderTriggerKeydown({
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-          altKey: event.altKey,
-        })
-      ) {
+      if (guardStage === "enter-leader") {
         leaderStateRef.current = enterLeaderPending(
           framework.leaderTree,
           Date.now(),
@@ -1697,14 +1696,7 @@ export function App() {
         return;
       }
 
-      if (
-        shouldSkipHotkeyCapture({
-          isComposing,
-          key: event.key,
-          targetIsEditable,
-          targetInsideTerminalPane,
-        })
-      ) {
+      if (guardStage === "skip-passthrough") {
         return;
       }
 
