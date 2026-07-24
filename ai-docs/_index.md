@@ -209,6 +209,12 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260724-feat-lead-fan-out-worktree` (ready, feat) - lead-cognition parallel
+  worktree orchestration overlay + `session.note` per-child scratchpad. Rides the
+  landed session-auth/native-subagent architecture (delegate scope, `root_override`
+  child mint, `session.children` lineage). Phase 1 `session.note` tool → Phase 2
+  `lead-fan-out-worktree` (1-min) entry skill (ws+wsflow) → Phase 3 wsflow
+  exposure/mirror. Implementation-ready; captured from lead-discuss.
 - `260723-epic-ticket-write-reshape` (todo, epic) - coordinates the ticket-write
   reshape: verify-commit gate as mechanical floor, must-not-forget tool collapse,
   concept-doc consolidation. Board artifact, not an implementation target.
