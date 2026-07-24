@@ -221,6 +221,53 @@ infeasible (no true `exec` on Windows), so Job Object is the pragmatic path.
 Repro-dependent; validate locally via `powershell.exe` interop from WSL (real
 Windows process spawning), with a Windows CI runner for automated regression.
 
+### Result (88a67a78) - 2026-07-24
+
+Implemented the **server-side parent-death detection** half of the phase's
+"and/or" (Job Object deferred — see below). `cmd/ws-mcp/serve()` now arms a
+Windows-only goroutine (`startParentDeathWatch`, build-tagged
+`parent_watch_windows.go`; `!windows` no-op stub in `parent_watch_other.go`)
+that captures `os.Getppid()` once, opens the parent handle with
+`windows.OpenProcess(SYNCHRONIZE, ...)`, blocks on
+`windows.WaitForSingleObject(h, INFINITE)`, and — only on a real `WAIT_OBJECT_0`
+signal — records a `process.parent_exited` event to the new always-on
+`<cache-root>/crash/mcp-lifecycle.log` sink (via exported
+`mcp.RecordLifecycleEvent`, reusing Phase 1's `crashDir()`) and `os.Exit(0)`s.
+So a force-killed launcher can no longer leave an orphaned server holding a
+stale `state.sqlite` lock (hypothesis A). The watch is armed only from
+`serve()`, never inside `Server.ServeStdio`, so the `smoke` self-test and every
+`internal/mcp` test that calls `ServeStdio` do not arm a live `os.Exit`
+goroutine. A `//go:build windows` regression test exercises `watchProcessExit`
+against a real killed child; the `windows-smoke` CI job gained its first
+`go test ./...` step so that test actually runs on `windows-latest`.
+
+Verification: `go build ./...` + full `go test ./...` clean (Linux, exercising
+the `!windows` stub); `GOOS=windows go build ./...` and
+`GOOS=windows go vet ./cmd/ws-mcp/...` clean (compile-verify the Windows sources
++ test). The Windows-only test cannot execute on this Linux host — it runs only
+in CI. Adversarial review verdict SHIP, no blockers/majors; the one actionable
+minor (fire `onExit` only on `WAIT_OBJECT_0`, not `WAIT_FAILED`) was applied.
+
+**Job Object backstop (3b) deferred — binding-decision escalation resolved by
+evidence.** The phase plan's survey emitted an `[escalate-to-binding-decision]`
+on whether to build the launcher-side kill-on-close Job Object at all. Two
+findings resolved it toward "not now": (1) a naive kill-on-close job would
+cascade-kill mercenary async workers and break the survives-disconnect contract
+unless a mandatory `JOB_OBJECT_LIMIT_BREAKAWAY_OK` + `CREATE_BREAKAWAY_FROM_JOB`
+companion ships; the server-side detection above has no such risk. (2) The
+kill-on-close mechanism could **not** be validated through `powershell.exe`
+interop from WSL: across three attempts (including a real job-owning parent
+process exiting) the child was never reaped, despite `IsProcessInJob` confirming
+correct assignment (`anyJob=False` before, `ourJob=True` after) — so this dev
+box cannot verify the ctypes Job Object path before shipping it. Root cause of
+the interop reap-failure was not isolated; the takeaway is that 3b needs a real
+Windows session/CI, matching the survey's escalation. **3b is deferred until
+field or Windows-CI evidence shows 3a's server-side detection is insufficient**
+(e.g. the launcher is force-killed in a way that races ahead of the Go
+watcher). If pursued, it must ship the mercenary breakaway companion.
+
+Deferred (unchanged): Phase 4 SQLite point-read retry + WAL re-assert.
+
 ### Phase 4: SQLite multi-process discipline
 
 Extend bounded busy-retry to the unretried point-read paths
