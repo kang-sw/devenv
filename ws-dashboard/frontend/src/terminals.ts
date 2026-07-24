@@ -331,6 +331,12 @@ export async function resizeTerminal(
   };
 }
 
+// Idempotent by design: a 404 means the terminal is already gone (already
+// closed, or reaped by the daemon's auto-reap) rather than a real failure, so
+// it resolves normally instead of throwing. This absorbs the manual-close /
+// auto-reap race at the single shared helper so every current and future
+// caller (closeTerminalPane in App.tsx being the only production caller
+// today) inherits the idempotency guarantee for free.
 export async function closeTerminal(
   terminalId: string,
   serverRoute?: string | null,
@@ -338,7 +344,7 @@ export async function closeTerminal(
   const response = await fetch(terminalCloseEndpoint(terminalId, serverRoute), {
     method: "DELETE",
   });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 404) {
     throw new Error(await terminalErrorMessage(response));
   }
 }
