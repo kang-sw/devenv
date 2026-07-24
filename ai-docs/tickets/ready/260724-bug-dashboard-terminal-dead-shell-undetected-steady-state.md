@@ -240,6 +240,55 @@ already-gone pane does not surface "terminal close failed" (the `404`-as-success
 path); the reconciliation poll only needs asserting when the WS is forced into
 fallback.
 
+### Result (2b4d0e0b) - 2026-07-24
+
+Landed the three frontend behaviors (range `862d58b0..2b4d0e0b`, all under
+`ws-dashboard/frontend/src`, zero daemon/Rust edits):
+
+- **Idempotent close** — `closeTerminal` (`terminals.ts`) now returns normally
+  on a `404` response instead of throwing, so the auto-reap/manual-close race
+  no longer surfaces "terminal close failed". The daemon already returns `404`
+  correctly in both `close_terminal` guard branches, so the fix is entirely
+  client-side and needed no server change.
+- **Retain-with-clear retirement** — a pane whose `pane.session.status` is
+  `exited`/`terminated`/`error` grays out (new `.terminal-pane-retired` rule in
+  `styles.css` reusing `--ws-color-text-disabled`, no new raw color) and its
+  control relabels to "Clear"; the pane is retained (scrollback preserved) until
+  the owner clears it, not auto-removed.
+- **Coarse reconciliation backstop** — a new 5s per-work-root `useEffect`
+  (`terminalListReconciliationPollIntervalMs`) that, only while any pane is on
+  the `socketStatus === "fallback"` path, re-lists terminals and prunes panes
+  the daemon no longer lists, via a shared `applyListedTerminalSessions`
+  apply-path now used by both the mount effect and the backstop (reuse of the
+  existing `reconcileListedTerminalSessions`, far coarser than the 120ms output
+  poll).
+
+Anchor corrections against this ticket's frozen Phase 2 text (line numbers had
+drifted after Phase 1 landed): `close_terminal` is `terminal.rs:784-799` (not
+737-745, which is `terminal_resize`); `closeTerminalPane` is `App.tsx:5749-5775`
+(not 5608-5628); the WS status-frame handler is `terminalPaneBody.tsx ~614-619`.
+Design refinement over the plan: the retirement gate reads the `pane` prop's
+`pane.session.status`, **not** the component-local `displaySession` mirror. A
+mental-model footgun note (`terminal-render.md`, `5c95a5b8`) records the
+source-verified reason — Dockview panel-param forwarding is suppressed while the
+socket is `connecting`/`connected` (`shouldUpdateDockviewWorkbenchPanelParams`),
+so `displaySession` freshness is not guaranteed — correcting the plan's looser
+"stale during fallback polling" phrasing while keeping the same guidance.
+
+Verification: `npm run build` clean; `npm run test:terminals` exit 0, with two
+added `terminals.test.ts` cases (`closeTerminal` resolves on a mocked `404`; the
+reconciliation prune boundary). The UI gray-out/clear affordance and the
+fallback-gated backstop are dogfood-level (no DOM/browser harness in
+`test:terminals`; `test:browser` is independently RED on unrelated 260713), so
+only the two pure-function units are pinned — matching the plan's scoped ask, not
+overclaiming UI coverage. Reviews: correctness clean, fit clean, test clean with
+one accepted minor (the prune predicate's exact-equality boundary
+`localCreatedAtMs === pruneStartedAtMs` is unpinned on pre-existing, unmodified
+code). Spec closeout: `#260724-terminal-pane-dead-session-retire` (`0fbbceb4`).
+
+Deferred: Phase 3 (Unix regression + native-Windows acceptance) remains — ticket
+stays in `ready/`.
+
 ### Phase 3: Verification (Unix regression + native-Windows acceptance)
 
 - Unix: extend/adjust `crates/daemon/tests/terminal_lifetime.rs` so the
