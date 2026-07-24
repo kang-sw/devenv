@@ -1032,7 +1032,6 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
@@ -1087,7 +1086,6 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",

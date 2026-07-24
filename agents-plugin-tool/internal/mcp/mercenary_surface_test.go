@@ -501,55 +501,82 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 }
 
 // TestRenderGoldenShippedDelegateModelVarsPerHarness verifies the tier-derived
-// RoleModel var resolves to per-harness model strings on the REAL shipped delegate
-// playbooks. implementer declares {{.RoleModel}} (tier medium); reviewer declares
-// {{.RoleModel}} (tier large). An isolated empty CacheHome yields the built-in
-// default aliases (claude: medium→sonnet, large→opus; codex: medium→gpt-5.6-terra,
-// large→gpt-5.6-sol),
-// so the assertions are deterministic and config-independent. Closes 260611 Phase 1
-// gap 2 (260609 Edition 379ff5e5: tier model vars never surfaced on a shipped asset).
+// RoleModel resolution still resolves to distinct per-harness model strings for
+// the REAL shipped delegate playbooks' declared tiers (implementer=medium,
+// reviewer=large, reference-discovery=small). An isolated empty CacheHome yields
+// the built-in default aliases (claude: medium→sonnet, large→opus, small→haiku;
+// codex: medium→gpt-5.6-terra), so the assertions are deterministic and
+// config-independent.
+//
+// 260622 retarget: shipped delegate bodies no longer echo an
+// "Alias model for this role: {{.RoleModel}}." line — playbook.render's
+// recommended-model return line is the single pre-spawn binding source now — so
+// this test asserts resolveTierModel directly (the same seam RoleModel routes
+// through) against each shipped playbook's actual rendered recommendedTier,
+// rather than scanning rendered body text for the model string. This keeps the
+// test tied to the real shipped frontmatter tier declaration (still exercises
+// renderPlaybookBody) while no longer depending on body prose that has moved
+// out of the delegate bodies. Per-harness divergence coverage moves to reviewer
+// (delegates:true), whose rendered body still diverges per harness via
+// delegationTip's ContinueIdiom text — implementer and reference-discovery
+// (delegates:false, no remaining harness-conditional vars) no longer diverge by
+// harness at all, so that assertion is dropped for them rather than left false.
+// Closes 260611 Phase 1 gap 2 (260609 Edition 379ff5e5: tier model vars never
+// surfaced on a shipped asset).
 func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	rsrcRoot := shippedRsrcRootForTest()
+	opts := wsconfig.Options{CacheHome: t.TempDir()}
 
-	render := func(t *testing.T, name, harness string) string {
+	render := func(t *testing.T, name, harness string) (string, string) {
 		t.Helper()
 		s := newTestServerWithHarness(t, harness)
 		var ctx map[string]string
 		if name == "implementer" {
 			ctx = shippedImplementerContext()
 		}
-		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
+		body, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, opts, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
-		return body
+		return body, tier
 	}
 
-	// implementer → RoleModel (tier medium): claude=sonnet, codex=gpt-5.6-terra (distinct per harness).
-	implClaude := render(t, "implementer", "claude")
-	implCodex := render(t, "implementer", "codex")
-	if !strings.Contains(implClaude, "sonnet") {
-		t.Errorf("implementer (claude) body must surface RoleModel 'sonnet':\n%s", implClaude)
+	// implementer → declared tier medium: claude=sonnet, codex=gpt-5.6-terra.
+	_, implTier := render(t, "implementer", "claude")
+	if implTier != "medium" {
+		t.Fatalf("implementer declared tier = %q, want %q", implTier, "medium")
 	}
-	if !strings.Contains(implCodex, "gpt-5.6-terra") {
-		t.Errorf("implementer (codex) body must surface RoleModel 'gpt-5.6-terra':\n%s", implCodex)
+	if got := resolveTierModel("claude", implTier, opts); got != "sonnet" {
+		t.Errorf("resolveTierModel(claude, %q) = %q, want %q", implTier, got, "sonnet")
 	}
-	if implClaude == implCodex {
-		t.Error("implementer render did not diverge per harness — model var not resolved per harness")
-	}
-
-	// reviewer → RoleModel (tier large): claude=opus.
-	revClaude := render(t, "reviewer", "claude")
-	if !strings.Contains(revClaude, "opus") {
-		t.Errorf("reviewer (claude) body must surface RoleModel 'opus':\n%s", revClaude)
+	if got := resolveTierModel("codex", implTier, opts); got != "gpt-5.6-terra" {
+		t.Errorf("resolveTierModel(codex, %q) = %q, want %q", implTier, got, "gpt-5.6-terra")
 	}
 
-	// reference-discovery → RoleModel (tier small): claude=haiku. Anchors the small
+	// reviewer → declared tier large: claude=opus. Its rendered body must still
+	// diverge per harness via delegationTip's ContinueIdiom text (still-visible
+	// per-harness signal after the RoleModel echo removal).
+	revBodyClaude, revTier := render(t, "reviewer", "claude")
+	if revTier != "large" {
+		t.Fatalf("reviewer declared tier = %q, want %q", revTier, "large")
+	}
+	if got := resolveTierModel("claude", revTier, opts); got != "opus" {
+		t.Errorf("resolveTierModel(claude, %q) = %q, want %q", revTier, got, "opus")
+	}
+	revBodyCodex, _ := render(t, "reviewer", "codex")
+	if revBodyClaude == revBodyCodex {
+		t.Error("reviewer render did not diverge per harness — expected delegationTip's ContinueIdiom text to differ")
+	}
+
+	// reference-discovery → declared tier small: claude=haiku. Anchors the small
 	// tier concretely so all three first-class tiers (small/medium/large) have a
 	// resolved-model assertion, not just placeholder-absence.
-	refDiscClaude := render(t, "reference-discovery", "claude")
-	if !strings.Contains(refDiscClaude, "haiku") {
-		t.Errorf("reference-discovery (claude) body must surface RoleModel 'haiku':\n%s", refDiscClaude)
+	_, refDiscTier := render(t, "reference-discovery", "claude")
+	if refDiscTier != "small" {
+		t.Fatalf("reference-discovery declared tier = %q, want %q", refDiscTier, "small")
+	}
+	if got := resolveTierModel("claude", refDiscTier, opts); got != "haiku" {
+		t.Errorf("resolveTierModel(claude, %q) = %q, want %q", refDiscTier, got, "haiku")
 	}
 }
 
