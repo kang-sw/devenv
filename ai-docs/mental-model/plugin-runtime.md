@@ -72,7 +72,7 @@ related:
 - Setting only `WS_RSRC_ROOT` before runtime handoff; maximum-delegation workflow-manual loading reads `lead-prefer-subagent` from `WS_SKILLS_ROOT` and otherwise falls back to the nonexistent `.runtime/skills` tree.
 - Narrowing `read_runtime_contract`'s exception catch back to `(OSError, json.JSONDecodeError)`: both `json.JSONDecodeError` and `UnicodeDecodeError` are `ValueError` subclasses, so the correct tuple is `(OSError, ValueError)`; the narrower form silently lets a mid-write byte-corrupt contract escape as an uncaught traceback instead of routing through `fail()`.
 - Tightening `wait_for_rsrc_tree` timeout from note-and-proceed to hard-fail: `apply_rsrc_root_env` already no-ops gracefully when `rsrc/` is absent, so a hard-fail on rsrc timeout adds a new unproven failure path with no safety benefit.
-- Applying canonical-launcher robustness fixes (Phase B cold-load: `wait_for_rsrc_tree`, OS-aware contract timeout, `os.replace` retry) to `agents-plugin-wsflow/bin/ws-mcp-launcher.py`: the wsflow launcher intentionally diverges from the canonical one — it is not the Windows shipping target and did not receive these fixes.
+- Treating `agents-plugin-wsflow/bin/ws-mcp-launcher.py` as an intentional divergence that may skip canonical launcher fixes: it is a maintained byte-identical mirror of `agents-plugin/bin/ws-mcp-launcher.py` (verified by `diff`), and every launcher change — cold-load robustness, diagnostics breadcrumbs, handoff behavior — must be applied to both copies identically, consistent with the "update the copied wsflow launcher with it" rule above.
 
 ## Technical Debt
 
