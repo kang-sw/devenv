@@ -11,6 +11,7 @@ related-mental-model:
   - ws-web-dashboard
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # dashboard terminal frontend: per-pane HTTP short-poll fallback is O(N) when WebSockets drop
@@ -228,6 +229,58 @@ Verification:
   results keyed by `terminalId` for a mixed batch of valid, unknown, and
   inaccessible IDs, omitting the latter two from `results` without failing
   the request for the valid IDs in the same batch.
+
+### Result (fb7165e3) - 2026-07-24
+
+Implemented as planned across `2b7a51d9..fb7165e3`. Behavioral delta: the
+WebSocket-fallback HTTP output path no longer scales O(N) with open
+terminal panes. Each poll tick now issues exactly one batched request
+(`POST terminals/output/batch`, unscoped + server-scoped mirror) returning
+per-terminal `TerminalOutputView` keyed by id; unknown or inaccessible ids
+are omitted from `results` rather than erroring (batch always 200). The
+frontend applies the whole batch in a single `setTerminalPanes` per tick,
+guarded by one in-flight flag (not N), with a pane-count-adaptive poll
+interval (step 3's back-off guard); quiet panes are still skipped via
+same-reference no-op.
+
+`pane.output` growth on the fallback path is now bounded by a front-trim
+(retains newest, drops oldest) tracked via `outputTrimOffset`. Because this
+breaks the raw-length assumption in the delta-write effect, the
+`terminalPaneBody.tsx` write bookkeeping was converted from a raw-length
+`writtenLengthRef` to an absolute-offset bookmark (`outputTrimOffset` +
+local length), so output is never silently dropped across a trim boundary
+and a trim that leaves `pane.output.length` unchanged no longer causes a
+spurious full clear+redump.
+
+Spec anchor extended (`260703-ws-dashboard-server-route-scoped-operation-endpoints`
+Remote Terminal HTTP Lifecycle) to document the batch route, method, and
+envelope; the body-parsing-alias contract bullet was fixed in a follow-up
+commit (`1f9cd422`) to include the batch route, per review Fit finding.
+Mental model `ws-web-dashboard/terminal-render.md` updated with the
+absolute-coordinate-space invariant and the batch-poll fallback.
+
+Verification:
+
+- Daemon: `cargo test -p ws-dashboard-daemon` green, including the new
+  `terminal_output_batch_omits_unknown_and_inaccessible_ids` test. One
+  pre-existing unrelated flake (`terminal_boot_reconcile...`) fails
+  identically on the base commit — not introduced by this change.
+- Frontend: `npm run build` and `npm run test:terminals` green. The
+  trim-boundary regression test (Phase 1 verification bullet 3, the
+  load-bearing case) is a confirmed negative control — two independent
+  mutation checks kill it.
+- Partitioned review: correctness clean (1 informational minor accepted
+  as-is); fit clean after the `1f9cd422` spec fix; test clean (2 narrow
+  non-blocking minors accepted as-is). No Critical/Important findings
+  open.
+- `test:browser` (dashboard-acceptance suite) intentionally not gated on:
+  it is independently red on the pre-existing unrelated bug 260713,
+  documented on that ticket and on the blocked leaf-extraction ticket; not
+  a regression from this work.
+
+All four Phase 1 steps and all Phase 1 verification bullets are covered.
+No deferred follow-up beyond the pre-existing out-of-scope items already
+noted above (WS-drop root cause, live-socket-path output growth).
 
 ## Out of scope note
 
