@@ -4,6 +4,8 @@ related:
   260723-bug-dashboard-terminal-blocking-pty-write-thread-starvation: prior investigation found this as a secondary render-cost contributor (that ticket's daemon-side blocking-write root cause is already fixed, in `.done/`)
 related-mental-model:
   - ws-web-dashboard
+sage-review-completeness: completed
+sage-review-design: completed
 ---
 
 # dashboard terminal frontend: unmemoized O(N) pane scan re-runs on every PTY output chunk from any terminal
