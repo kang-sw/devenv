@@ -227,3 +227,5 @@ slice; tracked here so the dependency is visible from both sides.
 This phase is a deferred forward-reference: implementation and verification
 are deferred to a future ticket/slice, so no verification is required for
 this ticket's initial slice.
+
+**Closeout (2026-07-24):** Deferred and split to `260724-idea-dashboard-hotkey-rebind-editor-settings-section`; no implementation in this ticket. This ticket closes with its Phase 1 slice delivered.
