@@ -288,6 +288,14 @@ Old runtimes that do not provide the command are not silently trusted. During
 the transition, the launcher either falls back to the existing bounded full
 validation path or repairs the runtime before writing a compatibility stamp.
 
+The advertised tool surface grows by ordinary manifest addition: for example
+`session.note` (see `#260619-session-key-lineage-children`) ships to both the
+`ws` launcher and the `runtime_capabilities.match: exact` wsflow surface, so
+adding one tool to `tools()` requires the matching `tools` entry in both
+`agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json` — an
+exact-match contract fails closed on any surface drift, not just missing
+entries.
+
 ## Post-Compaction Session Restoration {#260626-post-compaction-session-restoration}
 
 Context compaction discards in-flight routing and implementation context from the
@@ -305,6 +313,11 @@ lead-only — a delegate/leaf-scoped key is rejected at the capability gate — 
 valid key is required, with a reserved sentinel (taught only in lead skill prose)
 gating the fresh-bootstrap render. After compaction the `lead-revive` skill recovers
 the surviving key from the summary and threads it into `ws.workflow_manual`.
+
+The same per-session record file backs every additive session-state field, so
+a `session.note` annotation (`#260619-session-key-lineage-children`) written
+onto a child's record persists across the same restart/compaction boundary as
+agenda and todos — no separate store, no separate restoration path.
 
 ## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 

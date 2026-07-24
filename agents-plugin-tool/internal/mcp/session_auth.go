@@ -31,6 +31,7 @@ type sessionChild struct {
 	parent string
 	depth  int
 	live   bool
+	note   string
 }
 
 // sessionRecord is the on-disk JSON shape of a session entry. It is versioned so
@@ -57,6 +58,11 @@ type sessionRecord struct {
 	// Todos is the ordered step-level checklist for the session. Added as an
 	// additive field; older records parse with a nil slice. See session_state.go.
 	Todos []todoItem `json:"todos,omitempty"`
+	// Note is a free-form one-line annotation a lead attaches to this child's own
+	// record via session.note. Empty is the same as absent (omitempty) so a
+	// "clear the note" write is just writing an empty string, not a separate
+	// verb. See session_state.go's handleSessionNote.
+	Note string `json:"note,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
@@ -246,6 +252,7 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 				parent: record.Parent,
 				depth:  childDepth,
 				live:   false,
+				note:   record.Note,
 			}
 			if _, err := os.Stat(record.Root); err == nil {
 				child.live = true
@@ -262,6 +269,21 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 		return children[i].key < children[j].key
 	})
 	return children, nil
+}
+
+// setNote writes a free-form note onto targetKey's own session record via the
+// shared atomic read-modify-write primitive (mutateRecord, session_state.go).
+// It is the on-disk half of session.note: the caller's session_key only
+// authorizes the call (gated lead-only by the existing session.* prefix
+// block); the note itself lands on targetKey's record, not the caller's, so a
+// later session.children read of targetKey's parent surfaces it directly. An
+// empty text is a legitimate "clear the note" write, made possible purely by
+// the Note field's omitempty JSON tag.
+func (s *sessionStore) setNote(targetKey, text string) error {
+	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
+		r.Note = text
+		return nil
+	})
 }
 
 // getOverride returns the Overrides entry for the given item key in the session

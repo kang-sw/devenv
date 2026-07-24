@@ -544,6 +544,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.children":
 		return s.handleSessionChildren(req.ID, params.Arguments)
+	case "session.note":
+		return s.handleSessionNote(req.ID, params.Arguments)
 	case "agenda.set":
 		return s.handleAgendaSet(req.ID, params.Arguments)
 	case "agenda.clear":
@@ -1786,6 +1788,7 @@ type sessionChildOutput struct {
 	Depth  int    `json:"depth"`
 	Live   bool   `json:"live"`
 	Root   string `json:"root"`
+	Note   string `json:"note,omitempty"`
 }
 
 func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]any) response {
@@ -1823,6 +1826,7 @@ func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]
 			Depth:  child.depth,
 			Live:   child.live,
 			Root:   child.root,
+			Note:   child.note,
 		})
 	}
 
@@ -1834,6 +1838,40 @@ func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]
 		}, nil)
 	}
 	return toolTextResponse(id, formatSessionChildren(sessionKey, out, includeDead), nil)
+}
+
+// handleSessionNote lets a lead attach a free-form one-line note to a child
+// session key. session_key only authorizes the call (gated lead-only by the
+// existing session.* prefix block in roleAllowsTool; no additional lineage
+// check here, matching session.children's trust model); the note itself is
+// written onto child_session_key's own record, not the caller's, so a later
+// session.children read of the child's parent surfaces it. An empty text is a
+// legitimate "clear the note" write (the Note field's omitempty JSON tag is
+// what makes it disappear from output), not a separate clear verb.
+func (s *Server) handleSessionNote(id json.RawMessage, arguments map[string]any) response {
+	const tool = "session.note"
+	if _, err := sessionStateKey(tool, arguments); err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	childKey, err := stringArg(tool, "child_session_key", arguments)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	rawText, ok := arguments["text"]
+	if !ok {
+		return toolTextResponse(id, "", fmt.Errorf("%s: text is required", tool))
+	}
+	text, ok := rawText.(string)
+	if !ok {
+		return toolTextResponse(id, "", fmt.Errorf("%s: text must be a string", tool))
+	}
+	if err := s.sessions.setNote(childKey, text); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	if text == "" {
+		return toolTextResponse(id, fmt.Sprintf("note cleared: %s\n", childKey), nil)
+	}
+	return toolTextResponse(id, fmt.Sprintf("note set: %s\n", childKey), nil)
 }
 
 func sessionChildScopeLabel(scope toolRole) string {
@@ -1867,7 +1905,11 @@ func formatSessionChildren(sessionKey string, children []sessionChildOutput, inc
 			}
 			fmt.Fprintf(&b, " live: %s", live)
 		}
-		fmt.Fprintf(&b, " root: %s\n", child.Root)
+		fmt.Fprintf(&b, " root: %s", child.Root)
+		if child.Note != "" {
+			fmt.Fprintf(&b, " note: %s", child.Note)
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -3209,6 +3251,19 @@ func tools() []map[string]any {
 					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "session.note",
+			"description": "Attach a free-form one-line note to a child session key. The note is written onto the child's own record (not the caller's) and is surfaced by session.children.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":       stringProperty("Caller's lead session key; authorizes the call (see ws:workflow-manual)."),
+					"child_session_key": stringProperty("Target child session key to annotate."),
+					"text":              stringProperty("Free-form note text. An empty string clears the note."),
+				},
+				"required": []string{"session_key", "child_session_key", "text"},
 			},
 		},
 		{

@@ -204,6 +204,22 @@ minted after they fall out of its own (compacted or restarted) context.
   - Output defaults to compact labeled text per
     `#260512-mcp-llm-readable-output-defaults`; `format: "json"` is the
     structured escape hatch.
+- `session.note(session_key, child_session_key, text)` lets a lead attach a
+  free-form one-line annotation to a child session key. `session_key` only
+  authorizes the call — it is not looked up beyond the existing keyed-gate
+  `session.` prefix block, so this tool is lead-only for the same reason
+  `session.children` is. The note text is written onto
+  `child_session_key`'s **own** per-session record, not the caller's, as an
+  additive `note` field alongside `overrides`/`agenda`/`todos`; it persists
+  across restart and compaction the same way those fields do. `session.note`
+  performs no lineage check that `child_session_key` actually descends from
+  `session_key` — holding a valid `session_key` is the entire authorization,
+  mirroring `session.children`'s trust model. An empty `text` clears the note
+  (the field's `omitempty` JSON tag is what makes an empty write disappear,
+  not a separate clear verb). Once set, the note is surfaced as an additional
+  `note` field on the corresponding entry in `session.children` output (both
+  compact text and `format: "json"`), letting a lead re-discover what a child
+  was doing without holding it in its own context.
 
 ## Session State Tools {#260625-session-state-tools}
 
