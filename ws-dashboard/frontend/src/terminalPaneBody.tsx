@@ -71,6 +71,18 @@ export type TerminalPaneActions = {
   ) => void;
 };
 
+// Statuses a pane visually retires for (260724 Phase 2): the underlying
+// shell process is gone, so the pane switches to a gray-out treatment plus a
+// relabeled "Clear" affordance instead of "Terminate". Mirrors the
+// `pane.session.status === "running"` precedent in
+// `terminalRestoreIntentsFromPanes` (terminals.ts) as the complementary
+// non-running set.
+const terminalRetiredStatuses: ReadonlySet<string> = new Set([
+  "exited",
+  "terminated",
+  "error",
+]);
+
 // Mounted per terminal pane and stays mounted (with its wrapper
 // `display:none`'d by Dockview) while the owning root is not the active
 // root - a mere selection/visibility flip does NOT unmount this component.
@@ -746,8 +758,23 @@ export function TerminalPaneBody({
     };
   }, [pane.output]);
 
+  // Gated on `pane.session.status` (the parent-owned session view), not the
+  // locally-mirrored `displaySession.status` above: `displaySession` only
+  // updates from the live WebSocket "message" listener and does not observe
+  // HTTP fallback-poll status updates (see `appendTerminalOutput` in
+  // terminals.ts), which is exactly the transport state this retirement
+  // treatment must also cover (260724 Phase 2). Retain-with-clear, not
+  // auto-remove, per the ticket contract - the pane and its scrollback stay
+  // visible until the user explicitly clears it.
+  const isRetired = terminalRetiredStatuses.has(pane.session.status);
+
   return (
-    <div className="terminal-pane" data-terminal-id={terminalId}>
+    <div
+      className={
+        isRetired ? "terminal-pane terminal-pane-retired" : "terminal-pane"
+      }
+      data-terminal-id={terminalId}
+    >
       <div
         className="terminal-surface"
         data-command-id="terminal.input"
@@ -765,7 +792,7 @@ export function TerminalPaneBody({
           type="button"
           onClick={() => actions.onClose(pane)}
         >
-          Terminate
+          {isRetired ? "Clear" : "Terminate"}
         </button>
       </div>
     </div>
