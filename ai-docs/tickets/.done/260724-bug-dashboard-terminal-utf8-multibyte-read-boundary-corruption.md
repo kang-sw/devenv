@@ -4,6 +4,7 @@ spec:
   - 260516-ws-web-dashboard-terminal-io-transport
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-24
 ---
 
 # Terminal PTY read pump corrupts UTF-8 multibyte sequences split across read() boundaries
@@ -158,3 +159,41 @@ Also add these companion cases:
   Background excludes note (no test asserts on ANSI byte-splitting
   behavior — it was already correct before this change and unaffected by
   it).
+
+### Result (0741e94f) - 2026-07-24
+
+- `spawn_reader_thread` now holds a bounded carry-over `Vec<u8>` (≤3 bytes,
+  since a UTF-8 sequence is at most 4 bytes) across `read()` boundaries
+  instead of decoding each raw chunk in isolation. Carry-over bytes are
+  prepended to each new read before decoding with `std::str::from_utf8`.
+- `Ok`: the whole combined buffer decodes cleanly, emit it and clear the
+  carry-over.
+- `Err(e)` with `error_len() == None`: the tail from `valid_up_to()` onward
+  is an incomplete trailing sequence (genuine read-boundary split) — the
+  valid prefix is emitted via `append_output` and the incomplete tail is
+  carried over to prefix the next `read()`.
+- `Err(e)` with `error_len() == Some(n)`: the `n`-byte span at
+  `valid_up_to()` is genuinely malformed — exactly one U+FFFD is emitted for
+  that span via `String::from_utf8_lossy`, and decoding resumes past the
+  span within the same iteration (loop-and-advance), so the carry-over stays
+  bounded and the pump never wedges re-failing at the same offset.
+- `Ok(0)` (EOF): any remaining carry-over is flushed lossily via
+  `String::from_utf8_lossy` before the loop breaks, matching the existing
+  shutdown path.
+- `spawn_reader_thread` now returns its `JoinHandle` (previously discarded)
+  so tests can join it directly instead of polling `RingState.status` for
+  `Exited`.
+- Added 4 regression-guard unit tests alongside `ring_state_tests`: split
+  mid-codepoint across two reads, a cross-read case followed by clean EOF,
+  EOF-truncation degrading to lossy replacement without hanging, and a
+  malformed-interior-byte span emitting exactly one U+FFFD while surrounding
+  valid text still decodes correctly. 3 of the 4 were proven to fail against
+  the pre-fix code (reverting the fix reproduces double-U+FFFD corruption or
+  a hang/wedge), confirming the tests are regression guards and not
+  vacuously passing.
+- `cargo test -p ws-dashboard-daemon` green. Correctness and test-quality
+  reviews both clean (correctness: clean + 1 minor, addressed; test-quality
+  findings fixed and regression-guard-verified).
+- Input path (`terminal.rs:945`, `write_input`'s `String::from_utf8_lossy`)
+  remains explicitly out of scope per the Phase 1 plan; unchanged by this
+  fix.
