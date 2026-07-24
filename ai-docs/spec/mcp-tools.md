@@ -1384,11 +1384,11 @@ preferences. A user adds standing preferences by storing an override under
 tree. Delegation posture is controlled by `"workflow.prefer_subagent"` rather
 than a freeform prompt override.
 
-Shipped lead-prefer-subagent uses the generic empty extension point
-`PreferSubagentInvocationGuidance` for harness invocation details. Codex receives
-a code-owned builtin default under `prompt.PreferSubagentInvocationGuidance.codex`
-for its `spawn_agent(fork_context:true, ...)` binding, while Claude uses the
-empty shared seed unless configured otherwise.
+The former `PreferSubagentInvocationGuidance` extension point is retired:
+`lead-prefer-subagent`'s body moved to a static inlined SKILL.md (see
+`#260505-workflow-primitive-reference`), read directly via `LoadSkillBody`
+with no override-marker pass, so there is no per-harness invocation-guidance
+slot for it anymore. `builtinPromptOverrideDefaults()` returns an empty map.
 {#260619-delegation-section-override-point}
 
 > [!note] Constraints
