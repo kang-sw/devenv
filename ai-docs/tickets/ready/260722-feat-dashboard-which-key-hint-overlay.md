@@ -155,6 +155,53 @@ closeable until browser-level verification lands. See Phase 2.
   - Dismissal path 4 — a second `Ctrl+Space` dismisses the overlay.
   - After every dismissal path, subsequent terminal input is not blocked.
 
+### Result
+
+Added one new Playwright `test.step` ("which-key overlay: appearance delay,
+narrowing, and all four dismissal paths") to
+`ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts`, inserted right after
+the existing "create terminal and run a command" step (so a live terminal and
+an open, selected workRoot already exist), plus a small `expectTerminalNotBlocked`
+helper reused after every dismissal path. One assertion group per Phase 2
+"Done when" checklist line: appearance-delay boundary (absent at ~120ms,
+visible once past 250ms via a polling `expect`, not a fixed hard-sleep past
+the boundary), row narrowing (`describeLeaderChildren` output goes from the
+4 root groups to 3 leaves on `<leader> r`), and all four dismissal paths
+(match via `<leader> t n`, unmatched-key cancel, `Escape`, second
+`Ctrl+Space`) — each followed by a real terminal echo round-trip proving the
+terminal passthrough guard is not left stuck.
+
+Deviation from the plan's literal wording (documented, reasoned): dismissal
+path 1's "resolves" evidence uses the existing
+`.workbench-toolbar[data-last-command-id]` command-dispatch hook (the same
+idiom the earlier "activation controls are command-routed" step already
+relies on) instead of asserting a new terminal pane appears. Investigation
+during this phase found that the global leader-key listener's `executeCommand`
+call has no registered handler for `terminal.create` (or most other default
+leaf commandIds) — the real side effect is wired only at each control's own
+local click handler, not the shared bus the hotkey listener dispatches
+through — so `<leader> t n` reaches the command bus (observable via the
+dispatch hook) but does not actually open a terminal. This is a genuine,
+separate hotkey-config-framework dispatch defect, not a which-key-overlay
+defect; per the phase's own instruction not to weaken assertions to hide a
+found bug, the test asserts the true, in-scope thing (the overlay resolved
+and dispatched) rather than the false thing (a new terminal exists) or a
+silently-narrowed claim. Filed as
+`260724-idea-dashboard-hotkey-leader-dispatch-gap` for separate triage.
+
+Verification run: `npm run test:browser` (build + `cargo build -p
+ws-dashboard-daemon` + `playwright test`) executed for real. The new
+which-key step passed cleanly (confirmed via two full single-worker
+`-g "dashboard workRoot UI browser acceptance"` runs with zero failures
+inside or attributable to the step, and via the full `test:browser` run,
+where it is not among the reported step failures). The overall run still
+fails downstream at the pre-existing, already-tracked, deliberately-deferred
+`260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` defect (the
+"open new agent tab and launch a stub harness session" step) — confirmed via
+`git stash` to reproduce byte-identically on the pre-this-phase baseline, so
+it is neither caused by nor fixable within this phase's scope. No product
+source (`WhichKeyOverlay.tsx`, `hotkeys.ts`, `App.tsx`) was changed.
+
 ## Spec Impact
 
 - No new spec surface. This ticket is a presentation-only discoverability layer

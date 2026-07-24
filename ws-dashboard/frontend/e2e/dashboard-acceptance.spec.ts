@@ -313,6 +313,19 @@ async function runInTerminal(page: Page, command: string) {
   await page.keyboard.press("Enter");
 }
 
+// 260722-feat-dashboard-which-key-hint-overlay Phase 2: proves a dismissal
+// path left the terminal passthrough guard intact - focuses the currently
+// active terminal surface and confirms a fresh echo round-trips through it,
+// rather than only asserting the overlay's own DOM disappeared.
+async function expectTerminalNotBlocked(page: Page, tag: string) {
+  await page.locator(".terminal-surface").click();
+  await page.keyboard.type(commandPlan.echo(tag));
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".xterm-rows")).toContainText(tag, {
+    timeout: 5_000,
+  });
+}
+
 function terminalTabs(page: Page) {
   return page.getByRole("tab").filter({ hasText: "Terminal" });
 }
@@ -2722,6 +2735,126 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
         "Ctrl-C, ctrl-u, ctrl-w, clear-screen control rendering/recovery, paste, committed Hangul input, IME composition guard, and no document scroll",
     );
+  });
+
+  // --- 260722-feat-dashboard-which-key-hint-overlay Phase 2 ---------------
+  await test.step("which-key overlay: appearance delay, narrowing, and all four dismissal paths", async () => {
+    // CONTRACT: browser-level coverage of the already-shipped Phase 1 overlay
+    // (`WhichKeyOverlay.tsx`, `describeLeaderChildren` in `hotkeys.ts`) - one
+    // assertion per Phase 2 "Done when" checklist line. Verification-only:
+    // no product source changes accompany this step.
+    const overlay = page.locator(".which-key-overlay");
+    const rows = overlay.locator(".which-key-overlay-row");
+
+    // The leader-trigger keydown handler skips capture while focus sits
+    // inside an editable element or a `.terminal-pane` (hotkeys.ts
+    // `shouldSkipHotkeyCapture`), so every leader press below first refocuses
+    // this always-present, non-editable, non-terminal toolbar button.
+    const focusNeutral = async () => {
+      await page.locator('[data-command-id="terminal.create"]').focus();
+    };
+
+    // --- Appearance delay: absent before 250ms, present after it ---------
+    await focusNeutral();
+    await page.keyboard.press("Control+Space");
+    await page.waitForTimeout(120); // still inside the 250ms appearance delay
+    await expect(overlay).toHaveCount(0);
+    await expect(overlay).toBeVisible({ timeout: 1_000 });
+    note(
+      "which-key overlay: absent before the 250ms appearance delay elapsed, visible after it",
+    );
+
+    // --- Rows reflect live registry contents, and narrow on partial input -
+    await expect(rows).toHaveCount(4);
+    await expect(overlay.locator(".which-key-overlay-key")).toHaveText([
+      "r",
+      "t",
+      "a",
+      "g",
+    ]);
+    await expect(rows.filter({ hasText: "+group" })).toHaveCount(4);
+    await page.keyboard.press("r");
+    await expect(rows).toHaveCount(3);
+    await expect(overlay).toContainText(
+      "Open root picker (browse filesystem to add a new root)",
+    );
+    await expect(overlay).toContainText("Close active work root");
+    await expect(overlay).toContainText(
+      "Toggle active work root online/offline",
+    );
+    note(
+      "which-key overlay: rows reflected the live binding registry (r/t/a/g groups) and narrowed from 4 to 3 rows on a partial <leader> r sequence",
+    );
+    // Reset to idle before the dedicated dismissal-path assertions below so
+    // each one starts from the same known idle state (exercises the same
+    // Escape path formally covered as dismissal path 3 further down).
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+
+    // --- Dismissal path 1: a matched full sequence resolves cleanly -------
+    // Evidence that the sequence actually *resolved* (rather than merely
+    // cancelling) uses the same `.workbench-toolbar[data-last-command-id]`
+    // dispatch hook the "activation controls are command-routed" step above
+    // already relies on, instead of a downstream terminal-pane-count side
+    // effect. 260722-idea-dashboard-hotkey-leader-dispatch-gap (filed
+    // alongside this step) found that `<leader> t n` reaches the command bus
+    // but its real `terminal.create` side effect does not fire, because the
+    // App-level `executeCommand` shared handler map used by the global
+    // leader-key listener only wires a handful of commandIds
+    // (`workRoot.close`, `workRoot.activation.set`, `gitWorktreeAdd.open`,
+    // `workspace.remove`, `worktreeHidden.menu.open`, etc.) - `terminal.create`
+    // itself is wired only at its own toolbar button's local `onCommand`
+    // call site, not the shared bus the leader listener dispatches through.
+    // That gap is a hotkey-config-framework dispatch defect, not a
+    // which-key-overlay defect, and out of this ticket's scope to fix.
+    await focusNeutral();
+    await page.keyboard.press("Control+Space");
+    await expect(overlay).toBeVisible({ timeout: 1_000 });
+    await page.keyboard.press("t");
+    await expect(rows).toHaveCount(1);
+    await page.keyboard.press("n");
+    await expect(overlay).toHaveCount(0);
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "terminal.create",
+    );
+    note(
+      "which-key overlay dismissal path 1 (match): <leader> t n resolved (dispatched terminal.create through the command bus) and left no stale overlay DOM",
+    );
+    await expectTerminalNotBlocked(page, "WHICHKEY-MATCH-OK");
+
+    // --- Dismissal path 2: an unmatched key cancels (flash-exit) ----------
+    await focusNeutral();
+    await page.keyboard.press("Control+Space");
+    await expect(overlay).toBeVisible({ timeout: 1_000 });
+    await page.keyboard.press("q");
+    await expect(overlay).toHaveCount(0);
+    note(
+      "which-key overlay dismissal path 2 (unmatched key cancel): overlay disappeared",
+    );
+    await expectTerminalNotBlocked(page, "WHICHKEY-CANCEL-OK");
+
+    // --- Dismissal path 3: Escape dismisses -------------------------------
+    await focusNeutral();
+    await page.keyboard.press("Control+Space");
+    await expect(overlay).toBeVisible({ timeout: 1_000 });
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+    note(
+      "which-key overlay dismissal path 3 (Escape): overlay disappeared",
+    );
+    await expectTerminalNotBlocked(page, "WHICHKEY-ESCAPE-OK");
+
+    // --- Dismissal path 4: a second Ctrl+Space dismisses ------------------
+    await focusNeutral();
+    await page.keyboard.press("Control+Space");
+    await expect(overlay).toBeVisible({ timeout: 1_000 });
+    await page.keyboard.press("Control+Space");
+    await expect(overlay).toHaveCount(0);
+    note(
+      "which-key overlay dismissal path 4 (second Ctrl+Space): overlay disappeared",
+    );
+    await expectTerminalNotBlocked(page, "WHICHKEY-SECONDLEADER-OK");
   });
 
   // --- 260711 Phase 1: agent chat tab shell + stub tile launch ------------
