@@ -4,21 +4,25 @@ related:
   260723-feat-dashboard-terminal-lifetime-daemon-decouple: introduced-by
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-25
 ---
 
-## Blocked (2026-07-24) — native-Windows leg tracked under the chore acceptance ticket
+## Native-Windows leg verified — closing (2026-07-25)
 
-The Windows-harness confirmation gate is now lifted (the user's goal directive
-authorizes autonomous Windows E2E testing). The one remaining piece of this
-ticket — the native-Windows reaper acceptance leg of Phase 3 — is being
-satisfied by the dedicated end-of-drain acceptance ticket
-`260724-chore-dashboard-windows-terminal-reaper-native-acceptance`, whose
-`#[cfg(windows)]` live-ConPTY test exercises exactly this reaper path (that
-chore ticket `verifies:` this one). To avoid double-dispatch, goal-drain
-selection should SKIP this ticket (the `## Blocked` heading is retained solely
-for that skip signal); it will be closed when the chore's acceptance test lands
-and its Result is recorded here. The Phase 3 Unix-regression leg is already
-COMPLETE (`e2990574`).
+Both legs of Phase 3 are now complete, so this ticket is closed to `.done/`:
+
+- **Unix-regression leg**: COMPLETE (`e2990574`).
+- **Native-Windows acceptance leg**: VERIFIED by the dedicated end-of-drain
+  acceptance ticket `260724-chore-dashboard-windows-terminal-reaper-native-acceptance`
+  (which `verifies:` this one). Its `#[cfg(windows)]` live-ConPTY integration
+  test `crates/daemon/tests/terminal_windows_reaper_acceptance.rs` (Result
+  `f5891a7e`) spawns the real `terminal-helper` subprocess, drives the IPC
+  handshake to spawn a real ConPTY shell, kills that shell's OS process
+  out-of-band via `taskkill` so the PTY master never observes EOF, and proves
+  the Phase-1 `#[cfg(windows)]` reaper wakes and flips status to `Exited` on a
+  real Windows host — non-vacuity confirmed by mutation (reaper `transition`
+  neutralized → 15s hang/FAIL; restored → PASS). This exercises exactly the
+  non-PTY-EOF shell-death path this ticket's root-cause analysis identified.
 
 ## Symptom
 
@@ -390,3 +394,8 @@ Governing spec: `ai-docs/spec/ws-web-dashboard/index.md`.
   shape settles during implementation) — **address at post-implementation
   closeout, not before.**
 
+
+
+## Resolution (2026-07-25)
+
+Both Phase 3 legs complete: Unix-regression leg `e2990574`; native-Windows acceptance leg verified by the dedicated chore ticket `260724-chore-dashboard-windows-terminal-reaper-native-acceptance` (Result `f5891a7e`), whose live-ConPTY test proves the Phase-1 `#[cfg(windows)]` reaper wakes and flips status to `Exited` on a non-PTY-EOF out-of-band shell death on a real Windows host. Phase 1 (Windows reaper `b07f40ad`) and Phase 2 (frontend dead-pane retirement `2b4d0e0b`) shipped earlier.
