@@ -9,6 +9,9 @@ import {
   terminalCommandPlanForPlatform,
   type TerminalCommandPlan,
 } from "../src/terminalCommandPlan.js";
+// mirrors src/agentGuiSuspended.ts - agent GUI suspended 2026-07-25 (260713
+// family). While true, the agent-GUI acceptance steps below are quarantined.
+import { AGENT_GUI_SUSPENDED } from "../src/agentGuiSuspended.js";
 import type { TerminalPortabilityEvidence } from "./terminalPortabilityEvidence.js";
 
 // Browser-level acceptance gate for the dashboard workRoot UI.
@@ -1003,6 +1006,57 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- Settings modal open/close (260722 blocker-2: previously human-smoke ----
+  // --- only, no automated coverage) ------------------------------------------
+  await test.step("settings modal opens and closes", async () => {
+    await page.locator('[data-command-id="settings.open"]').click();
+    // Scope to role=dialog: the Settings nav button shares aria-label="Settings".
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await expect(dialog).toBeVisible();
+    // Section nav shell and its Terminal section entry both render.
+    await expect(dialog.locator('[aria-label="Settings sections"]')).toBeVisible();
+    await expect(
+      dialog.locator(".settings-section-nav-button", { hasText: "Terminal" }),
+    ).toBeVisible();
+
+    await dialog.locator('[data-command-id="settings.close"]').click();
+    await expect(
+      page.locator('[role="dialog"][aria-label="Settings"]'),
+    ).toHaveCount(0);
+    note(
+      "settings modal: Settings nav button opened the dialog with its section nav and Terminal section, and Close dismissed it",
+    );
+  });
+
+  // --- Add-server modal open/validate/cancel (260722 blocker-2: previously ----
+  // --- human-smoke only, no automated coverage) ------------------------------
+  await test.step("add-server modal opens, validates, and cancels", async () => {
+    await page.locator('[data-command-id="resource.action.server.add"]').click();
+    // Scope to role=dialog: the Add server nav button shares aria-label="Add server".
+    const dialog = page.locator('[role="dialog"][aria-label="Add server"]');
+    await expect(dialog).toBeVisible();
+
+    // Submit stays disabled until both name and endpoint are non-empty.
+    const submit = dialog.locator(
+      '[data-command-id="resource.action.server.link.submit"]',
+    );
+    await expect(submit).toBeDisabled();
+    // Add-mode form renders Name, Endpoint, then Passphrase as `.root-picker-input`.
+    const fields = dialog.locator(".root-picker-input");
+    await fields.nth(0).fill("Gate remote");
+    await fields.nth(1).fill("http://127.0.0.1:49999");
+    await expect(submit).toBeEnabled();
+
+    // Cancel without submitting to avoid a real server-link side effect.
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(
+      page.locator('[role="dialog"][aria-label="Add server"]'),
+    ).toHaveCount(0);
+    note(
+      "add-server modal: Add server nav button opened the dialog, submit stayed disabled until name+endpoint filled then enabled, and Cancel dismissed it without linking",
+    );
+  });
+
 
 
   await test.step("git workspace overflow adds linked worktree", async () => {
@@ -1980,6 +2034,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   });
 
   // --- Agent tab close uses the same session confirmation contract ---------
+  // suspended: agent GUI (260713)
+  if (!AGENT_GUI_SUSPENDED) {
   await test.step("agent tab close confirmation when a live agent tab exists", async () => {
     const agentTab = page.locator(
       '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
@@ -2019,6 +2075,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "agent close: cursor-near No preserved the agent tab and Yes detached the live agent surface",
     );
   });
+  }
 
   // --- Conventional read-only file explorer -------------------------------
   await test.step("file explorer expansion and refresh", async () => {
@@ -2791,14 +2848,16 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
 
     // --- Rows reflect live registry contents, and narrow on partial input -
-    await expect(rows).toHaveCount(4);
+    // The `a` agent-chat leader group is absent while the agent GUI is
+    // suspended (260713): its only leaf (`a n`) is not registered, so no
+    // top-level `a` group renders. Three top-level groups remain: r/t/g.
+    await expect(rows).toHaveCount(3);
     await expect(overlay.locator(".which-key-overlay-key")).toHaveText([
       "r",
       "t",
-      "a",
       "g",
     ]);
-    await expect(rows.filter({ hasText: "+group" })).toHaveCount(4);
+    await expect(rows.filter({ hasText: "+group" })).toHaveCount(3);
     await page.keyboard.press("r");
     await expect(rows).toHaveCount(3);
     await expect(overlay).toContainText(
@@ -2809,7 +2868,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "Toggle active work root online/offline",
     );
     note(
-      "which-key overlay: rows reflected the live binding registry (r/t/a/g groups) and narrowed from 4 to 3 rows on a partial <leader> r sequence",
+      "which-key overlay: rows reflected the live binding registry (r/t/g groups; the a agent-chat group is suspended) and narrowed to the r group's 3 children on a partial <leader> r sequence",
     );
     // Reset to idle before the dedicated dismissal-path assertions below so
     // each one starts from the same known idle state (exercises the same
@@ -2924,6 +2983,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   });
 
   // --- 260711 Phase 1: agent chat tab shell + stub tile launch ------------
+  // suspended: agent GUI (260713)
+  if (!AGENT_GUI_SUSPENDED) {
   await test.step("open new agent tab and launch a stub harness session", async () => {
     // CONTRACT: the top-right "open new agent tab" button always opens a new
     // empty tab immediately (never a picker), the empty tab's "current
@@ -2980,8 +3041,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "agent chat tab: open-new-tab button never blocked on a picker, resume popup rendered scoped stub history, and the Codex tile click invoked the stub session create/start path and rendered its synthetic transcript",
     );
   });
+  }
 
   // --- 260711 Phase 2: messenger bubbles + streaming rendering ------------
+  // suspended: agent GUI (260713)
+  if (!AGENT_GUI_SUSPENDED) {
   await test.step("agent chat bubbles render per-turn/tool separation and stream incrementally", async () => {
     // CONTRACT: the same pane/transcript opened in the Phase 1 step above now
     // renders as messenger-style bubbles (user right-aligned, agent/tool
@@ -3045,9 +3109,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         `agent-turn bubble observed growing over ${lengths.length} polls (lengths ${lengths.join(",")}) before settling into final semantic markdown`,
     );
   });
+  }
 
   // --- 260711 Phase 3: send input, mid-turn queuing, revert, history, ----
   // --- fork/resume-from-here gating ---------------------------------------
+  // suspended: agent GUI (260713)
+  if (!AGENT_GUI_SUSPENDED) {
   await test.step("agent chat send input, mid-turn queuing, revert, and history traversal", async () => {
     // CONTRACT: the pane opened/streamed in the Phase 1/2 steps above is a
     // Codex session (`capabilities.fork: true`, `capabilities.steer: true`,
@@ -3238,6 +3305,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         "capabilities.rewind: false), not just the Codex session exercised above - neither affordance rendered",
     );
   });
+  }
 
   // --- ANSI color rendering -----------------------------------------------
   await test.step("ANSI color rendering", async () => {
@@ -3927,6 +3995,8 @@ test("linked server root picker uses server-scoped local gateway routes", async 
   );
 
   // --- 260711 Phase 4: agent chat pane identity is server-route-scoped ----
+  // suspended: agent GUI (260713)
+  if (!AGENT_GUI_SUSPENDED) {
   await test.step("agent chat tab on a linked remote server behaves identically to the local case and is server-route-scoped", async () => {
     // CONTRACT: `createAgentChatPane` (`App.tsx`) reads `serverRoute` from
     // the real UI state (`workbenchModel.root.resourcePath.serverId`), now
@@ -3966,6 +4036,7 @@ test("linked server root picker uses server-scoped local gateway routes", async 
         "to the remote Server Route rather than server-local",
     );
   });
+  }
 
   await page.unroute("**/api/dashboard/servers/server-remote/root-picker**");
   let releaseFirstPicker: ((value: void) => void) | null = null;

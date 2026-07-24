@@ -92,3 +92,12 @@ question above, rather than as its own bug ticket, since fixing it well is
 a grouping/collapse UX design decision (e.g. should a mid-turn tool call
 render nested inside one continuous turn bubble, or as a distinct
 collapsible sub-item within it?) and not just a one-line logic patch.
+
+## Suspended (2026-07-25)
+
+Agent-GUI feature suspended per user directive (2026-07-25). The dashboard
+agent-chat / Codex-tile UI is hidden and un-spawnable (spawn entry points
+disabled behind `AGENT_GUI_SUSPENDED`); its acceptance steps are quarantined.
+This ticket is excluded from drain selection until the feature is resumed.
+Physical FE+BE module extraction is tracked separately in
+`260725-refactor-dashboard-agent-gui-physical-module-isolation`.

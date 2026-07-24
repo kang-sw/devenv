@@ -161,6 +161,48 @@ Two of the four ticket-named manual-smoke modals — SettingsModal and LinkedSer
 
 Closure therefore awaits, and cannot be completed autonomously: (1) `260713` fixed so the acceptance suite reaches green and validates the post-2938 terminal-restore / dockview-split steps, and (2) a human manual smoke of the SettingsModal and LinkedServerModal open/close flows. Skip this ticket in goal-drain selection until a human clears these.
 
+## Unblocked & Closed (2026-07-25)
+
+Both closure blockers are resolved; the ticket's stated bar (full
+`npm run test:browser` green + terminal restore/reattach, the four modals, and
+dockview layout validated) is now met by automation, so this ticket closes to
+`.done/`. This supersedes the `## Blocked (2026-07-24)` "cannot be completed
+autonomously" conclusion above.
+
+Resolution path — an owner directive (2026-07-25) suspended the dashboard
+agent-GUI feature rather than fixing 260713:
+
+- **Blocker 1 (260713 codex-tile / serial suite stalled at :2938) — cleared by
+  agent-GUI suspension.** The agent-chat GUI is suspended behind
+  `AGENT_GUI_SUSPENDED` (Tier 1, commit `c3f5b42b`): the five agent-GUI
+  acceptance steps (1983 / 2927 / 2985 / 3051 / 3930) are quarantined behind the
+  flag, so the `mode: "serial"` suite advances past :2938 and now executes AND
+  passes the previously-unreached post-2938 steps — terminal restore/reattach
+  and dockview split-durability — inside `dashboard workRoot UI browser
+  acceptance`.
+- **Blocker 2 (SettingsModal / LinkedServerModal human-smoke-only) — cleared by
+  new automated coverage.** Commit `c3f5b42b` adds Playwright acceptance steps
+  exercising SettingsModal open / section-nav / close and the Add-server
+  LinkedServerModal open / validate (submit disabled→enabled) / cancel flows.
+  The other two named modals (GitWorktree Add/Remove) already had acceptance
+  coverage. The "genuinely human-smoke-only" gap is closed; no human smoke
+  remains required.
+
+Verification (committed tree `c3f5b42b`, clean rebuild): `npm run test:browser`
+→ vite build OK, Playwright `2 passed (48.8s)` — both `dashboard workRoot UI
+browser acceptance` and `linked server root picker ...` green. Typecheck
+`tsc -b` EXIT 0; all 20 `test:*` unit suites green.
+
+Scope note: this refactor's own deliverable (behavior-preserving leaf / modal /
+pane-body extraction, App.tsx 11,382 → 7,626, ~33%) was already complete with
+both phase Results; only the external verification gate remained. No plugin
+version bump (changes confined to `ws-dashboard/frontend/` + `ai-docs/`).
+
+Related direction: the agent-GUI suspension is tracked by
+`260725-refactor-dashboard-agent-gui-physical-module-isolation` (Tier 2
+wire-out) and the `260713-*` family's `## Suspended` notes; the forward
+PTY-agent pivot is `260725-research-ws-dashboard-pty-agent-pivot`.
+
 ## Spec Impact
 
 No spec addressing: this is a behavior-preserving refactor with no

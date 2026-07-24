@@ -383,6 +383,7 @@ import {
   type WorkbenchToggle,
 } from "./chrome.js";
 import { GitStatusPill, WorkbenchActivityBadge } from "./workbenchChips.js";
+import { AGENT_GUI_SUSPENDED } from "./agentGuiSuspended.js";
 import { GitWorktreeAddModal } from "./gitWorktreeAddModal.js";
 import { GitWorktreeRemoveModal } from "./gitWorktreeRemoveModal.js";
 import { SettingsModal } from "./settingsModal.js";
@@ -5335,6 +5336,13 @@ function WorkbenchShell({
     serverRoute: string | null | undefined,
   ): AgentChatPaneState {
     const pane = createEmptyAgentChatPane(rootId, serverRoute);
+    // Agent GUI suspended (260713): belt-and-suspenders guard so even a stray
+    // `agentChat.create` dispatch (command palette / which-key) makes no state
+    // change and spawns no pane. Returns the unregistered pane object for the
+    // caller's type contract without touching any React state.
+    if (AGENT_GUI_SUSPENDED) {
+      return pane;
+    }
     setAgentChatPanes((current) => ({
       ...current,
       [pane.logicalKey]: pane,
@@ -6507,22 +6515,28 @@ function WorkbenchToolbar({
             );
           }}
         />
-        <ChromeIconButton
-          commandId="agentChat.create"
-          disabled={
-            root.activation !== "online" || root.availability !== "available"
-          }
-          icon={MessageSquarePlus}
-          label="Open new agent tab"
-          onClick={() => {
-            onCommand(
-              buildAgentChatCreateCommand(root.id, root.resourcePath.serverId),
-              {
-                "agentChat.create": onCreateAgentChat,
-              },
-            );
-          }}
-        />
+        {/* Agent GUI suspended (260713): omit the spawn button entirely. */}
+        {AGENT_GUI_SUSPENDED ? null : (
+          <ChromeIconButton
+            commandId="agentChat.create"
+            disabled={
+              root.activation !== "online" || root.availability !== "available"
+            }
+            icon={MessageSquarePlus}
+            label="Open new agent tab"
+            onClick={() => {
+              onCommand(
+                buildAgentChatCreateCommand(
+                  root.id,
+                  root.resourcePath.serverId,
+                ),
+                {
+                  "agentChat.create": onCreateAgentChat,
+                },
+              );
+            }}
+          />
+        )}
         <div className="workbench-overflow" ref={overflowRef}>
           <button
             aria-expanded={overflowOpen}

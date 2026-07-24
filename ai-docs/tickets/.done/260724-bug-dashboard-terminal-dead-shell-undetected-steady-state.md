@@ -4,17 +4,25 @@ related:
   260723-feat-dashboard-terminal-lifetime-daemon-decouple: introduced-by
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-25
 ---
 
-## Blocked (2026-07-24)
+## Native-Windows leg verified — closing (2026-07-25)
 
-The native-Windows reaper acceptance leg of Phase 3 cannot be executed
-autonomously. It needs the user's real Windows host (the PowerShell /
-`powershell.exe` dogfood harness) and must NOT touch the production Windows
-daemon on port 4300. It awaits explicit user go-ahead to run the Windows
-dogfood harness. This note exists so goal-drain selection skips this ticket
-until the user enables the Windows leg. The Phase 3 Unix-regression leg is
-COMPLETE (`e2990574`); only the native-Windows acceptance leg remains.
+Both legs of Phase 3 are now complete, so this ticket is closed to `.done/`:
+
+- **Unix-regression leg**: COMPLETE (`e2990574`).
+- **Native-Windows acceptance leg**: VERIFIED by the dedicated end-of-drain
+  acceptance ticket `260724-chore-dashboard-windows-terminal-reaper-native-acceptance`
+  (which `verifies:` this one). Its `#[cfg(windows)]` live-ConPTY integration
+  test `crates/daemon/tests/terminal_windows_reaper_acceptance.rs` (Result
+  `f5891a7e`) spawns the real `terminal-helper` subprocess, drives the IPC
+  handshake to spawn a real ConPTY shell, kills that shell's OS process
+  out-of-band via `taskkill` so the PTY master never observes EOF, and proves
+  the Phase-1 `#[cfg(windows)]` reaper wakes and flips status to `Exited` on a
+  real Windows host — non-vacuity confirmed by mutation (reaper `transition`
+  neutralized → 15s hang/FAIL; restored → PASS). This exercises exactly the
+  non-PTY-EOF shell-death path this ticket's root-cause analysis identified.
 
 ## Symptom
 
@@ -386,3 +394,8 @@ Governing spec: `ai-docs/spec/ws-web-dashboard/index.md`.
   shape settles during implementation) — **address at post-implementation
   closeout, not before.**
 
+
+
+## Resolution (2026-07-25)
+
+Both Phase 3 legs complete: Unix-regression leg `e2990574`; native-Windows acceptance leg verified by the dedicated chore ticket `260724-chore-dashboard-windows-terminal-reaper-native-acceptance` (Result `f5891a7e`), whose live-ConPTY test proves the Phase-1 `#[cfg(windows)]` reaper wakes and flips status to `Exited` on a non-PTY-EOF out-of-band shell death on a real Windows host. Phase 1 (Windows reaper `b07f40ad`) and Phase 2 (frontend dead-pane retirement `2b4d0e0b`) shipped earlier.

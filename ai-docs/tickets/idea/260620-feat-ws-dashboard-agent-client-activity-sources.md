@@ -1162,3 +1162,12 @@ when the dashboard/terminal track is complete and agent dogfooding resumes.
 Phases 1-2 shipped; only Phase 3 (OpenCode ACP adapter) remains, and it is
 separately externally blocked on an OpenCode CLI install not present in this
 environment.
+
+## Suspended (2026-07-25)
+
+Agent-GUI feature suspended per user directive (2026-07-25). The dashboard
+agent-chat / Codex-tile UI is hidden and un-spawnable (spawn entry points
+disabled behind `AGENT_GUI_SUSPENDED`); its acceptance steps are quarantined.
+This ticket is excluded from drain selection until the feature is resumed.
+Physical FE+BE module extraction is tracked separately in
+`260725-refactor-dashboard-agent-gui-physical-module-isolation`.

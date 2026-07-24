@@ -42,6 +42,7 @@ import {
   type DashboardCommandId,
   type DashboardCommandPayload,
 } from "./commands.js";
+import { AGENT_GUI_SUSPENDED } from "./agentGuiSuspended.js";
 import { browserStorage } from "./workRootFiles.js";
 
 // --- Reserved keys ---------------------------------------------------------
@@ -761,13 +762,21 @@ export function buildDefaultHotkeyBindings(): readonly HotkeyBinding<HotkeyDispa
     ),
     // `a` Agent-chat group (spec: "a n"; every other `a` leaf targets a
     // DOM-marker-only id, not a real `DashboardCommandId` member).
-    activeRootBinding(
-      "agentChat.create",
-      ["a", "n"],
-      "agentChat.create",
-      (root) => buildAgentChatCreateCommand(root.workRootId, root.serverRoute).payload,
-      "Open new agent tab in active work root",
-    ),
+    // Agent GUI suspended (260713): omit the `a n` binding entirely so the
+    // spawn command is not reachable via the leader keymap or which-key.
+    ...(AGENT_GUI_SUSPENDED
+      ? []
+      : [
+          activeRootBinding(
+            "agentChat.create",
+            ["a", "n"],
+            "agentChat.create",
+            (root) =>
+              buildAgentChatCreateCommand(root.workRootId, root.serverRoute)
+                .payload,
+            "Open new agent tab in active work root",
+          ),
+        ]),
     // `g` Git group (spec: "g r"/"g f"/"g p"/"g l"/"g b"/"g c"; "g s" is a
     // GAP - no focus-git-status-inspector id exists yet).
     activeRootBinding(
