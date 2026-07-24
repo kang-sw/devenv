@@ -584,7 +584,8 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
 // timeout unwinding before the trailing cleanup ever runs). This guard fires on
 // Drop - on BOTH the success path and any unwind - and best-effort reaps a
 // still-live helper by the identity the helper itself persisted: its
-// `<terminal_id>.json` registry entry (written under `WS_DASHBOARD_STATE_HOME`)
+// `<terminal_id>.json` registry entry (written under the `terminals/`
+// subdirectory of `WS_DASHBOARD_STATE_HOME`, i.e. `<state_home>/terminals/`)
 // carries the helper's real `pid` and `startTime`. It verifies the PID's
 // `/proc` start-time matches before signalling, so a recycled PID is never
 // killed. Then it removes the temp dirs.
@@ -603,7 +604,11 @@ struct HelperReaper {
 impl Drop for HelperReaper {
     fn drop(&mut self) {
         #[cfg(unix)]
-        if let Ok(entries) = std::fs::read_dir(&self.state_home) {
+        // Registry `.json` entries live under `<state_home>/terminals/`, not flat
+        // under `state_home` (see `default_registry_dir` in `src/terminal.rs`).
+        // If the subdir does not exist yet (helper never flushed), `read_dir`
+        // errors and we simply skip reaping.
+        if let Ok(entries) = std::fs::read_dir(self.state_home.join("terminals")) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
