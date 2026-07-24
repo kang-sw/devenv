@@ -118,7 +118,8 @@ pub mod windows {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     use windows_sys::Win32::Foundation::{
-        CloseHandle, SetHandleInformation, FALSE, HANDLE, HANDLE_FLAG_INHERIT,
+        CloseHandle, DuplicateHandle, SetHandleInformation, DUPLICATE_SAME_ACCESS, FALSE, HANDLE,
+        HANDLE_FLAG_INHERIT,
     };
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -126,8 +127,8 @@ pub mod windows {
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, GetProcessTimes, OpenProcess, TerminateProcess,
-        CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
+        GetCurrentProcess, GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject,
+        CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, INFINITE,
         PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     };
 
@@ -246,6 +247,49 @@ pub mod windows {
             return Err(io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    /// Duplicate a *borrowed* process handle (specifically
+    /// `portable_pty::Child::as_raw_handle`, which the `Child` owns and
+    /// `CloseHandle`s when the helper drops it in `kill_shell_if_running`)
+    /// into an independently-owned `OwnedHandle`. `DUPLICATE_SAME_ACCESS`
+    /// carries `SYNCHRONIZE` from the source handle, which
+    /// `wait_for_process_exit`'s `WaitForSingleObject` requires. The returned
+    /// handle closes automatically on drop and is a distinct kernel handle
+    /// from the `Child`'s own, so the reaper's wait can never be invalidated
+    /// by the `Child` being killed/dropped, and there is no double-close.
+    pub fn duplicate_process_handle(handle: RawHandle) -> io::Result<OwnedHandle> {
+        let mut duplicated: HANDLE = std::ptr::null_mut();
+        let ok = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                handle as HANDLE,
+                GetCurrentProcess(),
+                std::ptr::addr_of_mut!(duplicated),
+                0,
+                FALSE,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if ok == FALSE {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { OwnedHandle::from_raw_handle(duplicated as *mut _) })
+    }
+
+    /// Block until the process referred to by `handle` terminates, then
+    /// return. `handle` must carry `SYNCHRONIZE` access (a
+    /// `DUPLICATE_SAME_ACCESS` copy of a process handle does). This sleeps in
+    /// the kernel with zero idle CPU and wakes the instant the process exits;
+    /// waiting on an already-exited process returns immediately because the
+    /// handle is already signaled. Windows process handles allow many
+    /// concurrent waiters, so this coexists with `portable_pty`'s own
+    /// `Child::wait()` inside `kill_shell_if_running` (each waits on an
+    /// independent handle copy).
+    pub fn wait_for_process_exit(handle: &OwnedHandle) {
+        unsafe {
+            WaitForSingleObject(handle.as_raw_handle() as HANDLE, INFINITE);
+        }
     }
 
     pub fn process_start_time(pid: u32) -> Option<u64> {

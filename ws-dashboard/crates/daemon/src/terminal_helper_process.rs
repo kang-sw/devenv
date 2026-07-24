@@ -112,6 +112,25 @@ impl SharedState {
     }
 
     fn kill_shell_if_running(&self) {
+        // Stamp the ring `Terminated` BEFORE killing the child so a
+        // concurrent exit observer that wakes on child death finds a
+        // non-`Running` ring and its own `transition(Exited)` becomes a
+        // genuine no-op (see `transition`'s `Running`-only guard) instead of
+        // racing an `Exited` status over this intentional, daemon-initiated
+        // kill. On Windows the #[cfg(windows)] handle-wait reaper
+        // (`spawn_shell`) is exactly such an observer; the reader thread's
+        // PTY-EOF `transition(Exited)` is another. Only the status flag is
+        // set here - the PTY master and writer channel are deliberately torn
+        // down AFTER the child is killed below, because only child death
+        // reliably unblocks a writer thread stuck on a full OS pipe buffer
+        // (mental-model "Common Mistakes"); tearing them down first would
+        // reintroduce that starvation.
+        {
+            let mut ring = self.ring.lock().expect("ring lock poisoned");
+            if ring.status == TerminalHelperStatus::Running {
+                ring.status = TerminalHelperStatus::Terminated;
+            }
+        }
         if let Some(mut child) = self.child.lock().expect("child lock poisoned").take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -420,8 +439,31 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
                     );
                 }
             }
+
+            // Event-driven exit detection that does NOT depend on PTY EOF.
+            // On Windows a shell can die while ConPTY keeps the PTY master
+            // pipe open (conhost holding it), so the reader thread's
+            // EOF-triggered `transition(Exited)` (`spawn_reader_thread`) may
+            // never fire and the terminal would wrongly stay `Running`
+            // forever. Duplicate the shell's process handle into a handle we
+            // own (distinct from the `Child`'s, which `kill_shell_if_running`
+            // closes) and hand it to a detached reaper thread that blocks on
+            // it and drives the same exit path on wake.
+            match crate::terminal_platform::windows::duplicate_process_handle(raw_handle) {
+                Ok(handle) => spawn_process_exit_reaper(shared.clone(), handle),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "failed to duplicate terminal shell handle for exit reaper; \
+                         falling back to PTY-EOF-only exit detection"
+                    );
+                }
+            }
         } else {
-            tracing::warn!("terminal shell child exposed no raw handle; skipping job-object assignment");
+            tracing::warn!(
+                "terminal shell child exposed no raw handle; skipping job-object assignment \
+                 and exit reaper (PTY-EOF-only exit detection)"
+            );
         }
     }
 
@@ -467,6 +509,43 @@ fn spawn_reader_thread(shared: Arc<SharedState>, mut reader: Box<dyn Read + Send
                 }
             }
         }
+        shared.transition(TerminalHelperStatus::Exited);
+    });
+}
+
+// Windows-only, event-driven shell-exit detection independent of PTY EOF.
+//
+// The reader thread (`spawn_reader_thread`) is the ONLY exit trigger on
+// Unix, keyed off PTY master EOF. On Windows/ConPTY a shell process can
+// terminate while conhost keeps the master pipe open, so that EOF may never
+// arrive and the terminal would remain `Running` forever - the reported
+// zombie-pane bug. This reaper closes that gap at the source: it owns an
+// independent `DuplicateHandle` copy of the shell process handle (NOT the
+// borrowed `Child::as_raw_handle`, which `kill_shell_if_running` closes when
+// it drops the `Child`) and blocks on it in the kernel (zero idle CPU, zero
+// poll latency). The instant the shell process exits it drives the SAME
+// `SharedState::transition(Exited)` the PTY-EOF reader uses, so the existing
+// `Exit` IPC -> `apply_helper_status` -> WebSocket exit-frame pipeline is
+// reused unchanged.
+//
+// Windows-only by design: a second Unix `waitpid`-based reaper would race
+// and steal the reap from `portable_pty`'s own `Child::wait()` in
+// `kill_shell_if_running`, whereas Windows process handles admit many
+// concurrent independent waiters. Gated at the call site (`spawn_shell`'s
+// `#[cfg(windows)]` block).
+//
+// Detached and never joined. On a daemon-initiated kill the ring is already
+// `Terminated` (`kill_shell_if_running` stamps it before `child.kill()`), so
+// this `transition(Exited)` is a genuine no-op; on a spontaneous shell death
+// it is the authoritative exit signal. Exactly one shell is ever spawned per
+// helper (`shell_started` compare_exchange), so exactly one reaper exists,
+// and every helper-exit path runs `kill_shell_if_running`, which kills the
+// shell and unblocks this wait - so neither the thread nor the duplicated
+// handle leaks.
+#[cfg(windows)]
+fn spawn_process_exit_reaper(shared: Arc<SharedState>, handle: std::os::windows::io::OwnedHandle) {
+    thread::spawn(move || {
+        crate::terminal_platform::windows::wait_for_process_exit(&handle);
         shared.transition(TerminalHelperStatus::Exited);
     });
 }
