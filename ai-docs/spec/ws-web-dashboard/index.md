@@ -489,6 +489,9 @@ are:
 
 - `GET`/`POST .../work-roots/{workRootId}/terminals` — list / create.
 - `GET .../terminals/{terminalId}/output` — output poll (carries `?after=`).
+- `POST .../terminals/output/batch` — batched output poll (260723 Phase 1);
+  request `{"cursors": [{"terminalId": "<id>", "after": <u64>}, ...]}`,
+  response `{"results": {"<terminalId>": <TerminalOutputView>, ...}}`.
 - `POST .../terminals/{terminalId}/input` — raw input.
 - `POST .../terminals/{terminalId}/resize` — PTY resize.
 - `DELETE .../terminals/{terminalId}` — close.
@@ -515,6 +518,12 @@ Key properties:
 - **Owner-auth + bearer gating.** Terminal input, resize, and close are mutating
   host control; they preserve owner auth at the local gateway (router placement)
   and bearer auth to the linked daemon, and are never reachable without both.
+- **Batch omits, never errors.** The batch output route never fails as a whole
+  for a bad cursor: an unknown `terminalId` or one whose work root is currently
+  offline/unavailable (same `resolve_online_available_work_root` gate as the
+  single-ID route, applied per cursor) is silently omitted from `results` -
+  still `200`, possibly with a partial or empty map. Callers must treat a
+  missing key as "no update this tick", not as an error signal.
 - **Live socket route.** `.../terminals/{terminalId}/socket` is the live
   WebSocket transport, described in
   [Remote Terminal WebSocket Gatewaying](#remote-terminal-websocket-gatewaying).
