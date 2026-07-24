@@ -34,6 +34,7 @@ related:
 ## Module Contracts
 
 - `ServeStdio` handles requests concurrently and serializes only response writes; long-running waits must not block `tools/list`.
+- The per-request goroutine recovers panics: a panicking handler yields a JSON-RPC `-32000` error for that one request (not an `isError:true` result) and the process keeps serving. The recover-defer is appended AFTER `wg.Done`/`cancel`/`requests.Delete` so Go LIFO runs it FIRST on unwind, and the panicking handler's own inner defers (e.g. `defer store.Close()`) still run during unwind, so per-operation store open/close bounds the connection/`-wal`/`-shm` lifetime for a recovered panic. The panic value + stack are persisted always-on to `<cache-root>/crash/mcp-panic.log` (via `wsstate.CacheRoot`, one JSON line/panic, no rotation, stderr fallback), mirrored to `WS_MCP_DEBUG_LOG` only when set. {#260724-serve-request-panic-resilience}
 - Cancellation depends on exact JSON-RPC id stringification; changing id formatting breaks `notifications/cancelled`.
 - Tool results are returned as MCP text content, even when the text is JSON. Callers parse text, not structured content arrays.
 - `toolTextResponse` errors are successful JSON-RPC responses with `isError: true`; unknown tools/profile violations are JSON-RPC errors.
@@ -101,6 +102,7 @@ related:
 
 ## Common Mistakes
 
+- Registering the request-goroutine recover-defer BEFORE the `wg.Done`/`cancel`/`requests.Delete` defers (so it does not run first on unwind), or having it silently swallow the panic without both persisting the trace to the crash file AND returning a visible JSON-RPC error — either defeats the mid-session-crash fix. The `wsagent` async worker keeps its own separate `recover()`; do not route request-handler panics through it.
 - Advertising a tool in `tools()` without a dispatch case creates a visible broken tool.
 - Gating a tool at `callTool` and `toolAllowed` but forgetting `LeadToolNames`: tools/list and explicit calls gate correctly, yet `runtime.capabilities` still advertises it and the launcher contract test breaks.
 - Adding dispatch without schema makes the tool callable only by guessing the name.
