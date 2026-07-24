@@ -3,8 +3,8 @@ title: lead-goal-fan-out-step — batch-parallel lead-goal-step variant (mini-le
 related:
   260605-epic-ws-playbook-factory-pivot: rides on the epic's landed session-auth + native-subagent architecture; not a pivot-migration milestone itself
   260605-research-ws-native-subagent-pivot: source of the session-key/scope/render-mint decisions this feature builds on (ferrule lead-scope minting, playbook.render root_override, session.children lineage)
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # lead-goal-fan-out-step — batch-parallel lead-goal-step variant (mini-lead worktree fan-out) + session.note scratchpad
