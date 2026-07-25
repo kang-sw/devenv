@@ -87,8 +87,9 @@ every phase depends on it.
 ### The token never touches the helper or the registry
 
 The callback token lives in DAEMON-owned persisted state keyed by
-`terminal_id`, and reaches the agent only inside the `0600` vendor config file
-the daemon writes. Helper argv carries the config file PATH only.
+`terminal_id`, and reaches the agent only inside the `0600` `callback.json`
+the daemon writes — never inside the vendor config file, and never in argv.
+Helper argv carries file PATHS only.
 
 This is load-bearing in two directions. Everything the daemon passes the helper
 is clap `--long` argv (`cli.rs:31-49`), world-readable via `ps`, so a token
