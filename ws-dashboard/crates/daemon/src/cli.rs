@@ -25,6 +25,14 @@ pub enum Command {
     // by a human or the remote-deployment guide.
     #[command(hide = true)]
     TerminalHelper(TerminalHelperArgs),
+    // CONTRACT (260725 Phase 3 step 3): the hidden hook-fired subcommand a
+    // materialized vendor `settings.json` invokes (`agent_hook_config.rs`).
+    // Same hidden-subcommand precedent as `TerminalHelper` above: never
+    // documented in `--help`, never invoked directly by a human in normal
+    // operation (though it is a legitimate, deliberately loud-on-failure
+    // manual debugging entry point - see its dispatch in `main.rs`).
+    #[command(hide = true)]
+    TerminalNotify(TerminalNotifyArgs),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -92,6 +100,36 @@ pub struct TerminalHelperArgs {
     // must NOT become.
     #[arg(long = "scrub-marker", requires = "command")]
     pub scrub_marker: Vec<String>,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct TerminalNotifyArgs {
+    // CONTRACT (ticket "The token never touches the helper or the
+    // registry"): this argv carries a file PATH only, never config content
+    // and never the callback token itself - the token lives inside the file
+    // this path points at, read at fire time, not passed on the command
+    // line (which is world-readable via `ps`).
+    #[arg(long)]
+    pub callback: std::path::PathBuf,
+    #[arg(long, value_enum)]
+    pub state: TurnStateArg,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TurnStateArg {
+    Working,
+    Ready,
+    Idle,
+}
+
+impl TurnStateArg {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TurnStateArg::Working => "working",
+            TurnStateArg::Ready => "ready",
+            TurnStateArg::Idle => "idle",
+        }
+    }
 }
 
 // CONTRACT: pure `KEY=VALUE` split on the first `=`; used as the clap
@@ -180,6 +218,15 @@ impl Cli {
         }
     }
 
+    // CONTRACT: Non-consuming, checked before `into_serve_config` consumes
+    // `self.command` - mirrors `terminal_helper_args`'s accessor shape.
+    pub fn terminal_notify_args(&self) -> Option<&TerminalNotifyArgs> {
+        match self.command.as_ref() {
+            Some(Command::TerminalNotify(args)) => Some(args),
+            _ => None,
+        }
+    }
+
     pub fn remote_deployment_guide() -> &'static str {
         REMOTE_DEPLOYMENT_GUIDE
     }
@@ -189,6 +236,9 @@ impl Cli {
             Some(Command::Serve(args)) => ServeConfig::from_args(args),
             Some(Command::TerminalHelper(_)) => {
                 anyhow::bail!("terminal-helper is an internal re-exec target, not a serve command")
+            }
+            Some(Command::TerminalNotify(_)) => {
+                anyhow::bail!("terminal-notify is an internal hook target, not a serve command")
             }
             None => {
                 let mut command = Self::command();
@@ -431,6 +481,42 @@ mod tests {
             Cli::try_parse_from(args).is_err(),
             "--env-overlay without --command must fail to parse, not silently no-op"
         );
+    }
+
+    #[test]
+    fn terminal_notify_args_parse_callback_and_state() {
+        let cli = Cli::parse_from([
+            "ws-dashboard",
+            "terminal-notify",
+            "--callback",
+            "/tmp/callback.json",
+            "--state",
+            "ready",
+        ]);
+
+        let args = cli.terminal_notify_args().expect("terminal-notify args");
+        assert_eq!(args.callback, std::path::PathBuf::from("/tmp/callback.json"));
+        assert_eq!(args.state, TurnStateArg::Ready);
+        assert_eq!(args.state.as_str(), "ready");
+    }
+
+    #[test]
+    fn terminal_notify_args_accessor_is_none_for_other_commands() {
+        let cli = Cli::parse_from(["ws-dashboard", "serve"]);
+        assert!(cli.terminal_notify_args().is_none());
+    }
+
+    #[test]
+    fn terminal_notify_args_rejects_an_unknown_state_value() {
+        let result = Cli::try_parse_from([
+            "ws-dashboard",
+            "terminal-notify",
+            "--callback",
+            "/tmp/callback.json",
+            "--state",
+            "not-a-real-state",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

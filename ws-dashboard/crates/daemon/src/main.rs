@@ -18,6 +18,14 @@ async fn main() -> anyhow::Result<()> {
         let args = args.clone();
         return ws_dashboard_daemon::terminal_helper_process::run_terminal_helper(args).await;
     }
+    // CONTRACT (260725 Phase 3 step 3): the hidden `terminal-notify` hook
+    // target, dispatched the same way as `terminal-helper` above - before
+    // `logging::init`, since this is a short-lived, hook-fired invocation
+    // with no server lifetime to instrument.
+    if let Some(args) = cli.terminal_notify_args() {
+        let args = args.clone();
+        return ws_dashboard_daemon::terminal_notify::run_terminal_notify(args).await;
+    }
     // CONTRACT: `_guard` (not `_`) keeps the file sink's `WorkerGuard` alive
     // for the process lifetime — a bare `_` binding would drop it
     // immediately and silently disable the non-blocking writer's flush.

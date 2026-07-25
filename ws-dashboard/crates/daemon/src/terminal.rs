@@ -679,7 +679,7 @@ pub async fn create_terminal(
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
     };
-    let (command, env_overlay, scrub) =
+    let (command, env_overlay, scrub, hook_config) =
         match resolve_create_command(request.profile_id.as_deref()) {
             Ok(resolved) => resolved,
             Err(error) => return error.into_response(),
@@ -704,6 +704,7 @@ pub async fn create_terminal(
         // above.
         request.profile_id,
         scrub,
+        hook_config,
     )
     .await
     {
@@ -988,11 +989,12 @@ fn resolve_create_command(
         Option<(String, Vec<String>)>,
         Vec<(String, String)>,
         Option<&'static crate::agent_env_profile::EnvScrubProfile>,
+        Option<crate::agent_profile_registry::HookConfigShape>,
     ),
     TerminalError,
 > {
     let Some(id) = profile_id else {
-        return Ok((None, Vec::new(), None));
+        return Ok((None, Vec::new(), None, None));
     };
     let profile = crate::agent_profile_registry::resolve(id)
         .ok_or(TerminalError::BadRequest("unknown terminal profile"))?;
@@ -1003,7 +1005,7 @@ fn resolve_create_command(
     // Phase 2 does not populate env_overlay - no secret/value needs to
     // travel yet (Phase 4 owns the callback token and is explicitly barred
     // from `--env-overlay` regardless of this seam).
-    Ok((command, Vec::new(), Some(profile.scrub)))
+    Ok((command, Vec::new(), Some(profile.scrub), profile.hook_config))
 }
 
 impl TerminalSession {
@@ -1022,11 +1024,72 @@ impl TerminalSession {
         env_overlay: Vec<(String, String)>,
         profile_id: Option<String>,
         scrub: Option<&'static crate::agent_env_profile::EnvScrubProfile>,
+        hook_config: Option<crate::agent_profile_registry::HookConfigShape>,
     ) -> Result<Arc<Self>, TerminalError> {
         validate_command_env_overlay_pairing(&command, &env_overlay)?;
         let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
         let id = opaque_terminal_id();
         let socket_path = registry_dir.join(format!("{id}.sock"));
+
+        // CONTRACT (260725 Phase 3 step 2): the terminal id above is the
+        // FIRST point in this spawn path where a per-terminal id exists, and
+        // this is the last point before `build_helper_command` builds the
+        // helper argv - hook-config materialization needs the id (for
+        // `agent-profiles/<terminal_id>/`) and must land its `--settings`
+        // path into `command`'s args before that call, so it happens here,
+        // not inside `resolve_create_command` (called before any id exists)
+        // and not inside `build_helper_command` (a pure argv builder with no
+        // filesystem access, deliberately kept that way).
+        let mut command = command;
+        if let (Some(hook_config), Some((_, args))) = (hook_config, command.as_mut()) {
+            // FIX (review cycle 1, finding E): a `None` state dir used to
+            // fall back to `std::env::temp_dir()`, landing an EXECUTED
+            // command line (`settings.json`'s hook `command` string) under
+            // the predictable, world-writable `/tmp/agent-profiles/` - a
+            // local attacker who pre-creates/owns that path could replace
+            // the file with one whose command runs as the daemon's user.
+            // Degrading to a hookless spawn costs nothing (turn-attention
+            // signaling is best-effort UX, not correctness-critical - see
+            // the materialization-failure branch below, which already
+            // degrades the same way) and removes the exposure entirely.
+            match crate::persistent_state::default_state_dir() {
+                Some(state_dir) => {
+                    let profile_dir = state_dir.join("agent-profiles").join(&id);
+                    // CONTRACT (deliberate deferral, ticket "On-disk layout" /
+                    // Phase 4): `agent-profiles/<terminal_id>/` is created here and
+                    // never reclaimed by this phase - no cleanup on terminal close,
+                    // no sweep of stale directories at daemon restart. The ticket
+                    // pins that GC sweep to Phase 4 ("A GC sweep over
+                    // `agent-profiles/`... must run strictly AFTER `boot_reconcile`
+                    // completes"), so every terminal spawned under this phase alone
+                    // leaks its profile directory until Phase 4 lands. This is a
+                    // known, ticket-acknowledged gap, not an oversight.
+                    let callback_path = crate::agent_callback::callback_path(&profile_dir);
+                    match crate::agent_hook_config::materialize_hook_config(
+                        &profile_dir,
+                        &hook_config,
+                        &default_helper_binary(),
+                        &callback_path,
+                    ) {
+                        Ok(settings_path) => {
+                            args.push("--settings".to_owned());
+                            args.push(settings_path.display().to_string());
+                        }
+                        Err(error) => tracing::error!(
+                            terminal_id = %id,
+                            %error,
+                            "failed to materialize agent hook config; spawning without hooks"
+                        ),
+                    }
+                }
+                None => tracing::warn!(
+                    terminal_id = %id,
+                    "no persistent state directory resolved; spawning without agent hooks \
+                     rather than materializing an executed command line under a predictable, \
+                     world-writable temp path"
+                ),
+            }
+        }
 
         let command_to_spawn = build_helper_command(
             helper_binary,
@@ -2372,16 +2435,17 @@ mod terminal_portability_skeleton_tests {
 
     #[test]
     fn resolve_create_command_with_no_profile_id_takes_the_no_branch_path() {
-        let (command, env_overlay, scrub) = resolve_create_command(None)
+        let (command, env_overlay, scrub, hook_config) = resolve_create_command(None)
             .expect("absent profile_id must never fail resolution");
         assert_eq!(command, None, "absent profile_id must not resolve to a default command");
         assert!(env_overlay.is_empty());
         assert!(scrub.is_none(), "absent profile_id must not resolve to a default scrub profile");
+        assert!(hook_config.is_none(), "absent profile_id must not resolve to a default hook config");
     }
 
     #[test]
     fn resolve_create_command_with_claude_resolves_command_and_claude_scrub() {
-        let (command, env_overlay, scrub) = resolve_create_command(Some("claude"))
+        let (command, env_overlay, scrub, hook_config) = resolve_create_command(Some("claude"))
             .expect("the claude profile must resolve");
         let (program, args) = command.expect("a resolved profile must produce a command");
         assert_eq!(program, "claude");
@@ -2391,6 +2455,15 @@ mod terminal_portability_skeleton_tests {
             scrub.expect("a resolved profile must produce a scrub list").name,
             "claude"
         );
+        assert!(hook_config.is_some(), "the claude profile must resolve a hook config");
+    }
+
+    #[test]
+    fn resolve_create_command_with_dummy_echo_resolves_no_hook_config() {
+        let (command, _env_overlay, _scrub, hook_config) = resolve_create_command(Some("dummy-echo"))
+            .expect("the dummy-echo profile must resolve");
+        assert!(command.is_some());
+        assert!(hook_config.is_none(), "the test-only profile must not carry hooks");
     }
 
     #[test]

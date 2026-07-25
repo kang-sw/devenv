@@ -841,6 +841,111 @@ Verification: the spike result recorded explicitly (including a negative
 result); a test that `terminal-notify` resolves a base URL written after the
 config file, proving the ephemeral-port path works.
 
+### Result (4ffb22c8) - 2026-07-26
+
+Done. Step 1's gate was already closed and recorded separately (see the
+`#### Step 1 spike record` above); this Result covers steps 2-3, completing
+the phase as a whole.
+
+The daemon materializes a per-terminal vendor hook settings file at
+`agent-profiles/<terminal_id>/settings.json`, mode `0600` on Unix, and passes
+only its PATH through helper argv — never the settings content itself. It
+also writes `agent-profiles/<terminal_id>/bound-base-url.json` immediately
+after binding, on EVERY bind (not only at spawn), so the ephemeral-port
+constraint in `## Decisions` holds across `boot_reconcile` re-binds. A new
+hidden `ws-dashboard terminal-notify` subcommand
+(`#[command(hide = true)]`, `terminal_notify.rs`) resolves that file AT FIRE
+TIME — never cached — and POSTs the turn state to the daemon's callback
+route. The hook encodes `UserPromptSubmit` -> `working` and `Stop` ->
+`ready`, the three-state vocabulary (`working`/`ready`/`idle`) the closed
+Phase 3 step-1 spike established as live rather than deferred.
+
+Commits: `7efac08b` (plan), `d86d7094` (implementation), `4ffb22c8` (review
+fixes).
+
+**Verification (this machine, 2026-07-26; independently re-run and
+confirmed).** `cargo test -p ws-dashboard-daemon --lib` -> 168 passed, 0
+failed, 2 ignored, exit 0 (Phase 2 baseline 148, net +20). `cargo test -p
+ws-dashboard-daemon --test server` -> 16 passed, 0 failed. `cargo test -p
+ws-dashboard-daemon --test terminal_notify` -> 2 passed, 0 failed. `cargo
+test -p ws-dashboard-daemon --test terminal_lifetime` -> 4 passed, 0 failed
+(unchanged). `cargo test -p ws-dashboard-daemon --test
+agent_hook_missing_state_dir` -> 1 passed, 0 failed. `cargo check -p
+ws-dashboard-daemon --tests` -> exit 0. `cargo clippy -p ws-dashboard-daemon
+--all-targets` -> no new warnings (the only warnings present are pre-existing
+ones in unrelated test files, none touching `terminal_notify.rs`,
+`agent_hook_config.rs`, or `agent_callback.rs`).
+
+**Non-vacuity.** The hook-ordering assertion (`UserPromptSubmit` firing
+before `Stop` yields distinct resolved base URLs) was proven by a
+memoization mutation RE-RUN IN ISOLATION (`--test-threads=1`) so the failure
+showed this test's own fixture values (`left: "http://127.0.0.1:1111" right:
+"http://127.0.0.1:2222"`) rather than a sibling's — the first attempt's
+evidence had been cross-test-contaminated by the process-global mutation and
+was rejected as insufficient. The `0600` mode assertion on the vendor
+settings file was proven by mutating the mode to `0644` and observing the
+failure (`left: 420 right: 384`).
+
+**Review outcome.** fit: 0 Critical / 1 Important / 0 Minor - the unbounded
+hand-rolled failure log, recorded as finding 3 below. correctness: 0
+Critical / 6 Important / 7 Minor. test: 1 Critical / 3 Important / 2 Minor.
+All dispositioned findings were fixed in `4ffb22c8`, except one deliberately
+routed to a follow-up ticket (below). Findings that carry forward:
+
+1. **A test run was writing into the developer's REAL
+   `~/.local/state/ws-dashboard/`.** The new unconditional
+   `bound-base-url.json` write made pre-existing in-process `tests/server.rs`
+   tests pollute the real state dir — confirmed on disk, not inferred. Fixed
+   by scoping those tests to a temp state home; proven by before/after mtimes
+   on the real file being byte-identical across a full test run.
+2. **`terminal-notify` had no HTTP timeout**, so one hook fire could block an
+   interactive agent turn until the vendor's own hook timeout fires — the
+   stale-callback-on-a-reused-port case this design anticipates. Now
+   `connect_timeout` 750ms, `timeout` 2s.
+3. **The failure log was an unbounded hand-rolled appender** in the same
+   `logs/` directory as the daemon's own bounded one, under a filename its
+   pruner would never reclaim — and in the window before Phase 4, every hook
+   fire fails, twice per turn. Now writes through the crate's existing
+   daily-rotating appender (`logging::build_file_appender`).
+4. **`settings.json` — whose content is an executed command line — fell back
+   to the predictable, world-writable `/tmp/agent-profiles/`** when no state
+   dir resolved. Now degrades to a hookless spawn instead, proven by a new
+   integration test (`agent_hook_missing_state_dir.rs`) that removes every
+   state-home variable and asserts the profile dir is absent and the daemon
+   warns.
+5. **The hook command's POSIX single-quoting was provably wrong on
+   Windows** (`cmd.exe` does not treat `'` as a quote character) — and the
+   ticket chose this subcommand over `curl` specifically ON
+   WINDOWS-PORTABILITY GROUNDS, so the implementation was undermining its own
+   rationale. Replaced with a `cfg`-split quoting scheme (POSIX single-quote
+   unchanged, Windows double-quote). STATE PLAINLY: the Windows branch is
+   plausible but NOT proven — no Windows machine was available this cycle —
+   and it wants a Windows spike mirroring the macOS spike step 1 used. Do
+   not let this read as verified.
+6. **The temp file for `bound-base-url.json` had a fixed name**, so two
+   daemons sharing a state home could interleave and publish a torn file;
+   the registry precedent it was modelled on avoids this by deriving temp
+   names per terminal. Now suffixed per writer (pid + counter + timestamp);
+   `agent_hook_config.rs`'s own writer was checked and found not exposed to
+   the same hazard (its temp path is already namespaced under a
+   per-terminal-id directory).
+
+Deferred to `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry`
+(`c69a7ff5`), cross-referenced from there back to this ticket: the
+deliberate silent-exit-0 design has no expiry, so after Phase 4 a broken
+callback path is indistinguishable from an unfinished turn; the temp-file
+create-then-chmod window that matters once a token is written; and the
+constraint that Phase 4 must NOT derive `callback.json`'s `baseUrl` by
+reading the shared `bound-base-url.json` (that would reinstate the
+multi-daemon steal `## Decisions` rejects).
+
+Also recorded: `agent-profiles/<terminal_id>/` is created but never removed
+in this phase — Phase 4 owns that GC sweep, per `## Decisions`'s "On-disk
+layout" bullet and Phase 4's own bullet requiring the sweep to run strictly
+after `boot_reconcile`.
+
+**Deferred / not done.** Phase 4 and all later phases (4-8).
+
 ### Phase 4: token store and the callback endpoint
 
 Depends on Phase 3. Owns the `#260515-ws-web-daemon-foundation` spec amendment,

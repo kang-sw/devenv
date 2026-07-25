@@ -69,6 +69,20 @@ where
     let bound_addr = listener.local_addr()?;
     let info = startup_info(bound_addr, &auth, config.owner_auth_enabled);
 
+    // CONTRACT (260725 Phase 3 step 3, "ephemeral port"): written
+    // unconditionally on every bind, strictly BEFORE `boot_reconcile` below -
+    // it needs no terminal/registry state, only the bound address, and
+    // writing it first means any adopted terminal's eventual (Phase 4)
+    // callback rewrite can already find a fresh file. Best-effort: a warning
+    // on failure, not a startup abort, mirrors how startup already tolerates
+    // a missing state dir elsewhere (`opened_work_roots` seeding).
+    if let Some(state_dir) = crate::persistent_state::default_state_dir() {
+        let base_url = format!("http://{}", display_addr(bound_addr));
+        if let Err(error) = crate::agent_callback::write_bound_base_url(&state_dir, &base_url) {
+            tracing::warn!(%error, "failed to write bound-base-url file");
+        }
+    }
+
     eprintln!("ws-dashboard owner pairing URL: {}", info.pairing_url);
     if let Some(url) = info.direct_dashboard_url.as_deref() {
         eprintln!("ws-dashboard no-auth debug mode active: {url}");
