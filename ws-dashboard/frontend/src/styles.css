@@ -2768,9 +2768,12 @@ button {
 }
 
 /* 260725 nav-row-two-line-open-state Phase 1, Decision 2: base/openness own
-   `background` here via specificity ordering only (attribute selector below
-   is 0,2,0 vs this class selector's 0,1,0) - error tone re-asserts itself
-   below so it always wins regardless of open state. */
+   `background` here via specificity ordering only. The attribute selector
+   below is (0,3,0): one class (.resource-row) + one attribute
+   ([data-resource-open="false"]) + one class contributed by `:not()`'s
+   argument (.resource-row-error) - vs the plain `.resource-row-error` class
+   selector's (0,1,0). Error tone re-asserts itself below so it always wins
+   regardless of open state. */
 .resource-row[data-resource-open="false"]:not(.resource-row-error) {
   /* Very slight brightness drop: mix the row surface toward the darker
      canvas token rather than introducing a new color. */
@@ -2779,6 +2782,22 @@ button {
     var(--ws-color-surface-context) 92%,
     var(--ws-color-canvas) 8%
   );
+}
+
+/* Review fix (post-Phase-1): closed rows are the ones a user hovers *in
+   order to* open them, so they must keep hover feedback like every other
+   row. The plain `.resource-row:hover` above is (0,2,0), which the openness
+   rule's (0,3,0) always outranks on the `background` axis regardless of
+   source order, so without this rule a closed row never showed a hover
+   background. Reassert hover with one selector segment more than the
+   openness rule - adding `:hover` here makes this (0,4,0), the same three
+   segments plus the pseudo-class - so it wins on specificity alone (no
+   `!important`). Scoped by the same `:not(.resource-row-error)` so error-tone
+   rows are untouched, and this only overrides `background` on `:hover`, so
+   the non-hover de-emphasis (background and the foreground color-mixes
+   below) is unaffected. */
+.resource-row[data-resource-open="false"]:not(.resource-row-error):hover {
+  background: var(--ws-color-panel-hover);
 }
 
 /* `.row-title` (styles.css:1141) and `.resource-kind-glyph` (below, second
