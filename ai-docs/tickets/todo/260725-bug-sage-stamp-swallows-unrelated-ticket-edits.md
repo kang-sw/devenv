@@ -4,7 +4,7 @@ related:
   260723-feat-ticket-write-verify-commit-gate: introduced sage_stamp as the lead-only replacement for sage_record, including its canonical-title commit
   260725-idea-ws-git-commit-rename-and-payload-rejections: blocking prerequisite — once sage_stamp stops committing, the caller commits the posture change through git.commit, which today fails whenever a status transition is staged
   260721-bug-lead-write-ticket-sage-ready-ordering: edits the same Sage Review Gate step, and its open question about retrying tickets.move after sage_record commits the posture is invalidated by this ticket's decision
-sage-review-design: recommended
+sage-review-design: completed
 sage-review-completeness: recommended
 ---
 
