@@ -67,6 +67,28 @@ const DUMMY_ECHO_ARGS: &[&str] = &[
     "echo DUMMY_ECHO_MARKER & ping -n 31 127.0.0.1 > NUL",
 ];
 
+// CONTRACT (260725 Phase 6): same shape as `DUMMY_ECHO_ARGS` (a real
+// interpreter argv, marker line then a long-running sleep - see the CONTRACT
+// above `DUMMY_ECHO_COMMAND`), with a LONGER sleep, and that difference is
+// load-bearing rather than cosmetic. The Phase 6 indicator is suppressed at
+// render time for any session whose `status` is no longer `"running"` (the
+// stale-indicator fix), so the spawned dummy process must outlive the whole
+// browser spec: with the 30s sleep `dummy-echo` uses, the helper would exit
+// mid-run and the indicator under test would legitimately disappear. 180s
+// matches the Playwright per-test timeout (`playwright.config.ts`), which
+// bounds how long an orphaned sleep can survive an aborted run.
+#[cfg(unix)]
+const DUMMY_ECHO_HOOKED_ARGS: &[&str] = &[
+    "-c",
+    "printf '%s\\n' DUMMY_ECHO_MARKER; sleep 180",
+];
+
+#[cfg(windows)]
+const DUMMY_ECHO_HOOKED_ARGS: &[&str] = &[
+    "/C",
+    "echo DUMMY_ECHO_MARKER & ping -n 181 127.0.0.1 > NUL",
+];
+
 // CONTRACT (260725 Phase 3 step-1 spike, closed positive): both event names
 // are the exact strings the spike measured firing under a real interactive
 // PTY (`UserPromptSubmit`, `Stop`). Turn-state vocabulary is pinned by the
@@ -99,7 +121,37 @@ const DUMMY_ECHO_PROFILE: AgentProfile = AgentProfile {
     hook_config: None,
 };
 
-const PROFILES: &[AgentProfile] = &[CLAUDE_PROFILE, DUMMY_ECHO_PROFILE];
+// CONTRACT (260725 Phase 6, tab-label indicator): a SECOND test-only
+// profile, identical to `DUMMY_ECHO_PROFILE` except that it carries a
+// hook config. `TerminalSession::spawn` gates callback-token generation on
+// `hook_config.is_some()` (`terminal.rs`), so `dummy-echo` - which asserts
+// `hook_config.is_none()` in its own Phase 2 test on purpose - can never be
+// used to drive the Phase 4 turn-state callback route from a browser
+// acceptance spec: it never gets a token. This profile exists solely so
+// `agent-attention-indicator.spec.ts` can spawn a terminal that HAS a real
+// `terminal-tokens/<terminal_id>.json`, without depending on a vendor CLI.
+//
+// The event list is deliberately EMPTY: `materialize_hook_config`
+// (`agent_hook_config.rs`) loops over `shape.events`, so an empty slice
+// writes `{"hooks":{}}` and appends a `--settings <path>` pair that
+// `/bin/sh -c <script>` (or `cmd.exe /C <script>`) simply takes as extra
+// positional arguments - the dummy script's behavior is unchanged, and no
+// hook can ever fire because the dummy command is not a vendor CLI. Only
+// `hook_config.is_some()` is load-bearing here.
+//
+// Same visibility contract as `DUMMY_ECHO_PROFILE`: always compiled in
+// (the acceptance suite drives the real production binary), never exposed
+// on any user-facing surface, id known only to this module and its own
+// Playwright spec.
+const DUMMY_ECHO_HOOKED_PROFILE: AgentProfile = AgentProfile {
+    id: "dummy-echo-hooked",
+    command: DUMMY_ECHO_COMMAND,
+    args: DUMMY_ECHO_HOOKED_ARGS,
+    scrub: &agent_env_profile::NONE,
+    hook_config: Some(HookConfigShape { events: &[] }),
+};
+
+const PROFILES: &[AgentProfile] = &[CLAUDE_PROFILE, DUMMY_ECHO_PROFILE, DUMMY_ECHO_HOOKED_PROFILE];
 
 /// Pure `match`-shaped lookup, no I/O - unit-testable without spawning a
 /// process. `None` on an unknown id (including an empty string), which
@@ -145,6 +197,47 @@ mod tests {
     fn dummy_echo_profile_has_no_hook_config() {
         let profile = resolve("dummy-echo").expect("dummy-echo profile must be registered");
         assert!(profile.hook_config.is_none(), "test-only profile must not carry hooks");
+    }
+
+    #[test]
+    fn resolve_finds_the_dummy_echo_hooked_profile_with_a_no_op_scrub() {
+        let profile =
+            resolve("dummy-echo-hooked").expect("dummy-echo-hooked profile must be registered");
+        assert!(!profile.command.is_empty());
+        assert!(profile.scrub.markers.is_empty());
+    }
+
+    #[test]
+    fn dummy_echo_hooked_profile_carries_an_empty_hook_config() {
+        let profile =
+            resolve("dummy-echo-hooked").expect("dummy-echo-hooked profile must be registered");
+        let hook_config = profile
+            .hook_config
+            .expect("the hooked test profile must carry a hook config so spawn mints a token");
+        assert!(
+            hook_config.events.is_empty(),
+            "the hooked test profile must register no vendor events - only `is_some()` is \
+             load-bearing (see this profile's CONTRACT)"
+        );
+    }
+
+    #[test]
+    fn the_two_dummy_profiles_share_a_program_and_differ_in_hook_config_and_lifetime() {
+        let plain = resolve("dummy-echo").expect("dummy-echo profile must be registered");
+        let hooked =
+            resolve("dummy-echo-hooked").expect("dummy-echo-hooked profile must be registered");
+        assert_eq!(plain.command, hooked.command);
+        assert!(plain.hook_config.is_none());
+        assert!(hooked.hook_config.is_some());
+        // The hooked profile's process must outlive the whole browser spec
+        // (see its args CONTRACT): a shorter-lived dummy would exit
+        // mid-run, flip the session off `"running"`, and make the Phase 6
+        // indicator legitimately disappear while under test.
+        assert_ne!(
+            plain.args, hooked.args,
+            "the hooked profile deliberately runs longer than dummy-echo"
+        );
+        assert!(!hooked.args.is_empty());
     }
 
     #[test]
