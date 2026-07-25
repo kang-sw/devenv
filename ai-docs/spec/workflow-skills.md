@@ -26,6 +26,7 @@ lead-bootstrap
 lead-discuss
 lead-forge-mental-model
 lead-forge-spec
+lead-goal-fan-out-step
 lead-goal-step
 lead-implement
 lead-check-blockers
@@ -49,11 +50,12 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 14 entry skills the user invokes as
+The directly invocable surface is narrowed to 15 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
-`lead-verify-discussion`, `lead-tune`, and `lead-goal-step`. The remaining
+`lead-verify-discussion`, `lead-tune`, `lead-goal-step`, and
+`lead-goal-fan-out-step`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -543,6 +545,32 @@ selector to re-pick the same stuck ticket — and the selection step reads
 ticket state/bodies to judge "advanceable now" and skips it, rather than the
 body-blind FIFO pick; so one blocked ticket does not terminate the run while
 others remain workable. {#260723-goal-step-blocked-progress-conclusion}
+
+`lead-goal-fan-out-step` is a batch-parallel `lead-goal-step` variant: instead
+of dispatching one advanceable ticket at a time, it selects a
+mutually-independent batch (disjoint edit surface, no `related:`/`parent:`
+ordering between candidates, excluding tickets already dispatched this run and
+not yet merged) and advances each in its own worktree-isolated mini-lead in
+parallel, one `impl/<stem>` branch and background native dispatch per ticket,
+merging each serially back into the parent as its mini-lead reaches its merge
+gate. It degrades to the plain serial path — one ticket, dispatched directly
+to `lead-proceed` — whenever fewer than two independent tickets are available
+or recursive native dispatch is unavailable this cycle. It does not restate
+`lead-goal-step`'s contract: the goal-run posture, the three terminal states,
+`goal/*` staging, blocker-recording before yield, and the
+one-step-is-not-a-finished-goal continuation all govern unchanged, delivered
+verbatim at serve time via the `printPlaybook` transclusion mechanism
+(`#260724-serve-time-skill-body-transclusion` in `plugin-runtime.md`) rather
+than duplicated prose: serving `lead-goal-fan-out-step` always appends the
+rendered `lead-goal-step` skill body inside a visible `<playbook
+name="lead-goal-step" title="Goal Step">` boundary, unconditionally (no
+config-flag gate, unlike the `lead-prefer-subagent` precedent this mechanism
+generalizes). The overlay itself — batch selection, worktree/mini-lead
+dispatch, board bookkeeping via `session.note`/`session.children`, and serial
+merge — lives in `agents-plugin/rsrc/lead-goal-fan-out-step/lead-goal-fan-out-step.md`
+(a normal `kind: print` rsrc playbook, unlike `lead-goal-step`'s inline
+SKILL.md body), fronted by a thin `SKILL.md` shim shaped like `lead-discuss`'s.
+{#260724-goal-fan-out-step-transclusion}
 
 `lead-verify-design` is removed; its `SKILL.md` and rsrc playbook were deleted
 entirely (delete-don't-diet decision, `260630-epic-skill-playbook-diet`). Its

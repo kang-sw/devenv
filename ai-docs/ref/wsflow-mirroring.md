@@ -48,6 +48,7 @@ Included:
 - `lead-review`
 - `lead-prefer-subagent`
 - `lead-goal-step`
+- `lead-goal-fan-out-step`
 - `lead-revive` (inline-body exception; see below)
 
 Excluded:

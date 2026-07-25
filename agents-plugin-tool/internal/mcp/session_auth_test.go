@@ -1010,6 +1010,182 @@ func TestSessionChildrenMissingSessionKeyErrors(t *testing.T) {
 	}
 }
 
+// --- session.note tests ------------------------------------------------------
+
+func TestSessionNoteSetAndUpdateAppearsInChildren(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	leadKey, err := server.sessions.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatalf("mint lead key: %v", err)
+	}
+	childKey, err := server.sessions.mint(root, roleDelegate, leadKey)
+	if err != nil {
+		t.Fatalf("mint delegate child key: %v", err)
+	}
+
+	resp := callToolOnce(t, server, 1, "session.note", map[string]any{
+		"session_key":       leadKey,
+		"child_session_key": childKey,
+		"text":              "first note",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("session.note (set) returned isError: %s", resp)
+	}
+
+	resp2 := callToolOnce(t, server, 2, "session.note", map[string]any{
+		"session_key":       leadKey,
+		"child_session_key": childKey,
+		"text":              "updated note",
+	})
+	if toolIsError(t, resp2) {
+		t.Fatalf("session.note (update) returned isError: %s", resp2)
+	}
+
+	childrenResp := callToolOnce(t, server, 3, "session.children", map[string]any{"session_key": leadKey, "format": "json"})
+	if toolIsError(t, childrenResp) {
+		t.Fatalf("session.children returned isError: %s", childrenResp)
+	}
+	var parsed struct {
+		Children []sessionChildOutput `json:"children"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(toolText(t, childrenResp))), &parsed); err != nil {
+		t.Fatalf("parse session.children json: %v\n%s", err, toolText(t, childrenResp))
+	}
+	if len(parsed.Children) != 1 || parsed.Children[0].Key != childKey {
+		t.Fatalf("children = %#v, want single child %q", parsed.Children, childKey)
+	}
+	if parsed.Children[0].Note != "updated note" {
+		t.Fatalf("child note = %q, want %q", parsed.Children[0].Note, "updated note")
+	}
+}
+
+func TestSessionNoteRejectedForDelegateAndLeaf(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	leafKey, err := server.sessions.mint(root, roleLeaf, "")
+	if err != nil {
+		t.Fatalf("mint leaf key: %v", err)
+	}
+	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatalf("mint delegate key: %v", err)
+	}
+	childKey, err := server.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatalf("mint target child key: %v", err)
+	}
+
+	assertGateError := func(t *testing.T, label string, resp string, wantCode int) {
+		t.Helper()
+		var r struct {
+			Error *struct{ Code int } `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(resp), &r); err != nil {
+			t.Fatalf("%s: parse response: %v\n%s", label, err, resp)
+		}
+		if r.Error == nil {
+			t.Fatalf("%s: expected JSON-RPC error, got: %s", label, resp)
+		}
+		if r.Error.Code != wantCode {
+			t.Fatalf("%s: error code = %d, want %d; response: %s", label, r.Error.Code, wantCode, resp)
+		}
+	}
+
+	deniedLeaf := callToolOnce(t, server, 1, "session.note", map[string]any{
+		"session_key":       leafKey,
+		"child_session_key": childKey,
+		"text":              "blocked",
+	})
+	assertGateError(t, "leaf/session.note", deniedLeaf, -32601)
+
+	deniedDelegate := callToolOnce(t, server, 2, "session.note", map[string]any{
+		"session_key":       delegateKey,
+		"child_session_key": childKey,
+		"text":              "blocked",
+	})
+	assertGateError(t, "delegate/session.note", deniedDelegate, -32601)
+}
+
+func TestSessionNoteEmptyTextClearsNote(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	leadKey, err := server.sessions.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatalf("mint lead key: %v", err)
+	}
+	childKey, err := server.sessions.mint(root, roleDelegate, leadKey)
+	if err != nil {
+		t.Fatalf("mint delegate child key: %v", err)
+	}
+
+	setResp := callToolOnce(t, server, 1, "session.note", map[string]any{
+		"session_key":       leadKey,
+		"child_session_key": childKey,
+		"text":              "will be cleared",
+	})
+	if toolIsError(t, setResp) {
+		t.Fatalf("session.note (set) returned isError: %s", setResp)
+	}
+
+	clearResp := callToolOnce(t, server, 2, "session.note", map[string]any{
+		"session_key":       leadKey,
+		"child_session_key": childKey,
+		"text":              "",
+	})
+	if toolIsError(t, clearResp) {
+		t.Fatalf("session.note (clear) returned isError: %s", clearResp)
+	}
+
+	childrenResp := callToolOnce(t, server, 3, "session.children", map[string]any{"session_key": leadKey, "format": "json"})
+	if toolIsError(t, childrenResp) {
+		t.Fatalf("session.children returned isError: %s", childrenResp)
+	}
+	if strings.Contains(toolText(t, childrenResp), `"note"`) {
+		t.Fatalf("cleared note must be omitted (omitempty) from json output: %s", toolText(t, childrenResp))
+	}
+}
+
+func TestSessionNoteSurvivesFreshServerInstance(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+
+	leadServer := NewServer(root, "test")
+	leadKey, err := leadServer.sessions.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatalf("mint lead key: %v", err)
+	}
+	childKey, err := leadServer.sessions.mint(root, roleDelegate, leadKey)
+	if err != nil {
+		t.Fatalf("mint delegate child key: %v", err)
+	}
+	if err := leadServer.sessions.setNote(childKey, "persisted note"); err != nil {
+		t.Fatalf("setNote: %v", err)
+	}
+
+	freshServer := NewServer(root, "test")
+	children, err := freshServer.sessions.children(leadKey, 1)
+	if err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	if len(children) != 1 || children[0].note != "persisted note" {
+		t.Fatalf("fresh-instance children = %#v, want single child with note %q", children, "persisted note")
+	}
+}
+
 func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

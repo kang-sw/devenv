@@ -288,6 +288,43 @@ Old runtimes that do not provide the command are not silently trusted. During
 the transition, the launcher either falls back to the existing bounded full
 validation path or repairs the runtime before writing a compatibility stamp.
 
+The advertised tool surface grows by ordinary manifest addition: for example
+`session.note` (see `#260619-session-key-lineage-children`) ships to both the
+`ws` launcher and the `runtime_capabilities.match: exact` wsflow surface, so
+adding one tool to `tools()` requires the matching `tools` entry in both
+`agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json` — an
+exact-match contract fails closed on any surface drift, not just missing
+entries.
+
+## Serve-Time Skill-Body Transclusion {#260724-serve-time-skill-body-transclusion}
+
+`printPlaybook` (the `playbook.print` MCP tool's implementation) has a
+code-side pragmatic-concatenation mechanism: after the normal
+render-plus-substitute pass, for specific serving playbook names it loads a
+second body straight from the skills tree via `wsrsrc.LoadSkillBody` and
+appends it, wrapped in a visible `<playbook name="..." title="...">` boundary
+(`wrapRenderedPlaybookForConcatenation`), rather than inlining that content
+into the rsrc source or duplicating it in prose. The append happens after
+`substitutePlaybookVars` runs on the primary body, because the appended
+skills-tree body is static prose with no `{{.` placeholders and must not trip
+the undeclared-var guard. Two call sites currently use this mechanism, gated
+differently:
+
+- `lead-workflow-manual` appends `lead-prefer-subagent` only when the global
+  `workflow.prefer_subagent` preference resolves to `on`.
+- `lead-goal-fan-out-step` (`#260724-goal-fan-out-step-transclusion` in
+  `workflow-skills.md`) appends `lead-goal-step` unconditionally — every
+  serve, no config-flag check — since the fan-out overlay's whole point is to
+  transclude goal-step's contract verbatim rather than restate it.
+
+The appended skills-tree body is read live off disk at serve time (not
+manifest-hash-verified, an accepted trade-off shared with the
+`lead-prefer-subagent` precedent): editing the source `SKILL.md` changes the
+next `playbook.print` response with no separate build or regen step, but also
+means `agents-plugin/skills/manifest.json`'s drift gate does not catch a
+content change here the way `agents-plugin/rsrc/manifest.json` catches drift
+in ordinary rsrc playbook bodies.
+
 ## Post-Compaction Session Restoration {#260626-post-compaction-session-restoration}
 
 Context compaction discards in-flight routing and implementation context from the
@@ -305,6 +342,11 @@ lead-only — a delegate/leaf-scoped key is rejected at the capability gate — 
 valid key is required, with a reserved sentinel (taught only in lead skill prose)
 gating the fresh-bootstrap render. After compaction the `lead-revive` skill recovers
 the surviving key from the summary and threads it into `ws.workflow_manual`.
+
+The same per-session record file backs every additive session-state field, so
+a `session.note` annotation (`#260619-session-key-lineage-children`) written
+onto a child's record persists across the same restart/compaction boundary as
+agenda and todos — no separate store, no separate restoration path.
 
 ## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 

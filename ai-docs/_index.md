@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.36.1`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.36.1`).
+Active plugin package: `agents-plugin/` (`ws@0.36.4`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.36.4`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -239,6 +239,14 @@ dropped tickets live in hidden archive dirs and git history.
   four session entry-point front doors (eight files — the wsflow copies are
   hand-curated, not mirrored). No dependency on other ready work; Windows `PATH`
   resolution and per-call cost are unverified and deferred to downstream dogfood.
+- `260724-feat-lead-fan-out-worktree` - **landed** (Phases 1-3), moved to `.done`.
+  `lead-goal-fan-out-step`, a batch-parallel `lead-goal-step` variant (mini-lead
+  worktree fan-out) + `session.note` per-child scratchpad. Phase 1 `session.note`
+  tool; Phase 2 entry skill + serve-time transclusion of the `lead-goal-step` body
+  under a visible `<playbook name="lead-goal-step">` boundary; Phase 3 wsflow
+  mirror. Plugin at 0.36.4. Deferred: the batch≥2 concurrent-mini-lead dry run, to
+  run once the new print surface reinstalls into a running server. Related dogfood:
+  `260725-research-goal-loop-restart-starved-by-background-delegation` (idea).
 - `260723-epic-ticket-write-reshape` (todo, epic) - coordinates the ticket-write
   reshape: verify-commit gate as mechanical floor, must-not-forget tool collapse,
   concept-doc consolidation. Board artifact, not an implementation target.
