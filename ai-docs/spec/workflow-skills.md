@@ -450,11 +450,18 @@ re-invokes this skill each turn until the queue is empty).
 {#260723-lead-goal-step-rename-reposition}
 
 Ticket selection is itself delegated, not done by the lead: the skill
-spawns a light-tier Explore-style subagent to list `ready/`, prefer a
-candidate named as a prerequisite in another ready ticket's
-`related:`/`parent:` frontmatter when that referenced ticket is also in
-`ready/`, otherwise default to the oldest date-prefix ticket (FIFO), and
-return exactly one ticket path (or report the queue empty). The lead never
+spawns a light-tier Explore-style subagent to list `ready/` and, among
+advanceable candidates, prefer in order: a ticket already in progress —
+one whose body has a `### Result` on at least one phase but still has a
+phase without one — over untouched tickets; then a candidate named as a
+prerequisite in another ready ticket's `related:`/`parent:` frontmatter
+when that referenced ticket is also in `ready/`; otherwise the oldest
+date-prefix ticket (FIFO). It returns exactly one ticket path (or reports
+the queue empty). The in-progress preference is a soft ordering tier, not
+a hard gate: one goal-step cycle advances a single phase, so a multi-phase
+ticket stays in `ready/` between cycles, and without this tier FIFO could
+bounce between started tickets each cycle and leave phases half-done.
+{#260725-goal-step-in-progress-ticket-affinity} The lead never
 lists `ready/` or reads ticket files itself for this step. If the
 subagent reports `ready/` empty, the lead stops with no handoff. This
 inspects only existing free-text `related:`/`parent:` annotations — no new
