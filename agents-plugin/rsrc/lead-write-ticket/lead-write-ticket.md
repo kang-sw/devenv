@@ -67,6 +67,7 @@ Movement
 
 1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
 2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)` and follow its returned next_instruction.
+3. `tickets.sage_stamp` writes the posture but does not commit: commit it with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`, carrying the posture change together with any other uncommitted edits already held on the ticket, under real `## AI Context`.
 
 ### 7. Handoff
 

@@ -182,6 +182,29 @@ output exists), so the swallow criterion does not force it; the recommendation i
 to align it anyway so one convention covers both sage tools, but if it is left
 committing, record why in the ticket.
 
+**Decision: `tickets.sage_gate`'s ask-decline path is left committing.**
+Alignment is deferred rather than done in this phase because it is not a
+same-shape mirror of the `sage_stamp` fix: `SageGateResult.Action == "skip"` is
+returned both for an ordinary skip (landing exempt, category exempt, posture
+already terminal — nothing to commit) and for an ask-decline (posture just
+written to `skipped` — a commit is pending). Today `CommitTitle != ""` is
+exactly the signal `sageGateNextInstruction` and `formatSageGate` use to tell
+these two "skip" cases apart and show the commit. Removing the field with no
+replacement, as this phase does for `sage_stamp`, would silently drop the
+lead's only signal that an ask-decline write still needs a caller commit —
+this requires a new, unspecified `next_instruction`/`SageGateResult` signaling
+mechanism that the ticket does not define, not a mechanical field removal. It
+would also churn roughly ten existing tests tied to the current
+committing behavior (`TestSageGateDeclinePersistsSkipped`, three decline
+branches inside `TestSageGateCombinedSeparateAsks`, and the dedicated
+`TestMergeGateCommitDualDecline`) with no design decision yet in hand for what
+replaces the dropped signal. The governing criterion for this ticket is the
+swallow, not family symmetry, and `sage_gate` does not swallow today — it runs
+before any reviewer output exists, so no review-response content is ever at
+risk of being folded into its ask-decline commit the way `sage_stamp`'s commit
+folded in unrelated ticket-body edits. Aligning `sage_gate` is left for a
+follow-up once the missing signaling mechanism is designed.
+
 Then update `lead-write-ticket`'s Sage Review Gate step with the one thing that is
 not derivable: **where the commit goes**. Add a commit after stamping, so the
 posture change and whatever the lead has uncommitted land together with real
