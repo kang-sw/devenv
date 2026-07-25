@@ -2,7 +2,7 @@
 title: "tickets.sage_stamp commits unrelated ticket edits under a stub review message"
 related:
   260723-feat-ticket-write-verify-commit-gate: introduced sage_stamp as the lead-only replacement for sage_record, including its canonical-title commit
-  260725-idea-ws-git-commit-rename-and-payload-rejections: blocking prerequisite — once sage_stamp stops committing, the caller commits the posture change through git.commit, which today fails whenever a status transition is staged
+  260725-idea-ws-git-commit-rename-and-payload-rejections: prior prerequisite, now landed (.done) — the git.commit fix for committing alongside a staged status transition exists in source, so this is no longer a blocker; only an un-reinstalled binary still needs the native-git fallback
   260721-bug-lead-write-ticket-sage-ready-ordering: edits the same Sage Review Gate step, and its open question about retrying tickets.move after sage_record commits the posture is invalidated by this ticket's decision
 sage-review-design: completed
 sage-review-completeness: completed
@@ -124,9 +124,11 @@ reviewer playbooks already deliver the disposition contract per issue via
 `resolution: autonomous|missing`, so a playbook step would restate it. See Phase
 1 for the full rationale and the decision not to add one.
 
-Compounding it, `260725-idea-ws-git-commit-rename-and-payload-rejections` means
-the caller often cannot pre-commit those edits through `ws/git.commit` anyway
-when a status transition is also staged.
+Compounding it historically, `260725-idea-ws-git-commit-rename-and-payload-rejections`
+meant the caller often could not pre-commit those edits through `ws/git.commit`
+when a status transition was also staged. That fix has since landed (`.done/`),
+so this is no longer a design blocker — only a plugin reinstall is still pending,
+with native `git` as the interim fallback for a staged status transition.
 
 ## Spec Impact
 
@@ -198,11 +200,13 @@ the originating session applied findings on every one of four stages with no suc
 instruction present. Accepting or rejecting a finding is the lead's authority and
 the reviewer doctrine already frames its output as advisory.
 
-**Depends on `260725-idea-ws-git-commit-rename-and-payload-rejections` Phase 1.**
-Once `sage_stamp` stops committing, the caller commits the posture change through
-`ws/git.commit` — which today fails whenever a status transition is also staged.
-Landing this first would replace a bad commit message with an uncommittable
-state.
+**Prerequisite `260725-idea-ws-git-commit-rename-and-payload-rejections` has
+landed (`.done/`).** Once `sage_stamp` stops committing, the caller commits the
+posture change through `ws/git.commit`; the fix that lets `git.commit` carry a
+staged status transition now exists in source, so this no longer risks an
+uncommittable state. The installed binary may still predate the fix until the
+plugin is reinstalled; until then use the native `git` commit fallback for a
+staged status transition, as elsewhere in this repo.
 
 Verification: `sage_stamp` produces no commit and leaves the working tree
 otherwise untouched (no staging); a subsequent `ws/git.commit` by the caller
