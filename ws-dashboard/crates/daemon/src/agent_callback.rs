@@ -138,6 +138,67 @@ pub fn write_bound_base_url(state_dir: &Path, base_url: &str) -> io::Result<()> 
     Ok(())
 }
 
+/// Per-terminal writer for `agent-profiles/<terminal_id>/callback.json`
+/// (260725 Phase 4): same atomic temp-rename shape as `write_bound_base_url`,
+/// but this file carries a REAL credential (`token`), so the temp file is
+/// created at `0600` directly (no chmod-after window - see that function's
+/// own forward-note CONTRACT above, which this writer is the one it warned
+/// about). `terminal_id` is a fresh random id per spawn (mirrors
+/// `agent_hook_config::materialize_hook_config`'s own reasoning for its
+/// unsuffixed `settings.json.tmp`), so the fixed temp name below never
+/// collides across concurrent writers and needs no `unique_temp_path`
+/// suffix.
+///
+/// Called twice over a terminal's lifetime: once at fresh spawn (fresh
+/// `base_url`, fresh `token`) and once more on boot-reconcile adopt, when a
+/// restart changes the daemon's bound port (fresh `base_url`, SAME `token` -
+/// see `terminal.rs`'s `reconcile_entry` adopt-arm CONTRACT on why the token
+/// is recoverable, unlike `profile_id`).
+pub fn write_callback_target(
+    profile_dir: &Path,
+    base_url: &str,
+    terminal_id: &str,
+    token: &str,
+) -> io::Result<()> {
+    fs::create_dir_all(profile_dir)?;
+    let path = callback_path(profile_dir);
+    let temp_path = path.with_extension("json.tmp");
+    let raw = serde_json::to_string_pretty(&CallbackTarget {
+        base_url: base_url.to_owned(),
+        terminal_id: Some(terminal_id.to_owned()),
+        token: Some(token.to_owned()),
+    })
+    .map_err(io::Error::other)?;
+    create_new_file_at_mode_0600(&temp_path, &raw)?;
+    fs::rename(&temp_path, &path)?;
+    Ok(())
+}
+
+// CONTRACT (deliberate local duplicate of
+// `agent_token_store::create_new_file_at_mode_0600` - mirrors this
+// codebase's existing precedent of small platform-gated helpers living
+// per-module rather than a shared utility crate, e.g.
+// `agent_hook_config::shell_quote`): creates `path` fresh at `0600` on Unix,
+// removing a stale leftover from a prior crashed write first so
+// `create_new` always succeeds against a namespaced-by-terminal-id path.
+#[cfg(unix)]
+fn create_new_file_at_mode_0600(path: &Path, data: &str) -> io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = fs::remove_file(path);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(data.as_bytes())
+}
+
+#[cfg(not(unix))]
+fn create_new_file_at_mode_0600(path: &Path, data: &str) -> io::Result<()> {
+    fs::write(path, data)
+}
+
 // FIX (review cycle 1, addendum finding I): produces a temp path unique per
 // writer (pid + a monotonic in-process counter + a timestamp), so concurrent
 // writers never truncate-then-write the same temp file before renaming. See
@@ -328,6 +389,60 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_callback_target_writes_a_resolvable_terminal_id_and_token_fixture() {
+        let dir = temp_dir("write-callback-target");
+        write_callback_target(&dir, "http://127.0.0.1:7777", "term_a", "secret-token")
+            .expect("write callback target");
+
+        let target = resolve_callback_target(&callback_path(&dir)).expect("resolve written file");
+        assert_eq!(target.base_url, "http://127.0.0.1:7777");
+        assert_eq!(target.terminal_id.as_deref(), Some("term_a"));
+        assert_eq!(target.token.as_deref(), Some("secret-token"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_callback_target_writes_at_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir("write-callback-target-mode");
+        write_callback_target(&dir, "http://127.0.0.1:8888", "term_a", "secret-token")
+            .expect("write callback target");
+
+        let mode = fs::metadata(callback_path(&dir))
+            .expect("callback.json metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // CONTRACT: `write_callback_target` is called a SECOND time over a
+    // terminal's lifetime on boot-reconcile adopt (fresh `base_url`, same
+    // token) - proves the second write overwrites cleanly rather than
+    // failing because a prior successful write already consumed (renamed
+    // away) the fixed temp path.
+    #[test]
+    fn write_callback_target_can_be_rewritten_with_a_fresh_base_url() {
+        let dir = temp_dir("rewrite");
+        write_callback_target(&dir, "http://127.0.0.1:1111", "term_a", "secret-token")
+            .expect("first write callback target");
+        write_callback_target(&dir, "http://127.0.0.1:2222", "term_a", "secret-token")
+            .expect("rewrite callback target after simulated restart");
+
+        let target = resolve_callback_target(&callback_path(&dir)).expect("resolve rewritten file");
+        assert_eq!(target.base_url, "http://127.0.0.1:2222");
+        assert_eq!(target.terminal_id.as_deref(), Some("term_a"));
+        assert_eq!(target.token.as_deref(), Some("secret-token"));
 
         let _ = fs::remove_dir_all(&dir);
     }
