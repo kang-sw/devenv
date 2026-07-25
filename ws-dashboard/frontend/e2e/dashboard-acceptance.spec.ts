@@ -31,6 +31,25 @@ import type { TerminalPortabilityEvidence } from "./terminalPortabilityEvidence.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const artifactsDir = path.join(here, ".artifacts");
 
+// CONTRACT (macOS Unix-domain-socket path-length ceiling - 260725): the
+// daemon binds the terminal helper's IPC socket at
+// `WS_DASHBOARD_STATE_HOME/terminals/<terminal_id>.sock`
+// (`crates/daemon/src/terminal.rs::default_registry_dir`), and
+// `sockaddr_un.sun_path` caps out at 104 bytes on macOS (108 on Linux).
+// macOS's `os.tmpdir()`/`$TMPDIR` resolves to a long per-session
+// `/var/folders/<hash>/T/` path that alone can consume most of that budget,
+// pushing the full socket path over the ceiling and failing
+// `IpcListener::bind` with a silent HTTP 400 from `create_terminal`. `/tmp`
+// (which macOS symlinks to the short `/private/tmp`) stays comfortably
+// under the limit. Mirrors the same scoped workaround already applied to
+// the Rust test fixtures (`crates/daemon/tests/terminal_lifetime.rs::temp_fixture_path`,
+// `crates/daemon/tests/routes.rs::terminal_registry_temp_dir`) - do not
+// widen this to Linux (no equivalent headroom problem) or to unrelated
+// fixture dirs that never feed a socket path.
+function socketSafeTempBase(): string {
+  return process.platform === "darwin" ? "/tmp" : os.tmpdir();
+}
+
 let daemon: DaemonHandle;
 let workRoot: string;
 let secondWorkRoot: string | null = null;
@@ -147,7 +166,7 @@ test.beforeAll(async () => {
   }
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
   if (!externalDaemon) {
-    stateHome = mkdtempSync(path.join(os.tmpdir(), "ws-dash-state-"));
+    stateHome = mkdtempSync(path.join(socketSafeTempBase(), "ws-dash-state-"));
     ownsStateHome = true;
     process.env.WS_DASHBOARD_STATE_HOME = stateHome;
   }
