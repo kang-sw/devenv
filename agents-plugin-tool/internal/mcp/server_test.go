@@ -1756,6 +1756,43 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 }
 
+// aiContextDebugEvents fetches runtime.debug_events (a process-wide ring
+// buffer shared by every test in this package's binary — see appendDebugEvent
+// in server.go) via a standalone ServeStdio call and returns every
+// "git.commit.ai_context_received" event currently in the buffer, in
+// insertion order. It is called both before and after the calls under test so
+// the test can diff the two snapshots instead of asserting an absolute count,
+// which would be polluted both by other tests' git.commit calls and by
+// repeated invocations of this same test under `go test -count=N` (all
+// sharing the one process-wide buffer).
+func aiContextDebugEvents(t *testing.T, server *Server, root string) []map[string]any {
+	t.Helper()
+	var out bytes.Buffer
+	input := `{"jsonrpc":"2.0","id":"debug","method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":256}}}`
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio debug_events returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 debug_events response, got %d\n%s", len(lines), out.String())
+	}
+	text := toolText(t, responseLinesByID(t, lines)["debug"])
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("parse debug event line %q: %v", line, err)
+		}
+		if event["event"] == "git.commit.ai_context_received" {
+			events = append(events, event)
+		}
+	}
+	return events
+}
+
 func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -1765,19 +1802,37 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	runGit(t, root, "commit", "-m", "initial")
 	mustWrite(t, root, "file.txt", "one\ntwo\n")
 
+	server := NewServer(root, "test")
+
+	// Snapshot the debug-event ring buffer before issuing any of this test's
+	// git.commit calls (see aiContextDebugEvents doc comment for why this is
+	// a diff, not an absolute-count, assertion).
+	before := aiContextDebugEvents(t, server, root)
+
+	largeAIContext := make([]string, 0, 60)
+	for i := 0; i < 60; i++ {
+		largeAIContext = append(largeAIContext, fmt.Sprintf("Entry %d: %s", i, strings.Repeat("context detail", 20)))
+	}
+	largeAIContextJSON, err := json.Marshal(largeAIContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	commitInput := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: empty ai_context array","ai_context":[]}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: absent ai_context field"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single empty-string entry","ai_context":[""]}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: single whitespace entry","ai_context":["  "]}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: large valid ai_context array","ai_context":%s}}}`, largeAIContextJSON),
 	}, "\n")
 
 	var out bytes.Buffer
-	server := NewServer(root, "test")
 	if err := serveStdioWithSession(t, server, root, commitInput, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -1789,65 +1844,88 @@ func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
 	if !strings.Contains(byID["2"], `"isError":true`) || !strings.Contains(absentFieldText, "no ai_context field was received") {
 		t.Fatalf("git.commit with absent ai_context field = %s", byID["2"])
 	}
+	emptyStringEntryText := toolText(t, byID["3"])
+	if !strings.Contains(byID["3"], `"isError":true`) || !strings.Contains(emptyStringEntryText, "received 1 entry, all blank") {
+		t.Fatalf("git.commit with [\"\"] ai_context = %s", byID["3"])
+	}
+	whitespaceEntryText := toolText(t, byID["4"])
+	if !strings.Contains(byID["4"], `"isError":true`) || !strings.Contains(whitespaceEntryText, "received 1 entry, all blank") {
+		t.Fatalf("git.commit with [\"  \"] ai_context = %s", byID["4"])
+	}
+	// [""] and ["  "] must classify identically ("all blank"), not one as
+	// "empty array" and the other as "all blank" — this is the condition the
+	// review finding flagged: stringList used to silently drop exact-empty
+	// entries before wsgit ever saw them.
+	if emptyStringEntryText != whitespaceEntryText {
+		t.Fatalf("[\"\"] and [\"  \"] ai_context reported different conditions:\n%q\nvs\n%q", emptyStringEntryText, whitespaceEntryText)
+	}
+	largeArrayResultText := toolText(t, byID["5"])
+	if strings.Contains(byID["5"], `"isError":true`) {
+		t.Fatalf("git.commit with a large valid ai_context array was rejected: %s", byID["5"])
+	}
+	if !strings.Contains(largeArrayResultText, "commit: ") {
+		t.Fatalf("git.commit with a large valid ai_context array = %s", largeArrayResultText)
+	}
 
-	// Issue runtime.debug_events as a separate ServeStdio call: within a
-	// single call, tools/call requests are dispatched as concurrent
-	// goroutines (see ServeStdio's per-line `go func` in server.go), so
-	// nothing guarantees the git.commit calls above have appended their
-	// debug events before a same-batch debug_events call runs. A fresh call
-	// only starts after serveStdioWithSession above has returned, which
-	// itself only returns after wg.Wait() drains every goroutine from the
-	// first batch.
-	out.Reset()
-	debugEventsInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":256}}}`
-	if err := serveStdioWithSession(t, server, root, debugEventsInput, &out); err != nil {
-		t.Fatalf("ServeStdio debug_events returned error: %v", err)
+	after := aiContextDebugEvents(t, server, root)
+	if len(after) != len(before)+5 {
+		t.Fatalf("expected 5 new git.commit.ai_context_received events, got %d before and %d after", len(before), len(after))
 	}
-	debugLines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(debugLines) != 1 {
-		t.Fatalf("expected 1 debug_events response, got %d\n%s", len(debugLines), out.String())
-	}
-	debugByID := responseLinesByID(t, debugLines)
+	newEvents := after[len(before):]
 
-	debugEventsText := toolText(t, debugByID["3"])
-	// debugEvents is a process-wide ring buffer (see appendDebugEvent in
-	// server.go), shared across every test in this package's binary, and
-	// other tests also exercise git.commit with real, non-blank ai_context
-	// (post_trim_entry_count > 0). Filter on post_trim_entry_count == 0,
-	// which only this test's two deliberately-empty/absent calls produce,
-	// so unrelated git.commit events from other tests in the same process
-	// cannot be mistaken for these two.
-	var aiContextEvents []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(debugEventsText), "\n") {
-		var event map[string]any
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			t.Fatalf("parse debug event line %q: %v", line, err)
-		}
-		if event["event"] == "git.commit.ai_context_received" && event["post_trim_entry_count"] == float64(0) {
-			aiContextEvents = append(aiContextEvents, event)
-		}
-	}
-	if len(aiContextEvents) != 2 {
-		t.Fatalf("expected 2 git.commit.ai_context_received events with post_trim_entry_count=0, got %d: %s", len(aiContextEvents), debugEventsText)
-	}
-	// The two git.commit calls above run as concurrent goroutines (see the
-	// comment above), so their completion order — and thus their append
-	// order into the debug-event ring buffer — is not guaranteed. Match by
-	// the "present" field instead of assuming array position.
-	var emptyArrayEvent, absentFieldEvent map[string]any
-	for _, event := range aiContextEvents {
-		switch event["present"] {
-		case true:
-			emptyArrayEvent = event
-		case false:
+	// The five git.commit calls above run as concurrent goroutines (see
+	// ServeStdio's per-line `go func` in server.go), so their completion
+	// order — and thus their append order into the ring buffer — is not
+	// guaranteed. Classify the five new events by their own field values
+	// instead of assuming array position.
+	var emptyArrayEvent, absentFieldEvent, largeArrayEvent map[string]any
+	var blankEntryEvents []map[string]any
+	for _, event := range newEvents {
+		switch {
+		case event["present"] == false:
 			absentFieldEvent = event
+		case event["raw_entry_count"] == float64(0):
+			emptyArrayEvent = event
+		case event["raw_entry_count"] == float64(1) && event["post_trim_entry_count"] == float64(0):
+			blankEntryEvents = append(blankEntryEvents, event)
+		case event["raw_entry_count"] == float64(60):
+			largeArrayEvent = event
 		}
 	}
-	if emptyArrayEvent == nil || emptyArrayEvent["raw_entry_count"] != float64(0) || emptyArrayEvent["raw_bytes"] != float64(0) || emptyArrayEvent["post_trim_entry_count"] != float64(0) {
+	if emptyArrayEvent == nil || emptyArrayEvent["present"] != true || emptyArrayEvent["raw_bytes"] != float64(0) || emptyArrayEvent["post_trim_entry_count"] != float64(0) {
 		t.Fatalf("empty-array debug event = %#v", emptyArrayEvent)
 	}
 	if absentFieldEvent == nil || absentFieldEvent["raw_entry_count"] != float64(-1) || absentFieldEvent["raw_bytes"] != float64(0) || absentFieldEvent["post_trim_entry_count"] != float64(0) {
 		t.Fatalf("absent-field debug event = %#v", absentFieldEvent)
+	}
+	// One blank-entry event from [""] (raw_bytes 0) and one from ["  "]
+	// (raw_bytes 2); both must report post_trim_entry_count 0 — this is the
+	// field-accuracy fix: a naive non-empty-string count would have reported
+	// 1 here instead of 0.
+	if len(blankEntryEvents) != 2 {
+		t.Fatalf("expected 2 blank-entry debug events ([\"\"] and [\"  \"]), got %d: %#v", len(blankEntryEvents), blankEntryEvents)
+	}
+	sawEmptyStringBytes, sawWhitespaceBytes := false, false
+	for _, event := range blankEntryEvents {
+		if event["present"] != true {
+			t.Fatalf("blank-entry debug event missing present=true: %#v", event)
+		}
+		switch event["raw_bytes"] {
+		case float64(0):
+			sawEmptyStringBytes = true
+		case float64(2):
+			sawWhitespaceBytes = true
+		}
+	}
+	if !sawEmptyStringBytes || !sawWhitespaceBytes {
+		t.Fatalf("blank-entry debug events missing expected raw_bytes (0 for [\"\"], 2 for [\"  \"]): %#v", blankEntryEvents)
+	}
+	if largeArrayEvent == nil || largeArrayEvent["present"] != true || largeArrayEvent["post_trim_entry_count"] != float64(60) {
+		rawBytes, _ := largeArrayEvent["raw_bytes"].(float64)
+		t.Fatalf("large-array debug event = %#v (raw_bytes=%v)", largeArrayEvent, rawBytes)
+	}
+	if rawBytes, _ := largeArrayEvent["raw_bytes"].(float64); rawBytes < 5000 {
+		t.Fatalf("large-array debug event raw_bytes too small: %v", rawBytes)
 	}
 }
 

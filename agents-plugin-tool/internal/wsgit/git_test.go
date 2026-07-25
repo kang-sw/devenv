@@ -525,6 +525,18 @@ func TestCommitRequiresAIContextAndRelativePaths(t *testing.T) {
 			t.Fatalf("normalize error = %v, want all-blank condition", err)
 		}
 	})
+	// A present array whose sole entry is the exact empty string must report
+	// the same "all blank" condition as a whitespace-only entry, not get
+	// mistaken for a present-but-empty array — wsgit itself already gets
+	// this right off the raw, untrimmed AIContext slice; this pins it so a
+	// caller upstream (e.g. the MCP server layer) cannot silently regress it
+	// by pre-filtering "" entries before wsgit ever sees them.
+	t.Run("single empty-string entry classifies as all blank, not empty array", func(t *testing.T) {
+		_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x", AIContext: []string{""}})
+		if err == nil || !strings.Contains(err.Error(), "received 1 entry, all blank") {
+			t.Fatalf("normalize error = %v, want all-blank condition for a single empty-string entry", err)
+		}
+	})
 	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}})
 	if err == nil || !strings.Contains(err.Error(), "inside the repository") {
 		t.Fatalf("normalize error = %v, want repository boundary", err)
