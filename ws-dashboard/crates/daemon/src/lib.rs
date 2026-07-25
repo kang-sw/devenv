@@ -1,3 +1,4 @@
+pub mod agent_attention;
 pub mod agent_callback;
 pub mod agent_env_profile;
 pub mod agent_hook_config;

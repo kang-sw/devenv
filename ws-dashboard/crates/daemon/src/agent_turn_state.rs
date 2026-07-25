@@ -15,9 +15,16 @@
 // token check, is what keeps that ordering handler-controlled instead of
 // framework-controlled. See `terminal.rs::TerminalTurnStateRequest`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+// CONTRACT (260725 Phase 5): `Serialize` added so `agent_attention.rs` can
+// reuse this exact three-state vocabulary for the attention broadcast/
+// snapshot wire shape instead of introducing a parallel enum - see that
+// module's own CONTRACT. The `#[serde(rename_all = "lowercase")]` shape is
+// unchanged, so the outbound JSON string values (`"working"`/`"ready"`/
+// `"idle"`) are byte-for-byte the same strings `parse_turn_state` already
+// accepts inbound.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum TurnState {
     Working,
@@ -78,6 +85,29 @@ mod tests {
         assert_eq!(parse_turn_state("not-a-real-state"), None);
         assert_eq!(parse_turn_state(""), None);
         assert_eq!(parse_turn_state("Working"), None, "case-sensitive, not title-case");
+    }
+
+    // CONTRACT (260725 Phase 5): `Serialize` is new on this enum this phase -
+    // this round-trips every variant through `serde_json` and asserts the
+    // OUTBOUND string matches the exact INBOUND string `parse_turn_state`
+    // accepts, so the wire vocabulary the attention broadcast/snapshot emits
+    // can never silently drift from the vocabulary the turn-state callback
+    // route parses.
+    #[test]
+    fn turn_state_serializes_to_the_same_lowercase_strings_parse_turn_state_accepts() {
+        for (state, expected) in [
+            (TurnState::Working, "working"),
+            (TurnState::Ready, "ready"),
+            (TurnState::Idle, "idle"),
+        ] {
+            let json = serde_json::to_string(&state).expect("serialize TurnState");
+            assert_eq!(json, format!("\"{expected}\""));
+            assert_eq!(
+                parse_turn_state(expected),
+                Some(state),
+                "the string this enum serializes to must round-trip back through parse_turn_state"
+            );
+        }
     }
 
     #[test]

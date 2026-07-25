@@ -221,13 +221,18 @@ fn app_state_with_opened_and_store(
     opened_work_roots: OpenedWorkRoots,
     dashboard_state: DashboardStateStore,
 ) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        // CONTRACT (260725 Phase 5): must be `terminals.attention()`, a clone
+        // of the SAME hub `terminals` holds - see
+        // `TerminalRegistry::attention`'s CONTRACT.
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -240,6 +245,7 @@ fn app_state_with_opened_and_store(
 }
 
 fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig {
             static_dir: Some(static_dir),
@@ -249,7 +255,8 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -469,13 +476,15 @@ async fn invalid_missing_and_reused_pairing_tokens_do_not_install_sessions() {
 #[tokio::test]
 async fn expired_pairing_tokens_do_not_install_sessions() {
     // CONTRACT: A zero TTL is the deterministic expired-token fixture.
+    let expired_terminals = test_terminal_registry();
     let expired_state = AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        attention: expired_terminals.attention(),
+        terminals: expired_terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -6018,6 +6027,7 @@ async fn linked_server_git_and_worktree_forwarding_rewrites_resources_to_server_
         remote_server,
         remote_root,
         state_file_root,
+        ..
     } = fixture;
 
     // Read forwarding: git status through the linked server returns the remote
@@ -6198,6 +6208,13 @@ struct LinkedRemoteGitFixture {
     remote_server: tokio::task::JoinHandle<()>,
     remote_root: PathBuf,
     state_file_root: PathBuf,
+    // CONTRACT (260725 Phase 5): added for the attention server-scoping
+    // test, which needs to drive the remote daemon's OWN routes directly
+    // (create a terminal, POST its turn-state) rather than only through
+    // `local_app`'s forwarding - see `link_and_open_remote_root_at`'s own
+    // CONTRACT comment.
+    remote_app: axum::Router,
+    remote_state_dir: PathBuf,
 }
 
 async fn link_and_open_remote_git_root(tag: &str) -> LinkedRemoteGitFixture {
@@ -6217,17 +6234,30 @@ async fn link_and_open_remote_git_root_plain(tag: &str) -> LinkedRemoteGitFixtur
 }
 
 async fn link_and_open_remote_root_at(tag: &str, remote_root: PathBuf) -> LinkedRemoteGitFixture {
-    let remote_state = app_state_with_opened_and_store(
-        OpenedWorkRoots::default(),
-        DashboardStateStore::disabled(),
-    );
+    // CONTRACT (260725 Phase 5, attention server-scoping test): unlike the
+    // default `app_state_with_opened_and_store` this fixture used before,
+    // this pairs the remote's `TerminalRegistry` with the `state_dir` it was
+    // constructed against - `260725-attention-server-scoping` needs to read
+    // the REMOTE daemon's own callback-token file directly, the same way
+    // `read_callback_token_from_disk` already does for the local daemon in
+    // the turn-state tests.
+    let (remote_terminal_registry, remote_state_dir) = test_terminal_registry_with_state_dir();
+    let remote_state = app_state_with_terminal_registry(remote_terminal_registry);
     let passphrase = remote_state
         .auth
         .link_passphrase()
         .expose_for_owner_record()
         .to_owned();
     let remote_app = build_router(remote_state);
-    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+    // CONTRACT: kept alongside the spawned TCP server, not instead of it -
+    // `spawn_test_server`'s real network round trip is what the FORWARDING
+    // path (`local_app` -> linked server) actually exercises, while this
+    // clone lets a test drive the remote daemon's own routes directly
+    // in-process (no network hop) to set up state ON the remote without
+    // going through forwarding at all. Both share the same underlying
+    // `AppState` (Router::clone is a cheap Arc-style clone), so a write
+    // through either is visible through the other.
+    let (remote_addr, remote_server) = spawn_test_server(remote_app.clone()).await;
 
     let state_file_root = temp_fixture_path(&format!("linked-remote-{tag}-state"));
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
@@ -6309,6 +6339,8 @@ async fn link_and_open_remote_root_at(tag: &str, remote_root: PathBuf) -> Linked
         remote_server,
         remote_root,
         state_file_root,
+        remote_app,
+        remote_state_dir,
     }
 }
 
@@ -8267,13 +8299,15 @@ fn app_state_with_activity_cache_and_codex_home(
     cache_home: PathBuf,
     codex_home: Option<PathBuf>,
 ) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         document_events: DocumentEventHub::default(),
@@ -14029,6 +14063,7 @@ async fn daemon_security_smoke_covers_auth_and_health_boundary() {
 }
 
 fn app_state_with_translation_provider(base_url: String, default_model: Option<&str>) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
@@ -14042,7 +14077,8 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
             default_model: default_model.map(str::to_owned),
             timeout_ms: 5_000,
         })),
-        terminals: test_terminal_registry(),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -15816,6 +15852,14 @@ async fn work_root_activity_route_merges_claude_session_into_items() {
 
 fn app_state_with_terminal_registry(registry: TerminalRegistry) -> AppState {
     let mut state = app_state();
+    // CONTRACT (260725 Phase 5): `attention` must be re-pointed at the
+    // INCOMING registry's hub, not left aimed at `app_state()`'s own
+    // (now-discarded) registry - otherwise a turn-state POST against this
+    // `registry` would publish into a hub these tests' SSE requests (built
+    // against this same `state`) never read from, and this registry's own
+    // `remove`/`remove_for_work_roots` would forget entries in a hub nobody
+    // else observes either.
+    state.attention = registry.attention();
     state.terminals = registry;
     state
 }
@@ -16063,4 +16107,426 @@ async fn turn_state_route_rejects_an_invalid_state_value_only_after_a_valid_toke
 
     remove_static_fixture(&root);
     let _ = fs::remove_dir_all(&state_dir);
+}
+
+// ---------------------------------------------------------------------------
+// 260725 Phase 5: server-scoped attention event stream
+// (`agent_attention.rs::attention_events` / `servers.rs::
+// server_scoped_attention_events`). Builds on the Phase 4 turn-state route
+// tests above for terminal/token setup.
+// ---------------------------------------------------------------------------
+
+struct AttentionSseFrame {
+    event: String,
+    data: serde_json::Value,
+}
+
+fn drain_attention_sse_frames(buffer: &mut String, frames: &mut Vec<AttentionSseFrame>) {
+    while let Some(boundary) = buffer.find("\n\n") {
+        let frame = buffer[..boundary].to_owned();
+        *buffer = buffer[(boundary + 2)..].to_owned();
+        let event = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("event: "))
+            .expect("attention SSE frame event field")
+            .to_owned();
+        let data = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("attention SSE frame data field");
+        frames.push(AttentionSseFrame {
+            event,
+            data: serde_json::from_str(data).expect("attention SSE frame data JSON"),
+        });
+    }
+}
+
+// CONTRACT (ticket verification line (a)): a state transition for a
+// NON-selected work root must reach the client with NO Activity Console
+// pane/request open for it at all - this test never touches any
+// `.../activity` route.
+#[tokio::test]
+async fn attention_events_local_stream_delivers_a_transition_with_no_activity_console_pane_open() {
+    let root = temp_fixture_path("attention-local-scoping");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    // Stream opened BEFORE the turn-state POST, so the transition below must
+    // arrive as a live `event: attention` frame, not merely be visible via
+    // the reconnect snapshot (that path has its own dedicated test below).
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("attention events request"),
+        )
+        .await
+        .expect("attention events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    assert_eq!(
+        events
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("text/event-stream")),
+        Some(true)
+    );
+    let mut stream = events.into_body().into_data_stream();
+
+    let status = turn_state_request(app, &terminal_id, &terminal_token, "ready").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let mut buffer = String::new();
+    let mut frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while !frames.iter().any(|frame: &AttentionSseFrame| {
+            frame.event == "attention" && frame.data["terminalId"] == terminal_id
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("attention SSE chunk before timeout")
+                .expect("attention SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("attention SSE UTF-8"));
+            drain_attention_sse_frames(&mut buffer, &mut frames);
+        }
+    })
+    .await
+    .expect("attention transition event for the non-selected work root's terminal");
+
+    let event = frames
+        .iter()
+        .find(|frame| frame.event == "attention" && frame.data["terminalId"] == terminal_id)
+        .expect("attention event for the transitioned terminal");
+    assert_eq!(event.data["state"], "ready");
+    assert_eq!(event.data["workRootId"], work_root_id);
+    assert_eq!(event.data["type"], "terminal.attentionChanged");
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (ticket verification line (b)): a reconnect (a NEW connection,
+// simulating a browser refresh) must receive any pending state via the
+// snapshot, since a `broadcast` channel alone has no history for a
+// connection that was never open when the event fired.
+#[tokio::test]
+async fn attention_events_reconnect_receives_pending_state_via_the_snapshot() {
+    let root = temp_fixture_path("attention-reconnect-snapshot");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    // Record a pending transition with NO stream ever open yet - simulating
+    // a state change that happened before the browser tab (re)loaded.
+    let status = turn_state_request(app.clone(), &terminal_id, &terminal_token, "working").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A FRESH connection - never the one that would have seen a live event,
+    // since none was ever opened - simulating the browser refresh/reconnect.
+    let events = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("attention reconnect request"),
+        )
+        .await
+        .expect("attention reconnect response");
+    assert_eq!(events.status(), StatusCode::OK);
+    let mut stream = events.into_body().into_data_stream();
+
+    let mut buffer = String::new();
+    let mut frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while frames.is_empty() {
+            let chunk = stream
+                .next()
+                .await
+                .expect("attention snapshot chunk before timeout")
+                .expect("attention snapshot body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("attention snapshot UTF-8"));
+            drain_attention_sse_frames(&mut buffer, &mut frames);
+        }
+    })
+    .await
+    .expect("attention snapshot frame");
+
+    assert_eq!(
+        frames[0].event, "attentionSnapshot",
+        "the very first frame on a fresh connection must be the snapshot, not a live event"
+    );
+    let items = frames[0].data["items"]
+        .as_array()
+        .expect("attention snapshot items array");
+    let item = items
+        .iter()
+        .find(|item| item["terminalId"] == terminal_id)
+        .expect("the pending terminal must appear in the reconnect snapshot");
+    assert_eq!(item["state"], "working");
+    assert_eq!(item["workRootId"], work_root_id);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (design question 3's concrete answer, plan step 5): a lagged
+// receiver must END the stream rather than silently skip forward - the
+// deliberate divergence from `document_events`'s `continue`. This is the
+// guard the lag-path mutation experiment targets: reverting the `Lagged`
+// arm to `continue` (matching `document_events`) makes this test fail.
+#[tokio::test]
+async fn attention_events_ends_the_stream_on_a_lagged_receiver() {
+    let root = temp_fixture_path("attention-lag-guard");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("attention events request"),
+        )
+        .await
+        .expect("attention events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    let mut stream = events.into_body().into_data_stream();
+
+    // Consume exactly the initial snapshot frame. The subscriber's broadcast
+    // receiver has NOT yet called `recv()` at this point - `initial`
+    // resolves without touching `rx` at all (see `attention_events`'s own
+    // CONTRACT comment).
+    let snapshot_chunk = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("attention snapshot chunk before timeout")
+        .expect("attention snapshot stream item")
+        .expect("attention snapshot body chunk");
+    assert!(
+        std::str::from_utf8(&snapshot_chunk)
+            .expect("attention snapshot UTF-8")
+            .contains("event: attentionSnapshot"),
+        "first chunk must be the snapshot frame, before this receiver's first recv()"
+    );
+
+    // Flood the broadcast channel (capacity 64, `AttentionHub::default`)
+    // with MORE transitions than its capacity, WITHOUT the stream ever
+    // reading any of them - the subscriber falls behind by more than
+    // capacity, so its first real `recv()` (triggered by the poll below)
+    // must observe `RecvError::Lagged`.
+    for index in 0..80u32 {
+        let state = if index % 2 == 0 { "working" } else { "ready" };
+        let status = turn_state_request(app.clone(), &terminal_id, &terminal_token, state).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    let after_lag = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("attention stream poll after flooding must not hang");
+    assert!(
+        after_lag.is_none(),
+        "a lagged receiver must end the SSE stream, not silently skip forward or keep serving \
+         a full backlog: got {after_lag:?}"
+    );
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (MANDATORY per plan/ticket): proves server-scoping is REAL, not
+// accidental - modeled directly on
+// `linked_server_activity_events_forwarding_preserves_sse` above. The
+// POSITIVE half (forwarding relays the remote's own state) is equally true
+// of a correct per-server design AND of a single global hub; only the
+// NEGATIVE half (the LOCAL stream never sees the remote terminal's entry)
+// tells them apart - the ticket records that an earlier "dashboard-scope"
+// draft would have silently merged every linked server's attention state
+// into one hub, dropping remote-agent identity. Both halves live in this
+// ONE test so they always run against the exact same recorded transition.
+#[tokio::test]
+async fn linked_server_attention_events_are_scoped_per_server_not_globally_shared() {
+    let fixture = link_and_open_remote_git_root_plain("attention-scoping").await;
+    let LinkedRemoteGitFixture {
+        local_app,
+        cookie,
+        work_root_id,
+        remote_server,
+        remote_root,
+        state_file_root,
+        remote_app,
+        remote_state_dir,
+        ..
+    } = fixture;
+
+    // Create the terminal ON THE REMOTE through the LOCAL app's existing
+    // server-scoped forwarding path - already proven by
+    // `linked_server_activity_events_forwarding_preserves_sse` et al, so this
+    // test's own subject stays the ATTENTION stream's scoping, not terminal-
+    // creation forwarding.
+    let create = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "columns": 80,
+                        "rows": 24,
+                        "title": "Attention scoping test terminal",
+                        "profileId": "claude",
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped create terminal request"),
+        )
+        .await
+        .expect("server scoped create terminal response");
+    assert_eq!(create.status(), StatusCode::OK);
+    let create_body = axum::body::to_bytes(create.into_body(), 4096)
+        .await
+        .expect("server scoped create terminal body");
+    let create_value: serde_json::Value =
+        serde_json::from_slice(&create_body).expect("server scoped create terminal JSON");
+    let terminal_id = create_value["terminalId"]
+        .as_str()
+        .expect("remote terminal id")
+        .to_owned();
+    let terminal_token = read_callback_token_from_disk(&remote_state_dir, &terminal_id);
+
+    // POST the turn-state DIRECTLY to the REMOTE daemon's OWN route - not
+    // through `local_app`'s forwarding - so the state asserted on below was
+    // genuinely recorded by the remote daemon's own `AttentionHub`.
+    let turn_state_status =
+        turn_state_request(remote_app, &terminal_id, &terminal_token, "working").await;
+    assert_eq!(turn_state_status, StatusCode::NO_CONTENT);
+
+    // (1) POSITIVE: the forwarded server-scoped stream must carry the remote
+    // terminal's pending state in its snapshot - proves forwarding actually
+    // relays the real remote daemon's state end-to-end, not a mocked
+    // shortcut.
+    let forwarded = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("forwarded attention events request"),
+        )
+        .await
+        .expect("forwarded attention events response");
+    assert_eq!(forwarded.status(), StatusCode::OK);
+    let mut forwarded_stream = forwarded.into_body().into_data_stream();
+    let mut forwarded_buffer = String::new();
+    let mut forwarded_frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while forwarded_frames.is_empty() {
+            let chunk = forwarded_stream
+                .next()
+                .await
+                .expect("forwarded attention snapshot chunk before timeout")
+                .expect("forwarded attention snapshot body chunk");
+            forwarded_buffer
+                .push_str(std::str::from_utf8(&chunk).expect("forwarded attention SSE UTF-8"));
+            drain_attention_sse_frames(&mut forwarded_buffer, &mut forwarded_frames);
+        }
+    })
+    .await
+    .expect("forwarded attention snapshot frame");
+    assert_eq!(forwarded_frames[0].event, "attentionSnapshot");
+    let forwarded_items = forwarded_frames[0].data["items"]
+        .as_array()
+        .expect("forwarded attention snapshot items array");
+    assert!(
+        forwarded_items
+            .iter()
+            .any(|item| item["terminalId"] == terminal_id && item["state"] == "working"),
+        "the forwarded server-scoped stream must carry the remote terminal's pending state \
+         through the real forward path: {forwarded_items:?}"
+    );
+
+    // (2) NEGATIVE - the load-bearing half: the LOCAL, non-forwarded stream
+    // must NOT see the remote terminal's entry. A single dashboard-global
+    // hub would pass assertion (1) above just as easily as a correct
+    // per-server design; only this half distinguishes them.
+    let local = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("local attention events request"),
+        )
+        .await
+        .expect("local attention events response");
+    assert_eq!(local.status(), StatusCode::OK);
+    let mut local_stream = local.into_body().into_data_stream();
+    let mut local_buffer = String::new();
+    let mut local_frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while local_frames.is_empty() {
+            let chunk = local_stream
+                .next()
+                .await
+                .expect("local attention snapshot chunk before timeout")
+                .expect("local attention snapshot body chunk");
+            local_buffer.push_str(std::str::from_utf8(&chunk).expect("local attention SSE UTF-8"));
+            drain_attention_sse_frames(&mut local_buffer, &mut local_frames);
+        }
+    })
+    .await
+    .expect("local attention snapshot frame");
+    assert_eq!(local_frames[0].event, "attentionSnapshot");
+    let local_items = local_frames[0].data["items"]
+        .as_array()
+        .expect("local attention snapshot items array");
+    assert!(
+        !local_items
+            .iter()
+            .any(|item| item["terminalId"] == terminal_id),
+        "the LOCAL stream must never see the remote terminal's attention entry - a shared/global \
+         hub would leak it here even though forwarding assertion (1) above also passes: \
+         {local_items:?}"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
 }

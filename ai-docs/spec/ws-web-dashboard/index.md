@@ -2225,7 +2225,7 @@ session after inline `Yes`/`No` confirmation near the close action. Cancel
 leaves the terminal open and focus coherent; confirm preserves the
 close-as-terminate behavior. Hidden detached restore UX remains absent.
 
-## 🚧 Terminal Attention Event Stream {#260726-dashboard-terminal-attention-event-stream}
+## Terminal Attention Event Stream {#260726-dashboard-terminal-attention-event-stream}
 
 The daemon exposes a server-wide, work-root-independent SSE stream of
 per-terminal turn-state ("attention") transitions, so the browser can learn
