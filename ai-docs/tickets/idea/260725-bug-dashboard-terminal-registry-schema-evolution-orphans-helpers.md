@@ -17,7 +17,7 @@ registry design and affects any future field addition.
 
 `TerminalRegistryEntry` (`ws-dashboard/crates/daemon/src/terminal_registry_file.rs:14-27`)
 carries no `version` field and no `#[serde(default)]` on any field.
-`scan_registry_dir` (same file, L98-110) reads each `<terminal_id>.json`, and
+`scan_registry_dir` (same file, L77) reads each `<terminal_id>.json`, and
 on a deserialization failure logs `"skipping malformed terminal registry entry"`
 at `warn` and continues.
 

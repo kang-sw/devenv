@@ -387,7 +387,7 @@ slot for auth material at all, so "persist the token" is only half the change.
 REGISTRY SCHEMA CONSTRAINT (applies to the argv/env passthrough refactor too,
 not just to tokens). `TerminalRegistryEntry` has no `version` field and no
 `#[serde(default)]` on anything, and `scan_registry_dir`
-(`terminal_registry_file.rs:98-110`) warns-and-SKIPS an entry it cannot
+(`terminal_registry_file.rs:77`) warns-and-SKIPS an entry it cannot
 deserialize. Because helpers are detached and outlive daemon upgrades by
 design, adding a non-`Option` field makes every still-running older helper's
 entry invisible to the upgraded daemon — which means boot reconcile never sees
