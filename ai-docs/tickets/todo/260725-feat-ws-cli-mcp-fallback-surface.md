@@ -7,6 +7,7 @@ related:
   260630-epic-skill-playbook-diet: front-door token budget constraint on the entry-point pointer line
   260513-feat-runtime-binary-staging-copy: adjacent runtime-binary placement work; this ticket deliberately does not stage a binary into bin/
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # ws-cli — MCP-independent CLI fallback surface for Windows disconnects
