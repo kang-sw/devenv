@@ -4562,9 +4562,21 @@ function WorkbenchShell({
           for (const intent of restoreIntents) {
             onCommand(buildTerminalCreateCommand(rootId, serverRoute), {
               "terminal.create": () =>
+                // CONTRACT (review cycle 1, finding C2): forward the
+                // persisted intent's `profileId` so a restore-intent
+                // respawn (fires when the daemon lost the live helper -
+                // e.g. a restart - but the browser still remembers the
+                // tab) recreates the SAME kind of terminal that was
+                // closed, rather than silently downgrading an agent
+                // terminal to a plain default shell under its unchanged
+                // title. `createTerminalPane` already forwards `profileId`
+                // to `createTerminal` unconditionally (see
+                // `createAgentTerminalPane` above), so an absent/`null`
+                // intent profile keeps today's shell-respawn behavior.
                 createTerminalPane({
                   title: intent.title,
                   cwdHint: intent.cwdHint,
+                  profileId: intent.profileId ?? undefined,
                 }),
             });
           }

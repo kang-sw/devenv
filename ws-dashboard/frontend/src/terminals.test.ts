@@ -933,6 +933,49 @@ assertDeepEqual(
   "malformed restore storage degrades to empty",
 );
 
+// CONTRACT (review cycle 1, finding C2): a restore intent captured from a
+// profiled (agent) terminal pane must carry `profileId` through the same
+// pane -> intent -> storage -> intent round trip the plain-shell case above
+// already covers, so a browser-side restore-intent respawn recreates the
+// SAME kind of terminal rather than silently downgrading it to a plain
+// shell (see `App.tsx`'s restore-intent `useEffect`).
+const agentPane = terminalPaneFromSession({
+  ...session,
+  terminalId: "term_agent",
+  title: "Agent",
+  profileId: "claude",
+});
+const agentRestoreIntents = terminalRestoreIntentsFromPanes([agentPane], 123);
+assertEqual(
+  agentRestoreIntents[0].profileId,
+  "claude",
+  "restore intents capture the pane's profileId",
+);
+const agentStorage = {
+  getItem: (key: string) => fakeStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    fakeStorage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    fakeStorage.delete(key);
+  },
+};
+saveTerminalRestoreIntents(agentRestoreIntents, agentStorage);
+assertEqual(
+  loadTerminalRestoreIntents(agentStorage)[0]?.profileId,
+  "claude",
+  "profileId round-trips through restore-intent storage",
+);
+saveTerminalRestoreIntents(
+  terminalRestoreIntentsFromPanes([pane], 123),
+  agentStorage,
+);
+assertEqual(
+  loadTerminalRestoreIntents(agentStorage)[0]?.profileId,
+  null,
+  "an absent profileId still round-trips to null (unchanged shell-terminal behavior)",
+);
+
 assertDeepEqual(
   validateTerminalSize(100, 30),
   { columns: 100, rows: 30 },

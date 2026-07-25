@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
-import { workRootTerminalsEndpoint } from "../src/terminals.js";
+import { terminalCloseEndpoint, workRootTerminalsEndpoint } from "../src/terminals.js";
 
 // Browser-level acceptance gate for the 260725 Phase 2 browser-facing agent
 // spawn profile path (`ai-docs/.plans/2026-07/26-0130-260725-pty-agent-browser-spawn-profile.md`).
@@ -41,6 +41,39 @@ import { workRootTerminalsEndpoint } from "../src/terminals.js";
 //      only that the browser-visible dispatch and pane provenance are
 //      correct, so this suite has no dependency on a vendor binary,
 //      credentials, or network (per the ticket's hard constraint).
+//   4. (review cycle 1, finding C2) A daemon-side session loss (simulated
+//      via a direct DELETE that bypasses the browser's own close-tab flow,
+//      leaving the browser's persisted `TerminalRestoreIntent` stale)
+//      followed by a reload respawns the terminal through the SAME
+//      resolved profile (`profileId: "claude"`), not a silent downgrade to
+//      the default shell under an unchanged title - see the
+//      "restore-intent respawn preserves profileId..." step below. Reuses
+//      this test's own single authenticated `page` rather than a second
+//      `test()` block: the daemon's owner-pairing URL is single-use, so a
+//      fresh Playwright test (a fresh browser context with no session
+//      cookie) cannot re-authenticate against it.
+//
+// DEVIATION (review cycle 1, finding T1): the plan's Verification Plan step
+// 4 asked for this step to skip gracefully when `claude` is not installed.
+// No such skip exists here, and this is deliberate, not an oversight: the
+// daemon's `create_terminal` HTTP response is already built and returned
+// BEFORE the helper process's `spawn_shell` ever attempts to run the
+// resolved command (`TerminalSession::spawn` calls
+// `connect_and_handshake`, which reads the helper's pre-spawn
+// `Handshake`/`Status` messages and sends `HandshakeAck`, and only THEN
+// does the helper's `handle_connection` invoke `spawn_shell` - see
+// `terminal.rs::connect_and_handshake` and
+// `terminal_helper_process.rs::spawn_shell`/`handle_connection`). A failed
+// `spawn_command` only flips the helper's internal status to `Error`; it
+// cannot retroactively fail the already-returned HTTP response, so this
+// step's assertions (pane opens, `profileId: "claude"` recorded) hold
+// whether or not `claude` is actually on `PATH`. Verified empirically
+// (2026-07-26): with the "claude" profile's `command` temporarily
+// repointed at a nonexistent binary
+// (`definitely-not-a-real-claude-binary-260725`), `npx playwright test
+// --grep "agent spawn profile"` still passed (1 passed, 1.4s, exit 0);
+// reverted immediately after. This makes the plan's proposed skip dead code
+// rather than a live guard, so it was not added.
 
 function socketSafeTempBase(): string {
   // Mirrors dashboard-acceptance.spec.ts's `socketSafeTempBase` (same
@@ -322,7 +355,12 @@ test("agent spawn profile", async ({ page }) => {
 
     // No agent-chat surface exists anywhere before the click (expected,
     // since AGENT_GUI_SUSPENDED hides that button entirely) - recorded here
-    // as the explicit BEFORE baseline for the AFTER assertion below.
+    // as the explicit BEFORE baseline for the AFTER assertion below. Note
+    // (T-Minor, review cycle 1): this DOM-absence check alone cannot
+    // distinguish correct routing from a mis-wired button, because
+    // `registerNewAgentChatPane` already no-ops under `AGENT_GUI_SUSPENDED`
+    // regardless of which command fired it - see the AFTER assertion's own
+    // note below for the load-bearing check.
     await expect(page.locator('.workbench-pane[data-surface-kind="agentChat"]')).toHaveCount(0);
     await expect(page.locator('[data-command-id="agentChat.create"]')).toHaveCount(0);
 
@@ -353,20 +391,97 @@ test("agent spawn profile", async ({ page }) => {
     const paneWrapper = page.locator(".workbench-pane", { has: pane });
     await expect(paneWrapper).toHaveAttribute("data-surface-kind", "persistentTerminal");
 
-    // The central constraint, proven directly rather than only inferred
-    // from the command id: the click never registered (even transiently)
-    // an agentChat surface - `registerNewAgentChatPane` was never reached.
+    // Corroborating evidence, not the load-bearing check (T-Minor, review
+    // cycle 1): no agentChat surface exists after the click either. This
+    // alone does NOT prove `registerNewAgentChatPane` was never reached -
+    // that function already no-ops under `AGENT_GUI_SUSPENDED`
+    // (`App.tsx:5420`) regardless of which command routed to it, so even a
+    // hypothetical mis-wiring to `agentChat.create` would still produce
+    // zero agentChat panes here. The `data-last-command-id` assertion above
+    // is what actually distinguishes correct routing (`terminal.create.agent`)
+    // from a regression, since it reads the command id directly rather than
+    // an effect the suspension guard would swallow either way.
     await expect(page.locator('.workbench-pane[data-surface-kind="agentChat"]')).toHaveCount(0);
+  });
+
+  let respawnedAgentTerminalId = "";
+  await test.step("restore-intent respawn preserves profileId after a daemon-side session loss (C2)", async () => {
+    // Close the two non-agent terminals through the normal UI close flow
+    // first - that flow itself recomputes and re-saves this workRoot's
+    // restore intents from the panes that remain
+    // (`persistTerminalPanesForWorkRoot`), so it correctly drops their
+    // intents rather than leaving unrelated stale entries behind. Only
+    // `agentTerminalId`'s intent (profileId "claude") should survive past
+    // this point.
+    await closeTerminalById(page, dummyTerminalId);
+    await closeTerminalById(page, plainTerminalId);
+    // `closeTerminalById` only waits for the confirm popover to dismiss,
+    // not for the underlying async `closeTerminal().then(setTerminalPanes)`
+    // chain (the write that narrows this workRoot's persisted restore
+    // intents down to just the agent terminal) to settle. Wait for the
+    // DOM to reflect exactly one remaining tab before proceeding, so the
+    // direct-delete + reload below race against a stable, fully-persisted
+    // intent set rather than a still-in-flight one.
+    await expect(terminalTabsLocator(page)).toHaveCount(1, { timeout: 10_000 });
+
+    // Simulate the daemon losing the live agent session (e.g. a restart
+    // the registry didn't survive) WITHOUT going through the browser's own
+    // close-tab flow, so the browser-side restore intent written when the
+    // agent terminal was spawned is left stale in localStorage exactly as
+    // it would be after a real daemon restart that dropped this terminal -
+    // mirrors the direct-fetch bypass pattern the dummy-echo step above
+    // already uses for the opposite direction (daemon knows, browser
+    // doesn't).
+    const closeEndpoint = terminalCloseEndpoint(agentTerminalId);
+    const deleted = await page.evaluate(async (endpoint) => {
+      const response = await fetch(endpoint, { method: "DELETE" });
+      return { ok: response.ok, status: response.status };
+    }, closeEndpoint);
+    expect(
+      deleted.ok || deleted.status === 404,
+      `direct terminal delete: ${JSON.stringify(deleted)}`,
+    ).toBe(true);
+
+    // Reload + reselect: `listTerminals` now returns zero sessions for this
+    // workRoot (dummy/plain were closed normally above, and the agent
+    // terminal was just deleted directly), so the browser's
+    // restore-intent effect (`App.tsx`'s `restoredTerminalIntentRoots`)
+    // fires and respawns from the stale intent.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await selectWorkRootMinimal(page, workRoot);
+
+    await expect(terminalTabsLocator(page)).toHaveCount(1, { timeout: 10_000 });
+    const respawnedId = await currentTerminalPaneId(page);
+    expect(
+      respawnedId,
+      "the restore-intent respawn must produce a mounted pane",
+    ).toBeTruthy();
+    expect(respawnedId).not.toBe(agentTerminalId);
+    respawnedAgentTerminalId = respawnedId!;
+
+    // The C2 assertion: before the fix, this respawned terminal silently
+    // ran the default shell (profileId absent/null) under an unchanged
+    // title - the browser had no way to tell the user the wrong process
+    // was now running behind an agent-terminal-looking tab.
+    await expect(
+      page.locator(`.terminal-pane[data-terminal-id="${respawnedId}"]`),
+    ).toHaveAttribute("data-profile-id", "claude");
   });
 
   await test.step("cleanup: close every terminal this gate spawned", async () => {
     // This spec owns a dedicated daemon/workRoot (see the file-level
     // CONTRACT comment), so cleanup only needs to leave no live child
     // processes behind for `daemon.stop()` - it does not need to restore
-    // any shared cross-file terminal count.
+    // any shared cross-file terminal count. `dummyTerminalId`/
+    // `plainTerminalId` were already closed in the step above, and the
+    // original `agentTerminalId` was already deleted directly (the
+    // respawned terminal has a different id) - `closeTerminalById` is a
+    // no-op for a terminal id with no matching tab, so re-listing the
+    // originals here is harmless.
     await closeTerminalById(page, dummyTerminalId);
     await closeTerminalById(page, plainTerminalId);
     await closeTerminalById(page, agentTerminalId);
+    await closeTerminalById(page, respawnedAgentTerminalId);
     await expect(terminalTabsLocator(page)).toHaveCount(0);
   });
 });
