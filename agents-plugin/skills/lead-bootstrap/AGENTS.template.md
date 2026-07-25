@@ -76,7 +76,6 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 - Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or MCP parser behavior.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by stem only, never full path; stems survive status moves.
-- Check `## Ticket Focus` in `ai-docs/_index.md` before starting implementation; it may include non-ready attention items, but only `ready/` entries are direct implementation targets.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are English. Human-facing UI strings are exempt.
@@ -186,6 +185,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   focus cleanup is needed.
 - v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
+- v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
 -->
 
-<!-- Template Version: v0043 -->
+<!-- Template Version: v0044 -->
