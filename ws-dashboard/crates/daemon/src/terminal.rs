@@ -158,6 +158,32 @@ pub struct TerminalRegistry {
     // `TerminalRegistryEntry` or any HTTP response; the only reader is
     // `post_terminal_turn_state`'s token check.
     tokens: Arc<RwLock<HashMap<String, String>>>,
+    // CONTRACT (260725 Phase 4 review cycle 1, finding A - CLOSES the
+    // concurrent-spawn GC race, does not merely shrink it): `sessions` only
+    // gains a terminal's id at `insert`/`insert_unchecked`, which lands AFTER
+    // `TerminalSession::spawn` has already created `agent-profiles/<id>/` on
+    // disk (token write, `callback.json` write) and completed a real process
+    // spawn plus an IPC handshake - a real interval on the order of tens to
+    // hundreds of milliseconds during which the directory exists but the id
+    // is in neither `sessions` nor (before this field existed) anywhere the
+    // sweep could see. `mark_profile_pending`/`clear_profile_pending` bound
+    // that exact interval: `spawn` marks the id pending BEFORE creating the
+    // directory, and `insert`/`insert_unchecked` clear it AFTER the id is
+    // already visible in `sessions` (never before - see each method's own
+    // ordering comment). `spawn`'s own failure paths after marking (helper
+    // spawn failure, handshake timeout) also clear it, since those paths
+    // never reach `insert` and would otherwise leak the mark forever. Because
+    // `live_terminal_ids()` (the sweep's sole liveness source) unions this
+    // set with `sessions`' keys, at every instant from directory-creation to
+    // session-insertion the id is a member of AT LEAST ONE of the two sets -
+    // there is no gap for a sweep's `read_dir` to land in. Snapshotting
+    // liveness after `read_dir` instead of before (the reviewer's original
+    // suggestion) was rejected: it only narrows the window to "created after
+    // the post-listing snapshot", which is still open for exactly the same
+    // spawn-plus-handshake duration: it does not name a boundary the window
+    // cannot cross, whereas the mark/clear pair here corresponds to real code
+    // events (directory creation, session insertion) that fully bracket it.
+    pending_profile_ids: Arc<RwLock<HashSet<String>>>,
     helper_binary: PathBuf,
     registry_dir: PathBuf,
     connect_timeout: Duration,
@@ -216,6 +242,7 @@ impl TerminalRegistry {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             tokens: Arc::new(RwLock::new(HashMap::new())),
+            pending_profile_ids: Arc::new(RwLock::new(HashSet::new())),
             helper_binary,
             registry_dir,
             connect_timeout,
@@ -420,29 +447,92 @@ impl TerminalRegistry {
     // currently in `self.sessions`, regardless of status - "keys off
     // TERMINAL liveness", not `TerminalSession::is_live()`'s strict
     // Running-only check, since a config may legitimately outlive an agent
-    // that exited inside a surviving (or grace-window) terminal. See
-    // `agent_profile_gc.rs`'s module CONTRACT for the ordering guarantee
-    // this depends on at its one production call site (`server.rs`).
+    // that exited inside a surviving (or grace-window) terminal - UNIONED
+    // with `self.pending_profile_ids`, the in-flight-spawn set that closes
+    // the concurrent-spawn GC race (review cycle 1, finding A; see the field
+    // doc comment on `pending_profile_ids` for why a union of the two sets,
+    // rather than either alone, is what fully brackets the
+    // directory-creation-to-session-insertion interval with no gap). See
+    // `agent_profile_gc.rs`'s module CONTRACT for the ordering guarantee this
+    // depends on at its one production call site (`server.rs`).
     pub(crate) fn live_terminal_ids(&self) -> HashSet<String> {
-        self.sessions
+        let mut ids: HashSet<String> = self
+            .sessions
             .read()
             .expect("terminal registry lock poisoned")
             .keys()
             .cloned()
-            .collect()
+            .collect();
+        ids.extend(
+            self.pending_profile_ids
+                .read()
+                .expect("terminal registry lock poisoned")
+                .iter()
+                .cloned(),
+        );
+        ids
+    }
+
+    // CONTRACT (260725 Phase 4 review cycle 1, finding A): called by
+    // `TerminalSession::spawn` BEFORE it creates `agent-profiles/<id>/` on
+    // disk (i.e. before the first `write_token`/`write_callback_target`
+    // call) - this ordering is what makes the id visible to
+    // `live_terminal_ids()` before the directory a sweep could race against
+    // even exists.
+    fn mark_profile_pending(&self, terminal_id: &str) {
+        self.pending_profile_ids
+            .write()
+            .expect("terminal registry lock poisoned")
+            .insert(terminal_id.to_owned());
+    }
+
+    // CONTRACT (260725 Phase 4 review cycle 1, finding A): the counterpart to
+    // `mark_profile_pending`. Two call shapes, both safe to call
+    // unconditionally (a missing key is a harmless no-op, so a plain-shell
+    // spawn that never marked pending in the first place costs nothing
+    // here): (1) `insert`/`insert_unchecked` call this AFTER the id is
+    // already present in `sessions` - never before, or a sweep could
+    // observe the id in neither set for an instant; (2) `TerminalSession::
+    // spawn`'s own failure paths after marking (helper spawn failure,
+    // handshake timeout) call this directly, since a `spawn` that returns
+    // `Err` never reaches `insert` and would otherwise leak the mark
+    // forever - the directory such a failure may have already created
+    // becomes an ordinary orphan for the next sweep to reclaim, same as the
+    // pre-existing MAX_TERMINAL_SESSIONS-rejection case.
+    fn clear_profile_pending(&self, terminal_id: &str) {
+        self.pending_profile_ids
+            .write()
+            .expect("terminal registry lock poisoned")
+            .remove(terminal_id);
     }
 
     fn insert(&self, session: Arc<TerminalSession>) -> Result<(), TerminalError> {
+        // CONTRACT (260725 Phase 4 review cycle 1, finding A): capture the id
+        // before `session` is (possibly) moved into `sessions` below, so
+        // `clear_profile_pending` can run on every exit path - including the
+        // cap-rejection `Err` path, where the directory `spawn` may already
+        // have created simply becomes an ordinary orphan for the next sweep.
+        let terminal_id = session.id.clone();
         let mut sessions = self
             .sessions
             .write()
             .expect("terminal registry lock poisoned");
         sessions.retain(|_, session| session.is_live());
         if sessions.len() >= MAX_TERMINAL_SESSIONS {
+            drop(sessions);
+            self.clear_profile_pending(&terminal_id);
             return Err(TerminalError::BadRequest("too many terminal sessions"));
         }
         self.remember_token(&session);
-        sessions.insert(session.id.clone(), session);
+        sessions.insert(terminal_id.clone(), session);
+        // CONTRACT (load-bearing ORDER, finding A): clear the pending mark
+        // only AFTER the id is visible in `sessions` (the lock above is
+        // dropped here, publishing the insert to any concurrent reader
+        // before this call), never before - see `pending_profile_ids`'s
+        // field doc for why the union, not this ordering alone, closes the
+        // race, and why getting this ordering backwards would reopen it.
+        drop(sessions);
+        self.clear_profile_pending(&terminal_id);
         Ok(())
     }
 
@@ -452,11 +542,19 @@ impl TerminalRegistry {
     // `insert`'s cap check here could evict a legitimately-adopted live
     // session for no better reason than scan order.
     fn insert_unchecked(&self, session: Arc<TerminalSession>) {
+        let terminal_id = session.id.clone();
         self.remember_token(&session);
         self.sessions
             .write()
             .expect("terminal registry lock poisoned")
-            .insert(session.id.clone(), session);
+            .insert(terminal_id.clone(), session);
+        // See `insert`'s identical ordering CONTRACT: clear only after the
+        // id is visible in `sessions`. Boot-reconcile-adopted sessions never
+        // went through `TerminalSession::spawn`'s pending mark, so this is a
+        // harmless no-op for them; kept here for symmetry and so a future
+        // adopt-path change that DID mark pending would not need to
+        // rediscover this requirement.
+        self.clear_profile_pending(&terminal_id);
     }
 
     // CONTRACT (260725 Phase 4): the ONE place `self.tokens` gains an entry
@@ -861,6 +959,7 @@ pub async fn create_terminal(
         };
 
     match TerminalSession::spawn(
+        &state.terminals,
         &state.terminals.helper_binary,
         &state.terminals.registry_dir,
         state.terminals.connect_timeout,
@@ -1239,6 +1338,7 @@ fn resolve_create_command(
 impl TerminalSession {
     #[allow(clippy::too_many_arguments)]
     async fn spawn(
+        registry: &TerminalRegistry,
         helper_binary: &Path,
         registry_dir: &Path,
         connect_timeout: Duration,
@@ -1292,6 +1392,22 @@ impl TerminalSession {
                     // sweep is the sole cleanup path, driven by terminal
                     // liveness rather than a close-time hook here.
                     //
+                    // CONTRACT (260725 Phase 4 review cycle 1, finding A -
+                    // LOAD-BEARING, closes the concurrent-spawn GC race):
+                    // mark this id pending in the registry BEFORE the first
+                    // byte of `agent-profiles/<id>/` is created below (the
+                    // upcoming `write_token`/`write_callback_target` calls
+                    // are exactly what `create_dir_all`s it). From this line
+                    // until either `insert`/`insert_unchecked` clears the
+                    // mark (success) or one of this function's own later
+                    // `?`/early-return failure paths clears it directly
+                    // (helper spawn failure, handshake timeout), the id is a
+                    // member of `live_terminal_ids()` even though it is not
+                    // yet - and may never be - in `sessions`. See
+                    // `pending_profile_ids`'s field doc on `TerminalRegistry`
+                    // for the full argument that this brackets the race with
+                    // no gap, unlike shrinking the sweep's snapshot window.
+                    registry.mark_profile_pending(&id);
                     // CONTRACT (260725 Phase 4, token generation and write
                     // order - load-bearing): the token and `callback.json`
                     // are written BEFORE `materialize_hook_config` below, so
@@ -1367,13 +1483,30 @@ impl TerminalSession {
             std::env::vars_os(),
         );
 
-        tokio::task::spawn_blocking(move || crate::terminal_platform::spawn_detached(command_to_spawn))
-            .await
+        let spawn_outcome =
+            tokio::task::spawn_blocking(move || crate::terminal_platform::spawn_detached(command_to_spawn))
+                .await;
+        // CONTRACT (260725 Phase 4 review cycle 1, finding A): this function
+        // returns `Err` below without ever reaching `insert`/
+        // `insert_unchecked`, so if `mark_profile_pending` ran above, this
+        // is the ONE place that ever will clear it for this attempt - an
+        // unconditional call is correct (and a harmless no-op) whether or
+        // not this spawn's `hook_config` branch actually marked pending.
+        if spawn_outcome.is_err() || matches!(spawn_outcome, Ok(Err(_))) {
+            registry.clear_profile_pending(&id);
+        }
+        spawn_outcome
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
 
         let connected = connect_and_handshake(&socket_path, connect_timeout).await;
         if connected.is_none() {
+            // CONTRACT (260725 Phase 4 review cycle 1, finding A): same
+            // reasoning as the spawn-failure branch above - this function
+            // returns `Err` a few lines below without ever reaching
+            // `insert`, so this is the only place left that will clear a
+            // pending mark for this attempt.
+            registry.clear_profile_pending(&id);
             // CONTRACT (260725 Phase 1, fail-loudly finding): the helper is
             // spawned with all three standard streams to `/dev/null`
             // (above) and dispatches before `logging::init` in `main.rs`, so
@@ -2819,6 +2952,18 @@ pub(crate) async fn insert_fake_live_session_for_test(registry: &TerminalRegistr
         output_signal: watch::channel(0).0,
     });
     registry.insert_unchecked(session);
+}
+
+// CONTRACT (260725 Phase 4 review cycle 1, finding A): test-only hook so
+// `agent_profile_gc.rs`'s concurrent-spawn regression test can reproduce the
+// exact ordering `TerminalSession::spawn` performs in production - mark an
+// id pending WITHOUT ever inserting a session for it - without needing a
+// real process spawn and IPC handshake in the test itself. Mirrors
+// `insert_fake_live_session_for_test`'s existing role for the "already
+// live" case.
+#[cfg(test)]
+pub(crate) fn mark_profile_pending_for_test(registry: &TerminalRegistry, terminal_id: &str) {
+    registry.mark_profile_pending(terminal_id);
 }
 
 #[derive(Debug)]

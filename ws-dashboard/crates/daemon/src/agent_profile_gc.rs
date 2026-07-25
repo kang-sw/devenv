@@ -227,6 +227,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&state_dir);
     }
 
+    // CONTRACT (260725 Phase 4 review cycle 1, finding A - the mandatory
+    // regression test for the CONCURRENT-SPAWN case): reproduces the exact
+    // gap the Critical finding named - `agent-profiles/<id>/` created on
+    // disk (and its token written) BEFORE the session is ever inserted into
+    // `sessions` (which is what `TerminalSession::spawn` does in
+    // production: directory + token first, real process spawn and IPC
+    // handshake after, `insert`/`insert_unchecked` only at the very end).
+    // Without `TerminalRegistry::mark_profile_pending` (called at exactly
+    // that "about to create the directory" point), `live_terminal_ids()`
+    // would return empty here - `insert_unchecked` is deliberately never
+    // called in this test, unlike
+    // `sweep_agent_profiles_never_touches_a_directory_belonging_to_a_live_session`
+    // above, which only exercises the ALREADY-live case. See the mutation
+    // evidence in the Phase 4 review-cycle-1 fix report for proof this test
+    // actually fails without the fix.
+    #[tokio::test]
+    async fn sweep_agent_profiles_never_touches_a_directory_whose_terminal_is_pending_but_not_yet_live() {
+        let state_dir = temp_dir("preserve-pending");
+        let profile_root = state_dir.join("agent-profiles");
+        let pending_dir = profile_root.join("term_pending");
+        std::fs::create_dir_all(&pending_dir).expect("create pending profile dir");
+        std::fs::write(pending_dir.join("settings.json"), "{}").expect("write pending settings.json");
+        crate::agent_token_store::write_token(&state_dir, "term_pending", "secret")
+            .expect("write pending token");
+
+        let registry = TerminalRegistry::new(
+            std::path::PathBuf::from("/nonexistent-unused-helper-binary"),
+            temp_dir("preserve-pending-registry"),
+            Duration::from_millis(200),
+            Some(state_dir.clone()),
+            "http://127.0.0.1:0".to_owned(),
+        );
+        // Mark pending WITHOUT ever inserting a session - this is the
+        // window `TerminalSession::spawn` sits in between creating the
+        // directory and the caller's eventual `insert`/`insert_unchecked`
+        // call, which a real process spawn plus IPC handshake can stretch
+        // to tens or hundreds of milliseconds.
+        crate::terminal::mark_profile_pending_for_test(&registry, "term_pending");
+
+        sweep_agent_profiles(&state_dir, &registry).await;
+
+        assert!(
+            pending_dir.exists(),
+            "a directory whose terminal id is pending (created but not yet session-inserted) \
+             must never be reclaimed by a sweep landing in that window"
+        );
+        assert!(
+            crate::agent_token_store::read_token(&state_dir, "term_pending").is_some(),
+            "a pending terminal's token file must survive a sweep landing in that window"
+        );
+
+        let _ = std::fs::remove_dir_all(&state_dir);
+    }
+
     #[tokio::test]
     async fn sweep_agent_profiles_on_a_missing_agent_profiles_dir_is_a_harmless_no_op() {
         let state_dir = temp_dir("missing-root");
