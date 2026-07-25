@@ -162,8 +162,19 @@ async fn terminal_notify_exits_zero_and_stays_silent_on_stdio_when_the_callback_
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let log_contents = std::fs::read_to_string(state_home.join("logs").join("terminal-notify.log"))
-        .expect("terminal-notify must append a diagnostic line to logs/terminal-notify.log");
+    // FIX (review cycle 1, finding C): `log_failure` now writes through the
+    // crate's own bounded rolling-file appender (`Rotation::DAILY`) instead
+    // of a bespoke unbounded append-only writer, so the on-disk filename is
+    // "terminal-notify.log.<date>", not the bare "terminal-notify.log".
+    let log_dir = state_home.join("logs");
+    let rotated_log = std::fs::read_dir(&log_dir)
+        .expect("read logs dir")
+        .filter_map(|entry| entry.ok())
+        .find(|entry| entry.file_name().to_string_lossy().starts_with("terminal-notify.log"))
+        .unwrap_or_else(|| panic!("expected a terminal-notify.log.<date> file in {log_dir:?}"))
+        .path();
+    let log_contents = std::fs::read_to_string(&rotated_log)
+        .expect("terminal-notify must append a diagnostic line to logs/terminal-notify.log.<date>");
     assert!(log_contents.contains("state=working"));
     assert!(log_contents.contains(&callback_path.display().to_string()));
     assert!(

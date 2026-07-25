@@ -184,17 +184,85 @@ fn startup_info_reports_direct_dashboard_url_for_no_auth() {
         .contains(auth.pairing_token().expose_for_owner_url()));
 }
 
+// CONTRACT (review cycle 1, finding A - CRITICAL): production code
+// (`server.rs`, 260725 Phase 3 step 3) now unconditionally resolves
+// `persistent_state::default_state_dir()` inside `run_with_shutdown_and_grace`
+// to write `bound-base-url.json`. The three tests below call
+// `run_with_shutdown`/`run_with_shutdown_and_grace` IN-PROCESS - unscoped,
+// every one of them would resolve the REAL developer/CI machine's actual
+// state directory (`~/.local/state/ws-dashboard/` or platform equivalent) and
+// overwrite its `bound-base-url.json` as a side effect of running
+// `cargo test`, silently clobbering a live daemon's file if one happens to
+// share that state dir. Verified on a real machine (review finding): a stale
+// `~/.local/state/ws-dashboard/bound-base-url.json` from exactly this
+// pollution predated this fix.
+//
+// `persistent_state::ENV_LOCK` is `#[cfg(test)] pub(crate)` in the library
+// crate - unreachable from this file, which is a SEPARATE integration-test
+// crate linking the daemon as an external dependency (`#[cfg(test)]` items
+// are not even compiled into the non-test rlib this crate links against, and
+// `pub(crate)` would block cross-crate access even if they were - the same
+// reasoning already recorded below for
+// `bound_base_url_file_is_rewritten_on_every_daemon_bind`'s subprocess
+// design). Since these three tests are the ONLY tests in THIS file/binary
+// that mutate `WS_DASHBOARD_STATE_HOME` in-process (the bound-base-url
+// rewrite test below uses subprocess-scoped env, no process-global
+// mutation), a lock local to this file is sufficient to serialize just these
+// three against each other and against any future in-process
+// `run_with_shutdown*` test added here.
+//
+// `tokio::sync::Mutex`, not `std::sync::Mutex`: the guard is held across
+// `.await` points for the test's whole body (necessarily - the env var must
+// stay pinned until the state-dir-dependent write inside `run_with_shutdown`
+// has actually happened, and that point is not observable from outside the
+// call), which `clippy::await_holding_lock` correctly flags as a hazard for
+// a blocking `std::sync::Mutex`. An async-aware mutex has no such hazard.
+static STATE_HOME_ISOLATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static STATE_HOME_ISOLATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn isolated_state_home(label: &str) -> PathBuf {
+    let unique = STATE_HOME_ISOLATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "ws-dashboard-server-test-state-home-{label}-{}-{unique}",
+        std::process::id()
+    ))
+}
+
 #[tokio::test]
 async fn shutdown_hook_can_terminate_server_task() {
+    let _lock = STATE_HOME_ISOLATION_LOCK.lock().await;
+    let saved_home = std::env::var_os("WS_DASHBOARD_STATE_HOME");
+    let saved_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
+    let state_home = isolated_state_home("shutdown-hook");
+    std::env::set_var("WS_DASHBOARD_STATE_HOME", &state_home);
+    std::env::remove_var("WS_DASHBOARD_STATE_FILE");
+
     let info = run_with_shutdown(ServeConfig::default_loopback(), async {})
         .await
         .expect("server exits after test shutdown hook");
 
     assert_eq!(info.bound_addr.ip(), Ipv4Addr::LOCALHOST);
+
+    match saved_home {
+        Some(value) => std::env::set_var("WS_DASHBOARD_STATE_HOME", value),
+        None => std::env::remove_var("WS_DASHBOARD_STATE_HOME"),
+    }
+    match saved_file {
+        Some(value) => std::env::set_var("WS_DASHBOARD_STATE_FILE", value),
+        None => std::env::remove_var("WS_DASHBOARD_STATE_FILE"),
+    }
+    let _ = std::fs::remove_dir_all(&state_home);
 }
 
 #[tokio::test]
 async fn shutdown_grace_period_bounds_open_idle_connections() {
+    let _lock = STATE_HOME_ISOLATION_LOCK.lock().await;
+    let saved_home = std::env::var_os("WS_DASHBOARD_STATE_HOME");
+    let saved_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
+    let state_home = isolated_state_home("grace-period");
+    std::env::set_var("WS_DASHBOARD_STATE_HOME", &state_home);
+    std::env::remove_var("WS_DASHBOARD_STATE_FILE");
+
     let addr = unused_loopback_addr();
     let mut config = ServeConfig::default_loopback();
     config.bind_addr = addr;
@@ -217,10 +285,27 @@ async fn shutdown_grace_period_bounds_open_idle_connections() {
 
     assert_eq!(info.bound_addr, addr);
     drop(idle_connection);
+
+    match saved_home {
+        Some(value) => std::env::set_var("WS_DASHBOARD_STATE_HOME", value),
+        None => std::env::remove_var("WS_DASHBOARD_STATE_HOME"),
+    }
+    match saved_file {
+        Some(value) => std::env::set_var("WS_DASHBOARD_STATE_FILE", value),
+        None => std::env::remove_var("WS_DASHBOARD_STATE_FILE"),
+    }
+    let _ = std::fs::remove_dir_all(&state_home);
 }
 
 #[tokio::test]
 async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
+    let _lock = STATE_HOME_ISOLATION_LOCK.lock().await;
+    let saved_home = std::env::var_os("WS_DASHBOARD_STATE_HOME");
+    let saved_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
+    let state_home = isolated_state_home("security-smoke");
+    std::env::set_var("WS_DASHBOARD_STATE_HOME", &state_home);
+    std::env::remove_var("WS_DASHBOARD_STATE_FILE");
+
     let info = run_with_shutdown(ServeConfig::default_loopback(), async {})
         .await
         .expect("loopback startup succeeds");
@@ -243,6 +328,16 @@ async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
     assert!(disabled_owner_auth
         .to_string()
         .contains("--bind-mode public"));
+
+    match saved_home {
+        Some(value) => std::env::set_var("WS_DASHBOARD_STATE_HOME", value),
+        None => std::env::remove_var("WS_DASHBOARD_STATE_HOME"),
+    }
+    match saved_file {
+        Some(value) => std::env::set_var("WS_DASHBOARD_STATE_FILE", value),
+        None => std::env::remove_var("WS_DASHBOARD_STATE_FILE"),
+    }
+    let _ = std::fs::remove_dir_all(&state_home);
 }
 
 fn unused_loopback_addr() -> SocketAddr {

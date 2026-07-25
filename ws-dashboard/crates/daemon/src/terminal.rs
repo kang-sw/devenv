@@ -1042,33 +1042,51 @@ impl TerminalSession {
         // filesystem access, deliberately kept that way).
         let mut command = command;
         if let (Some(hook_config), Some((_, args))) = (hook_config, command.as_mut()) {
-            let state_dir = crate::persistent_state::default_state_dir()
-                .unwrap_or_else(std::env::temp_dir);
-            let profile_dir = state_dir.join("agent-profiles").join(&id);
-            // CONTRACT (deliberate deferral, ticket "On-disk layout" /
-            // Phase 4): `agent-profiles/<terminal_id>/` is created here and
-            // never reclaimed by this phase - no cleanup on terminal close,
-            // no sweep of stale directories at daemon restart. The ticket
-            // pins that GC sweep to Phase 4 ("A GC sweep over
-            // `agent-profiles/`... must run strictly AFTER `boot_reconcile`
-            // completes"), so every terminal spawned under this phase alone
-            // leaks its profile directory until Phase 4 lands. This is a
-            // known, ticket-acknowledged gap, not an oversight.
-            let callback_path = crate::agent_callback::callback_path(&profile_dir);
-            match crate::agent_hook_config::materialize_hook_config(
-                &profile_dir,
-                &hook_config,
-                &default_helper_binary(),
-                &callback_path,
-            ) {
-                Ok(settings_path) => {
-                    args.push("--settings".to_owned());
-                    args.push(settings_path.display().to_string());
+            // FIX (review cycle 1, finding E): a `None` state dir used to
+            // fall back to `std::env::temp_dir()`, landing an EXECUTED
+            // command line (`settings.json`'s hook `command` string) under
+            // the predictable, world-writable `/tmp/agent-profiles/` - a
+            // local attacker who pre-creates/owns that path could replace
+            // the file with one whose command runs as the daemon's user.
+            // Degrading to a hookless spawn costs nothing (turn-attention
+            // signaling is best-effort UX, not correctness-critical - see
+            // the materialization-failure branch below, which already
+            // degrades the same way) and removes the exposure entirely.
+            match crate::persistent_state::default_state_dir() {
+                Some(state_dir) => {
+                    let profile_dir = state_dir.join("agent-profiles").join(&id);
+                    // CONTRACT (deliberate deferral, ticket "On-disk layout" /
+                    // Phase 4): `agent-profiles/<terminal_id>/` is created here and
+                    // never reclaimed by this phase - no cleanup on terminal close,
+                    // no sweep of stale directories at daemon restart. The ticket
+                    // pins that GC sweep to Phase 4 ("A GC sweep over
+                    // `agent-profiles/`... must run strictly AFTER `boot_reconcile`
+                    // completes"), so every terminal spawned under this phase alone
+                    // leaks its profile directory until Phase 4 lands. This is a
+                    // known, ticket-acknowledged gap, not an oversight.
+                    let callback_path = crate::agent_callback::callback_path(&profile_dir);
+                    match crate::agent_hook_config::materialize_hook_config(
+                        &profile_dir,
+                        &hook_config,
+                        &default_helper_binary(),
+                        &callback_path,
+                    ) {
+                        Ok(settings_path) => {
+                            args.push("--settings".to_owned());
+                            args.push(settings_path.display().to_string());
+                        }
+                        Err(error) => tracing::error!(
+                            terminal_id = %id,
+                            %error,
+                            "failed to materialize agent hook config; spawning without hooks"
+                        ),
+                    }
                 }
-                Err(error) => tracing::error!(
+                None => tracing::warn!(
                     terminal_id = %id,
-                    %error,
-                    "failed to materialize agent hook config; spawning without hooks"
+                    "no persistent state directory resolved; spawning without agent hooks \
+                     rather than materializing an executed command line under a predictable, \
+                     world-writable temp path"
                 ),
             }
         }
