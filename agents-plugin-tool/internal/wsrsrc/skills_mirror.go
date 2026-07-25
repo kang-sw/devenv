@@ -12,9 +12,14 @@ import (
 // or "draws/"). \b is zero-width, so it does not consume input and cannot
 // cause overlapping-match or non-consumption issues for adjacent tokens like
 // "ws:ws:".
+//
+// wsCliPattern is a literal-token substitution (not a namespace-prefix rule
+// like the other two): it rewrites the standalone token "ws-cli" to
+// "wsflow-cli" and must not be broadened to match "ws-mcp" or "ws-plugin".
 var (
 	wsColonPattern = regexp.MustCompile(`\bws:`)
 	wsSlashPattern = regexp.MustCompile(`\bws/`)
+	wsCliPattern   = regexp.MustCompile(`\bws-cli\b`)
 )
 
 // disqualifyingTokens are the tokens that make a source SKILL.md ineligible
@@ -44,6 +49,7 @@ func GenerateWsflowSkillBody(source string) (string, error) {
 	}
 	out := wsColonPattern.ReplaceAllString(source, "wsflow:")
 	out = wsSlashPattern.ReplaceAllString(out, "wsflow/")
+	out = wsCliPattern.ReplaceAllString(out, "wsflow-cli")
 	return out, nil
 }
 
