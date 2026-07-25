@@ -226,6 +226,7 @@ import {
   attentionEventsEndpoint,
   parseAgentAttentionEntry,
   parseAgentAttentionSnapshot,
+  shouldReplaceAttentionSourceOnError,
   type AgentAttentionEntry,
 } from "./agentAttention";
 import {
@@ -1887,6 +1888,30 @@ export function App() {
       source.addEventListener("attentionSnapshot", handleAttentionMessage);
       source.addEventListener("attention", handleAttentionMessage);
       source.onmessage = handleAttentionMessage;
+      // CONTRACT (260725 Phase 5 review cycle 1, finding C): a non-2xx
+      // response (401 session expiry, the forwarder's bounded 502 for an
+      // unreachable linked server) fails this `EventSource` PERMANENTLY per
+      // the WHATWG spec - `readyState` goes to `CLOSED` and the browser
+      // never retries on its own, unlike a clean stream end (the `Lagged`
+      // case), which auto-reconnects and is what makes this design's
+      // resync-via-reconnect work at all. Without this handler the dead
+      // source stayed in `sources` forever, since the `sources.has(...)`
+      // guard above then skips re-creating it on every future poll-driven
+      // effect re-run. `shouldReplaceAttentionSourceOnError` (see its own
+      // CONTRACT) filters out the transient `CONNECTING` case, where
+      // `EventSource` is already retrying with its own backoff - only a
+      // genuinely `CLOSED` source is torn down here, and only ever
+      // recreated on the NEXT `serversView` poll tick
+      // (`resourceAvailabilityPollIntervalMs`, 5s), never synchronously in
+      // this handler - a natural bound against hammering a persistently
+      // failing server.
+      source.onerror = () => {
+        if (!shouldReplaceAttentionSourceOnError(source.readyState)) {
+          return;
+        }
+        source.close();
+        sources.delete(serverRoute);
+      };
       sources.set(serverRoute, source);
     }
   }, [serversView?.servers]);

@@ -1,7 +1,9 @@
 import {
+  ATTENTION_SOURCE_CLOSED_READY_STATE,
   attentionEventsEndpoint,
   parseAgentAttentionEntry,
   parseAgentAttentionSnapshot,
+  shouldReplaceAttentionSourceOnError,
   type AgentAttentionEntry,
 } from "./agentAttention.js";
 
@@ -153,4 +155,27 @@ assertEqual(
   parseAgentAttentionSnapshot(null),
   null,
   "a non-object snapshot payload is rejected",
+);
+
+// --- shouldReplaceAttentionSourceOnError (review finding C) --------------
+
+assertEqual(
+  ATTENTION_SOURCE_CLOSED_READY_STATE,
+  2,
+  "must match the DOM EventSource.CLOSED numeric value this module deliberately avoids importing",
+);
+assertEqual(
+  shouldReplaceAttentionSourceOnError(ATTENTION_SOURCE_CLOSED_READY_STATE),
+  true,
+  "a permanently-failed (CLOSED) EventSource must be replaced - this is the only resync path once a 401/502 kills the connection",
+);
+assertEqual(
+  shouldReplaceAttentionSourceOnError(0),
+  false,
+  "a CONNECTING EventSource is already auto-retrying with its own backoff and must be left alone",
+);
+assertEqual(
+  shouldReplaceAttentionSourceOnError(1),
+  false,
+  "an OPEN EventSource has not failed and must be left alone",
 );
