@@ -774,6 +774,14 @@ export function TerminalPaneBody({
         isRetired ? "terminal-pane terminal-pane-retired" : "terminal-pane"
       }
       data-terminal-id={terminalId}
+      // CONTRACT (260725 Phase 2, browser spawn profile): browser-visible
+      // provenance hook, mirroring `data-terminal-id` - lets the acceptance
+      // suite assert which registry profile (if any) produced this pane
+      // straight from rendered DOM rather than only from the network
+      // response. Empty string (not omitted) for the unchanged
+      // default-shell path, matching `TerminalSessionView.profileId`'s
+      // `null`.
+      data-profile-id={pane.session.profileId ?? ""}
     >
       <div
         className="terminal-surface"
