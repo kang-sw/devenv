@@ -3,6 +3,7 @@ package wsgit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -265,6 +266,46 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 	}
 }
 
+func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		{},
+		{},
+		[]byte("1 A. N... 100644 100644 100644 aaa bbb src/file.go\n"),
+		{},
+		{},
+		{},
+		[]byte("abc123\n"),
+	}}
+	aiContext := make([]string, 0, 60)
+	for i := 0; i < 60; i++ {
+		aiContext = append(aiContext, fmt.Sprintf("Entry %d: %s", i, strings.TrimSpace(strings.Repeat("context detail ", 20))))
+	}
+	result, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths:     []string{"src"},
+		Title:     "feat(ws-mcp): accept a large ai_context array",
+		AIContext: aiContext,
+	})
+	if err != nil {
+		t.Fatalf("Commit error = %v, want nil", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result = %#v", result)
+	}
+	commitArgs := runner.calls[5].args
+	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
+		t.Fatalf("commit args = %#v", commitArgs)
+	}
+	message := commitArgs[2]
+	if len(message) < 5000 {
+		t.Fatalf("commit message too short for large ai_context, len=%d", len(message))
+	}
+	for _, want := range []string{aiContext[0], aiContext[len(aiContext)-1]} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message missing entry %q", want)
+		}
+	}
+}
+
 func TestCommitMessageRendersMentalModelNotesUnderAIContext(t *testing.T) {
 	message := CommitMessage(CommitOptions{
 		Title:               "docs(workflow): capture model note",
@@ -466,11 +507,25 @@ func TestCommitStillAddsRootWithLiveChangesAndDeletedChildren(t *testing.T) {
 }
 
 func TestCommitRequiresAIContextAndRelativePaths(t *testing.T) {
-	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x"})
-	if err == nil || !strings.Contains(err.Error(), "ai_context") {
-		t.Fatalf("normalize error = %v, want ai_context", err)
-	}
-	_, err = normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}})
+	t.Run("absent field", func(t *testing.T) {
+		_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x"})
+		if err == nil || !strings.Contains(err.Error(), "no ai_context field was received") {
+			t.Fatalf("normalize error = %v, want absent-field condition", err)
+		}
+	})
+	t.Run("empty array", func(t *testing.T) {
+		_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x", AIContext: []string{}})
+		if err == nil || !strings.Contains(err.Error(), "received an empty array") {
+			t.Fatalf("normalize error = %v, want empty-array condition", err)
+		}
+	})
+	t.Run("all blank entries", func(t *testing.T) {
+		_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x", AIContext: []string{"   ", "\n"}})
+		if err == nil || !strings.Contains(err.Error(), "received 2 entries, all blank") {
+			t.Fatalf("normalize error = %v, want all-blank condition", err)
+		}
+	})
+	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}})
 	if err == nil || !strings.Contains(err.Error(), "inside the repository") {
 		t.Fatalf("normalize error = %v, want repository boundary", err)
 	}

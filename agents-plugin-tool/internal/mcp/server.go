@@ -1040,11 +1040,30 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
+		aiContextRawValue, aiContextPresent := params.Arguments["ai_context"]
+		aiContextItems, aiContextIsArray := aiContextRawValue.([]any)
+		aiContextRawEntryCount := -1
+		aiContextRawBytes := 0
+		if aiContextIsArray {
+			aiContextRawEntryCount = len(aiContextItems)
+			for _, item := range aiContextItems {
+				if text, ok := item.(string); ok {
+					aiContextRawBytes += len(text)
+				}
+			}
+		}
+		aiContext := stringList(aiContextRawValue)
+		appendDebugEvent("git.commit.ai_context_received", map[string]any{
+			"present":               aiContextPresent,
+			"raw_entry_count":       aiContextRawEntryCount,
+			"raw_bytes":             aiContextRawBytes,
+			"post_trim_entry_count": len(aiContext),
+		})
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:               stringList(params.Arguments["paths"]),
 			Title:               title,
 			Description:         description,
-			AIContext:           stringList(params.Arguments["ai_context"]),
+			AIContext:           aiContext,
 			MentalModelNotes:    stringList(params.Arguments["mental_model_notes"]),
 			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
 			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),

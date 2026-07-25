@@ -506,6 +506,7 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 }
 
 func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
+	rawAIContext := opts.AIContext
 	opts.Title = strings.TrimSpace(opts.Title)
 	opts.Description = strings.TrimSpace(opts.Description)
 	opts.AIContext = trimStrings(opts.AIContext)
@@ -520,7 +521,20 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 		return CommitOptions{}, fmt.Errorf("title must be a single line")
 	}
 	if len(opts.AIContext) == 0 {
-		return CommitOptions{}, fmt.Errorf("ai_context requires at least one entry")
+		switch {
+		case rawAIContext == nil:
+			return CommitOptions{}, fmt.Errorf("ai_context is required: no ai_context field was received")
+		case len(rawAIContext) == 0:
+			return CommitOptions{}, fmt.Errorf("ai_context requires at least one entry: received an empty array")
+		default:
+			plural := ""
+			if len(rawAIContext) != 1 {
+				plural = "ies"
+			} else {
+				plural = "y"
+			}
+			return CommitOptions{}, fmt.Errorf("ai_context requires at least one non-blank entry: received %d entr%s, all blank", len(rawAIContext), plural)
+		}
 	}
 	paths := trimStrings(opts.Paths)
 	if len(paths) == 0 {

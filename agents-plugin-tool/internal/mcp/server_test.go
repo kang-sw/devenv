@@ -1756,6 +1756,101 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 }
 
+func TestServeStdioGitCommitAIContextConditionsAndDebugEvent(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	mustWrite(t, root, "file.txt", "one\ntwo\n")
+
+	commitInput := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: empty ai_context array","ai_context":[]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: absent ai_context field"}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, commitInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+
+	emptyArrayText := toolText(t, byID["1"])
+	if !strings.Contains(byID["1"], `"isError":true`) || !strings.Contains(emptyArrayText, "received an empty array") {
+		t.Fatalf("git.commit with empty ai_context array = %s", byID["1"])
+	}
+	absentFieldText := toolText(t, byID["2"])
+	if !strings.Contains(byID["2"], `"isError":true`) || !strings.Contains(absentFieldText, "no ai_context field was received") {
+		t.Fatalf("git.commit with absent ai_context field = %s", byID["2"])
+	}
+
+	// Issue runtime.debug_events as a separate ServeStdio call: within a
+	// single call, tools/call requests are dispatched as concurrent
+	// goroutines (see ServeStdio's per-line `go func` in server.go), so
+	// nothing guarantees the git.commit calls above have appended their
+	// debug events before a same-batch debug_events call runs. A fresh call
+	// only starts after serveStdioWithSession above has returned, which
+	// itself only returns after wg.Wait() drains every goroutine from the
+	// first batch.
+	out.Reset()
+	debugEventsInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":256}}}`
+	if err := serveStdioWithSession(t, server, root, debugEventsInput, &out); err != nil {
+		t.Fatalf("ServeStdio debug_events returned error: %v", err)
+	}
+	debugLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(debugLines) != 1 {
+		t.Fatalf("expected 1 debug_events response, got %d\n%s", len(debugLines), out.String())
+	}
+	debugByID := responseLinesByID(t, debugLines)
+
+	debugEventsText := toolText(t, debugByID["3"])
+	// debugEvents is a process-wide ring buffer (see appendDebugEvent in
+	// server.go), shared across every test in this package's binary, and
+	// other tests also exercise git.commit with real, non-blank ai_context
+	// (post_trim_entry_count > 0). Filter on post_trim_entry_count == 0,
+	// which only this test's two deliberately-empty/absent calls produce,
+	// so unrelated git.commit events from other tests in the same process
+	// cannot be mistaken for these two.
+	var aiContextEvents []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(debugEventsText), "\n") {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("parse debug event line %q: %v", line, err)
+		}
+		if event["event"] == "git.commit.ai_context_received" && event["post_trim_entry_count"] == float64(0) {
+			aiContextEvents = append(aiContextEvents, event)
+		}
+	}
+	if len(aiContextEvents) != 2 {
+		t.Fatalf("expected 2 git.commit.ai_context_received events with post_trim_entry_count=0, got %d: %s", len(aiContextEvents), debugEventsText)
+	}
+	// The two git.commit calls above run as concurrent goroutines (see the
+	// comment above), so their completion order — and thus their append
+	// order into the debug-event ring buffer — is not guaranteed. Match by
+	// the "present" field instead of assuming array position.
+	var emptyArrayEvent, absentFieldEvent map[string]any
+	for _, event := range aiContextEvents {
+		switch event["present"] {
+		case true:
+			emptyArrayEvent = event
+		case false:
+			absentFieldEvent = event
+		}
+	}
+	if emptyArrayEvent == nil || emptyArrayEvent["raw_entry_count"] != float64(0) || emptyArrayEvent["raw_bytes"] != float64(0) || emptyArrayEvent["post_trim_entry_count"] != float64(0) {
+		t.Fatalf("empty-array debug event = %#v", emptyArrayEvent)
+	}
+	if absentFieldEvent == nil || absentFieldEvent["raw_entry_count"] != float64(-1) || absentFieldEvent["raw_bytes"] != float64(0) || absentFieldEvent["post_trim_entry_count"] != float64(0) {
+		t.Fatalf("absent-field debug event = %#v", absentFieldEvent)
+	}
+}
+
 func TestServeStdioReferencesTraceRejectsAmbiguousSelectors(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

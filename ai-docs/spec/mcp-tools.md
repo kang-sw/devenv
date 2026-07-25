@@ -1181,6 +1181,21 @@ deletion, committable through `git.commit`; when a commit's ticket paths are
 entirely deletion-side after this exclusion, the verify step is skipped for
 that commit. {#260725-git-commit-verify-excludes-delete-side-paths}
 
+`ai_context` has no size limit in `git.commit` itself: the tool's input schema
+carries no `maxLength`/size constraint, and a large valid array (many long
+entries) commits normally. `ai_context` still requires at least one non-blank
+entry, but the resulting error now names which of three distinct conditions
+occurred instead of collapsing them into one generic message: the field was
+absent (or explicitly `null`) from the call, the field was present as an empty
+array, or the field was present with entries that were all blank after
+trimming. Every `git.commit` invocation also unconditionally records the
+received `ai_context` argument's presence, raw entry count, raw byte size, and
+post-trim entry count as a `git.commit.ai_context_received` event via
+`runtime.debug_events`, independent of whether the call succeeds or is
+rejected, so a caller-side report of an unexpected `ai_context` rejection can
+be diagnosed against what the server actually received.
+{#260725-git-commit-ai-context-condition-reporting}
+
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
 `path.generate` allocates writable workflow artifact paths so workflow agents can
