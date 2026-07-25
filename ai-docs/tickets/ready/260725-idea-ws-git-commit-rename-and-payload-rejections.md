@@ -174,6 +174,40 @@ turns on: a caller that passes **extra ticket paths alongside** a staged rename
 commit). Pin whichever behavior the chosen strategy produces, so the decision
 above is settled by a test rather than left to the next reader.
 
+### Result (78bf2e11) - 2026-07-25
+
+Fixed via strategy (b): a new `filterIndexDeleteSidePaths(status, paths)` helper
+(`internal/wsgit/git.go`, after `expandCommitPathsForTicketMoves`) filters the
+**expanded** path list by index status before the `c.verifier()` call only —
+index status `D` drops `Path`, `R` drops `OldPath`, `C` (copy) is kept — and the
+verifier call is skipped entirely when the filtered list is empty.
+`validateCommitStatus` is untouched and still receives the full expanded list, so
+the unrelated-staged-path refusal and the `[_index.md]`-only refusal are
+preserved unchanged.
+
+Strategy (b) over (a) because it fixes the divergent case the ticket flagged: a
+caller supplying both the old and new rename paths (dogfood matrix row 2) —
+option (a)'s unexpanded caller paths would still hand the pre-rename path to the
+verifier there, while index-status filtering excludes it regardless of path
+provenance.
+
+Nuance beyond the ticket text (surfaced by the survey): an outright staged
+deletion filters down to zero verifier paths, and `wsdoc.TicketVerify` errors on
+an empty `paths` slice — so the empty-filtered-list guard skips the verifier call
+rather than invoking it with `[]`, pinned by a dedicated test asserting the
+verifier stub is never called.
+
+Verification: `go test ./internal/wsgit/... ./internal/wsdoc/...` PASS (12 new
+tests: 5 for the pure helper, 7 `Client.Commit`-level covering promotion via
+`tickets.move`, close to `.dropped/` via `tickets.close`, outright deletion, the
+divergent extra-paths case, unrelated-path refusal, `[_index.md]`-only refusal,
+and content-only-edit no-op); `go build ./...` / `go vet ./...` clean.
+Partitioned correctness + fit review both clean. Spec closeout:
+`mcp-tools.md {#260725-git-commit-verify-excludes-delete-side-paths}`;
+mental-model `git-workflow-tools.md` invariant bullet under the same anchor.
+
+Phase 2 (`ai_context` constraint) remains open and independent.
+
 ### Phase 2: Report the real `ai_context` constraint
 
 **Expect to find no in-repo size limit.** A design-review source audit found
