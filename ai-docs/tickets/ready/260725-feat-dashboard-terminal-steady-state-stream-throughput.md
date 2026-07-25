@@ -77,6 +77,29 @@ only — no data-path change.
 Verification: TUI repaint throughput improves; no visual regression; context-loss
 falls back gracefully.
 
+### Result (92f4c4b5) - 2026-07-25
+
+Shipped as a live hotfix ahead of Phases 2–4. `WebglAddon` is loaded after
+`terminal.open()` with a `webglcontextlost` handler that disposes it and falls
+back to `CanvasAddon` then the built-in DOM renderer; construction is
+try/catch-guarded and the addon is disposed in the existing unmount cleanup
+(`ws-dashboard/frontend/src/terminalPaneBody.tsx`). Deps pinned to
+`@xterm/addon-webgl@^0.18.0` + `@xterm/addon-canvas@^0.7.0` (last lines declaring
+the `@xterm/xterm ^5.0.0` peer). Render-backend only; no data-path change.
+
+Verification: `npm run build` (tsc -b && vite build) clean; the daemon serves
+`frontend/dist` from disk per request, so the rebuilt bundle went live with no
+daemon restart and no dropped terminals; the served xterm chunk carries the
+`webglcontextlost` wiring, a GL shader program, and the canvas `getContext`
+fallback. A before/after throughput benchmark was not captured — the improvement
+is inferred from moving off the DOM renderer.
+
+Forward: a separate correctness investigation (2026-07-25) found the Phase 4
+`refocusActiveTerminal` churn is also an IME-composition-corruption regression
+under load — it calls `.focus()` per output chunk with no composition guard.
+Phase 4 must couple the debounce with an IME/composition guard, or that fix
+lands in the dedicated bug ticket tracking the refocus-vs-IME interaction.
+
 ### Phase 2: Port the daemon O(1) output_after fix to the helper ring
 
 The helper process's own ring still linear-scans on every wake:
