@@ -2,6 +2,8 @@
 title: "tickets.sage_stamp commits unrelated ticket edits under a stub review message"
 related:
   260723-feat-ticket-write-verify-commit-gate: introduced sage_stamp as the lead-only replacement for sage_record, including its canonical-title commit
+  260725-idea-ws-git-commit-rename-and-payload-rejections: blocking prerequisite — once sage_stamp stops committing, the caller commits the posture change through git.commit, which today fails whenever a status transition is staged
+  260721-bug-lead-write-ticket-sage-ready-ordering: edits the same Sage Review Gate step, and its open question about retrying tickets.move after sage_record commits the posture is invalidated by this ticket's decision
 sage-review-design: recommended
 sage-review-completeness: recommended
 ---
@@ -55,21 +57,35 @@ index surgery.
 
 ## Decision: remove the commit
 
-`sage_stamp` is the only member of the ticket mutation family that commits:
+`sage_stamp` will write the posture and return — no commit, and no staging
+either. The caller's own `ws/git.commit` then carries the posture change together
+with any review-response edits under real rationale, which removes the swallow at
+its cause instead of labelling it.
+
+**The governing criterion is the swallow, not family symmetry.** An earlier draft
+justified this by calling `sage_stamp` "the only member of the ticket mutation
+family that commits". That is false: `tickets.sage_gate` also commits, on the
+ask-decline path (`internal/mcp/server.go:1363-1373`), and `mcp-tools.md`
+documents it. The family picture is mixed rather than one-sided:
 
 | Tool | Documented contract |
 |---|---|
 | `tickets.create_empty` | does not stage or commit |
-| `tickets.move` | stages atomically; **does not commit** |
-| `tickets.close` | stages the change set atomically; **does not commit** |
-| `tickets.sage_stamp` | writes posture, **commits with the canonical title** |
+| `tickets.move` | stages atomically; does not commit |
+| `tickets.close` | stages the change set atomically; does not commit |
+| `tickets.sage_gate` | persists posture and **commits** on ask-decline |
+| `tickets.sage_stamp` | writes posture and **commits** with a canonical title |
 
-The family contract is "stage, and let the caller commit". `sage_stamp` will be
-brought in line: write the posture, stage, return — no commit. This removes the
-swallow at its cause rather than labelling it, since the caller's own
-`ws/git.commit` then carries the posture change and the review-response edits
-together under real rationale. The cost is that `lead-write-ticket` must commit
-explicitly after stamping, which is a step the playbook already has.
+What actually distinguishes `sage_stamp` is *when* it commits: uniquely among
+these, it fires at the one moment the flow guarantees uncommitted body edits are
+present. `sage_gate` runs before any reviewer output exists, so it swallows
+nothing today. Family alignment is therefore supporting evidence, not the
+argument — and Phase 1 must still decide `sage_gate` explicitly rather than
+leaving one committer behind by omission.
+
+Note also that `create_empty`, not `move`/`close`, is the correct analogue:
+those two stage because they perform renames that exist only in the index, while
+a frontmatter field write needs no staging at all.
 
 Rejected alternatives:
 
@@ -85,12 +101,25 @@ Rejected alternatives:
 ## Frequency
 
 Not a one-off. A single ticketing session hit it four times — `b9c72975`,
-`27b3b599`, `025bab2c`, `8a4d81ce` — because the shape recurs by construction:
-`lead-write-ticket` runs a reviewer, has the lead fix findings in-place, then
-calls `sage_stamp`, so review-driven body edits are *always* uncommitted at stamp
-time. The rate is one swallowed commit per review stage per ticket, and the
-swallowed content is specifically the review-response rationale, which is the
-most valuable rationale the flow produces.
+`27b3b599`, `025bab2c`, `8a4d81ce` — one swallowed commit per review stage per
+ticket, and the swallowed content is specifically the review-response rationale,
+which is the most valuable rationale the flow produces.
+
+**Correction to an earlier reading of why it recurs.** This was first written as
+"recurs by construction: `lead-write-ticket` runs a reviewer, has the lead fix
+findings in-place, then calls `sage_stamp`". Design review checked the playbook
+and that middle step does not exist. `lead-write-ticket` section 6 is only
+`sage_gate` -> **On: Reviewer Spawn** -> `sage_stamp`, and Reviewer Spawn step 3
+is "Parse `verdict:` ... return it to `tickets.sage_stamp`" — nothing instructs
+the lead to apply findings to the ticket body at all. (Section 4's "fix confirmed
+gaps in-place" belongs to the intent-checklist step, before commit, not to the
+sage stage.)
+
+So the four occurrences came from a lead improvising into a documented gap, not
+from following the documented flow. The swallow is real either way — the edits
+existed and the message did not describe them — but the recurrence mechanism is
+"the playbook has no home for review-response edits", which is a second defect
+sitting underneath this one.
 
 Compounding it, `260725-idea-ws-git-commit-rename-and-payload-rejections` means
 the caller often cannot pre-commit those edits through `ws/git.commit` anyway
@@ -98,10 +127,17 @@ when a status transition is also staged.
 
 ## Spec Impact
 
-- Target spec areas: `mcp-tools.md` for the `tickets.sage_stamp` contract (drops
-  the commit, gains the stage-only guarantee and loses the returned commit ref),
-  and `workflow-skills.md` for `lead-write-ticket`'s Sage Review Gate step, which
-  gains an explicit commit after stamping.
+- Target spec areas: `mcp-tools.md` anchor `{#260720-sage-gate-record-tools}`,
+  which covers **both** sage tools, for the `tickets.sage_stamp` contract (drops
+  the commit and the returned commit ref) and for whatever `sage_gate` decision
+  Phase 1 records; and `workflow-skills.md` for `lead-write-ticket`'s Sage Review
+  Gate step, which gains an explicit commit after stamping.
+- While editing that anchor, correct an existing drift found during design
+  review: it claims "A declined `ask` and a **config-fallback resolution** each
+  persist the resolved posture and commit", but the config-fallback half is
+  already untrue in code — `resolveConcretePosture` (`tickets_sage.go:162-171`)
+  writes the field with no commit metadata, and `resolveStage` returns a bare
+  `stageOutcome{action: "skip"}` for terminal postures.
 - Expected caller-visible change: `sage_stamp` no longer creates a commit and no
   longer returns a commit hash; the posture write is staged for the caller to
   commit. Callers that relied on the returned hash must read it from their own
@@ -115,17 +151,31 @@ when a status transition is also staged.
 ### Phase 1: Make sage_stamp stage-only, and commit explicitly in the playbook
 
 Remove the `wsgit.NewClient().Commit(...)` call from the `tickets.sage_stamp`
-dispatch (`internal/mcp/server.go:1398`) and stage the posture write instead,
-matching how `tickets.move` and `tickets.close` stage atomically without
-committing. Drop the commit ref from the tool's response and from its schema
-description. `SageRecordResult`'s `CommitTitle`/`CommitPaths`/`AIContext` become
-either unused or repurposed as staging inputs — decide which and remove whatever
-is left dead rather than leaving an unreferenced commit-shaped struct behind.
+dispatch (`internal/mcp/server.go:1398`). Do **not** stage the posture write in
+its place: `wsgit.Commit` already stages its own `paths`
+(`stagingCommandsForCommit`, `internal/wsgit/git.go:528`), so a pre-stage buys
+the caller nothing, and it introduces a new failure mode — a staged ticket file
+left behind by a lead that does not commit immediately makes the next
+`ws/git.commit` on a different path set fail `validateCommitStatus`
+(`git.go:615`) with "refusing to commit unrelated staged path", which cannot
+happen today. Match `create_empty`: write, return, leave the tree alone.
 
-Leave `SageGateResult`'s ask-decline commit path alone unless the same audit
-shows it has the identical problem; it writes `skipped` with no reviewer output
-in flight, so it does not obviously swallow anything. If it does share the
-defect, fold it in and say so; if not, record why it was left.
+Drop the commit ref from the tool's response and from its schema description, and
+**update `next_instruction` in both verdict branches** (`server.go:2726` and the
+`concern` branch above it). That string is the lead's actual control surface —
+playbook step 6.2 says to call `sage_stamp` "and follow its returned
+next_instruction" — so leaving it reading "recorded and committed ... proceed to
+handoff" would have the tool override the edited playbook and silently defeat
+this fix.
+
+`SageRecordResult`'s `CommitTitle`/`CommitPaths`/`AIContext` become unused;
+remove them rather than leaving an unreferenced commit-shaped struct behind.
+
+Decide `tickets.sage_gate`'s ask-decline commit explicitly in the same change
+rather than by omission. It does not swallow today (it runs before any reviewer
+output exists), so the swallow criterion does not force it; the recommendation is
+to align it anyway so one convention covers both sage tools, but if it is left
+committing, record why in the ticket.
 
 Then update `lead-write-ticket`'s Sage Review Gate step to commit after stamping,
 so the posture change and any review-response edits land in one commit with real
