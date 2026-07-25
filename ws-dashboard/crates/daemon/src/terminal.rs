@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex as AsyncMutex};
 use ws_dashboard_core::WorkRootId;
 
+use crate::agent_attention::AttentionHub;
 use crate::router::AppState;
 use crate::terminal_helper_ipc::{write_ndjson, NdjsonReader};
 use crate::terminal_helper_protocol::{
@@ -200,6 +201,17 @@ pub struct TerminalRegistry {
     // reintroduce the rejected multi-daemon-steal shape (see
     // `agent_callback.rs`'s CONTRACT on `write_bound_base_url`).
     base_url: String,
+    // CONTRACT (260725 Phase 5): shared Arc-backed attention state. UNLIKE
+    // `state_dir`/`base_url` above, this is NOT threaded in as a `new()`
+    // constructor parameter - every construction site starts with an empty
+    // hub (`AttentionHub::default()`), so there is nothing meaningful for a
+    // caller to supply. What a caller building `AppState` DOES need is a
+    // CLONE of this SAME instance (never a fresh, disconnected
+    // `AttentionHub::default()`) so `AppState.attention`'s route handlers and
+    // this registry's `remove`/`remove_for_work_roots` choke points
+    // (`forget`, below) observe each other's writes - `attention()` is the
+    // one accessor that hands out that shared clone.
+    attention: AttentionHub,
 }
 
 impl Default for TerminalRegistry {
@@ -248,7 +260,18 @@ impl TerminalRegistry {
             connect_timeout,
             state_dir,
             base_url,
+            attention: AttentionHub::default(),
         }
+    }
+
+    // CONTRACT (260725 Phase 5): the ONE way a caller building `AppState`
+    // obtains the SAME attention hub this registry's `remove`/
+    // `remove_for_work_roots` choke points clean up via `forget` - never
+    // construct a separate `AttentionHub::default()` for `AppState.attention`,
+    // or the registry's forget-on-close would silently write into a hub no
+    // route handler ever reads from.
+    pub fn attention(&self) -> AttentionHub {
+        self.attention.clone()
     }
 
     // CONTRACT (ticket "Boot reconcile policy" / server.rs wiring): must run
@@ -517,10 +540,34 @@ impl TerminalRegistry {
             .sessions
             .write()
             .expect("terminal registry lock poisoned");
-        sessions.retain(|_, session| session.is_live());
+        // CONTRACT (260725 Phase 5 review cycle 1, finding A): this eviction
+        // is a FIFTH session-removal path alongside `remove`/
+        // `remove_for_work_roots` below - capture the ids it drops so their
+        // attention entries can be forgotten too (see the `for evicted_ids`
+        // loops below). Without this, a helper that exits without ever
+        // reaching a browser `DELETE` (tab closed, agent CLI quit, helper
+        // crash) has its last recorded state silently evicted from
+        // `sessions` here while its `AttentionHub` entry survives and leaks
+        // into every future `attentionSnapshot` for the daemon's lifetime -
+        // nothing else ever removes it, since this path never calls
+        // `remove`/`remove_for_work_roots`. Whether the callback-token half
+        // of this same gap is also worth closing is Phase 4's inherited
+        // debt, not this phase's; only the attention half is fixed here.
+        let mut evicted_ids = Vec::new();
+        sessions.retain(|id, session| {
+            if session.is_live() {
+                true
+            } else {
+                evicted_ids.push(id.clone());
+                false
+            }
+        });
         if sessions.len() >= MAX_TERMINAL_SESSIONS {
             drop(sessions);
             self.clear_profile_pending(&terminal_id);
+            for evicted_id in &evicted_ids {
+                self.attention.forget(evicted_id);
+            }
             return Err(TerminalError::BadRequest("too many terminal sessions"));
         }
         self.remember_token(&session);
@@ -533,6 +580,9 @@ impl TerminalRegistry {
         // race, and why getting this ordering backwards would reopen it.
         drop(sessions);
         self.clear_profile_pending(&terminal_id);
+        for evicted_id in &evicted_ids {
+            self.attention.forget(evicted_id);
+        }
         Ok(())
     }
 
@@ -595,6 +645,11 @@ impl TerminalRegistry {
             .expect("terminal registry lock poisoned")
             .remove(terminal_id);
         self.forget_token(terminal_id);
+        // CONTRACT (260725 Phase 5): mirrors `forget_token` exactly - the
+        // other lockstep choke point a closed terminal's attention snapshot
+        // entry must be forgotten at, or a reconnect's snapshot would show a
+        // phantom terminal after close.
+        self.attention.forget(terminal_id);
         removed
     }
 
@@ -626,6 +681,10 @@ impl TerminalRegistry {
         drop(sessions);
         for session in &removed {
             self.forget_token(&session.id);
+            // CONTRACT (260725 Phase 5): same forget-on-removal rule as
+            // `remove` above - a workRoot/workspace removal must forget every
+            // one of its terminals' attention entries, not just their tokens.
+            self.attention.forget(&session.id);
         }
         removed
     }
@@ -1155,11 +1214,16 @@ pub struct TerminalTurnStateRequest {
 // check passes, so a probing caller with no valid token can never even learn
 // whether `state`'s value would have been acceptable.
 //
-// CONTRACT (Phase 4 scope boundary): this handler validates and accepts a
-// turn-state POST but does NOT persist or broadcast the value anywhere
-// durable/observable - there is nothing yet to hand it to (Phase 5 owns the
-// SSE broadcast hub). `_turn_state` is intentionally unused beyond proving
-// the value parsed.
+// CONTRACT (260725 Phase 5): after the token and state checks below pass,
+// this handler resolves the session's `work_root_id` and calls
+// `AttentionHub::record_and_publish`, which both updates the snapshot map
+// `agent_attention::attention_events` serves on connect AND broadcasts an
+// `attention` SSE frame to already-subscribed streams. Unlike Phase 4, the
+// parsed value no longer dead-ends here. An unknown `terminal_id` at this
+// point (the `state.terminals.get` lookup below) is a defensive no-op, not a
+// panic - `token_for` already proved the terminal is known, but this method
+// re-reads `sessions` under a separate lock, so treat a race as harmless
+// rather than assume it cannot happen.
 pub async fn post_terminal_turn_state(
     State(state): State<AppState>,
     AxumPath(terminal_id): AxumPath<String>,
@@ -1171,9 +1235,14 @@ pub async fn post_terminal_turn_state(
     if !crate::agent_turn_state::tokens_match(&expected_token, &request.token) {
         return terminal_error(StatusCode::UNAUTHORIZED, "unauthorized");
     }
-    let Some(_turn_state) = crate::agent_turn_state::parse_turn_state(&request.state) else {
+    let Some(turn_state) = crate::agent_turn_state::parse_turn_state(&request.state) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid turn state");
     };
+    if let Some(session) = state.terminals.get(&terminal_id) {
+        state
+            .attention
+            .record_and_publish(terminal_id, session.work_root_id.clone(), turn_state);
+    }
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -2873,6 +2942,123 @@ mod terminal_portability_skeleton_tests {
             resolve_create_command(Some("not-a-real-profile")),
             Err(TerminalError::BadRequest(_))
         ));
+    }
+
+    // CONTRACT (260725 Phase 5): `remove`/`remove_for_work_roots` must forget
+    // a closed terminal's attention entry at the SAME two choke points that
+    // already forget its callback token - see each method's own CONTRACT.
+    // These tests reach `registry.attention` directly (private field, same
+    // crate module) rather than through an HTTP route, so they exercise the
+    // choke point in isolation from `post_terminal_turn_state`'s own tests
+    // (`tests/routes.rs`).
+    #[tokio::test]
+    async fn remove_forgets_the_attention_entry() {
+        let registry = TerminalRegistry::default();
+        insert_fake_live_session_for_test(&registry, "term_forget_on_remove").await;
+        registry.attention.record_and_publish(
+            "term_forget_on_remove".to_owned(),
+            WorkRootId::from("fake-work-root".to_owned()),
+            crate::agent_turn_state::TurnState::Working,
+        );
+        assert_eq!(registry.attention.snapshot().len(), 1);
+
+        registry.remove("term_forget_on_remove");
+
+        assert!(
+            registry.attention.snapshot().is_empty(),
+            "remove must forget the attention entry, not just the session and token"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_for_work_roots_forgets_the_attention_entry() {
+        let registry = TerminalRegistry::default();
+        let work_root_id = WorkRootId::from("fake-work-root".to_owned());
+        insert_fake_live_session_for_test(&registry, "term_forget_on_workroot_removal").await;
+        registry.attention.record_and_publish(
+            "term_forget_on_workroot_removal".to_owned(),
+            work_root_id.clone(),
+            crate::agent_turn_state::TurnState::Ready,
+        );
+        assert_eq!(registry.attention.snapshot().len(), 1);
+
+        let work_root_ids = BTreeSet::from([work_root_id]);
+        registry.remove_for_work_roots(&work_root_ids);
+
+        assert!(
+            registry.attention.snapshot().is_empty(),
+            "remove_for_work_roots must forget every removed session's attention entry"
+        );
+    }
+
+    // CONTRACT (260725 Phase 5 review cycle 1, finding A): `insert`'s own
+    // opening `sessions.retain(|_, s| s.is_live())` is a FIFTH
+    // session-removal path, distinct from `remove`/`remove_for_work_roots`
+    // above - this test watches THAT specific path (not just any removal),
+    // since the finding was that a removal path was silently missed even
+    // though the other two were wired correctly.
+    #[tokio::test]
+    async fn insert_forgets_the_attention_entry_of_a_session_its_own_eviction_retain_drops() {
+        let registry = TerminalRegistry::default();
+        insert_fake_live_session_for_test(&registry, "term_evicted_by_insert").await;
+        registry.attention.record_and_publish(
+            "term_evicted_by_insert".to_owned(),
+            WorkRootId::from("fake-work-root".to_owned()),
+            crate::agent_turn_state::TurnState::Ready,
+        );
+        assert_eq!(registry.attention.snapshot().len(), 1);
+
+        // Mark the fake session not-live, mirroring a helper that exited
+        // without the browser ever issuing a `DELETE` for it - so the NEXT
+        // `insert` call's eviction `retain` (not `remove`, not
+        // `remove_for_work_roots`) is what drops it from `sessions`.
+        {
+            let sessions = registry
+                .sessions
+                .read()
+                .expect("terminal registry lock poisoned");
+            let evicted = sessions
+                .get("term_evicted_by_insert")
+                .expect("fake session must be present before eviction");
+            evicted.apply_helper_status(TerminalStatus::Exited, 1);
+        }
+
+        // A fresh, unrelated, real `insert` (not `insert_unchecked` -
+        // `insert_unchecked` skips the eviction retain entirely and would
+        // not exercise this path) is what runs the retain under test.
+        let trigger_session = Arc::new(fake_terminal_session().await);
+        registry
+            .insert(trigger_session)
+            .expect("inserting an unrelated live session must succeed");
+
+        assert!(
+            registry.attention.snapshot().is_empty(),
+            "insert's eviction retain must forget the evicted session's attention entry, not \
+             just remove it from `sessions` - otherwise a helper that exits without a browser \
+             DELETE leaks its last state into every future snapshot for the daemon's lifetime"
+        );
+    }
+
+    #[test]
+    fn attention_handle_returned_by_app_state_construction_shares_the_registrys_own_hub() {
+        // CONTRACT: proves the `attention()` accessor hands out a clone of
+        // the SAME hub, not a fresh disconnected one - a write through one
+        // handle must be visible through the other.
+        let registry = TerminalRegistry::default();
+        let app_state_attention = registry.attention();
+
+        app_state_attention.record_and_publish(
+            "term_shared".to_owned(),
+            WorkRootId::from("fake-work-root".to_owned()),
+            crate::agent_turn_state::TurnState::Idle,
+        );
+
+        assert_eq!(
+            registry.attention.snapshot().len(),
+            1,
+            "a write through the accessor's returned handle must be visible through the \
+             registry's own internal handle"
+        );
     }
 }
 

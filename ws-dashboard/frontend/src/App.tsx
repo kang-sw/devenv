@@ -223,6 +223,13 @@ import {
   type TerminalSessionView,
 } from "./terminals";
 import {
+  attentionEventsEndpoint,
+  parseAgentAttentionEntry,
+  parseAgentAttentionSnapshot,
+  shouldReplaceAttentionSourceOnError,
+  type AgentAttentionEntry,
+} from "./agentAttention";
+import {
   appendUserTranscriptBlock,
   attachAgentChatSession,
   createEmptyAgentChatPane,
@@ -468,6 +475,16 @@ export function App() {
   const [serversView, setServersView] = useState<DashboardServersView | null>(
     null,
   );
+  // Per-terminal attention (turn-state) entries, merged across every
+  // eligible linked server's own stream, keyed by
+  // `serverScopedIdentity(serverRoute, terminalId)` the same way
+  // `resourcesByServer`/Activity Console state key by `(serverRoute,
+  // workRootId)`. Lifted at this level (not owned by any pane) so Phase 6's
+  // tab-label indicator can read it without new plumbing - this phase
+  // renders nothing from it.
+  const [attentionByKey, setAttentionByKey] = useState<
+    Record<string, AgentAttentionEntry>
+  >({});
   const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [gitWorktreeTarget, setGitWorktreeTarget] = useState<{
@@ -1788,6 +1805,129 @@ export function App() {
   useEffect(() => {
     saveWorkNavOrderSnapshot(workNavOrder);
   }, [workNavOrder]);
+
+  // Per-terminal attention stream: unlike the Activity Console and document
+  // streams (each a single subscription tied to the current pane
+  // selection), this one is selection-independent - one `EventSource` per
+  // eligible entry in `serversView.servers`, opened/closed as THAT list
+  // changes rather than as any pane opens/closes. A linked server with
+  // nothing reachable to subscribe to (`unreachable`/`authRequired`/
+  // `staleEndpoint`/`tunnelRequired`) is skipped so it never retry-loops an
+  // `EventSource` against a dead link.
+  const attentionSourcesRef = useRef<Map<string, EventSource>>(new Map());
+  useEffect(() => {
+    const servers = serversView?.servers ?? [];
+    const eligibleRoutes = new Set(
+      servers
+        .filter(
+          (server) => server.kind === "local" || server.status === "connected",
+        )
+        .map((server) => server.id),
+    );
+    const sources = attentionSourcesRef.current;
+
+    for (const [serverRoute, source] of sources) {
+      if (eligibleRoutes.has(serverRoute)) {
+        continue;
+      }
+      source.close();
+      sources.delete(serverRoute);
+      setAttentionByKey((current) => {
+        const prefix = `${serverScopedIdentity(serverRoute)}/`;
+        const next: Record<string, AgentAttentionEntry> = {};
+        let changed = false;
+        for (const [key, entry] of Object.entries(current)) {
+          if (key.startsWith(prefix)) {
+            changed = true;
+            continue;
+          }
+          next[key] = entry;
+        }
+        return changed ? next : current;
+      });
+    }
+
+    for (const serverRoute of eligibleRoutes) {
+      if (sources.has(serverRoute)) {
+        continue;
+      }
+      const source = new EventSource(attentionEventsEndpoint(serverRoute));
+      const handleAttentionMessage = (message: MessageEvent) => {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(message.data);
+        } catch {
+          return;
+        }
+        const snapshot = parseAgentAttentionSnapshot(payload);
+        if (snapshot) {
+          setAttentionByKey((current) => {
+            const prefix = `${serverScopedIdentity(serverRoute)}/`;
+            const next: Record<string, AgentAttentionEntry> = {};
+            for (const [key, entry] of Object.entries(current)) {
+              if (!key.startsWith(prefix)) {
+                next[key] = entry;
+              }
+            }
+            for (const entry of snapshot) {
+              next[serverScopedIdentity(serverRoute, entry.terminalId)] = entry;
+            }
+            return next;
+          });
+          return;
+        }
+        const entry = parseAgentAttentionEntry(payload);
+        if (!entry) {
+          return;
+        }
+        setAttentionByKey((current) => ({
+          ...current,
+          [serverScopedIdentity(serverRoute, entry.terminalId)]: entry,
+        }));
+      };
+      source.addEventListener("attentionSnapshot", handleAttentionMessage);
+      source.addEventListener("attention", handleAttentionMessage);
+      source.onmessage = handleAttentionMessage;
+      // CONTRACT (260725 Phase 5 review cycle 1, finding C): a non-2xx
+      // response (401 session expiry, the forwarder's bounded 502 for an
+      // unreachable linked server) fails this `EventSource` PERMANENTLY per
+      // the WHATWG spec - `readyState` goes to `CLOSED` and the browser
+      // never retries on its own, unlike a clean stream end (the `Lagged`
+      // case), which auto-reconnects and is what makes this design's
+      // resync-via-reconnect work at all. Without this handler the dead
+      // source stayed in `sources` forever, since the `sources.has(...)`
+      // guard above then skips re-creating it on every future poll-driven
+      // effect re-run. `shouldReplaceAttentionSourceOnError` (see its own
+      // CONTRACT) filters out the transient `CONNECTING` case, where
+      // `EventSource` is already retrying with its own backoff - only a
+      // genuinely `CLOSED` source is torn down here, and only ever
+      // recreated on the NEXT `serversView` poll tick
+      // (`resourceAvailabilityPollIntervalMs`, 5s), never synchronously in
+      // this handler - a natural bound against hammering a persistently
+      // failing server.
+      source.onerror = () => {
+        if (!shouldReplaceAttentionSourceOnError(source.readyState)) {
+          return;
+        }
+        source.close();
+        sources.delete(serverRoute);
+      };
+      sources.set(serverRoute, source);
+    }
+  }, [serversView?.servers]);
+
+  // Unmount-only teardown: close every still-open attention `EventSource`
+  // when the app itself unmounts, independent of the per-route diffing
+  // effect above (which only closes sources for routes that drop out of the
+  // eligible set while the app stays mounted).
+  useEffect(() => {
+    return () => {
+      for (const source of attentionSourcesRef.current.values()) {
+        source.close();
+      }
+      attentionSourcesRef.current.clear();
+    };
+  }, []);
 
   const handleWorkspaceReorder = useCallback(
     (serverId: string, sourceId: string, beforeId: string | undefined) => {

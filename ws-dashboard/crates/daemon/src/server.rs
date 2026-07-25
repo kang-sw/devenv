@@ -178,6 +178,11 @@ where
         opened_work_roots,
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
+        // CONTRACT (260725 Phase 5): must be `terminals.attention()` - a
+        // clone of the SAME hub `terminals` internally holds - captured
+        // BEFORE `terminals` is moved into the field below. See
+        // `TerminalRegistry::attention`'s own CONTRACT.
+        attention: terminals.attention(),
         terminals,
         codex_sessions: crate::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: crate::claude_cli::ClaudeProviderRegistry::default(),

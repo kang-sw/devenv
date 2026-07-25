@@ -11,6 +11,7 @@ use axum::Router;
 use tokio::fs;
 use tokio::sync::Mutex;
 
+use crate::agent_attention::{attention_events, AttentionHub};
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::document_translation::{
@@ -33,7 +34,8 @@ use crate::root_picker::{
 };
 use crate::servers::{
     dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
-    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_close_terminal,
+    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_attention_events,
+    server_scoped_close_terminal,
     server_scoped_create_empty_directory, server_scoped_document_events,
     server_scoped_git_branches, server_scoped_git_fetch, server_scoped_git_pull_ff_only,
     server_scoped_git_push, server_scoped_git_status, server_scoped_git_switch_branch,
@@ -83,6 +85,12 @@ pub struct AppState {
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
+    // CONTRACT (260725 Phase 5): must be the SAME instance `terminals`
+    // internally holds (obtain via `terminals.attention()`, never a fresh
+    // `AttentionHub::default()`) - see `TerminalRegistry::attention`'s own
+    // CONTRACT for why a disconnected clone would silently break
+    // forget-on-close.
+    pub attention: AttentionHub,
     pub codex_sessions: crate::codex_app_server::CodexProviderRegistry,
     pub claude_sessions: crate::claude_cli::ClaudeProviderRegistry,
     pub work_root_activity: WorkRootActivityProjector,
@@ -292,6 +300,10 @@ pub fn build_router(state: AppState) -> Router {
             delete(server_scoped_close_terminal),
         )
         .route(
+            "/api/dashboard/servers/{server_route}/terminals/attention/events",
+            get(server_scoped_attention_events),
+        )
+        .route(
             "/api/dashboard/document-translation/providers",
             get(translation_providers),
         )
@@ -392,6 +404,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/terminals/{terminal_id}",
             axum::routing::delete(close_terminal),
+        )
+        .route(
+            "/api/dashboard/terminals/attention/events",
+            get(attention_events),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/files",
