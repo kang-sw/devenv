@@ -35,6 +35,8 @@ promoting `260725-bug-dashboard-terminal-platform-macos-unsupported` and
 Note the tool works fine for content-only ticket edits (`0a811fbb`,
 `44fe6fba`, `c79feaee`), so the defect is specific to staged renames.
 
+Re-reproduced the same day through the opposite entry point: `ws/tickets.close(stem, status: "done")` performs frontmatter write -> `git add` -> `git mv`, leaving a staged rename `ready/<stem>.md -> .done/<stem>.md`. The following `ws/git.commit` failed with the identical signature (`[file-exists] ai-docs/tickets/ready/<stem>.md: cannot read ticket file: ... no such file or directory`), whether the `ready/` path was included in `paths` or omitted entirely — with `paths: ["ai-docs/_index.md", "ai-docs/tickets/.done/<stem>.md"]` (no `ready/` path anywhere in the call) the error still named the `ready/` path. `ws/tickets.verify(paths: ["ai-docs/tickets/.done/<stem>.md"])` returned PASS on the same tree at the same moment. This confirms the embedded ticket-verify step derives its path set from the staged diff (the rename's OLD side) rather than from the caller's `paths` argument — sharpening the fix direction below from "the tool mishandles a caller-supplied old path" to "the tool ignores `paths` for this check and reconstructs paths from the index itself." Workaround: native `git commit -F <msgfile>` (`eef7c968` on `impl/nav-row-two-line-open-state-phase1`).
+
 ## Finding 2: large `ai_context` rejected as if it were empty
 
 A call with a non-empty `ai_context` array of eight long entries was rejected

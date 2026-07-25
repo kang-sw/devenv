@@ -1,5 +1,12 @@
 import { normalizeServerRouteLocation } from "./routeBasis.js";
-import { decideSurfaceClose, type SurfaceKind } from "./workbench/index.js";
+// Import from the narrow policy/surfaceRegistry modules rather than the
+// workbench barrel (./workbench/index.js): the barrel re-exports
+// dockviewLayout.tsx, which pulls in the dockview package's CSS import -
+// fine for the Vite-bundled app, but it breaks this module's inclusion in
+// the plain-Node route-tests runner (tsconfig.route-tests.json), which has
+// no CSS loader. Same runtime behavior, narrower module graph.
+import { decideSurfaceClose } from "./workbench/policy.js";
+import type { SurfaceKind } from "./workbench/surfaceRegistry.js";
 import type {
   InstanceView,
   ResourceEntity,
@@ -136,4 +143,35 @@ export function kindLabel(kind: WorkRootView["kind"]) {
     case "plainDirectory":
       return "directory";
   }
+}
+
+// 260725 nav-row-two-line-open-state Phase 1: shared per-root grouping used
+// by both the document-count map (App(), synchronous useMemo over
+// readOnlyFilePanes) and the terminal-count map (WorkbenchShell, signature-
+// gated per its own churn-avoidance comment) - see the ticket's Decision 1.
+// Pure and side-effect free so it is unit-testable without React.
+export function countByRootKey<T>(
+  items: readonly T[],
+  keyOf: (item: T) => string,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = keyOf(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+// The nav row's reserved second line (260725 Phase 1) always renders for
+// workRoot/compactWorkRoot rows regardless of open state - only its text
+// varies, per the ticket's no-height-jump constraint - so this needs a
+// single formatter covering both the "nothing open yet" and populated cases.
+export function formatOpenSurfaceCounts(
+  terminalCount: number,
+  documentCount: number,
+): string {
+  if (terminalCount === 0 && documentCount === 0) {
+    return "no open surfaces";
+  }
+  return `${terminalCount} terminal${terminalCount === 1 ? "" : "s"}, ${documentCount} document${documentCount === 1 ? "" : "s"}`;
 }

@@ -73,6 +73,8 @@
     "src/terminalPrefs.test.ts",
     "src/settingsSections.tsx",
     "src/settingsSections.test.ts",
+    "src/resourcePresentation.tsx",
+    "src/resourcePresentation.test.ts",
     "src/workbench/**/*.ts"
   ]
 }

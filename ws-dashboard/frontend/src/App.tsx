@@ -373,6 +373,8 @@ import {
   resourcePresentationLabel,
   resourceRowTone,
   kindLabel,
+  countByRootKey,
+  formatOpenSurfaceCounts,
 } from "./resourcePresentation.js";
 import {
   ChromeIconButton,
@@ -501,6 +503,24 @@ export function App() {
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
   >({});
+  // 260725 nav-row-two-line-open-state Phase 1: per-root open-terminal count,
+  // pushed up from WorkbenchShell (terminalPanes is WorkbenchShell-local -
+  // see onTerminalCountByRootChange below and its signature-gated push
+  // effect) so the nav row's reserved second line can render it without a
+  // new plumbing path for readOnlyFilePanes-shaped state.
+  const [terminalCountByRoot, setTerminalCountByRoot] = useState<
+    Record<string, number>
+  >({});
+  // Document counts need no cross-component plumbing: readOnlyFilePanes
+  // already lives here, so this is a plain memo, not an upward-pushed state
+  // like the terminal count above.
+  const documentCountByRoot = useMemo(
+    () =>
+      countByRootKey(Object.values(readOnlyFilePanes), (pane) =>
+        serverScopedIdentity(pane.serverRoute, pane.workRootId),
+      ),
+    [readOnlyFilePanes],
+  );
   // Browser-local SIBLING work-nav display order (workspace rows under a
   // server; worktree rows under a workspace), drag-reordered by the user.
   // Purely a render-time ordering overlay applied via `applySiblingOrder` -
@@ -1869,6 +1889,8 @@ export function App() {
             selectedId={selectedId}
             selectedWorkRoot={workbenchSelection?.root ?? null}
             openWorkRootKeys={openWorkRootKeysSet}
+            terminalCountByRoot={terminalCountByRoot}
+            documentCountByRoot={documentCountByRoot}
             onOpenWorkRoot={handleWorkRootOpened}
             onOpenAddServer={() => setServerModal({ mode: "add" })}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -1967,6 +1989,7 @@ export function App() {
             onCommand={executeCommand}
             onOpenWorkRoot={handleWorkRootOpened}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
+            onTerminalCountByRootChange={setTerminalCountByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
             onOpenWorkRootKeysChange={setOpenWorkRootKeys}
             onOpenWorkRootRefsChange={setOpenWorkRootRefs}
@@ -2745,6 +2768,8 @@ function ResourceNavigation({
   selectedId,
   selectedWorkRoot,
   openWorkRootKeys,
+  terminalCountByRoot,
+  documentCountByRoot,
   onOpenWorkRoot,
   onOpenAddServer,
   onOpenSettings,
@@ -2766,6 +2791,12 @@ function ResourceNavigation({
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
   openWorkRootKeys: ReadonlySet<string>;
+  // 260725 nav-row-two-line-open-state Phase 1: open-terminal/open-document
+  // counts by serverScopedIdentity(serverId, rootId), same key shape as
+  // openWorkRootKeys. Ship terminal/document counts only - agent counts are
+  // deferred (see ResourceRow's own comment).
+  terminalCountByRoot: Record<string, number>;
+  documentCountByRoot: Record<string, number>;
   onOpenWorkRoot: (
     view: DashboardResourcesView,
     requestedWorkRootId?: string,
@@ -2861,6 +2892,8 @@ function ResourceNavigation({
               Boolean(resourcesByServer[server.id])
             }
             openWorkRootKeys={openWorkRootKeys}
+            terminalCountByRoot={terminalCountByRoot}
+            documentCountByRoot={documentCountByRoot}
             onCommand={onCommand}
             onOpenWorkRoot={onOpenWorkRoot}
             onOpenServerAuth={onOpenServerAuth}
@@ -2898,6 +2931,8 @@ function ServerRows({
   selectedId,
   resources,
   openWorkRootKeys,
+  terminalCountByRoot,
+  documentCountByRoot,
   onCommand,
   onOpenWorkRoot,
   onOpenServerAuth,
@@ -2913,6 +2948,8 @@ function ServerRows({
   selectedId: string | null;
   resources: DashboardResourcesView | null;
   openWorkRootKeys: ReadonlySet<string>;
+  terminalCountByRoot: Record<string, number>;
+  documentCountByRoot: Record<string, number>;
   onCommand: DashboardCommandDispatcher;
   onOpenWorkRoot: (
     view: DashboardResourcesView,
@@ -3015,6 +3052,8 @@ function ServerRows({
               serverId={server.id}
               selectedId={selectedId}
               openWorkRootKeys={openWorkRootKeys}
+              terminalCountByRoot={terminalCountByRoot}
+              documentCountByRoot={documentCountByRoot}
               onCommand={onCommand}
               worktreeOrderByWorkspace={workNavOrder.worktreeOrderByWorkspace}
               hiddenWorktreesByWorkspace={workNavOrder.hiddenWorktreesByWorkspace}
@@ -3531,6 +3570,7 @@ function WorkbenchShell({
   workbenchLayoutRestoreRef,
   terminalVisualRestoreRef,
   onWorkbenchGroupsByRootChange,
+  onTerminalCountByRootChange,
   onPaneOrderByRootChange,
   onOpenWorkRootKeysChange,
   onOpenWorkRootRefsChange,
@@ -3581,6 +3621,11 @@ function WorkbenchShell({
   onWorkbenchGroupsByRootChange: Dispatch<
     SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
   >;
+  // 260725 nav-row-two-line-open-state Phase 1, Decision 1: pushed from a
+  // signature-gated effect below (not on every terminalPanes change) so this
+  // does not regress App()'s re-render cadence to WorkbenchShell's
+  // per-output-chunk rate - see the effect's own comment.
+  onTerminalCountByRootChange: Dispatch<SetStateAction<Record<string, number>>>;
   onPaneOrderByRootChange: Dispatch<
     SetStateAction<Record<string, WorkbenchPaneOrder>>
   >;
@@ -3982,6 +4027,38 @@ function WorkbenchShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [agentChatPaneIdentitySignature],
   );
+  // 260725 nav-row-two-line-open-state Phase 1, Decision 1: per-root open-
+  // terminal counts for the nav row's reserved second line. Same
+  // signature-gate technique as terminalPaneIdentitySignature/-Identities
+  // above, for the same reason - terminalPanes churns on every batched
+  // output-cursor flush, but the per-root *count* almost never changes on an
+  // output-only commit, so the map (and the App()-level setState/re-render it
+  // triggers via the effect below) must only be rebuilt when a pane is
+  // actually added/removed for some root.
+  const terminalCountByRootSignature = Object.entries(
+    countByRootKey(Object.values(terminalPanes), (pane) =>
+      serverScopedIdentity(pane.session.serverRoute, pane.session.workRootId),
+    ),
+  )
+    .map(([key, count]) => `${key}:${count}`)
+    .sort()
+    .join(",");
+  const terminalCountByRoot = useMemo(
+    () =>
+      countByRootKey(Object.values(terminalPanes), (pane) =>
+        serverScopedIdentity(
+          pane.session.serverRoute,
+          pane.session.workRootId,
+        ),
+      ),
+    // Deliberately keyed on the count signature (change-detector), not
+    // terminalPanes itself - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [terminalCountByRootSignature],
+  );
+  useEffect(() => {
+    onTerminalCountByRootChange(terminalCountByRoot);
+  }, [terminalCountByRoot, onTerminalCountByRootChange]);
   useEffect(() => {
     for (const rootKey of openWorkRootKeys) {
       const ref = openWorkRootRefs[rootKey];
@@ -7108,6 +7185,8 @@ function WorkspaceRows({
   serverId,
   selectedId,
   openWorkRootKeys,
+  terminalCountByRoot,
+  documentCountByRoot,
   onCommand,
   worktreeOrderByWorkspace,
   hiddenWorktreesByWorkspace,
@@ -7118,6 +7197,8 @@ function WorkspaceRows({
   serverId: string;
   selectedId: string | null;
   openWorkRootKeys: ReadonlySet<string>;
+  terminalCountByRoot: Record<string, number>;
+  documentCountByRoot: Record<string, number>;
   onCommand: DashboardCommandDispatcher;
   worktreeOrderByWorkspace: Readonly<Record<string, readonly string[]>>;
   hiddenWorktreesByWorkspace: Readonly<Record<string, readonly string[]>>;
@@ -7159,6 +7240,7 @@ function WorkspaceRows({
     );
 
   if (compactRoot) {
+    const compactRootKey = serverScopedIdentity(serverId, compactRoot.id);
     return (
       <div className="resource-group">
         <ResourceRow
@@ -7179,9 +7261,9 @@ function WorkspaceRows({
             compactRoot.kind === "gitPrimaryRoot" ||
             compactRoot.kind === "gitLinkedWorktree"
           }
-          isOpenWorkRoot={openWorkRootKeys.has(
-            serverScopedIdentity(serverId, compactRoot.id),
-          )}
+          isOpenWorkRoot={openWorkRootKeys.has(compactRootKey)}
+          terminalCount={terminalCountByRoot[compactRootKey] ?? 0}
+          documentCount={documentCountByRoot[compactRootKey] ?? 0}
           debugMeta={[
             "compact workRoot",
             kindLabel(compactRoot.kind),
@@ -7228,45 +7310,48 @@ function WorkspaceRows({
           onWorkspaceReorder(serverId, sourceId, beforeId)
         }
       />
-      {childWorkRoots.map((root) => (
-        <div key={root.id}>
-          <ResourceRow
-            id={root.id}
-            title={root.label}
-            presentation="workRoot"
-            state={root.state}
-            depth={1}
-            selected={selectedId === root.id}
-            actions={root.actions}
-            actionEntityId={root.id}
-            actionServerId={serverId}
-            workspaceId={workspace.id}
-            kind={root.kind}
-            availability={root.availability}
-            activation={root.activation}
-            isOpenWorkRoot={openWorkRootKeys.has(
-              serverScopedIdentity(serverId, root.id),
-            )}
-            debugMeta={[
-              "workRoot",
-              kindLabel(root.kind),
-              `availability: ${root.availability}`,
-              `activation: ${root.activation}`,
-            ]}
-            onCommand={onCommand}
-            dragScopeKey={worktreeScopeKey}
-            onSiblingReorder={(sourceId, beforeId) =>
-              onWorktreeReorder(serverId, workspace.id, sourceId, beforeId)
-            }
-          />
-          {root.mainInstances.length > 0 ? (
-            <div className="nav-secondary-context">
-              {root.mainInstances.length} pinned main surface
-              {root.mainInstances.length === 1 ? "" : "s"}
-            </div>
-          ) : null}
-        </div>
-      ))}
+      {childWorkRoots.map((root) => {
+        const rootKey = serverScopedIdentity(serverId, root.id);
+        return (
+          <div key={root.id}>
+            <ResourceRow
+              id={root.id}
+              title={root.label}
+              presentation="workRoot"
+              state={root.state}
+              depth={1}
+              selected={selectedId === root.id}
+              actions={root.actions}
+              actionEntityId={root.id}
+              actionServerId={serverId}
+              workspaceId={workspace.id}
+              kind={root.kind}
+              availability={root.availability}
+              activation={root.activation}
+              isOpenWorkRoot={openWorkRootKeys.has(rootKey)}
+              terminalCount={terminalCountByRoot[rootKey] ?? 0}
+              documentCount={documentCountByRoot[rootKey] ?? 0}
+              debugMeta={[
+                "workRoot",
+                kindLabel(root.kind),
+                `availability: ${root.availability}`,
+                `activation: ${root.activation}`,
+              ]}
+              onCommand={onCommand}
+              dragScopeKey={worktreeScopeKey}
+              onSiblingReorder={(sourceId, beforeId) =>
+                onWorktreeReorder(serverId, workspace.id, sourceId, beforeId)
+              }
+            />
+            {root.mainInstances.length > 0 ? (
+              <div className="nav-secondary-context">
+                {root.mainInstances.length} pinned main surface
+                {root.mainInstances.length === 1 ? "" : "s"}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -7338,6 +7423,8 @@ function ResourceRow({
   canAddWorktree = false,
   isOpenWorkRoot = false,
   closeWorkRootId = id,
+  terminalCount,
+  documentCount,
   debugMeta,
   onCommand,
   dragScopeKey,
@@ -7365,6 +7452,15 @@ function ResourceRow({
   canAddWorktree?: boolean;
   isOpenWorkRoot?: boolean;
   closeWorkRootId?: string;
+  // 260725 nav-row-two-line-open-state Phase 1: open-terminal/open-document
+  // counts for the row's reserved second line. Only meaningful for
+  // workRoot/compactWorkRoot presentations - undefined for workspace rows
+  // (Decision 4: workspace has no single rootKey, so the caller never passes
+  // these and the row never renders the second line for that presentation).
+  // Agent/agentChat surface counts are explicitly out of scope for this
+  // phase - do not extend this to a third count without a data source.
+  terminalCount?: number;
+  documentCount?: number;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
   // SIBLING drag-reorder scope key (server.id for a workspace row, including
@@ -7426,6 +7522,13 @@ function ResourceRow({
   );
   const draggable = Boolean(dragScopeKey && onSiblingReorder);
   const siblingId = dragEntityId ?? id;
+  // 260725 nav-row-two-line-open-state Phase 1, Decision 4: the second line
+  // and the open/closed data attribute are meaningful only for workRoot and
+  // compactWorkRoot rows - a workspace row represents N child roots with no
+  // single rootKey, so its counts are undefined and its isOpenWorkRoot only
+  // ever reflects baseRoot, not the workspace as a whole. Gate in JS (not a
+  // CSS-only :not() selector) since the count data itself is undefined here.
+  const showOpenSurfaceCounts = presentation !== "workspace";
   return (
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}${draggable ? " resource-row-draggable" : ""}${dragOver ? " resource-row-drag-over" : ""}`}
@@ -7435,6 +7538,9 @@ function ResourceRow({
       data-resource-kind={kind ?? presentation}
       data-resource-activation={activation ?? ""}
       data-resource-availability={availability ?? ""}
+      data-resource-open={
+        showOpenSurfaceCounts ? (isOpenWorkRoot ? "true" : "false") : undefined
+      }
       style={{ "--depth": depth } as CSSProperties}
       title={metadataTitle}
       draggable={draggable}
@@ -7521,6 +7627,11 @@ function ResourceRow({
             </span>
           ) : null}
         </span>
+        {showOpenSurfaceCounts ? (
+          <span className="resource-row-counts">
+            {formatOpenSurfaceCounts(terminalCount ?? 0, documentCount ?? 0)}
+          </span>
+        ) : null}
       </button>
       {hasWorkspaceRemove ||
       hasWorktreeRemove ||
