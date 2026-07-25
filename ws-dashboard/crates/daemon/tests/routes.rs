@@ -160,16 +160,19 @@ fn test_terminal_registry() -> TerminalRegistry {
 // headroom left for this fixture's directory name plus a terminal id plus
 // `.sock` before `UnixListener::bind` fails with "path must be shorter than
 // SUN_LEN". `/tmp` (which macOS symlinks to the short `/private/tmp`) stays
-// comfortably under the limit on every platform this crate targets, so the
-// terminal-registry fixture - the only fixture that binds real sockets under
-// its temp path - uses it directly instead of going through the shared
-// `temp_fixture_path` helper (which many non-socket fixtures also use and
-// must not be perturbed by a socket-specific constraint).
+// comfortably under the limit, so the terminal-registry fixture - the only
+// fixture that binds real sockets under its temp path - uses it directly on
+// macOS instead of going through the shared `temp_fixture_path` helper
+// (which many non-socket fixtures also use and must not be perturbed by a
+// socket-specific constraint). The override is scoped to
+// `target_os = "macos"` only: Linux's 108-byte `sun_path` has no equivalent
+// headroom problem with `$TMPDIR`, so Linux keeps `std::env::temp_dir()`
+// unchanged rather than moving to `/tmp` gratuitously.
 fn terminal_registry_temp_dir() -> PathBuf {
     let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     let base = PathBuf::from("/tmp");
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "macos"))]
     let base = std::env::temp_dir();
     base.join(format!(
         "ws-dashboard-terminal-registry-{}-{unique}",

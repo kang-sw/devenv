@@ -2,19 +2,31 @@
 // operations, extending `terminal::TerminalPlatform`'s existing cfg-gated-
 // module-behind-an-enum shape (see `terminal.rs`'s `default_shell`, which
 // already dispatches Unix vs. Windows behind `#[cfg(not(windows))]`/
-// `#[cfg(windows)]`). Every syscall-touching leaf lives in a `unix`/
-// `windows` submodule; the daemon's cfg-independent call sites (`terminal.rs`
-// spawn/kill paths, boot reconcile) call the top-level re-exported names.
+// `#[cfg(windows)]`). Every syscall-touching leaf lives in a `unix`/`linux`/
+// `macos`/`windows` submodule; the daemon's cfg-independent call sites
+// (`terminal.rs` spawn/kill paths, boot reconcile) call the top-level
+// re-exported names.
 //
 // Identity model (ticket-pinned): PID + OS-reported start-time is the ONLY
 // kill precondition. A nonce/token is explicitly rejected as a kill-gate
 // because it is unverifiable once IPC is dead - exactly the moment the kill
 // decision has to be made. `verify_process_identity` re-derives start-time
-// from the OS and compares against the registry-recorded value; `kill_
-// verified` captures a *stable* OS handle (Linux pidfd / Windows process
-// handle) at verification time and signals through that handle rather than
-// re-resolving the PID, closing the verify-to-kill TOCTOU window a plain
-// "check PID, then `kill(pid)`" sequence would leave open.
+// from the OS and compares against the registry-recorded value.
+//
+// `kill_verified`'s TOCTOU guarantee is PLATFORM-TIERED - do not read either
+// bullet below as a whole-file invariant:
+// - Linux/Windows: `kill_verified` captures a *stable* OS handle (Linux
+//   pidfd / Windows process handle) at verification time and signals through
+//   that handle rather than re-resolving the PID, structurally closing the
+//   verify-to-kill TOCTOU window a plain "check PID, then `kill(pid)`"
+//   sequence would leave open.
+// - macOS: there is no pidfd-equivalent stable handle (see the `macos`
+//   submodule's doc comments), so `kill_verified` re-verifies via
+//   `proc_pidinfo` and then signals through a bare `kill(2)` on the raw PID -
+//   the exact "check PID, then `kill(pid)`" shape the Linux/Windows legs
+//   avoid. This narrows, but does not close, the verify-to-kill race; the
+//   best-effort post-kill re-check only logs a pid-reuse *signal* and must
+//   never be read as a reliable mis-kill detector.
 
 use std::io;
 
@@ -33,7 +45,7 @@ pub mod unix {
     ///
     /// Shared across Linux and macOS unchanged: both are plain POSIX
     /// `setsid()`/`fork()`/`exec()` semantics, verified by this port's
-    /// native macOS build (see `terminal_platform.rs` module docs).
+    /// native macOS `cargo build`/`cargo test` run (260725 Phase 1).
     ///
     /// # Safety of the `pre_exec` closure
     /// `pre_exec` runs in the forked child between `fork()` and `exec()`,
@@ -127,9 +139,14 @@ pub mod macos {
     /// Reads `PROC_PIDTBSDINFO` for `pid` via `proc_pidinfo(3)`. `None` if
     /// the process does not exist, is not visible to us (e.g. owned by
     /// another user without privilege), or the kernel wrote back a short
-    /// buffer (per Apple's documented contract, a return value that does
-    /// not equal the requested struct size means failure - there is no
-    /// separate errno-style channel here).
+    /// buffer. `proc_pidinfo` does set `errno` on failure (probed directly:
+    /// `EPERM` for a process we may not query, `ESRCH` for no such process),
+    /// but this leaf does not read it - per Apple's documented contract, any
+    /// return value that does not equal the requested struct size means
+    /// failure regardless of which `errno` produced it, and this module has
+    /// no use yet for distinguishing "not permitted" from "no such process"
+    /// (see `verify_process_identity`'s cross-user-EPERM doc note below for
+    /// the one place that distinction would matter).
     fn read_bsdinfo(pid: u32) -> Option<libc::proc_bsdinfo> {
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
         let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
@@ -163,6 +180,16 @@ pub mod macos {
         read_bsdinfo(pid).map(|info| pack_start_time(&info))
     }
 
+    /// CONTRACT (cross-user EPERM divergence from the Linux leg, documented
+    /// not fixed - harmless today): `proc_pidinfo` returns `EPERM` (via
+    /// `read_bsdinfo` -> `None`) for a pid owned by another user we lack
+    /// privilege to query, where Linux's world-readable `/proc/<pid>/stat`
+    /// would still yield a real start-time. A pid recycled by a root-owned
+    /// process therefore classifies as `IdentityStatus::NoSuchProcess` on
+    /// macOS vs. `IdentityStatus::PidReused` on Linux. This is harmless
+    /// today because `terminal_reconcile.rs` maps both outcomes to
+    /// drop-only (never kill) - but it would matter if those two rows ever
+    /// diverge in behavior.
     pub fn verify_process_identity(pid: u32, expected_start_time: u64) -> bool {
         process_start_time(pid) == Some(expected_start_time)
     }
@@ -203,6 +230,18 @@ pub mod macos {
     ///   *signal* worth surfacing, even though by this point our kill has
     ///   already been delivered to whatever held the pid at signal time.
     pub fn kill_verified(pid: u32, expected_start_time: u64) -> io::Result<bool> {
+        // Guard against `pid == 0` or a truncating `pid as libc::pid_t` cast
+        // for `pid > i32::MAX`: `kill(2)` treats a non-positive `pid_t` as a
+        // process-group/broadcast target, not a single process. Not reached
+        // in practice - `read_bsdinfo` already returns `None` for both
+        // (probed: pid 0 -> EPERM unprivileged, out-of-range pids -> ESRCH)
+        // - but the Linux leg (`pidfd_open(0)` -> `EINVAL`) and Windows leg
+        // (`OpenProcess(0)` fails) are structurally immune where this one
+        // instead relies on a permission check it does not control, so this
+        // restores that same parity explicitly rather than by accident.
+        if pid == 0 || pid > i32::MAX as u32 {
+            return Ok(false);
+        }
         let verified = matches!(
             read_bsdinfo(pid),
             Some(info) if pack_start_time(&info) == expected_start_time
@@ -215,13 +254,37 @@ pub mod macos {
         }
         let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
         if rc != 0 {
+            // Asymmetric-with-the-mismatch-log-below on purpose: a verified
+            // identity followed by a failed signal is the more surprising
+            // event (the daemon just confirmed this is our helper and still
+            // could not signal it), so it gets a channel too, not just the
+            // post-kill mismatch case.
+            tracing::warn!(
+                pid,
+                error = %io::Error::last_os_error(),
+                "kill(2) failed immediately after a verified identity match - the process was \
+                 confirmed to be our helper but the signal itself was not delivered"
+            );
             return Ok(false);
         }
         // Best-effort post-kill re-check; see the doc comment above for the
         // three-way classification this implements.
         match read_bsdinfo(pid) {
             None => {}
-            Some(after) if pack_start_time(&after) == expected_start_time => {}
+            Some(after) if pack_start_time(&after) == expected_start_time => {
+                // Distinguishes the two same-start-time sub-shapes the doc
+                // comment above draws (zombie vs. a same-identity readback
+                // that raced kernel teardown bookkeeping) at debug level
+                // only - both are success, neither is worth a warning, but
+                // the ticket's Decisions section names `pbi_status`/`SZOMB`
+                // explicitly as the observation point for this distinction.
+                tracing::debug!(
+                    pid,
+                    is_zombie = after.pbi_status == libc::SZOMB,
+                    "post-kill re-check observed the same process identity after a verified \
+                     SIGKILL - no pid reuse, success"
+                );
+            }
             Some(_after) => {
                 tracing::warn!(
                     pid,
