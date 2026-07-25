@@ -930,6 +930,16 @@ fn build_helper_command(
         helper_command
             .env_clear()
             .envs(crate::agent_env_profile::scrub_env_os(host_env, scrub).into_iter());
+        // CONTRACT (review cycle 1, finding C1): thread this SAME resolved
+        // `scrub` list to hop 2 via `--scrub-marker`, so the helper's own
+        // shell spawn (`terminal_helper_process.rs::apply_scrub_and_overlay`)
+        // scrubs the profile's actual markers instead of independently
+        // hardcoding `CLAUDE`. Without this, a profile whose markers are not
+        // a subset of `CLAUDE`'s would be scrubbed at hop 1 and NOT at hop
+        // 2 - the hop that actually seeds the PTY child's env.
+        for marker in scrub.markers {
+            helper_command.arg("--scrub-marker").arg(*marker);
+        }
     }
     helper_command
         .stdin(std::process::Stdio::null())
@@ -2346,6 +2356,18 @@ mod terminal_portability_skeleton_tests {
              the caller-supplied profile is what actually ran, not CLAUDE"
         );
         assert_eq!(envs.get("PATH").cloned().flatten().as_deref(), Some("/usr/bin:/bin"));
+
+        // C1 fix: hop 1 must forward the SYNTHETIC profile's own marker to
+        // hop 2 via `--scrub-marker`, not silently keep it hop-1-only.
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let scrub_marker_pos = args
+            .iter()
+            .position(|arg| arg == "--scrub-marker")
+            .expect("--scrub-marker present");
+        assert_eq!(args[scrub_marker_pos + 1], "SYNTHETIC_MARKER_ONLY");
     }
 
     #[test]
