@@ -15,7 +15,7 @@ rules and hard invariants only.
 
 - Status is directory-based only: `idea/` → `todo/` → `ready/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
 - See the workflow manual's **Ticket System Concepts** section for what each status directory means.
-- `ai-docs/_index.md ## Ticket Focus` is the selected active attention list; only `ready/` entries are direct implementation targets.
+- Active attention is discovered from the status directories via `tickets.list`/`project_tree`, not a cached index section; only `ready/` entries are direct implementation targets.
 - Move tickets with `tickets.close(stem, status)` (to done/dropped) or
   `tickets.move(stem, to)` (idea/todo/ready) MCP tools; use native `git mv`
   as fallback when MCP tools are unavailable. No cross-link updates needed.

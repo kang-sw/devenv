@@ -45,7 +45,6 @@ unresolved findings, and deferred follow-ups; do not restate unchanged plan or s
    `#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.
    Use the result commit supplied by the caller.
 3. Move completed tickets to the next status directory when all phases complete.
-4. Remove completed tickets from the `## Ticket Focus` section in `ai-docs/_index.md`.
 
 ## Doctrine
 

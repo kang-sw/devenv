@@ -4,6 +4,7 @@ related:
   260605-epic-ws-playbook-factory-pivot: workflow routing depends on accurate project-memory status
 sage-review-completeness: completed
 sage-review-design: completed
+completed: 2026-07-25
 ---
 
 # remove the _index.md Ticket Focus section and retire its maintenance machinery
@@ -146,6 +147,53 @@ Verification:
   python bundle suite green; the bootstrap/AGENTS template-version test green
   after the bump (locate it via the template-version constant the bootstrap
   suite asserts, e.g. the `Template Version: vNNNN` marker check).
+
+### Result (367dc6c6) - 2026-07-25
+
+Removed the `## Ticket Focus` section from `ai-docs/_index.md` and retired every
+live reader/writer/cleaner/semantics/spec/convention surface across the ws and
+wsflow trees: the `lead-write-ticket` promotion-writer step, the
+`executor-wrapup` cleaner step, the `lead-bootstrap` keep-list entry, both
+`AGENTS.template.md` reader lines, both `WORKFLOW.md` semantics/keep-list/routing
+mentions, the Go-embedded `ticket-conventions.md` clause, and the
+`documentation-system.md` / `workflow-skills.md` spec prose — replaced with
+filesystem-discovery wording (active attention is read from the status
+directories via `tickets.list` / `project_tree`, no cached section). rsrc bodies
+were edited canonically and the wsflow rsrc mirror plus both `manifest.json`
+regenerated via `WS_REGEN_MANIFEST=1` / `WS_REGEN_WSFLOW_RSRC=1`; the mirror
+byte-contract stayed green.
+
+Verification: `go build ./...`, `go vet ./...`, and the full `agents-plugin-tool`
+`go test ./...` (12 packages) are green; wsflow pytest is 9/9 green (with the
+corrected `v0004`→`v0005` lineage assertion); `TestWsflowRsrcMirrorUpToDate` and
+the rsrc/skills manifest-up-to-date tests are green; `diff -rq agents-plugin/rsrc
+agents-plugin-wsflow/rsrc` is byte-identical. Partitioned review (correctness /
+fit / test) is clean: 0 Critical, 0 Important, 4 Minor — all documentation-clarity
+or deferred-step notes, no code fix warranted.
+
+Deviations:
+- Managed-template version was bumped to `v0044` (ws) / `v0005` (wsflow), not the
+  plan's assumed `v0042`: `v0042`/`v0043` had already landed on `main` from
+  unrelated work, so the new entry was appended after `v0043` without disturbing
+  the immutable `v0041` / `v0004` migration records.
+- The mandated full-tree manifest regen incidentally corrected pre-existing
+  `lead-goal-step/SKILL.md` hash drift in `agents-plugin/skills/manifest.json`
+  (stale since `b8cc7024`, unrelated to this ticket); the manifest now matches the
+  file.
+
+Deferred (post-reinstall regeneration): this repo's own managed root `AGENTS.md`
+(~:199) and `ai-docs/WORKFLOW.md` (:47, :107, :120) still carry the retired
+reader / semantics lines. Per this phase's own contract they must be cleared by
+bootstrap *regeneration*, never a hand-edit — and a correct regen needs the
+rebuilt plugin carrying the new `v0044` template (the installed binary still
+ships `v0043`, so `ws/convention.read` and any bootstrap run today would
+reintroduce the removed text). The regen therefore lands after this work ships
+and devenv re-bootstraps; captured as follow-up idea ticket
+`260725-idea-retire-ticket-focus-root-regen`. Until then a repo-wide `grep -ri
+'ticket focus'` returns exactly: the immutable `v0041` / `v0004` migration
+bullets, the new `v0044` / `v0005` entries that name the section they retire,
+`CHANGELOG.md`, the `260713` dogfood ticket and this ticket's own body, two
+historical `.plans/` docs, and the two deferred-regen root files above.
 
 ## Spec Impact
 
