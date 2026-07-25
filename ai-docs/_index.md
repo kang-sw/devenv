@@ -209,6 +209,17 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260725-bug-sage-stamp-swallows-unrelated-ticket-edits` - `tickets.sage_stamp`
+  commits the whole ticket file under a canonical review title, burying
+  review-response rationale in commits whose message says only "design review
+  passed" (4 occurrences in one session). Ready, single phase: remove the commit
+  (and do not stage), update `next_instruction` in both verdict branches, decide
+  `sage_gate`'s ask-decline commit explicitly, and add the commit to
+  `lead-write-ticket` after stamping. **Blocked on
+  `260725-idea-ws-git-commit-rename-and-payload-rejections` Phase 1** — without it
+  the caller cannot commit the posture change when a status transition is staged.
+  Settled non-scope: no apply-findings step is added to the playbook, since
+  `resolution: autonomous|missing` already carries that contract.
 - `260725-idea-ws-git-commit-rename-and-payload-rejections` - two independent
   `ws/git.commit` defects found by dogfooding. Ready, and the higher-urgency of
   the two ws bugs: Phase 1 is a single-guard fix (the verifier receives

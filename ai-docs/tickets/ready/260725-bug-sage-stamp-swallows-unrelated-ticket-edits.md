@@ -90,11 +90,11 @@ a frontmatter field write needs no staging at all.
 Rejected alternatives:
 
 - **Refuse to run when the ticket file has other uncommitted edits.** Makes the
-  existing commit honest but leaves `sage_stamp` inconsistent with its siblings,
-  and forces an extra commit round-trip mid-review.
+  existing commit honest, but forces an extra commit round-trip mid-review and
+  keeps a posture-stamping tool owning a commit for no reason that survives the
+  "why it commits at all" finding.
 - **Keep the sweep, add an optional `ai_context` argument.** Labels the symptom
-  while a single commit still mixes a posture transition with unrelated content,
-  and keeps the family inconsistency.
+  while a single commit still mixes a posture transition with unrelated content.
 - **Commit only the frontmatter field.** Not achievable without index surgery,
   per the section above.
 
