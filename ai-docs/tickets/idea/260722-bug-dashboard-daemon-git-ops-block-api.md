@@ -66,12 +66,48 @@ Measured `GET /api/dashboard/resources` from the daemon host (PowerShell
   frontend poll does via `loadServers()` + `loadResources("poll")`):
   **21-24 s**, with one round hard-timing-out at 12 s.
 
-The concurrency signature is the key evidence: two simultaneous read requests
-balloon from ~2.4 s to ~22 s (a ~10x blowup from just 2 in-flight requests),
-which is the fingerprint of hypothesis #1 (a blocking git child starving the
-tokio worker pool) and/or hypothesis #2 (a coarse registry lock held across
-the whole git op serializing every other request). A pure per-request slowness
-would add, not multiply.
+A single request already exceeds the client's 8 s budget (13-14 s), and
+concurrency compounds it to ~22 s.
+
+### Hypotheses #1 and #2 are contradicted by the code (2026-07-25 source audit)
+
+The original Suspected Root Cause (blocking git on the async executor, or a
+coarse lock held across the git op) does NOT match the current source:
+
+- **#1 (executor starvation) — disproven.** The resources handler already
+  offloads: `resources.rs` `local_dashboard_resources_view` wraps the entire
+  git/fs sync in `tokio::task::spawn_blocking`, with an explicit comment
+  ("Live discovery runs synchronous filesystem and `git` subprocess work, so
+  keep it off the async worker threads"). Every git call site in the poll path
+  (`discovery.rs`, `work_root_activity.rs`, `git_toolbar.rs`) sits inside a
+  synchronous `fn` reached only through a `spawn_blocking`. This invariant is
+  already codified in the `ws-web-dashboard` mental model (Coupling + "Change
+  live resource discovery or refresh"). It is a real design rule the codebase
+  follows here, and it was hardened reactively by prior bugs
+  (`260710-bug-dashboard-root-picker-blocking-git-spawn`,
+  `260723-bug-dashboard-terminal-blocking-pty-write-thread-starvation`).
+- **#2 (coarse lock serializing) — largely disproven for the read path.**
+  `OpenedWorkRoots.roots` is an `Arc<RwLock<..>>` and the resources path is a
+  reader, so two concurrent `GET /resources` take concurrent read guards and
+  do not serialize on it.
+
+### Revised leading cause
+
+The latency is the aggregate cost of spawning many `git` subprocesses (one or
+more per known work root: `rev-parse --show-toplevel`, `worktree list
+--porcelain`, activity `git_output`) on this environment's slow filesystem,
+per single request — not executor starvation. Concurrency compounds it,
+plausibly via `.git/index.lock` contention (already tracked as
+`260711-idea-dashboard-git-status-polling-index-lock-contention`); note the
+lock-free-git-form rule (Module Contract, mental model) is currently scoped to
+the `git_toolbar.rs` poll only, not the resources discovery/activity git calls.
+The real fixes therefore live elsewhere than this ticket's original framing:
+bound/parallelize the per-work-root git fan-out, extend the lock-free-form rule
+to the discovery/activity path, and/or the daemon-side timeout
+(`260724-idea`). This ticket's "blocks the whole async API surface" framing
+from the 2026-07-22 clone/refresh observation may still hold for a genuinely
+long *mutating* git op (clone/worktree-add) that is NOT on the read poll path;
+that narrower claim is not disproven here and remains the residual scope.
 
 ### Downstream symptom (why this surfaced)
 
