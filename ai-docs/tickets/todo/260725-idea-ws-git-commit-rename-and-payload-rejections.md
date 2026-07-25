@@ -3,6 +3,8 @@ title: "ws/git.commit: cannot commit a staged ticket rename, and rejects large a
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
+sage-review-completeness: recommended
+sage-review-design: recommended
 ---
 
 # ws/git.commit dogfood findings
@@ -98,3 +100,59 @@ string had to be repaired with `git commit --amend -F <file>` afterwards
 - Finding 2: report the real constraint. If there is a size limit, say what it
   is and which field exceeded it; if there is no intended limit, the rejection
   is a serialization bug sitting upstream of the emptiness check.
+
+## Spec Impact
+
+- Target spec area: `mcp-tools.md`, for the `git.commit` argument contract — which
+  `paths` values are accepted when the index holds a rename, and what the
+  `ai_context` field actually constrains.
+- Expected caller-visible change: a staged ticket rename becomes committable
+  through `ws/git.commit` (today no `paths` value succeeds), and an `ai_context`
+  rejection names the condition that actually failed instead of reporting
+  emptiness for a non-empty array.
+- Contract-first spec: no. Both are defects against the already-documented
+  contract rather than new caller-facing behavior, so the spec is corrected at
+  closeout to match what the fixed tool accepts.
+
+## Phases
+
+### Phase 1: Commit a staged ticket rename
+
+Make `ws/git.commit` accept a status transition staged by `tickets.move` or
+`tickets.close`. Both guards must be satisfied by the same call: the ticket
+verify gate must stop applying a file-exists check to the delete side of a
+rename (resolving staged renames through the index, e.g.
+`git diff --cached --name-status -M`), **and** the unrelated-staged-path guard
+must treat a renamed pair as one path so that passing only the destination is
+not rejected. Relaxing either alone leaves the deadlock intact — that is what
+the three-row argument matrix above demonstrates.
+
+Decide and document which `paths` value is canonical for a rename (destination
+only is the natural choice, since that is the file that exists), and make the
+other accepted forms either work or fail with a message that names the canonical
+form.
+
+Verification: promoting a ticket `todo/` -> `ready/` via `tickets.move` and
+closing one to `.dropped/` via `tickets.close` both commit through
+`ws/git.commit` with the destination path alone; a genuinely unrelated staged
+ticket path is still refused; content-only ticket edits keep working
+unchanged. Regression coverage must include the close path, not just promotion —
+this session confirmed both are affected.
+
+### Phase 2: Report the real `ai_context` constraint
+
+Establish first whether a size limit is intended. If it is, reject with a message
+naming the limit and the field that exceeded it; if it is not, fix the
+serialization defect sitting upstream of the emptiness check so a large valid
+array is accepted. Do not resolve this by lowering what callers may write:
+`## AI Context` is the project's decision-rationale tier, so a size ceiling that
+silently pushes callers toward shorter rationale is a workflow regression, and
+any limit that survives must be documented rather than discovered by bisection.
+
+Independent of Phase 1 — no ordering dependency.
+
+Verification: the eight-long-entry payload that failed three times in the
+originating session is accepted, or rejected with a message that states the real
+constraint; a genuinely empty array still reports emptiness; a regression test
+pins whichever behavior is chosen so the emptiness message cannot silently start
+covering a second condition again.
