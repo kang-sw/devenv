@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { CanvasAddon } from "@xterm/addon-canvas";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import {
   clampTerminalSize,
   terminalWebSocketCursor,
@@ -132,6 +133,12 @@ export function TerminalPaneBody({
   // renderer is active (no GPU acceleration available). See the mount effect's
   // load-after-open()/fallback chain below.
   const rendererAddonRef = useRef<WebglAddon | CanvasAddon | null>(null);
+  // Unicode v11 width-table provider for this pane's terminal. Held so it can
+  // be disposed on unmount (which unregisters the provider). `null` when the
+  // provider could not be constructed and xterm's built-in v6 tables stay
+  // active. This is a character-width lookup change only; the output/data path
+  // is untouched.
+  const unicodeAddonRef = useRef<Unicode11Addon | null>(null);
   const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
@@ -226,6 +233,21 @@ export function TerminalPaneBody({
     } catch {
       // WebGL unavailable in this environment; try 2D canvas, then DOM.
       loadCanvasRenderer();
+    }
+
+    // Swap xterm's default (Unicode v6) character-width tables for the v11
+    // tables so wide glyphs - notably emoji - occupy their correct two cells
+    // instead of one. This only changes width lookups used for cursor
+    // advancement/layout; the output/data path is untouched. If the provider
+    // fails to construct, xterm keeps its built-in v6 tables and rendering
+    // continues unchanged.
+    try {
+      const unicode11Addon = new Unicode11Addon();
+      terminal.loadAddon(unicode11Addon);
+      terminal.unicode.activeVersion = "11";
+      unicodeAddonRef.current = unicode11Addon;
+    } catch {
+      unicodeAddonRef.current = null;
     }
     // `pane.outputTrimOffset` is always 0 at genuine mount time in practice
     // (this component only unmounts/remounts on a real terminal close/
@@ -546,6 +568,10 @@ export function TerminalPaneBody({
       // the terminal; a no-op when only the DOM renderer was active.
       rendererAddonRef.current?.dispose();
       rendererAddonRef.current = null;
+      // Unregister the v11 Unicode provider before disposing the terminal; a
+      // no-op when the built-in v6 tables were left active.
+      unicodeAddonRef.current?.dispose();
+      unicodeAddonRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       serializeAddonRef.current = null;
