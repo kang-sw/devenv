@@ -390,6 +390,44 @@ async fn handle_connection(
     }
 }
 
+// CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub): pure
+// builder extracted from `spawn_shell` so both the "default (no explicit
+// command) path is byte-for-byte unchanged" and the "explicit command scrubs
+// Claude markers + applies overlay" contracts are testable without spawning
+// a real process. `host_env` seeds `CommandBuilder`'s own base env (see
+// `portable_pty::CommandBuilder::new`/`get_base_env`) - hop 1 (the daemon's
+// helper spawn, `terminal.rs::build_helper_command`) independently scrubs
+// too, since this hop's inherited env is itself inherited wholesale from
+// hop 1; this hop's own scrub is not merely redundant with that, because it
+// is the only hop that actually determines what a `command = Some(..)`
+// spawn's process sees, so it must scrub regardless of hop 1's outcome.
+fn build_shell_command(
+    args: &TerminalHelperArgs,
+    host_env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    term: String,
+) -> CommandBuilder {
+    let mut command = match &args.command {
+        None => CommandBuilder::new(crate::terminal::default_shell()),
+        Some(program) => {
+            let mut command = CommandBuilder::new(program);
+            command.args(&args.command_args);
+            command.env_clear();
+            for (key, value) in
+                crate::agent_env_profile::scrub_env_os(host_env, &crate::agent_env_profile::CLAUDE)
+            {
+                command.env(key, value);
+            }
+            for (key, value) in &args.env_overlay {
+                command.env(key, value);
+            }
+            command
+        }
+    };
+    command.cwd(&args.cwd);
+    command.env("TERM", term);
+    command
+}
+
 fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::Result<()> {
     let pty_system = native_pty_system();
     let pair = pty_system.openpty(PtySize {
@@ -398,10 +436,9 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
         pixel_width: 0,
         pixel_height: 0,
     })?;
-    let mut command = CommandBuilder::new(crate::terminal::default_shell());
-    command.cwd(&args.cwd);
-    command.env(
-        "TERM",
+    let command = build_shell_command(
+        args,
+        std::env::vars_os(),
         crate::terminal::browser_pty_term(|key| {
             std::env::var_os(key).map(|value| value.to_string_lossy().into_owned())
         }),
@@ -1017,6 +1054,95 @@ mod reader_thread_utf8_tests {
             reassembled.matches('\u{FFFD}').count(),
             1,
             "exactly one replacement character for the single malformed byte: {reassembled:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod spawn_shell_command_tests {
+    use super::*;
+
+    fn args_fixture() -> TerminalHelperArgs {
+        TerminalHelperArgs {
+            registry_dir: std::path::PathBuf::from("/tmp/registry"),
+            terminal_id: "term_abc".to_owned(),
+            work_root_id: "wr1".to_owned(),
+            cwd: std::path::PathBuf::from("/tmp/cwd"),
+            cwd_hint: None,
+            title: "title".to_owned(),
+            columns: 80,
+            rows: 24,
+            socket_path: std::path::PathBuf::from("/tmp/term_abc.sock"),
+            command: None,
+            command_args: Vec::new(),
+            env_overlay: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn spawn_shell_default_no_command_matches_existing_behaviour() {
+        let args = args_fixture();
+        let command = build_shell_command(&args, Vec::new(), "xterm-256color".to_owned());
+
+        assert_eq!(
+            command.get_argv().first(),
+            Some(&std::ffi::OsString::from(crate::terminal::default_shell()))
+        );
+        assert_eq!(
+            command.get_cwd().map(|cwd| cwd.to_string_lossy().into_owned()),
+            Some(args.cwd.to_string_lossy().into_owned())
+        );
+        let extra_env: Vec<&str> = command.iter_extra_env_as_str().map(|(key, _value)| key).collect();
+        assert_eq!(
+            extra_env,
+            vec!["TERM"],
+            "no env_clear/scrub must have run on the default path - TERM is the only extra env entry: {extra_env:?}"
+        );
+    }
+
+    #[test]
+    fn spawn_shell_explicit_command_scrubs_claude_markers_and_applies_overlay() {
+        let mut args = args_fixture();
+        args.command = Some("printf".to_owned());
+        args.command_args = vec!["hi".to_owned()];
+        args.env_overlay = vec![("FOO".to_owned(), "bar".to_owned())];
+
+        let mut host_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = crate::agent_env_profile::CLAUDE
+            .markers
+            .iter()
+            .map(|marker| {
+                (
+                    std::ffi::OsString::from(*marker),
+                    std::ffi::OsString::from("marker-value"),
+                )
+            })
+            .collect();
+        host_env.push((
+            std::ffi::OsString::from("PATH"),
+            std::ffi::OsString::from("/usr/bin:/bin"),
+        ));
+
+        let command = build_shell_command(&args, host_env, "xterm-256color".to_owned());
+
+        assert_eq!(
+            command.get_argv(),
+            &vec![std::ffi::OsString::from("printf"), std::ffi::OsString::from("hi")]
+        );
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            assert_eq!(command.get_env(marker), None, "marker {marker} must be scrubbed");
+        }
+        assert_eq!(
+            command.get_env("PATH").map(|value| value.to_string_lossy().into_owned()),
+            Some("/usr/bin:/bin".to_owned()),
+            "deny-list, not allowlist - non-marker vars must survive"
+        );
+        assert_eq!(
+            command.get_env("FOO").map(|value| value.to_string_lossy().into_owned()),
+            Some("bar".to_owned())
+        );
+        assert_eq!(
+            command.get_env("TERM").map(|value| value.to_string_lossy().into_owned()),
+            Some("xterm-256color".to_owned())
         );
     }
 }
