@@ -394,38 +394,73 @@ async fn handle_connection(
 // builder extracted from `spawn_shell` so both the "default (no explicit
 // command) path is byte-for-byte unchanged" and the "explicit command scrubs
 // Claude markers + applies overlay" contracts are testable without spawning
-// a real process. `host_env` seeds `CommandBuilder`'s own base env (see
-// `portable_pty::CommandBuilder::new`/`get_base_env`) - hop 1 (the daemon's
-// helper spawn, `terminal.rs::build_helper_command`) independently scrubs
-// too, since this hop's inherited env is itself inherited wholesale from
-// hop 1; this hop's own scrub is not merely redundant with that, because it
-// is the only hop that actually determines what a `command = Some(..)`
-// spawn's process sees, so it must scrub regardless of hop 1's outcome.
-fn build_shell_command(
-    args: &TerminalHelperArgs,
-    host_env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
-    term: String,
-) -> CommandBuilder {
+// a real process. Hop 1 (the daemon's helper spawn,
+// `terminal.rs::build_helper_command`) independently scrubs too, since this
+// hop's inherited env is itself inherited wholesale from hop 1; this hop's
+// own scrub is not merely redundant with that, because it is the only hop
+// that actually determines what a `command = Some(..)` spawn's process
+// sees, so it must scrub regardless of hop 1's outcome.
+//
+// Review cycle 1, finding I1/C1: this used to seed a scrubbed copy of the
+// host env via `command.env_clear()` + repopulate. On Windows,
+// `CommandBuilder::new()`'s base env (`get_base_env`) additionally merges a
+// registry-refreshed system+user `PATH` on top of the process's own
+// inherited env; `env_clear()` destroyed that merge and the repopulation
+// loop only restored the (stale) inherited copy underneath it, so an
+// agent-profile terminal would resolve its program against a narrower
+// `PATH` than an ordinary shell terminal from the same helper binary. Unix
+// is unaffected (its `as_command()` conversion re-derives `SHELL`/`HOME`
+// regardless), but the bug is real on Windows. Per-marker
+// `command.env_remove(marker)` (see `apply_claude_scrub_and_overlay` below)
+// removes exactly the scrub markers from whatever `CommandBuilder::new()`
+// already built - registry merge included - and touches nothing else, so it
+// preserves the whole base-env construction on every platform. There is
+// therefore no `host_env` parameter here anymore: the real base env comes
+// from `CommandBuilder::new()` itself, not an injected copy.
+fn build_shell_command(args: &TerminalHelperArgs, term: String) -> CommandBuilder {
     let mut command = match &args.command {
         None => CommandBuilder::new(crate::terminal::default_shell()),
         Some(program) => {
             let mut command = CommandBuilder::new(program);
             command.args(&args.command_args);
-            command.env_clear();
-            for (key, value) in
-                crate::agent_env_profile::scrub_env_os(host_env, &crate::agent_env_profile::CLAUDE)
-            {
-                command.env(key, value);
-            }
-            for (key, value) in &args.env_overlay {
-                command.env(key, value);
-            }
+            apply_claude_scrub_and_overlay(&mut command, &args.env_overlay);
             command
         }
     };
     command.cwd(&args.cwd);
     command.env("TERM", term);
     command
+}
+
+// CONTRACT (review cycle 1, finding T3 - LEAD DECISION, since neither the
+// ticket nor the plan settles overlay-vs-scrub precedence explicitly): the
+// scrub wins. An overlay pair keyed to one of the 11 Claude markers must NOT
+// resurrect it - this is a security-adjacent deny-list, and silent
+// resurrection is exactly the failure it exists to prevent. Finding C3
+// separately flags `--env-overlay` as the argv channel a later phase is
+// most likely to reach for by accident, which makes this precedence
+// load-bearing rather than cosmetic. A colliding overlay key is dropped
+// with a warning rather than applied or hard-failed: nothing populates
+// `env_overlay` yet in this phase (Phase 2 is the first real caller), so a
+// hard error here would add fallible-signature plumbing through
+// `build_shell_command`/`spawn_shell` to protect a path with no live
+// caller; a log-and-drop keeps the invariant enforced while staying cheap
+// at this seam, and Phase 2+ callers get a visible signal if they ever hit
+// this collision by mistake.
+fn apply_claude_scrub_and_overlay(command: &mut CommandBuilder, overlay: &[(String, String)]) {
+    for marker in crate::agent_env_profile::CLAUDE.markers {
+        command.env_remove(marker);
+    }
+    for (key, value) in overlay {
+        if crate::agent_env_profile::CLAUDE.markers.contains(&key.as_str()) {
+            tracing::warn!(
+                %key,
+                "env-overlay key matches a scrubbed Claude marker; the scrub wins, overlay value dropped"
+            );
+            continue;
+        }
+        command.env(key, value);
+    }
 }
 
 fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::Result<()> {
@@ -438,7 +473,6 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
     })?;
     let command = build_shell_command(
         args,
-        std::env::vars_os(),
         crate::terminal::browser_pty_term(|key| {
             std::env::var_os(key).map(|value| value.to_string_lossy().into_owned())
         }),
