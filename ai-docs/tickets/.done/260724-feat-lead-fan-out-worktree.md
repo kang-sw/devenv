@@ -5,6 +5,7 @@ related:
   260605-research-ws-native-subagent-pivot: source of the session-key/scope/render-mint decisions this feature builds on (ferrule lead-scope minting, playbook.render root_override, session.children lineage)
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-25
 ---
 
 # lead-goal-fan-out-step — batch-parallel lead-goal-step variant (mini-lead worktree fan-out) + session.note scratchpad
