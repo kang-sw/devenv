@@ -1790,8 +1790,8 @@ regression; both match the Phase 1 baseline exactly. This phase's own tests
 were confirmed to leak nothing at the process level: live `terminal-helper`
 process counts (`pgrep -f terminal-helper`) were compared before and after
 every run, including each mutation round-trip, and returned to the same
-baseline every time, independent of the already-tracked `tests/routes.rs`
-detached-helper leak
+baseline every time, and no `T`-state strays remained, independent of the
+already-tracked `tests/routes.rs` detached-helper leak
 (`260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper`).
 
 The browser-facing UI gate remains an explicit gap on macOS, deferred to a

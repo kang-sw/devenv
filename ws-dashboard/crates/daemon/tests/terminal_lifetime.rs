@@ -980,8 +980,11 @@ async fn terminal_close_kills_verified_process_via_fallback_kill() {
     // plain `GracefulShutdown` could never have reached the frozen helper, so
     // only the fallback `kill_verified` SIGKILL path can account for this.
     // Reusing `start_time` here (rather than testing pid existence alone)
-    // proves "this identity is gone", not merely "this pid number is free" -
-    // a recycled pid would otherwise read as a false pass.
+    // widens the accepting set from `{None}` to `{None} ∪ {Some(other)}` -
+    // a strict superset. A recycled pid now reads as "identity gone" and
+    // breaks the loop immediately, instead of reading as `Some(other)`,
+    // failing the old `is_none()` check, and stalling the poll until the
+    // deadline - a spurious timeout, not a false pass either way.
     let death_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     loop {
         if ws_dashboard_daemon::terminal_platform::process_start_time(pid) != Some(start_time) {

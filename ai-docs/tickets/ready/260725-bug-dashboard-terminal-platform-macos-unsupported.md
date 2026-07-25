@@ -359,6 +359,21 @@ Review: partitioned correctness/fit/test, two cycles. Cycle 1 raised 1
 Critical (the spec claimed a macOS test pass that was false) + 4 Important +
 7 Minor; all accepted and fixed. Cycle 2: no Critical, no Important.
 
+#### Edition (e9504d0c) - 2026-07-25
+
+Correction to the `SZOMB` branch rationale above: the claim that
+`kill_verified_kills_on_matching_identity` "legitimately observes a zombie
+carrying the expected start-time" is factually wrong on macOS. Measured with
+a dedicated C probe: for a genuine unreaped zombie (parent alive,
+deliberately never reaping, confirmed `Z <defunct>` via `ps`),
+`proc_pidinfo` returns n=0 at t+50ms, t+1.25s, and t+4.25s — i.e.
+`process_start_time` yields `None`, not `Some(start_time)`. That test
+therefore takes the "pid gone" branch, and the `SZOMB` arm is unreachable on
+this platform. Behavior is unaffected — both arms are silent successes — so
+no code change follows from this. Short hash used: `e9504d0c` (current HEAD
+at authoring time; using the commit this Edition ships in would be
+circular).
+
 ### Phase 2: Native macOS runtime acceptance for the helper lifecycle
 
 Phase 1 proves the code compiles and unit-verifies; it does not prove the
