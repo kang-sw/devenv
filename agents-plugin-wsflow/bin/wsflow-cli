@@ -1,0 +1,9 @@
+#!/bin/sh
+# wsflow-cli: MCP-independent CLI fallback for the wsflow plugin.
+# Bakes wsflow's agentless environment before delegating to the launcher.
+set -e
+export WS_MCP_NO_AGENT=1
+export WS_MCP_NAMESPACE=wsflow
+export WS_MCP_SETUP_TOOL=setup
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec python3 "$script_dir/ws-mcp-launcher.py" "$@"

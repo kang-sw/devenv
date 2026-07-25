@@ -175,6 +175,23 @@ func TestSubstitutionMirrorRespectsWordBoundaries(t *testing.T) {
 	}
 }
 
+// TestWsCliSubstitutionPattern proves the ws-cli literal-token substitution
+// fires on standalone "ws-cli" while leaving "ws-mcp" and "ws-plugin"
+// untouched.
+func TestWsCliSubstitutionPattern(t *testing.T) {
+	source := "---\nname: fixture\n---\n\n" +
+		"Run ws-cli tools, never ws-mcp directly, and do not touch ws-plugin.\n"
+	out, err := GenerateWsflowSkillBody(source)
+	if err != nil {
+		t.Fatalf("expected guard to accept fixture, got error: %v", err)
+	}
+	want := "---\nname: fixture\n---\n\n" +
+		"Run wsflow-cli tools, never ws-mcp directly, and do not touch ws-plugin.\n"
+	if out != want {
+		t.Fatalf("ws-cli substitution mismatch:\ngot:  %q\nwant: %q", out, want)
+	}
+}
+
 // TestSubstitutionGuardAcceptsNamespaceOnlyContent is the positive-path
 // sibling: a source containing only ws:/ws/ namespace tokens must pass the
 // guard and substitute cleanly.

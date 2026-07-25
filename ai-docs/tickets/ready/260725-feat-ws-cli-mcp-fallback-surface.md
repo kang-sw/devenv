@@ -412,6 +412,59 @@ Verification (downstream dogfood, not a local gate): bare-name resolution from
 test environment is available to this work. Do not block the phase on it; record
 the result when a Windows session next runs.
 
+### Result (1281b11a) - 2026-07-25
+
+Added the four shims — `agents-plugin/bin/ws-cli` (+x, **env-free**),
+`agents-plugin/bin/ws-cli.cmd`, `agents-plugin-wsflow/bin/wsflow-cli` (+x, bakes
+`WS_MCP_NO_AGENT=1` / `WS_MCP_NAMESPACE=wsflow` / `WS_MCP_SETUP_TOOL=setup`), and
+`agents-plugin-wsflow/bin/wsflow-cli.cmd` — each delegating to its own plugin's
+`ws-mcp-launcher.py` via `exec python3 "$script_dir/ws-mcp-launcher.py" "$@"`
+(the launcher already resolves the binary and forwards argv+`os.environ`, so no
+new plumbing). Confirmed the env-baking asymmetry against source: `ws` `plugin.json`
+has no `env` block and `RuntimeNamespace()`/`NoAgentMode()` default to full-ws, so
+`ws-cli` correctly exports nothing; only `wsflow-cli` carries the three vars. Made
+`import urllib.request` lazy inside `download_file()` (the sole `urlopen` caller,
+on every download path) in both launcher copies, kept byte-identical. Extended
+`internal/wsrsrc/skills_mirror.go` with `wsCliPattern` (`\bws-cli\b` -> `wsflow-cli`,
+a literal-token rule that does not touch `ws-mcp`/`ws-plugin` and does not collide
+with the existing `\bws:`/`\bws/` patterns) plus a pinning `TestWsCliSubstitutionPattern`.
+
+Verification: from `agents-plugin-tool/`, `go build ./...` / `go vet ./...` clean;
+`go test ./internal/wsrsrc/... ./cmd/ws-mcp/...` green including the new test and
+the unchanged `TestWsflowSkillsMirrorUpToDate`; `diff` of the two launcher copies
+empty. Local shim resolution driven end-to-end (via `WS_MCP_BOOTSTRAP_BINARY`,
+since the source tree is not itself a recognized local-devenv-runtime cache path —
+a verification-harness detail, not a defect): `ws-cli runtime capabilities` reports
+the full surface (`mercenary.*`, `config.workflow_prefer_mercenary` present) while
+`wsflow-cli runtime capabilities` omits them, proving the baked
+`WS_MCP_NO_AGENT=1`/`WS_MCP_NAMESPACE=wsflow` env reaches the subprocess.
+
+Deviations: none from the plan contract; `substitutionMirroredSkills`,
+`cmd/ws-mcp/main.go`, and the Phase 3 surface were left untouched. A stray untracked
+`agents-plugin-wsflow/.runtime/` produced by local shim verification was removed
+before commit (pre-existing `.gitignore` gap, out of scope to fix here).
+
+Review: partitioned correctness/fit/test, all clean — **0 critical, 0 important**.
+Two minor items accepted (no remediation): (1) `wsflow-cli.cmd`'s three `set`
+statements lack an enclosing `setlocal`, so an interactive Windows `cmd` session
+would leak the three vars after the launcher returns — functional behavior is
+correct (the vars still reach `python3`), the leak is interactive-Windows-only, and
+the plan explicitly scopes `.cmd` correctness as downstream dogfood; wrapping in
+`setlocal`/`endlocal` for exec-no-leak parity with the POSIX shim is a good polish
+to fold into the Windows dogfood pass. (2) `TestWsCliSubstitutionPattern` exercises
+the left/standalone boundary (`ws-mcp`/`ws-plugin` untouched) but not the right
+boundary (`ws-client`), which is protected by the pattern's `\b` — an optional
+coverage top-up.
+
+Concurrency note: implemented under strict explicit-pathspec isolation from a
+concurrent unrelated session's five uncommitted files (`agents-plugin{,-wsflow}/rsrc/lead-write-ticket/lead-write-ticket.md`,
+both `rsrc/manifest.json`, `ai-docs/_index.md`); commit `1281b11a` contains exactly
+the eight Phase 2 files and none of them.
+
+Deferred (unchanged from ticket): spec reflection into `mcp-tools.md` /
+`plugin-runtime.md` / `workflow-skills.md` stays closeout-only. Phase 3 (the
+`mcp-server-repair` skill and eight front-door pointers) remains in `ready/`.
+
 ### Phase 3: `mcp-server-repair` skill and entry-point pointers
 
 Author `agents-plugin/skills/mcp-server-repair/SKILL.md` with a description that

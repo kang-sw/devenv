@@ -9,7 +9,6 @@ import sys
 import tempfile
 import time
 import uuid
-import urllib.request
 from pathlib import Path
 
 
@@ -171,6 +170,8 @@ def runtime_binary_name(contract: dict, contract_path: Path, os_name: str) -> st
 
 
 def download_file(url: str, destination: Path) -> None:
+    import urllib.request
+
     try:
         with urllib.request.urlopen(url) as response, destination.open("wb") as out:
             shutil.copyfileobj(response, out)
