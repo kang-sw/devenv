@@ -57,6 +57,10 @@ func main() {
 		mentalModelsCommand(os.Args[2:])
 	case "references":
 		referencesCommand(os.Args[2:])
+	case "tools":
+		toolsCommand(os.Args[2:])
+	case "call":
+		callCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -871,6 +875,194 @@ func referencesTrace(args []string) {
 		return
 	}
 	printTextOrFatal("references trace", mcp.FormatReferenceTrace(result), err)
+}
+
+// --- Generic MCP tool passthrough (tools / call) ---
+//
+// These subcommands are the canonical fallback surface: they route through
+// Server.ServeStdio with a synthetic single-line JSON-RPC request, the same
+// mechanism serve() and runSmoke() already use, so all profile filtering
+// (filteredTools) and gating (callTool's NoAgentMode/toolAllowed/keyed
+// session-scope checks) apply unchanged with zero internal/mcp export
+// changes. Root does not gate tools/list or tools/call dispatch — only a
+// session_key argument resolves a root, inside individual tool handlers — so
+// defaultRoot(".") is used unconditionally here.
+
+// toolsMappingRule documents the informal `ws/x.y(a: b)` invocation shorthand
+// used in skill prose alongside its literal CLI equivalent, so a caller
+// without a live MCP connection can still discover and drive tools.
+const toolsMappingRule = `mapping: ws/x.y(a: b) -> ws-cli call x.y '{"a":"b"}'`
+
+// mcpLineResponse is the CLI-local decode shape for the single JSON-RPC
+// response line ServeStdio writes for one synthetic request. internal/mcp's
+// own response/rpcError types are unexported, so this package needs its own
+// mirror of the wire shape.
+type mcpLineResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *mcpLineError   `json:"error"`
+}
+
+type mcpLineError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// runMCPLine feeds a single synthetic JSON-RPC request line through a fresh
+// Server's ServeStdio and decodes the single response line it writes back.
+func runMCPLine(line string) (mcpLineResponse, error) {
+	var out bytes.Buffer
+	server := mcp.NewServer(defaultRoot("."), version, sourceCommit)
+	if err := server.ServeStdio(context.Background(), strings.NewReader(line+"\n"), &out); err != nil {
+		return mcpLineResponse{}, err
+	}
+	trimmed := bytes.TrimSpace(out.Bytes())
+	if len(trimmed) == 0 {
+		return mcpLineResponse{}, fmt.Errorf("no response from MCP dispatch")
+	}
+	var resp mcpLineResponse
+	if err := json.Unmarshal(trimmed, &resp); err != nil {
+		return mcpLineResponse{}, fmt.Errorf("decode MCP response: %w", err)
+	}
+	return resp, nil
+}
+
+// listMCPTools performs a tools/list round-trip and returns the raw
+// (already profile/namespace-filtered) tool entries from filteredTools, one
+// map per tool with at least name/description/inputSchema keys.
+func listMCPTools() []map[string]any {
+	resp, err := runMCPLine(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	if err != nil {
+		fatal("tools", err)
+	}
+	if resp.Error != nil {
+		fatal("tools", fmt.Errorf("%s", resp.Error.Message))
+	}
+	var result struct {
+		Tools []map[string]any `json:"tools"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		fatal("tools", err)
+	}
+	return result.Tools
+}
+
+func toolsCommand(args []string) {
+	switch len(args) {
+	case 0:
+		toolsList()
+	case 1:
+		toolsShow(args[0])
+	default:
+		fmt.Fprintln(os.Stderr, "usage: ws-mcp tools [<name>]")
+		os.Exit(2)
+	}
+}
+
+// toolsList prints the mapping rule followed by name + description for every
+// tool visible in the current profile — deliberately no inputSchema, so the
+// bare listing stays short enough to be a recovery entry point.
+func toolsList() {
+	fmt.Println(toolsMappingRule)
+	for _, tool := range listMCPTools() {
+		name, _ := tool["name"].(string)
+		description, _ := tool["description"].(string)
+		fmt.Printf("%s: %s\n", name, description)
+	}
+}
+
+// toolsShow prints the inputSchema for a single named tool. Looking the name
+// up through the same filtered tools/list result means an agentless-hidden
+// or otherwise unavailable tool name reports "not found" rather than leaking
+// its schema.
+func toolsShow(name string) {
+	for _, tool := range listMCPTools() {
+		toolName, _ := tool["name"].(string)
+		if toolName != name {
+			continue
+		}
+		schema, err := json.Marshal(tool["inputSchema"])
+		if err != nil {
+			fatal("tools", err)
+		}
+		fmt.Println(string(schema))
+		return
+	}
+	fatal("tools", fmt.Errorf("tool not found: %s", name))
+}
+
+// callCommand dispatches a single tools/call request built from the same
+// {name, arguments} shape callTool consumes, writing the tool's text content
+// to stdout on success. It exits non-zero with a readable message on
+// malformed JSON, unknown tool, JSON-RPC-level error, or tool-level
+// (isError) error.
+func callCommand(args []string) {
+	if len(args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: ws-mcp call <name> '<json>'")
+		os.Exit(2)
+	}
+	name := args[0]
+	rawArguments := args[1]
+
+	var probe any
+	if err := json.Unmarshal([]byte(rawArguments), &probe); err != nil {
+		fatal("call", fmt.Errorf("malformed JSON arguments: %w", err))
+	}
+
+	request := struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Method  string `json:"method"`
+		Params  struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"params"`
+	}{JSONRPC: "2.0", ID: 1, Method: "tools/call"}
+	request.Params.Name = name
+	request.Params.Arguments = json.RawMessage(rawArguments)
+
+	line, err := json.Marshal(request)
+	if err != nil {
+		fatal("call", err)
+	}
+
+	resp, err := runMCPLine(string(line))
+	if err != nil {
+		fatal("call", err)
+	}
+	// Unknown tool names and other JSON-RPC-level failures (invalid params,
+	// method not found) surface via resp.Error, not Result["isError"] — see
+	// callTool's `default:` case in internal/mcp/server.go, which returns
+	// errorResponse(..., -32602, "unknown tool: ...") for an unrecognised
+	// tool name. Both shapes are checked here so neither is silently dropped.
+	if resp.Error != nil {
+		fmt.Fprintf(os.Stderr, "ws-mcp call %s: %s\n", name, resp.Error.Message)
+		os.Exit(1)
+	}
+
+	var result struct {
+		IsError bool `json:"isError"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		fatal("call", err)
+	}
+	var text string
+	if len(result.Content) > 0 {
+		text = result.Content[0].Text
+	}
+	if result.IsError {
+		fmt.Fprint(os.Stderr, text)
+		if !strings.HasSuffix(text, "\n") {
+			fmt.Fprintln(os.Stderr)
+		}
+		os.Exit(1)
+	}
+	fmt.Print(text)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {
