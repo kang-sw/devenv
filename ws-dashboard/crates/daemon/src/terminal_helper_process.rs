@@ -171,7 +171,9 @@ impl SharedState {
 
 pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()> {
     let pid = std::process::id();
-    let start_time = crate::terminal_platform::process_start_time(pid).unwrap_or(0);
+    let start_time = crate::terminal_platform::process_start_time(pid).ok_or_else(|| {
+        anyhow::anyhow!("failed to read own process start time for identity registration (pid {pid})")
+    })?;
 
     let entry = TerminalRegistryEntry {
         terminal_id: args.terminal_id.clone(),

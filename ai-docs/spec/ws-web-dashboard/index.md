@@ -1687,6 +1687,14 @@ tracked source. If native Windows evidence cannot run, the evidence states the
 exact blocker and records the result as an explicit gap instead of treating a
 POSIX local gate as native-Windows coverage.
 
+Native macOS evidence to date (260725 Phase 1) covers a native `cargo build`
+and `cargo test -p ws-dashboard-daemon` pass on aarch64-apple-darwin —
+compile correctness and unit-level identity/kill-verification behavior only.
+Live-lifecycle and browser-gate evidence (spawn, daemon-restart re-adopt,
+identity-verified close, dead-shell detection against a running dashboard) is
+an explicit gap on macOS, deferred to a later phase, and must not be read as
+covered by the build/unit-test pass recorded here.
+
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
 The dashboard daemon provides a live local discovery provider that maps opened
@@ -1907,7 +1915,11 @@ paths.
 Each helper records its identity — process id and process start-time — in a
 per-terminal registry file, so the daemon can distinguish a still-live helper
 from a stale entry whose pid has since been reused by an unrelated process
-rather than trusting a bare pid.
+rather than trusting a bare pid. The start-time value's *source* is
+platform-specific (`/proc/<pid>/stat` on Linux, `GetProcessTimes` on Windows,
+`proc_pidinfo`/`PROC_PIDTBSDINFO` on macOS); the recorded registry value
+itself stays an opaque number end-to-end and is never interpreted outside the
+platform module that produced it.
 
 Live terminal sessions persist across browser refresh, and across a daemon
 restart, because the PTY's lifetime belongs to the detached helper process,
@@ -2109,12 +2121,19 @@ Only two events terminate a helper process: an explicit terminal-close
 request, or removal of the owning workRoot/workspace root. Termination is
 graceful-then-verified: the daemon first sends the helper a graceful-shutdown
 request over the IPC channel, then falls back to an identity-verified kill of
-the helper's recorded pid — never a bare-pid re-resolve, so a pid reused by
-an unrelated process after the helper already exited is never mistakenly
-killed. On Windows, the helper additionally places its spawned shell into a
-kill-on-close job object so the fallback kill tears down the whole shell
-subtree; on Unix, the helper detaches from the daemon at spawn time so it
-keeps running independent of the daemon process.
+the helper's recorded pid — never a bare-pid re-resolve. On Linux and
+Windows this guarantee is structurally closed: the fallback kill captures a
+stable OS handle (Linux pidfd / Windows process handle) at verification time
+and signals through that handle, so a pid reused by an unrelated process
+after the helper already exited is never mistakenly killed. On macOS the
+fallback kill instead verifies identity immediately before signalling and
+performs a best-effort, non-guaranteed post-kill re-check (macOS has no
+pidfd-equivalent stable handle to signal through) — this narrows, but does
+not close, the same verify-to-kill race; it must not be read as a reliable
+mis-kill detector. On Windows, the helper additionally places its spawned
+shell into a kill-on-close job object so the fallback kill tears down the
+whole shell subtree; on Unix, the helper detaches from the daemon at spawn
+time so it keeps running independent of the daemon process.
 
 When the frontend instead reattaches to a still-alive daemon terminal by id on
 reload, it restores that pane's visual appearance rather than replaying only
