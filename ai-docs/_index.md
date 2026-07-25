@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260725-bug-dashboard-terminal-platform-macos-unsupported` | ready | Dashboard daemon does not build on macOS: the `#[cfg(unix)]` terminal platform layer is Linux-only (pidfd syscalls + `/proc` start-time) |
 | `260725-feat-dashboard-nav-row-two-line-open-state` | ready | Left-nav work-root rows: two-line layout with open-surface counts, plus open-vs-closed de-emphasis |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
@@ -245,28 +244,15 @@ dropped tickets live in hidden archive dirs and git history.
 | `260724-idea-dashboard-daemon-terminal-lifetime-test-interactive-shell-timing` | idea | Daemon `terminal_lifetime` tests are not robust to interactive-shell startup timing and fail on interactive-zsh hosts |
 | `260724-idea-dashboard-hotkey-leader-dispatch-gap` | idea | Global leader-key `executeCommand` call has no registered handler for `terminal.create` and most other default leaf commandIds, so leader-sub dispatch silently no-ops for them |
 | `260724-idea-dashboard-hotkey-rebind-editor-settings-section` | idea | Dashboard hotkey-rebind editor settings section, split from `260722-feat-dashboard-settings-panel` Phase 2 |
+| `260725-bug-agent-synthetic-load-cleanup-guard` | idea | Agent-generated synthetic CPU load must record PIDs at spawn and self-limit; a review subagent's load experiment leaked 70 orphaned busy loops |
 | `260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper` | idea | Integration tests in `tests/routes.rs` leak detached helper processes with no reaper (platform-independent, found during macOS Phase 1 port) |
+| `260725-bug-dashboard-terminal-lifetime-load-fragility` | idea | Two pre-existing `terminal_lifetime` tests fail reproducibly under CPU-saturation load (found during macOS Phase 2 acceptance) |
 | `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails` | idea | `discovery.rs::canonical_or_normalized` hashes a resolved vs. unresolved path depending on whether the workRoot exists, so `WorkRootId` flips across directory removal/recreation when a path segment is a symlink |
 | `260725-refactor-dashboard-agent-gui-physical-module-isolation` | idea | Tier 2 wire-out: physically extract the suspended agent-GUI modules (FE+BE) from the live dashboard build; needs sage design gating before `ready` |
 | `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
 
 ## Ticket Focus
 
-- `260725-bug-dashboard-terminal-platform-macos-unsupported` (ready, bug) —
-  **priority target (owner: macOS must be feature-complete, 2026-07-25).**
-  Phase 1 done (`### Result (1aca7993) - 2026-07-25`): the daemon now builds
-  and unit/integration-tests clean on native aarch64-apple-darwin (macOS
-  `linux`/`macos`/`unix`/`windows` split of `terminal_platform.rs`, verified
-  Linux non-regression via container `cargo check`). Phase 2 (native macOS
-  runtime/browser-facing lifecycle acceptance) remains. Phase 1 also surfaced
-  a silent detached-helper-and-PTY leak in `tests/terminal_lifetime.rs`'s
-  `HelperReaper` (fixed) and two pre-existing bugs spun out as their own
-  `idea/` tickets (see inventory): `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails`
-  and `260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper`. Spec
-  addressing via `## Spec Impact` (`ws-web-dashboard/index.md`,
-  Contract-first: no) — includes amending the currently-absolute
-  never-kill-a-recycled-pid guarantee into a platform tier. Sage combined =
-  passed.
 - `260725-feat-dashboard-nav-row-two-line-open-state` (ready, feat) —
   owner UX request: left-nav work-root rows get a second line showing open
   terminal/document counts, plus open-vs-closed de-emphasis by saturation.
@@ -291,15 +277,19 @@ dropped tickets live in hidden archive dirs and git history.
   (a nested agent inherits `CLAUDE_CODE_CHILD_SESSION` and loses transcript
   saving). Sage combined = passed after one block/revise cycle.
 
-**Ordering (owner, 2026-07-25):** macOS first. Partially discharged as of
-Phase 1 of `260725-bug-dashboard-terminal-platform-macos-unsupported`
-(`1aca7993`): the daemon now builds and unit/integration-tests natively on
-macOS, so the other two ready tickets and dashboard dogfooding are no longer
-build-blocked. Phase 2 of that ticket (native macOS runtime/browser-facing
-acceptance) still remains open. The one exception worth taking early — now
-moot as a special case, but recorded for history — was the turn-start hook
-spike inside the attention ticket's Phase 3, which touches no daemon code
-and decides whether the `working` state and the nav spinner exist at all.
+**Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
+`260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
+ticket closed (`ai-docs/tickets/.done/`) — the daemon builds and
+unit/integration-tests natively on macOS (Phase 1), and all four terminal
+lifecycle legs (spawn, daemon-restart re-adopt, dead-shell detection,
+identity-verified close) pass native runtime acceptance with non-vacuity
+proofs (Phase 2). The browser-facing UI/WebSocket gate remains an explicit,
+separately tracked gap (see that ticket's Phase 2 Result). The other two ready
+tickets and dashboard dogfooding are no longer build-blocked. The one
+exception worth taking early — now moot as a special case, but recorded for
+history — was the turn-start hook spike inside the attention ticket's Phase 3,
+which touches no daemon code and decides whether the `working` state and the
+nav spinner exist at all.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin
