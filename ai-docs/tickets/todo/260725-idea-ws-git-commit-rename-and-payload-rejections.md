@@ -3,11 +3,13 @@ title: "ws/git.commit: cannot commit a staged ticket rename, and rejects large a
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
-sage-review-completeness: recommended
+sage-review-completeness: completed
 sage-review-design: completed
 ---
 
 # ws/git.commit dogfood findings
+
+## Background
 
 Two independent surprises hit during a single 2026-07-25 ticketing session.
 Both forced a fallback to native `git commit`, which loses the tool's
@@ -37,7 +39,7 @@ promoting `260725-bug-dashboard-terminal-platform-macos-unsupported` and
 Note the tool works fine for content-only ticket edits (`0a811fbb`,
 `44fe6fba`, `c79feaee`), so the defect is specific to staged renames.
 
-### Independent reproduction: it is a deadlock, not a bad argument shape
+### Independent reproduction, and where the failure actually is
 
 Hit again the same day on the `main` worktree while promoting
 `260725-feat-ws-cli-mcp-fallback-surface`, this time after `ws/tickets.move`
@@ -74,9 +76,11 @@ The single necessary change is therefore what the *verifier* receives, since
 `Verifier` (`git.go:45`) takes only `(root, paths)` and carries no index status
 with which to make the distinction itself.
 
-This also means the deadlock pushes callers off the gate that
-`260723-feat-ticket-write-verify-commit-gate` deliberately made non-bypassable:
-the only way through is the native-git fallback that gate exists to prevent.
+Narrow cause, wide blast radius: because no workable `paths` value exists for a
+caller doing an ordinary status transition, the defect pushes callers off the
+gate that `260723-feat-ticket-write-verify-commit-gate` deliberately made
+non-bypassable — the only way through is the native-git fallback that gate exists
+to prevent.
 
 Scope confirmed to be every staging path, not just promotion: `ws/tickets.close`
 (dropping `260725-bug-git-commit-deadlocks-after-tickets-move-rename` to
@@ -163,6 +167,12 @@ deletion commits; a genuinely unrelated staged ticket path is still refused and
 the `[_index.md]`-only form still fails; content-only ticket edits keep working
 unchanged. Regression coverage must include the close and delete paths, not just
 promotion — this session confirmed close is affected.
+
+Cover the divergent case explicitly, since it is the one the strategy choice
+turns on: a caller that passes **extra ticket paths alongside** a staged rename
+(for example the moved ticket plus an unrelated content-edited ticket in the same
+commit). Pin whichever behavior the chosen strategy produces, so the decision
+above is settled by a test rather than left to the next reader.
 
 ### Phase 2: Report the real `ai_context` constraint
 
