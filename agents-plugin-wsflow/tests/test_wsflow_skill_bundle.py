@@ -18,6 +18,7 @@ EXPECTED_SKILLS = {
     "lead-bootstrap",
     "lead-discuss",
     "lead-goal-step",
+    "lead-goal-fan-out-step",
     "lead-forge-mental-model",
     "lead-forge-spec",
     "lead-implement",
@@ -43,7 +44,12 @@ EXPECTED_INLINE_SKILLS = {
     "lead-verify-discussion",
     "lead-goal-step",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint"}
+EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint", "lead-goal-fan-out-step"}
+PARALLEL_INIT_TITLES = {
+    "lead-discuss": "Discuss",
+    "lead-sprint": "Sprint",
+    "lead-goal-fan-out-step": "Goal Fan-Out Step",
+}
 
 FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
@@ -120,7 +126,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
-            title = skill.removeprefix("lead-").title()
+            title = PARALLEL_INIT_TITLES[skill]
             match = re.fullmatch(
                 r"---\n"
                 rf"name: {re.escape(skill)}\n"
