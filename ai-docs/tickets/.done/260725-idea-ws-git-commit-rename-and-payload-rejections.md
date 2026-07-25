@@ -5,6 +5,7 @@ related-mental-model:
   - plugin-runtime
 sage-review-completeness: completed
 sage-review-design: completed
+completed: 2026-07-25
 ---
 
 # ws/git.commit dogfood findings
@@ -247,3 +248,39 @@ commits; an absent field, an empty array, and an all-blank-entry array each
 report their own distinct condition; a regression test fixes whichever behavior
 is chosen so the emptiness message cannot silently start covering a second
 condition again.
+
+### Result (4fcf940a) - 2026-07-25
+
+Confirmed the design-review audit: no in-repo `ai_context` size limit exists, so
+no limit was added and the fix is purely diagnostic. `wsgit.normalizeCommitOptions`
+now branches the emptiness error into three distinct, named conditions — absent
+field (`nil`), present-but-empty array (`[]`), and present-but-all-blank entries
+(entries all `strings.TrimSpace`-blank) — using the pre-trim value; the message
+no longer collapses them into a single "requires at least one entry". The
+`git.commit` case in `internal/mcp/server.go` records a
+`git.commit.ai_context_received` debug event (present / raw_entry_count /
+raw_bytes / post_trim_entry_count) unconditionally before invoking `wsgit`, so
+both successful and rejected calls are diagnosable through `runtime.debug_events`.
+Debug recording lives in the MCP layer, not `wsgit`, per the
+`{#260720-wsdoc-commit-boundary}` import-layering precedent; a single `wsgit`-level
+error covers both the MCP handler and the CLI mirror (both call `Client.Commit`).
+
+Review (partitioned correctness + fit + test) surfaced three real findings, all
+fixed in `4fcf940a` and re-reviewed clean: (1) a `-count=N` test flake — the
+server-level debug-event test asserted an absolute ring-buffer count; now it
+snapshots before/after and asserts a delta; (2) `post_trim_entry_count` was
+computed from the empty-string-only `stringList` filter, misreporting
+whitespace-only entries — now computed with the same `TrimSpace` rule `wsgit`
+uses; (3) `[""]` classified as "empty array" while `["  "]` classified as "all
+blank" — a new `stringListKeepBlank` feeds `wsgit` the un-pre-filtered array so
+both now report "all blank" identically.
+
+Verification: `go test -count=5 ./internal/wsgit/... ./internal/mcp/...` PASS
+(new tests: wsgit three-condition subtests incl. `[""]`; server-level
+`TestServeStdioGitCommitAIContextConditionsAndDebugEvent` with absent/`[]`/`[""]`/
+`["  "]`/60-entry-multi-KB-valid cases and delta-based debug-event assertions);
+`go build ./...` / `go vet ./...` clean; `-count=10 -race` on the debug-event test
+clean. Spec closeout: `mcp-tools.md {#260725-git-commit-ai-context-condition-reporting}`
+(no size limit; three-condition + debug-event behavior).
+
+Both phases complete; ticket closed.

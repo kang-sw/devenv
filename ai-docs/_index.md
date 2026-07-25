@@ -215,22 +215,12 @@ dropped tickets live in hidden archive dirs and git history.
   passed" (4 occurrences in one session). Ready, single phase: remove the commit
   (and do not stage), update `next_instruction` in both verdict branches, decide
   `sage_gate`'s ask-decline commit explicitly, and add the commit to
-  `lead-write-ticket` after stamping. **Blocked on
-  `260725-idea-ws-git-commit-rename-and-payload-rejections` Phase 1** — without it
-  the caller cannot commit the posture change when a status transition is staged.
-  Settled non-scope: no apply-findings step is added to the playbook, since
+  `lead-write-ticket` after stamping. Prerequisite
+  `260725-idea-ws-git-commit-rename-and-payload-rejections` is now **landed**
+  (both phases, on the goal branch), so the caller can commit a posture change
+  staged alongside a status transition — this ticket is **unblocked**. Settled
+  non-scope: no apply-findings step is added to the playbook, since
   `resolution: autonomous|missing` already carries that contract.
-- `260725-idea-ws-git-commit-rename-and-payload-rejections` - two independent
-  `ws/git.commit` defects found by dogfooding. Ready, and the higher-urgency of
-  the two ws bugs: Phase 1 is a single-guard fix (the verifier receives
-  index-delete-side paths from `expandCommitPathsForTicketMoves`) that today makes
-  **every** ticket status transition — promote, triage, close — uncommittable
-  through the tool, forcing the native-git fallback that
-  `260723-feat-ticket-write-verify-commit-gate` exists to prevent. Phase 2 is
-  independent and diagnostic-first: no in-repo `ai_context` size limit exists, so
-  the misleading emptiness error most likely reflects a field that never arrived.
-  Stem carries a non-standard `-idea-` category token, kept because the stem is
-  already referenced in both `main` and dashboard-branch history.
 - `260725-feat-ws-cli-mcp-fallback-surface` - MCP-independent CLI fallback for
   Windows disconnects, where the host does not auto-reconnect and the re-enable
   path is undiscoverable. Ready: generic `ws-cli tools`/`call` passthrough over
