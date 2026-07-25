@@ -51,8 +51,57 @@ work concerns worktree removal semantics; this ticket concerns clone/refresh
 latency blocking the API, which is a broader async-hygiene concern across
 the daemon's git surface generally, not limited to one operation.
 
+## Live Reproduction (2026-07-25)
+
+Reproduced with direct latency measurement against the Windows :4300 dogfood
+daemon (`D:\dbg-ws-terminal-dogfood`, serving the WSL work roots), while a
+user reported a persistent red `Refresh failed` overlay in the browser.
+
+Measured `GET /api/dashboard/resources` from the daemon host (PowerShell
+`Invoke-WebRequest`, wall-clock):
+
+- Single call, warm: ~2.4 s.
+- Single call, steady state: **13-14 s**.
+- `resources` + `servers` issued **concurrently** (exactly what the 5 s
+  frontend poll does via `loadServers()` + `loadResources("poll")`):
+  **21-24 s**, with one round hard-timing-out at 12 s.
+
+The concurrency signature is the key evidence: two simultaneous read requests
+balloon from ~2.4 s to ~22 s (a ~10x blowup from just 2 in-flight requests),
+which is the fingerprint of hypothesis #1 (a blocking git child starving the
+tokio worker pool) and/or hypothesis #2 (a coarse registry lock held across
+the whole git op serializing every other request). A pure per-request slowness
+would add, not multiply.
+
+### Downstream symptom (why this surfaced)
+
+This latency is the root cause of the user-visible persistent red
+`Refresh failed` / `signal is aborted without reason` overlay:
+
+- The resources endpoint consistently exceeds the frontend's hardcoded
+  `DEFAULT_FETCH_TIMEOUT_MS = 8_000` (`ws-dashboard/frontend/src/fetchWithTimeout.ts`).
+- Each 5 s poll's fetch therefore aborts at 8 s with a reason-less
+  `AbortController.abort()`, producing the DOMException string
+  `signal is aborted without reason`.
+- `createResourceRefreshCoordinator` (`resourceRefresh.ts`) catches it and
+  `setError(message)`; `App.tsx` renders it as the red
+  `InlineNotice tone="error" title="Refresh failed"` banner.
+- Because the backend never beats 8 s in this environment, no poll ever
+  reaches the `setError(null)` success path, so the overlay is permanent
+  rather than a transient flicker. It is a symptom of this daemon-side bug,
+  not a frontend regression (unrelated to the 2026-07-25 agent-GUI
+  suspension, which does not touch the resources/servers/timeout path).
+
+Client-side bounding already exists (parent
+`260724-bug-dashboard-git-diff-index-lock-stuck-activity-badge` Phase 2); the
+daemon-side bound is tracked in
+`260724-idea-dashboard-daemon-side-git-poll-response-timeout`. This ticket
+remains the root-cause fix (isolate the git op so it stops blocking the API
+surface); the timeout tickets only bound the symptom.
+
 ## Reporter Context
 
-Observed during live dogfooding on 2026-07-22. Not yet reproduced under
-controlled conditions or profiled; this ticket captures the observation and
-hypothesis for future investigation/triage.
+Observed during live dogfooding on 2026-07-22. Reproduced with latency
+measurement on 2026-07-25 (see Live Reproduction above); still not profiled at
+the source level (which call site holds the executor thread / lock is not yet
+pinned).
