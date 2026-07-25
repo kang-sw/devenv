@@ -1040,11 +1040,44 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
+		aiContextRawValue, aiContextPresent := params.Arguments["ai_context"]
+		aiContextItems, aiContextIsArray := aiContextRawValue.([]any)
+		aiContextRawEntryCount := -1
+		aiContextRawBytes := 0
+		if aiContextIsArray {
+			aiContextRawEntryCount = len(aiContextItems)
+			for _, item := range aiContextItems {
+				if text, ok := item.(string); ok {
+					aiContextRawBytes += len(text)
+				}
+			}
+		}
+		// Use stringListKeepBlank, not stringList: stringList silently drops
+		// exact-empty-string entries, which would make an ["" ] payload
+		// indistinguishable from an empty array by the time wsgit sees it.
+		// wsgit.normalizeCommitOptions is the single source of truth for
+		// TrimSpace-based blank classification (shared with the CLI commit
+		// path); it needs the untouched, type-checked entries to classify
+		// "present but all blank" the same way regardless of whether an
+		// entry is "" or whitespace-only.
+		aiContext := stringListKeepBlank(aiContextRawValue)
+		aiContextPostTrimCount := 0
+		for _, entry := range aiContext {
+			if strings.TrimSpace(entry) != "" {
+				aiContextPostTrimCount++
+			}
+		}
+		appendDebugEvent("git.commit.ai_context_received", map[string]any{
+			"present":               aiContextPresent,
+			"raw_entry_count":       aiContextRawEntryCount,
+			"raw_bytes":             aiContextRawBytes,
+			"post_trim_entry_count": aiContextPostTrimCount,
+		})
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:               stringList(params.Arguments["paths"]),
 			Title:               title,
 			Description:         description,
-			AIContext:           stringList(params.Arguments["ai_context"]),
+			AIContext:           aiContext,
 			MentalModelNotes:    stringList(params.Arguments["mental_model_notes"]),
 			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
 			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
@@ -4800,6 +4833,27 @@ func stringList(value any) []string {
 	for _, item := range items {
 		text, ok := item.(string)
 		if ok && text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+// stringListKeepBlank mirrors stringList's nil-vs-empty-array and
+// type-checking behavior but keeps blank ("" and whitespace-only) string
+// entries instead of dropping them. Callers that need to classify a present
+// array by blankness themselves (e.g. wsgit.normalizeCommitOptions's
+// TrimSpace-based emptiness check) must receive the untouched entries, or an
+// exact-empty-string entry becomes indistinguishable from an entry that was
+// never present at all.
+func stringListKeepBlank(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok {
 			out = append(out, text)
 		}
 	}
