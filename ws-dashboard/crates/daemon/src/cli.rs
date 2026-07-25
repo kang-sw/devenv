@@ -53,15 +53,33 @@ pub struct TerminalHelperArgs {
     // `command_args`/`env_overlay` are only meaningful when `command` is
     // `Some`. All three default to absent/empty so existing manual-argv
     // fixtures that never pass these flags keep parsing unmodified.
+    //
+    // `requires = "command"` on the two dependent flags (review cycle 1,
+    // finding C2) turns "command-arg/env-overlay passed without --command"
+    // into a hard parse failure instead of a silent no-op: both fields
+    // previously fed code paths gated on `command.is_some()`, so an absent
+    // `command` meant the caller's flags were accepted and then quietly
+    // discarded with no error and no log - a natural mistake for a future
+    // caller (e.g. Phase 2's profile selector) to make.
     #[arg(long)]
     pub command: Option<String>,
     // `allow_hyphen_values`: forwarded argv commonly includes the target
     // command's own flags (e.g. `--command-arg --flag`), which clap would
     // otherwise reject as an unexpected option rather than accept as this
     // flag's value.
-    #[arg(long = "command-arg", allow_hyphen_values = true)]
+    #[arg(long = "command-arg", allow_hyphen_values = true, requires = "command")]
     pub command_args: Vec<String>,
-    #[arg(long = "env-overlay", value_parser = parse_env_overlay)]
+    // CONTRACT (review cycle 1, finding C3): overlay VALUES land verbatim in
+    // the helper's argv, which - like every other `TerminalHelperArgs` field
+    // - is world-readable to any local process via `ps`. This flag exists
+    // for non-secret overlay values only (e.g. a vendor CLI's base-URL
+    // override); it must never carry a credential or token. In particular,
+    // the parent ticket's Phase 4 daemon-owned callback token is designed to
+    // never touch the helper or the registry precisely because helper argv
+    // is world-readable - `--env-overlay` must NOT become the channel that
+    // routes it there. See also `terminal.rs`'s `build_helper_command` for
+    // the argv-forwarding call site this flag feeds.
+    #[arg(long = "env-overlay", value_parser = parse_env_overlay, requires = "command")]
     pub env_overlay: Vec<(String, String)>,
 }
 
@@ -355,6 +373,53 @@ mod tests {
         assert_eq!(args.command, None);
         assert!(args.command_args.is_empty());
         assert!(args.env_overlay.is_empty());
+    }
+
+    // CONTRACT (review cycle 1, finding C2): base args shared by the two
+    // rejection tests below, deliberately omitting `--command`.
+    fn base_terminal_helper_args() -> Vec<&'static str> {
+        vec![
+            "ws-dashboard",
+            "terminal-helper",
+            "--registry-dir",
+            "/tmp/registry",
+            "--terminal-id",
+            "t1",
+            "--work-root-id",
+            "wr1",
+            "--cwd",
+            "/tmp/cwd",
+            "--title",
+            "test",
+            "--columns",
+            "80",
+            "--rows",
+            "24",
+            "--socket-path",
+            "/tmp/t1.sock",
+        ]
+    }
+
+    #[test]
+    fn terminal_helper_args_command_arg_without_command_is_rejected() {
+        let mut args = base_terminal_helper_args();
+        args.extend(["--command-arg", "--flag"]);
+
+        assert!(
+            Cli::try_parse_from(args).is_err(),
+            "--command-arg without --command must fail to parse, not silently no-op"
+        );
+    }
+
+    #[test]
+    fn terminal_helper_args_env_overlay_without_command_is_rejected() {
+        let mut args = base_terminal_helper_args();
+        args.extend(["--env-overlay", "FOO=bar"]);
+
+        assert!(
+            Cli::try_parse_from(args).is_err(),
+            "--env-overlay without --command must fail to parse, not silently no-op"
+        );
     }
 
     #[test]

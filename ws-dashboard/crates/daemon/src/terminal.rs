@@ -860,6 +860,11 @@ fn build_helper_command(
         for arg in args {
             helper_command.arg("--command-arg").arg(arg);
         }
+        // CONTRACT (review cycle 1, finding C3): `--env-overlay` values land
+        // verbatim in this argv, which is world-readable via `ps` - see the
+        // full CONTRACT on `TerminalHelperArgs::env_overlay` in `cli.rs`.
+        // Never route a secret (in particular, the parent ticket's Phase 4
+        // callback token) through this loop.
         for (key, value) in env_overlay {
             helper_command.arg("--env-overlay").arg(format!("{key}={value}"));
         }
@@ -873,6 +878,26 @@ fn build_helper_command(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     helper_command
+}
+
+// CONTRACT (review cycle 1, finding C2): `env_overlay` is only meaningful
+// (and only ever applied, at hop 2) when an explicit `command` is present -
+// see `TerminalHelperArgs::env_overlay`'s CONTRACT in `cli.rs`. Hop 2
+// enforces this at the clap boundary (`requires = "command"`); hop 1
+// constructs the helper's argv directly rather than parsing it, so it needs
+// its own explicit guard rather than relying on clap. Extracted as a small
+// pure predicate so it is unit-testable without exercising the rest of
+// `spawn`'s async setup (registry dir, socket path, handshake, ...).
+fn validate_command_env_overlay_pairing(
+    command: &Option<(String, Vec<String>)>,
+    env_overlay: &[(String, String)],
+) -> Result<(), TerminalError> {
+    if command.is_none() && !env_overlay.is_empty() {
+        return Err(TerminalError::BadRequest(
+            "env_overlay requires an explicit command",
+        ));
+    }
+    Ok(())
 }
 
 impl TerminalSession {
@@ -890,6 +915,7 @@ impl TerminalSession {
         command: Option<(String, Vec<String>)>,
         env_overlay: Vec<(String, String)>,
     ) -> Result<Arc<Self>, TerminalError> {
+        validate_command_env_overlay_pairing(&command, &env_overlay)?;
         let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
         let id = opaque_terminal_id();
         let socket_path = registry_dir.join(format!("{id}.sock"));
@@ -1991,6 +2017,28 @@ mod terminal_portability_skeleton_tests {
         let _ = foreign.kill();
         let _ = foreign.wait();
         let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    #[test]
+    fn validate_command_env_overlay_pairing_rejects_overlay_without_command() {
+        assert!(matches!(
+            validate_command_env_overlay_pairing(&None, &[("FOO".to_owned(), "bar".to_owned())]),
+            Err(TerminalError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn validate_command_env_overlay_pairing_allows_overlay_with_command() {
+        assert!(validate_command_env_overlay_pairing(
+            &Some(("agent-cli".to_owned(), Vec::new())),
+            &[("FOO".to_owned(), "bar".to_owned())],
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_command_env_overlay_pairing_allows_no_command_and_no_overlay() {
+        assert!(validate_command_env_overlay_pairing(&None, &[]).is_ok());
     }
 
     #[test]
