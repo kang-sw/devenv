@@ -170,6 +170,15 @@ session — is exactly the path that triggers it. The argv/env passthrough
 refactor must therefore include a scrub/allowlist step, not just a
 pass-through, and the vendor profile owns the list of markers to strip.
 
+The scrub must be applied at BOTH hops, not just the visible one. The daemon
+spawns the helper with a plain `std::process::Command` that sets no env
+(`terminal.rs:817-844`; `terminal_platform.rs` only adds `setsid` + double-fork),
+so the helper already inherits the daemon's environment before `spawn_shell`
+runs. Scrubbing only inside `spawn_shell` leaves the helper's own env dirty.
+Note also that the existing line "Today env-at-spawn is only `TERM`" is true
+only about EXPLICIT env — it reads as if the environment were otherwise clean,
+and it is not.
+
 CONFIG MATERIALIZATION: hook config is per-vendor and does not fit argv/env
 alone (`claude` takes `--settings <file>`; `codex` takes config-file / `-c`
 overrides), so the profile must WRITE a config file at spawn — argv/env
@@ -180,6 +189,17 @@ precise delete-on-exit. That is the correct trade because the detached helper
 outlives the daemon by design (`260723`), so exit-coupled cleanup would require
 the helper to know about vendor config — which the no-PTY-reinvention
 invariant forbids.
+
+Two things the GC decision does NOT get for free:
+
+- There is no existing daemon-side directory sweep to hang it on.
+  `delete_registry_entry` (`terminal_registry_file.rs:68-71`) is per-entry and
+  is only called from boot reconcile / verified kill. A sweep is a net-new
+  background task, not a reuse.
+- "No live terminal record" keys off TERMINAL liveness, not AGENT liveness.
+  The agent CLI is a grandchild the daemon has no handle on (see the open
+  question below), so a config file survives as long as its terminal does even
+  after the agent has exited.
 
 ### 2. Model selection exposure
 
@@ -306,19 +326,31 @@ feature does not justify touching the load-bearing helper protocol.
 CORRECTION (design review, 2026-07-25): an earlier draft of this ticket also
 credited the IPC option with getting authorization "for free" from filesystem
 permissions on the per-terminal socket. That was false and is struck — nothing
-chmods the socket. Only the registry JSON gets `0600`
-(`terminal_registry_file.rs:50-51`), and the helper's handshake carries no
-secret, so same-user forgery was never prevented on that path either. The
-operability argument is the whole reason; the security argument never existed.
+chmods the socket, so its mode is umask-governed, and the handshake carries no
+secret (`HelperToDaemonMessage::Handshake { pid, start_time }`,
+`terminal_helper_protocol.rs:43-46`). Only the registry JSON gets a deliberate
+`0600` (`terminal_registry_file.rs:48-52`); the asymmetry is simply an absence
+on the socket side. Filesystem permissions therefore buy CROSS-USER isolation
+only — any same-user process can already connect and drive any terminal today,
+which is precisely the threat the scoped token exists to address. The
+operability argument is the whole reason for the rejection; the security
+argument never existed.
 
 AUTHORIZATION: the endpoint carries a per-terminal token minted at spawn and
 written into the injected vendor config file, so an arbitrary local process
 cannot post attention events for terminals it did not spawn. This is integrity
 scoping, not secrecy — consistent with the `wsSessionKey` reading in feature 1.
-Today the daemon's only auth is a single owner bearer token plus a link
-passphrase (`auth.rs`) applied as one middleware over the whole protected
-router, so handing that to every spawned hook would grant the agent every
-dashboard route. The scoped token is not optional.
+Today the daemon has no per-resource auth at all: `auth.rs:13-64` defines four
+credential types (pairing token, link passphrase, owner session cookie, bearer
+token) and none of them are resource-scoped, and `router.rs:96-104` applies a
+single `require_owner_auth` layer over the ENTIRE protected router — only
+`/pair` and `/api/dashboard/link-auth` sit outside it. `require_owner_auth`
+(`:505-525`) branches on websocket-upgrade versus browser entrypoint and never
+on path. So handing an agent any existing credential grants it every dashboard
+route. The scoped token is not optional.
+
+(Incidental, relevant to any later push work: `/sw.js` and
+`/manifest.webmanifest` are served from inside the authenticated router.)
 
 CAVEAT: `--no-auth` disables the owner-auth middleware, which is precisely the
 dogfooding configuration. The scoped token is therefore unenforced in exactly
@@ -347,6 +379,22 @@ token the restarted daemon no longer recognizes — it just has to be satisfied
 in the daemon's own store. Port drift has the same shape and is accepted as a
 known staleness mode; the daemon is normally started on a fixed port.
 
+Where the code change actually lands: `boot_reconcile` (`terminal.rs:196-220`)
+must REPOPULATE the in-memory token -> terminal lookup from the daemon's store
+during boot, before serving. Today's `TerminalSession` construction path has no
+slot for auth material at all, so "persist the token" is only half the change.
+
+REGISTRY SCHEMA CONSTRAINT (applies to the argv/env passthrough refactor too,
+not just to tokens). `TerminalRegistryEntry` has no `version` field and no
+`#[serde(default)]` on anything, and `scan_registry_dir`
+(`terminal_registry_file.rs:98-110`) warns-and-SKIPS an entry it cannot
+deserialize. Because helpers are detached and outlive daemon upgrades by
+design, adding a non-`Option` field makes every still-running older helper's
+entry invisible to the upgraded daemon — which means boot reconcile never sees
+it, the drop path never runs, and the helper plus its socket are orphaned
+permanently. Any new registry field must be `Option<T>` + `#[serde(default)]`.
+This hazard is not specific to this pivot and is reported separately.
+
 ### Browser delivery: OPEN, not reuse (design review, 2026-07-25)
 
 An earlier draft asserted that browser delivery "reuses what exists" via the
@@ -366,10 +414,21 @@ event as built:
   the SELECTED root — which defeats the purpose, since a nav badge has to
   light up for roots the user is NOT currently looking at.
 
-What genuinely IS reusable is the browser-side vocabulary, not the transport:
-`workRootActivity.ts`'s `attention` flag (L66), live/attention priority
-ordering, and the browser-local ack watermark
-(`initializeActivityDirtyItems`).
+Nor is the browser-side `attention` flag reusable as-is, which an earlier draft
+also claimed. `attention` is currently an ERROR signal, not an
+awaiting-interaction signal — `work_root_activity.rs:1095-1104` sets it from
+`!diagnostics.is_empty()`, a status of `blocked`/`failed`/`unavailable`, or a
+`current_call` error, and `activity_item_rank` (L1192-1200) gives it rank 1,
+just below `live`. Overloading it with a benign "turn finished, awaiting your
+input" would make every waiting agent render as a failure in the Activity
+Console and would silently reorder the ribbon. A ready-for-input state needs
+its own field or its own vocabulary.
+
+What IS genuinely reusable: the browser-local ack watermark shape
+(`initializeActivityDirtyItems`, `workRootActivity.ts:568`) as a PATTERN, and
+`ActivityItem.kind`, which is an open string vocabulary by contract
+(`crates/core/src/activity.rs:92-100`) — so a terminal-originated kind is
+additive at the type level even though the transport is not.
 
 The transport is therefore an OPEN question with three candidates, none picked:
 adding an in-memory injection point to the activity projector's watch path; a
@@ -394,10 +453,14 @@ open).
   `--ws-color-surface-context`), `:hover` (2743, `--ws-color-panel-hover`), and
   the `-error` tone (2757, `--ws-color-notice-error`). The other tone classes
   (`-ready`, `-muted`) set only `border-left-color`. So `resourceRowTone` does
-  NOT own `background` in general — but the conclusion is unchanged and in fact
-  stronger: an attention flash animated on `background` would fight three
-  independent rules including hover, so it must be an independent overlay layer
-  (e.g. a pseudo-element).
+  NOT own `background` in general.
+  The conclusion is unchanged and in fact stronger. The hard case is not the
+  tone classes at all but `.resource-row-selected` (styles.css 1081-1095 —
+  defined ONCE, so not overridden despite living in the early block), which
+  paints a two-layer gradient plus a `box-shadow` and also sets
+  `border-left-color`. An attention flash animated on `background` would have
+  to fight the base rule, `:hover`, `-error`, AND that gradient, so it must be
+  an independent overlay layer (e.g. a pseudo-element).
   SEQUENCING: the agent counter is precisely the slot
   `260725-feat-dashboard-nav-row-two-line-open-state` DEFERRED pending this
   pivot. That deferral resolves here — the counter arrives with the pivot and
@@ -476,11 +539,20 @@ wrapper component — is called out below as an open design choice.
   the "reuse the activity SSE" assertion was refuted against source — see
   `### Browser delivery: OPEN, not reuse`. Three candidates listed there, none
   picked. This is the largest remaining unknown in the notification path.
-- Whether the daemon needs a handle on the AGENT process specifically. Today it
-  tracks the helper and the helper tracks the shell; the agent CLI is a
-  grandchild with no daemon-side identity or lifetime record. Attention state
-  keyed only by terminal id may be sufficient — but if the agent exits while
-  the terminal survives, nothing currently clears its attention flag.
+- Whether the daemon needs a handle on the AGENT process specifically. The
+  daemon tracks only the helper (pid + start_time,
+  `terminal_helper_protocol.rs:43-46`) and the helper tracks only the shell it
+  spawned (`SharedState.child`, `terminal_helper_process.rs:80`). The agent CLI
+  is a grandchild launched by the shell, invisible to both. Three consequences
+  the design has not addressed: attention events can be correlated ONLY by the
+  injected token, since there is no process identity to check them against;
+  config-file GC keys off terminal liveness, so a file outlives its agent; and
+  `TerminalHelperStatus` reports only the shell's state, so "the agent finished
+  a turn" can never be inferred from existing helper signals — the hook is the
+  only source.
+- Whether a ready-for-input state gets its own field or reuses/extends
+  `attention`. Reuse is currently blocked because `attention` means "error" —
+  see `### Browser delivery`.
 - Attention aggregation and acknowledgement semantics: does a server row
   aggregate attention from its work roots, and does acknowledging a tab clear
   the nav badge? The ack-watermark precedent exists
