@@ -34,6 +34,20 @@ field either (a) commits only the frontmatter field it owns, leaving unrelated
 working-tree edits for the caller's own `git.commit`, or (b) accepts caller-
 supplied context when it is going to sweep up whatever else is staged.
 
+## Frequency
+
+Not a one-off. A single ticketing session hit it four times — `b9c72975`,
+`27b3b599`, `025bab2c`, `8a4d81ce` — because the shape recurs by construction:
+`lead-write-ticket` runs a reviewer, has the lead fix findings in-place, then
+calls `sage_stamp`, so review-driven body edits are *always* uncommitted at stamp
+time. The rate is one swallowed commit per review stage per ticket, and the
+swallowed content is specifically the review-response rationale, which is the
+most valuable rationale the flow produces.
+
+Compounding it, `260725-idea-ws-git-commit-rename-and-payload-rejections` means
+the caller often cannot pre-commit those edits through `ws/git.commit` anyway
+when a status transition is also staged.
+
 ## Open questions
 
 - Should `sage_stamp` restrict its commit to the frontmatter posture change, or
