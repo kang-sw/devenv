@@ -103,8 +103,7 @@ Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promoti
 1. For `todo/` (not promoting): existing `spec:` links are optional recovery hints only; implementation still routes through proceed.
 2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
 3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance. When `judge: contract-first-spec` is yes: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` inline, list the resulting stem in `spec:`, and drop redundant `## Spec Impact` text.
-4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/` or add a `Ticket Focus` entry; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
-5. On pass, for `ready/`: ensure `ai-docs/_index.md ## Ticket Focus` carries `` `stem` - one-line purpose, readiness, and dependency notes ``. For a non-ready attention entry, use `` `stem` (`status`, `<role>`) - one-line purpose and why it is in focus; not implementation-ready ``.
+4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/`; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
 
 ## On: Output Handoff
 

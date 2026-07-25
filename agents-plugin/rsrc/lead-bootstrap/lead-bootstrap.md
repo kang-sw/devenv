@@ -99,7 +99,7 @@ Mode: user request
 
 1. Re-read `ai-docs/_index.md`.
 2. Preserve the memory-policy comment.
-3. Keep summary, stack, workspace, build/test commands, read-before-edit pointers, active inventory, `Ticket Focus`, and compact notes.
+3. Keep summary, stack, workspace, build/test commands, read-before-edit pointers, active inventory, and compact notes.
 4. Compact deep sections into links only when a clear owning document already exists.
 5. Leave unique project direction, active priorities, and unresolved operational caveats in place.
 6. Do not author or semantically update specs, mental models, tickets, or refs.
