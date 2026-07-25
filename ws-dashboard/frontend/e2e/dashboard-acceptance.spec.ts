@@ -2862,9 +2862,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       formatOpenSurfaceCounts(liveTerminalCount, liveDocCount),
     );
     const openRowHeight = (await openRow.boundingBox())?.height ?? 0;
-    expect(openRowHeight).toBeGreaterThan(34);
+    // Review fix: `toBeGreaterThan(34)` only proved the row grew past the
+    // one-line floor, not that it landed exactly on the reserved two-line
+    // floor (styles.css `[data-resource-presentation="workRoot"]`,
+    // min-height: 52px) with no extra slack or shortfall - a partial jump
+    // would still pass `toBeGreaterThan(34)`. Compare against the row's own
+    // computed min-height (not a hardcoded literal) so this keeps tracking
+    // correctly if that CSS value changes; `.row-title`/`.resource-row-counts`
+    // are both single-line `white-space: nowrap` with ellipsis overflow, so
+    // content can never push the row taller than the reserved floor.
+    const openRowMinHeight = await openRow.evaluate((node) =>
+      parseFloat(getComputedStyle(node).minHeight),
+    );
+    expect(openRowHeight).toBe(openRowMinHeight);
     note(
-      `nav row height (compactWorkRoot, open, two-line): ${openRowHeight}px`,
+      `nav row height (compactWorkRoot, open, two-line): ${openRowHeight}px (== reserved min-height ${openRowMinHeight}px)`,
     );
 
     // Reuse the git-linked worktree row created in "git workspace overflow
@@ -2878,6 +2890,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // `openWorkRootInBrowser`/`selectWorkRootInBrowser` use, is what the
     // App.tsx:1093 effect actually keys the "open" write on - rather than
     // (falsely) assuming residue from the earlier step survives the reload.
+    //
+    // This `if` branch is the ONLY place the open->closed transition, the
+    // closed-row hover affordance, and the workspace-presentation exclusion
+    // (Decision 4) get exercised. On a run without `gitWorkRoot` all three
+    // degrade to a note() below - loudly, since that means this run carries
+    // NO evidence for any of them, not merely a skipped nicety.
     if (gitWorkRoot) {
       const worktreeDir = path.join(
         gitWorkRoot,
@@ -2895,13 +2913,78 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       await expect(closedRow.locator(".resource-row-counts")).toHaveText(
         formatOpenSurfaceCounts(0, 0),
       );
+      // Review fix: measure this SAME row's height before and after its own
+      // close, not `openRow` (a different compactWorkRoot row that never
+      // closes in this step) before this row's own close - two different
+      // rows measured at 52px each proves nothing about the transition.
+      // Strict equality mirrors the short-viewport precedent at :3696: a
+      // partway shift must fail here too, not just a floor-to-zero collapse.
+      const closedRowHeightBeforeClose =
+        (await closedRow.boundingBox())?.height ?? 0;
       await closedRow.locator('[data-command-id="workRoot.close"]').click();
       await expect(closedRow).toHaveAttribute("data-resource-open", "false");
       await expect(closedRow.locator(".resource-row-counts")).toHaveText(
         formatOpenSurfaceCounts(0, 0),
       );
-      const closedRowHeight = (await closedRow.boundingBox())?.height ?? 0;
-      note(`nav row height (workRoot, closed, two-line): ${closedRowHeight}px`);
+      const closedRowHeightAfterClose =
+        (await closedRow.boundingBox())?.height ?? 0;
+      expect(closedRowHeightAfterClose).toBe(closedRowHeightBeforeClose);
+      note(
+        `nav row height (workRoot, open->closed, two-line): ${closedRowHeightBeforeClose}px -> ${closedRowHeightAfterClose}px (unchanged across the actual transition)`,
+      );
+
+      // Review fix: closed rows are the ones a user hovers *in order to*
+      // open them, so they must keep hover feedback like every other row
+      // (styles.css `[data-resource-open="false"]:not(.resource-row-error)
+      // :hover`). Assert the computed value, not the cascade on paper - a
+      // specificity argument is a hypothesis, the computed style is the
+      // evidence. Move the pointer away first: the preceding
+      // `workRoot.close` click above left the cursor resting on this same
+      // row, so reading "idle" background without moving away first would
+      // silently capture the already-hovered state and make this assertion
+      // pass or fail for the wrong reason.
+      await page.mouse.move(0, 0);
+      const closedRowBackgroundIdle = await closedRow.evaluate(
+        (node) => getComputedStyle(node).backgroundColor,
+      );
+      await closedRow.hover();
+      const closedRowBackgroundHovered = await closedRow.evaluate(
+        (node) => getComputedStyle(node).backgroundColor,
+      );
+      await page.mouse.move(0, 0);
+      expect(closedRowBackgroundHovered).not.toBe(closedRowBackgroundIdle);
+      note(
+        `nav row hover (workRoot, closed): background ${closedRowBackgroundIdle} -> ${closedRowBackgroundHovered} on hover`,
+      );
+
+      // Decision 4 coverage: the workspace-presentation row for this same
+      // git workspace (still uncompacted here - both worktree-removal
+      // attempts above were cancelled through the modal, so the linked
+      // worktree, and therefore the 2-workRoot workspace, still exists) must
+      // omit BOTH the openness attribute entirely (App.tsx emits
+      // `showOpenSurfaceCounts ? (...) : undefined`, i.e. no attribute at
+      // all - not `data-resource-open="false"`) and the counts line.
+      const workspaceRow = page
+        .locator('.resource-row[data-resource-presentation="workspace"]', {
+          hasText: workRootDisplayName(gitWorkRoot),
+        })
+        .first();
+      if (await workspaceRow.count()) {
+        expect(
+          await workspaceRow.getAttribute("data-resource-open"),
+        ).toBeNull();
+        await expect(
+          workspaceRow.locator(".resource-row-counts"),
+        ).toHaveCount(0);
+        note(
+          "nav row workspace-presentation exclusion (Decision 4): data-resource-open attribute is absent entirely and .resource-row-counts is absent",
+        );
+      } else {
+        note(
+          'LOAD-BEARING ASSERTION SKIPPED: workspace-presentation exclusion (Decision 4) did NOT run - no uncompacted .resource-row[data-resource-presentation="workspace"] row was found for the git workspace fixture, so this run provides NO evidence for that behavior',
+        );
+      }
+
       // Closing the currently-selected root re-selects the next open root
       // (App.tsx workRoot.close handler); with only `workRoot` left open
       // that lands back on it automatically, but reselect explicitly so
@@ -2909,7 +2992,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       await selectWorkRootInBrowser(page, workRoot);
     } else {
       note(
-        "nav row closed-state: skipped because no daemon-host Git workRoot is configured",
+        "LOAD-BEARING ASSERTIONS SKIPPED: nav row closed-state, the open->closed height-stability check, the closed-row hover-feedback check, and the workspace-presentation exclusion check (Decision 4) did NOT run - no daemon-host Git workRoot is configured, so this run provides NO evidence for any of those behaviors",
       );
     }
 
