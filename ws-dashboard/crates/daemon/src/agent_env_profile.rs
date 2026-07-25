@@ -45,6 +45,18 @@ pub const CLAUDE: EnvScrubProfile = EnvScrubProfile {
     ],
 };
 
+// CONTRACT (260725 Phase 2, browser spawn profile): the test-only
+// `"dummy-echo"` registry entry (`agent_profile_registry.rs`) needs an
+// `EnvScrubProfile` too - `build_helper_command`'s scrub call is
+// unconditional whenever a profile resolved (see `terminal.rs`'s
+// `resolve_create_command`) - but has no vendor identity markers to strip.
+// An empty marker list makes `scrub_env_os` a documented no-op rather than a
+// magic `Option<&EnvScrubProfile>` special case at the call site.
+pub const NONE: EnvScrubProfile = EnvScrubProfile {
+    name: "none",
+    markers: &[],
+};
+
 /// Removes every entry whose key exactly (case-sensitively) matches one of
 /// `profile.markers` from `env`, preserving the relative order of the
 /// remaining entries. Subtractive (deny-list) over the full inherited

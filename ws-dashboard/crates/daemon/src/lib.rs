@@ -1,4 +1,5 @@
 pub mod agent_env_profile;
+pub mod agent_profile_registry;
 pub mod auth;
 pub mod claude_cli;
 pub mod claude_routes;

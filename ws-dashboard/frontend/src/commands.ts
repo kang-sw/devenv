@@ -39,6 +39,7 @@ export type DashboardCommandId =
   | "fileExplorer.selectEntry"
   | "workbench.openActivity"
   | "terminal.create"
+  | "terminal.create.agent"
   | "agentChat.create"
   | "resource.select"
   | "activity.selectItem"
@@ -111,6 +112,13 @@ export type DashboardCommandPayload =
   | { type: "fileExplorer.selectEntry"; workRootId: string; path: string }
   | { type: "workbench.openActivity"; workRootId: string }
   | { type: "terminal.create"; workRootId: string }
+  // CONTRACT (260725 Phase 2, browser spawn profile): the resolved profile
+  // id is NOT in the payload - it is a fixed dispatch-time constant
+  // ("claude") the handler chooses, keeping this payload shape parallel to
+  // `terminal.create`'s and avoiding a free-text profile field in loggable
+  // command payloads (`ws-web-dashboard/index.md:97`'s "logical dashboard
+  // target, not host path" rule).
+  | { type: "terminal.create.agent"; workRootId: string }
   | { type: "agentChat.create"; workRootId: string }
   | { type: "activity.selectItem"; activityId: string }
   | { type: "activity.transcript.loadMore"; activityId: string }
@@ -554,6 +562,16 @@ export function buildTerminalCreateCommand(
   };
 }
 
+export function buildTerminalCreateAgentCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "terminal.create.agent",
+    payload: { type: "terminal.create.agent", serverRoute, workRootId },
+  };
+}
+
 export function buildAgentChatCreateCommand(
   workRootId: string,
   serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
@@ -766,6 +784,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Open WorkRoot Activity";
     case "terminal.create":
       return "Create terminal";
+    case "terminal.create.agent":
+      return "Create agent terminal (claude)";
     case "agentChat.create":
       return "Open new agent tab";
     case "activity.selectItem":

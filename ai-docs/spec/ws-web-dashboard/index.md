@@ -2045,6 +2045,16 @@ create and list live terminal sessions by opaque terminal ids. Spawns run in
 the selected workRoot directory and terminal ids are not process ids or host
 paths.
 
+Terminal creation optionally names a vendor profile id, resolved against a
+small daemon-side profile registry (spawn argv, env scrub list, hook config
+shape). An absent profile id keeps the default interactive-shell spawn
+unchanged, byte for byte, from a request that names no profile at all. The
+resolved profile — if any — is recorded read-only on the session for
+provenance, but that provenance does not survive a daemon restart: a session
+reattached during boot reconciliation is rebuilt from the on-disk terminal
+registry alone, which never carries a profile id.
+{#260725-ws-web-dashboard-terminal-spawn-profile}
+
 Each helper records its identity — process id and process start-time — in a
 per-terminal registry file, so the daemon can distinguish a still-live helper
 from a stale entry whose pid has since been reused by an unrelated process
@@ -2106,8 +2116,12 @@ lists. Clearing or closing an already-retired or already-gone pane is
 idempotent: it resolves as success without surfacing a terminal-close error.
 {#260724-terminal-pane-dead-session-retire}
 
-The terminal pane is a shell terminal substrate only; it does not hardcode
-Codex, Claude, or other agent presets.
+The terminal pane substrate is shell-neutral: it does not hardcode a
+specific agent preset, but MAY be spawned with a resolved vendor profile
+(command argv, env scrub, provenance) over the same single-sourced PTY
+plumbing — no second helper kind, no parallel PTY implementation. See
+[Terminal Registry And PTY Spawn](#260516-ws-web-dashboard-terminal-registry-pty-spawn)
+for the profile registry.
 
 Terminal tab labels behave as selectable workbench tabs for every visible
 terminal session. Opening a real workRoot shows an explicit empty workbench

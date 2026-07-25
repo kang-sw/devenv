@@ -521,6 +521,195 @@ regression step. The acceptance suite must not acquire a dependency on a vendor
 binary, credentials, or network; Phase 6 states the same rule and this phase
 must not quietly break it.
 
+### Result (5bc8ad28) - 2026-07-26
+
+Done. `agent_profile_registry.rs` (new) is a pure static lookup table -
+`AgentProfile { id, command, args, scrub, hook_config }` - with two entries:
+`"claude"` (composes Phase 1's `agent_env_profile::CLAUDE`) and a
+UI-invisible `"dummy-echo"` test profile (a real, always-registered entry
+per the survey's design answer 3, reachable only through the daemon's
+production route, never a user-facing control). `CreateTerminalRequest`
+gained `profileId: Option<String>` (`#[serde(default)]`); a new pure
+`resolve_create_command` (`terminal.rs`) resolves it before
+`TerminalSession::spawn` - unknown id is a `BadRequest`, absent id is a
+literal no-branch-taken path producing the exact prior `(None, Vec::new())`
+call. Provenance (`profile_id: Option<String>`) was added to
+`TerminalSession`/`TerminalSessionView` (camelCase `profileId`), NOT to
+`TerminalRegistryEntry` (hard constraint untouched - confirmed no diff to
+that struct). Frontend: `TerminalCreateOptions.profileId`,
+`TerminalSessionView.profileId`, a new `terminal.create.agent` command
+(profile id fixed at `"claude"` in the handler, not carried in the
+payload), and a `ChromeIconButton` ("New agent terminal", icon `Bot`) added
+beside the existing "New terminal" button, OUTSIDE the
+`AGENT_GUI_SUSPENDED ? null : (...)` block.
+
+**Deviation from a plan Codebase Finding, reported as directed.** The
+plan's Codebase Findings said `build_helper_command`'s hop-1 scrub call
+(hardcoded `&CLAUDE`) needed no signature change for Phase 2. Leaving that
+hardcoding in place would have made every profile's own `scrub` field dead
+code - unread by anything, for both current profiles, which is exactly the
+class of "merely plausible replacement" vacuity Phase 1's review already
+flagged once (finding 4 below). `build_helper_command` now takes
+`scrub: Option<&EnvScrubProfile>` and applies the CALLER-SUPPLIED resolved
+profile's own list (falling back to `CLAUDE` only as a defensive default).
+Proven with a unit test supplying a synthetic non-CLAUDE scrub profile and
+asserting ITS marker - not a CLAUDE marker - is what gets stripped.
+
+**Restart provenance loss, made visible per this phase's own instruction.**
+`reconcile_entry`'s adopt arm passes `profile_id: None` with an explicit
+CONTRACT comment: unlike turn state (self-corrects on the next hook after
+adoption), profile provenance has NO self-correction signal, so a
+re-adopted agent terminal permanently under-counts against Phase 7's
+counter until it is closed and a fresh one is spawned. This is a candidate
+follow-up `idea/` ticket, not fixed here.
+
+Follow-on commits from a review cycle: `0c788730`, `87214f93`, `5bc8ad28`
+(the last is a documentation-only correction to this Result's own
+verification numbers, see below).
+
+**Known open item, not a Phase 2 defect.** The fit review noted that
+`## Spec Impact` bullet part (a) — the Phase 1 spawn-seam description
+(argv/env passthrough and the scrub/allowlist at the daemon-helper spawn
+seam itself, independent of the profile registry) — remains unamended in
+the spec. Phase 2's own spec edit (`74a668b3`) covers part (b), the
+browser-facing profile parameter on `CreateTerminalRequest`; it does not
+touch part (a). Phase 1 did not introduce this gap either — that phase's
+own doc pass concluded no spec change was owed because the scrub is not
+caller-visible. Recorded here rather than silently left, so a later phase
+can settle whether part (a) is owed at all.
+
+**Verification (this machine, 2026-07-26).** `cargo test -p
+ws-dashboard-daemon --lib` -> 147 passed, 0 failed, 2 ignored (Phase 1
+baseline 140, net +7: 3 registry-resolve tests, 3 `resolve_create_command`
+tests, 1 scrub-wiring non-vacuity test). `cargo test -p ws-dashboard-daemon
+--test terminal_lifetime` -> 4 passed, 0 failed (unchanged). `cargo check -p
+ws-dashboard-daemon --tests` -> exit 0. `npm run build` (tsc -b + vite
+build) -> clean. All 21 pure-TS `npm run test:*` suites -> exit 0.
+Browser: `npx playwright test --grep "agent spawn profile"` (new dedicated
+sibling spec `e2e/agent-spawn-profile.spec.ts`, own daemon/workRoot - see
+that file's CONTRACT comment for why it is not a `test.step` inside
+`dashboard-acceptance.spec.ts`) -> 1 passed, run twice for stability. It
+proves the plan's own browser step never covered: clicking the real
+toolbar button dispatches `terminal.create.agent` (via the toolbar's
+`data-last-command-id` command-observer attribute), the resulting pane is
+an ordinary `persistentTerminal` recorded `profileId: "claude"`, and no
+`data-surface-kind="agentChat"` pane is ever registered. It does not wait
+for or assert that the underlying `claude` binary starts successfully, so
+it acquires no dependency on a vendor binary, credentials, or network. Full
+regression: `npx playwright test dashboard-acceptance.spec.ts` fails only
+at the pre-existing, already-tracked fitNow short-viewport assertion
+(`todo/260725-bug-dashboard-fitnow-short-viewport-shrink`); every other
+step, including toolbar/command-log assertions the new button could have
+disturbed, passes.
+
+**Final verification, re-run on the final committed state after the review
+cycle's fixes landed (this machine, 2026-07-26; the lead independently
+reproduced the Rust figure).** `cargo test -p ws-dashboard-daemon --lib` ->
+148 passed, 0 failed, 2 ignored, exit 0 (Phase 1 baseline 140; net +8 over
+Phase 1, one more than this Result's own pre-review 147 - the additional
+lib test is the hop-2 synthetic-marker regression guard added in
+`0c788730`). `cargo test -p ws-dashboard-daemon --test terminal_lifetime`
+-> 4 passed, exit 0 (unchanged). `npm run build` -> exit 0. All 21 pure-TS
+suites -> exit 0 each. `npx playwright test --grep "agent spawn profile"`
+-> 1 passed, exit 0. Full `dashboard-acceptance.spec.ts` -> exit 1 with the
+sole failure at `:3779`, the same pre-existing, already-tracked fitNow
+short-viewport regression named above - judged by failure site, untouched
+by this review cycle's fixes.
+
+**Non-vacuity (mutated production source, observed the intended failure,
+reverted).** (a) `resolve_create_command`'s absent-`profile_id` branch
+mutated to fall through to `"claude"` - failed the no-branch-taken unit
+test (`left: Some(("claude", [])) right: None`). (b) `build_helper_command`
+mutated to always apply `agent_env_profile::NONE` regardless of the
+supplied `scrub` - failed both the Claude-marker deny-list test and the
+new synthetic-scrub-profile test. Both reverted; `cargo test -p
+ws-dashboard-daemon --lib` clean afterward. (c) Review-cycle addendum:
+`apply_scrub_and_overlay` (hop 2) mutated to ignore its threaded `markers`
+argument and scrub the hardcoded `CLAUDE` list instead, simulating the
+pre-fix behavior - failed the new
+`apply_scrub_and_overlay_uses_the_supplied_marker_list_not_a_hardcoded_claude_one`
+assertion (`left: Some("scrub-me") right: None`); reverted, `cargo test -p
+ws-dashboard-daemon --lib` back to 148 passed.
+
+**Review outcome.** fit: 0 Critical / 0 Important / 0 Minor - clean.
+correctness: 0 Critical / 2 Important / 5 Minor. test: 0 Critical /
+1 Important / 1 Minor. All four non-minor findings were dispositioned
+[fixed] and are fixed in `0c788730`, `87214f93`, and (for the factual
+correction to this Result's own verification numbers) `5bc8ad28`. The four
+recorded below each change what a later phase must know; the remaining
+Minor findings (four correctness, none test) carry no forward obligation
+and are not repeated here.
+
+1. **Scrub asymmetry (correctness, Important).** Hop 1
+   (`build_helper_command`) honoured the resolved profile's own scrub list,
+   but hop 2 (the helper's own `apply_claude_scrub_and_overlay`) still
+   iterated a hardcoded `agent_env_profile::CLAUDE` unconditionally,
+   contradicting both hop 2's own CONTRACT comment and this ticket's
+   "the scrub applies at BOTH hops" constraint. Latent at the time of the
+   original Result above: every registered profile either used the Claude
+   marker set or declared an empty scrub, so the two-hop gap produced no
+   observable bug yet — but the first profile with non-Claude markers (the
+   deferred Codex profile, e.g.) would have leaked its markers at hop 1 only.
+   Fixed by threading hop 1's resolved scrub list to hop 2 through a new
+   repeated `--scrub-marker` helper argv flag; `apply_claude_scrub_and_overlay`
+   is renamed `apply_scrub_and_overlay` and now scrubs the caller-supplied
+   list instead of a hardcoded one, with a new hop-2 test
+   (`apply_scrub_and_overlay_uses_the_supplied_marker_list_not_a_hardcoded_claude_one`)
+   mirroring the existing hop-1 synthetic-profile assertion. RECORDING
+   PROMINENTLY for later phases: helper argv now carries scrub marker NAMES
+   in addition to file paths. That is deliberate and safe — marker names are
+   env-var KEYS, never values — and it does NOT relax the standing rule that
+   argv must never carry secrets. Phase 4's callback token is still forbidden
+   from argv.
+2. **Restore-intent respawn dropped `profileId` (correctness, Important).**
+   After a daemon restart drops a live helper, the browser's restore-intent
+   respawn path (`App.tsx`, fires when `listTerminals` returns zero sessions
+   for a workRoot with a persisted `TerminalRestoreIntent`) rebuilt the
+   terminal via `createTerminalPane({ title, cwdHint })` with no
+   `profileId`, so an agent terminal came back as a PLAIN SHELL under its
+   original, unchanged agent-style title — nothing in the UI told the owner
+   the wrong process was now running. Worse than the provenance loss already
+   captured in `idea/260726-bug-dashboard-agent-profile-provenance-lost-on-restart`,
+   which loses only the daemon-side metadata; this ran the wrong process
+   behind an unchanged label. Fixed in `87214f93`: `TerminalRestoreIntent`
+   gains `profileId?: string | null`, round-tripping through the existing
+   version-1 localStorage schema additively so an older persisted intent
+   with no `profileId` key still parses. Verified at browser level by a new
+   step that closes the other terminals through the normal UI flow, waits
+   for that write to settle, direct-DELETEs the agent terminal (bypassing
+   the browser's own close-tab flow, leaving a stale restore intent to
+   simulate a daemon restart), reloads, and asserts the respawned pane
+   carries `data-profile-id="claude"`.
+3. **Vendor independence, now proven rather than argued (test, Important).**
+   The plan called for the browser step to skip gracefully when `claude` is
+   not installed; the ticket's own acceptance constraint has no such
+   dependency to begin with. Rather than add a now-dead skip guard, the
+   deviation is documented in the `agent-spawn-profile.spec.ts` header, and
+   the underlying question was settled empirically: with the `"claude"`
+   profile's command temporarily repointed at a nonexistent binary, the
+   browser step still passed (1 passed, 1.4s, exit 0) — because the
+   daemon's `create_terminal` HTTP response is already built and returned
+   before the helper's `spawn_shell` ever attempts to run the resolved
+   command, so a failed spawn can only flip the helper's internal status,
+   never retroactively fail the already-returned response. The acceptance
+   suite therefore has NO dependency on a vendor binary, credentials, or
+   network — exactly as the ticket requires — proven rather than merely
+   asserted.
+4. **An assertion's comment claimed more than the assertion proved (test,
+   Minor).** The agentChat-count-zero checks in
+   `agent-spawn-profile.spec.ts` were annotated as proof that
+   `registerNewAgentChatPane` was never routed to, but that function already
+   no-ops under `AGENT_GUI_SUSPENDED` regardless of routing, so a
+   hypothetical mis-wiring to `agentChat.create` would still produce zero
+   agentChat panes there too. The load-bearing check is the adjacent
+   `data-last-command-id` assertion, which reads the fired command id
+   directly. Comments corrected in `87214f93` to say so.
+
+**Deferred / not done.** Phase 3 steps 2-3 (hook config materialization,
+`terminal-notify` subcommand) and all later phases (4-8). No
+`TerminalRegistryEntry` change. No Codex profile (deferred scope). The
+restart-provenance-loss gap above is flagged, not fixed.
+
 ### Phase 3: turn-start verification, hook config materialization, notify subcommand
 
 Depends on Phase 2.

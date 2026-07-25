@@ -411,7 +411,7 @@ async fn handle_connection(
 // `PATH` than an ordinary shell terminal from the same helper binary. Unix
 // is unaffected (its `as_command()` conversion re-derives `SHELL`/`HOME`
 // regardless), but the bug is real on Windows. Per-marker
-// `command.env_remove(marker)` (see `apply_claude_scrub_and_overlay` below)
+// `command.env_remove(marker)` (see `apply_scrub_and_overlay` below)
 // removes exactly the scrub markers from whatever `CommandBuilder::new()`
 // already built - registry merge included - and touches nothing else, so it
 // preserves the whole base-env construction on every platform. There is
@@ -423,7 +423,7 @@ fn build_shell_command(args: &TerminalHelperArgs, term: String) -> CommandBuilde
         Some(program) => {
             let mut command = CommandBuilder::new(program);
             command.args(&args.command_args);
-            apply_claude_scrub_and_overlay(&mut command, &args.env_overlay);
+            apply_scrub_and_overlay(&mut command, &args.scrub_marker, &args.env_overlay);
             command
         }
     };
@@ -434,28 +434,36 @@ fn build_shell_command(args: &TerminalHelperArgs, term: String) -> CommandBuilde
 
 // CONTRACT (review cycle 1, finding T3 - LEAD DECISION, since neither the
 // ticket nor the plan settles overlay-vs-scrub precedence explicitly): the
-// scrub wins. An overlay pair keyed to one of the 11 Claude markers must NOT
-// resurrect it - this is a security-adjacent deny-list, and silent
-// resurrection is exactly the failure it exists to prevent. Finding C3
-// separately flags `--env-overlay` as the argv channel a later phase is
-// most likely to reach for by accident, which makes this precedence
-// load-bearing rather than cosmetic. A colliding overlay key is dropped
-// with a warning rather than applied or hard-failed: nothing populates
-// `env_overlay` yet in this phase (Phase 2 is the first real caller), so a
-// hard error here would add fallible-signature plumbing through
-// `build_shell_command`/`spawn_shell` to protect a path with no live
-// caller; a log-and-drop keeps the invariant enforced while staying cheap
-// at this seam, and Phase 2+ callers get a visible signal if they ever hit
-// this collision by mistake.
-fn apply_claude_scrub_and_overlay(command: &mut CommandBuilder, overlay: &[(String, String)]) {
-    for marker in crate::agent_env_profile::CLAUDE.markers {
+// scrub wins. An overlay pair keyed to one of `markers` must NOT resurrect
+// it - this is a security-adjacent deny-list, and silent resurrection is
+// exactly the failure it exists to prevent. Finding C3 separately flags
+// `--env-overlay` as the argv channel a later phase is most likely to reach
+// for by accident, which makes this precedence load-bearing rather than
+// cosmetic. A colliding overlay key is dropped with a warning rather than
+// applied or hard-failed: nothing populates `env_overlay` yet in this phase
+// (Phase 2 is the first real caller), so a hard error here would add
+// fallible-signature plumbing through `build_shell_command`/`spawn_shell` to
+// protect a path with no live caller; a log-and-drop keeps the invariant
+// enforced while staying cheap at this seam, and Phase 2+ callers get a
+// visible signal if they ever hit this collision by mistake.
+//
+// CONTRACT (review cycle 1, finding C1): `markers` is the resolved
+// profile's OWN scrub list, threaded from hop 1
+// (`terminal.rs::build_helper_command`) via the repeated `--scrub-marker`
+// argv flag - this used to be hardcoded to `agent_env_profile::CLAUDE.markers`
+// unconditionally, which contradicted the header CONTRACT above ("this hop
+// ... must scrub regardless of hop 1's outcome") for any profile whose
+// markers are not a subset of `CLAUDE`'s. Both hops now honour the same
+// list.
+fn apply_scrub_and_overlay(command: &mut CommandBuilder, markers: &[String], overlay: &[(String, String)]) {
+    for marker in markers {
         command.env_remove(marker);
     }
     for (key, value) in overlay {
-        if crate::agent_env_profile::CLAUDE.markers.contains(&key.as_str()) {
+        if markers.iter().any(|marker| marker == key) {
             tracing::warn!(
                 %key,
-                "env-overlay key matches a scrubbed Claude marker; the scrub wins, overlay value dropped"
+                "env-overlay key matches a scrubbed marker; the scrub wins, overlay value dropped"
             );
             continue;
         }
@@ -1110,6 +1118,7 @@ mod spawn_shell_command_tests {
             command: None,
             command_args: Vec::new(),
             env_overlay: Vec::new(),
+            scrub_marker: Vec::new(),
         }
     }
 
@@ -1179,7 +1188,7 @@ mod spawn_shell_command_tests {
     }
 
     #[test]
-    fn apply_claude_scrub_and_overlay_removes_markers_preserves_unrelated_vars_and_scrub_wins_over_colliding_overlay(
+    fn apply_scrub_and_overlay_removes_markers_preserves_unrelated_vars_and_scrub_wins_over_colliding_overlay(
     ) {
         // Markers are seeded as explicit `.env()` entries rather than via an
         // injected "host env" iterable: `CommandBuilder::new()`'s base env
@@ -1190,8 +1199,13 @@ mod spawn_shell_command_tests {
         // `portable_pty::cmdbuilder::EnvEntry`), so this exercises the same
         // removal codepath `build_shell_command`'s `Some` branch runs
         // against a real dirty inherited env.
+        let markers: Vec<String> = crate::agent_env_profile::CLAUDE
+            .markers
+            .iter()
+            .map(|marker| (*marker).to_owned())
+            .collect();
         let mut command = CommandBuilder::new("printf");
-        for marker in crate::agent_env_profile::CLAUDE.markers {
+        for marker in &markers {
             command.env(marker, "marker-value");
         }
         command.env("PATH", "/usr/bin:/bin");
@@ -1207,9 +1221,9 @@ mod spawn_shell_command_tests {
             ("FOO".to_owned(), "bar".to_owned()),
             ("CLAUDECODE".to_owned(), "resurrected".to_owned()),
         ];
-        apply_claude_scrub_and_overlay(&mut command, &overlay);
+        apply_scrub_and_overlay(&mut command, &markers, &overlay);
 
-        for marker in crate::agent_env_profile::CLAUDE.markers {
+        for marker in &markers {
             assert_eq!(
                 command.get_env(marker),
                 None,
@@ -1229,6 +1243,42 @@ mod spawn_shell_command_tests {
         assert_eq!(
             command.get_env("FOO").map(|value| value.to_string_lossy().into_owned()),
             Some("bar".to_owned())
+        );
+    }
+
+    // CONTRACT (review cycle 1, finding C1, non-vacuity): mirrors
+    // `terminal.rs`'s
+    // `helper_spawn_with_command_uses_the_supplied_scrub_profile_not_a_hardcoded_one`
+    // at hop 2. Proves `apply_scrub_and_overlay` (the function
+    // `build_shell_command`'s `Some` branch calls) scrubs the
+    // CALLER-SUPPLIED `markers` list rather than a profile-blind hardcoded
+    // `CLAUDE` - a synthetic marker absent from `CLAUDE`'s list is scrubbed,
+    // while a real Claude marker (not in the synthetic list) survives,
+    // which a hardcoded-`CLAUDE` regression would get backwards.
+    #[test]
+    fn apply_scrub_and_overlay_uses_the_supplied_marker_list_not_a_hardcoded_claude_one() {
+        let synthetic_markers = vec!["SYNTHETIC_MARKER_ONLY".to_owned()];
+        let mut command = CommandBuilder::new("printf");
+        command.env("SYNTHETIC_MARKER_ONLY", "scrub-me");
+        command.env("CLAUDECODE", "marker-value");
+        command.env("PATH", "/usr/bin:/bin");
+
+        apply_scrub_and_overlay(&mut command, &synthetic_markers, &[]);
+
+        assert_eq!(
+            command.get_env("SYNTHETIC_MARKER_ONLY"),
+            None,
+            "the supplied synthetic profile's own marker must be scrubbed at hop 2"
+        );
+        assert!(
+            command.get_env("CLAUDECODE").is_some(),
+            "a hardcoded-CLAUDE regression would scrub this even though the \
+             supplied profile never lists it - CLAUDECODE surviving proves \
+             the caller-supplied marker list is what actually ran, not CLAUDE"
+        );
+        assert_eq!(
+            command.get_env("PATH").map(|value| value.to_string_lossy().into_owned()),
+            Some("/usr/bin:/bin".to_owned())
         );
     }
 }

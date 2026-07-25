@@ -82,6 +82,7 @@ const session: TerminalSessionView = {
   rows: 24,
   createdAtMs: 1,
   cwdHint: null,
+  profileId: null,
 };
 
 assertEqual(
@@ -479,6 +480,7 @@ const sessionB: TerminalSessionView = {
   rows: 24,
   createdAtMs: 1,
   cwdHint: null,
+  profileId: null,
 };
 const paneA = terminalPaneFromSession(session);
 const paneB = terminalPaneFromSession(sessionB);
@@ -931,6 +933,49 @@ assertDeepEqual(
   "malformed restore storage degrades to empty",
 );
 
+// CONTRACT (review cycle 1, finding C2): a restore intent captured from a
+// profiled (agent) terminal pane must carry `profileId` through the same
+// pane -> intent -> storage -> intent round trip the plain-shell case above
+// already covers, so a browser-side restore-intent respawn recreates the
+// SAME kind of terminal rather than silently downgrading it to a plain
+// shell (see `App.tsx`'s restore-intent `useEffect`).
+const agentPane = terminalPaneFromSession({
+  ...session,
+  terminalId: "term_agent",
+  title: "Agent",
+  profileId: "claude",
+});
+const agentRestoreIntents = terminalRestoreIntentsFromPanes([agentPane], 123);
+assertEqual(
+  agentRestoreIntents[0].profileId,
+  "claude",
+  "restore intents capture the pane's profileId",
+);
+const agentStorage = {
+  getItem: (key: string) => fakeStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    fakeStorage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    fakeStorage.delete(key);
+  },
+};
+saveTerminalRestoreIntents(agentRestoreIntents, agentStorage);
+assertEqual(
+  loadTerminalRestoreIntents(agentStorage)[0]?.profileId,
+  "claude",
+  "profileId round-trips through restore-intent storage",
+);
+saveTerminalRestoreIntents(
+  terminalRestoreIntentsFromPanes([pane], 123),
+  agentStorage,
+);
+assertEqual(
+  loadTerminalRestoreIntents(agentStorage)[0]?.profileId,
+  null,
+  "an absent profileId still round-trips to null (unchanged shell-terminal behavior)",
+);
+
 assertDeepEqual(
   validateTerminalSize(100, 30),
   { columns: 100, rows: 30 },
@@ -1012,6 +1057,7 @@ const remoteSession: TerminalSessionView = {
   rows: 24,
   createdAtMs: 1,
   cwdHint: null,
+  profileId: null,
 };
 
 await (async () => {
@@ -1029,13 +1075,23 @@ await (async () => {
   assertEqual(recorded().method, "POST", "createTerminal uses POST");
   assertDeepEqual(
     recorded().body,
-    { columns: 80, rows: 24, title: "Remote", cwdHint: "sub" },
-    "createTerminal forwards the size/title/cwd payload",
+    { columns: 80, rows: 24, title: "Remote", cwdHint: "sub", profileId: null },
+    "createTerminal forwards the size/title/cwd/profile payload, profileId null when omitted",
   );
   assertEqual(
     created.serverRoute,
     remote,
     "createTerminal stamps the serverRoute onto the returned session",
+  );
+
+  // 260725 Phase 2 (browser spawn profile): an explicit profileId option
+  // must reach the POST body unchanged.
+  installFetchMock(remoteSession);
+  await createTerminal("root-remote", { title: "Remote", profileId: "claude" }, remote);
+  assertDeepEqual(
+    recorded().body,
+    { columns: 80, rows: 24, title: "Remote", cwdHint: null, profileId: "claude" },
+    "createTerminal forwards an explicit profileId",
   );
 
   installFetchMock([remoteSession]);
@@ -1139,6 +1195,7 @@ await (async () => {
     rows: 24,
     createdAtMs: 1,
     cwdHint: null,
+    profileId: null,
   };
 
   installFetchMock(sessionWithoutRoute);

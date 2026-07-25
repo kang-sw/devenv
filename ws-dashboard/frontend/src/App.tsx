@@ -16,6 +16,7 @@ import type {
 } from "react";
 import {
   Activity,
+  Bot,
   CirclePower,
   Eye,
   EyeOff,
@@ -71,6 +72,7 @@ import {
   buildRootPickerUnpinDirectoryCommand,
   buildAgentChatCreateCommand,
   buildSettingsOpenCommand,
+  buildTerminalCreateAgentCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildServerOffCommand,
@@ -4560,9 +4562,21 @@ function WorkbenchShell({
           for (const intent of restoreIntents) {
             onCommand(buildTerminalCreateCommand(rootId, serverRoute), {
               "terminal.create": () =>
+                // CONTRACT (review cycle 1, finding C2): forward the
+                // persisted intent's `profileId` so a restore-intent
+                // respawn (fires when the daemon lost the live helper -
+                // e.g. a restart - but the browser still remembers the
+                // tab) recreates the SAME kind of terminal that was
+                // closed, rather than silently downgrading an agent
+                // terminal to a plain default shell under its unchanged
+                // title. `createTerminalPane` already forwards `profileId`
+                // to `createTerminal` unconditionally (see
+                // `createAgentTerminalPane` above), so an absent/`null`
+                // intent profile keeps today's shell-respawn behavior.
                 createTerminalPane({
                   title: intent.title,
                   cwdHint: intent.cwdHint,
+                  profileId: intent.profileId ?? undefined,
                 }),
             });
           }
@@ -5396,6 +5410,17 @@ function WorkbenchShell({
         });
       })
       .catch(() => undefined);
+  }
+
+  // CONTRACT (260725 Phase 2, browser spawn profile): thin wrapper over
+  // `createTerminalPane` with a fixed `profileId: "claude"` - the toolbar
+  // button's spawn goes through the SAME `terminal.create`-family plumbing
+  // as an ordinary shell terminal (`persistentTerminal` surface, same
+  // `createTerminal`/`terminalPaneFromSession`/`placeTerminalSessions`
+  // path), never through `registerNewAgentChatPane` or any of the other two
+  // `AGENT_GUI_SUSPENDED` guard depths (`agentGuiSuspended.ts`).
+  function createAgentTerminalPane() {
+    createTerminalPane({ profileId: "claude" });
   }
 
   // CONTRACT: mirrors `createTerminalPane`'s multi-instance registration
@@ -6289,6 +6314,7 @@ function WorkbenchShell({
               onCommand={onCommand}
               onOpenActivity={openWorkRootActivityPane}
               onCreateTerminal={createTerminalPane}
+              onCreateAgentTerminal={createAgentTerminalPane}
               onCreateAgentChat={createAgentChatPane}
             />
             {error ? (
@@ -6443,6 +6469,7 @@ function WorkbenchToolbar({
   onCommand,
   onOpenActivity,
   onCreateTerminal,
+  onCreateAgentTerminal,
   onCreateAgentChat,
 }: {
   server: ServerView;
@@ -6454,6 +6481,7 @@ function WorkbenchToolbar({
   onCommand: DashboardCommandDispatcher;
   onOpenActivity: () => void;
   onCreateTerminal: () => void;
+  onCreateAgentTerminal: () => void;
   onCreateAgentChat: () => void;
 }) {
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -6588,6 +6616,33 @@ function WorkbenchToolbar({
               buildTerminalCreateCommand(root.id, root.resourcePath.serverId),
               {
                 "terminal.create": onCreateTerminal,
+              },
+            );
+          }}
+        />
+        {/* CONTRACT (260725 Phase 2, browser spawn profile): this button is
+            NOT gated by AGENT_GUI_SUSPENDED - it is a parallel path through
+            `terminal.create`-family plumbing (an ordinary
+            `persistentTerminal` pane spawned with a resolved vendor
+            profile), not the suspended agent-chat GUI surface. It must
+            render regardless of AGENT_GUI_SUSPENDED and must never call
+            `registerNewAgentChatPane`/`createAgentChatPane` or dispatch
+            `agentChat.create`. */}
+        <ChromeIconButton
+          commandId="terminal.create.agent"
+          disabled={
+            root.activation !== "online" || root.availability !== "available"
+          }
+          icon={Bot}
+          label="New agent terminal"
+          onClick={() => {
+            onCommand(
+              buildTerminalCreateAgentCommand(
+                root.id,
+                root.resourcePath.serverId,
+              ),
+              {
+                "terminal.create.agent": onCreateAgentTerminal,
               },
             );
           }}

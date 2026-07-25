@@ -81,6 +81,17 @@ pub struct TerminalHelperArgs {
     // the argv-forwarding call site this flag feeds.
     #[arg(long = "env-overlay", value_parser = parse_env_overlay, requires = "command")]
     pub env_overlay: Vec<(String, String)>,
+    // CONTRACT (review cycle 1, finding C1): carries the resolved profile's
+    // scrub deny-list from hop 1 (`terminal.rs::build_helper_command`) to
+    // hop 2 (this process's own `apply_scrub_and_overlay`) so both hops
+    // honour the SAME list instead of hop 2 independently hardcoding
+    // `agent_env_profile::CLAUDE`. Marker names are not secrets (they are
+    // env-var key names, never values), so a repeated argv flag alongside
+    // `--command-arg`/`--env-overlay` does not turn argv into a secret
+    // channel - see the `env_overlay` CONTRACT above for the channel this
+    // must NOT become.
+    #[arg(long = "scrub-marker", requires = "command")]
+    pub scrub_marker: Vec<String>,
 }
 
 // CONTRACT: pure `KEY=VALUE` split on the first `=`; used as the clap

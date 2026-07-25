@@ -266,9 +266,15 @@ dropped tickets live in hidden archive dirs and git history.
   Progress: Phase 3's step-1 gate is closed (turn-start hook verified) and
   Phase 1 is DONE (`9f4a16ca`) — the spawn seam carries explicit argv plus an
   env overlay, with an enumerated 11-marker Claude deny-list scrubbed at both
-  hops. Next unfinished phase is Phase 2. Carry-forward constraint for Phase
-  4: `--env-overlay` is an argv channel and helper argv is world-readable via
-  `ps`, so the callback token must never be threaded through it.
+  hops. Phase 2 is DONE (`5bc8ad28`) — an opaque profile id on the create
+  request resolves against a daemon-side registry, the vacated toolbar slot
+  spawns through it without touching the suspended agent-chat surface, and the
+  pane carries the resolved profile. Next unfinished phase is Phase 3
+  (steps 2-3; step 1's gate is already closed). Carry-forward constraint for
+  Phase 4: helper argv is world-readable via `ps`, and while it now carries
+  scrub marker NAMES alongside file paths, that does not relax the rule — the
+  callback token must never be threaded through argv, `--env-overlay`
+  included.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the

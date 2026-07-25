@@ -251,6 +251,26 @@ impl TerminalRegistry {
                     connected,
                     entry.columns,
                     entry.rows,
+                    // CONTRACT (260725 Phase 2, browser spawn profile):
+                    // `TerminalRegistryEntry` never carries a profile id
+                    // (hard constraint - see
+                    // `terminal_registry_file.rs::TerminalRegistryEntry`),
+                    // so a re-adopted session always reports
+                    // `profileId: null` even when the underlying process is
+                    // still running a resolved vendor profile (e.g.
+                    // `claude`). Unlike turn state (which self-corrects on
+                    // the next hook after adoption), profile provenance has
+                    // NO self-correction signal - nothing re-announces "I am
+                    // a claude-profile terminal" after adopt - so this is a
+                    // PERMANENT loss for this terminal's remaining lifetime,
+                    // not a transient one. Consequence for Phase 7: its
+                    // post-restart agent-terminal counter will UNDER-count
+                    // this terminal until it is closed and a fresh one is
+                    // spawned. Out of scope for Phase 2 (sniffing the
+                    // process's own argv via OS APIs would be a new
+                    // mechanism, not "extend the seam"); flagged for a
+                    // follow-up ticket, not fixed here.
+                    None,
                 );
                 self.insert_unchecked(session);
             }
@@ -432,6 +452,11 @@ pub struct TerminalSession {
     title: String,
     cwd_hint: Option<String>,
     created_at_ms: u64,
+    // CONTRACT (260725 Phase 2, browser spawn profile): provenance only -
+    // which registry profile (if any) produced this session. NOT persisted
+    // to `TerminalRegistryEntry` (hard constraint), so this does not survive
+    // a daemon restart; see `reconcile_entry`'s adopt-arm CONTRACT comment.
+    profile_id: Option<String>,
     pid: u32,
     start_time: u64,
     write_half: Arc<AsyncMutex<IpcWriteHalf>>,
@@ -471,6 +496,11 @@ pub struct TerminalSessionView {
     rows: u16,
     created_at_ms: u64,
     cwd_hint: Option<String>,
+    // CONTRACT (260725 Phase 2, browser spawn profile): read-only echo of
+    // which registry profile produced this session, `null` for the
+    // unchanged default-shell path and for any adopted (post-restart)
+    // session - see `TerminalSession::profile_id`'s CONTRACT.
+    profile_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -567,6 +597,13 @@ pub struct CreateTerminalRequest {
     rows: u16,
     title: Option<String>,
     cwd_hint: Option<String>,
+    // CONTRACT (260725 Phase 2, browser spawn profile): opaque id into
+    // `agent_profile_registry`. Absent (the common case) keeps today's
+    // shell-spawn behavior byte for byte - see
+    // `resolve_create_command`'s `None` branch. `#[serde(default)]` so an
+    // older/unaware client body (no `profileId` key) still deserializes.
+    #[serde(default)]
+    profile_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -642,6 +679,11 @@ pub async fn create_terminal(
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
     };
+    let (command, env_overlay, scrub) =
+        match resolve_create_command(request.profile_id.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(error) => return error.into_response(),
+        };
 
     match TerminalSession::spawn(
         &state.terminals.helper_binary,
@@ -653,12 +695,15 @@ pub async fn create_terminal(
         columns,
         rows,
         request.cwd_hint,
-        // CONTRACT (260725 Phase 1): no profile selector exists on
-        // `CreateTerminalRequest` yet - Phase 2 wires a real value once it
-        // adds the browser-facing profile field. Until then every terminal
-        // spawned from the browser takes the unchanged default-shell path.
-        None,
-        Vec::new(),
+        command,
+        env_overlay,
+        // CONTRACT (260725 Phase 2): provenance is the request's own
+        // (already-validated-by-`resolve_create_command`) profile id, not a
+        // second registry lookup - `resolve_create_command` already proved
+        // this id resolves or this call site would have returned early
+        // above.
+        request.profile_id,
+        scrub,
     )
     .await
     {
@@ -804,19 +849,24 @@ pub async fn close_terminal(
     StatusCode::NO_CONTENT.into_response()
 }
 
-// CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub): pure
-// builder extracted from `TerminalSession::spawn` so the "default (no
-// explicit command) path is byte-for-byte unchanged" contract is testable
-// without spawning a real process. When `command` is `None`, this function
-// must build the exact same arg chain/stdio as before this phase and must
-// call neither `.env()` nor `.env_clear()` - that is hop 1's half of the
-// regression guard. When `command` is `Some`, this hop scrubs `host_env`
-// against the Claude marker profile as defense-in-depth: hop 2 (the
+// CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub; extended
+// Phase 2, browser spawn profile): pure builder extracted from
+// `TerminalSession::spawn` so the "default (no explicit command) path is
+// byte-for-byte unchanged" contract is testable without spawning a real
+// process. When `command` is `None`, this function must build the exact
+// same arg chain/stdio as before this phase and must call neither `.env()`
+// nor `.env_clear()` - that is hop 1's half of the regression guard. When
+// `command` is `Some`, this hop scrubs `host_env` against `scrub` (the
+// resolved profile's own deny-list - Phase 2 no longer hardcodes `CLAUDE`
+// here, see `resolve_create_command`) as defense-in-depth: hop 2 (the
 // helper's own shell spawn) does its own independent scrub of its inherited
 // env, but that inherited env is seeded from hop 1's env at process-spawn
 // time, so a hop-1 regression would otherwise leave the helper's base env
 // dirty even if hop 2's own scrub step were correct - see plan Codebase
-// Findings.
+// Findings. `scrub` is only ever read inside the `command.is_some()`
+// branch below, so its value is inert on the default path; callers still
+// pass `None` there for the same reason `command` is `None` - one resolved
+// profile, one paired scrub list, never independently defaulted.
 #[allow(clippy::too_many_arguments)]
 fn build_helper_command(
     helper_binary: &Path,
@@ -831,6 +881,7 @@ fn build_helper_command(
     socket_path: &Path,
     command: Option<&(String, Vec<String>)>,
     env_overlay: &[(String, String)],
+    scrub: Option<&crate::agent_env_profile::EnvScrubProfile>,
     host_env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> std::process::Command {
     let mut helper_command = std::process::Command::new(helper_binary);
@@ -868,10 +919,27 @@ fn build_helper_command(
         for (key, value) in env_overlay {
             helper_command.arg("--env-overlay").arg(format!("{key}={value}"));
         }
-        helper_command.env_clear().envs(
-            crate::agent_env_profile::scrub_env_os(host_env, &crate::agent_env_profile::CLAUDE)
-                .into_iter(),
-        );
+        // CONTRACT (260725 Phase 2): `scrub` must be `Some` whenever
+        // `command` is `Some` - `resolve_create_command` returns them
+        // paired, one resolved profile producing both. Falling back to
+        // `CLAUDE` (the strictest list this codebase knows) rather than
+        // panicking or silently skipping the scrub keeps a defensive
+        // caller-error path safe instead of leaving a dirty env - see the
+        // hop-1 defense-in-depth CONTRACT above.
+        let scrub = scrub.unwrap_or(&crate::agent_env_profile::CLAUDE);
+        helper_command
+            .env_clear()
+            .envs(crate::agent_env_profile::scrub_env_os(host_env, scrub).into_iter());
+        // CONTRACT (review cycle 1, finding C1): thread this SAME resolved
+        // `scrub` list to hop 2 via `--scrub-marker`, so the helper's own
+        // shell spawn (`terminal_helper_process.rs::apply_scrub_and_overlay`)
+        // scrubs the profile's actual markers instead of independently
+        // hardcoding `CLAUDE`. Without this, a profile whose markers are not
+        // a subset of `CLAUDE`'s would be scrubbed at hop 1 and NOT at hop
+        // 2 - the hop that actually seeds the PTY child's env.
+        for marker in scrub.markers {
+            helper_command.arg("--scrub-marker").arg(*marker);
+        }
     }
     helper_command
         .stdin(std::process::Stdio::null())
@@ -900,6 +968,44 @@ fn validate_command_env_overlay_pairing(
     Ok(())
 }
 
+// CONTRACT (260725 Phase 2, browser spawn profile): pure resolver extracted
+// from `create_terminal` so the "absent `profile_id` is a literal
+// no-branch-taken path, not a branch that happens to compute the same
+// values" contract is unit-testable without spawning a real process or
+// going through the HTTP handler - mirrors this file's existing
+// `validate_command_env_overlay_pairing`/`build_helper_command` pure-seam
+// pattern (Phase 1 Result, finding 4: the equivalent env-overlay guard was
+// silently vacuous until it got its own dedicated, mutation-caught test).
+// `command` and `scrub` are always returned paired (`None`/`None` or
+// `Some`/`Some`) - never independently defaulted - so `build_helper_command`
+// never has to guess which scrub list belongs to an explicit command. An
+// unknown `profile_id` is a `TerminalError::BadRequest`, mirroring the
+// existing `validate_size` early-return shape.
+fn resolve_create_command(
+    profile_id: Option<&str>,
+) -> Result<
+    (
+        Option<(String, Vec<String>)>,
+        Vec<(String, String)>,
+        Option<&'static crate::agent_env_profile::EnvScrubProfile>,
+    ),
+    TerminalError,
+> {
+    let Some(id) = profile_id else {
+        return Ok((None, Vec::new(), None));
+    };
+    let profile = crate::agent_profile_registry::resolve(id)
+        .ok_or(TerminalError::BadRequest("unknown terminal profile"))?;
+    let command = Some((
+        profile.command.to_owned(),
+        profile.args.iter().map(|arg| (*arg).to_owned()).collect(),
+    ));
+    // Phase 2 does not populate env_overlay - no secret/value needs to
+    // travel yet (Phase 4 owns the callback token and is explicitly barred
+    // from `--env-overlay` regardless of this seam).
+    Ok((command, Vec::new(), Some(profile.scrub)))
+}
+
 impl TerminalSession {
     #[allow(clippy::too_many_arguments)]
     async fn spawn(
@@ -914,6 +1020,8 @@ impl TerminalSession {
         cwd_hint: Option<String>,
         command: Option<(String, Vec<String>)>,
         env_overlay: Vec<(String, String)>,
+        profile_id: Option<String>,
+        scrub: Option<&'static crate::agent_env_profile::EnvScrubProfile>,
     ) -> Result<Arc<Self>, TerminalError> {
         validate_command_env_overlay_pairing(&command, &env_overlay)?;
         let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
@@ -933,6 +1041,7 @@ impl TerminalSession {
             &socket_path,
             command.as_ref(),
             &env_overlay,
+            scrub,
             std::env::vars_os(),
         );
 
@@ -983,6 +1092,7 @@ impl TerminalSession {
             connected,
             columns,
             rows,
+            profile_id,
         ))
     }
 
@@ -995,6 +1105,7 @@ impl TerminalSession {
         connected: HandshakeConnection,
         columns: u16,
         rows: u16,
+        profile_id: Option<String>,
     ) -> Arc<Self> {
         let grace_until_ms = (connected.status != TerminalStatus::Running)
             .then(|| now_ms() + DAEMON_GRACE_WINDOW_MS);
@@ -1004,6 +1115,7 @@ impl TerminalSession {
             title,
             cwd_hint,
             created_at_ms,
+            profile_id,
             pid: connected.pid,
             start_time: connected.start_time,
             write_half: Arc::new(AsyncMutex::new(connected.writer)),
@@ -1032,6 +1144,7 @@ impl TerminalSession {
             rows: inner.rows,
             created_at_ms: self.created_at_ms,
             cwd_hint: self.cwd_hint.clone(),
+            profile_id: self.profile_id.clone(),
         }
     }
 
@@ -1661,6 +1774,7 @@ mod terminal_portability_skeleton_tests {
             title: "fake".to_owned(),
             cwd_hint: None,
             created_at_ms: now_ms(),
+            profile_id: None,
             pid: std::process::id(),
             start_time: 0,
             write_half: Arc::new(AsyncMutex::new(write_half)),
@@ -2056,6 +2170,7 @@ mod terminal_portability_skeleton_tests {
             Path::new("/tmp/term_abc.sock"),
             None,
             &[],
+            None,
             Vec::<(std::ffi::OsString, std::ffi::OsString)>::new(),
         );
 
@@ -2133,6 +2248,7 @@ mod terminal_portability_skeleton_tests {
             Path::new("/tmp/term_abc.sock"),
             Some(&("agent-cli".to_owned(), vec!["--flag".to_owned()])),
             &[("BASE_URL".to_owned(), "http://x".to_owned())],
+            Some(&crate::agent_env_profile::CLAUDE),
             host_env,
         );
 
@@ -2171,6 +2287,118 @@ mod terminal_portability_skeleton_tests {
             .position(|arg| arg == "--env-overlay")
             .expect("--env-overlay present");
         assert_eq!(args[env_overlay_pos + 1], "BASE_URL=http://x");
+    }
+
+    // CONTRACT (260725 Phase 2, non-vacuity): proves `build_helper_command`
+    // actually applies the CALLER-SUPPLIED `scrub` profile rather than a
+    // profile-blind hardcoded `CLAUDE` - the sibling test above passes
+    // `Some(&CLAUDE)` explicitly, which alone cannot distinguish "the scrub
+    // parameter is real" from "CLAUDE stayed hardcoded and the parameter is
+    // dead". This test passes a DIFFERENT synthetic scrub profile whose
+    // marker does not appear in CLAUDE's list, and asserts that marker (not
+    // a CLAUDE marker) is what gets stripped.
+    #[test]
+    fn helper_spawn_with_command_uses_the_supplied_scrub_profile_not_a_hardcoded_one() {
+        const SYNTHETIC: crate::agent_env_profile::EnvScrubProfile =
+            crate::agent_env_profile::EnvScrubProfile {
+                name: "synthetic-test-profile",
+                markers: &["SYNTHETIC_MARKER_ONLY"],
+            };
+        let host_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = vec![
+            (
+                std::ffi::OsString::from("SYNTHETIC_MARKER_ONLY"),
+                std::ffi::OsString::from("scrub-me"),
+            ),
+            (
+                std::ffi::OsString::from("CLAUDECODE"),
+                std::ffi::OsString::from("marker-value"),
+            ),
+            (
+                std::ffi::OsString::from("PATH"),
+                std::ffi::OsString::from("/usr/bin:/bin"),
+            ),
+        ];
+
+        let command = build_helper_command(
+            Path::new("/usr/local/bin/ws-dashboard"),
+            Path::new("/tmp/registry"),
+            "term_abc",
+            "wr1",
+            Path::new("/tmp/cwd"),
+            "title",
+            80,
+            24,
+            None,
+            Path::new("/tmp/term_abc.sock"),
+            Some(&("agent-cli".to_owned(), Vec::new())),
+            &[],
+            Some(&SYNTHETIC),
+            host_env,
+        );
+
+        let envs: HashMap<String, Option<String>> = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert!(
+            !envs.contains_key("SYNTHETIC_MARKER_ONLY"),
+            "the supplied synthetic profile's own marker must be scrubbed"
+        );
+        assert!(
+            envs.contains_key("CLAUDECODE"),
+            "a hardcoded-CLAUDE regression would scrub this even though the \
+             supplied profile never lists it - CLAUDECODE surviving proves \
+             the caller-supplied profile is what actually ran, not CLAUDE"
+        );
+        assert_eq!(envs.get("PATH").cloned().flatten().as_deref(), Some("/usr/bin:/bin"));
+
+        // C1 fix: hop 1 must forward the SYNTHETIC profile's own marker to
+        // hop 2 via `--scrub-marker`, not silently keep it hop-1-only.
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let scrub_marker_pos = args
+            .iter()
+            .position(|arg| arg == "--scrub-marker")
+            .expect("--scrub-marker present");
+        assert_eq!(args[scrub_marker_pos + 1], "SYNTHETIC_MARKER_ONLY");
+    }
+
+    #[test]
+    fn resolve_create_command_with_no_profile_id_takes_the_no_branch_path() {
+        let (command, env_overlay, scrub) = resolve_create_command(None)
+            .expect("absent profile_id must never fail resolution");
+        assert_eq!(command, None, "absent profile_id must not resolve to a default command");
+        assert!(env_overlay.is_empty());
+        assert!(scrub.is_none(), "absent profile_id must not resolve to a default scrub profile");
+    }
+
+    #[test]
+    fn resolve_create_command_with_claude_resolves_command_and_claude_scrub() {
+        let (command, env_overlay, scrub) = resolve_create_command(Some("claude"))
+            .expect("the claude profile must resolve");
+        let (program, args) = command.expect("a resolved profile must produce a command");
+        assert_eq!(program, "claude");
+        assert!(args.is_empty());
+        assert!(env_overlay.is_empty());
+        assert_eq!(
+            scrub.expect("a resolved profile must produce a scrub list").name,
+            "claude"
+        );
+    }
+
+    #[test]
+    fn resolve_create_command_rejects_an_unknown_profile_id() {
+        assert!(matches!(
+            resolve_create_command(Some("not-a-real-profile")),
+            Err(TerminalError::BadRequest(_))
+        ));
     }
 }
 
