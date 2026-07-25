@@ -1799,8 +1799,13 @@ later phase, and must not be read as covered by this process/socket-level
 result — `terminal_lifetime` exercises the real lifecycle through real OS
 processes and a real Unix-domain-socket IPC channel, including a real
 `tokio_tungstenite` client attached to the daemon's terminal WebSocket route
-in the dead-shell leg, so the WS protocol surface itself is exercised — but
-not through the browser-facing UI.
+in three of its four lifecycle legs (restart reattach, boot-reconcile
+grace-row adoption, and dead-shell detection — only the close-kill leg has
+no socket), with bidirectional traffic (terminal input written back over the
+socket, not merely output read), asserted `101` upgrade responses on every
+attach, and the restart leg's client attaching with a real `?after=` resume
+cursor, so the WS protocol surface itself is exercised thoroughly — but not
+through the browser-facing UI.
 
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
