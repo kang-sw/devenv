@@ -871,6 +871,12 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
 // lands in the kernel socket buffer, but nothing reads it) before the
 // fallback timer fires. `SIGKILL` is not maskable by `SIGSTOP`, so
 // `kill_verified`'s signal still reaches and terminates the frozen helper.
+//
+// Unix-only: this test shells out to `kill -STOP` and `ps -o state=`, neither
+// of which exists on Windows. The Windows verified-kill path has its own
+// `#[cfg(windows)]` acceptance target, so gating this test to `unix` loses no
+// coverage.
+#[cfg(unix)]
 #[tokio::test]
 async fn terminal_close_kills_verified_process_via_fallback_kill() {
     let client = reqwest::Client::new();
@@ -904,6 +910,21 @@ async fn terminal_close_kills_verified_process_via_fallback_kill() {
     let entry: serde_json::Value =
         serde_json::from_str(&raw).expect("parse terminal registry entry JSON");
     let pid = entry["pid"].as_u64().expect("registry pid") as u32;
+    let start_time = entry["startTime"].as_u64().expect("registry startTime");
+
+    // Verify the pid we are about to SIGSTOP is still the helper this test
+    // just created, not a recycled pid, BEFORE signalling it - this is the
+    // exact identity invariant the whole ticket exists to protect (see
+    // `HelperReaper` above: "PID gone or recycled for another process -
+    // never signal a stranger"). If the helper already died and its pid was
+    // reused, `SIGSTOP`-ing it would freeze an unrelated process
+    // indefinitely (the reaper would then correctly refuse to `SIGKILL` it
+    // on identity mismatch, so it would never be thawed).
+    assert_eq!(
+        ws_dashboard_daemon::terminal_platform::process_start_time(pid),
+        Some(start_time),
+        "helper pid {pid} identity must match the registry's startTime before SIGSTOP-ing it"
+    );
 
     // Freeze the helper so it cannot service `GracefulShutdown` before
     // `terminate()`'s 200ms fallback timer fires. Poll `ps` until the kernel
@@ -954,13 +975,16 @@ async fn terminal_close_kills_verified_process_via_fallback_kill() {
     );
 
     // Poll (generous, bounded deadline - consistent with this file's "err
-    // generous" margin philosophy) until the OS confirms the pid is gone.
-    // This is the actual "OS process was verified-killed" evidence: a plain
-    // `GracefulShutdown` could never have reached the frozen helper, so only
-    // the fallback `kill_verified` SIGKILL path can account for this.
+    // generous" margin philosophy) until the OS confirms this identity is
+    // gone. This is the actual "OS process was verified-killed" evidence: a
+    // plain `GracefulShutdown` could never have reached the frozen helper, so
+    // only the fallback `kill_verified` SIGKILL path can account for this.
+    // Reusing `start_time` here (rather than testing pid existence alone)
+    // proves "this identity is gone", not merely "this pid number is free" -
+    // a recycled pid would otherwise read as a false pass.
     let death_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     loop {
-        if ws_dashboard_daemon::terminal_platform::process_start_time(pid).is_none() {
+        if ws_dashboard_daemon::terminal_platform::process_start_time(pid) != Some(start_time) {
             break;
         }
         assert!(

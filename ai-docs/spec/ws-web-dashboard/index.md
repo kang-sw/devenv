@@ -1787,18 +1787,20 @@ part of the `--lib` 124/0/2 result re-confirmed in this phase.
 `--lib` (124 passed, 0 failed, 2 ignored) and `--test server` (15 passed, 0
 failed) were re-run alongside `--test terminal_lifetime` to confirm no
 regression; both match the Phase 1 baseline exactly. This phase's own tests
-were confirmed to leak nothing: live `terminal-helper` process counts
-(`pgrep -f terminal-helper`) and `/tmp/ws-dashboard-terminal-lifetime-*`
-temp-dir listings were compared before and after every run, including each
-mutation round-trip, independent of the already-tracked `tests/routes.rs`
+were confirmed to leak nothing at the process level: live `terminal-helper`
+process counts (`pgrep -f terminal-helper`) were compared before and after
+every run, including each mutation round-trip, and returned to the same
+baseline every time, independent of the already-tracked `tests/routes.rs`
 detached-helper leak
 (`260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper`).
 
-The browser-facing UI/WebSocket gate remains an explicit gap on macOS,
-deferred to a later phase, and must not be read as covered by this
-process/socket-level result — `terminal_lifetime` exercises the real
-lifecycle through real OS processes and a real Unix-domain-socket IPC
-channel, but not through the browser-facing UI/WebSocket surface.
+The browser-facing UI gate remains an explicit gap on macOS, deferred to a
+later phase, and must not be read as covered by this process/socket-level
+result — `terminal_lifetime` exercises the real lifecycle through real OS
+processes and a real Unix-domain-socket IPC channel, including a real
+`tokio_tungstenite` client attached to the daemon's terminal WebSocket route
+in the dead-shell leg, so the WS protocol surface itself is exercised — but
+not through the browser-facing UI.
 
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
