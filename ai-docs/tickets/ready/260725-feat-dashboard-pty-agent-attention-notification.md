@@ -569,7 +569,7 @@ baseline 140, net +7: 3 registry-resolve tests, 3 `resolve_create_command`
 tests, 1 scrub-wiring non-vacuity test). `cargo test -p ws-dashboard-daemon
 --test terminal_lifetime` -> 4 passed, 0 failed (unchanged). `cargo check -p
 ws-dashboard-daemon --tests` -> exit 0. `npm run build` (tsc -b + vite
-build) -> clean. All 18 pure-TS `npm run test:*` suites -> exit 0.
+build) -> clean. All 21 pure-TS `npm run test:*` suites -> exit 0.
 Browser: `npx playwright test --grep "agent spawn profile"` (new dedicated
 sibling spec `e2e/agent-spawn-profile.spec.ts`, own daemon/workRoot - see
 that file's CONTRACT comment for why it is not a `test.step` inside
