@@ -336,6 +336,58 @@ the same text the MCP path returns; the documented cold-start call
 `call workflow_manual '{"session_key":"obsidian-latch","root":"<abs>"}'` mints a
 usable lead key; error paths exit non-zero.
 
+### Result (6b1038b7) - 2026-07-25
+
+Added `tools` and `call` subcommands to `cmd/ws-mcp/main.go`. Both route through
+`mcp.NewServer(...).ServeStdio` fed a synthetic single-line JSON-RPC request —
+the same mechanism `serve()`/`runSmoke()` already use — so `filteredTools()` and
+`callTool` profile and session-scope gating are inherited unchanged, with **zero**
+`internal/mcp` export changes (the two methods are unexported; the ServeStdio
+round-trip is the sanctioned reuse path). Bare `tools` prints the mapping rule
+plus each tool's name/description only (no `inputSchema`); `tools <name>` prints
+that one tool's `inputSchema`; `call <name> '<json>'` dispatches and writes the
+tool's text content to stdout, exiting non-zero on tool error, unknown tool, or
+malformed JSON.
+
+Error-shape handling confirmed against source: an unknown tool name returns a
+JSON-RPC-level `errorResponse(-32602, "unknown tool: ...")` (`server.go:1720-1721`,
+the `callTool` switch `default:`), not a tool-level `isError`, so `callCommand`
+checks both shapes — `resp.Error != nil` first, then `result.IsError` — before
+extracting `content[0].text`. Malformed JSON is caught by a pre-dispatch
+`json.Unmarshal` probe, not surfaced as a `-32700` from `ServeStdio`. Arg-count
+usage errors exit 2 (matching `usage()`); tool/runtime/parse errors exit 1.
+
+Verification: from `agents-plugin-tool/`, `go build ./...` and `go vet ./...`
+clean; `go test ./cmd/ws-mcp/... ./internal/mcp/...` green. Eight new
+`main_test.go` cases cover all Verification Plan bullets — bare-list parity
+(full + agentless, no `inputSchema`), `tools <name>` schema parity, unknown-tool
+for both `tools` and `call`, malformed JSON, cross-process session-key round trip
+(two subprocesses sharing `WS_CACHE_HOME`), non-lead scope gating (delegate key
+rejected from `ferrule`/`workflow_manual`), and the cold-start `obsidian-latch`
+mint. All assertions compare against an independent in-process `ServeStdio` drive
+rather than the CLI's own output.
+
+Deviations: the cross-process round-trip test exercises `git.status` rather than
+`tickets.list` — an empty temp repo has no `ai-docs/tickets`, which would trip the
+tool-level error path instead of a clean round trip. No other deviation; all eight
+verification bullets landed.
+
+Review: partitioned correctness/fit/test, all clean — **0 critical, 0 important**.
+Six minor items, all accepted (no remediation): generic `-32602 invalid params`
+message for a valid-but-non-object JSON argument; latent tool-`description`-with-
+newline listing/parse fragility (no current tool has one) in both the CLI output
+and the bare-list test; the JSON-RPC-error branch using an inline
+`fmt.Fprintf+os.Exit(1)` rather than `fatal()` to keep the two error branches
+parallel and surface tool text verbatim; `mcpLineResponse`'s unread `JSONRPC`/`ID`
+wire-mirror fields; and `CombinedOutput()` vs the more precise `.Output()` in the
+round-trip golden check.
+
+Deferred (unchanged from ticket): spec reflection into `mcp-tools.md` /
+`plugin-runtime.md` / `workflow-skills.md` and any durable mental-model invariant
+stay closeout-only per the ticket's "Contract-first spec: no" decision — captured
+once Phases 2-3 settle the full fallback surface. Phases 2-3 not started; the
+ticket remains in `ready/`.
+
 ### Phase 2: `bin/` shims, namespace env baking, and launcher warm-path trim
 
 Add `bin/ws-cli` + `bin/ws-cli.cmd` to `agents-plugin/`, and `bin/wsflow-cli` +

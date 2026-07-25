@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
@@ -724,4 +727,316 @@ func stringsTrim(out []byte) string {
 		text = text[:len(text)-1]
 	}
 	return text
+}
+
+// --- tools / call passthrough (Phase 1) ---
+
+// inProcessToolsList drives a bare tools/list request directly through
+// mcp.NewServer(...).ServeStdio, mirroring the CLI's own runMCPLine helper,
+// so tests can assert the CLI's `tools` output against the same profile
+// filtering (filteredTools) without duplicating it.
+func inProcessToolsList(t *testing.T) []map[string]any {
+	t.Helper()
+	server := mcp.NewServer(".", "test", "test")
+	var buf bytes.Buffer
+	line := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(line), &buf); err != nil {
+		t.Fatalf("in-process tools/list failed: %v", err)
+	}
+	var resp struct {
+		Result struct {
+			Tools []map[string]any `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatalf("decode in-process tools/list: %v\n%s", err, buf.String())
+	}
+	return resp.Result.Tools
+}
+
+// parseSessionKeyLine extracts the `session_key: <value>` line ferrule's
+// text response always leads with.
+func parseSessionKeyLine(t *testing.T, text string) string {
+	t.Helper()
+	for _, line := range strings.Split(text, "\n") {
+		if name, value, ok := strings.Cut(line, ": "); ok && name == "session_key" {
+			return strings.TrimSpace(value)
+		}
+	}
+	t.Fatalf("session_key not found in output: %q", text)
+	return ""
+}
+
+func TestToolsCommandBareListMatchesToolsList(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "full", env: nil},
+		{name: "agentless", env: map[string]string{"WS_MCP_NO_AGENT": "1", "WS_MCP_NAMESPACE": "wsflow"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for key, value := range tc.env {
+				t.Setenv(key, value)
+			}
+
+			wantTools := inProcessToolsList(t)
+			wantNames := make([]string, 0, len(wantTools))
+			for _, tool := range wantTools {
+				name, _ := tool["name"].(string)
+				wantNames = append(wantNames, name)
+			}
+			slices.Sort(wantNames)
+
+			cmd := exec.Command(bin, "tools")
+			cmd.Env = os.Environ()
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ws-mcp tools failed: %v\n%s", err, string(out))
+			}
+			text := string(out)
+			if !strings.Contains(text, toolsMappingRule) {
+				t.Fatalf("tools output missing mapping rule: %q", text)
+			}
+			if strings.Contains(text, "inputSchema") {
+				t.Fatalf("bare tools output leaked inputSchema: %q", text)
+			}
+			lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+			if len(lines) == 0 || lines[0] != toolsMappingRule {
+				t.Fatalf("tools output first line = %q, want mapping rule", lines[0])
+			}
+			gotNames := make([]string, 0, len(lines)-1)
+			for _, line := range lines[1:] {
+				name, _, ok := strings.Cut(line, ": ")
+				if !ok {
+					t.Fatalf("tools line missing name/description separator: %q", line)
+				}
+				gotNames = append(gotNames, name)
+			}
+			slices.Sort(gotNames)
+			if !slices.Equal(gotNames, wantNames) {
+				t.Fatalf("tools names = %v, want %v", gotNames, wantNames)
+			}
+
+			if tc.name == "agentless" {
+				for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail", "config.agents_tier"} {
+					if slices.Contains(gotNames, hidden) {
+						t.Fatalf("agentless tools output exposed hidden tool %s in %v", hidden, gotNames)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestToolsCommandShowMatchesInputSchema(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	wantTools := inProcessToolsList(t)
+	var wantSchema map[string]any
+	for _, tool := range wantTools {
+		if name, _ := tool["name"].(string); name == "runtime.info" {
+			wantSchema, _ = tool["inputSchema"].(map[string]any)
+			break
+		}
+	}
+	if wantSchema == nil {
+		t.Fatal("runtime.info missing inputSchema in in-process tools/list")
+	}
+
+	cmd := exec.Command(bin, "tools", "runtime.info")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp tools runtime.info failed: %v\n%s", err, string(out))
+	}
+	var gotSchema map[string]any
+	if err := json.Unmarshal(out, &gotSchema); err != nil {
+		t.Fatalf("invalid schema JSON: %v\n%s", err, string(out))
+	}
+	wantJSON, _ := json.Marshal(wantSchema)
+	gotJSON, _ := json.Marshal(gotSchema)
+	if string(wantJSON) != string(gotJSON) {
+		t.Fatalf("tools runtime.info schema = %s, want %s", gotJSON, wantJSON)
+	}
+}
+
+func TestToolsCommandShowUnknownToolExitsNonZero(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	cmd := exec.Command(bin, "tools", "nonexistent-tool")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for unknown tool, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "tool not found") {
+		t.Fatalf("unexpected message: %s", out)
+	}
+}
+
+func TestCallCommandMalformedJSONExitsNonZero(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	cmd := exec.Command(bin, "call", "runtime.info", "not-json")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for malformed JSON, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "malformed JSON") {
+		t.Fatalf("unexpected message: %s", out)
+	}
+}
+
+func TestCallCommandUnknownToolExitsNonZero(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	cmd := exec.Command(bin, "call", "nonexistent-tool", "{}")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for unknown tool, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "unknown tool") {
+		t.Fatalf("unexpected message: %s", out)
+	}
+}
+
+func TestCallCommandCrossProcessSessionKeyRoundTrip(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	cache := filepath.Join(t.TempDir(), "cache")
+	env := append(os.Environ(), "WS_CACHE_HOME="+cache)
+
+	mint := exec.Command(bin, "call", "ferrule", fmt.Sprintf(`{"root":%q}`, root))
+	mint.Env = env
+	mintOut, err := mint.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp call ferrule failed: %v\n%s", err, string(mintOut))
+	}
+	key := parseSessionKeyLine(t, string(mintOut))
+
+	// Fresh process, same WS_CACHE_HOME: the minted key must resolve here too.
+	callCmd := exec.Command(bin, "call", "git.status", fmt.Sprintf(`{"session_key":%q}`, key))
+	callCmd.Env = env
+	gotOut, err := callCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp call git.status failed: %v\n%s", err, string(gotOut))
+	}
+
+	// In-process equivalent for the same key, sharing WS_CACHE_HOME via t.Setenv.
+	t.Setenv("WS_CACHE_HOME", cache)
+	server := mcp.NewServer(".", "test", "test")
+	var buf bytes.Buffer
+	line := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.status","arguments":{"session_key":%q}}}`, key) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(line), &buf); err != nil {
+		t.Fatalf("in-process tools/call failed: %v", err)
+	}
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatalf("decode in-process tools/call: %v\n%s", err, buf.String())
+	}
+	var wantText string
+	if len(resp.Result.Content) > 0 {
+		wantText = resp.Result.Content[0].Text
+	}
+	if string(gotOut) != wantText {
+		t.Fatalf("ws-mcp call git.status = %q, want %q (in-process equivalent)", gotOut, wantText)
+	}
+}
+
+func TestCallCommandRejectsLeadOnlyToolForNonLeadSessionKey(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	cache := filepath.Join(t.TempDir(), "cache")
+	env := append(os.Environ(), "WS_CACHE_HOME="+cache)
+
+	// Keyless mint requesting a non-lead ("delegate") capability succeeds —
+	// only the keyed gate inside callTool rejects a non-lead key from
+	// reaching a lead-only tool, not the mint call itself.
+	mint := exec.Command(bin, "call", "ferrule", fmt.Sprintf(`{"root":%q,"capability":"delegate"}`, root))
+	mint.Env = env
+	mintOut, err := mint.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp call ferrule (delegate mint) failed: %v\n%s", err, string(mintOut))
+	}
+	delegateKey := parseSessionKeyLine(t, string(mintOut))
+
+	for _, tool := range []string{"ferrule", "workflow_manual"} {
+		t.Run(tool, func(t *testing.T) {
+			args := fmt.Sprintf(`{"session_key":%q,"root":%q}`, delegateKey, root)
+			callCmd := exec.Command(bin, "call", tool, args)
+			callCmd.Env = env
+			out, err := callCmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("expected non-zero exit for lead-only tool %s via non-lead session_key, got success: %s", tool, out)
+			}
+			if !strings.Contains(string(out), "not available") {
+				t.Fatalf("unexpected rejection message for %s: %s", tool, out)
+			}
+		})
+	}
+}
+
+func TestCallCommandColdStartWorkflowManualMintsLeadKey(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	cache := filepath.Join(t.TempDir(), "cache")
+
+	cmd := exec.Command(bin, "call", "workflow_manual", fmt.Sprintf(`{"session_key":"obsidian-latch","root":%q}`, root))
+	cmd.Env = append(os.Environ(), "WS_CACHE_HOME="+cache)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp call workflow_manual (cold start) failed: %v\n%s", err, string(out))
+	}
+	text := string(out)
+	if !strings.Contains(text, "## Session Key") {
+		t.Fatalf("cold-start workflow_manual output missing session key section: %q", text)
+	}
+	if strings.Contains(text, "obsidian-latch") {
+		t.Fatalf("cold-start workflow_manual echoed the freshBootstrapKey sentinel instead of minting a fresh key: %q", text)
+	}
 }
