@@ -42,6 +42,32 @@ interactive agent surface, so it should not be assumed as a hard prerequisite
 for `260620`'s or the seamless cross-harness history collapse
 (`260624-feat-ws-dashboard-managed-cli-recent-sessions`) work.
 
+**Supersession REVERSED 2026-07-25** (owner). The 2026-07-11 priority
+supersession above is formally withdrawn. The structured provider-adapter track
+it promoted (`260620`) is now suspended behind `AGENT_GUI_SUSPENDED`, and the
+owner has directed a pivot back to a PTY-based agent
+(`260725-research-ws-dashboard-pty-agent-pivot`). In the owner's words this is
+"the revival of the PTY agent itself" — so this ticket is not merely
+un-deprioritized, it is back on the direction path as the substrate design.
+
+Consequences to respect rather than re-derive:
+
+- `260725-feat-dashboard-pty-agent-attention-notification` (ready/) absorbs
+  PART of this ticket's Phase 1 — specifically the argv/env passthrough at the
+  spawn seam, plus a net-new environment scrub this ticket never anticipated.
+  It does NOT absorb the rest of Phase 1: the output ring, cursoring, resize,
+  status, close/reap, and bounded fallback reads already exist in the shipped
+  terminal substrate, and vendor profiles are only partially covered there.
+  When that ticket's Phase 1 lands, append an Edition note here recording
+  exactly what was absorbed so this ticket does not sit half-done silently.
+- The load-bearing invariant from the pivot applies to this ticket too: the
+  agent must be an ADDITIVE layer over the existing terminal substrate. Do not
+  read this ticket's Phase 1 as licence to build a second PTY subsystem.
+- This paragraph resolves the research anchor's open question "whether/how
+  260624's 2026-07-11 supersession is formally reversed". The answer is: edit
+  this ticket, which is what this note does; it is NOT superseded by the pivot
+  research ticket.
+
 The long-text input surface is a browser-side composer, not an editor embedded
 inside the PTY. It may use a React/CodeMirror-style floating editor, snippets,
 or bootstrap previews, then deliberately submits the final text to the daemon so

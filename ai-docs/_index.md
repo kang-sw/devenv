@@ -270,7 +270,28 @@ dropped tickets live in hidden archive dirs and git history.
   `terminalPanes` is `WorkbenchShell`-local while the nav renders from
   `App()`. Spec addressing via `## Spec Impact`
   (`#260516-ws-web-dashboard-inspectable-navigation-shell`, Contract-first:
-  no). Sage combined = passed.
+  no). Sage combined = passed. NOTE: its `## Constraints` selection-gradient
+  claim was corrected 2026-07-25 — `.resource-row-selected`'s gradient does
+  not currently render, because the later `.resource-row` rule wins at equal
+  specificity. Treat it as a live defect to confirm, not as a design input.
+- `260725-feat-dashboard-pty-agent-attention-notification` (ready, feat) —
+  the PTY agent's primary entry-point feature: a vendor turn-boundary hook
+  injected at spawn reports to a token-authed daemon endpoint, which fans out
+  over a new server-scoped SSE stream to the tab label, the nav row, and
+  (opt-in) the browser. Eight phases; 1-6 are one vertical slice. Load-bearing
+  results of the review pass: the activity SSE cannot carry this (disk-poll
+  watch path, pane-gated), `attention` already means "error" so ready-for-input
+  needs its own field, the callback token lives in daemon-owned state and never
+  in helper argv or the registry, and the spawn seam must SCRUB inherited env
+  (a nested agent inherits `CLAUDE_CODE_CHILD_SESSION` and loses transcript
+  saving). Sage combined = passed after one block/revise cycle.
+
+**Ordering (owner, 2026-07-25):** macOS first. Every phase of the other two
+ready tickets is verification-blocked until the daemon compiles natively, and
+so is dashboard dogfooding. The one exception worth taking early is the
+turn-start hook spike inside the attention ticket's Phase 3 — it touches no
+daemon code and its result decides whether the `working` state and the nav
+spinner exist at all.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin
@@ -285,7 +306,10 @@ follows the already-landed Tier 1 suspension (`AGENT_GUI_SUSPENDED` flag,
 `c3f5b42b`) and turns away from the structured-adapter track
 (`260620-feat-ws-dashboard-agent-client-activity-sources` and related
 agent-GUI tickets, now suspended). `260624-feat-ws-dashboard-managed-cli-terminal`
-is the pre-written PTY-agent substrate design for this pivot.
+is the pre-written PTY-agent substrate design for this pivot; its 2026-07-11
+priority supersession was formally REVERSED 2026-07-25 (owner framed the pivot
+as "the revival of the PTY agent itself"), recorded by editing that ticket's
+Background rather than superseding it.
 
 - `260710-bug-project-index-ticket-focus-stale-status` (todo, bug) — this
   ticket. The mechanical reconciliation half is done as of this pass; the
