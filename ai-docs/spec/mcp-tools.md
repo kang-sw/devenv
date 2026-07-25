@@ -1172,6 +1172,15 @@ surfaced. The gate is non-overridable: there is no flag that lets a hard-failing
 ticket commit through. A commit that stages no ticket files is unaffected.
 Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}
 
+The verify step excludes index-delete-side paths from the staged path set it
+checks: for a staged rename the pre-rename path is dropped and the destination
+path is verified, and for an outright staged deletion the deleted path is
+dropped with nothing to verify in its place. This makes a status transition
+staged by `tickets.move` or `tickets.close`, and an outright staged ticket
+deletion, committable through `git.commit`; when a commit's ticket paths are
+entirely deletion-side after this exclusion, the verify step is skipped for
+that commit. {#260725-git-commit-verify-excludes-delete-side-paths}
+
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
 `path.generate` allocates writable workflow artifact paths so workflow agents can
