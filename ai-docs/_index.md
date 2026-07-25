@@ -281,7 +281,12 @@ dropped tickets live in hidden archive dirs and git history.
   `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry`: the notify
   silence has no expiry, the 0600 write sequence has a pre-chmod umask window
   that only matters once a token is written, and Phase 4 must NOT derive
-  `callback.json`'s baseUrl from the shared `bound-base-url.json`.
+  `callback.json`'s baseUrl from the shared `bound-base-url.json`. Phase 4 is
+  now DONE (`f134aa8a`) and discharged all three: the umask window is closed
+  (files created at 0600 rather than chmod'd after), the base URL comes from
+  the in-memory bound address, and end-to-end delivery is asserted by driving
+  the real CLI against the real route. The notify silence itself is unchanged
+  and its ticket stays open. Next unfinished phase is Phase 5.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
