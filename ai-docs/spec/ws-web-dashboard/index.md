@@ -1726,13 +1726,15 @@ docker run --rm --platform linux/amd64 \
   cargo check --locked -p ws-dashboard-daemon --all-targets
 ...
 Checking ws-dashboard-daemon v0.1.0 (/workspace/crates/daemon)
-Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.65s
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 44.07s
 (exit code 0)
 ```
 
-Run at the Phase 1 tip commit with a clean working tree, so it type-checked
-the exact reviewed source, test targets included. This is produced Linux
-evidence, not a deferral.
+Run against a clean working tree at each Phase 1 implementation tip in turn —
+including the final one, `1aca7993` — so it type-checked the reviewed source
+with test targets included. Documentation-only commits after that point do not
+affect the result, because the Linux leg compiles no macOS-gated code. This is
+produced Linux evidence, not a deferral.
 
 Live-lifecycle and browser-gate evidence (spawn, daemon-restart re-adopt,
 identity-verified close, dead-shell detection against a running dashboard) is
