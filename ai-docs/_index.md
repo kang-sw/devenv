@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260725-feat-dashboard-nav-row-two-line-open-state` | ready | Left-nav work-root rows: two-line layout with open-surface counts, plus open-vs-closed de-emphasis |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-bug-implement-merge-target-discovery` | todo | Investigate safer merge-target discovery for nested implement branches |
@@ -253,18 +252,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260725-feat-dashboard-nav-row-two-line-open-state` (ready, feat) —
-  owner UX request: left-nav work-root rows get a second line showing open
-  terminal/document counts, plus open-vs-closed de-emphasis by saturation.
-  Agent counter deliberately deferred until the PTY pivot settles what an
-  agent pane is. The substantial part is data plumbing, not CSS:
-  `terminalPanes` is `WorkbenchShell`-local while the nav renders from
-  `App()`. Spec addressing via `## Spec Impact`
-  (`#260516-ws-web-dashboard-inspectable-navigation-shell`, Contract-first:
-  no). Sage combined = passed. NOTE: its `## Constraints` selection-gradient
-  claim was corrected 2026-07-25 — `.resource-row-selected`'s gradient does
-  not currently render, because the later `.resource-row` rule wins at equal
-  specificity. Treat it as a live defect to confirm, not as a design input.
 - `260725-feat-dashboard-pty-agent-attention-notification` (ready, feat) —
   the PTY agent's primary entry-point feature: a vendor turn-boundary hook
   injected at spawn reports to a token-authed daemon endpoint, which fans out

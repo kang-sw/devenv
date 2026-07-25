@@ -7,6 +7,7 @@ related:
 parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-25
 ---
 
 # Left-nav work-root rows — two-line layout with open-surface counts, and open-vs-closed de-emphasis
@@ -284,3 +285,84 @@ affects what later steps still run on failure.
 Exact type scale, colour-mix ratios, and secondary-line wording are
 implementation-time visual choices; the owner asked for roughly 65:35 line
 proportion, reduced saturation, and only a very slight brightness drop.
+
+### Result (432221db) - 2026-07-25
+
+Work-root left-nav rows gained a reserved second line reporting that root's
+live open terminal/document counts (per-root, sourced from
+`readOnlyFilePanes` and `terminalPanes`, not from `paneOrderByRoot` — whose
+own in-source CONTRACT excludes terminal and read-only-file panes), plus an
+open-versus-closed visual de-emphasis emitted as a `data-resource-open`
+attribute rather than a branched class string. Terminal counts reach `App`
+state through a signature-gated upward callback from `WorkbenchShell`
+modelled on `onWorkbenchGroupsByRootChange`, so the new `setState` fires only
+when a pane is actually added/removed for a root, never on per-frame PTY
+output-cursor churn; document counts are a plain memo since
+`readOnlyFilePanes` already lives in `App()`. Row height is reserved
+unconditionally so open->closed does not reflow the nav. Applies to
+`workRoot` and `compactWorkRoot` presentations; `workspace` rows are excluded
+entirely (attribute absent, counts line absent — a workspace row has no
+single `rootKey`). The agent counter slot stays deferred and the row's
+overlay affordance (no `::before`/`::after` added) stays unconsumed, as the
+ticket required. Along the way, a live selection-vs-tone precedence defect
+(`.resource-row-selected`'s `border-left-color`/`box-shadow` losing to tone
+classes depending on source order) was repaired via a compound selector;
+per lead decision, the dead `.resource-row-selected` background gradient
+itself (see `## Constraints` correction) was left unrestored.
+
+Verification evidence (browser-level, per the binding ws-web-dashboard
+mental-model rule): Playwright `--grep "dashboard workRoot UI browser
+acceptance"`; evidence recorded in
+`ws-dashboard/frontend/e2e/.artifacts/evidence.txt`: open row 52px == reserved
+min-height 52px; open->closed 52px -> 52px measured on the same row across
+its own close; closed-row hover background changes from the de-emphasized
+mix to the panel-hover token; workspace-presentation exclusion confirmed
+(attribute absent entirely, counts line absent); live counts match the
+mounted workbench tabs. No `LOAD-BEARING ASSERTION SKIPPED` note appeared, so
+the git-workRoot branch genuinely executed. Non-vacuity proven at browser
+level by two source mutations: inverting `data-resource-open` fails the
+openness assertion; zeroing the rendered counts fails the live-count
+cross-check. Tree restored clean after both.
+
+Deviations:
+
+- `b75a7d0c` was an unplanned prerequisite: the e2e harness's state-home temp
+  dir exceeded macOS's 104-byte `sockaddr_un.sun_path` limit (measured
+  108 bytes; macOS `$TMPDIR` is a long per-session `/var/folders/<hash>/T/`
+  path, unlike Linux's short `/tmp`), so terminal creation had never worked
+  on macOS and the browser gate could not run at all until the state-home
+  temp dir was scoped short (mirroring the same workaround already applied
+  to the Rust `terminal_lifetime.rs`/`routes.rs` test fixtures).
+- That fix revealed, but did not cause, a pre-existing unrelated failure at
+  `dashboard-acceptance.spec.ts:3779` (`fitNow()` shrinking a short viewport
+  120 -> 47 rows, violating its documented preserve-last-good-size contract).
+  Proven unrelated by a three-arm controlled experiment on this branch (with
+  the nav-row e2e fix / without it / with it but the nav-row step
+  neutralized — all three fail identically at `:3779`). Filed as
+  `260725-bug-dashboard-fitnow-short-viewport-shrink` in `todo/`. It
+  red-lights the serial spec's exit code, so this phase was judged by
+  failure site, not exit code.
+- Review outcome: fit 0/0/0; test 0 Critical / 3 Important / 4 Minor (T1-T7,
+  T5-T7 folded into the T1/T4 fixes); correctness 0 Critical / 1 Important /
+  1 Minor (C1/C2). All findings were dispositioned fix and are fixed in
+  `681ee02c`/`432221db`. The Important correctness finding was a real shipped
+  regression: the openness rule's specificity (0,3,0) — `:not()` contributes
+  its argument's specificity — unconditionally beat `.resource-row:hover`
+  (0,2,0), so closed rows lost hover feedback; re-asserted at (0,4,0).
+- One additional bug was found only by running the suite: the closed-row
+  hover check read its "idle" background immediately after clicking
+  `workRoot.close` on that same row, so the pointer was still resting on it
+  and "idle" was already hovered, making the assertion pass or fail
+  vacuously regardless of the CSS fix. Fixed with a `page.mouse.move(0, 0)`
+  before the idle read.
+
+Unresolved / deferred: the `fitNow` short-viewport bug above (separate
+ticket, `todo/260725-bug-dashboard-fitnow-short-viewport-shrink`); agent
+counts (deferred by this ticket's `## Deferred scope`, and the sibling
+ticket `260725-feat-dashboard-pty-agent-attention-notification` Phase 7 fills
+that slot).
+
+
+## Resolution (2026-07-25)
+
+Sole phase complete and verified at browser level (Playwright, evidence in `ws-dashboard/frontend/e2e/.artifacts/evidence.txt`), with non-vacuity proven by two source mutations. Spec addressed at `#260725-nav-row-open-surface-counts-and-open-state`; the CSS cascade and reserved-height invariants went to the `ws-web-dashboard` mental model instead, as implementation rationale. All seven review findings were dispositioned fix and landed. Two items intentionally leave this ticket rather than blocking it: the deferred agent counter, which the sibling ticket `260725-feat-dashboard-pty-agent-attention-notification` fills in its Phase 7, and the pre-existing `fitNow()` short-viewport shrink revealed (not caused) by the macOS socket-path prerequisite fix, filed as `260725-bug-dashboard-fitnow-short-viewport-shrink`.
