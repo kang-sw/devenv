@@ -605,12 +605,14 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
 // `<terminal_id>.json` registry entry (written under the `terminals/`
 // subdirectory of `WS_DASHBOARD_STATE_HOME`, i.e. `<state_home>/terminals/`)
 // carries the helper's real `pid` and `startTime`. It verifies the PID's
-// `/proc` start-time matches before signalling, so a recycled PID is never
-// killed. Then it removes the temp dirs.
+// start-time (via the crate's cfg-independent `terminal_platform::
+// process_start_time` re-export - `/proc/<pid>/stat` on Linux, `proc_pidinfo`
+// on macOS) matches before signalling, so a recycled PID is never killed.
+// Then it removes the temp dirs.
 //
-// CONTRACT: the identity-verified reap (pid + /proc start-time match) closes the
-// PID-reuse window entirely. The only residual risk is a panic in the razor-thin
-// window after `create_terminal` returns but before the helper has flushed its
+// CONTRACT: the identity-verified reap (pid + OS-reported start-time match)
+// closes the PID-reuse window entirely. The only residual risk is a panic in
+// the razor-thin window after `create_terminal` returns but before the helper has flushed its
 // registry `.json`; such an untracked helper is left to the OS, which EOF-exits
 // it once its orphaned PTY master is dropped. Fix #1 (the marker handshake)
 // makes the panic path rare regardless, so this guard is defense in depth.

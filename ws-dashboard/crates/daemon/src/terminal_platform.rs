@@ -145,7 +145,7 @@ pub mod macos {
     /// return value that does not equal the requested struct size means
     /// failure regardless of which `errno` produced it, and this module has
     /// no use yet for distinguishing "not permitted" from "no such process"
-    /// (see `verify_process_identity`'s cross-user-EPERM doc note below for
+    /// (see `process_start_time`'s cross-user-EPERM doc note below for
     /// the one place that distinction would matter).
     fn read_bsdinfo(pid: u32) -> Option<libc::proc_bsdinfo> {
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
@@ -176,20 +176,22 @@ pub mod macos {
         (info.pbi_start_tvsec << 20) | (info.pbi_start_tvusec & 0xF_FFFF)
     }
 
-    pub fn process_start_time(pid: u32) -> Option<u64> {
-        read_bsdinfo(pid).map(|info| pack_start_time(&info))
-    }
-
     /// CONTRACT (cross-user EPERM divergence from the Linux leg, documented
     /// not fixed - harmless today): `proc_pidinfo` returns `EPERM` (via
     /// `read_bsdinfo` -> `None`) for a pid owned by another user we lack
     /// privilege to query, where Linux's world-readable `/proc/<pid>/stat`
     /// would still yield a real start-time. A pid recycled by a root-owned
     /// process therefore classifies as `IdentityStatus::NoSuchProcess` on
-    /// macOS vs. `IdentityStatus::PidReused` on Linux. This is harmless
+    /// macOS vs. `IdentityStatus::PidReused` on Linux - this function's
+    /// `None`/`Some(different)` outcomes are exactly what `terminal.rs`'s
+    /// `identity_status` maps to those two variants. This is harmless
     /// today because `terminal_reconcile.rs` maps both outcomes to
     /// drop-only (never kill) - but it would matter if those two rows ever
     /// diverge in behavior.
+    pub fn process_start_time(pid: u32) -> Option<u64> {
+        read_bsdinfo(pid).map(|info| pack_start_time(&info))
+    }
+
     pub fn verify_process_identity(pid: u32, expected_start_time: u64) -> bool {
         process_start_time(pid) == Some(expected_start_time)
     }
@@ -254,6 +256,12 @@ pub mod macos {
         }
         let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
         if rc != 0 {
+            // Bind errno immediately after the syscall - `tracing::warn!`'s
+            // callsite-interest check and dispatcher lookup run before field
+            // values are evaluated, so sampling `last_os_error()` inline as a
+            // field expression risks reading errno after something else has
+            // clobbered it.
+            let error = io::Error::last_os_error();
             // Asymmetric-with-the-mismatch-log-below on purpose: a verified
             // identity followed by a failed signal is the more surprising
             // event (the daemon just confirmed this is our helper and still
@@ -261,7 +269,7 @@ pub mod macos {
             // post-kill mismatch case.
             tracing::warn!(
                 pid,
-                error = %io::Error::last_os_error(),
+                %error,
                 "kill(2) failed immediately after a verified identity match - the process was \
                  confirmed to be our helper but the signal itself was not delivered"
             );
