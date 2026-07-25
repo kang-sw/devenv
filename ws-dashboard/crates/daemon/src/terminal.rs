@@ -2063,6 +2063,29 @@ mod terminal_portability_skeleton_tests {
             command.get_envs().next().is_none(),
             "default path must not call .env()/.env_clear() at all"
         );
+        // CONTRACT (review cycle 1, finding T1): `get_envs()` alone cannot
+        // distinguish "no env method ever called" from "env_clear() called
+        // with nothing re-added" - both report zero explicit entries,
+        // because `std::process::Command` has no public API exposing
+        // whether `clear()` ran (verified empirically against this
+        // toolchain's std - see review finding T1). On unix, `Command`'s
+        // `Debug` impl renders as a shell `env` invocation and DOES encode
+        // the clear flag (`env -i ...` vs a bare quoted program), which
+        // closes the gap there. There is no known equivalent public signal
+        // on Windows (`Command`'s windows `Debug` impl only prints
+        // program+args), so that platform's default-path env_clear()
+        // regression remains a named, accepted limitation of this guard
+        // rather than a fixed gap.
+        #[cfg(unix)]
+        {
+            let debug = format!("{command:?}");
+            assert!(
+                !debug.starts_with("env "),
+                "default path's Debug rendering must not show env manipulation \
+                 (env -i/env -u), which would indicate an unconditional env_clear() \
+                 snuck into this branch: {debug:?}"
+            );
+        }
         let args: Vec<String> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -2087,6 +2110,14 @@ mod terminal_portability_skeleton_tests {
         host_env.push((
             std::ffi::OsString::from("PATH"),
             std::ffi::OsString::from("/usr/bin:/bin"),
+        ));
+        // T2: a second, arbitrary non-marker key that no plausible
+        // hand-rolled allowlist would think to include - closes the gap
+        // where a narrow allowlist that happens to enumerate PATH would
+        // otherwise still pass this test.
+        host_env.push((
+            std::ffi::OsString::from("SOME_OTHER_VAR"),
+            std::ffi::OsString::from("keep-me"),
         ));
 
         let command = build_helper_command(
@@ -2118,6 +2149,11 @@ mod terminal_portability_skeleton_tests {
             assert!(!envs.contains_key(*marker), "marker {marker} must be scrubbed");
         }
         assert_eq!(envs.get("PATH").cloned().flatten().as_deref(), Some("/usr/bin:/bin"));
+        assert_eq!(
+            envs.get("SOME_OTHER_VAR").cloned().flatten().as_deref(),
+            Some("keep-me"),
+            "deny-list, not allowlist - an arbitrary non-marker key must survive too (T2)"
+        );
 
         let args: Vec<String> = command
             .get_args()

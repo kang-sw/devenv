@@ -1116,7 +1116,7 @@ mod spawn_shell_command_tests {
     #[test]
     fn spawn_shell_default_no_command_matches_existing_behaviour() {
         let args = args_fixture();
-        let command = build_shell_command(&args, Vec::new(), "xterm-256color".to_owned());
+        let command = build_shell_command(&args, "xterm-256color".to_owned());
 
         assert_eq!(
             command.get_argv().first(),
@@ -1130,53 +1130,105 @@ mod spawn_shell_command_tests {
         assert_eq!(
             extra_env,
             vec!["TERM"],
-            "no env_clear/scrub must have run on the default path - TERM is the only extra env entry: {extra_env:?}"
+            "no env manipulation beyond TERM must have run on the default path: {extra_env:?}"
+        );
+        // CONTRACT (review cycle 1, finding T1): `iter_extra_env_as_str()`
+        // alone cannot distinguish "no env method ever called" from
+        // "env_clear() called with nothing re-added but TERM" -
+        // `env_clear()` wipes the ENTIRE internal env map, base-flagged
+        // entries included, but `iter_extra_env_as_str()` only ever reports
+        // non-base-flagged entries either way, so both cases produce the
+        // identical `["TERM"]` result above (verified empirically against
+        // portable-pty 0.8.1 - see review finding T1). A known real
+        // base-env value (`PATH`, present in any dev/CI process) surviving
+        // is the actual proof: an accidental `env_clear()` on this branch
+        // wipes it along with everything else; a correct no-manipulation
+        // default path leaves it untouched.
+        assert!(
+            command.get_env("PATH").is_some(),
+            "default path must preserve the real base env (e.g. PATH); its absence means \
+             something cleared the base env on this branch"
         );
     }
 
     #[test]
-    fn spawn_shell_explicit_command_scrubs_claude_markers_and_applies_overlay() {
+    fn spawn_shell_explicit_command_forwards_argv_cwd_term_and_non_marker_overlay() {
         let mut args = args_fixture();
         args.command = Some("printf".to_owned());
         args.command_args = vec!["hi".to_owned()];
         args.env_overlay = vec![("FOO".to_owned(), "bar".to_owned())];
 
-        let mut host_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = crate::agent_env_profile::CLAUDE
-            .markers
-            .iter()
-            .map(|marker| {
-                (
-                    std::ffi::OsString::from(*marker),
-                    std::ffi::OsString::from("marker-value"),
-                )
-            })
-            .collect();
-        host_env.push((
-            std::ffi::OsString::from("PATH"),
-            std::ffi::OsString::from("/usr/bin:/bin"),
-        ));
-
-        let command = build_shell_command(&args, host_env, "xterm-256color".to_owned());
+        let command = build_shell_command(&args, "xterm-256color".to_owned());
 
         assert_eq!(
             command.get_argv(),
             &vec![std::ffi::OsString::from("printf"), std::ffi::OsString::from("hi")]
         );
-        for marker in crate::agent_env_profile::CLAUDE.markers {
-            assert_eq!(command.get_env(marker), None, "marker {marker} must be scrubbed");
-        }
         assert_eq!(
-            command.get_env("PATH").map(|value| value.to_string_lossy().into_owned()),
-            Some("/usr/bin:/bin".to_owned()),
-            "deny-list, not allowlist - non-marker vars must survive"
+            command.get_cwd().map(|cwd| cwd.to_string_lossy().into_owned()),
+            Some(args.cwd.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            command.get_env("TERM").map(|value| value.to_string_lossy().into_owned()),
+            Some("xterm-256color".to_owned())
         );
         assert_eq!(
             command.get_env("FOO").map(|value| value.to_string_lossy().into_owned()),
             Some("bar".to_owned())
         );
+    }
+
+    #[test]
+    fn apply_claude_scrub_and_overlay_removes_markers_preserves_unrelated_vars_and_scrub_wins_over_colliding_overlay(
+    ) {
+        // Markers are seeded as explicit `.env()` entries rather than via an
+        // injected "host env" iterable: `CommandBuilder::new()`'s base env
+        // is seeded from this test process's own real environment (which
+        // does not carry Claude markers), and per-marker `env_remove`
+        // behaves identically against base-flagged and explicit entries
+        // (both are stored in the same internal map, see
+        // `portable_pty::cmdbuilder::EnvEntry`), so this exercises the same
+        // removal codepath `build_shell_command`'s `Some` branch runs
+        // against a real dirty inherited env.
+        let mut command = CommandBuilder::new("printf");
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            command.env(marker, "marker-value");
+        }
+        command.env("PATH", "/usr/bin:/bin");
+        // T2: an arbitrary non-marker key that no plausible hand-rolled
+        // allowlist would think to include - closes the gap where a narrow
+        // allowlist that happens to enumerate PATH would otherwise still
+        // pass this test.
+        command.env("SOME_OTHER_VAR", "keep-me");
+
+        // T3 (LEAD DECISION: scrub wins): one overlay pair targets a scrub
+        // marker directly, alongside an ordinary non-conflicting pair.
+        let overlay = vec![
+            ("FOO".to_owned(), "bar".to_owned()),
+            ("CLAUDECODE".to_owned(), "resurrected".to_owned()),
+        ];
+        apply_claude_scrub_and_overlay(&mut command, &overlay);
+
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            assert_eq!(
+                command.get_env(marker),
+                None,
+                "marker {marker} must stay scrubbed even when the overlay tries to set it"
+            );
+        }
         assert_eq!(
-            command.get_env("TERM").map(|value| value.to_string_lossy().into_owned()),
-            Some("xterm-256color".to_owned())
+            command.get_env("PATH").map(|value| value.to_string_lossy().into_owned()),
+            Some("/usr/bin:/bin".to_owned()),
+            "deny-list, not allowlist - PATH must survive"
+        );
+        assert_eq!(
+            command.get_env("SOME_OTHER_VAR").map(|value| value.to_string_lossy().into_owned()),
+            Some("keep-me".to_owned()),
+            "deny-list, not allowlist - an arbitrary non-marker key must survive too (T2)"
+        );
+        assert_eq!(
+            command.get_env("FOO").map(|value| value.to_string_lossy().into_owned()),
+            Some("bar".to_owned())
         );
     }
 }
