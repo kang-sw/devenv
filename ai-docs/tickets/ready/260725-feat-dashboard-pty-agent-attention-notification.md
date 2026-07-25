@@ -6,7 +6,7 @@ related:
   260723-feat-dashboard-terminal-lifetime-daemon-decouple: detached-helper model that makes the daemon the only viable owner of injected config
   260725-feat-dashboard-nav-row-two-line-open-state: owns the two-line nav row whose deferred agent-counter slot Phase 7 fills
   260725-refactor-dashboard-agent-gui-physical-module-isolation: Tier 2 wire-out that owns the agent-GUI surface Phase 2 must not route through, and the module holding the existing settings-JSON builder
-  260725-bug-dashboard-terminal-platform-macos-unsupported: blocks native macOS verification of every phase here
+  260725-bug-dashboard-terminal-platform-macos-unsupported: WAS a block on native macOS verification of every phase here; cleared 2026-07-25 (ticket closed under .done/, driving merges bfbc1a1c and ed255029 landed, `cargo check -p ws-dashboard-daemon` exits 0 on this machine)
   260725-bug-dashboard-terminal-registry-schema-evolution-orphans-helpers: registry hazard this ticket deliberately avoids by never adding a registry field
   260711-idea-dashboard-agent-facing-mcp-control-surface: dashboard-as-MCP direction explicitly NOT absorbed here
 related-mental-model:
@@ -353,24 +353,28 @@ Phases 1-6 form one vertical slice: after Phase 6 an agent CLI can be spawned
 from the UI, finish a turn, and make its tab react. Phases 7-8 are additive
 presentation on top of that slice.
 
-Every phase's verification is blocked on
+Every phase's verification WAS blocked on
 `260725-bug-dashboard-terminal-platform-macos-unsupported` while working on
-macOS — including the pure unit tests, since the daemon crate does not compile.
-Phases may be written before it lands; none may be marked done.
+macOS — including the pure unit tests, since the daemon crate did not compile.
+That block is CLEARED as of 2026-07-25: the blocking ticket is closed under
+`ai-docs/tickets/.done/`, its driving merges landed (`bfbc1a1c` macOS
+terminal_platform port Phase 1, `ed255029` native macOS lifecycle acceptance
+Phase 2), and `cargo check -p ws-dashboard-daemon` exits 0 on this machine as
+of that date. Phases may now be verified and marked done on macOS in the
+normal course.
 
-ONE EXCEPTION, and it should be taken first: Phase 3's step 1 is a
-verification spike against a vendor binary under a PTY. It touches no daemon
-code, so macOS does not block it, and its result determines the state
-vocabulary that Phases 4-7 all encode. Run it out of order, ahead of Phase 1,
-as soon as this ticket is picked up.
+Independently of that (now-cleared) block, one ordering obligation still
+applies and should be taken first: Phase 3's step 1 is a verification spike
+against a vendor binary under a PTY. It touches no daemon code, and its result
+determines the state vocabulary that Phases 4-7 all encode. Run it out of
+order, ahead of Phase 1, as soon as this ticket is picked up.
 
 Treat that spike as a SEPARABLE GATE, not merely as Phase 3's first bullet: it
 may be completed and its result recorded on its own, ahead of and independently
-of every other phase, and it is exempt from the "none may be marked done" rule
-above because it depends on no daemon code. It is deliberately left inside
-Phase 3 rather than renumbered into its own phase because the phase numbering
-is already stamped; the ordering obligation is what matters, and it is stated
-here so it cannot be missed by an implementer reading phases in order.
+of every other phase. It is deliberately left inside Phase 3 rather than
+renumbered into its own phase because the phase numbering is already stamped;
+the ordering obligation is what matters, and it is stated here so it cannot be
+missed by an implementer reading phases in order.
 
 ### Phase 1: argv/env passthrough and environment scrub at the spawn seam
 
