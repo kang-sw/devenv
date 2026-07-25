@@ -1687,13 +1687,59 @@ tracked source. If native Windows evidence cannot run, the evidence states the
 exact blocker and records the result as an explicit gap instead of treating a
 POSIX local gate as native-Windows coverage.
 
-Native macOS evidence to date (260725 Phase 1) covers a native `cargo build`
-and `cargo test -p ws-dashboard-daemon` pass on aarch64-apple-darwin —
-compile correctness and unit-level identity/kill-verification behavior only.
+Native macOS evidence to date (260725 Phase 1) covers a native
+`cargo build -p ws-dashboard-daemon --all-targets` pass on aarch64-apple-darwin
+plus per-target `cargo test -p ws-dashboard-daemon` results, run and read
+individually rather than trusted from a single fail-fast invocation:
+
+- `--lib`: 124 passed, 0 failed, 2 ignored (includes the four
+  `terminal_platform::platform_identity_tests`, covering `process_start_time`,
+  `verify_process_identity`, and both `kill_verified` outcomes on the macOS
+  leg).
+- `--test server`: 15 passed, 0 failed.
+- `--test terminal_lifetime`: 3 passed, 0 failed (real two-daemon-process
+  restart/reattach/dead-shell-detection lifecycle, run against real OS
+  processes and a real Unix-domain-socket IPC channel).
+- `--test terminal_windows_reaper_acceptance`: 0 tests collected — this
+  target's content is entirely `#[cfg(windows)]`-gated, so it compiles clean
+  on macOS but contributes no macOS coverage.
+- `--test routes`: 164 passed, 2 failed. Both failures
+  (`dashboard_resources_refresh_prunes_workspace_without_available_work_roots`,
+  `online_missing_work_root_returns_bounded_unavailable_without_path_leak`)
+  are attributed to the pre-existing, diff-untouched
+  `discovery.rs::canonical_or_normalized` work-root-id instability captured in
+  ticket `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails`,
+  not to this port; `discovery.rs` and `work_root_files.rs` are unmodified by
+  this phase.
+
+Linux non-regression evidence: native `cargo check --target
+x86_64-unknown-linux-gnu -p ws-dashboard-daemon` cannot run in this
+environment — `ring` and `libsqlite3-sys` both invoke `cc-rs` at build-script
+time even for `cargo check`, and the environment has no
+`x86_64-linux-gnu-gcc` cross C toolchain. Verified instead with a native
+x86_64 Linux container:
+
+```
+docker run --rm --platform linux/amd64 \
+  -v <repo>/ws-dashboard:/workspace:ro \
+  -e CARGO_TARGET_DIR=/tmp/target -w /workspace rust:latest \
+  cargo check --locked -p ws-dashboard-daemon --all-targets
+...
+Checking ws-dashboard-daemon v0.1.0 (/workspace/crates/daemon)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.65s
+(exit code 0)
+```
+
+Run at the Phase 1 tip commit with a clean working tree, so it type-checked
+the exact reviewed source, test targets included. This is produced Linux
+evidence, not a deferral.
+
 Live-lifecycle and browser-gate evidence (spawn, daemon-restart re-adopt,
 identity-verified close, dead-shell detection against a running dashboard) is
 an explicit gap on macOS, deferred to a later phase, and must not be read as
-covered by the build/unit-test pass recorded here.
+covered by the build/unit-test pass recorded here — `terminal_lifetime`
+exercises the real lifecycle at the process/socket level but not through the
+browser-facing UI/WebSocket gate.
 
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
@@ -2121,19 +2167,20 @@ Only two events terminate a helper process: an explicit terminal-close
 request, or removal of the owning workRoot/workspace root. Termination is
 graceful-then-verified: the daemon first sends the helper a graceful-shutdown
 request over the IPC channel, then falls back to an identity-verified kill of
-the helper's recorded pid — never a bare-pid re-resolve. On Linux and
-Windows this guarantee is structurally closed: the fallback kill captures a
-stable OS handle (Linux pidfd / Windows process handle) at verification time
-and signals through that handle, so a pid reused by an unrelated process
-after the helper already exited is never mistakenly killed. On macOS the
-fallback kill instead verifies identity immediately before signalling and
-performs a best-effort, non-guaranteed post-kill re-check (macOS has no
-pidfd-equivalent stable handle to signal through) — this narrows, but does
-not close, the same verify-to-kill race; it must not be read as a reliable
-mis-kill detector. On Windows, the helper additionally places its spawned
-shell into a kill-on-close job object so the fallback kill tears down the
-whole shell subtree; on Unix, the helper detaches from the daemon at spawn
-time so it keeps running independent of the daemon process.
+the helper's recorded pid. On Linux and Windows this guarantee is
+structurally closed and never a bare-pid re-resolve: the fallback kill
+captures a stable OS handle (Linux pidfd / Windows process handle) at
+verification time and signals through that handle, so a pid reused by an
+unrelated process after the helper already exited is never mistakenly
+killed. On macOS the fallback kill instead verifies identity immediately
+before signalling and then signals through the bare recorded pid (`kill(2)`;
+macOS has no pidfd-equivalent stable handle to signal through instead),
+followed by a best-effort, non-guaranteed post-kill re-check — this narrows,
+but does not close, the same verify-to-kill race; it must not be read as a
+reliable mis-kill detector. On Windows, the helper additionally places its
+spawned shell into a kill-on-close job object so the fallback kill tears down
+the whole shell subtree; on Unix, the helper detaches from the daemon at
+spawn time so it keeps running independent of the daemon process.
 
 When the frontend instead reattaches to a still-alive daemon terminal by id on
 reload, it restores that pane's visual appearance rather than replaying only
