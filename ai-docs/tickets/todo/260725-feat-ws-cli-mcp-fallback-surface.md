@@ -1,0 +1,305 @@
+---
+title: "ws-cli — MCP-independent CLI fallback surface for Windows disconnects"
+related:
+  260724-bug-windows-mcp-mid-session-disconnect: root-cause hardening this works around; that ticket fixed the confirmed crash trigger, this one keeps the workflow usable when the connection is gone anyway
+  260523-bug-ws-mcp-launcher-runtime-repair-race: already-fixed concurrent-repair safety that makes CLI-triggered runtime repair acceptable
+  260703-chore-prefer-subagent-verify-discussion-inline-mirror: introduced the substitution-mirrored skill generation this extends with a ws-cli pattern
+  260630-epic-skill-playbook-diet: front-door token budget constraint on the entry-point pointer line
+  260513-feat-runtime-binary-staging-copy: adjacent runtime-binary placement work; this ticket deliberately does not stage a binary into bin/
+sage-review-design: recommended
+---
+
+# ws-cli — MCP-independent CLI fallback surface for Windows disconnects
+
+## Background
+
+On Windows the ws/wsflow MCP server disconnects mid-session often enough to
+block normal workflow use. `260724-bug-windows-mcp-mid-session-disconnect`
+landed four phases of root-cause hardening (request-goroutine panic recovery
+with an always-on crash log, launcher abnormal-exit breadcrumb, Windows
+parent-death self-termination, SQLite point-read retry + WAL re-assert) and
+`260713-bug-mcp-ping-idle-disconnect` restored protocol `ping`, but disconnects
+are still observed downstream.
+
+Two host-side facts make the disconnect worse than a transient error:
+
+- Claude Code does **not** auto-reconnect a dropped ws MCP server. Once the
+  server is gone, its tools stay absent from the tool list for the rest of the
+  session.
+- The manual re-enable path is not discoverable, so a user who hits this has no
+  obvious recovery action.
+
+The result is a total workflow stop: every ws skill's front door begins with an
+MCP call, so with the server down the session cannot even bootstrap. This ticket
+adds a fallback path that does not depend on the MCP connection at all, plus the
+discovery surface that makes an agent actually take it.
+
+### Enabling facts (source-verified during design)
+
+- Claude Code puts a plugin's `bin/` directory on `PATH`. Verified live:
+  `/Users/kang-sw/.claude/plugins/ws-plugin/ws/bin` is present in `PATH` and
+  `ws-mcp-launcher.py` resolves from it.
+- The launcher is already argv-transparent — `ws-mcp-launcher.py:883` builds
+  `[str(binary), *sys.argv[1:]]` and execs it. No new argument plumbing is
+  needed; `serve --stdio` is only what `plugin.json` happens to pass.
+- Session keys are file-backed, not in-memory: `sessionStore.readRecord`
+  (`internal/mcp/session_auth.go:359`) reads one JSON record per key from the
+  keys directory. A fresh CLI process can therefore reuse a `session_key` minted
+  by the MCP server process. This is what makes the fallback able to continue an
+  in-flight session rather than start over.
+- `Server.callTool` (`internal/mcp/server.go:485`) is a single dispatch entry
+  point keyed by tool name, and `Server.filteredTools()` (`server.go:4368`)
+  already produces the profile-aware `name`/`description`/`inputSchema` list that
+  `tools/list` returns.
+
+### Measured invocation cost (macOS arm64, warm, 2026-07-25)
+
+| Path | Time |
+|---|---|
+| Binary direct (`version`) | 7.8 ms |
+| Launcher-mediated (`version`) | 84.9 ms |
+| `python3 -c pass` (reference) | 21.4 ms |
+| Real work: `tickets list` (binary direct) | 13 ms |
+| Real work: `git status` (binary direct) | 46 ms |
+
+Attribution of the 77 ms launcher overhead: ~21 ms interpreter startup, ~22 ms
+`import urllib.request`, ~6 ms launcher logic (`runtime.json` read 0.1 ms +
+local-devenv source fingerprint rglob 2.2 ms + `detect_project_root` 3.7 ms), the
+remainder residual stdlib imports. The compatibility stamp does not hash the
+12 MB binary — `compatibility_stamp_payload` (`ws-mcp-launcher.py:316`) uses
+`stat` size + mtime only — and the source fingerprint walk is likewise stat-only,
+so the warm path is dominated by Python process startup, not by launcher work.
+
+Conclusion: a real fallback call costs ~90-130 ms on macOS, which is noise
+against a Bash tool round-trip. Windows is expected to be materially worse
+(slower interpreter startup, AV scanning, `subprocess.call` instead of `exec`)
+but was not measured — see Constraints.
+
+## Decisions
+
+- **Expose the fallback as a generic passthrough, not as hand-written
+  per-tool subcommands.** Two new subcommands on the existing `ws-mcp` binary:
+
+  ```
+  ws-cli tools                  # mapping rules + full tool list (the fallback's help entry point)
+  ws-cli tools <name>           # that tool's inputSchema
+  ws-cli call <name> '<json>'   # invoke, printing the tool's text content to stdout
+  ```
+
+  `tools` dumps `filteredTools()` and `call` routes through `callTool`, so the
+  documented mapping rule collapses to one line: `ws/x.y(a: b)` becomes
+  `ws-cli call x.y '{"a":"b"}'`. Coverage is total and drift is structurally
+  impossible.
+
+- **Rejected: documenting the existing hand-written subcommands as the fallback
+  surface.** `main.go`'s switch covers `git|tickets|specs|mental-models|
+  references|config|path|runtime|mercenary` but not `ferrule`,
+  `workflow_manual`, `playbook.print`/`render`, `convention.read`,
+  `project_tree`, `todo.*`, `agenda.*`, or `enter.*` — i.e. not the tools needed
+  to bootstrap a session at all. Documenting it would also require a hand-
+  maintained flag-to-schema mapping that drifts from the MCP schemas on every
+  tool change.
+
+- **The existing hand-written subcommands stay** (they are load-bearing for
+  tests), but they are explicitly **not canonical**. Only `tools` and `call` are
+  the documented fallback surface.
+
+- **`--help` is not the fallback entry point.** `--help` would interleave the
+  non-canonical hand-written subcommands with the fallback surface. `ws-cli
+  tools` with no argument is the entry point instead: it prints the mapping rule
+  and the tool list, and the hand-written subcommands never appear there because
+  they live in a separate `main.go` switch rather than in the tool list. `--help`
+  is left untouched.
+
+- **Ship a `bin/` shim, not a copied binary.** `bin/ws-cli` (POSIX shebang
+  script, resolvable from git-bash) plus `bin/ws-cli.cmd` (for `cmd`/PowerShell,
+  which will not resolve a bare extensionless name), both delegating to the
+  existing launcher. Rejected: renaming/copying the runtime binary into `bin/` —
+  the real binary lives under `.runtime/<platform>/` under contract + stamp
+  management, and duplicating it there would fork the staging/repair logic and
+  collide with `260513-feat-runtime-binary-staging-copy`. The "extra logic"
+  originally feared for the shim approach does not exist, because the launcher
+  already resolves the binary and forwards argv.
+
+- **Shim names are namespace-scoped: `ws-cli` for ws, `wsflow-cli` for wsflow.**
+  Both plugins currently ship an identically-named `bin/ws-mcp-launcher.py`, so
+  with both installed a shared shim name would resolve by `PATH` order to an
+  arbitrary plugin.
+
+- **Each shim bakes in its own environment.** wsflow's `WS_MCP_NO_AGENT=1`,
+  `WS_MCP_NAMESPACE=wsflow`, and `WS_MCP_SETUP_TOOL=setup` are supplied only by
+  the `env` block of its `plugin.json` `mcpServers` entry. A `PATH`-invoked shim
+  inherits none of it, so without baking, a wsflow user's fallback would run in
+  full-ws mode under namespace `ws` and expose the mercenary surface that the
+  agentless product deliberately hides.
+
+- **CLI-triggered runtime repair is allowed; a `--no-repair` fast path was
+  rejected.** A CLI-only session must still be able to update its runtime, and
+  making the user run an install script is a far more expensive failure mode
+  (cognitively, and in practice) than a slow first call. The concurrent-repair
+  hazard that motivated the alternative was already fixed in `fb8e156d`
+  (`260523-bug-ws-mcp-launcher-runtime-repair-race`): contract-addressed cache
+  binary names, process-unique temporary files, and best-effort replacement with
+  compatible-target fallback. The residual cost is latency on a stale-runtime
+  first call, not corruption.
+
+- **Discovery goes through a dedicated skill, `/ws:mcp-server-repair` (mirrored
+  as `/wsflow:mcp-server-repair`), not through the workflow manual.** The manual
+  is delivered *by* the `workflow_manual` MCP tool, so a fallback paragraph
+  living there is unreachable in exactly the situation it addresses. Skills are
+  read from disk by the host and stay listed when the server is down. Rejected:
+  editing the downstream bootstrap `AGENTS.md`, which would force every
+  downstream project to re-bootstrap.
+
+- **The repair skill body must be fully self-contained.** Every other ws skill's
+  front door delegates to `ws/playbook.print`; this one cannot, or it dies at the
+  moment it is needed. Mapping rule, `ws-cli tools` usage, and the manual
+  reconnect procedure go directly in `SKILL.md`.
+
+- **The skill has two audiences.** For the agent: keep working through `ws-cli`.
+  For the user: the concrete steps to re-enable the MCP server, since that path
+  is otherwise undiscoverable. The agent cannot re-enable the server itself and
+  must surface the procedure.
+
+- **A pointer line goes in the four session entry-point front doors** —
+  `lead-discuss`, `lead-sprint`, `lead-revive`, `lead-proceed` — pointing at
+  `/ws:mcp-server-repair` if the front door's MCP call fails.
+
+  Rejected: all 17 skills. Rejected: the originally-proposed criterion "skills
+  that load `workflow_manual`", which selects only `lead-discuss`, `lead-revive`,
+  and `lead-sprint` — `lead-proceed` calls `playbook.print` only, and omitting it
+  would leave the "start from a ticket" path uncovered. The remaining 13 skills
+  are only invoked once a session is already running, so the entry points filter
+  them.
+
+  Rationale for having the line at all, given the standalone skill exists:
+  noticing that tools are *absent* from a tool list is a weak signal, whereas an
+  MCP call returning an error is the highest-attention moment available, and the
+  only text in front of the model at that moment is that skill's front door.
+  `lead-revive` matters most — its description already positions it as the
+  pre-everything recovery entry, yet its body is a `workflow_manual` call that
+  dead-ends when the server is down.
+
+- **`skills_mirror.go` gains a narrow `\bws-cli\b` -> `wsflow-cli` pattern.**
+  Current substitution covers only `\bws:` and `\bws/`, so a mirrored wsflow
+  skill would instruct the agent to run `ws-cli` — the exact wrong-namespace bug
+  the split naming exists to prevent, and one the `disqualifyingTokens` guard
+  does not catch. The pattern must stay narrow: `ws-mcp` and `ws-plugin` are real
+  names that must not become `wsflow-*`.
+
+- **`import urllib.request` becomes lazy in the launcher.** It costs 22 ms of the
+  85 ms warm path (~26%) and is only needed on the download-install path. Folded
+  into this ticket as a pure gain, with a larger relative payoff on Windows.
+
+## Constraints
+
+- Windows per-call cost is **unmeasured**. Interpreter startup is typically
+  several times slower than macOS, AV scanning adds to it, and the Windows
+  launcher branch uses `subprocess.call` rather than `exec`, so the estimate is
+  roughly 250-400 ms per call. Measuring it would fit naturally as a timing step
+  in the existing `windows-smoke` CI job, but that is **out of scope here** — no
+  Windows test environment is available to this work. Recorded so a later session
+  does not treat the macOS numbers as cross-platform.
+- The fallback keeps the launcher's existing `python3`-on-`PATH` requirement. If
+  the MCP failure is itself caused by a broken Python, the fallback fails too.
+- Launcher edits must be applied to `agents-plugin/bin/ws-mcp-launcher.py` and
+  kept byte-identical with the `agents-plugin-wsflow/` mirror.
+- Text intended for substitution mirroring must clear
+  `guardSubstitutionEligible`'s denylist, which includes the bare token `ws.`
+  matched by naive substring containment — so any sentence-ending word such as
+  "flows.", "shows.", or "knows." disqualifies the source. Mirrored skill text
+  must avoid them.
+- The entry-point pointer must stay to a single short line. Only one skill loads
+  per invocation, so the practical cost is ~15 words per invocation, but
+  `260630-epic-skill-playbook-diet` governs the front-door budget.
+
+## Prior Art
+
+- `Server.callTool` (`internal/mcp/server.go:485`) — single name-keyed dispatch
+  with the session-scope and product-profile gates already applied; reuse rather
+  than reimplement, so CLI callers inherit identical authorization behavior.
+- `Server.filteredTools()` (`internal/mcp/server.go:4368`) — profile-aware tool
+  list with schemas, already reflecting agentless mode and mercenary hiding.
+- `ws-mcp-launcher.py:883` — existing argv passthrough.
+- `internal/wsrsrc/skills_mirror.go` — `GenerateWsflowSkillBody` plus
+  `guardSubstitutionEligible`.
+- `internal/mcp/session_auth.go:359` — file-backed session records.
+
+## Spec Impact
+
+- Target spec areas: `mcp-tools.md` for the `ws-cli tools` / `ws-cli call`
+  passthrough contract and its equivalence to the MCP tool surface;
+  `plugin-runtime.md` for the `bin/` shim names, per-plugin env baking, `PATH`
+  exposure, and CLI-triggered repair behavior; `workflow-skills.md` for the
+  `mcp-server-repair` skill and the entry-point pointer rule.
+- Expected caller-visible change: every MCP tool becomes invocable as a
+  subprocess with the same name and schema; two new `PATH`-resolvable
+  executables per plugin (`ws-cli`/`ws-cli.cmd`, `wsflow-cli`/`wsflow-cli.cmd`);
+  one new skill per namespace; a pointer line in four existing skills.
+- Contract-first spec: no. Tool names and schemas are already specified in
+  `mcp-tools.md` and the CLI is a transport mirror of them rather than a new
+  contract; the shim naming and skill behavior are reflected into the specs at
+  closeout.
+
+## Phases
+
+### Phase 1: Generic CLI passthrough (`tools` / `call`)
+
+Add `tools` and `call` subcommands to `cmd/ws-mcp/main.go`, routing through the
+existing `Server` rather than duplicating handler logic.
+
+`tools` with no argument prints the mapping rule (`ws/x.y(a: b)` ->
+`ws-cli call x.y '{"a":"b"}'`) followed by the tool list from `filteredTools()`;
+`tools <name>` prints that tool's `inputSchema`. `call <name> '<json>'` builds the
+same request shape `callTool` consumes and writes the resulting text content to
+stdout, with a non-zero exit and a readable message on tool error, unknown tool
+name, or malformed JSON.
+
+Output must remain profile-correct: an agentless (`WS_MCP_NO_AGENT=1`) invocation
+must not list or dispatch agent-backed tools, and session-scope gating in
+`callTool` must apply unchanged — a non-lead `session_key` must not reach
+lead-only tools through the CLI. `--help` is deliberately left alone.
+
+Verification: `tools` output matches `tools/list` for the same profile in both
+full-ws and agentless mode; a `call` round-trip against a real tool using a
+`session_key` minted by a separate process returns the same text the MCP path
+returns; error paths exit non-zero.
+
+### Phase 2: `bin/` shims, namespace env baking, and launcher warm-path trim
+
+Add `bin/ws-cli` + `bin/ws-cli.cmd` to `agents-plugin/`, and `bin/wsflow-cli` +
+`bin/wsflow-cli.cmd` to `agents-plugin-wsflow/`, each delegating to its own
+plugin's launcher and exporting that plugin's environment (`WS_MCP_NO_AGENT`,
+`WS_MCP_NAMESPACE`, `WS_MCP_SETUP_TOOL` for wsflow) before doing so. Extend
+`skills_mirror.go` with the narrow `\bws-cli\b` -> `wsflow-cli` pattern. Make
+`import urllib.request` lazy in the launcher, keeping the two launcher copies
+byte-identical.
+
+Depends on Phase 1: the shims front commands that must already exist.
+
+Verification: both shims resolve as bare names on `PATH` from a POSIX shell and
+from `cmd`/PowerShell; the wsflow shim yields namespace `wsflow` with the
+agentless profile and no mercenary tools in `ws-cli tools` output; mirror
+generation rewrites `ws-cli` to `wsflow-cli` while leaving `ws-mcp` and
+`ws-plugin` untouched; launcher warm path improves by roughly the measured 22 ms;
+launcher `diff` between the two plugin copies stays empty.
+
+### Phase 3: `mcp-server-repair` skill and entry-point pointers
+
+Author `agents-plugin/skills/mcp-server-repair/SKILL.md` with a description that
+names the trigger explicitly (ws tools absent from the tool list, or a ws tool
+call failing to connect) and a fully self-contained body: how to invoke
+`ws-cli tools` / `ws-cli call`, the mapping rule, the note that a stale runtime
+may make the first call slow because repair runs, and the manual reconnect
+procedure to relay to the user. The body must contain no MCP call. Confirm the
+source passes `guardSubstitutionEligible` and generate the wsflow mirror.
+
+Add the one-line pointer to the front doors of `lead-discuss`, `lead-sprint`,
+`lead-revive`, and `lead-proceed`.
+
+Depends on Phases 1 and 2: the skill documents the invocation form they define.
+
+Verification: the skill is listed by the host with the ws MCP server stopped; its
+body contains no `ws/` tool invocation; mirror generation succeeds and produces
+`wsflow-cli` in the mirrored body; the four front doors each gain exactly one
+line and no other change.
