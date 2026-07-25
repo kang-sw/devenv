@@ -186,6 +186,24 @@ Ship terminal and document counts in Phase 1. Add the agent counter once the
 pivot settles what an agent pane *is*; until then a counter would either
 count the wrong thing or need rewriting immediately.
 
+**Forward note (owner discussion, 2026-07-25) — what the deferred slot will
+carry.** The pivot's notification design now claims this slot explicitly (see
+`260725-research-ws-dashboard-pty-agent-pivot` `## Notification Path`), so
+Phase 1 should leave room for it rather than treat it as an unknown shape:
+
+- The agent counter will be a *split* count, not a single number: working N
+  (spinner) / ready M (blinking orange bell glyph). Budget secondary-line
+  width for two labelled sub-counts, not one.
+- The pivot also wants a Windows-11-style orange attention flash on the row
+  itself. That flash must be an independent overlay layer (e.g. a
+  pseudo-element), NOT an animation on `background` — `resourceRowTone`
+  already owns `background` and `border-left-color` (styles.css 2746-2757,
+  with `-error` setting `background` outright). Phase 1 does not implement the
+  flash, but it must not consume the row's only overlay affordance either.
+
+This is a compatibility note, not added scope: Phase 1 still ships terminal and
+document counts only.
+
 ## Spec Impact
 
 Target spec area: `ai-docs/spec/ws-web-dashboard/index.md` —

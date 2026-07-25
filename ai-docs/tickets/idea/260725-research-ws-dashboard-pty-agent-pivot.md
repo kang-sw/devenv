@@ -5,6 +5,8 @@ related:
   260622-research-ws-dashboard-ferrule-session-binding: settled ferrule/bootstrap spawn-injection design reused for hook injection
   260620-feat-ws-dashboard-agent-client-activity-sources: suspended structured provider-adapter track this pivot turns away from
   260725-refactor-dashboard-agent-gui-physical-module-isolation: Tier 2 wire-out of the suspended agent-GUI/adapter surface
+  260711-idea-dashboard-agent-facing-mcp-control-surface: dashboard-as-MCP-server direction this pivot deliberately does NOT absorb; also the source of the verified claude-CLI hook grounding
+  260725-feat-dashboard-nav-row-two-line-open-state: two-line nav row whose deferred agent-counter slot this pivot fills
   260514-research-ws-web-dashboard-direction: prior steer toward higher-level agent-pane abstraction that this pivot reverses
   260605-research-ws-native-subagent-pivot: broader native-subagent direction anchor
   260605-epic-ws-playbook-factory-pivot: epic coordinating the native-subagent pivot
@@ -114,7 +116,7 @@ Frontend attach seam reused as-is: `terminals.ts` + `terminalPaneBody.tsx`
 The narrow scope is three decorative/convenience entry-point features layered
 over the vendor agent CLI. Prior art and gaps for each:
 
-### 1. Spawn-time hook injection
+### 1. Spawn-time launch-context injection
 
 Reuse the ferrule/bootstrap injection design:
 `260622-research-ws-dashboard-ferrule-session-binding` (settled) + `260624`
@@ -127,6 +129,35 @@ INVARIANT to respect: the identity-privacy three-class model from spec
 `#260521-ws-dashboard-activity-console-read-model` — `activityId`
 (browser-facing) vs `providerSessionId` / `wsSessionKey` (daemon-private). The
 injected credential must never become browser route / command / pane identity.
+
+OWNER CLARIFICATION (2026-07-25) on what "daemon-private" means here:
+`wsSessionKey` is NOT a security credential. It is private because a key that
+leaks into a subagent's context derails the workflow — the subagent starts
+acting with the lead's session authority — not because it grants privileged
+access to an attacker. The three-class model above still holds, but the
+injection mechanism does NOT need to defend against local `ps` inspection.
+argv/env is acceptable; a 0600 file is not required for the key's sake.
+
+DECIDED (2026-07-25): MCP injection is OUT OF SCOPE for this pivot. The owner
+framed it as binary — either MCP is required for the notification feature, in
+which case it must be built as a real extensible dashboard MCP framework
+rather than a one-off; or it is not required, in which case the pivot does not
+touch MCP at all. It is not required: a vendor notification hook is a command
+line in a vendor settings file that posts to an HTTP endpoint, with the
+endpoint and token carried in that same injected file. No MCP server, no tool
+surface, no protocol work. The dashboard-as-MCP-server direction stays where it
+already lives — `260711-idea-dashboard-agent-facing-mcp-control-surface`.
+
+CONFIG MATERIALIZATION: hook config is per-vendor and does not fit argv/env
+alone (`claude` takes `--settings <file>`; `codex` takes config-file / `-c`
+overrides), so the profile must WRITE a config file at spawn — argv/env
+passthrough is necessary but not sufficient as the enabling refactor.
+Ownership is deliberately naive per owner direction: the DAEMON owns the file
+and reclaims it by GC (sweep files with no live terminal record), not by
+precise delete-on-exit. That is the correct trade because the detached helper
+outlives the daemon by design (`260723`), so exit-coupled cleanup would require
+the helper to know about vendor config — which the no-PTY-reinvention
+invariant forbids.
 
 ### 2. Model selection exposure
 
@@ -162,9 +193,13 @@ GAPS:
   `frontend/src/workbench/dockviewLayout.tsx::DockviewWorkbenchTab` (L343-401)
   renders only icon + title + close; NO attention/blink indicator exists —
   net-new.
-- (b) A PTY-agent has no structured turn events, so "running vs
-  awaiting-interaction" must be derived from output-idle timing (net-new
-  heuristic; no terminal bell / activity-dot handling exists today).
+- (b) SUPERSEDED 2026-07-25. This originally read: "a PTY-agent has no
+  structured turn events, so running vs awaiting-interaction must be derived
+  from output-idle timing." That was wrong — feature 1 injects hooks, and the
+  hook IS the structured turn event. See `## Notification Path` below, which
+  settles the source, transport, and presentation as one mechanism rather than
+  two independent features. Output-idle timing survives only as a last-resort
+  fallback for vendors with no hook mechanism.
 
 ## Spawn Entry Point (owner directive, 2026-07-25)
 
@@ -191,6 +226,100 @@ is occupied — it denotes the daemon-discovered singleton main-instance
 projection (`workbench/editorGroups.ts`, handled at `App.tsx:5909`/`5931`,
 surfaced in the nav as "N pinned main surface(s)"), not a spawnable PTY. It is
 not a free slot to claim without deciding what happens to that projection.
+
+## Notification Path (owner discussion, 2026-07-25)
+
+Features 1 and 3 above are NOT independent tracks — the injected hook IS the
+attention source. This section settles the path end to end.
+
+### Signal source: vendor hooks (settled)
+
+`260620` Phase 4's live spike verified `PreToolUse` hooks fire via `--settings`
+against `claude` 2.1.207 in headless stream-json mode. OWNER RULING
+(2026-07-25): interactive hook firing is ASSUMED, not re-verified — vendor
+documentation treats interactive as the primary hook use case, so a hook
+verified under stream-json is taken to fire in a PTY session. No spike gates
+design on this.
+
+The turn-boundary hooks (vendor names vary; the `Stop` / `Notification` class)
+are the running -> awaiting-interaction signal. Codex's external `notify`
+program is the likely equivalent and still needs confirming per vendor profile.
+
+### Signal transport: daemon HTTP endpoint (settled)
+
+DECIDED: a narrow HTTP endpoint on the daemon, NOT an extension of the helper
+IPC protocol.
+
+Rejected — extending the helper IPC surface: the socket is already per-terminal
+so filesystem permissions would have supplied authorization for free, but the
+owner rejected it on operability. Helpers are detached and long-lived by
+design, so changing their IPC protocol forces killing and restarting every live
+helper on each dev iteration — exactly the churn that makes dogfooding painful.
+Daemon restarts are cheap, helper restarts are not, and that asymmetry decides
+it. Notification is cosmetic and does not justify touching the load-bearing
+helper protocol.
+
+AUTHORIZATION: the endpoint carries a per-terminal token minted at spawn and
+written into the same injected vendor config file, so an arbitrary local
+process cannot post attention events for terminals it did not spawn. This is
+integrity scoping, not secrecy — consistent with the `wsSessionKey` reading in
+feature 1. Today the daemon's only auth is a single owner bearer token plus a
+link passphrase (`auth.rs`); handing that to every spawned hook would grant the
+agent every dashboard route, so the scoped token is not optional.
+
+CONSEQUENCE to respect: the token and callback URL must live in the PERSISTED
+terminal registry, not only in daemon memory. `boot_reconcile` re-adopts
+helpers across a daemon restart, so an in-memory-only token would leave a live
+agent posting with a token the restarted daemon no longer recognizes. Port
+drift has the same shape and is accepted as a known staleness mode — the daemon
+is normally started on a fixed port.
+
+Browser delivery reuses what exists: the `work_root_activity_events` SSE route
+plus `workRootActivity.ts`'s `attention` flag (L66), live/attention priority
+ordering, and the browser-local ack watermark
+(`initializeActivityDirtyItems`).
+
+### Presentation
+
+- Tab label (feature 3): net-new indicator at
+  `dockviewLayout.tsx::DockviewWorkbenchTab` (L343-401), which renders only
+  icon + title + close today.
+- Left nav row: NOT a layout change. Owner direction is a Windows-11-style
+  orange flash — background / overlay tint pulsing on the row — and/or a
+  breakdown inside the second-line counter: working N (spinner) / ready M
+  (blinking orange bell glyph).
+  IMPLEMENTATION NOTE: `resourceRowTone` already owns both `background` and
+  `border-left-color` on `.resource-row*` (styles.css 2746-2757; `-error` also
+  sets `background`). A flash must therefore be an independent overlay layer
+  (e.g. a pseudo-element) rather than an animation on `background`, or it will
+  fight the tone classes.
+  SEQUENCING: the agent counter is precisely the slot
+  `260725-feat-dashboard-nav-row-two-line-open-state` DEFERRED pending this
+  pivot. That deferral resolves here — the counter arrives with the pivot and
+  carries the working/ready split.
+- Browser: `document.title` flashing + favicon badge as the zero-permission
+  default (works over plain-http LAN), with the `Notification` API as an
+  explicit Settings opt-in.
+
+### Browser notification constraints
+
+- Secure context required. `localhost` qualifies, so local dogfooding works,
+  but the dashboard's linked-server story means plain-http LAN access has no
+  `Notification` API at all. Browser notification is inherently a
+  localhost-or-TLS feature; the title/favicon fallback is what covers the rest.
+- Permission must be requested from a user gesture, so the trigger is a
+  Settings toggle. Natural host is the same section registry
+  (`settingsSections.tsx`, spec `#260722-ws-dashboard-settings-panel`) already
+  chosen for the model picker.
+- PWA shell already exists: `frontend/public/manifest.webmanifest`
+  (`display: standalone`), `frontend/public/sw.js`, and a
+  `serviceWorker.register('/sw.js')` call in `main.tsx`. But `sw.js` is an
+  11-line stub with only install/activate/fetch handlers and NO
+  push/notification handling — it exists to satisfy installability, nothing
+  more.
+- OUT OF SCOPE, explicitly: Web Push / VAPID / a push service. Delivery while
+  the tab is closed requires unconditional HTTPS plus a push backend, which is
+  a different project. Stated here so nobody drifts into it.
 
 ## Remove vs Keep
 
@@ -230,8 +359,17 @@ wrapper component — is called out below as an open design choice.
   plumbing, but the plumbing stays single-sourced.
 - Model picker vs the "dashboard is not model authority" invariant — how to
   delegate to ws-runtime aliases.
-- Deriving running / awaiting-interaction from PTY output-idle timing without
-  structured turn events.
+- RESOLVED 2026-07-25 — was "deriving running / awaiting-interaction from PTY
+  output-idle timing without structured turn events". Vendor hooks supply the
+  signal; see `## Notification Path`. Residuals: Codex's hook equivalent
+  (`notify`) is unconfirmed, and vendors with no hook mechanism have no
+  fallback pinned — terminal BEL / OSC 9 is the candidate (xterm.js exposes
+  `onBell`; no handler exists in the codebase today) with output-idle timing as
+  the last resort.
+- Attention aggregation and acknowledgement semantics: does a server row
+  aggregate attention from its work roots, and does acknowledging a tab clear
+  the nav badge? The ack-watermark precedent exists
+  (`initializeActivityDirtyItems`) but the propagation rule is unpinned.
 - Whether/how 260624's 2026-07-11 supersession is formally reversed (edit
   260624 vs supersede-by-this-ticket).
 - Scope boundary: how much of 260624 Phase 1 argv/env commonization is in-scope
