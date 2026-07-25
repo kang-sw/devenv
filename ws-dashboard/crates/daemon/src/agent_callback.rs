@@ -169,34 +169,16 @@ pub fn write_callback_target(
         token: Some(token.to_owned()),
     })
     .map_err(io::Error::other)?;
-    create_new_file_at_mode_0600(&temp_path, &raw)?;
+    // FIX (review cycle 1, finding C): this module used to carry its own
+    // byte-for-byte-identical private copy of
+    // `agent_token_store::create_new_file_at_mode_0600`. Share the one
+    // implementation instead - see that function's doc comment for why the
+    // duplication's own justifying comment (citing `shell_quote`'s
+    // same-module cfg split as precedent) did not actually support keeping
+    // two copies of this security-sensitive sequence across two modules.
+    crate::agent_token_store::create_new_file_at_mode_0600(&temp_path, raw.as_bytes())?;
     fs::rename(&temp_path, &path)?;
     Ok(())
-}
-
-// CONTRACT (deliberate local duplicate of
-// `agent_token_store::create_new_file_at_mode_0600` - mirrors this
-// codebase's existing precedent of small platform-gated helpers living
-// per-module rather than a shared utility crate, e.g.
-// `agent_hook_config::shell_quote`): creates `path` fresh at `0600` on Unix,
-// removing a stale leftover from a prior crashed write first so
-// `create_new` always succeeds against a namespaced-by-terminal-id path.
-#[cfg(unix)]
-fn create_new_file_at_mode_0600(path: &Path, data: &str) -> io::Result<()> {
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt;
-    let _ = fs::remove_file(path);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(data.as_bytes())
-}
-
-#[cfg(not(unix))]
-fn create_new_file_at_mode_0600(path: &Path, data: &str) -> io::Result<()> {
-    fs::write(path, data)
 }
 
 // FIX (review cycle 1, addendum finding I): produces a temp path unique per

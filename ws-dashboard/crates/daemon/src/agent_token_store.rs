@@ -94,8 +94,21 @@ pub fn delete_token(state_dir: &Path, terminal_id: &str) {
     let _ = fs::remove_file(token_store_path(state_dir, terminal_id));
 }
 
+/// Shared by `agent_callback::write_callback_target` (review cycle 1,
+/// finding C): this was a second, byte-for-byte-identical private copy of
+/// this exact function per module (differing only in `&str` vs `&[u8]`,
+/// resolved here by taking `&[u8]` and having the caller pass
+/// `.as_bytes()`), which a prior comment on the `agent_callback.rs` copy
+/// justified as mirroring `agent_hook_config::shell_quote`'s per-module
+/// `#[cfg(unix)]`/`#[cfg(not(unix))]` split - that precedent is a single
+/// helper split across compile-time configs within ONE module, not the same
+/// helper duplicated across two different modules, so it did not actually
+/// support keeping two copies of the one function that performs this crate's
+/// first real credential-bearing file write. Both call sites now share this
+/// implementation instead of risking a future errno/race-handling fix
+/// landing on only one copy.
 #[cfg(unix)]
-fn create_new_file_at_mode_0600(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn create_new_file_at_mode_0600(path: &Path, data: &[u8]) -> io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt;
     // Best-effort clear of a stale leftover from an earlier crashed write at
@@ -114,7 +127,7 @@ fn create_new_file_at_mode_0600(path: &Path, data: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn create_new_file_at_mode_0600(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn create_new_file_at_mode_0600(path: &Path, data: &[u8]) -> io::Result<()> {
     fs::write(path, data)
 }
 
