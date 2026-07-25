@@ -166,6 +166,32 @@ GAPS:
   awaiting-interaction" must be derived from output-idle timing (net-new
   heuristic; no terminal bell / activity-dot handling exists today).
 
+## Spawn Entry Point (owner directive, 2026-07-25)
+
+The PTY agent is spawned from the **top-right toolbar button slot** — it takes
+over the role the removed "Open new agent tab" button held. That slot is
+currently empty: the Tier 1 suspension (`c3f5b42b`) omits the button entirely
+when `AGENT_GUI_SUSPENDED`, so reclaiming it creates no conflict with the
+suspension and needs no flag change.
+
+LOAD-BEARING CONSTRAINT: the new spawn path must NOT reuse
+`registerNewAgentChatPane`. That primitive is one of the three suspension
+guard depths (toolbar render, `a n` hotkey registration, and the primitive
+itself), and it early-returns without state change while the flag is true.
+Routing a new spawn through it would either no-op silently or, if the guard
+were relaxed to let it through, re-open the suspended agent-GUI surface as a
+side effect. The spawn must route through the terminal-create path instead —
+which is also what the no-PTY-reinvention invariant above requires.
+
+This entry point FORCES open question 1 below rather than merely touching it:
+a single toolbar action must produce a pane of one definite `SurfaceKind`, so
+the kind/profile-versus-wrapper choice has to be settled before the button can
+be wired. Note also that `SurfaceKind` already has an `"agent"` variant, but it
+is occupied — it denotes the daemon-discovered singleton main-instance
+projection (`workbench/editorGroups.ts`, handled at `App.tsx:5909`/`5931`,
+surfaced in the nav as "N pinned main surface(s)"), not a spawnable PTY. It is
+not a free slot to claim without deciding what happens to that projection.
+
 ## Remove vs Keep
 
 Wire-out of the adapter surface is tracked in
@@ -190,7 +216,10 @@ wrapper component — is called out below as an open design choice.
 
 ## Open Questions (for sage/design; do NOT resolve here)
 
-- How THIN the additive layer is. The "no PTY wheel reinvention" invariant
+- How THIN the additive layer is. **Now forced, not optional** — see
+  `## Spawn Entry Point`: a single toolbar spawn action must yield one
+  definite `SurfaceKind`, so this must be settled before the entry point can
+  be wired. The "no PTY wheel reinvention" invariant
   above SETTLES the substrate question — same substrate, no new PTY plumbing.
   What remains open is only the shape of the thin layer: whether the agent is
   expressed as a `kind`/profile flag on the same terminal pane vs a thin
