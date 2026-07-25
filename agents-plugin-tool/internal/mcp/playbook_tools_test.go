@@ -894,6 +894,55 @@ func TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally(t *testing.T)
 	}
 }
 
+// TestPlaybookPrintGoalFanOutStepResolvesWsflowSkillsRoot verifies the same
+// transclusion branch as
+// TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally, but under
+// the wsflow package roots (WS_SKILLS_ROOT pointed at
+// agents-plugin-wsflow/skills, rsrc loaded from agents-plugin-wsflow/rsrc).
+// It proves ResolveSkillsRoot/LoadSkillBody are root-agnostic: serving
+// lead-goal-fan-out-step from the wsflow tree loads the wsflow rsrc overlay
+// and still emits the visible <playbook name="lead-goal-step" title="Goal
+// Step"> boundary, with the appended block in lockstep with whatever
+// lead-goal-step SKILL.md the wsflow skills root carries. (lead-goal-step's
+// body has no namespace tokens, so the wsflow and full-ws copies are
+// byte-identical today; this test therefore guards the wsflow-root load +
+// boundary + lockstep-drift, not a wsflow-vs-full-ws body divergence that
+// does not currently exist for this skill.)
+func TestPlaybookPrintGoalFanOutStepResolvesWsflowSkillsRoot(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin-wsflow", "rsrc")
+	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin-wsflow", "skills")
+	t.Setenv("WS_SKILLS_ROOT", skillsRoot)
+	s := newTestServerWithHarness(t, "claude")
+	configOpts := isolatedPlaybookConfigOptions(t)
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-goal-fan-out-step", nil, configOpts, "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	const boundaryTag = `<playbook name="lead-goal-step" title="Goal Step">`
+
+	if !strings.Contains(body, boundaryTag) {
+		t.Fatalf("lead-goal-fan-out-step body missing appended lead-goal-step boundary under wsflow roots:\n%s", body)
+	}
+	if !strings.Contains(body, "</playbook>") {
+		t.Fatalf("lead-goal-fan-out-step body missing closing </playbook> boundary:\n%s", body)
+	}
+
+	// Lockstep: the appended block must equal exactly what LoadSkillBody
+	// returns right now for lead-goal-step as read from the wsflow skills
+	// root, so a future edit to that copy is auto-reflected here and the
+	// wsflow-root transclusion cannot silently drift.
+	wantAppendBody, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-goal-step")
+	if err != nil {
+		t.Fatalf("LoadSkillBody(lead-goal-step): %v", err)
+	}
+	wantBlock := wrapRenderedPlaybookForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
+	if !strings.Contains(body, wantBlock) {
+		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live wsflow lead-goal-step SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
+	}
+}
+
 func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 	t.Setenv(envNoAgent, "")
 	t.Setenv(envNamespace, "")

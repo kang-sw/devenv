@@ -505,6 +505,67 @@ the wsflow mirror-drift tests
 lead-* skill + session-tool surface, following `ai-docs/ref/wsflow-mirroring.md`.
 Depends on Phases 1-2.
 
+### Result (874b2bc5) - 2026-07-25
+
+The wsflow mirror + exposure verification landed; `TestWsflowRsrcMirrorUpToDate`
+(previously red BY DESIGN) is now green. Delta:
+
+- **Runtime exposure — verification only, no new work.** All four fan-out
+  primitives were already exposed in `agents-plugin-wsflow/runtime.json` with the
+  `>=0.36.3-dev <0.37.0` gate and none `noAgentHiddenTool`-gated: `ferrule` (L14),
+  `session.children` (L15), `session.note` (L16, added Phase 1), `playbook.render`
+  (L68). The probe found nothing stripped, so the "open exposure for each stripped
+  tool" contingency in the phase plan was a no-op. `TestRuntimeCapabilitiesCommand…`
+  exact-match surface tests confirm they are advertised.
+- **rsrc mirror (regen, not hand-edit).** Ran `WS_REGEN_WSFLOW_RSRC=1 go test
+  ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror` — synced
+  `agents-plugin-wsflow/rsrc/` byte-for-byte from canonical (47 files), materializing
+  `rsrc/lead-goal-fan-out-step/lead-goal-fan-out-step.md` (byte-identical to full-ws;
+  namespace tokens stay `{{.SkillNamespace}}`/`{{.McpNamespace}}`, render-time) and
+  the one added `manifest.json` hash entry. The full-ws rsrc manifest already carried
+  the entry from Phase 2, so this single regen closed both the missing-overlay and
+  manifest-byte-diff halves of the red test.
+- **Entry-skill shim (curated, not generated).** Hand-authored
+  `agents-plugin-wsflow/skills/lead-goal-fan-out-step/SKILL.md` as the parallel-init
+  thin shim — the full-ws shim with `ws/` → `wsflow/`, description verbatim, title
+  `# Goal Fan-Out Step`. It is a `playbook.print` shim (not inline), so it is NOT
+  added to the substitution-mirrored generator list nor to the bundle test's
+  `EXPECTED_INLINE_SKILLS`.
+- **wsflow bundle test.** `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`:
+  `lead-goal-fan-out-step` added to `EXPECTED_SKILLS` and
+  `EXPECTED_PARALLEL_INIT_SKILLS`; introduced a `PARALLEL_INIT_TITLES` map because the
+  prior `skill.removeprefix("lead-").title()` derivation yields the wrong
+  `Goal-Fan-Out-Step` (hyphens) for the multi-hyphen stem — existing `lead-discuss`
+  /`lead-sprint` keep their exact prior titles, so coverage is preserved, not loosened.
+- **Transclusion under wsflow — verified green, resolves correctly.** New durable Go
+  test `TestPlaybookPrintGoalFanOutStepResolvesWsflowSkillsRoot`
+  (`internal/mcp/playbook_tools_test.go`) points `WS_SKILLS_ROOT` at
+  `agents-plugin-wsflow/skills` and loads rsrc from `agents-plugin-wsflow/rsrc`,
+  asserting the served fan-out body emits the visible `<playbook name="lead-goal-step"
+  title="Goal Step">` boundary and the appended block is in lockstep with
+  `LoadSkillBody(<wsflow skills root>, "lead-goal-step")`. Recorded nuance: the ticket's
+  "the appended base body is the wsflow variant" is satisfied **trivially** — the
+  `lead-goal-step` SKILL.md body carries no `ws/`/`wsflow/` namespace tokens (it
+  references tools narratively), so the wsflow and full-ws copies are byte-identical;
+  there is no distinct wsflow variant to diverge, and the root-agnostic
+  `ResolveSkillsRoot`/`LoadSkillBody` path emits the correct boundary + body under
+  wsflow roots regardless. The test guards wsflow-root overlay load + boundary +
+  lockstep-drift, which is the meaningful invariant.
+- **Doc.** `ai-docs/ref/wsflow-mirroring.md` "Shipped wsflow Skills → Included" list
+  gained `lead-goal-fan-out-step`.
+
+Verification: `go build ./...`, `go vet ./...`, and full `go test ./... -count=1` (12
+packages) all green; `python3 -m unittest discover agents-plugin-wsflow/tests` (9 tests)
+and `agents-plugin/tests` (45 tests) OK. Single full-scope review: clean, one minor
+(comment-accuracy overclaim in the new test) fixed in `03ae2047` — the review confirmed
+`lead-goal-step` is byte-identical across packages, which is why the corrected comment
+no longer claims a wsflow-vs-full-ws body distinction.
+
+No spec changes in this phase: the ticket's Spec Impact (`mcp-tools.md`,
+`plugin-runtime.md`, `workflow-skills.md`) was fully addressed in Phases 1-2; Phase 3 is
+a mechanical package mirror whose doctrine home is the `wsflow-mirroring.md` reference.
+All three phases are now complete.
+
 ## Spec Impact
 
 Ready addressing is via this section (implementation determines exact spec text;
