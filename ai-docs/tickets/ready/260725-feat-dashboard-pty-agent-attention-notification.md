@@ -109,6 +109,14 @@ existing model: the browser-local ack-watermark PATTERN
 `ActivityItem.kind` being an open string vocabulary by contract
 (`crates/core/src/activity.rs:92-100`).
 
+ACKNOWLEDGEMENT IS KEYED PER TERMINAL, and the nav badge is DERIVED from it.
+This lives here rather than in Phase 7 because Phase 6 builds the ack store and
+would otherwise have to guess the key and be reworked. Acknowledging a tab
+clears that terminal's state; a row's badge clears when no child terminal is
+still pending. There is exactly one ack watermark, never two that can disagree.
+(Server-row AGGREGATION is a separate question and stays in Phase 7, since it
+affects only rendering.)
+
 ### Concrete mechanics, pinned so an implementer does not have to invent them
 
 - **Turn states.** `working` / `ready` / `idle`. See the next decision for how
@@ -126,7 +134,7 @@ existing model: the browser-local ack-watermark PATTERN
   (Phase 5), which is browser-facing, not to the callback, which is not.
 - **What the hook actually runs.** A hidden `ws-dashboard` subcommand, in the
   same style as the existing hidden `terminal-helper`
-  (`cli.rs:~31`, `#[command(hide = true)]`), invoked as
+  (`cli.rs:26`, `#[command(hide = true)]`), invoked as
   `ws-dashboard terminal-notify --callback <path> --state ready`. This is
   chosen over `curl` deliberately: `curl` is not guaranteed present, is awkward
   to quote portably inside a vendor JSON config, and does not exist by default
@@ -327,11 +335,16 @@ and transport contracts are unchanged when no profile is requested.
   credential versus a workflow-integrity concern).
 - `#260722-ws-dashboard-settings-panel` — Phase 8 adds a
   notification-permission section entry.
-- Whatever spec entry `260725-feat-dashboard-nav-row-two-line-open-state`
-  lands for the secondary-line counts — Phase 7 changes their SEMANTICS (an
-  agent terminal leaves the terminal count and joins the agent count), which
-  amends behaviour that ticket will have already shipped and asserted. Amend
-  that entry and append a note to that ticket; do not diverge silently.
+- `#260516-ws-web-dashboard-inspectable-navigation-shell`
+  (`ai-docs/spec/ws-web-dashboard/index.md:983`) — Phase 7 changes the
+  secondary-line count SEMANTICS that
+  `260725-feat-dashboard-nav-row-two-line-open-state` will already have
+  shipped. That ticket's Phase 1 derives terminal counts from `terminalPanes`
+  WHOLESALE and its Deferred scope does not anticipate an exclusion, so
+  Phase 7's "an agent terminal counts in the agent counter only" amends
+  landed, asserted behaviour — including that ticket's acceptance step. Amend
+  the spec entry and append a note to that ticket; do not let it be discovered
+  as a broken assertion.
 
 
 ## Phases
@@ -350,6 +363,14 @@ verification spike against a vendor binary under a PTY. It touches no daemon
 code, so macOS does not block it, and its result determines the state
 vocabulary that Phases 4-7 all encode. Run it out of order, ahead of Phase 1,
 as soon as this ticket is picked up.
+
+Treat that spike as a SEPARABLE GATE, not merely as Phase 3's first bullet: it
+may be completed and its result recorded on its own, ahead of and independently
+of every other phase, and it is exempt from the "none may be marked done" rule
+above because it depends on no daemon code. It is deliberately left inside
+Phase 3 rather than renumbered into its own phase because the phase numbering
+is already stamped; the ordering obligation is what matters, and it is stated
+here so it cannot be missed by an implementer reading phases in order.
 
 ### Phase 1: argv/env passthrough and environment scrub at the spawn seam
 

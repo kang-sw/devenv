@@ -119,7 +119,18 @@ Pane kinds come from `SurfaceKind`
   secondary line's height rather than conditionally removing the element.
 - **There are three competing visual axes, not two.** Selection is
   `.resource-row-selected` (`styles.css:1081`: accent gradient + inset
-  shadows, and `border-left-color`). Openness is the new axis. But a third
+  shadows, and `border-left-color`).
+  CORRECTION (2026-07-25, found while designing
+  `260725-feat-dashboard-pty-agent-attention-notification`): that accent
+  gradient DOES NOT CURRENTLY RENDER. `App.tsx:7431` puts `.resource-row` and
+  `.resource-row-selected` on the same element, both are single-class
+  specificity (0,1,0), and the base `.resource-row { background: … }` at
+  `styles.css:2729` comes later in the file — so source order wins and only
+  `border-left-color` and `box-shadow` survive from the selected rule. This
+  looks like a live defect rather than intent. Confirm and decide whether to
+  repair it as part of Phase 1 or leave it; either way do not design the
+  openness axis around a gradient that is not on screen.
+  Openness is the new axis. But a third
   already exists and already owns *both* channels the obvious split would
   use: `resourceRowTone` (`resourcePresentation.ts`) emits
   `.resource-row-ready` / `-muted` / `-error`, which set `border-left-color`
