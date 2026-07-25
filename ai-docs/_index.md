@@ -209,6 +209,17 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260725-idea-ws-git-commit-rename-and-payload-rejections` - two independent
+  `ws/git.commit` defects found by dogfooding. Ready, and the higher-urgency of
+  the two ws bugs: Phase 1 is a single-guard fix (the verifier receives
+  index-delete-side paths from `expandCommitPathsForTicketMoves`) that today makes
+  **every** ticket status transition — promote, triage, close — uncommittable
+  through the tool, forcing the native-git fallback that
+  `260723-feat-ticket-write-verify-commit-gate` exists to prevent. Phase 2 is
+  independent and diagnostic-first: no in-repo `ai_context` size limit exists, so
+  the misleading emptiness error most likely reflects a field that never arrived.
+  Stem carries a non-standard `-idea-` category token, kept because the stem is
+  already referenced in both `main` and dashboard-branch history.
 - `260725-feat-ws-cli-mcp-fallback-surface` - MCP-independent CLI fallback for
   Windows disconnects, where the host does not auto-reconnect and the re-enable
   path is undiscoverable. Ready: generic `ws-cli tools`/`call` passthrough over
