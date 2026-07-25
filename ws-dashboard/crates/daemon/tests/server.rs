@@ -11,11 +11,17 @@
 // - shutdown hooks can terminate the server without leaving a background task.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpStream;
+use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
+use tokio::time::timeout;
 use ws_dashboard_daemon::auth::OwnerAuthState;
 use ws_dashboard_daemon::cli::{BindMode, Cli, ServeArgs};
 use ws_dashboard_daemon::config::{validate_bind_guard, ServeConfig};
@@ -243,6 +249,139 @@ fn unused_loopback_addr() -> SocketAddr {
     let listener =
         StdTcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).expect("reserve port");
     listener.local_addr().expect("reserved port addr")
+}
+
+// CONTRACT (260725 Phase 3 step 3, "ephemeral port" verification): the
+// ticket's central verification line asks for a test that `terminal-notify`
+// "resolves a base URL written after the config file" - this is the
+// daemon-write half of that ordering, proven by binding TWICE on port `0`
+// (an OS-assigned, genuinely unpredictable ephemeral port each time) and
+// asserting the on-disk `bound-base-url.json` tracks the CURRENT bind, not
+// the first one.
+//
+// DEVIATION FROM PLAN (recorded, not silent): the plan's own Verification
+// Plan text called for calling `run_with_shutdown` twice IN-PROCESS under a
+// temp `WS_DASHBOARD_STATE_HOME`, holding `persistent_state::ENV_LOCK` for
+// the test's whole body. That mutex is `#[cfg(test)] pub(crate)` in
+// `persistent_state.rs` - both attributes make it unreachable from this
+// file, which is a SEPARATE integration-test crate linking the daemon
+// library as an external dependency (`#[cfg(test)]` items are not even
+// compiled into the library `cargo test` builds for integration tests, and
+// `pub(crate)` would block cross-crate access even if they were). Using
+// `std::env::set_var` here instead, with no lock, would race any OTHER
+// `run_with_shutdown`-calling test in this same file/process, since every
+// `run_with_shutdown` call now also resolves `default_state_dir()` to write
+// this file. This test instead spawns two REAL daemon SUBPROCESSES (the
+// same `env!("CARGO_BIN_EXE_ws-dashboard")` pattern `terminal_lifetime.rs`
+// and `terminal_windows_reaper_acceptance.rs` already use), each given its
+// own `WS_DASHBOARD_STATE_HOME` as subprocess-scoped env - no process-global
+// env mutation, no lock needed, and it proves the behavior through the real
+// `main.rs` entry point rather than only the library call.
+static BOUND_BASE_URL_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn bound_base_url_state_home(label: &str) -> PathBuf {
+    let unique = BOUND_BASE_URL_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    #[cfg(target_os = "macos")]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(target_os = "macos"))]
+    let base = std::env::temp_dir();
+    base.join(format!(
+        "ws-dashboard-bound-base-url-{label}-{}-{unique}",
+        std::process::id()
+    ))
+}
+
+struct BoundBaseUrlDaemon {
+    child: Child,
+    reported_base_url: String,
+}
+
+impl BoundBaseUrlDaemon {
+    async fn kill(mut self) {
+        self.child.kill().await.expect("kill daemon subprocess");
+        let _ = self.child.wait().await;
+    }
+}
+
+async fn spawn_daemon_for_bound_base_url(state_home: &std::path::Path) -> BoundBaseUrlDaemon {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ws-dashboard"))
+        .arg("serve")
+        .arg("--no-auth")
+        .arg("--port")
+        .arg("0")
+        .arg("--bind-mode")
+        .arg("local")
+        .env("WS_DASHBOARD_STATE_HOME", state_home)
+        .env_remove("WS_DASHBOARD_STATE_FILE")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn real ws-dashboard daemon subprocess");
+
+    let stderr = child.stderr.take().expect("daemon stderr pipe");
+    let mut lines = BufReader::new(stderr).lines();
+    let reported_base_url = timeout(Duration::from_secs(10), async {
+        loop {
+            let line = lines
+                .next_line()
+                .await
+                .expect("read daemon stderr")
+                .expect("daemon exited before printing its no-auth debug URL");
+            if let Some(url) = line.strip_prefix("ws-dashboard no-auth debug mode active: ") {
+                break url.trim().trim_end_matches('/').to_owned();
+            }
+        }
+    })
+    .await
+    .expect("daemon subprocess must print its no-auth debug URL before the timeout");
+
+    BoundBaseUrlDaemon { child, reported_base_url }
+}
+
+fn read_bound_base_url_json(state_home: &std::path::Path) -> String {
+    let raw = std::fs::read_to_string(state_home.join("bound-base-url.json"))
+        .expect("read bound-base-url.json written by the daemon subprocess");
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("parse bound-base-url.json");
+    parsed["baseUrl"]
+        .as_str()
+        .expect("bound-base-url.json must have a baseUrl string field")
+        .to_owned()
+}
+
+#[tokio::test]
+async fn bound_base_url_file_is_rewritten_on_every_daemon_bind() {
+    let state_home = bound_base_url_state_home("rewrite");
+
+    let first = spawn_daemon_for_bound_base_url(&state_home).await;
+    let first_reported = first.reported_base_url.clone();
+    let first_written = read_bound_base_url_json(&state_home);
+    assert_eq!(
+        first_written, first_reported,
+        "bound-base-url.json must match the FIRST run's own reported bound address"
+    );
+    first.kill().await;
+
+    let second = spawn_daemon_for_bound_base_url(&state_home).await;
+    let second_reported = second.reported_base_url.clone();
+    let second_written = read_bound_base_url_json(&state_home);
+    assert_eq!(
+        second_written, second_reported,
+        "bound-base-url.json must match the SECOND run's own reported bound address"
+    );
+    second.kill().await;
+
+    assert_ne!(
+        first_reported, second_reported,
+        "two sequential port-0 binds must be assigned different ephemeral ports"
+    );
+    assert_ne!(
+        first_written, second_written,
+        "bound-base-url.json must be rewritten on the second bind, not stuck at the first bind's content"
+    );
+
+    let _ = std::fs::remove_dir_all(&state_home);
 }
 
 async fn connect_with_retry(addr: SocketAddr) -> TcpStream {

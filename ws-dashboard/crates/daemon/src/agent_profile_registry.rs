@@ -11,15 +11,17 @@
 
 use crate::agent_env_profile::{self, EnvScrubProfile};
 
-/// Placeholder for Phase 3's hook-config-shape materialization
-/// (`agent-profiles/<terminal_id>/` file write, `ws-dashboard
-/// terminal-notify`). Intentionally empty - every Phase 2 profile sets
-/// `hook_config: None` and nothing in this phase reads a populated value.
-/// Phase 3 defines the real fields and the write-out step; this type only
-/// reserves the slot on `AgentProfile` so that phase is an extension, not a
-/// struct-shape rewrite.
+/// Vendor hook-event -> turn-state pairs to materialize into a `--settings`
+/// file at spawn time (260725 Phase 3 step 2). `events` is `(event name,
+/// turn state)`, e.g. Claude's `[("UserPromptSubmit", "working"), ("Stop",
+/// "ready")]` per the ticket's pinned three-state vocabulary and the closed
+/// Phase 3 step-1 spike, which measured both events firing in a real
+/// interactive PTY. `Copy` because `AgentProfile` itself is `Copy` and this
+/// is the type Phase 2 reserved a slot for without defining its contents.
 #[derive(Debug, Clone, Copy)]
-pub struct HookConfigShape;
+pub struct HookConfigShape {
+    pub events: &'static [(&'static str, &'static str)],
+}
 
 /// A vendor (or test-only) spawn profile: the literal argv to run in place
 /// of the default interactive shell, plus the env-scrub list to apply to the
@@ -65,12 +67,20 @@ const DUMMY_ECHO_ARGS: &[&str] = &[
     "echo DUMMY_ECHO_MARKER & ping -n 31 127.0.0.1 > NUL",
 ];
 
+// CONTRACT (260725 Phase 3 step-1 spike, closed positive): both event names
+// are the exact strings the spike measured firing under a real interactive
+// PTY (`UserPromptSubmit`, `Stop`). Turn-state vocabulary is pinned by the
+// ticket's `## Decisions` ("Concrete mechanics"): `working` / `ready` / `idle`.
+const CLAUDE_HOOK_CONFIG: HookConfigShape = HookConfigShape {
+    events: &[("UserPromptSubmit", "working"), ("Stop", "ready")],
+};
+
 const CLAUDE_PROFILE: AgentProfile = AgentProfile {
     id: "claude",
     command: "claude",
     args: &[],
     scrub: &agent_env_profile::CLAUDE,
-    hook_config: None,
+    hook_config: Some(CLAUDE_HOOK_CONFIG),
 };
 
 // CONTRACT (plan design answer 3): always present in the compiled daemon
@@ -115,6 +125,26 @@ mod tests {
         let profile = resolve("dummy-echo").expect("dummy-echo profile must be registered");
         assert!(!profile.command.is_empty());
         assert!(profile.scrub.markers.is_empty());
+    }
+
+    #[test]
+    fn claude_profile_hook_config_registers_both_spike_verified_events() {
+        let profile = resolve("claude").expect("claude profile must be registered");
+        let hook_config = profile.hook_config.expect("claude profile must carry hook config");
+        assert!(hook_config
+            .events
+            .iter()
+            .any(|(event, state)| *event == "UserPromptSubmit" && *state == "working"));
+        assert!(hook_config
+            .events
+            .iter()
+            .any(|(event, state)| *event == "Stop" && *state == "ready"));
+    }
+
+    #[test]
+    fn dummy_echo_profile_has_no_hook_config() {
+        let profile = resolve("dummy-echo").expect("dummy-echo profile must be registered");
+        assert!(profile.hook_config.is_none(), "test-only profile must not carry hooks");
     }
 
     #[test]

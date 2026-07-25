@@ -1,4 +1,6 @@
+pub mod agent_callback;
 pub mod agent_env_profile;
+pub mod agent_hook_config;
 pub mod agent_profile_registry;
 pub mod auth;
 pub mod claude_cli;
@@ -25,6 +27,7 @@ pub mod terminal_helper_ipc;
 pub mod terminal_helper_process;
 pub mod terminal_helper_protocol;
 pub mod terminal_ipc_transport;
+pub mod terminal_notify;
 pub mod terminal_platform;
 pub mod terminal_reconcile;
 pub mod terminal_registry_file;
