@@ -402,6 +402,97 @@ Verification: unit tests asserting scrubbed markers are absent from the
 constructed env and that a default (no-argv) spawn still produces the existing
 shell behaviour, so ordinary terminals are provably unchanged.
 
+### Result (9f4a16ca) - 2026-07-26
+
+Done. `TerminalHelperArgs` gained `--command`, repeated `--command-arg`, and
+repeated `--env-overlay KEY=VALUE`
+(`ws-dashboard/crates/daemon/src/cli.rs`, `1deaa070`), and a vendor-neutral
+`EnvScrubProfile` seam (`ws-dashboard/crates/daemon/src/agent_env_profile.rs`,
+`dd425a9e`) applies at BOTH spawn hops: the daemon's helper spawn
+(`terminal.rs`, `c67d6dfd`) and the helper's own shell spawn
+(`terminal_helper_process.rs`, `977baecf`). Only the Claude marker profile is
+populated — an ENUMERATED 11-item deny-list (`CLAUDECODE`,
+`CLAUDE_CODE_BRIDGE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
+`CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`,
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, `CLAUDE_CODE_SESSION_ID`,
+`CLAUDE_EFFORT`, `CLAUDE_PID`, `CLAUDE_WATCHER_TOKEN`, `AI_AGENT`) rather than
+a `CLAUDE`-prefix rule, because a prefix rule would both over-match any future
+unrelated `CLAUDE*` var and silently exclude `AI_AGENT`, which carries no
+`CLAUDE` prefix. Scrubbing is subtractive (deny-list) and triggers only on the
+presence of explicit argv, so the no-argv default path is untouched by
+construction rather than by parity-checking. `TerminalRegistryEntry`
+(`terminal_registry_file.rs`) is unchanged — confirmed by an empty diff
+against the branch point (`e0668c40^`) — satisfying the ticket's no-registry-
+schema-change constraint.
+
+Follow-on commits from a review cycle: `4a20a378`, `8de998b9`, `9f4a16ca`.
+Related docs on this branch: `e751e89a` (mental model), `1fbf9a0f` (idea
+ticket).
+
+**Verification (re-run and confirmed on this machine, 2026-07-26):**
+`cargo test -p ws-dashboard-daemon --lib` → 140 passed, 0 failed, 2 ignored,
+exit 0 (baseline before this phase was 134 — net +6 tests). `cargo test -p
+ws-dashboard-daemon --test terminal_lifetime` → 4 passed, 0 failed, exit 0.
+`cargo check -p ws-dashboard-daemon --tests` → exit 0.
+
+**Non-vacuity.** Each new regression guard was proven by mutating production
+source, observing the intended failure, then reverting: an unconditional
+env-clear added to the default (no-argv) branch fails the default-path guard
+at both hops; a narrow allowlist keeping only `PATH` fails the deny-list
+assertion at both hops; removing the "scrub wins over overlay" guard lets an
+overlay resurrect `CLAUDECODE` and fails that assertion.
+
+**Review outcome.** fit: 0 Critical / 0 Important / 2 Minor, both accepted
+as-is — the missing profile-selector parameter is Phase 2's additive surface,
+and the `host_env: impl IntoIterator` shape on the scrub function legitimately
+diverges from a point-lookup closure pattern because a scrub needs full
+enumeration, not single-key lookups. correctness: 0 Critical / 3 Important,
+all fixed. test: 1 Critical / 2 Important, all fixed. Findings that carry
+forward:
+
+1. `CommandBuilder::env_clear()` (hop 2, `portable-pty`) destroyed
+   `portable-pty`'s Windows base-env construction (system+user `PATH` merged
+   from `HKLM`/`HKCU`), so a Windows agent-profile terminal would have
+   resolved its program against a narrower `PATH` than a shell terminal in
+   the same helper. Fixed by switching hop 2 to per-marker
+   `command.env_remove(marker)` (`terminal_helper_process.rs:452`,
+   `8de998b9`). Hop 1 deliberately KEEPS `env_clear()` + repopulate:
+   `std::process::Command` has no comparable base-env construction to
+   destroy, so this is not a correctness fix there, and an independent probe
+   showed switching hop 1's mechanism would not close hop 1's own test blind
+   spot either (see point 4).
+2. `--command-arg` / `--env-overlay` were silently dropped when `--command`
+   was absent; now a hard failure — clap `requires = "command"` at hop 2
+   (`cli.rs:70,82`) and a `TerminalError::BadRequest` guard at hop 1
+   (`terminal.rs:896`).
+3. `--env-overlay` is an argv channel carrying arbitrary env VALUES, which
+   cuts against this ticket's load-bearing invariant (`## Constraints`,
+   "identity privacy" / "token never touches the helper") that helper argv is
+   world-readable via `ps` and therefore must carry file PATHS only. Nothing
+   populates `--env-overlay` yet. A `CONTRACT` note at `cli.rs:72` now names
+   that invariant and names Phase 4's callback token as the specific value it
+   must never carry. RECORDING PROMINENTLY: this is a constraint on Phase 4,
+   not a footnote on Phase 1 — the callback token must never be threaded
+   through `--env-overlay`.
+4. The mandatory "default spawn unchanged" guard was originally VACUOUS:
+   `get_envs()` / `iter_extra_env_as_str()` cannot distinguish "no env
+   manipulation" from "`env_clear()` then re-add `TERM`" — verified
+   empirically with isolated probes. Now fixed at both hops, but hop 1's
+   replacement guard infers the clear from `std::process::Command`'s unstable
+   `Debug` rendering and is `#[cfg(unix)]`-gated
+   (`terminal.rs:2064-2085`), so Windows has no coverage for that specific
+   regression at hop 1. Captured as
+   `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` in `idea/`
+   — cross-referenced from that ticket back to this one.
+5. Decision, now settled rather than left open: an env overlay may NOT
+   resurrect a scrubbed marker — the scrub wins, with a warning log on the
+   attempt. Recorded here so a later phase does not re-litigate it.
+
+**Deferred / not done.** Phase 2 (profile registry and the browser spawn
+path), Phase 3 steps 2-3, and all later phases. Only the Claude marker set is
+populated; the seam is vendor-neutral so Phase 2 extends it rather than
+rewriting it.
+
 ### Phase 2: agent spawn path from the browser
 
 Depends on Phase 1. Owns the `#260516-ws-web-dashboard-terminal-pane` spec

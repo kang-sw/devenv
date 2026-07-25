@@ -263,6 +263,12 @@ dropped tickets live in hidden archive dirs and git history.
   in helper argv or the registry, and the spawn seam must SCRUB inherited env
   (a nested agent inherits `CLAUDE_CODE_CHILD_SESSION` and loses transcript
   saving). Sage combined = passed after one block/revise cycle.
+  Progress: Phase 3's step-1 gate is closed (turn-start hook verified) and
+  Phase 1 is DONE (`9f4a16ca`) — the spawn seam carries explicit argv plus an
+  env overlay, with an enumerated 11-marker Claude deny-list scrubbed at both
+  hops. Next unfinished phase is Phase 2. Carry-forward constraint for Phase
+  4: `--env-overlay` is an argv channel and helper argv is world-readable via
+  `ps`, so the callback token must never be threaded through it.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the

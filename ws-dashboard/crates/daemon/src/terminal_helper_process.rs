@@ -390,6 +390,79 @@ async fn handle_connection(
     }
 }
 
+// CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub): pure
+// builder extracted from `spawn_shell` so both the "default (no explicit
+// command) path is byte-for-byte unchanged" and the "explicit command scrubs
+// Claude markers + applies overlay" contracts are testable without spawning
+// a real process. Hop 1 (the daemon's helper spawn,
+// `terminal.rs::build_helper_command`) independently scrubs too, since this
+// hop's inherited env is itself inherited wholesale from hop 1; this hop's
+// own scrub is not merely redundant with that, because it is the only hop
+// that actually determines what a `command = Some(..)` spawn's process
+// sees, so it must scrub regardless of hop 1's outcome.
+//
+// Review cycle 1, finding I1/C1: this used to seed a scrubbed copy of the
+// host env via `command.env_clear()` + repopulate. On Windows,
+// `CommandBuilder::new()`'s base env (`get_base_env`) additionally merges a
+// registry-refreshed system+user `PATH` on top of the process's own
+// inherited env; `env_clear()` destroyed that merge and the repopulation
+// loop only restored the (stale) inherited copy underneath it, so an
+// agent-profile terminal would resolve its program against a narrower
+// `PATH` than an ordinary shell terminal from the same helper binary. Unix
+// is unaffected (its `as_command()` conversion re-derives `SHELL`/`HOME`
+// regardless), but the bug is real on Windows. Per-marker
+// `command.env_remove(marker)` (see `apply_claude_scrub_and_overlay` below)
+// removes exactly the scrub markers from whatever `CommandBuilder::new()`
+// already built - registry merge included - and touches nothing else, so it
+// preserves the whole base-env construction on every platform. There is
+// therefore no `host_env` parameter here anymore: the real base env comes
+// from `CommandBuilder::new()` itself, not an injected copy.
+fn build_shell_command(args: &TerminalHelperArgs, term: String) -> CommandBuilder {
+    let mut command = match &args.command {
+        None => CommandBuilder::new(crate::terminal::default_shell()),
+        Some(program) => {
+            let mut command = CommandBuilder::new(program);
+            command.args(&args.command_args);
+            apply_claude_scrub_and_overlay(&mut command, &args.env_overlay);
+            command
+        }
+    };
+    command.cwd(&args.cwd);
+    command.env("TERM", term);
+    command
+}
+
+// CONTRACT (review cycle 1, finding T3 - LEAD DECISION, since neither the
+// ticket nor the plan settles overlay-vs-scrub precedence explicitly): the
+// scrub wins. An overlay pair keyed to one of the 11 Claude markers must NOT
+// resurrect it - this is a security-adjacent deny-list, and silent
+// resurrection is exactly the failure it exists to prevent. Finding C3
+// separately flags `--env-overlay` as the argv channel a later phase is
+// most likely to reach for by accident, which makes this precedence
+// load-bearing rather than cosmetic. A colliding overlay key is dropped
+// with a warning rather than applied or hard-failed: nothing populates
+// `env_overlay` yet in this phase (Phase 2 is the first real caller), so a
+// hard error here would add fallible-signature plumbing through
+// `build_shell_command`/`spawn_shell` to protect a path with no live
+// caller; a log-and-drop keeps the invariant enforced while staying cheap
+// at this seam, and Phase 2+ callers get a visible signal if they ever hit
+// this collision by mistake.
+fn apply_claude_scrub_and_overlay(command: &mut CommandBuilder, overlay: &[(String, String)]) {
+    for marker in crate::agent_env_profile::CLAUDE.markers {
+        command.env_remove(marker);
+    }
+    for (key, value) in overlay {
+        if crate::agent_env_profile::CLAUDE.markers.contains(&key.as_str()) {
+            tracing::warn!(
+                %key,
+                "env-overlay key matches a scrubbed Claude marker; the scrub wins, overlay value dropped"
+            );
+            continue;
+        }
+        command.env(key, value);
+    }
+}
+
 fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::Result<()> {
     let pty_system = native_pty_system();
     let pair = pty_system.openpty(PtySize {
@@ -398,10 +471,8 @@ fn spawn_shell(args: &TerminalHelperArgs, shared: Arc<SharedState>) -> anyhow::R
         pixel_width: 0,
         pixel_height: 0,
     })?;
-    let mut command = CommandBuilder::new(crate::terminal::default_shell());
-    command.cwd(&args.cwd);
-    command.env(
-        "TERM",
+    let command = build_shell_command(
+        args,
         crate::terminal::browser_pty_term(|key| {
             std::env::var_os(key).map(|value| value.to_string_lossy().into_owned())
         }),
@@ -1017,6 +1088,147 @@ mod reader_thread_utf8_tests {
             reassembled.matches('\u{FFFD}').count(),
             1,
             "exactly one replacement character for the single malformed byte: {reassembled:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod spawn_shell_command_tests {
+    use super::*;
+
+    fn args_fixture() -> TerminalHelperArgs {
+        TerminalHelperArgs {
+            registry_dir: std::path::PathBuf::from("/tmp/registry"),
+            terminal_id: "term_abc".to_owned(),
+            work_root_id: "wr1".to_owned(),
+            cwd: std::path::PathBuf::from("/tmp/cwd"),
+            cwd_hint: None,
+            title: "title".to_owned(),
+            columns: 80,
+            rows: 24,
+            socket_path: std::path::PathBuf::from("/tmp/term_abc.sock"),
+            command: None,
+            command_args: Vec::new(),
+            env_overlay: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn spawn_shell_default_no_command_matches_existing_behaviour() {
+        let args = args_fixture();
+        let command = build_shell_command(&args, "xterm-256color".to_owned());
+
+        assert_eq!(
+            command.get_argv().first(),
+            Some(&std::ffi::OsString::from(crate::terminal::default_shell()))
+        );
+        assert_eq!(
+            command.get_cwd().map(|cwd| cwd.to_string_lossy().into_owned()),
+            Some(args.cwd.to_string_lossy().into_owned())
+        );
+        let extra_env: Vec<&str> = command.iter_extra_env_as_str().map(|(key, _value)| key).collect();
+        assert_eq!(
+            extra_env,
+            vec!["TERM"],
+            "no env manipulation beyond TERM must have run on the default path: {extra_env:?}"
+        );
+        // CONTRACT (review cycle 1, finding T1): `iter_extra_env_as_str()`
+        // alone cannot distinguish "no env method ever called" from
+        // "env_clear() called with nothing re-added but TERM" -
+        // `env_clear()` wipes the ENTIRE internal env map, base-flagged
+        // entries included, but `iter_extra_env_as_str()` only ever reports
+        // non-base-flagged entries either way, so both cases produce the
+        // identical `["TERM"]` result above (verified empirically against
+        // portable-pty 0.8.1 - see review finding T1). A known real
+        // base-env value (`PATH`, present in any dev/CI process) surviving
+        // is the actual proof: an accidental `env_clear()` on this branch
+        // wipes it along with everything else; a correct no-manipulation
+        // default path leaves it untouched.
+        assert!(
+            command.get_env("PATH").is_some(),
+            "default path must preserve the real base env (e.g. PATH); its absence means \
+             something cleared the base env on this branch"
+        );
+    }
+
+    #[test]
+    fn spawn_shell_explicit_command_forwards_argv_cwd_term_and_non_marker_overlay() {
+        let mut args = args_fixture();
+        args.command = Some("printf".to_owned());
+        args.command_args = vec!["hi".to_owned()];
+        args.env_overlay = vec![("FOO".to_owned(), "bar".to_owned())];
+
+        let command = build_shell_command(&args, "xterm-256color".to_owned());
+
+        assert_eq!(
+            command.get_argv(),
+            &vec![std::ffi::OsString::from("printf"), std::ffi::OsString::from("hi")]
+        );
+        assert_eq!(
+            command.get_cwd().map(|cwd| cwd.to_string_lossy().into_owned()),
+            Some(args.cwd.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            command.get_env("TERM").map(|value| value.to_string_lossy().into_owned()),
+            Some("xterm-256color".to_owned())
+        );
+        assert_eq!(
+            command.get_env("FOO").map(|value| value.to_string_lossy().into_owned()),
+            Some("bar".to_owned())
+        );
+    }
+
+    #[test]
+    fn apply_claude_scrub_and_overlay_removes_markers_preserves_unrelated_vars_and_scrub_wins_over_colliding_overlay(
+    ) {
+        // Markers are seeded as explicit `.env()` entries rather than via an
+        // injected "host env" iterable: `CommandBuilder::new()`'s base env
+        // is seeded from this test process's own real environment (which
+        // does not carry Claude markers), and per-marker `env_remove`
+        // behaves identically against base-flagged and explicit entries
+        // (both are stored in the same internal map, see
+        // `portable_pty::cmdbuilder::EnvEntry`), so this exercises the same
+        // removal codepath `build_shell_command`'s `Some` branch runs
+        // against a real dirty inherited env.
+        let mut command = CommandBuilder::new("printf");
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            command.env(marker, "marker-value");
+        }
+        command.env("PATH", "/usr/bin:/bin");
+        // T2: an arbitrary non-marker key that no plausible hand-rolled
+        // allowlist would think to include - closes the gap where a narrow
+        // allowlist that happens to enumerate PATH would otherwise still
+        // pass this test.
+        command.env("SOME_OTHER_VAR", "keep-me");
+
+        // T3 (LEAD DECISION: scrub wins): one overlay pair targets a scrub
+        // marker directly, alongside an ordinary non-conflicting pair.
+        let overlay = vec![
+            ("FOO".to_owned(), "bar".to_owned()),
+            ("CLAUDECODE".to_owned(), "resurrected".to_owned()),
+        ];
+        apply_claude_scrub_and_overlay(&mut command, &overlay);
+
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            assert_eq!(
+                command.get_env(marker),
+                None,
+                "marker {marker} must stay scrubbed even when the overlay tries to set it"
+            );
+        }
+        assert_eq!(
+            command.get_env("PATH").map(|value| value.to_string_lossy().into_owned()),
+            Some("/usr/bin:/bin".to_owned()),
+            "deny-list, not allowlist - PATH must survive"
+        );
+        assert_eq!(
+            command.get_env("SOME_OTHER_VAR").map(|value| value.to_string_lossy().into_owned()),
+            Some("keep-me".to_owned()),
+            "deny-list, not allowlist - an arbitrary non-marker key must survive too (T2)"
+        );
+        assert_eq!(
+            command.get_env("FOO").map(|value| value.to_string_lossy().into_owned()),
+            Some("bar".to_owned())
         );
     }
 }

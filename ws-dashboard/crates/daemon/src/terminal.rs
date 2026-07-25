@@ -653,6 +653,12 @@ pub async fn create_terminal(
         columns,
         rows,
         request.cwd_hint,
+        // CONTRACT (260725 Phase 1): no profile selector exists on
+        // `CreateTerminalRequest` yet - Phase 2 wires a real value once it
+        // adds the browser-facing profile field. Until then every terminal
+        // spawned from the browser takes the unchanged default-shell path.
+        None,
+        Vec::new(),
     )
     .await
     {
@@ -798,6 +804,102 @@ pub async fn close_terminal(
     StatusCode::NO_CONTENT.into_response()
 }
 
+// CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub): pure
+// builder extracted from `TerminalSession::spawn` so the "default (no
+// explicit command) path is byte-for-byte unchanged" contract is testable
+// without spawning a real process. When `command` is `None`, this function
+// must build the exact same arg chain/stdio as before this phase and must
+// call neither `.env()` nor `.env_clear()` - that is hop 1's half of the
+// regression guard. When `command` is `Some`, this hop scrubs `host_env`
+// against the Claude marker profile as defense-in-depth: hop 2 (the
+// helper's own shell spawn) does its own independent scrub of its inherited
+// env, but that inherited env is seeded from hop 1's env at process-spawn
+// time, so a hop-1 regression would otherwise leave the helper's base env
+// dirty even if hop 2's own scrub step were correct - see plan Codebase
+// Findings.
+#[allow(clippy::too_many_arguments)]
+fn build_helper_command(
+    helper_binary: &Path,
+    registry_dir: &Path,
+    terminal_id: &str,
+    work_root_id: &str,
+    spawn_cwd: &Path,
+    title: &str,
+    columns: u16,
+    rows: u16,
+    cwd_hint: Option<&str>,
+    socket_path: &Path,
+    command: Option<&(String, Vec<String>)>,
+    env_overlay: &[(String, String)],
+    host_env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> std::process::Command {
+    let mut helper_command = std::process::Command::new(helper_binary);
+    helper_command
+        .arg("terminal-helper")
+        .arg("--registry-dir")
+        .arg(registry_dir)
+        .arg("--terminal-id")
+        .arg(terminal_id)
+        .arg("--work-root-id")
+        .arg(work_root_id)
+        .arg("--cwd")
+        .arg(spawn_cwd)
+        .arg("--title")
+        .arg(title)
+        .arg("--columns")
+        .arg(columns.to_string())
+        .arg("--rows")
+        .arg(rows.to_string())
+        .arg("--socket-path")
+        .arg(socket_path);
+    if let Some(hint) = cwd_hint {
+        helper_command.arg("--cwd-hint").arg(hint);
+    }
+    if let Some((program, args)) = command {
+        helper_command.arg("--command").arg(program);
+        for arg in args {
+            helper_command.arg("--command-arg").arg(arg);
+        }
+        // CONTRACT (review cycle 1, finding C3): `--env-overlay` values land
+        // verbatim in this argv, which is world-readable via `ps` - see the
+        // full CONTRACT on `TerminalHelperArgs::env_overlay` in `cli.rs`.
+        // Never route a secret (in particular, the parent ticket's Phase 4
+        // callback token) through this loop.
+        for (key, value) in env_overlay {
+            helper_command.arg("--env-overlay").arg(format!("{key}={value}"));
+        }
+        helper_command.env_clear().envs(
+            crate::agent_env_profile::scrub_env_os(host_env, &crate::agent_env_profile::CLAUDE)
+                .into_iter(),
+        );
+    }
+    helper_command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    helper_command
+}
+
+// CONTRACT (review cycle 1, finding C2): `env_overlay` is only meaningful
+// (and only ever applied, at hop 2) when an explicit `command` is present -
+// see `TerminalHelperArgs::env_overlay`'s CONTRACT in `cli.rs`. Hop 2
+// enforces this at the clap boundary (`requires = "command"`); hop 1
+// constructs the helper's argv directly rather than parsing it, so it needs
+// its own explicit guard rather than relying on clap. Extracted as a small
+// pure predicate so it is unit-testable without exercising the rest of
+// `spawn`'s async setup (registry dir, socket path, handshake, ...).
+fn validate_command_env_overlay_pairing(
+    command: &Option<(String, Vec<String>)>,
+    env_overlay: &[(String, String)],
+) -> Result<(), TerminalError> {
+    if command.is_none() && !env_overlay.is_empty() {
+        return Err(TerminalError::BadRequest(
+            "env_overlay requires an explicit command",
+        ));
+    }
+    Ok(())
+}
+
 impl TerminalSession {
     #[allow(clippy::too_many_arguments)]
     async fn spawn(
@@ -810,39 +912,31 @@ impl TerminalSession {
         columns: u16,
         rows: u16,
         cwd_hint: Option<String>,
+        command: Option<(String, Vec<String>)>,
+        env_overlay: Vec<(String, String)>,
     ) -> Result<Arc<Self>, TerminalError> {
+        validate_command_env_overlay_pairing(&command, &env_overlay)?;
         let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
         let id = opaque_terminal_id();
         let socket_path = registry_dir.join(format!("{id}.sock"));
 
-        let mut command = std::process::Command::new(helper_binary);
-        command
-            .arg("terminal-helper")
-            .arg("--registry-dir")
-            .arg(registry_dir)
-            .arg("--terminal-id")
-            .arg(&id)
-            .arg("--work-root-id")
-            .arg(work_root_id.as_str())
-            .arg("--cwd")
-            .arg(&spawn_cwd)
-            .arg("--title")
-            .arg(&title)
-            .arg("--columns")
-            .arg(columns.to_string())
-            .arg("--rows")
-            .arg(rows.to_string())
-            .arg("--socket-path")
-            .arg(&socket_path);
-        if let Some(hint) = normalized_cwd_hint.as_deref() {
-            command.arg("--cwd-hint").arg(hint);
-        }
-        command
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+        let command_to_spawn = build_helper_command(
+            helper_binary,
+            registry_dir,
+            &id,
+            work_root_id.as_str(),
+            &spawn_cwd,
+            &title,
+            columns,
+            rows,
+            normalized_cwd_hint.as_deref(),
+            &socket_path,
+            command.as_ref(),
+            &env_overlay,
+            std::env::vars_os(),
+        );
 
-        tokio::task::spawn_blocking(move || crate::terminal_platform::spawn_detached(command))
+        tokio::task::spawn_blocking(move || crate::terminal_platform::spawn_detached(command_to_spawn))
             .await
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
@@ -1923,6 +2017,160 @@ mod terminal_portability_skeleton_tests {
         let _ = foreign.kill();
         let _ = foreign.wait();
         let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    #[test]
+    fn validate_command_env_overlay_pairing_rejects_overlay_without_command() {
+        assert!(matches!(
+            validate_command_env_overlay_pairing(&None, &[("FOO".to_owned(), "bar".to_owned())]),
+            Err(TerminalError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn validate_command_env_overlay_pairing_allows_overlay_with_command() {
+        assert!(validate_command_env_overlay_pairing(
+            &Some(("agent-cli".to_owned(), Vec::new())),
+            &[("FOO".to_owned(), "bar".to_owned())],
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_command_env_overlay_pairing_allows_no_command_and_no_overlay() {
+        assert!(validate_command_env_overlay_pairing(&None, &[]).is_ok());
+    }
+
+    #[test]
+    fn helper_spawn_default_no_command_matches_existing_arg_shape() {
+        let command = build_helper_command(
+            Path::new("/usr/local/bin/ws-dashboard"),
+            Path::new("/tmp/registry"),
+            "term_abc",
+            "wr1",
+            Path::new("/tmp/cwd"),
+            "title",
+            80,
+            24,
+            None,
+            Path::new("/tmp/term_abc.sock"),
+            None,
+            &[],
+            Vec::<(std::ffi::OsString, std::ffi::OsString)>::new(),
+        );
+
+        assert!(
+            command.get_envs().next().is_none(),
+            "default path must not call .env()/.env_clear() at all"
+        );
+        // CONTRACT (review cycle 1, finding T1): `get_envs()` alone cannot
+        // distinguish "no env method ever called" from "env_clear() called
+        // with nothing re-added" - both report zero explicit entries,
+        // because `std::process::Command` has no public API exposing
+        // whether `clear()` ran (verified empirically against this
+        // toolchain's std - see review finding T1). On unix, `Command`'s
+        // `Debug` impl renders as a shell `env` invocation and DOES encode
+        // the clear flag (`env -i ...` vs a bare quoted program), which
+        // closes the gap there. There is no known equivalent public signal
+        // on Windows (`Command`'s windows `Debug` impl only prints
+        // program+args), so that platform's default-path env_clear()
+        // regression remains a named, accepted limitation of this guard
+        // rather than a fixed gap.
+        #[cfg(unix)]
+        {
+            let debug = format!("{command:?}");
+            assert!(
+                !debug.starts_with("env "),
+                "default path's Debug rendering must not show env manipulation \
+                 (env -i/env -u), which would indicate an unconditional env_clear() \
+                 snuck into this branch: {debug:?}"
+            );
+        }
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(!args.iter().any(|arg| arg == "--command"));
+        assert!(!args.iter().any(|arg| arg == "--command-arg"));
+        assert!(!args.iter().any(|arg| arg == "--env-overlay"));
+    }
+
+    #[test]
+    fn helper_spawn_with_command_scrubs_claude_markers_and_forwards_argv() {
+        let mut host_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = crate::agent_env_profile::CLAUDE
+            .markers
+            .iter()
+            .map(|marker| {
+                (
+                    std::ffi::OsString::from(*marker),
+                    std::ffi::OsString::from("marker-value"),
+                )
+            })
+            .collect();
+        host_env.push((
+            std::ffi::OsString::from("PATH"),
+            std::ffi::OsString::from("/usr/bin:/bin"),
+        ));
+        // T2: a second, arbitrary non-marker key that no plausible
+        // hand-rolled allowlist would think to include - closes the gap
+        // where a narrow allowlist that happens to enumerate PATH would
+        // otherwise still pass this test.
+        host_env.push((
+            std::ffi::OsString::from("SOME_OTHER_VAR"),
+            std::ffi::OsString::from("keep-me"),
+        ));
+
+        let command = build_helper_command(
+            Path::new("/usr/local/bin/ws-dashboard"),
+            Path::new("/tmp/registry"),
+            "term_abc",
+            "wr1",
+            Path::new("/tmp/cwd"),
+            "title",
+            80,
+            24,
+            None,
+            Path::new("/tmp/term_abc.sock"),
+            Some(&("agent-cli".to_owned(), vec!["--flag".to_owned()])),
+            &[("BASE_URL".to_owned(), "http://x".to_owned())],
+            host_env,
+        );
+
+        let envs: HashMap<String, Option<String>> = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            assert!(!envs.contains_key(*marker), "marker {marker} must be scrubbed");
+        }
+        assert_eq!(envs.get("PATH").cloned().flatten().as_deref(), Some("/usr/bin:/bin"));
+        assert_eq!(
+            envs.get("SOME_OTHER_VAR").cloned().flatten().as_deref(),
+            Some("keep-me"),
+            "deny-list, not allowlist - an arbitrary non-marker key must survive too (T2)"
+        );
+
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let command_pos = args.iter().position(|arg| arg == "--command").expect("--command present");
+        assert_eq!(args[command_pos + 1], "agent-cli");
+        let command_arg_pos = args
+            .iter()
+            .position(|arg| arg == "--command-arg")
+            .expect("--command-arg present");
+        assert_eq!(args[command_arg_pos + 1], "--flag");
+        let env_overlay_pos = args
+            .iter()
+            .position(|arg| arg == "--env-overlay")
+            .expect("--env-overlay present");
+        assert_eq!(args[env_overlay_pos + 1], "BASE_URL=http://x");
     }
 }
 
