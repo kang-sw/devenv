@@ -148,6 +148,28 @@ endpoint and token carried in that same injected file. No MCP server, no tool
 surface, no protocol work. The dashboard-as-MCP-server direction stays where it
 already lives — `260711-idea-dashboard-agent-facing-mcp-control-surface`.
 
+ENVIRONMENT SCRUB — NET-NEW REQUIREMENT (found during 2026-07-25 verification;
+not previously recorded anywhere). `spawn_shell`
+(`terminal_helper_process.rs:391-408`) sets only `cwd` and `TERM` on the
+`CommandBuilder` and never calls `env_clear`, so `portable-pty` hands the
+child the daemon's environment WHOLESALE. Today that is harmless because the
+child is a shell. It stops being harmless the moment the child is an agent CLI:
+if the daemon was itself launched from inside an agent harness, that harness's
+env markers propagate down into every spawned agent.
+
+This is not hypothetical. During the hook verification above, a `claude`
+started from inside a Claude Code session printed:
+
+```text
+⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker
+```
+
+Transcript saving off also means `--resume` has nothing to resume. The
+dogfooding path — owner starts the daemon from a terminal inside their agent
+session — is exactly the path that triggers it. The argv/env passthrough
+refactor must therefore include a scrub/allowlist step, not just a
+pass-through, and the vendor profile owns the list of markers to strip.
+
 CONFIG MATERIALIZATION: hook config is per-vendor and does not fit argv/env
 alone (`claude` takes `--settings <file>`; `codex` takes config-file / `-c`
 overrides), so the profile must WRITE a config file at spawn — argv/env
@@ -232,52 +254,129 @@ not a free slot to claim without deciding what happens to that projection.
 Features 1 and 3 above are NOT independent tracks — the injected hook IS the
 attention source. This section settles the path end to end.
 
-### Signal source: vendor hooks (settled)
+### Signal source: vendor hooks (VERIFIED, not assumed)
 
-`260620` Phase 4's live spike verified `PreToolUse` hooks fire via `--settings`
-against `claude` 2.1.207 in headless stream-json mode. OWNER RULING
-(2026-07-25): interactive hook firing is ASSUMED, not re-verified — vendor
-documentation treats interactive as the primary hook use case, so a hook
-verified under stream-json is taken to fire in a PTY session. No spike gates
-design on this.
+The owner ruled on 2026-07-25 that interactive hook firing could be ASSUMED
+from `260620` Phase 4's headless stream-json verification. That assumption was
+then discharged empirically rather than carried — it is now a measured fact:
 
-The turn-boundary hooks (vendor names vary; the `Stop` / `Notification` class)
-are the running -> awaiting-interaction signal. Codex's external `notify`
-program is the likely equivalent and still needs confirming per vendor profile.
+- `--settings <file>` DOES accept a `hooks` block. A doc-derived claim that
+  hooks can only come from `.claude/settings.json` was checked and is wrong;
+  `claude --help` lists `--settings <file-or-json>`, and the repo's own
+  `260620` Phase 4 spike had already injected a `PreToolUse` hook this way.
+- A `Stop` hook supplied via `--settings` FIRES IN A REAL INTERACTIVE PTY
+  SESSION. Verified 2026-07-25 on macOS by driving `claude` under
+  `pty.fork()`, sending a prompt, and observing the hook artifact written
+  BEFORE the session was terminated (so it cannot be confused with a
+  session-teardown write).
+
+`Stop` is therefore the turn-boundary signal, and it needs no fallback tier for
+the Claude profile.
+
+STILL UNVERIFIED (do not present as settled):
+
+- The `Notification` event and its `idle_prompt` matcher — reported by a docs
+  lookup as "Claude is done and waiting for your next prompt", which would be
+  a more precise awaiting-interaction signal than `Stop`. It did NOT fire in
+  the PTY run above, but that run ended at the 60s mark and never idled long
+  enough to be a real test. Worth a second spike only if `Stop` proves too
+  coarse.
+- Codex. Confirmed that Codex HAS a hook subsystem — `codex --help` exposes
+  `--dangerously-bypass-hook-trust` ("Run enabled hooks without requiring
+  persisted hook trust for this invocation"). The earlier guess that Codex
+  offers a `notify` external program was NOT confirmed; no `notify` key
+  appears in the binary's strings or in a live `~/.codex/config.toml`.
+  IMPLICATION worth flagging early: Codex gates hooks behind a PERSISTED TRUST
+  record. A daemon that injects a hook config at spawn may therefore need an
+  explicit trust step, which the Claude profile does not need — the per-vendor
+  profile is less symmetric than this ticket previously assumed.
 
 ### Signal transport: daemon HTTP endpoint (settled)
 
 DECIDED: a narrow HTTP endpoint on the daemon, NOT an extension of the helper
 IPC protocol.
 
-Rejected — extending the helper IPC surface: the socket is already per-terminal
-so filesystem permissions would have supplied authorization for free, but the
-owner rejected it on operability. Helpers are detached and long-lived by
-design, so changing their IPC protocol forces killing and restarting every live
-helper on each dev iteration — exactly the churn that makes dogfooding painful.
-Daemon restarts are cheap, helper restarts are not, and that asymmetry decides
-it. Notification is cosmetic and does not justify touching the load-bearing
-helper protocol.
+Rejected — extending the helper IPC surface. The owner rejected it on
+operability: helpers are detached and long-lived by design, so changing their
+IPC protocol forces killing and restarting every live helper on each dev
+iteration — exactly the churn that makes dogfooding painful. Daemon restarts
+are cheap, helper restarts are not, and that asymmetry decides it. A cosmetic
+feature does not justify touching the load-bearing helper protocol.
+
+CORRECTION (design review, 2026-07-25): an earlier draft of this ticket also
+credited the IPC option with getting authorization "for free" from filesystem
+permissions on the per-terminal socket. That was false and is struck — nothing
+chmods the socket. Only the registry JSON gets `0600`
+(`terminal_registry_file.rs:50-51`), and the helper's handshake carries no
+secret, so same-user forgery was never prevented on that path either. The
+operability argument is the whole reason; the security argument never existed.
 
 AUTHORIZATION: the endpoint carries a per-terminal token minted at spawn and
-written into the same injected vendor config file, so an arbitrary local
-process cannot post attention events for terminals it did not spawn. This is
-integrity scoping, not secrecy — consistent with the `wsSessionKey` reading in
-feature 1. Today the daemon's only auth is a single owner bearer token plus a
-link passphrase (`auth.rs`); handing that to every spawned hook would grant the
-agent every dashboard route, so the scoped token is not optional.
+written into the injected vendor config file, so an arbitrary local process
+cannot post attention events for terminals it did not spawn. This is integrity
+scoping, not secrecy — consistent with the `wsSessionKey` reading in feature 1.
+Today the daemon's only auth is a single owner bearer token plus a link
+passphrase (`auth.rs`) applied as one middleware over the whole protected
+router, so handing that to every spawned hook would grant the agent every
+dashboard route. The scoped token is not optional.
 
-CONSEQUENCE to respect: the token and callback URL must live in the PERSISTED
-terminal registry, not only in daemon memory. `boot_reconcile` re-adopts
-helpers across a daemon restart, so an in-memory-only token would leave a live
-agent posting with a token the restarted daemon no longer recognizes. Port
-drift has the same shape and is accepted as a known staleness mode — the daemon
-is normally started on a fixed port.
+CAVEAT: `--no-auth` disables the owner-auth middleware, which is precisely the
+dogfooding configuration. The scoped token is therefore unenforced in exactly
+the mode it will first be exercised in. Acceptable for a cosmetic feature, but
+it means `--no-auth` runs cannot be used as evidence that token scoping works.
 
-Browser delivery reuses what exists: the `work_root_activity_events` SSE route
-plus `workRootActivity.ts`'s `attention` flag (L66), live/attention priority
+TOKEN STORE — CORRECTED (design review, 2026-07-25). An earlier draft said the
+token must live in "the PERSISTED terminal registry". That is the WRONG store
+and would have leaked the token:
+
+- The registry is HELPER-owned, not daemon-owned — create-on-spawn,
+  delete-on-exit, with the daemon only pruning entries it has confirmed dead
+  (`terminal_registry_file.rs:1-6`), and the helper writes its entry before the
+  IPC listener even binds (`terminal_helper_process.rs:174-193`).
+- Everything the daemon tells the helper travels as clap `--long` argv
+  (`cli.rs:31-49`), which is world-readable via `ps`.
+
+So a token routed into the registry would have to pass through helper argv
+first. Correct shape instead: the token lives in DAEMON-owned persisted state
+keyed by `terminal_id`, and reaches the agent only inside the `0600` vendor
+config file the daemon itself writes. Helper argv carries the config file PATH
+(not secret) and nothing else. The durability requirement that motivated the
+original claim still holds — `boot_reconcile` re-adopts helpers across a daemon
+restart, so an in-memory-only token would leave a live agent posting with a
+token the restarted daemon no longer recognizes — it just has to be satisfied
+in the daemon's own store. Port drift has the same shape and is accepted as a
+known staleness mode; the daemon is normally started on a fixed port.
+
+### Browser delivery: OPEN, not reuse (design review, 2026-07-25)
+
+An earlier draft asserted that browser delivery "reuses what exists" via the
+`work_root_activity_events` SSE route. That was checked against source and is
+WRONG. The activity SSE path cannot carry a terminal-originated attention
+event as built:
+
+- The snapshot route `work_root_activity` (`work_root_activity.rs:187`) DOES
+  merge live in-memory Codex/Claude sessions into the unified feed
+  (L202-221) — which is presumably where the reuse intuition came from.
+- But the SSE route `work_root_activity_events` (L274) goes through
+  `watch_snapshot` (L166) -> `watch_snapshot_blocking` (L546) ->
+  `project_blocking`, which reads the on-disk wsstate projection ONLY, on a
+  200 ms re-poll (L378). The live-session merge is not on the watch path.
+  There is no in-memory injection point.
+- The frontend subscription is additionally scoped to the Activity Console for
+  the SELECTED root — which defeats the purpose, since a nav badge has to
+  light up for roots the user is NOT currently looking at.
+
+What genuinely IS reusable is the browser-side vocabulary, not the transport:
+`workRootActivity.ts`'s `attention` flag (L66), live/attention priority
 ordering, and the browser-local ack watermark
 (`initializeActivityDirtyItems`).
+
+The transport is therefore an OPEN question with three candidates, none picked:
+adding an in-memory injection point to the activity projector's watch path; a
+small dedicated daemon-owned attention event stream independent of the activity
+projection; or piggybacking the existing per-terminal WebSocket (rejected on
+first look — it is per-pane, so it cannot notify about a pane that is not
+open).
 
 ### Presentation
 
@@ -288,11 +387,17 @@ ordering, and the browser-local ack watermark
   orange flash — background / overlay tint pulsing on the row — and/or a
   breakdown inside the second-line counter: working N (spinner) / ready M
   (blinking orange bell glyph).
-  IMPLEMENTATION NOTE: `resourceRowTone` already owns both `background` and
-  `border-left-color` on `.resource-row*` (styles.css 2746-2757; `-error` also
-  sets `background`). A flash must therefore be an independent overlay layer
-  (e.g. a pseudo-element) rather than an animation on `background`, or it will
-  fight the tone classes.
+  IMPLEMENTATION NOTE (corrected after design review — the original overstated
+  which rules own `background`). In the EFFECTIVE CSS block (styles.css 2727+;
+  the earlier 1030-1110 block is overridden), `background` on `.resource-row`
+  is written by three separate rules: the base rule (2729,
+  `--ws-color-surface-context`), `:hover` (2743, `--ws-color-panel-hover`), and
+  the `-error` tone (2757, `--ws-color-notice-error`). The other tone classes
+  (`-ready`, `-muted`) set only `border-left-color`. So `resourceRowTone` does
+  NOT own `background` in general — but the conclusion is unchanged and in fact
+  stronger: an attention flash animated on `background` would fight three
+  independent rules including hover, so it must be an independent overlay layer
+  (e.g. a pseudo-element).
   SEQUENCING: the agent counter is precisely the slot
   `260725-feat-dashboard-nav-row-two-line-open-state` DEFERRED pending this
   pivot. That deferral resolves here — the counter arrives with the pivot and
@@ -361,11 +466,21 @@ wrapper component — is called out below as an open design choice.
   delegate to ws-runtime aliases.
 - RESOLVED 2026-07-25 — was "deriving running / awaiting-interaction from PTY
   output-idle timing without structured turn events". Vendor hooks supply the
-  signal; see `## Notification Path`. Residuals: Codex's hook equivalent
-  (`notify`) is unconfirmed, and vendors with no hook mechanism have no
-  fallback pinned — terminal BEL / OSC 9 is the candidate (xterm.js exposes
-  `onBell`; no handler exists in the codebase today) with output-idle timing as
-  the last resort.
+  signal, now verified in an interactive PTY rather than assumed; see
+  `## Notification Path`. Residuals: Codex hooks exist but are gated behind a
+  persisted trust record whose config shape is unknown, and vendors with no
+  hook mechanism have no fallback pinned — terminal BEL / OSC 9 is the
+  candidate (xterm.js exposes `onBell`; no handler exists in the codebase
+  today) with output-idle timing as the last resort.
+- HOW the attention event reaches the browser. Reopened by design review after
+  the "reuse the activity SSE" assertion was refuted against source — see
+  `### Browser delivery: OPEN, not reuse`. Three candidates listed there, none
+  picked. This is the largest remaining unknown in the notification path.
+- Whether the daemon needs a handle on the AGENT process specifically. Today it
+  tracks the helper and the helper tracks the shell; the agent CLI is a
+  grandchild with no daemon-side identity or lifetime record. Attention state
+  keyed only by terminal id may be sufficient — but if the agent exits while
+  the terminal survives, nothing currently clears its attention flag.
 - Attention aggregation and acknowledgement semantics: does a server row
   aggregate attention from its work roots, and does acknowledging a tab clear
   the nav badge? The ack-watermark precedent exists

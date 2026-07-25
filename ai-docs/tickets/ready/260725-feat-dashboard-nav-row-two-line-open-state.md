@@ -196,10 +196,11 @@ Phase 1 should leave room for it rather than treat it as an unknown shape:
   width for two labelled sub-counts, not one.
 - The pivot also wants a Windows-11-style orange attention flash on the row
   itself. That flash must be an independent overlay layer (e.g. a
-  pseudo-element), NOT an animation on `background` — `resourceRowTone`
-  already owns `background` and `border-left-color` (styles.css 2746-2757,
-  with `-error` setting `background` outright). Phase 1 does not implement the
-  flash, but it must not consume the row's only overlay affordance either.
+  pseudo-element), NOT an animation on `background`: in the effective CSS
+  block, three separate rules already write `background` on `.resource-row` —
+  the base rule (2729), `:hover` (2743), and the `-error` tone (2757). Phase 1
+  does not implement the flash, but it must not consume the row's only overlay
+  affordance either.
 
 This is a compatibility note, not added scope: Phase 1 still ships terminal and
 document counts only.
