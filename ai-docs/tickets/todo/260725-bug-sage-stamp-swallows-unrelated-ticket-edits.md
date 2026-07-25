@@ -115,11 +115,14 @@ the lead to apply findings to the ticket body at all. (Section 4's "fix confirme
 gaps in-place" belongs to the intent-checklist step, before commit, not to the
 sage stage.)
 
-So the four occurrences came from a lead improvising into a documented gap, not
-from following the documented flow. The swallow is real either way — the edits
-existed and the message did not describe them — but the recurrence mechanism is
-"the playbook has no home for review-response edits", which is a second defect
-sitting underneath this one.
+So the four occurrences came from a lead acting on reviewer output without a
+playbook step telling it to. The swallow is real either way — the edits existed
+and the message did not describe them.
+
+That absence was then examined and **judged correct, not a second defect**: the
+reviewer playbooks already deliver the disposition contract per issue via
+`resolution: autonomous|missing`, so a playbook step would restate it. See Phase
+1 for the full rationale and the decision not to add one.
 
 Compounding it, `260725-idea-ws-git-commit-rename-and-payload-rejections` means
 the caller often cannot pre-commit those edits through `ws/git.commit` anyway
@@ -177,10 +180,23 @@ output exists), so the swallow criterion does not force it; the recommendation i
 to align it anyway so one convention covers both sage tools, but if it is left
 committing, record why in the ticket.
 
-Then update `lead-write-ticket`'s Sage Review Gate step to commit after stamping,
-so the posture change and any review-response edits land in one commit with real
-`## AI Context`. The playbook must make clear that this is the commit carrying
-review-response rationale, since that content is exactly what was being lost.
+Then update `lead-write-ticket`'s Sage Review Gate step with the one thing that is
+not derivable: **where the commit goes**. Add a commit after stamping, so the
+posture change and whatever the lead has uncommitted land together with real
+`## AI Context`.
+
+**Do not add a step instructing the lead to apply reviewer findings.** Design
+review flagged its absence, but the disposition contract already ships with the
+data: each reviewer issue carries `resolution: autonomous` ("the lead or
+implementer can resolve this without a user decision") or `resolution: missing`
+("a user decision ... is required"), defined in both reviewer playbooks and
+delivered at the moment of use, at finer granularity than a playbook sentence
+could give. A step would be restatement, which
+`260702-research-destructive-dedup-methodology` separates from guardrails and
+`260630-epic-skill-playbook-diet` is actively removing. Empirically, the lead in
+the originating session applied findings on every one of four stages with no such
+instruction present. Accepting or rejecting a finding is the lead's authority and
+the reviewer doctrine already frames its output as advisory.
 
 **Depends on `260725-idea-ws-git-commit-rename-and-payload-rejections` Phase 1.**
 Once `sage_stamp` stops committing, the caller commits the posture change through
@@ -188,10 +204,15 @@ Once `sage_stamp` stops committing, the caller commits the posture change throug
 Landing this first would replace a bad commit message with an uncommittable
 state.
 
-Verification: `sage_stamp` produces no commit and leaves the posture write staged;
-a subsequent `ws/git.commit` by the caller carries both the posture change and any
-concurrent body edits under caller-supplied `## AI Context`; the tool's response
-and schema no longer advertise a commit ref; running the full
-`lead-write-ticket` flow end-to-end on a ticket with review-driven edits produces
-a commit whose message describes those edits, which is the regression this ticket
-exists to prevent.
+Verification: `sage_stamp` produces no commit and leaves the working tree
+otherwise untouched (no staging); a subsequent `ws/git.commit` by the caller
+carries the posture change plus whatever body edits the lead had uncommitted,
+under caller-supplied `## AI Context`; the tool's response, its schema
+description, and `next_instruction` in both verdict branches no longer advertise
+a commit or route the lead past one.
+
+The end-to-end criterion is stated in terms of *uncommitted edits the lead
+happens to hold*, not "review-driven edits", because the playbook has no step
+that produces the latter and adding one is explicitly out of scope above — a
+criterion phrased around review-response content would not be reproducible from
+the documented flow.
