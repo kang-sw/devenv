@@ -47,6 +47,33 @@ pub struct TerminalHelperArgs {
     pub rows: u16,
     #[arg(long)]
     pub socket_path: std::path::PathBuf,
+    // CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub):
+    // explicit command + env overlay passthrough. `command` absent (the
+    // default) means "spawn `default_shell()`, unchanged from today" -
+    // `command_args`/`env_overlay` are only meaningful when `command` is
+    // `Some`. All three default to absent/empty so existing manual-argv
+    // fixtures that never pass these flags keep parsing unmodified.
+    #[arg(long)]
+    pub command: Option<String>,
+    // `allow_hyphen_values`: forwarded argv commonly includes the target
+    // command's own flags (e.g. `--command-arg --flag`), which clap would
+    // otherwise reject as an unexpected option rather than accept as this
+    // flag's value.
+    #[arg(long = "command-arg", allow_hyphen_values = true)]
+    pub command_args: Vec<String>,
+    #[arg(long = "env-overlay", value_parser = parse_env_overlay)]
+    pub env_overlay: Vec<(String, String)>,
+}
+
+// CONTRACT: pure `KEY=VALUE` split on the first `=`; used as the clap
+// `value_parser` for `--env-overlay` so malformed overlay flags fail fast at
+// argument parsing rather than surfacing later as a silently-dropped or
+// misinterpreted env var.
+fn parse_env_overlay(raw: &str) -> Result<(String, String), String> {
+    match raw.split_once('=') {
+        Some((key, value)) => Ok((key.to_owned(), value.to_owned())),
+        None => Err(format!("expected KEY=VALUE, got `{raw}` (missing `=`)")),
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -254,6 +281,93 @@ mod tests {
         let cli = Cli::parse_from(["ws-dashboard", "--remote-guide"]);
 
         assert!(cli.wants_remote_guide());
+    }
+
+    #[test]
+    fn terminal_helper_args_parse_command_argv_and_env_overlay_flags() {
+        let cli = Cli::parse_from([
+            "ws-dashboard",
+            "terminal-helper",
+            "--registry-dir",
+            "/tmp/registry",
+            "--terminal-id",
+            "t1",
+            "--work-root-id",
+            "wr1",
+            "--cwd",
+            "/tmp/cwd",
+            "--title",
+            "test",
+            "--columns",
+            "80",
+            "--rows",
+            "24",
+            "--socket-path",
+            "/tmp/t1.sock",
+            "--command",
+            "agent-cli",
+            "--command-arg",
+            "--flag",
+            "--command-arg",
+            "value",
+            "--env-overlay",
+            "FOO=bar",
+            "--env-overlay",
+            "BASE_URL=http://x",
+        ]);
+
+        let args = cli.terminal_helper_args().expect("terminal-helper args");
+        assert_eq!(args.command.as_deref(), Some("agent-cli"));
+        assert_eq!(args.command_args, vec!["--flag".to_owned(), "value".to_owned()]);
+        assert_eq!(
+            args.env_overlay,
+            vec![
+                ("FOO".to_owned(), "bar".to_owned()),
+                ("BASE_URL".to_owned(), "http://x".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn terminal_helper_args_command_argv_and_env_overlay_default_absent() {
+        let cli = Cli::parse_from([
+            "ws-dashboard",
+            "terminal-helper",
+            "--registry-dir",
+            "/tmp/registry",
+            "--terminal-id",
+            "t1",
+            "--work-root-id",
+            "wr1",
+            "--cwd",
+            "/tmp/cwd",
+            "--title",
+            "test",
+            "--columns",
+            "80",
+            "--rows",
+            "24",
+            "--socket-path",
+            "/tmp/t1.sock",
+        ]);
+
+        let args = cli.terminal_helper_args().expect("terminal-helper args");
+        assert_eq!(args.command, None);
+        assert!(args.command_args.is_empty());
+        assert!(args.env_overlay.is_empty());
+    }
+
+    #[test]
+    fn parse_env_overlay_splits_on_first_equals() {
+        assert_eq!(
+            parse_env_overlay("KEY=value=with=equals"),
+            Ok(("KEY".to_owned(), "value=with=equals".to_owned()))
+        );
+    }
+
+    #[test]
+    fn parse_env_overlay_rejects_missing_equals() {
+        assert!(parse_env_overlay("NOEQUALSSIGN").is_err());
     }
 
     #[test]
