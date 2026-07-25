@@ -189,6 +189,13 @@ turn-start hook fires, the first slice ships a two-state vocabulary
 half of the nav counter goes with it. Do not infer `working` from output-idle
 timing; that is the heuristic this whole design exists to avoid.
 
+**Resolved 2026-07-25, positive.** The Phase 3 step-1 spike (see that phase's
+step-1 record) measured `UserPromptSubmit` firing in a real interactive PTY
+session. `working` therefore STAYS in the vocabulary and the spinner half of
+the nav counter is NOT deferred. This resolves the gate; it does not complete
+Phase 3 — steps 2-3 (hook config materialization, the `terminal-notify`
+subcommand) are untouched.
+
 ### The first spawn produces an ordinary terminal pane
 
 The research ticket's open question 1 ("how thin the additive layer is —
@@ -436,6 +443,119 @@ Depends on Phase 2.
    argv.
 3. Add the hidden `ws-dashboard terminal-notify` subcommand and the
    bound-base-URL file the daemon rewrites on every bind.
+
+#### Step 1 spike record — 2026-07-25 (SEPARABLE GATE result; NOT a Phase 3 `### Result`)
+
+This is a partial record against Phase 3 step 1 only. Steps 2-3 (hook config
+materialization, `terminal-notify` subcommand) are UNTOUCHED and Phase 3 as a
+whole is NOT done. The ticket's `## Phases` preamble permits this step-1 gate
+to be completed and recorded independently of the rest of the phase; this
+section is that record, placed inline (rather than as a phase `### Result`,
+which the ticket conventions reserve for a completed phase) because Phase 3
+has no `### Result` yet. All backing artifacts lived under a session-scoped
+scratchpad that does not survive the session, so this record is
+self-contained: method, raw data, and cross-checks are inlined below rather
+than cited by path.
+
+**Result: POSITIVE.** `UserPromptSubmit` DOES fire at human turn submission for
+the Claude CLI (v2.1.220) under a real interactive PTY. Consequence, per the
+`## Decisions` gate this resolves: `working` STAYS in the three-state
+`working`/`ready`/`idle` vocabulary, and the spinner half of the Phase 7 nav
+counter is NOT deferred.
+
+**Raw artifact (verbatim, both lines, one run, one prompt/reply turn):**
+
+```
+USER_PROMPT_SUBMIT 1784991563.367513000
+STOP 1784991570.994170000
+```
+
+7.626657 s apart.
+
+**Method (sufficient to reproduce without the scratchpad):** Python stdlib
+`pty.fork()`; child `os.execve()` of the resolved absolute path to the
+`claude` binary (execve does not search `PATH`) with argv
+`["claude", "--settings", <path>]`. The settings file registers BOTH
+`UserPromptSubmit` and `Stop` as
+`{"matcher": "*", "hooks": [{"type": "command", "command": "echo \"<LABEL> $(date +%s.%N)\" >> <shared events.log>"}]}`.
+The parent process waits ~8 s (one poll loop, 0.5 s `select()` tick), writes a
+short prompt (`"Reply with exactly the word done and stop.\r"`) to the PTY
+master fd, keeps polling, then — BEFORE any teardown (`SIGTERM`, fd close, or
+`waitpid`) — reads `events.log` from the parent process and only then sends
+`SIGTERM`. That read-before-teardown ordering is load-bearing: it is what
+makes the timestamps trustworthy as fire-time observations rather than
+teardown-time artifacts, and it is the same method that originally verified
+`Stop`. CLI version 2.1.220. Exactly one CLI invocation, one short
+prompt/reply turn, one settings file shared by both hooks.
+
+**Why the timestamps are fire-time, not settings-write-time:** the settings
+file holds `$(date +%s.%N)` as an UNEXPANDED shell literal (verified by
+reading the settings file back: the command string contains the literal
+`$(date +%s.%N)`, not a baked-in number) — the hook's own shell expands it only
+when the hook actually runs. The two lines are 7.627 s apart, which is
+inconsistent with both being written at settings-parse or session-teardown
+time. Independent cross-check at a layer the hook cannot influence:
+`events.log`'s own filesystem mtime (`1784991570.995319`) matches the `STOP`
+line's embedded timestamp (`1784991570.994170`) to 1.1 ms.
+
+**Why the fire is pinned to the human submission and not to session start,
+config load, replay, or teardown:** exactly one prompt was ever written to the
+PTY in the run, at script-relative `t≈8.3s` (the driver script's own progress
+line: `[t=8.3] sent prompt`). Exactly one `UserPromptSubmit` line and one
+`Stop` line appear in `events.log`, in that order, both timestamped after the
+process had been running for several seconds — there is no second, unrelated
+`UserPromptSubmit` fire that a session-start or config-load explanation would
+need to account for. Independent corroboration from the PTY transcript's own
+self-reported elapsed time for that turn — the CLI's live status line showed
+`(7s · ↓1 tokens)` and the completed-turn line read `Crunched for 7s` — which
+matches the 7.627 s gap measured between the two hook-written timestamps
+within the overhead of hook dispatch and process scheduling.
+
+**Positive control (why the result is trustworthy, not merely favorable):**
+`Stop` was registered in the same run specifically so an absent
+`UserPromptSubmit` could be distinguished from a dead harness (e.g. `claude`
+failing to start, the settings file being ignored, or the PTY drive script
+losing the child). That design criterion was met: both hooks fired in the
+same run, `Stop` confirming the harness was live and hook delivery worked at
+all, `UserPromptSubmit` confirming the specific candidate signal.
+
+**Environment note (stated precisely):** the spike ran inside a Claude Code
+session, and the child was exec'd via a filtered environment with all ten
+`CLAUDE`/`CLAUDECODE`-named variables stripped (`CLAUDECODE`,
+`CLAUDE_CODE_BRIDGE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
+`CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`,
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, `CLAUDE_CODE_SESSION_ID`,
+`CLAUDE_EFFORT`, `CLAUDE_PID`, `CLAUDE_WATCHER_TOKEN`), ruling out "inherited
+env suppressed the hook" as a confound. Residual `AI_AGENT=claude-code_2-1-219_agent`
+and several `~/.claude/plugins/...` entries in the child's `PATH` remained
+unstripped. This does not weaken the result — residual environment could only
+have suppressed a fire, never fabricated one, and a fire was observed anyway.
+
+**Scope boundary — what this DOES and does NOT prove (must not drift):**
+- PROVEN: the `UserPromptSubmit` event exists in CLI 2.1.220; it fires at
+  human turn submission under a real interactive PTY; a `type: "command"` hook
+  delivered via a `--settings` FILE PATH executes and writes an observable
+  artifact.
+- NOT PROVEN: `0600` file permissions specifically — the spike's settings file
+  was `0644` (same-uid read is expected to work identically, but was not
+  tested at `0600`) — and delivery through the daemon -> helper ->
+  `portable-pty` seam with the Phase 1 environment scrub applied. Phase 3 step
+  2 (hook config materialization under `agent-profiles/<terminal_id>/`) and
+  step 3 (`terminal-notify` subcommand) still own that plumbing and remain
+  unverified.
+- Correction to a premise recorded elsewhere: the spike did NOT use
+  inline-argv JSON delivery. The `## Decisions` note about `claude_cli.rs`
+  passing its hook settings JSON inline as argv (around the "Prior art to
+  reuse, not reinvent" bullet) describes that module's existing mechanism, not
+  this spike — this spike used a `--settings <file>` path throughout, and does
+  not validate step 2's delivery plumbing.
+
+Scratchpad paths referenced during this spike
+(`turn_start_spike/events.log`, `turn_start_spike/settings.json`,
+`turn_start_spike/child_env.txt`, `turn_start_spike/pty_transcript.txt`,
+`turn_start_spike.py`, `turn_start_spike_run.log`) are ephemeral and already
+gone; they are named here only as historical context, not as evidence this
+record depends on.
 
 Verification: the spike result recorded explicitly (including a negative
 result); a test that `terminal-notify` resolves a base URL written after the

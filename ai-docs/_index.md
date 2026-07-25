@@ -276,7 +276,14 @@ tickets and dashboard dogfooding are no longer build-blocked. The one
 exception worth taking early — now moot as a special case, but recorded for
 history — was the turn-start hook spike inside the attention ticket's Phase 3,
 which touches no daemon code and decides whether the `working` state and the
-nav spinner exist at all.
+nav spinner exist at all. That spike has since RUN and answered POSITIVE
+(2026-07-25): `UserPromptSubmit` fires at human turn submission for the vendor
+CLI under an interactive PTY, verified with `Stop` as a same-run positive
+control, so the first slice keeps the three-state `working`/`ready`/`idle`
+vocabulary and the nav spinner is not deferred. Evidence is inlined in that
+ticket's Phase 3 step-1 record. Phase 3 itself is still open — its steps 2-3,
+the `0600` hook-config materialization and the daemon-to-helper delivery seam,
+remain unverified.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin
