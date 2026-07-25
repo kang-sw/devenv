@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -151,9 +151,29 @@ where
 #[derive(Clone)]
 pub struct TerminalRegistry {
     sessions: Arc<RwLock<HashMap<String, Arc<TerminalSession>>>>,
+    // CONTRACT (260725 Phase 4): terminal_id -> callback token, kept in
+    // lockstep with `sessions` at the same four choke points
+    // (`insert`/`insert_unchecked`/`remove`/`remove_for_work_roots`) - see
+    // each method's own comment. NEVER logged, NEVER serialized into
+    // `TerminalRegistryEntry` or any HTTP response; the only reader is
+    // `post_terminal_turn_state`'s token check.
+    tokens: Arc<RwLock<HashMap<String, String>>>,
     helper_binary: PathBuf,
     registry_dir: PathBuf,
     connect_timeout: Duration,
+    // CONTRACT (260725 Phase 4): the daemon state dir, threaded in from
+    // `persistent_state::default_state_dir()` at construction rather than
+    // recomputed at every call site that needs it (spawn's hook-config
+    // branch, boot-reconcile's adopt arm, the GC sweep) - single source of
+    // truth for where `terminal-tokens/` and `agent-profiles/` live.
+    state_dir: Option<PathBuf>,
+    // CONTRACT (260725 Phase 4, ticket "Ephemeral port"): the daemon's own
+    // bound base URL, threaded in from the SAME `bound_addr`-derived string
+    // `server.rs` already builds at bind time (BEFORE `boot_reconcile`
+    // runs) - never re-read from `bound-base-url.json`, which would
+    // reintroduce the rejected multi-daemon-steal shape (see
+    // `agent_callback.rs`'s CONTRACT on `write_bound_base_url`).
+    base_url: String,
 }
 
 impl Default for TerminalRegistry {
@@ -162,6 +182,15 @@ impl Default for TerminalRegistry {
             default_helper_binary(),
             default_registry_dir(),
             DEFAULT_CONNECT_TIMEOUT,
+            crate::persistent_state::default_state_dir(),
+            // CONTRACT: no real bound address exists outside `server.rs`'s
+            // `run_with_shutdown` - the only production call site always
+            // supplies the real bound base URL instead of this fallback.
+            // An empty string degrades gracefully: `write_callback_target`
+            // would write an unusable (but never dangerous) `baseUrl`, and
+            // nothing constructs a `TerminalRegistry` via `Default` today
+            // (see plan Codebase Findings).
+            String::new(),
         )
     }
 }
@@ -177,12 +206,21 @@ pub(crate) fn default_registry_dir() -> PathBuf {
 }
 
 impl TerminalRegistry {
-    pub fn new(helper_binary: PathBuf, registry_dir: PathBuf, connect_timeout: Duration) -> Self {
+    pub fn new(
+        helper_binary: PathBuf,
+        registry_dir: PathBuf,
+        connect_timeout: Duration,
+        state_dir: Option<PathBuf>,
+        base_url: String,
+    ) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            tokens: Arc::new(RwLock::new(HashMap::new())),
             helper_binary,
             registry_dir,
             connect_timeout,
+            state_dir,
+            base_url,
         }
     }
 
@@ -193,12 +231,26 @@ impl TerminalRegistry {
     // helpers that survived a prior daemon's exit, applies the 6-row table
     // (`terminal_reconcile::classify`) per entry, and returns a registry
     // pre-populated with every adopted (row 1/2) session.
+    //
+    // CONTRACT (260725 Phase 4, ORDERING IS LOAD-BEARING): the `server.rs`
+    // GC sweep must be spawned strictly AFTER this call is awaited to
+    // completion - see `agent_profile_gc.rs`'s module CONTRACT for why a
+    // sweep racing ahead of this line would delete the profile directory of
+    // every helper this call is about to adopt.
     pub async fn boot_reconcile(
         helper_binary: PathBuf,
         registry_dir: PathBuf,
         connect_timeout: Duration,
+        state_dir: Option<PathBuf>,
+        base_url: String,
     ) -> Self {
-        let registry = Self::new(helper_binary, registry_dir.clone(), connect_timeout);
+        let registry = Self::new(
+            helper_binary,
+            registry_dir.clone(),
+            connect_timeout,
+            state_dir,
+            base_url,
+        );
         let scan_dir = registry_dir.clone();
         let entries = tokio::task::spawn_blocking(move || scan_registry_dir(&scan_dir))
             .await
@@ -242,6 +294,7 @@ impl TerminalRegistry {
             ReconcileRow::AdoptLive | ReconcileRow::AdoptGrace => {
                 let connected =
                     connected.expect("adopt rows are only reachable with a live connection");
+                let callback_token = self.recover_callback_token(&entry.terminal_id);
                 let session = TerminalSession::from_connection(
                     entry.terminal_id.clone(),
                     WorkRootId::from(entry.work_root_id.clone()),
@@ -270,7 +323,15 @@ impl TerminalRegistry {
                     // process's own argv via OS APIs would be a new
                     // mechanism, not "extend the seam"); flagged for a
                     // follow-up ticket, not fixed here.
+                    //
+                    // CONTRACT (260725 Phase 4, callback token - NOT the same
+                    // shape as profile_id above): unlike profile provenance,
+                    // the callback token IS recoverable across a restart -
+                    // see `recover_callback_token`'s own CONTRACT for why. Do
+                    // not read the comment above as applying to the token
+                    // too; the two fields have opposite recoverability.
                     None,
+                    callback_token,
                 );
                 self.insert_unchecked(session);
             }
@@ -287,6 +348,43 @@ impl TerminalRegistry {
                 unreachable!("identity already verified above; classify cannot return this row")
             }
         }
+    }
+
+    // CONTRACT (260725 Phase 4): unlike `profile_id` (permanently lost on
+    // adopt - see the CONTRACT on `reconcile_entry`'s adopt arm above), the
+    // callback token IS recoverable: it was written once, at fresh spawn, to
+    // `terminal-tokens/<terminal_id>.json` and never rotates for this
+    // terminal's lifetime (one token per terminal, generated once, valid
+    // until close - Design Answer 1). The presence of
+    // `agent-profiles/<terminal_id>/callback.json` on disk is what
+    // distinguishes "this terminal was spawned with hooks" (recover its
+    // token, rewrite its callback target with the fresh `base_url`) from a
+    // plain shell terminal (no profile dir ever existed, `None` is not a
+    // loss - there was never a token to recover). An unresolved
+    // `state_dir` also falls through to `None`, same as the fresh-spawn
+    // path's own degrade.
+    fn recover_callback_token(&self, terminal_id: &str) -> Option<String> {
+        let state_dir = self.state_dir.as_deref()?;
+        let profile_dir = state_dir.join("agent-profiles").join(terminal_id);
+        let callback_path = crate::agent_callback::callback_path(&profile_dir);
+        if !callback_path.exists() {
+            return None;
+        }
+        let token = crate::agent_token_store::read_token(state_dir, terminal_id)?;
+        if let Err(error) = crate::agent_callback::write_callback_target(
+            &profile_dir,
+            &self.base_url,
+            terminal_id,
+            &token,
+        ) {
+            tracing::error!(
+                terminal_id = %terminal_id,
+                %error,
+                "failed to rewrite callback target on boot-reconcile adopt; a stale base URL \
+                 may remain until the next successful rewrite"
+            );
+        }
+        Some(token)
     }
 
     fn list_for_work_root(&self, work_root_id: &WorkRootId) -> Vec<TerminalSessionView> {
@@ -307,6 +405,33 @@ impl TerminalRegistry {
             .cloned()
     }
 
+    // CONTRACT (260725 Phase 4): the ONLY reader of `self.tokens` - backs
+    // `post_terminal_turn_state`'s auth check. Never logged, never echoed
+    // into a response.
+    fn token_for(&self, terminal_id: &str) -> Option<String> {
+        self.tokens
+            .read()
+            .expect("terminal registry lock poisoned")
+            .get(terminal_id)
+            .cloned()
+    }
+
+    // CONTRACT (260725 Phase 4, GC sweep liveness source): every terminal id
+    // currently in `self.sessions`, regardless of status - "keys off
+    // TERMINAL liveness", not `TerminalSession::is_live()`'s strict
+    // Running-only check, since a config may legitimately outlive an agent
+    // that exited inside a surviving (or grace-window) terminal. See
+    // `agent_profile_gc.rs`'s module CONTRACT for the ordering guarantee
+    // this depends on at its one production call site (`server.rs`).
+    pub(crate) fn live_terminal_ids(&self) -> HashSet<String> {
+        self.sessions
+            .read()
+            .expect("terminal registry lock poisoned")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     fn insert(&self, session: Arc<TerminalSession>) -> Result<(), TerminalError> {
         let mut sessions = self
             .sessions
@@ -316,6 +441,7 @@ impl TerminalRegistry {
         if sessions.len() >= MAX_TERMINAL_SESSIONS {
             return Err(TerminalError::BadRequest("too many terminal sessions"));
         }
+        self.remember_token(&session);
         sessions.insert(session.id.clone(), session);
         Ok(())
     }
@@ -326,17 +452,52 @@ impl TerminalRegistry {
     // `insert`'s cap check here could evict a legitimately-adopted live
     // session for no better reason than scan order.
     fn insert_unchecked(&self, session: Arc<TerminalSession>) {
+        self.remember_token(&session);
         self.sessions
             .write()
             .expect("terminal registry lock poisoned")
             .insert(session.id.clone(), session);
     }
 
-    fn remove(&self, terminal_id: &str) -> Option<Arc<TerminalSession>> {
-        self.sessions
+    // CONTRACT (260725 Phase 4): the ONE place `self.tokens` gains an entry
+    // - both `insert` and `insert_unchecked` call this so the in-memory
+    // token map and the session map never drift apart. A session with no
+    // `callback_token` (plain shell, or hook materialization that failed
+    // before a token was generated) simply adds nothing here.
+    fn remember_token(&self, session: &Arc<TerminalSession>) {
+        if let Some(token) = session.callback_token.clone() {
+            self.tokens
+                .write()
+                .expect("terminal registry lock poisoned")
+                .insert(session.id.clone(), token);
+        }
+    }
+
+    // CONTRACT (260725 Phase 4): deletes the matching `self.tokens` entry
+    // AND best-effort deletes the on-disk token file - the other of the
+    // four lockstep choke points (see `remember_token` for the insert side).
+    fn forget_token(&self, terminal_id: &str) {
+        let had_token = self
+            .tokens
             .write()
             .expect("terminal registry lock poisoned")
             .remove(terminal_id)
+            .is_some();
+        if had_token {
+            if let Some(state_dir) = self.state_dir.as_deref() {
+                crate::agent_token_store::delete_token(state_dir, terminal_id);
+            }
+        }
+    }
+
+    fn remove(&self, terminal_id: &str) -> Option<Arc<TerminalSession>> {
+        let removed = self
+            .sessions
+            .write()
+            .expect("terminal registry lock poisoned")
+            .remove(terminal_id);
+        self.forget_token(terminal_id);
+        removed
     }
 
     // CONTRACT (risk signal, ticket 260723 Phase 1 plan): returns every
@@ -364,6 +525,10 @@ impl TerminalRegistry {
                 true
             }
         });
+        drop(sessions);
+        for session in &removed {
+            self.forget_token(&session.id);
+        }
         removed
     }
 }
@@ -457,6 +622,16 @@ pub struct TerminalSession {
     // to `TerminalRegistryEntry` (hard constraint), so this does not survive
     // a daemon restart; see `reconcile_entry`'s adopt-arm CONTRACT comment.
     profile_id: Option<String>,
+    // CONTRACT (260725 Phase 4): mirrors `profile_id`'s shape (provenance
+    // slot, not persisted to `TerminalRegistryEntry` - hard constraint), but
+    // NOT its recoverability: this IS recovered on boot-reconcile adopt
+    // (read back from `terminal-tokens/<terminal_id>.json`), unlike
+    // `profile_id`. `None` for a plain shell terminal (`hook_config: None`
+    // at spawn) or when token/callback materialization failed. The only
+    // reader is `TerminalRegistry::remember_token`; this field itself is
+    // never logged, never serialized (no `Serialize` derive reads it), and
+    // never forwarded into helper argv.
+    callback_token: Option<String>,
     pid: u32,
     start_time: u64,
     write_half: Arc<AsyncMutex<IpcWriteHalf>>,
@@ -689,6 +864,8 @@ pub async fn create_terminal(
         &state.terminals.helper_binary,
         &state.terminals.registry_dir,
         state.terminals.connect_timeout,
+        state.terminals.state_dir.as_deref(),
+        &state.terminals.base_url,
         work_root_id,
         root_path,
         request.title.unwrap_or_else(|| "Terminal".to_owned()),
@@ -847,6 +1024,57 @@ pub async fn close_terminal(
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
     session.terminate().await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalTurnStateRequest {
+    token: String,
+    // CONTRACT: deliberately a raw `String`, not `agent_turn_state::TurnState`
+    // directly - see that module's own CONTRACT for why parsing this field
+    // is deferred until AFTER the token check below, rather than left to
+    // axum's `Json` extractor (which would reject an unrecognized value
+    // before this handler body - and therefore the token check - ever runs).
+    state: String,
+}
+
+// CONTRACT (ticket "the route pair" / router.rs wiring): registered in the
+// OUTER router chain, structurally outside `require_owner_auth` - see
+// `router.rs::build_router`'s CONTRACT comment. This is the one HTTP route in
+// this crate authorized by a per-terminal opaque token instead of the owner
+// session cookie: the caller is a vendor CLI hook firing from inside a
+// spawned agent terminal (`terminal-notify`, `terminal_notify.rs`), never a
+// browser, and it never receives - and could not present - an owner session
+// cookie.
+//
+// CONTRACT (Design Answer 3): an unknown `terminal_id` and a wrong token
+// return the EXACT SAME response (`terminal_error(UNAUTHORIZED,
+// "unauthorized")`) - never let a caller distinguish "no such terminal" from
+// "wrong token" by status code or body. The turn-state value is only parsed
+// (and only rejected as `BAD_REQUEST` on an unrecognized value) AFTER this
+// check passes, so a probing caller with no valid token can never even learn
+// whether `state`'s value would have been acceptable.
+//
+// CONTRACT (Phase 4 scope boundary): this handler validates and accepts a
+// turn-state POST but does NOT persist or broadcast the value anywhere
+// durable/observable - there is nothing yet to hand it to (Phase 5 owns the
+// SSE broadcast hub). `_turn_state` is intentionally unused beyond proving
+// the value parsed.
+pub async fn post_terminal_turn_state(
+    State(state): State<AppState>,
+    AxumPath(terminal_id): AxumPath<String>,
+    Json(request): Json<TerminalTurnStateRequest>,
+) -> Response {
+    let Some(expected_token) = state.terminals.token_for(&terminal_id) else {
+        return terminal_error(StatusCode::UNAUTHORIZED, "unauthorized");
+    };
+    if !crate::agent_turn_state::tokens_match(&expected_token, &request.token) {
+        return terminal_error(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let Some(_turn_state) = crate::agent_turn_state::parse_turn_state(&request.state) else {
+        return terminal_error(StatusCode::BAD_REQUEST, "invalid turn state");
+    };
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -1014,6 +1242,8 @@ impl TerminalSession {
         helper_binary: &Path,
         registry_dir: &Path,
         connect_timeout: Duration,
+        state_dir: Option<&Path>,
+        base_url: &str,
         work_root_id: WorkRootId,
         root_path: PathBuf,
         title: String,
@@ -1041,6 +1271,7 @@ impl TerminalSession {
         // and not inside `build_helper_command` (a pure argv builder with no
         // filesystem access, deliberately kept that way).
         let mut command = command;
+        let mut callback_token: Option<String> = None;
         if let (Some(hook_config), Some((_, args))) = (hook_config, command.as_mut()) {
             // FIX (review cycle 1, finding E): a `None` state dir used to
             // fall back to `std::env::temp_dir()`, landing an EXECUTED
@@ -1052,18 +1283,46 @@ impl TerminalSession {
             // signaling is best-effort UX, not correctness-critical - see
             // the materialization-failure branch below, which already
             // degrades the same way) and removes the exposure entirely.
-            match crate::persistent_state::default_state_dir() {
+            match state_dir {
                 Some(state_dir) => {
                     let profile_dir = state_dir.join("agent-profiles").join(&id);
-                    // CONTRACT (deliberate deferral, ticket "On-disk layout" /
-                    // Phase 4): `agent-profiles/<terminal_id>/` is created here and
-                    // never reclaimed by this phase - no cleanup on terminal close,
-                    // no sweep of stale directories at daemon restart. The ticket
-                    // pins that GC sweep to Phase 4 ("A GC sweep over
-                    // `agent-profiles/`... must run strictly AFTER `boot_reconcile`
-                    // completes"), so every terminal spawned under this phase alone
-                    // leaks its profile directory until Phase 4 lands. This is a
-                    // known, ticket-acknowledged gap, not an oversight.
+                    // CONTRACT (260725 Phase 4): `agent-profiles/<terminal_id>/`
+                    // is created here and reclaimed only by the GC sweep
+                    // (`agent_profile_gc.rs`), never on terminal close - the
+                    // sweep is the sole cleanup path, driven by terminal
+                    // liveness rather than a close-time hook here.
+                    //
+                    // CONTRACT (260725 Phase 4, token generation and write
+                    // order - load-bearing): the token and `callback.json`
+                    // are written BEFORE `materialize_hook_config` below, so
+                    // the vendor `settings.json` this call produces always
+                    // points its `--callback` argv at a file that already
+                    // exists (even if empty/stale from a write failure) by
+                    // the time the spawned process can possibly fire a
+                    // hook. Generated once per fresh spawn, never rotated
+                    // (Design Answer 1) - `reconcile_entry`'s adopt arm
+                    // recovers this SAME token on restart rather than
+                    // regenerating it.
+                    let token = generate_callback_token();
+                    let write_result = crate::agent_token_store::write_token(state_dir, &id, &token)
+                        .and_then(|()| {
+                            crate::agent_callback::write_callback_target(
+                                &profile_dir,
+                                base_url,
+                                &id,
+                                &token,
+                            )
+                        });
+                    match write_result {
+                        Ok(()) => callback_token = Some(token),
+                        Err(error) => tracing::error!(
+                            terminal_id = %id,
+                            %error,
+                            "failed to write callback token or target; turn-state hooks for \
+                             this terminal will not authenticate"
+                        ),
+                    }
+
                     let callback_path = crate::agent_callback::callback_path(&profile_dir);
                     match crate::agent_hook_config::materialize_hook_config(
                         &profile_dir,
@@ -1156,9 +1415,11 @@ impl TerminalSession {
             columns,
             rows,
             profile_id,
+            callback_token,
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn from_connection(
         id: String,
         work_root_id: WorkRootId,
@@ -1169,6 +1430,7 @@ impl TerminalSession {
         columns: u16,
         rows: u16,
         profile_id: Option<String>,
+        callback_token: Option<String>,
     ) -> Arc<Self> {
         let grace_until_ms = (connected.status != TerminalStatus::Running)
             .then(|| now_ms() + DAEMON_GRACE_WINDOW_MS);
@@ -1179,6 +1441,7 @@ impl TerminalSession {
             cwd_hint,
             created_at_ms,
             profile_id,
+            callback_token,
             pid: connected.pid,
             start_time: connected.start_time,
             write_half: Arc::new(AsyncMutex::new(connected.writer)),
@@ -1838,6 +2101,7 @@ mod terminal_portability_skeleton_tests {
             cwd_hint: None,
             created_at_ms: now_ms(),
             profile_id: None,
+            callback_token: None,
             pid: std::process::id(),
             start_time: 0,
             write_half: Arc::new(AsyncMutex::new(write_half)),
@@ -2112,6 +2376,8 @@ mod terminal_portability_skeleton_tests {
             PathBuf::from("/nonexistent-unused-helper-binary"),
             registry_dir.clone(),
             Duration::from_millis(200),
+            None,
+            String::new(),
         )
         .await;
 
@@ -2172,6 +2438,8 @@ mod terminal_portability_skeleton_tests {
             PathBuf::from("/nonexistent-unused-helper-binary"),
             registry_dir.clone(),
             Duration::from_millis(200),
+            None,
+            String::new(),
         )
         .await;
 
@@ -2484,6 +2752,23 @@ fn opaque_terminal_id() -> String {
     format!("term_{suffix}")
 }
 
+// CONTRACT (260725 Phase 4, callback token): a longer, unprefixed sibling of
+// `opaque_terminal_id` above - same crate/distribution, deliberately
+// distinct purpose. `opaque_terminal_id` is displayed and logged freely (it
+// names a terminal, not a secret); this token is a credential and must NEVER
+// be displayed, logged, or forwarded through argv (hard constraint). 32
+// alphanumeric characters (~190 bits of entropy over a 62-symbol alphabet)
+// is far past what a per-terminal, non-rotating, POST-body credential needs.
+const CALLBACK_TOKEN_LENGTH: usize = 32;
+
+fn generate_callback_token() -> String {
+    thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(CALLBACK_TOKEN_LENGTH)
+        .map(char::from)
+        .collect()
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2497,6 +2782,43 @@ fn default_columns() -> u16 {
 
 fn default_rows() -> u16 {
     24
+}
+
+// CONTRACT (260725 Phase 4, cross-module test seam): `TerminalRegistry`'s
+// `insert_unchecked` and `TerminalSession`'s fields all stay private to this
+// module - this is the one deliberate exception, gated `#[cfg(test)]` so it
+// never ships in a production build, letting `agent_profile_gc.rs`'s own
+// tests seed a registry with a live session id without needing a real
+// spawned helper process (this crate has no lighter-weight way to construct
+// a `TerminalSession` - see `fake_terminal_session` above, which this
+// mirrors, for the same real-but-unattached-IPC-duplex shape).
+#[cfg(test)]
+pub(crate) async fn insert_fake_live_session_for_test(registry: &TerminalRegistry, terminal_id: &str) {
+    let (_peer, local) = tokio::io::duplex(4096);
+    let (_read_half, write_half) =
+        crate::terminal_ipc_transport::split(Box::new(local) as crate::terminal_ipc_transport::BoxedIpcStream);
+    let session = Arc::new(TerminalSession {
+        id: terminal_id.to_owned(),
+        work_root_id: WorkRootId::from("fake-work-root".to_owned()),
+        title: "fake".to_owned(),
+        cwd_hint: None,
+        created_at_ms: now_ms(),
+        profile_id: None,
+        callback_token: None,
+        pid: std::process::id(),
+        start_time: 0,
+        write_half: Arc::new(AsyncMutex::new(write_half)),
+        inner: Mutex::new(TerminalSessionInner {
+            status: TerminalStatus::Running,
+            columns: default_columns(),
+            rows: default_rows(),
+            output: VecDeque::new(),
+            next_sequence: 1,
+            grace_until_ms: None,
+        }),
+        output_signal: watch::channel(0).0,
+    });
+    registry.insert_unchecked(session);
 }
 
 #[derive(Debug)]

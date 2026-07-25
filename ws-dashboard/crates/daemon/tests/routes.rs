@@ -144,11 +144,38 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Cargo-provided real compiled binary. Each call gets its own isolated
 // registry directory so concurrent tests never share terminal socket paths.
 fn test_terminal_registry() -> TerminalRegistry {
-    TerminalRegistry::new(
+    test_terminal_registry_with_state_dir().0
+}
+
+// CONTRACT (260725 Phase 4): pairs a real `TerminalRegistry` with the
+// `state_dir` it was constructed against, so a test can read back
+// daemon-private files (`terminal-tokens/<id>.json`,
+// `agent-profiles/<id>/callback.json`) written under that SAME path after
+// creating a real terminal through the HTTP surface - mirrors the pattern
+// `daemonHarness.ts` already uses at the Playwright layer (Codebase Findings:
+// "a Playwright spec can also read daemon-private files under that same
+// state home directly from Node"). Deliberately a SEPARATE temp path from
+// `terminal_registry_temp_dir()` (which stays scoped to socket-length-
+// sensitive `registry_dir`/`.sock` paths on macOS) - `state_dir` never holds
+// a socket file, so it has no equivalent path-length constraint.
+fn test_terminal_registry_with_state_dir() -> (TerminalRegistry, PathBuf) {
+    let state_dir = terminal_registry_state_dir();
+    let registry = TerminalRegistry::new(
         PathBuf::from(env!("CARGO_BIN_EXE_ws-dashboard")),
         terminal_registry_temp_dir(),
         Duration::from_secs(5),
-    )
+        Some(state_dir.clone()),
+        "http://127.0.0.1:0".to_owned(),
+    );
+    (registry, state_dir)
+}
+
+fn terminal_registry_state_dir() -> PathBuf {
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "ws-dashboard-terminal-registry-state-{}-{unique}",
+        std::process::id()
+    ))
 }
 
 // CONTRACT (macOS Unix-domain-socket path-length ceiling, surfaced running
@@ -15772,4 +15799,268 @@ async fn work_root_activity_route_merges_claude_session_into_items() {
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+// ---------------------------------------------------------------------------
+// 260725 Phase 4: per-terminal turn-state callback route (token auth, NOT
+// owner-session auth - see `router.rs::build_router`'s CONTRACT and
+// `terminal.rs::post_terminal_turn_state`).
+//
+// CONTRACT: every test below runs with owner auth ENABLED (`app_state()`'s
+// `ServeConfig::default_loopback()` already sets `owner_auth_enabled: true` -
+// asserted explicitly in the first test) and deliberately never sends an
+// owner session cookie on the turn-state request itself - that absence is
+// what proves the route sits outside `require_owner_auth` structurally
+// rather than merely because auth happened to be disabled for the test.
+// ---------------------------------------------------------------------------
+
+fn app_state_with_terminal_registry(registry: TerminalRegistry) -> AppState {
+    let mut state = app_state();
+    state.terminals = registry;
+    state
+}
+
+// CONTRACT: unlike `create_terminal_for_test`, this passes an explicit
+// `profileId` so the spawn path's `hook_config` branch runs and materializes
+// a real callback token + `callback.json` (see
+// `terminal.rs::TerminalSession::spawn`'s hook-config branch) - a plain
+// shell terminal never gets a token at all. `"claude"` resolves to a real
+// argv (`resolve_create_command`) even though the `claude` binary itself is
+// not expected to exist on the test machine; per the ticket's own restart-
+// harness finding, `create_terminal`'s HTTP response completes before the
+// helper ever attempts to spawn the resolved command, so this costs nothing.
+async fn create_terminal_with_profile_for_test(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+    profile_id: &str,
+) -> String {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "columns": 80,
+                        "rows": 24,
+                        "title": "Turn-state test terminal",
+                        "profileId": profile_id,
+                    })
+                    .to_string(),
+                ))
+                .expect("create terminal request"),
+        )
+        .await
+        .expect("create terminal response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
+    value["terminalId"]
+        .as_str()
+        .expect("terminal id")
+        .to_owned()
+}
+
+// CONTRACT: reads the daemon-private token store directly off disk (same
+// pattern `daemonHarness.ts` uses at the Playwright layer) - there is no
+// public API surface that exposes a callback token, by design (hard
+// constraint: never in a response body, URL, or `TerminalRegistryEntry`).
+fn read_callback_token_from_disk(state_dir: &Path, terminal_id: &str) -> String {
+    let raw = fs::read_to_string(
+        state_dir
+            .join("terminal-tokens")
+            .join(format!("{terminal_id}.json")),
+    )
+    .expect("read terminal token file");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("parse terminal token file");
+    value["token"]
+        .as_str()
+        .expect("token field")
+        .to_owned()
+}
+
+async fn turn_state_request(
+    app: axum::Router,
+    terminal_id: &str,
+    token: &str,
+    state: &str,
+) -> StatusCode {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/turn-state"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "token": token, "state": state }).to_string(),
+                ))
+                .expect("turn-state request"),
+        )
+        .await
+        .expect("turn-state response");
+    response.status()
+}
+
+#[tokio::test]
+async fn turn_state_route_accepts_a_valid_token_with_owner_auth_enabled_and_no_cookie() {
+    let root = temp_fixture_path("turn-state-valid");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    assert!(
+        state.config.owner_auth_enabled,
+        "this route's whole point is only proven when owner auth is ENABLED"
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    let status = turn_state_request(app, &terminal_id, &terminal_token, "working").await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_a_wrong_token() {
+    let root = temp_fixture_path("turn-state-wrong");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+
+    let status = turn_state_request(app, &terminal_id, "definitely-not-the-real-token", "working").await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_an_empty_token() {
+    let root = temp_fixture_path("turn-state-empty");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+
+    let status = turn_state_request(app, &terminal_id, "", "working").await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_an_unknown_terminal_id_the_same_way_as_a_wrong_token() {
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let app = build_router(state);
+
+    let status = turn_state_request(app, "term_does_not_exist", "any-token", "working").await;
+
+    // CONTRACT (Design Answer 3): unknown terminal id and wrong token must
+    // be indistinguishable to the caller.
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (MANDATORY per plan Verification Plan): a token minted for one
+// terminal must never authenticate a turn-state POST for a DIFFERENT
+// terminal, even when both are live in the same registry at once.
+#[tokio::test]
+async fn turn_state_route_rejects_terminal_a_token_used_for_terminal_b() {
+    let root = temp_fixture_path("turn-state-cross-terminal");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let terminal_a =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_b =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    assert_ne!(terminal_a, terminal_b);
+    let token_a = read_callback_token_from_disk(&state_dir, &terminal_a);
+
+    // Terminal A's own token must accept for terminal A...
+    let status_a = turn_state_request(app.clone(), &terminal_a, &token_a, "working").await;
+    assert_eq!(status_a, StatusCode::NO_CONTENT);
+
+    // ...but must NEVER authenticate a POST naming terminal B instead.
+    let status_cross = turn_state_request(app, &terminal_b, &token_a, "working").await;
+    assert_eq!(
+        status_cross,
+        StatusCode::UNAUTHORIZED,
+        "terminal A's token must not accept for terminal B"
+    );
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_an_invalid_state_value_only_after_a_valid_token() {
+    let root = temp_fixture_path("turn-state-invalid-state");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    // An unrecognized state value with the CORRECT token is a 400, only
+    // reachable once the token check has already passed.
+    let invalid_state_status =
+        turn_state_request(app.clone(), &terminal_id, &terminal_token, "not-a-real-state").await;
+    assert_eq!(invalid_state_status, StatusCode::BAD_REQUEST);
+
+    // The SAME invalid state value with a WRONG token must still be 401, not
+    // 400 - proving the token check runs first and short-circuits before
+    // `state` is ever parsed (Design Answer 3's ordering).
+    let wrong_token_status =
+        turn_state_request(app, &terminal_id, "wrong-token", "not-a-real-state").await;
+    assert_eq!(wrong_token_status, StatusCode::UNAUTHORIZED);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
 }

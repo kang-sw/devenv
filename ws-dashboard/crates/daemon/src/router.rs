@@ -63,8 +63,8 @@ use crate::codex_routes::{
     codex_session_transcript, create_codex_session, list_codex_sessions,
 };
 use crate::terminal::{
-    close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_output_batch, terminal_resize, terminal_websocket, TerminalRegistry,
+    close_terminal, create_terminal, list_terminals, post_terminal_turn_state, terminal_input,
+    terminal_output, terminal_output_batch, terminal_resize, terminal_websocket, TerminalRegistry,
 };
 use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
@@ -94,8 +94,18 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    // CONTRACT: `/pair` and daemon-to-daemon link auth stay outside the
-    // protected browser router.
+    // CONTRACT: three route classes stay outside the protected browser
+    // router, each for a different reason: `/pair` (one-time browser
+    // pairing, issues the owner session cookie), `/api/dashboard/link-auth`
+    // (daemon-to-daemon link auth, a distinct credential entirely), and
+    // (260725 Phase 4) `/api/dashboard/terminals/{terminal_id}/turn-state`
+    // (a non-browser, per-terminal callback route authorized by an opaque
+    // token the handler itself checks - see `terminal.rs::
+    // post_terminal_turn_state`'s own CONTRACT). The turn-state route is
+    // registered here, in this SAME outer chain before `.merge(protected)`,
+    // so it sits outside `require_owner_auth` structurally rather than via a
+    // runtime flag - it never issues or consumes the owner session cookie
+    // and is never reachable from a browser context.
     // CONTRACT: `/healthz`, `/`, static UI, and WebSocket upgrade routes are
     // nested behind one central auth boundary when owner auth is enabled. The
     // loopback-only no-auth debug profile omits that layer for the whole
@@ -466,6 +476,10 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/pair", get(pair))
         .route("/api/dashboard/link-auth", post(remote_link_auth))
+        .route(
+            "/api/dashboard/terminals/{terminal_id}/turn-state",
+            post(post_terminal_turn_state),
+        )
         .merge(protected)
         .with_state(state)
 }
