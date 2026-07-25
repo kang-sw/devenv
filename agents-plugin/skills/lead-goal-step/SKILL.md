@@ -43,9 +43,12 @@ project's own dogfood-capture convention.
 Spawn a light-tier Explore-style subagent to pick the next ticket: list
 `ai-docs/tickets/ready/`, and for each candidate check its body for a
 recorded blocker note (e.g. a `## Blocked (...)` entry) and skip blocked
-candidates; among the remaining advanceable candidates, prefer one named
-as a prerequisite via another ready ticket's `related:`/`parent:`
-frontmatter, otherwise the oldest (FIFO). Have it return exactly one
+candidates; among the remaining advanceable candidates, prefer a ticket
+already in progress — one whose body carries a `### Result` on at least
+one phase but still has a phase without one — over untouched tickets; then
+prefer one named as a prerequisite via another ready ticket's
+`related:`/`parent:` frontmatter, otherwise the oldest (FIFO). Have it
+return exactly one
 advanceable ticket path, or report that `ready/` is empty, or report that
 every remaining `ready/` ticket is blocked. Do not list `ready/` or read
 ticket files yourself — the subagent does that pinpoint read, not you.
