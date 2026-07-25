@@ -2,6 +2,7 @@
 title: "git.commit deadlocks after tickets.move stages a rename"
 related:
   260723-feat-ticket-write-verify-commit-gate: introduced the non-bypassable git.commit ticket-verify gate this deadlock lives in
+dropped: 2026-07-25
 ---
 
 # git.commit deadlocks after tickets.move stages a rename
@@ -40,3 +41,10 @@ so the deadlock actively pushes callers off the guarded path.
   it therefore affect ticket completion as well as promotion?
 - Is there a supported `git.commit` argument shape for this flow that was simply
   not discovered here?
+
+
+## Resolution (2026-07-25)
+
+Duplicate. Absorbed into `260725-idea-ws-git-commit-rename-and-payload-rejections`, which was written the same day on the `impl/macos-terminal-acceptance-phase2` worktree and cherry-picked into `main` afterwards. That ticket already covered this rename defect as its Finding 1 and additionally carries a second, independent `ws/git.commit` defect (a large `ai_context` array rejected with `ai_context requires at least one entry`, triggered by payload size rather than emptiness) that this ticket never observed.
+
+Nothing was lost in the merge: this ticket's unique evidence — the full three-row argument matrix, including the `[_index.md]`-only case that is refused by the *unrelated-staged-path* guard, which is what makes the failure a genuine deadlock rather than an undiscovered argument shape — was folded into the surviving ticket as an "Independent reproduction" subsection, along with the observation that the deadlock forces callers onto the native-git fallback that `260723-feat-ticket-write-verify-commit-gate` exists to prevent.
