@@ -322,9 +322,7 @@ section naming the target spec area, expected caller-visible change, and whether
 a contract-first planned spec is required. It invokes `lead-write-spec`
 autonomously only for contract-first planned spec entries, and stops when no
 stem or `## Spec Impact` can address the work, spec writing fails, or the
-behavior is too underspecified to spec. `Ticket Focus` entries are maintained
-for selected active attention items; only `ready/` entries are direct
-implementation targets.
+behavior is too underspecified to spec.
 
 Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
 writes mechanism decisions, rejected alternatives, future-scope hints, Result

@@ -15,7 +15,7 @@ through MCP discovery tools and convention documents.
 `ai-docs/_index.md` is the project memory and active inventory document. It
 records the repository purpose, plugin topology, read-before-edit references,
 implemented runtime surfaces, prompt and skill inventory, current spec list,
-active ticket list, ticket focus, and compact session notes.
+active ticket list, and compact session notes.
 
 The index is intentionally bounded: completed and dropped ticket history lives
 in the ticket archive directories and Git history, while the index keeps the
@@ -114,9 +114,9 @@ status. Active status directories are `ready/`, `todo/`, and `idea/`: `idea/`
 captures rough ideas before triage, `todo/` holds accepted backlog with
 recoverable ticket intent, and `ready/` holds spec-addressed implementation
 work.
-Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Focus`
-lists selected active attention items; only `ready/` entries are direct
-implementation targets.
+Completed or dropped work moves to `.done/` or `.dropped/`. Active attention is
+discovered from the status directories via `tickets.list`/`project_tree`, not a
+cached index section; only `ready/` entries are direct implementation targets.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
@@ -244,9 +244,8 @@ spec changes together.
 `lead-write-ticket` creates or updates tickets. It applies the spec-address gate
 when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads ticket
 conventions, verifies existing stems or ticket-local `## Spec Impact`, invokes
-`lead-write-spec` only for contract-first planned spec entries, updates
-`## Ticket Focus` for selected active attention items, preserves stable ticket
-stems, and commits ticket changes. Creating or promoting accepted backlog into
+`lead-write-spec` only for contract-first planned spec entries, preserves stable
+ticket stems, and commits ticket changes. Creating or promoting accepted backlog into
 `todo/` preserves intent without requiring immediate spec linkage; optional
 `todo/` `spec:` links are recovery hints and promotion candidates.
 
