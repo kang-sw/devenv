@@ -57,6 +57,19 @@ export type DockviewWorkbenchLayoutProps = {
   readonly groups: readonly DockviewWorkbenchGroup[];
   readonly activePaneByGroup: Readonly<Record<string, string>>;
   readonly onSelectPane: (groupId: string, paneId: string) => void;
+  // CONTRACT (260725 Phase 6 review cycle 1, Critical): fired on EVERY tab
+  // click, including a click on the tab that is already Dockview's active
+  // panel. `onSelectPane` cannot serve this purpose: it is driven by
+  // `onDidActivePanelChange`, and dockview-core only emits that when the
+  // active panel actually CHANGES (`DockviewComponent.doSetGroupActive`
+  // compares against the current value; `DockviewGroupPanelModel.openPanel`
+  // early-returns when the panel is already active). Anything that must
+  // happen when the user deliberately returns to an ALREADY-ACTIVE tab -
+  // acknowledging that tab's attention indicator being the motivating case -
+  // needs this second, change-independent trigger. Deliberately carries no
+  // group id and performs no selection: it is a pure "the user touched this
+  // tab" signal, so it can never fight `onSelectPane`'s placement policy.
+  readonly onAcknowledgePane?: (paneId: string) => void;
   readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
   readonly onMovePane: (
     paneId: string,
@@ -96,6 +109,7 @@ type DockviewWorkbenchPanelParams = WorkbenchDockviewPanelParams & {
   readonly contentRevision?: string;
   readonly body?: ReactNode;
   readonly attentionState?: AgentAttentionState;
+  readonly onAcknowledgePane?: (paneId: string) => void;
   readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
 
@@ -118,6 +132,7 @@ export function DockviewWorkbenchLayout({
   groups,
   activePaneByGroup,
   onMovePane,
+  onAcknowledgePane,
   onRequestClosePane,
   onSelectPane,
   initialGroupSizeById,
@@ -130,16 +145,29 @@ export function DockviewWorkbenchLayout({
   );
   const callbacksRef = useRef({
     onMovePane,
+    onAcknowledgePane,
     onRequestClosePane,
     onSelectPane,
     onLayoutSnapshot,
   });
   callbacksRef.current = {
     onMovePane,
+    onAcknowledgePane,
     onRequestClosePane,
     onSelectPane,
     onLayoutSnapshot,
   };
+  // CONTRACT: a STABLE identity handed to every panel's params, forwarding
+  // to whatever the latest render passed. Panel params are only refreshed
+  // when `shouldUpdateDockviewWorkbenchPanelParams` says so - and for a
+  // connected terminal that is deliberately almost never - so embedding the
+  // raw prop would freeze a stale closure over `App()`'s attention state
+  // into the tab and acknowledge the wrong revision. Reading through
+  // `callbacksRef` (refreshed on every render above) is this file's existing
+  // answer to that, previously used only for Dockview's own event handlers.
+  const acknowledgePane = useCallback((paneId: string) => {
+    callbacksRef.current.onAcknowledgePane?.(paneId);
+  }, []);
   const initialGroupSizeByIdRef = useRef(initialGroupSizeById);
   initialGroupSizeByIdRef.current = initialGroupSizeById;
   // Applying a restored split size is a one-shot best-effort action per
@@ -172,6 +200,7 @@ export function DockviewWorkbenchLayout({
         groups,
         activePaneByGroup,
         callbacksRef.current.onRequestClosePane,
+        acknowledgePane,
       );
       const initialSizeById = initialGroupSizeByIdRef.current;
       if (initialSizeById) {
@@ -197,7 +226,7 @@ export function DockviewWorkbenchLayout({
         syncingRef.current = false;
       });
     }
-  }, [activePaneByGroup, groups]);
+  }, [acknowledgePane, activePaneByGroup, groups]);
 
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -367,12 +396,34 @@ function DockviewWorkbenchTab({
       // nothing to show, rather than omitted - a browser assertion for the
       // CLEARED state must be able to distinguish "indicator gone" from
       // "tab not rendered yet"/"attribute never written", which an absent
-      // attribute cannot. Matches this component's existing
-      // `data-workbench-*` attribute convention so the affordance is
-      // assertable without CSS or visual inspection.
+      // attribute cannot. Exposed as a data attribute (rather than left to
+      // CSS/visual inspection) so it is Playwright-assertable.
+      //
+      // NAMING (review cycle 1, Fit Minor): this name is the plan's, and it
+      // does NOT follow the `data-workbench-*` prefix every sibling
+      // attribute on this element uses - `data-workbench-group-id`,
+      // `data-workbench-pane-id`, `data-workbench-close-confirmation`, and
+      // the badge span's own `data-workbench-tab-attention` below all do.
+      // Kept as specified rather than silently renamed (the acceptance spec
+      // selects on it); recorded here so the inconsistency is a known,
+      // deliberate exception instead of a claim of conformance.
       data-attention-state={params.attentionState ?? "none"}
       role="tab"
       title={api.title ?? params.title}
+      // CONTRACT (review cycle 1, Critical): acknowledgement must fire on
+      // EVERY tab click, not only on a click that changes Dockview's active
+      // panel. The primary flow for this feature is an agent working in the
+      // tab the user left focused: the badge appears on the ALREADY-ACTIVE
+      // tab, so `onDidActivePanelChange` (and therefore `onSelectPane`)
+      // never fires when the user comes back and clicks it, and before this
+      // handler existed the badge was unclearable - permanently so with a
+      // single open pane. `onAcknowledgePane` performs no selection, so
+      // firing it alongside `onSelectPane` on a genuine tab change is
+      // idempotent, not a double-select. The close button stops propagation,
+      // so closing a tab never routes through here.
+      onClick={() => {
+        params.onAcknowledgePane?.(params.paneId);
+      }}
     >
       {/* Dockview owns one deterministic tab strip per group in this slice.
           Dashboard row policy is retained as pane category metadata instead
@@ -423,6 +474,7 @@ function syncDockviewWorkbench(
   groups: readonly DockviewWorkbenchGroup[],
   activePaneByGroup: Readonly<Record<string, string>>,
   onRequestClosePane?: (request: DockviewTabCloseRequest) => void,
+  onAcknowledgePane?: (paneId: string) => void,
 ): ReadonlyMap<string, string> {
   const desiredPaneIds = new Set(
     groups.flatMap((group) => group.panes.map((pane) => pane.id)),
@@ -450,7 +502,12 @@ function syncDockviewWorkbench(
     const activePaneId = activePaneByGroup[group.id] ?? group.panes[0]?.id;
 
     for (const [index, pane] of group.panes.entries()) {
-      const params = toDockviewWorkbenchPanelParams(group, pane, onRequestClosePane);
+      const params = toDockviewWorkbenchPanelParams(
+        group,
+        pane,
+        onRequestClosePane,
+        onAcknowledgePane,
+      );
       const existingPanel = api.getPanel(pane.id);
 
       if (!existingPanel) {
@@ -541,6 +598,7 @@ function toDockviewWorkbenchPanelParams(
   group: DockviewWorkbenchGroup,
   pane: DockviewWorkbenchPane,
   onRequestClosePane?: (request: DockviewTabCloseRequest) => void,
+  onAcknowledgePane?: (paneId: string) => void,
 ): DockviewWorkbenchPanelParams {
   return {
     attachmentId: pane.id,
@@ -555,6 +613,7 @@ function toDockviewWorkbenchPanelParams(
     contentRevision: pane.contentRevision,
     body: pane.body,
     attentionState: pane.attentionState,
+    onAcknowledgePane,
     onRequestClosePane,
   };
 }

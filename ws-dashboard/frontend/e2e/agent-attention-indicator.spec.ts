@@ -3,7 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
-import { workRootTerminalsEndpoint } from "../src/terminals.js";
+import {
+  terminalCloseEndpoint,
+  workRootTerminalsEndpoint,
+} from "../src/terminals.js";
 
 // Browser-level acceptance gate for the 260725 Phase 6 tab-label attention
 // indicator (`ai-docs/.plans/2026-07/26-0748-pty-agent-tab-indicator.md`).
@@ -34,6 +37,12 @@ import { workRootTerminalsEndpoint } from "../src/terminals.js";
 //   4. Selecting the terminal's own tab acknowledges and clears it.
 //   5. A LATER turn boundary re-raises it (the watermark is keyed by
 //      `updatedAtMs`, so acknowledging once does not mute the terminal).
+//   6. LOAD-BEARING (review cycle 1, Critical): clicking the tab that is
+//      ALREADY Dockview's active panel acknowledges it, with no intervening
+//      pane change. Assertions 3-4 above cannot cover this - they select the
+//      other terminal first, so the active panel genuinely changes and
+//      `onDidActivePanelChange` fires. The feature's PRIMARY flow is the
+//      opposite: the agent finishes in the tab the user left focused.
 //
 // No vendor CLI, credentials, or network are involved: the terminal is
 // spawned with the always-compiled-in `"dummy-echo-hooked"` test profile
@@ -254,6 +263,29 @@ async function closeTerminalById(page: Page, terminalId: string) {
   await expect(popover).toHaveCount(0);
 }
 
+// Unconditional teardown for the terminals this gate spawns (review cycle 1,
+// Test Minor 2). The daemon does NOT terminate live `TerminalSession`s on
+// shutdown (`run_with_shutdown_and_grace`), so anything still running when
+// `daemon.stop()` fires survives as an orphaned `terminal-helper`/`sh`/
+// `sleep` for the rest of its natural life - and this profile deliberately
+// sleeps 180s. The happy-path close step below is the DOM-level evidence
+// that the close flow works; this is the belt-and-braces version that also
+// runs when an assertion above threw. Direct DELETE rather than the UI close
+// flow: after a failed assertion the DOM may be in any state, but the page's
+// owner session cookie is still good. Errors are swallowed so a teardown
+// hiccup can never mask the real failure.
+async function forceCloseTerminals(page: Page, terminalIds: string[]) {
+  for (const terminalId of terminalIds.filter(Boolean)) {
+    try {
+      await page.evaluate(async (endpoint) => {
+        await fetch(endpoint, { method: "DELETE" });
+      }, terminalCloseEndpoint(terminalId));
+    } catch {
+      // Page already closed/crashed - nothing more this side can do.
+    }
+  }
+}
+
 test("agent attention indicator", async ({ page }) => {
   await pairOwner(page);
   await openWorkRootMinimal(page, workRoot);
@@ -263,151 +295,195 @@ test("agent attention indicator", async ({ page }) => {
   let plainTerminalId = "";
   let token = "";
 
-  await test.step("spawn a hooked test-profile terminal and make its tab the active one", async () => {
-    const endpoint = workRootTerminalsEndpoint(workRootId);
-    const created = await page.evaluate(
-      async ({ endpoint }) => {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            columns: 80,
-            rows: 24,
-            title: "Attention Probe",
-            cwdHint: null,
-            profileId: "dummy-echo-hooked",
-          }),
-        });
-        return {
-          ok: response.ok,
-          status: response.status,
-          body: await response.json(),
-        };
-      },
-      { endpoint },
-    );
-    expect(
-      created.ok,
-      `terminal create with dummy-echo-hooked profile: ${JSON.stringify(created)}`,
-    ).toBe(true);
-    expect(created.body.profileId).toBe("dummy-echo-hooked");
-    agentTerminalId = created.body.terminalId as string;
-    expect(agentTerminalId).toBeTruthy();
+  try {
+    await test.step("spawn a hooked test-profile terminal and make its tab the active one", async () => {
+      const endpoint = workRootTerminalsEndpoint(workRootId);
+      const created = await page.evaluate(
+        async ({ endpoint }) => {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              columns: 80,
+              rows: 24,
+              title: "Attention Probe",
+              cwdHint: null,
+              profileId: "dummy-echo-hooked",
+            }),
+          });
+          return {
+            ok: response.ok,
+            status: response.status,
+            body: await response.json(),
+          };
+        },
+        { endpoint },
+      );
+      expect(
+        created.ok,
+        `terminal create with dummy-echo-hooked profile: ${JSON.stringify(created)}`,
+      ).toBe(true);
+      expect(created.body.profileId).toBe("dummy-echo-hooked");
+      agentTerminalId = created.body.terminalId as string;
+      expect(agentTerminalId).toBeTruthy();
 
-    token = readCallbackToken(agentTerminalId);
+      token = readCallbackToken(agentTerminalId);
 
-    // The direct fetch above bypassed this tab's React state; reload +
-    // reselect so the daemon-known session renders as a real Dockview pane
-    // (same restoration path agent-spawn-profile.spec.ts uses).
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await selectWorkRootMinimal(page, workRoot);
-    await expect(terminalTab(page, agentTerminalId)).toHaveCount(1, {
-      timeout: 20_000,
+      // The direct fetch above bypassed this tab's React state; reload +
+      // reselect so the daemon-known session renders as a real Dockview pane
+      // (same restoration path agent-spawn-profile.spec.ts uses).
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await selectWorkRootMinimal(page, workRoot);
+      await expect(terminalTab(page, agentTerminalId)).toHaveCount(1, {
+        timeout: 20_000,
+      });
+
+      // A second, ordinary terminal exists solely so "select a DIFFERENT tab"
+      // is expressible below. Created via the toolbar, which auto-focuses it.
+      await page.locator('[data-command-id="terminal.create"]').click();
+      await expect(terminalTabsLocator(page)).toHaveCount(2, { timeout: 20_000 });
+      await expect
+        .poll(() => currentTerminalPaneId(page), { timeout: 20_000 })
+        .not.toBe(agentTerminalId);
+      plainTerminalId = (await currentTerminalPaneId(page))!;
+      expect(plainTerminalId).toBeTruthy();
+
+      // Make the agent terminal the ACTIVE tab and wait until its pane body is
+      // actually mounted and its socket connected. This is a precondition of
+      // the load-bearing assertion below, not incidental setup: the
+      // `shouldUpdateDockviewWorkbenchPanelParams` early return this phase
+      // fixes only suppresses updates while `meta[1]` is
+      // `"connecting"`/`"connected"`, so a backgrounded (disconnected) tab
+      // would repaint anyway and prove nothing.
+      await terminalTab(page, agentTerminalId).click();
+      await expect(
+        page.locator(`.terminal-pane[data-terminal-id="${agentTerminalId}"]`),
+      ).toHaveCount(1, { timeout: 20_000 });
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "none",
+      );
     });
 
-    // A second, ordinary terminal exists solely so "select a DIFFERENT tab"
-    // is expressible below. Created via the toolbar, which auto-focuses it.
-    await page.locator('[data-command-id="terminal.create"]').click();
-    await expect(terminalTabsLocator(page)).toHaveCount(2, { timeout: 20_000 });
-    await expect
-      .poll(() => currentTerminalPaneId(page), { timeout: 20_000 })
-      .not.toBe(agentTerminalId);
-    plainTerminalId = (await currentTerminalPaneId(page))!;
-    expect(plainTerminalId).toBeTruthy();
+    await test.step("a turn-state callback raises the indicator on that tab only", async () => {
+      await postTurnState(agentTerminalId, token, "working");
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "working",
+        { timeout: 20_000 },
+      );
+      await expect(
+        terminalTab(page, agentTerminalId).locator(
+          "[data-workbench-tab-attention]",
+        ),
+      ).toHaveAttribute("data-workbench-tab-attention", "working");
+      await expect(terminalTab(page, plainTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "none",
+      );
+    });
 
-    // Make the agent terminal the ACTIVE tab and wait until its pane body is
-    // actually mounted and its socket connected. This is a precondition of
-    // the load-bearing assertion below, not incidental setup: the
-    // `shouldUpdateDockviewWorkbenchPanelParams` early return this phase
-    // fixes only suppresses updates while `meta[1]` is
-    // `"connecting"`/`"connected"`, so a backgrounded (disconnected) tab
-    // would repaint anyway and prove nothing.
-    await terminalTab(page, agentTerminalId).click();
-    await expect(
-      page.locator(`.terminal-pane[data-terminal-id="${agentTerminalId}"]`),
-    ).toHaveCount(1, { timeout: 20_000 });
-    await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "none",
-    );
-  });
+    await test.step("a SECOND transition repaints the same mounted, active, connected tab (param-diff fix)", async () => {
+      // THE load-bearing assertion of this spec (plan step 7). Nothing between
+      // the previous step and this one remounts or reselects the panel: the
+      // only path from `working` to `ready` on screen is
+      // `shouldUpdateDockviewWorkbenchPanelParams` returning true for a
+      // CONNECTED persistentTerminal whose `attentionState` changed. Revert
+      // that comparison and this assertion is the one that fails.
+      await postTurnState(agentTerminalId, token, "ready");
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+    });
 
-  await test.step("a turn-state callback raises the indicator on that tab only", async () => {
-    await postTurnState(agentTerminalId, token, "working");
-    await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "working",
-      { timeout: 20_000 },
-    );
-    await expect(
-      terminalTab(page, agentTerminalId).locator(
-        "[data-workbench-tab-attention]",
-      ),
-    ).toHaveAttribute("data-workbench-tab-attention", "working");
-    await expect(terminalTab(page, plainTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "none",
-    );
-  });
+    await test.step("selecting a different tab does not acknowledge this one", async () => {
+      await terminalTab(page, plainTerminalId).click();
+      await expect(
+        page.locator(`.terminal-pane[data-terminal-id="${plainTerminalId}"]`),
+      ).toHaveCount(1, { timeout: 20_000 });
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "ready",
+      );
+    });
 
-  await test.step("a SECOND transition repaints the same mounted, active, connected tab (param-diff fix)", async () => {
-    // THE load-bearing assertion of this spec (plan step 7). Nothing between
-    // the previous step and this one remounts or reselects the panel: the
-    // only path from `working` to `ready` on screen is
-    // `shouldUpdateDockviewWorkbenchPanelParams` returning true for a
-    // CONNECTED persistentTerminal whose `attentionState` changed. Revert
-    // that comparison and this assertion is the one that fails.
-    await postTurnState(agentTerminalId, token, "ready");
-    await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "ready",
-      { timeout: 20_000 },
-    );
-  });
+    await test.step("selecting the terminal's own tab acknowledges and clears the indicator", async () => {
+      await terminalTab(page, agentTerminalId).click();
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "none",
+        { timeout: 20_000 },
+      );
+      await expect(
+        terminalTab(page, agentTerminalId).locator(
+          "[data-workbench-tab-attention]",
+        ),
+      ).toHaveCount(0);
+    });
 
-  await test.step("selecting a different tab does not acknowledge this one", async () => {
-    await terminalTab(page, plainTerminalId).click();
-    await expect(
-      page.locator(`.terminal-pane[data-terminal-id="${plainTerminalId}"]`),
-    ).toHaveCount(1, { timeout: 20_000 });
-    await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "ready",
-    );
-  });
+    await test.step("a later turn boundary re-raises the acknowledged indicator", async () => {
+      // The ack watermark is keyed by `updatedAtMs`, not by terminal id: a
+      // single acknowledgement must not mute this terminal for the rest of the
+      // session. This is also a THIRD repaint of the same connected tab.
+      await postTurnState(agentTerminalId, token, "working");
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "working",
+        { timeout: 20_000 },
+      );
+    });
 
-  await test.step("selecting the terminal's own tab acknowledges and clears the indicator", async () => {
-    await terminalTab(page, agentTerminalId).click();
-    await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "none",
-      { timeout: 20_000 },
-    );
-    await expect(
-      terminalTab(page, agentTerminalId).locator(
-        "[data-workbench-tab-attention]",
-      ),
-    ).toHaveCount(0);
-  });
+    await test.step("clicking the ALREADY-ACTIVE tab acknowledges it (no intervening pane change)", async () => {
+      // THE review-cycle-1 Critical regression guard. Every earlier clear in
+      // this spec first selected the OTHER terminal, so Dockview's active
+      // panel genuinely changed and `onDidActivePanelChange` -> `selectPane`
+      // fired. That masked the feature's PRIMARY flow: the agent finishes in
+      // the tab the user left focused, so the badge is raised on the tab that
+      // is ALREADY active, and dockview-core emits no active-panel change when
+      // that tab is clicked (`doSetGroupActive` compares against the current
+      // value; `DockviewGroupPanelModel.openPanel` early-returns for the
+      // already-active panel). With `selectPane` as the only ack trigger the
+      // badge was unclearable here - permanently so with a single open pane.
+      //
+      // Preconditions asserted, not assumed: the agent tab is already the
+      // selected tab AND already shows the indicator raised by the previous
+      // step. Nothing between that step and the click below touches any other
+      // pane.
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "working",
+      );
 
-  await test.step("a later turn boundary re-raises the acknowledged indicator", async () => {
-    // The ack watermark is keyed by `updatedAtMs`, not by terminal id: a
-    // single acknowledgement must not mute this terminal for the rest of the
-    // session. This is also a THIRD repaint of the same connected tab.
-    await postTurnState(agentTerminalId, token, "working");
-    await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
-      "data-attention-state",
-      "working",
-      { timeout: 20_000 },
-    );
-  });
+      await terminalTab(page, agentTerminalId).click();
 
-  await test.step("cleanup: close every terminal this gate spawned", async () => {
-    await closeTerminalById(page, agentTerminalId);
-    await closeTerminalById(page, plainTerminalId);
-    await expect(terminalTabsLocator(page)).toHaveCount(0);
-  });
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "none",
+        { timeout: 20_000 },
+      );
+      // The tab never stopped being the active one - this clear came from the
+      // tab's own click handler, not from a selection change.
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    await test.step("cleanup: close every terminal this gate spawned", async () => {
+      await closeTerminalById(page, agentTerminalId);
+      await closeTerminalById(page, plainTerminalId);
+      await expect(terminalTabsLocator(page)).toHaveCount(0);
+    });
+  } finally {
+    await forceCloseTerminals(page, [agentTerminalId, plainTerminalId]);
+  }
 });
