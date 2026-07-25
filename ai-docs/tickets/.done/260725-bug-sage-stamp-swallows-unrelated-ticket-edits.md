@@ -6,6 +6,7 @@ related:
   260721-bug-lead-write-ticket-sage-ready-ordering: edits the same Sage Review Gate step, and its open question about retrying tickets.move after sage_record commits the posture is invalidated by this ticket's decision
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-25
 ---
 
 # tickets.sage_stamp commits unrelated ticket edits under a stub review message
@@ -249,3 +250,50 @@ not otherwise reach: `lead-write-ticket`'s Sage Review Gate step issues an
 explicit commit after stamping, and `tickets.sage_gate`'s ask-decline path
 matches whichever outcome was chosen — either it no longer commits, or it still
 does and the ticket carries the recorded rationale for leaving it.
+
+### Result (d6c3e45d) - 2026-07-25
+
+`tickets.sage_stamp` is now stage-only: its MCP dispatch no longer calls
+`wsgit.NewClient().Commit(...)` and stages nothing in its place — it writes the
+posture and returns, matching `create_empty`. The tool response, its schema
+description, and `next_instruction` in **both** verdict branches (concern +
+pass) drop every commit claim and route the caller to its own `ws/git.commit`.
+The now-unused `SageRecordResult` fields `CommitTitle`/`CommitPaths`/`AIContext`
+were removed, with `sageRecordSingle`/`sageRecordCombined` updated. `wsdoc` still
+does not import `wsgit`. `lead-write-ticket`'s Sage Review Gate step gained an
+explicit commit-after-stamping step (canonical `agents-plugin/rsrc/` tree, wsflow
+rsrc mirror + both manifests regenerated via `WS_REGEN_*`, byte-contract green);
+no reviewer-findings-application step was added (out of scope). Spec `mcp-tools.md`
+anchor `{#260720-sage-gate-record-tools}` now states sage_stamp neither stages
+nor commits, and the pre-existing config-fallback-commit drift was corrected
+(a config-fallback resolution persists the posture but does **not** commit; only
+the declined-`ask` path commits). Mental model `mcp-runtime.md`
+`{#260720-wsdoc-commit-boundary}` was updated to drop sage_stamp as a committer
+reference (sage_gate ask-decline is now the sole reference implementation).
+
+Decision — `tickets.sage_gate` left committing (not aligned to stage-only): the
+ticket's governing criterion is the swallow, and sage_gate does not swallow (it
+runs before any reviewer output exists). Aligning it is not a mirror of the
+sage_stamp fix — the ask-decline and ordinary-skip paths both return
+`Action=="skip"`, so `CommitTitle` is today the only disambiguator, and removing
+the commit would need an unspecified new signaling mechanism plus churn across
+~10 `stageOutcome`/`mergeGateCommit` tests. The ticket sanctions leaving it with
+recorded rationale; that rationale is captured in the Phase 1 body above and
+aligning is deferred as a follow-up once the signal is designed.
+
+Verification: `go build ./...`, `go vet ./...`, and the full `agents-plugin-tool`
+`go test ./... -count=1` (12 packages) are green. New `TestServeStdioSageStampDispatch`
+proves the no-commit/no-staging shape end-to-end: `git log` byte-identical
+before/after the dispatch AND `git status --porcelain <ticket>` is ` M <path>`
+(modified, unstaged). `TestFormatSageRecordRoundTrip` asserts both branches carry
+"not committed" / "ws/git.commit" and emit no `commit:` line; sage_gate tests
+(`TestServeStdioSageGateDispatch`, `TestSageGate*`, `TestMergeGateCommitDualDecline`)
+pass unchanged, guarding the retained commit behavior;
+`TestWsflowRsrcMirrorUpToDate`, `TestShippedManifestUpToDate`, and
+`TestPlaybookPrintGoldenLeadWriteTicket` are green.
+
+Review: partitioned (correctness / fit / test) clean — 0 Critical, 0 Important,
+1 Minor. The Minor: `ticketRel` is now a vestigial parameter of
+`sageRecordSingle`/`sageRecordCombined` (its only use, `CommitPaths:
+[]string{ticketRel}`, was removed); it compiles and vets clean, so it is a
+cleanliness item, not a defect — accepted and recorded here rather than fixed.
