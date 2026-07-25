@@ -2225,6 +2225,45 @@ session after inline `Yes`/`No` confirmation near the close action. Cancel
 leaves the terminal open and focus coherent; confirm preserves the
 close-as-terminate behavior. Hidden detached restore UX remains absent.
 
+## 🚧 Terminal Attention Event Stream {#260726-dashboard-terminal-attention-event-stream}
+
+The daemon exposes a server-wide, work-root-independent SSE stream of
+per-terminal turn-state ("attention") transitions, so the browser can learn
+that a terminal has gone from `working` to `ready` (or `idle`) even when no
+Activity Console pane for that terminal's workRoot is open. The local route is
+`GET /api/dashboard/terminals/attention/events`; the server-scoped sibling is
+`GET /api/dashboard/servers/{serverRoute}/terminals/attention/events`, forwarded
+transparently to the linked daemon the same way the Activity Console watch
+stream and document-content-changed stream are. Unlike those two streams, this
+one is not scoped to a `{workRootId}` path segment: attention state is keyed by
+terminal id across the whole daemon, independent of which workRoot (or
+Activity Console pane) is currently selected in the browser.
+
+On connect, the stream first emits one `event: attentionSnapshot` frame
+carrying every currently-pending attention state (`{ items: [...] }`), so a
+browser refresh or a fresh reconnect after a network interruption does not
+lose a state transition that happened while no stream was open. Subsequent
+transitions arrive as `event: attention` frames, one per terminal-id/state
+change, wire-shaped as
+`{ type: "terminal.attentionChanged", terminalId, workRootId, state, updatedAtMs }`
+where `state` is one of `working` / `ready` / `idle` — the same three-value
+vocabulary the daemon's per-terminal turn-state callback route accepts, not a
+parallel enum. A terminal's attention entry is removed from the snapshot the
+moment its underlying terminal session closes (explicit close or owning
+workRoot/workspace removal), so a reconnect never reports state for a
+terminal that no longer exists.
+
+If the stream falls behind its buffered event backlog, the daemon ends the
+SSE response rather than silently skipping forward: attention state is not
+safely re-derivable from a later event the way a document's content is from a
+re-read, so the browser's native reconnect (which re-enters this route and
+receives a fresh, complete snapshot) is the resync path, not an in-place skip.
+
+This stream is independent of the Activity Console read model and watch
+stream ([Activity Console Read Model](#260521-ws-dashboard-activity-console-read-model),
+[Activity Console Watch Stream](#260521-ws-dashboard-activity-console-watch-stream)):
+it carries no Activity Console item data and does not affect that projection.
+
 ## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 
 The dashboard combines daemon-owned live terminal state, read-only file pane
