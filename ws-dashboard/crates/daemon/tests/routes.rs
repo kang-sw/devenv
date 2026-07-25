@@ -146,9 +146,35 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn test_terminal_registry() -> TerminalRegistry {
     TerminalRegistry::new(
         PathBuf::from(env!("CARGO_BIN_EXE_ws-dashboard")),
-        temp_fixture_path("terminal-registry"),
+        terminal_registry_temp_dir(),
         Duration::from_secs(5),
     )
+}
+
+// CONTRACT (macOS Unix-domain-socket path-length ceiling, surfaced running
+// this crate's tests natively on macOS for the first time - 260725 phase 1):
+// `sockaddr_un.sun_path` caps out at 104 bytes on macOS vs. 108 on Linux, and
+// `std::env::temp_dir()` (what `temp_fixture_path` uses) resolves to a long
+// per-session `$TMPDIR` path on macOS (e.g.
+// `/var/folders/<hash>/T/`), which alone can consume 40-60 bytes - too little
+// headroom left for this fixture's directory name plus a terminal id plus
+// `.sock` before `UnixListener::bind` fails with "path must be shorter than
+// SUN_LEN". `/tmp` (which macOS symlinks to the short `/private/tmp`) stays
+// comfortably under the limit on every platform this crate targets, so the
+// terminal-registry fixture - the only fixture that binds real sockets under
+// its temp path - uses it directly instead of going through the shared
+// `temp_fixture_path` helper (which many non-socket fixtures also use and
+// must not be perturbed by a socket-specific constraint).
+fn terminal_registry_temp_dir() -> PathBuf {
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    #[cfg(unix)]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(unix))]
+    let base = std::env::temp_dir();
+    base.join(format!(
+        "ws-dashboard-terminal-registry-{}-{unique}",
+        std::process::id()
+    ))
 }
 
 fn app_state() -> AppState {
