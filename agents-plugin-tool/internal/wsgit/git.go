@@ -476,9 +476,19 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	// Verify runs after staging (so a blocked commit leaves the invalid state
 	// staged for the caller to fix and re-verify, not reverted) and before the
 	// commit message/`git commit` itself, matching validateCommitStatus's
-	// gate position.
-	if err := c.verifier()(root, opts.Paths); err != nil {
-		return CommitResult{}, err
+	// gate position. The verifier only ever sees the delete-side-filtered
+	// paths (see filterIndexDeleteSidePaths): a staged ticket rename or
+	// deletion leaves its old path unreadable, and wsdoc.TicketVerify's
+	// file-exists guardrail would otherwise reject a legitimate status
+	// transition. validateCommitStatus above still sees the full expanded
+	// opts.Paths, since narrowing what it sees would reopen the
+	// unrelated-path guard for the delete-side path itself. See
+	// {#260720-wsdoc-commit-boundary} for why this stays a wsgit-side filter
+	// rather than a wsdoc.TicketVerify change.
+	if verifyPaths := filterIndexDeleteSidePaths(status, opts.Paths); len(verifyPaths) > 0 {
+		if err := c.verifier()(root, verifyPaths); err != nil {
+			return CommitResult{}, err
+		}
 	}
 	ticketChanges := detectTicketChanges(ctx, runner, root)
 	if len(opts.UpdatedTickets) == 0 {
@@ -664,6 +674,32 @@ func expandCommitPathsForTicketMoves(status StatusResult, paths []string) []stri
 		}
 	}
 	return expanded
+}
+
+// filterIndexDeleteSidePaths drops paths that are the delete side of a staged
+// rename (IndexStatus "R", via OldPath) or an outright staged deletion
+// (IndexStatus "D") from the given expanded path list. It exists so Commit
+// can hand the Verifier only paths that still exist to read; see the call
+// site comment referencing {#260720-wsdoc-commit-boundary} for why this
+// filter applies to the verifier call only, not to validateCommitStatus.
+func filterIndexDeleteSidePaths(status StatusResult, paths []string) []string {
+	deleteSide := map[string]bool{}
+	for _, file := range status.ChangedFiles {
+		if file.IndexStatus == "D" {
+			deleteSide[filepath.ToSlash(filepath.Clean(file.Path))] = true
+		}
+		if file.IndexStatus == "R" && file.OldPath != "" {
+			deleteSide[filepath.ToSlash(filepath.Clean(file.OldPath))] = true
+		}
+	}
+	kept := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if deleteSide[filepath.ToSlash(filepath.Clean(path))] {
+			continue
+		}
+		kept = append(kept, path)
+	}
+	return kept
 }
 
 func pathInCommitSet(path string, roots []string) bool {

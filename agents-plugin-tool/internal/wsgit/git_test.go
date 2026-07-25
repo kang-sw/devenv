@@ -351,6 +351,50 @@ func TestCommitExpandsTodoToReadyTicketMovePathsByStem(t *testing.T) {
 	}
 }
 
+func TestFilterIndexDeleteSidePathsDropsRenameOldPath(t *testing.T) {
+	status := ParseStatus([]byte("2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"))
+	got := filterIndexDeleteSidePaths(status, []string{"ai-docs/tickets/ready/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"})
+	want := []string{"ai-docs/tickets/ready/260503-feat-demo.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterIndexDeleteSidePaths = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterIndexDeleteSidePathsDropsCloseRenameOldPath(t *testing.T) {
+	status := ParseStatus([]byte("2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/.dropped/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"))
+	got := filterIndexDeleteSidePaths(status, []string{"ai-docs/tickets/.dropped/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"})
+	want := []string{"ai-docs/tickets/.dropped/260503-feat-demo.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterIndexDeleteSidePaths = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterIndexDeleteSidePathsDropsOutrightDeletion(t *testing.T) {
+	status := ParseStatus([]byte("1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 ai-docs/tickets/idea/260503-feat-demo.md\n"))
+	got := filterIndexDeleteSidePaths(status, []string{"ai-docs/tickets/idea/260503-feat-demo.md"})
+	if len(got) != 0 {
+		t.Fatalf("filterIndexDeleteSidePaths = %#v, want empty", got)
+	}
+}
+
+func TestFilterIndexDeleteSidePathsKeepsUnrelatedContentEdit(t *testing.T) {
+	status := ParseStatus([]byte("1 M. N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-other.md\n"))
+	got := filterIndexDeleteSidePaths(status, []string{"ai-docs/tickets/todo/260503-feat-other.md"})
+	want := []string{"ai-docs/tickets/todo/260503-feat-other.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterIndexDeleteSidePaths = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterIndexDeleteSidePathsKeepsCopySourcePath(t *testing.T) {
+	status := ParseStatus([]byte("2 C. N... 100644 100644 100644 aaa bbb C100 ai-docs/tickets/ready/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"))
+	got := filterIndexDeleteSidePaths(status, []string{"ai-docs/tickets/ready/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"})
+	want := []string{"ai-docs/tickets/ready/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterIndexDeleteSidePaths = %#v, want %#v (copy source must not be filtered)", got, want)
+	}
+}
+
 func TestCommitStagesDeletedTicketMoveByParentDirectory(t *testing.T) {
 	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.done/260503-feat-demo.md\n"))
 	got := stagingCommandsForCommit([]string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}, preStatus)
@@ -684,6 +728,292 @@ func TestCommitProceedsWhenVerifierNilDefaultsToNoOp(t *testing.T) {
 	}
 	if len(runner.calls) != 7 || runner.calls[5].args[0] != "commit" {
 		t.Fatalf("runner.calls = %#v, want `git commit` to run at call index 5", runner.calls)
+	}
+}
+
+// TestCommitPromotionVerifierSeesOnlyDestinationPath exercises the ticket's
+// named "promotion" verification boundary: a staged todo/ -> ready/ rename
+// must commit, and the Verifier must see only the destination path (the
+// source path is unreadable post-rename, so handing it to
+// wsdoc.TicketVerify's file-exists guardrail would wrongly fail the commit).
+func TestCommitPromotionVerifierSeesOnlyDestinationPath(t *testing.T) {
+	root := "/repo"
+	preStatus := "1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/ready/260503-feat-demo.md\n"
+	postStatus := "2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte(preStatus),  // pre-status
+		{},                 // add ready/...
+		{},                 // rm --cached todo/...
+		[]byte(postStatus), // post-status
+		{},                 // detectTicketChanges name-status
+		{},                 // detectTicketChanges unified diff
+		{},                 // commit -m
+		[]byte("abc123\n"), // rev-parse HEAD
+	}}
+	var gotPaths []string
+	client := Client{Runner: runner, Verifier: func(gotRoot string, paths []string) error {
+		gotPaths = paths
+		if gotRoot != root {
+			t.Fatalf("verifier root = %q, want %q", gotRoot, root)
+		}
+		return nil
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{"ai-docs/tickets/ready/260503-feat-demo.md"},
+		Title:     "docs(ticket): promote demo ticket",
+		AIContext: []string{"User intent: promote a ticket from todo to ready."},
+	})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
+	}
+	want := []string{"ai-docs/tickets/ready/260503-feat-demo.md"}
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Fatalf("verifier paths = %#v, want %#v", gotPaths, want)
+	}
+}
+
+// TestCommitCloseVerifierSeesOnlyDestinationPath mirrors the promotion case
+// for tickets.close's todo/ -> .dropped/ transition, per the ticket's
+// explicit "close path" regression requirement.
+func TestCommitCloseVerifierSeesOnlyDestinationPath(t *testing.T) {
+	root := "/repo"
+	preStatus := "1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.dropped/260503-feat-demo.md\n"
+	postStatus := "2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/.dropped/260503-feat-demo.md\tai-docs/tickets/todo/260503-feat-demo.md\n"
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte(preStatus),
+		{},
+		{},
+		[]byte(postStatus),
+		{},
+		{},
+		{},
+		[]byte("abc123\n"),
+	}}
+	var gotPaths []string
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+		gotPaths = paths
+		return nil
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{"ai-docs/tickets/.dropped/260503-feat-demo.md"},
+		Title:     "docs(ticket): drop demo ticket",
+		AIContext: []string{"User intent: close a ticket by dropping it."},
+	})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
+	}
+	want := []string{"ai-docs/tickets/.dropped/260503-feat-demo.md"}
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Fatalf("verifier paths = %#v, want %#v", gotPaths, want)
+	}
+}
+
+// TestCommitOutrightDeletionSkipsVerifierEntirely covers the risk flagged in
+// the plan: filtering opts.Paths down to empty (the sole staged path was an
+// outright ticket deletion) must skip the Verifier call altogether rather
+// than invoking it with an empty slice, since wsdoc.TicketVerify treats an
+// empty paths argument as a caller-input error.
+func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
+	root := "/repo"
+	preStatus := "1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/idea/260503-feat-demo.md\n"
+	postStatus := "1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 ai-docs/tickets/idea/260503-feat-demo.md\n"
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte(preStatus),
+		{},
+		[]byte(postStatus),
+		{},
+		{},
+		{},
+		[]byte("abc123\n"),
+	}}
+	verifierCalled := false
+	client := Client{Runner: runner, Verifier: func(string, []string) error {
+		verifierCalled = true
+		return nil
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{"ai-docs/tickets/idea/260503-feat-demo.md"},
+		Title:     "docs(ticket): delete demo ticket",
+		AIContext: []string{"User intent: delete a ticket outright."},
+	})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
+	}
+	if verifierCalled {
+		t.Fatalf("Verifier was invoked for an outright deletion with no remaining paths to verify")
+	}
+}
+
+// TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt pins the
+// strategy choice documented in the plan: when the caller explicitly passes
+// both sides of a staged rename alongside an unrelated ticket's own path,
+// the Verifier must still see only the rename's destination path plus the
+// unrelated path — not the rename's stale old path.
+func TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt(t *testing.T) {
+	root := "/repo"
+	preStatus := strings.Join([]string{
+		"1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-alpha.md",
+		"? ai-docs/tickets/ready/260503-feat-alpha.md",
+		"1 .M N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260504-feat-beta.md",
+		"",
+	}, "\n")
+	postStatus := strings.Join([]string{
+		"2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-alpha.md\tai-docs/tickets/todo/260503-feat-alpha.md",
+		"1 M. N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260504-feat-beta.md",
+		"",
+	}, "\n")
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte(preStatus),
+		{},
+		{},
+		[]byte(postStatus),
+		{},
+		{},
+		{},
+		[]byte("abc123\n"),
+	}}
+	var gotPaths []string
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+		gotPaths = paths
+		return nil
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths: []string{
+			"ai-docs/tickets/todo/260503-feat-alpha.md",
+			"ai-docs/tickets/ready/260503-feat-alpha.md",
+			"ai-docs/tickets/todo/260504-feat-beta.md",
+		},
+		Title:     "docs(ticket): promote alpha and edit beta",
+		AIContext: []string{"User intent: promote one ticket while editing another in the same commit."},
+	})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
+	}
+	want := []string{"ai-docs/tickets/ready/260503-feat-alpha.md", "ai-docs/tickets/todo/260504-feat-beta.md"}
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Fatalf("verifier paths = %#v, want %#v (rename old path must be excluded even though the caller passed it explicitly)", gotPaths, want)
+	}
+}
+
+// TestCommitStillRefusesUnrelatedStagedRenameOldPath confirms
+// validateCommitStatus's existing unrelated-path guard, which runs before
+// the new delete-side filter, is unaffected: a staged rename for a stem the
+// caller never named must still block the commit before the Verifier is
+// ever invoked.
+func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
+	postStatus := "2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-alpha.md\tai-docs/tickets/todo/260503-feat-alpha.md\n"
+	runner := &sequenceRunner{outs: [][]byte{
+		{}, // pre-status
+		{}, // add
+		[]byte(postStatus),
+	}}
+	verifierCalled := false
+	client := Client{Runner: runner, Verifier: func(string, []string) error {
+		verifierCalled = true
+		return nil
+	}}
+
+	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
+		Paths:     []string{"ai-docs/tickets/todo/260505-feat-gamma.md"},
+		Title:     "docs(ticket): unrelated commit",
+		AIContext: []string{"User intent: commit an unrelated ticket path."},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
+		t.Fatalf("Commit error = %v, want unrelated staged path", err)
+	}
+	if verifierCalled {
+		t.Fatalf("Verifier was invoked despite an unrelated staged path blocking the commit")
+	}
+	if len(runner.calls) != 3 {
+		t.Fatalf("runner.calls = %#v, want exactly 3 (pre-status, add, post-status)", runner.calls)
+	}
+}
+
+// TestCommitIndexOnlyPathStillRefusesUnrelatedStagedRename closes the
+// dogfood-matrix coverage gap: committing only "_index.md" while an
+// unrelated ticket rename is separately staged must still be refused, since
+// "_index.md" is not ticket-shaped and triggers no stem expansion.
+func TestCommitIndexOnlyPathStillRefusesUnrelatedStagedRename(t *testing.T) {
+	postStatus := strings.Join([]string{
+		"2 R. N... 100644 100644 100644 aaa bbb R100 ai-docs/tickets/ready/260503-feat-alpha.md\tai-docs/tickets/todo/260503-feat-alpha.md",
+		"1 M. N... 100644 100644 100644 aaa bbb _index.md",
+		"",
+	}, "\n")
+	runner := &sequenceRunner{outs: [][]byte{
+		{},
+		{},
+		[]byte(postStatus),
+	}}
+	verifierCalled := false
+	client := Client{Runner: runner, Verifier: func(string, []string) error {
+		verifierCalled = true
+		return nil
+	}}
+
+	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
+		Paths:     []string{"_index.md"},
+		Title:     "docs: update index",
+		AIContext: []string{"User intent: commit only the index while a ticket rename is separately staged."},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
+		t.Fatalf("Commit error = %v, want unrelated staged path", err)
+	}
+	if verifierCalled {
+		t.Fatalf("Verifier was invoked despite an unrelated staged ticket rename blocking the commit")
+	}
+}
+
+// TestCommitContentOnlyEditLeavesVerifierPathsUnmodified confirms the filter
+// is a no-op when nothing in the commit is a rename or deletion.
+func TestCommitContentOnlyEditLeavesVerifierPathsUnmodified(t *testing.T) {
+	root := "/repo"
+	ticketPath := "ai-docs/tickets/todo/260503-feat-demo.md"
+	postStatus := "1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"
+	runner := &sequenceRunner{outs: [][]byte{
+		{},
+		{},
+		[]byte(postStatus),
+		{},
+		{},
+		{},
+		[]byte("abc123\n"),
+	}}
+	var gotPaths []string
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+		gotPaths = paths
+		return nil
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{ticketPath},
+		Title:     "docs(ticket): edit demo ticket body",
+		AIContext: []string{"User intent: a plain content-only ticket edit."},
+	})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if result.Hash != "abc123" {
+		t.Fatalf("result.Hash = %q, want abc123", result.Hash)
+	}
+	want := []string{ticketPath}
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Fatalf("verifier paths = %#v, want %#v (filter must be a no-op for content-only edits)", gotPaths, want)
 	}
 }
 
