@@ -1736,12 +1736,69 @@ with test targets included. Documentation-only commits after that point do not
 affect the result, because the Linux leg compiles no macOS-gated code. This is
 produced Linux evidence, not a deferral.
 
-Live-lifecycle and browser-gate evidence (spawn, daemon-restart re-adopt,
-identity-verified close, dead-shell detection against a running dashboard) is
-an explicit gap on macOS, deferred to a later phase, and must not be read as
-covered by the build/unit-test pass recorded here — `terminal_lifetime`
-exercises the real lifecycle at the process/socket level but not through the
-browser-facing UI/WebSocket gate.
+Native macOS evidence (260725 Phase 2) closes the process/socket-level half of
+the live-lifecycle gap: all four lifecycle legs verified on native
+aarch64-apple-darwin via `cargo test -p ws-dashboard-daemon --test
+terminal_lifetime` (4 passed, 0 failed), each with a non-vacuity mutation
+proving its assertion can actually fail — mutated, run to a confirmed FAIL,
+reverted via `git checkout --`, re-run to a confirmed PASS, with `git status`/
+`git diff` on `crates/daemon/src/` clean after every revert:
+
+- Spawn (`unix::spawn_detached`, `terminal_platform.rs`): forcing the
+  `pre_exec` closure to `return Err(...)` immediately failed
+  `create_terminal`'s `assert_eq!(response.status(), OK, "create terminal")`
+  with `left: 400, right: 200`.
+- Daemon-restart re-adopt (`reconcile_entry`'s adopt arm, `terminal.rs`):
+  commenting out `self.insert_unchecked(session);` failed both restart-adopt
+  tests at their "adopted terminal missing from list: []" panics.
+- Dead-shell detection (PTY-EOF reader path, `terminal_helper_process.rs`):
+  commenting out `shared.transition(TerminalHelperStatus::Exited);` in
+  `spawn_reader_thread`'s EOF branch failed
+  `terminal_live_pty_eof_exit_flips_status_to_exited`'s `saw_exited` assertion
+  after its 5s drain deadline. This is a **confirmed observation**, not an
+  assumption carried over from prior phases' prose: macOS PTYs deliver EOF on
+  shell exit the same way Linux does, so the reader-thread path (not a
+  Windows-style process-handle reaper, which stays `#[cfg(windows)]`-gated and
+  contributes no macOS coverage) is what flips status to `exited` on this
+  platform too.
+- Identity-verified close (`TerminalSession::terminate`'s fallback
+  `kill_verified` call, `terminal.rs`): the new
+  `terminal_close_kills_verified_process_via_fallback_kill` test `SIGSTOP`s
+  the helper before issuing `DELETE` so it cannot service the graceful
+  `GracefulShutdown` IPC path within `terminate()`'s 200ms window (`SIGKILL`
+  is not maskable by `SIGSTOP`), forcing the fallback `kill_verified` SIGKILL
+  to be the mechanism that actually terminates it. Inserting an early
+  `return Ok(false);` in `macos::kill_verified` right after its `pid == 0`
+  guard reproduced the leg's non-vacuity failure: the test's process-death
+  poll timed out with the `SIGSTOP`'d helper still alive. This mutation
+  leaves a frozen process if the test fails between the `SIGSTOP` and the
+  daemon's kill; the test's own `HelperReaper` drop guard (identity-verified
+  `kill -KILL`, independent of `kill_verified`) was confirmed to reap it
+  automatically during the panic unwind, since `SIGKILL` still terminates a
+  stopped (`T`-state) process.
+
+Pid-mismatch/pid-reuse negative coverage is deliberately **not** added at the
+integration level — reproducing genuine OS pid reuse deterministically would
+require racing OS pid allocation and would be flaky by construction. This case
+stays covered only at the unit level:
+`terminal_platform::platform_identity_tests::kill_verified_refuses_to_kill_on_start_time_mismatch`,
+part of the `--lib` 124/0/2 result re-confirmed in this phase.
+
+`--lib` (124 passed, 0 failed, 2 ignored) and `--test server` (15 passed, 0
+failed) were re-run alongside `--test terminal_lifetime` to confirm no
+regression; both match the Phase 1 baseline exactly. This phase's own tests
+were confirmed to leak nothing: live `terminal-helper` process counts
+(`pgrep -f terminal-helper`) and `/tmp/ws-dashboard-terminal-lifetime-*`
+temp-dir listings were compared before and after every run, including each
+mutation round-trip, independent of the already-tracked `tests/routes.rs`
+detached-helper leak
+(`260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper`).
+
+The browser-facing UI/WebSocket gate remains an explicit gap on macOS,
+deferred to a later phase, and must not be read as covered by this
+process/socket-level result — `terminal_lifetime` exercises the real
+lifecycle through real OS processes and a real Unix-domain-socket IPC
+channel, but not through the browser-facing UI/WebSocket surface.
 
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 

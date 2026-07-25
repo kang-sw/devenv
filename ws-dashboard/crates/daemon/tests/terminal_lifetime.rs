@@ -853,3 +853,125 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
     let _ = std::fs::remove_dir_all(&state_home);
     let _ = std::fs::remove_dir_all(&work_root);
 }
+
+// CONTRACT (260725 Phase 2, fourth lifecycle leg - identity-verified close):
+// `TerminalSession::terminate` (`terminal.rs`) is unconditionally 2-tier: it
+// writes `GracefulShutdown` over IPC, sleeps 200ms, then ALWAYS calls
+// `terminal_platform::kill_verified(pid, start_time)` regardless of whether
+// the graceful path appeared to succeed. Under normal healthy load the
+// helper's `GracefulShutdown` handler (`terminal_helper_process.rs`) kills
+// its own shell and self-exits well inside that 200ms window, which makes
+// the fallback `kill_verified` call a structural no-op (the pid is already
+// gone by the time it runs, so `read_bsdinfo`/`process_start_time` returns
+// `None` and it is a harmless `Ok(false)`). A black-box "is the process gone
+// after DELETE" check alone cannot distinguish "the graceful path did it"
+// from "the identity-verified `kill_verified` SIGKILL path did it" - this
+// test forces the latter by `SIGSTOP`-ing the helper before issuing the
+// close, so it genuinely cannot service its IPC socket (the write still
+// lands in the kernel socket buffer, but nothing reads it) before the
+// fallback timer fires. `SIGKILL` is not maskable by `SIGSTOP`, so
+// `kill_verified`'s signal still reaches and terminates the frozen helper.
+#[tokio::test]
+async fn terminal_close_kills_verified_process_via_fallback_kill() {
+    let client = reqwest::Client::new();
+    let state_home = temp_fixture_path("state-close-kill");
+    std::fs::create_dir_all(&state_home).expect("create state home dir");
+    let work_root = temp_fixture_path("root-close-kill");
+    std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    // Leak-safe cleanup: if anything below panics after the SIGSTOP but
+    // before the daemon's kill_verified reaches the helper, this guard's
+    // identity-verified `kill -KILL` still reaps a stopped process (SIGKILL
+    // is not maskable, so it terminates a `T`-state process immediately
+    // without first requiring a SIGCONT). See `HelperReaper` above.
+    let _reaper = HelperReaper {
+        state_home: state_home.clone(),
+        work_root: work_root.clone(),
+    };
+
+    let daemon = spawn_real_daemon(&state_home).await;
+    let work_root_id = open_work_root(&client, &daemon.base_url, &work_root).await;
+    let terminal_id = create_terminal(&client, &daemon.base_url, &work_root_id).await;
+
+    // Read the terminal's registry entry directly (mirrors `HelperReaper`'s
+    // parse, not a fresh implementation) to capture the helper's real
+    // `pid`/`startTime` before closing.
+    let registry_path = state_home
+        .join("terminals")
+        .join(format!("{terminal_id}.json"));
+    let raw =
+        std::fs::read_to_string(&registry_path).expect("read terminal registry entry before close");
+    let entry: serde_json::Value =
+        serde_json::from_str(&raw).expect("parse terminal registry entry JSON");
+    let pid = entry["pid"].as_u64().expect("registry pid") as u32;
+
+    // Freeze the helper so it cannot service `GracefulShutdown` before
+    // `terminate()`'s 200ms fallback timer fires. Poll `ps` until the kernel
+    // actually reports the stopped state (`T`) rather than assuming the
+    // signal has been fully applied the instant `kill` returns.
+    let stop_status = std::process::Command::new("kill")
+        .arg("-STOP")
+        .arg(pid.to_string())
+        .status()
+        .expect("run kill -STOP on helper pid");
+    assert!(stop_status.success(), "SIGSTOP delivery to helper must succeed");
+
+    let stop_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let output = std::process::Command::new("ps")
+            .arg("-o")
+            .arg("state=")
+            .arg("-p")
+            .arg(pid.to_string())
+            .output()
+            .expect("run ps to observe helper state");
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if state.starts_with('T') {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < stop_deadline,
+            "helper pid {pid} never reached the SIGSTOP'd `T` state; last ps state: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // `close_terminal` `.await`s `terminate()` (including the fallback
+    // `kill_verified` call) before responding, so by the time this returns
+    // the identity-verified SIGKILL has already been issued.
+    let close_response = client
+        .delete(format!(
+            "{}/api/dashboard/terminals/{terminal_id}",
+            daemon.base_url
+        ))
+        .send()
+        .await
+        .expect("close terminal request");
+    assert_eq!(
+        close_response.status(),
+        reqwest::StatusCode::NO_CONTENT,
+        "close terminal"
+    );
+
+    // Poll (generous, bounded deadline - consistent with this file's "err
+    // generous" margin philosophy) until the OS confirms the pid is gone.
+    // This is the actual "OS process was verified-killed" evidence: a plain
+    // `GracefulShutdown` could never have reached the frozen helper, so only
+    // the fallback `kill_verified` SIGKILL path can account for this.
+    let death_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if ws_dashboard_daemon::terminal_platform::process_start_time(pid).is_none() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < death_deadline,
+            "helper pid {pid} was not killed by terminate()'s fallback kill_verified path \
+             within the deadline"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    daemon.kill_hard().await;
+    let _ = std::fs::remove_dir_all(&state_home);
+    let _ = std::fs::remove_dir_all(&work_root);
+}
