@@ -146,7 +146,17 @@ where
     // `crates/daemon/tests/terminal_notify_callback_restart.rs`'s ordering
     // regression test, which is what actually proves this placement rather
     // than merely documenting it.
-    if let Some(state_dir) = state_dir {
+    // CONTRACT (260725 Phase 4 review cycle 1, finding B): unlike this
+    // crate's other untracked `tokio::spawn` calls (`spawn_ipc_reader_task`,
+    // the `claude_cli`/`codex_app_server` reader loops), this task is
+    // self-bounding on NOTHING - it is an infinite `loop { tick; sweep }`
+    // with no connection/pipe to close underneath it. Left untracked, it
+    // would run forever regardless of this daemon's own shutdown signal,
+    // unlike `shutdown_task` below (this crate's one other background task,
+    // tracked and `.abort()`-ed in both `select!` arms). Track the
+    // `JoinHandle` and abort it alongside `shutdown_task` so it participates
+    // in the same graceful-shutdown path instead of leaking.
+    let gc_sweep_task = state_dir.map(|state_dir| {
         let sweep_registry = terminals.clone();
         tokio::spawn(async move {
             crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
@@ -159,8 +169,8 @@ where
                 interval.tick().await;
                 crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
             }
-        });
-    }
+        })
+    });
 
     let app = build_router(AppState {
         config,
@@ -191,10 +201,16 @@ where
     tokio::select! {
         result = &mut server => {
             shutdown_task.abort();
+            if let Some(gc_sweep_task) = &gc_sweep_task {
+                gc_sweep_task.abort();
+            }
             result?;
         }
         () = force_after_shutdown(shutdown_rx, grace_period) => {
             shutdown_task.abort();
+            if let Some(gc_sweep_task) = &gc_sweep_task {
+                gc_sweep_task.abort();
+            }
             tracing::warn!(
                 grace_period_ms = grace_period.as_millis(),
                 "forcing ws-dashboard daemon shutdown after grace period"
