@@ -16,6 +16,11 @@ export type TerminalSessionView = {
   rows: number;
   createdAtMs: number;
   cwdHint: string | null;
+  // Which registry profile (e.g. "claude") produced this session, `null`
+  // for the unchanged default-shell path and for any adopted (post-daemon-
+  // restart) session - mirrors the daemon's `TerminalSessionView.profileId`
+  // (260725 Phase 2, browser spawn profile).
+  profileId: string | null;
 };
 
 export type TerminalOutputChunk = {
@@ -82,6 +87,9 @@ export type TerminalPaneState = {
 export type TerminalCreateOptions = {
   title?: string;
   cwdHint?: string | null;
+  // Opaque daemon-side vendor profile id (e.g. "claude"). Omitted keeps
+  // today's default-shell spawn behavior unchanged (260725 Phase 2).
+  profileId?: string;
 };
 
 export type TerminalRestoreIntent = {
@@ -220,6 +228,7 @@ export async function createTerminal(
         rows: defaultPtyLogicalSize.rows,
         title: options.title ?? "Terminal",
         cwdHint: options.cwdHint ?? null,
+        profileId: options.profileId ?? null,
       }),
     },
   );

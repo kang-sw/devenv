@@ -332,6 +332,7 @@ const smallEntry: TerminalVisualRestoreEntry = {
     rows: 24,
     createdAtMs: 1,
     cwdHint: null,
+    profileId: null,
   };
   const chunkSize = 4_000;
   // Comfortably more chunks than needed to trim at least once, and to keep

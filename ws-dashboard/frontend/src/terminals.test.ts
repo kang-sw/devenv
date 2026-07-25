@@ -82,6 +82,7 @@ const session: TerminalSessionView = {
   rows: 24,
   createdAtMs: 1,
   cwdHint: null,
+  profileId: null,
 };
 
 assertEqual(
@@ -479,6 +480,7 @@ const sessionB: TerminalSessionView = {
   rows: 24,
   createdAtMs: 1,
   cwdHint: null,
+  profileId: null,
 };
 const paneA = terminalPaneFromSession(session);
 const paneB = terminalPaneFromSession(sessionB);
@@ -1012,6 +1014,7 @@ const remoteSession: TerminalSessionView = {
   rows: 24,
   createdAtMs: 1,
   cwdHint: null,
+  profileId: null,
 };
 
 await (async () => {
@@ -1029,13 +1032,23 @@ await (async () => {
   assertEqual(recorded().method, "POST", "createTerminal uses POST");
   assertDeepEqual(
     recorded().body,
-    { columns: 80, rows: 24, title: "Remote", cwdHint: "sub" },
-    "createTerminal forwards the size/title/cwd payload",
+    { columns: 80, rows: 24, title: "Remote", cwdHint: "sub", profileId: null },
+    "createTerminal forwards the size/title/cwd/profile payload, profileId null when omitted",
   );
   assertEqual(
     created.serverRoute,
     remote,
     "createTerminal stamps the serverRoute onto the returned session",
+  );
+
+  // 260725 Phase 2 (browser spawn profile): an explicit profileId option
+  // must reach the POST body unchanged.
+  installFetchMock(remoteSession);
+  await createTerminal("root-remote", { title: "Remote", profileId: "claude" }, remote);
+  assertDeepEqual(
+    recorded().body,
+    { columns: 80, rows: 24, title: "Remote", cwdHint: null, profileId: "claude" },
+    "createTerminal forwards an explicit profileId",
   );
 
   installFetchMock([remoteSession]);
@@ -1139,6 +1152,7 @@ await (async () => {
     rows: 24,
     createdAtMs: 1,
     cwdHint: null,
+    profileId: null,
   };
 
   installFetchMock(sessionWithoutRoute);
