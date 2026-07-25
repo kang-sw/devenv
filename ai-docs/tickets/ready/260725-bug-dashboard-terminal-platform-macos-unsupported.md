@@ -262,6 +262,103 @@ Rejected approach: patching only the two compile errors and leaving
 whose helper re-adoption and verified kill are permanently inert — strictly
 worse than the current honest build failure.
 
+### Result (1aca7993) - 2026-07-25
+
+`terminal_platform.rs` now splits into `unix` (portable `spawn_detached`
+only), `linux` (the `/proc` + pidfd leaves, bodies unchanged), `macos` (new),
+and `windows` (untouched), behind a cfg-independent re-export block with a
+`compile_error!` arm for any other unix target. macOS start-time comes from
+`proc_pidinfo(PROC_PIDTBSDINFO)`, packing `pbi_start_tvsec << 20 |
+pbi_start_tvusec` into the existing opaque `u64`; registry schema unchanged.
+macOS `kill_verified` verifies, `kill(pid, SIGKILL)`s, then re-reads
+best-effort, discriminating the three post-kill outcomes (gone / zombie
+carrying the original start-time via `pbi_status` `SZOMB` / different
+start-time); `io::Result<bool>` semantics match the Linux leg exactly (never
+`Err`). `terminal_helper_process.rs` no longer records
+`process_start_time(pid).unwrap_or(0)`; it returns `Err` before
+`write_registry_entry`, and ordering was verified so the error cannot leave a
+partial registry entry, a bound socket, or a live PTY. `IdentityStatus` is
+untouched — still 3 variants, no reconcile-table ripple.
+
+Verification, native aarch64-apple-darwin at 1aca7993: `cargo build -p
+ws-dashboard-daemon --all-targets` clean and warning-free. `--lib` 124
+passed / 0 failed / 2 ignored (the 2 ignored are pre-existing
+`claude_cli`/`codex_app_server` tests needing an authenticated CLI binary).
+`--test server` 15/0; `--test terminal_lifetime` 3/0; `--test
+terminal_windows_reaper_acceptance` 0 tests collected (entirely
+`#[cfg(windows)]`, compiles clean). `--test routes` 164 passed / 2 failed
+(see Deferred below). Linux non-regression was produced, not deferred:
+native `cargo check --target x86_64-unknown-linux-gnu` cannot run on this
+host (`ring` and `libsqlite3-sys` invoke `cc-rs` at build-script time even
+under `cargo check`, and no `x86_64-linux-gnu-gcc` is installed), so it was
+verified in a native x86_64 Linux container instead — `docker run --rm
+--platform linux/amd64 ... rust:latest cargo check --locked -p
+ws-dashboard-daemon --all-targets` exited 0, re-run at each implementation
+tip including the final one.
+
+Findings this phase produced beyond the port itself:
+
+- The ticket's premise that per-target results were knowable from one
+  `cargo test` invocation was wrong: cargo fail-fasts on the `routes`
+  target, so three of five integration targets had never executed on macOS
+  at all and had to be run individually.
+- `tests/terminal_lifetime.rs`'s `HelperReaper` was `#[cfg(unix)]` but
+  hand-parsed `/proc/<pid>/stat`, so on macOS its identity guard never
+  matched and it reaped nothing — leaking a detached helper and its PTY on
+  every run, silently. Same defect class this ticket exists to close. Fixed
+  by routing through the cfg-independent `terminal_platform::process_start_time`
+  re-export; proved non-vacuously by injecting a panic mid-test and
+  confirming via `ps` that the helper was actually killed on unwind.
+- All 3 `terminal_lifetime` tests were failing (0/3) for the same reason as
+  the `routes.rs` fixture: macOS's `sockaddr_un.sun_path` is 104 bytes vs
+  Linux's 108, and macOS `$TMPDIR` is a long `/var/folders/<hash>/T/` path.
+  Fixed with a `#[cfg(target_os = "macos")]`-scoped `/tmp` base; production
+  is unaffected since the registry dir resolves through
+  `$HOME/.local/state/ws-dashboard/...`.
+- The "fail loudly" requirement was initially satisfied only in letter: the
+  helper is spawned with stdout/stderr null and `main.rs` dispatches
+  `terminal-helper` before `logging::init`, so neither the anyhow print nor
+  a `tracing::error!` would reach anywhere. Closed with a daemon-side log
+  distinguishing "helper never wrote a registry entry" from other spawn
+  failures (chosen over moving `logging::init`, to avoid the daemon and
+  helper processes racing on the same rolling log file).
+
+Deviations from the ticket: the ticket named `pbi_status`/`SZOMB` for the
+zombie discrimination; the first implementation named it in docs but never
+read it — corrected, it is now actually read. The ticket's Phase 1 bullet
+list did not anticipate the two test-fixture fixes or the `HelperReaper`
+fix; all three were taken in-scope under the ticket's own "treat newly
+surfaced macOS-only compile or test failures as in-scope" clause.
+
+Deferred / unresolved:
+
+- `--test routes` 2 failures
+  (`dashboard_resources_refresh_prunes_workspace_without_available_work_roots`,
+  `online_missing_work_root_returns_bounded_unavailable_without_path_leak`)
+  trace to `discovery.rs::canonical_or_normalized` hashing a resolved path
+  when the workRoot exists and an unresolved one when it does not, so
+  `WorkRootId` flips across directory removal/recreation whenever a path
+  segment is a symlink (macOS `/var`, `/tmp`, `/etc`). Pre-existing,
+  `discovery.rs` untouched by this phase. Captured as
+  `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails`.
+- Integration tests in `tests/routes.rs` leak detached helper processes (no
+  reaper; ~8 per run; 81 orphans observed live on the dogfood host).
+  Platform-independent, pre-existing. Captured as
+  `260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper`.
+- The macOS `kill_verified` boundary guard (`pid == 0 || pid > i32::MAX as
+  u32`) is untested. A test was written and then removed rather than kept
+  as fake coverage: `read_bsdinfo` already returns `None` for both inputs,
+  so the assertion passes with the guard disabled. Making it non-vacuous
+  needs the guard extracted into a separately testable predicate — not
+  taken.
+- Phase 2 (native macOS runtime acceptance) is untouched; `terminal_lifetime`
+  exercises the real lifecycle at the process/socket level but not through
+  the browser-facing UI/WebSocket gate.
+
+Review: partitioned correctness/fit/test, two cycles. Cycle 1 raised 1
+Critical (the spec claimed a macOS test pass that was false) + 4 Important +
+7 Minor; all accepted and fixed. Cycle 2: no Critical, no Important.
+
 ### Phase 2: Native macOS runtime acceptance for the helper lifecycle
 
 Phase 1 proves the code compiles and unit-verifies; it does not prove the
