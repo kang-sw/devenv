@@ -997,6 +997,27 @@ server and sibling worktree rows within a workspace are user-reorderable by
 drag, with the resulting order persisted browser-locally per scope rather than
 changing server-reported order.
 
+Work-root left-nav rows carry a second, smaller information line beneath the
+row title reporting how many surfaces that root currently has open, counted
+separately for terminals and documents and phrased in place of a count when
+nothing is open. The counts describe live workbench state — surfaces mounted
+for that root right now — so they change as terminals and documents are opened
+and closed, and a root with no open surfaces says so rather than showing
+nothing. The counting scope is per root: a row never reports another root's
+surfaces. Agent counts are not part of this line. Every work-root row reserves
+the vertical space for the second line whether or not it currently has counts
+to show, so opening or closing a root changes what a row says without changing
+how tall it is and without reflowing the rows around it.
+
+A work-root row also encodes open-versus-closed state visually, not only
+through the presence of its close affordance: a root that is not currently
+open is drawn with reduced emphasis while staying listed, selectable, and
+hoverable with the same hover feedback as any other row. A row that is
+reporting an error keeps its error appearance regardless of open state. Both
+the second line and the open-state emphasis apply to work-root rows —
+including the compact single-work-root form — and not to workspace rows, which
+carry neither. {#260725-nav-row-open-surface-counts-and-open-state}
+
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route
 mouse or click behavior through a shared dashboard command dispatch path, with
