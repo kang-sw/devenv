@@ -2,8 +2,8 @@
 title: remove the _index.md Ticket Focus section and retire its maintenance machinery
 related:
   260605-epic-ws-playbook-factory-pivot: workflow routing depends on accurate project-memory status
-sage-review-completeness: required
-sage-review-design: required
+sage-review-completeness: completed
+sage-review-design: completed
 ---
 
 # remove the _index.md Ticket Focus section and retire its maintenance machinery
