@@ -7,3 +7,4 @@ description: Required first step for implementation tasks. Use when starting fro
 
 Call `ws/playbook.print(name: "lead-proceed")` and execute the returned procedure
 inline against the user request.
+If this call fails to connect, run `/ws:mcp-server-repair`.

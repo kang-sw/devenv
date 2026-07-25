@@ -50,6 +50,7 @@ Included:
 - `lead-goal-step`
 - `lead-goal-fan-out-step`
 - `lead-revive` (inline-body exception; see below)
+- `mcp-server-repair` (inline-body exception; see below)
 
 Excluded:
 
@@ -81,6 +82,13 @@ Excluded:
   these were deleted (or, for `lead-goal-step`, never existed). All
   three are also in `EXPECTED_INLINE_SKILLS` for the same reason as
   `lead-revive`.
+- Exception: `mcp-server-repair` also ships an inline, substitution-generated
+  body rather than a `playbook.print` shim, and has no shared rsrc playbook.
+  Its full-ws counterpart is the `agents-plugin/skills/mcp-server-repair/`
+  skill directory (not a `lead-*` skill). It is inline by deliberate design:
+  the skill exists to recover when the MCP server is down, so its body must be
+  readable without any tool call — a `playbook.print` shim would die exactly
+  when the skill is needed. It is in `EXPECTED_INLINE_SKILLS` for that reason.
 - Do not mention `ws/`, `ws:`, `ws.`, `subquery`, or `agents.*` in
   distributed wsflow skill text.
 - Do not describe wsflow as ws-lite, a ws mode, or a ws-compatible product.
@@ -132,8 +140,9 @@ bodies:
 - `lead-prefer-subagent`
 - `lead-verify-discussion`
 - `lead-goal-step`
+- `mcp-server-repair`
 
-For these two skills only, `agents-plugin-wsflow/skills/<name>/SKILL.md` is
+For these skills only, `agents-plugin-wsflow/skills/<name>/SKILL.md` is
 generated from `agents-plugin/skills/<name>/SKILL.md` via literal namespace
 substitution (`ws:` → `wsflow:`, `ws/` → `wsflow/`) rather than hand-authored
 or curated independently. This is not a blanket auto-mirror mechanism; adding

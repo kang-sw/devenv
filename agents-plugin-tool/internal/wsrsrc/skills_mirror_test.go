@@ -16,6 +16,7 @@ var substitutionMirroredSkills = []string{
 	"lead-goal-step",
 	"lead-prefer-subagent",
 	"lead-verify-discussion",
+	"mcp-server-repair",
 }
 
 // fullSkillsRoot is the canonical full-ws skills tree relative to this
