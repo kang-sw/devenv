@@ -1,5 +1,6 @@
 ---
 title: dashboard daemon does not build on macOS — the "unix" terminal platform layer is Linux-only
+completed: 2026-07-25
 related:
   260723-feat-dashboard-terminal-lifetime-daemon-decouple: introduced-by; landed the detached-helper identity/kill model as "Unix + Windows", but its Unix leg is Linux-only
   260724-bug-dashboard-terminal-dead-shell-undetected-steady-state: sibling platform gap; established the per-platform dead-shell detection story that macOS has never been checked against
@@ -359,6 +360,21 @@ Review: partitioned correctness/fit/test, two cycles. Cycle 1 raised 1
 Critical (the spec claimed a macOS test pass that was false) + 4 Important +
 7 Minor; all accepted and fixed. Cycle 2: no Critical, no Important.
 
+#### Edition (e9504d0c) - 2026-07-25
+
+Correction to the `SZOMB` branch rationale above: the claim that
+`kill_verified_kills_on_matching_identity` "legitimately observes a zombie
+carrying the expected start-time" is factually wrong on macOS. Measured with
+a dedicated C probe: for a genuine unreaped zombie (parent alive,
+deliberately never reaping, confirmed `Z <defunct>` via `ps`),
+`proc_pidinfo` returns n=0 at t+50ms, t+1.25s, and t+4.25s — i.e.
+`process_start_time` yields `None`, not `Some(start_time)`. That test
+therefore takes the "pid gone" branch, and the `SZOMB` arm is unreachable on
+this platform. Behavior is unaffected — both arms are silent successes — so
+no code change follows from this. Short hash used: `e9504d0c` (current HEAD
+at authoring time; using the commit this Edition ships in would be
+circular).
+
 ### Phase 2: Native macOS runtime acceptance for the helper lifecycle
 
 Phase 1 proves the code compiles and unit-verifies; it does not prove the
@@ -385,3 +401,66 @@ a non-vacuity proof that the assertions can fail, and the outcome recorded
 under the cross-platform-evidence anchor. A leg that does not pass is recorded
 as an explicit OS-scoped limitation under that same anchor — never silently
 dropped, and never satisfied by a Linux run standing in for macOS.
+
+### Result (23321137) - 2026-07-25
+
+Added `terminal_close_kills_verified_process_via_fallback_kill` to
+`crates/daemon/tests/terminal_lifetime.rs` (`#[cfg(unix)]`-gated), the fourth
+and last lifecycle leg. It asserts `process_start_time(pid) == Some(entry.
+startTime)` before `kill -STOP`ing the detached helper, drives a `DELETE`, then
+polls `process_start_time(pid) != Some(start_time)` against a 3s deadline. The
+`SIGSTOP` is load-bearing: under normal load the helper self-exits inside
+`terminate()`'s 200ms `GracefulShutdown` window, which would make the
+2-tier-fallback `kill_verified` SIGKILL path a structural no-op; `SIGSTOP`
+forces that path to actually run (`SIGKILL` is not maskable by `SIGSTOP`). All
+four lifecycle legs (spawn, restart re-adopt, dead-shell EOF, identity-verified
+close) now carry a mutation-based non-vacuity proof — mutate production
+source, confirm the test FAILS, revert, confirm green, confirm `git status`
+clean — recorded under
+`#260516-ws-web-dashboard-terminal-cross-platform-evidence`.
+
+Verification, native aarch64-apple-darwin: `--test terminal_lifetime` run 7
+times unloaded (4 passed / 0 failed every run) plus 3 earlier consecutive runs
+at 5.34s/5.15s/5.17s (also 4/4 every run); `--lib` 124 passed / 0 failed / 2
+ignored; `--test server` 15 passed / 0 failed — both match the Phase 1
+baseline exactly. Live `terminal-helper` process count was compared before and
+after every run including each mutation round-trip: 84/84 throughout, 0
+`T`-state strays at every sample. Build check at HEAD `7989a910`: `cargo check
+--locked -p ws-dashboard-daemon --all-targets` exit 0, 0 warnings.
+
+Review: partitioned correctness/fit/test, two independent correctness passes.
+Cycle 1 raised 2 Important, both accepted and fixed in `e9504d0c` (gate the
+test `#[cfg(unix)]` since it shells out to `kill -STOP`/`ps -o state=`, which
+do not exist on Windows; verify the recorded identity before signalling,
+matching the exact invariant this ticket protects). The final pass raised 3
+Minor findings: two fixed in `e6331eda` (inverted death-poll rationale
+comment; restored a dropped T-state-stray evidence clause) and `7989a910`
+(under-claimed WS-protocol-surface sentence — 3 of 4 legs do attach a real
+`tokio_tungstenite` client with bidirectional traffic and asserted `101`
+upgrades, only the close-kill leg has no socket); the third was the same
+`7989a910` fix, counted once. Final verdict: No Critical, No Important.
+
+Deferred / unresolved, all captured as follow-up tickets rather than silently
+dropped:
+
+- `260725-bug-dashboard-terminal-lifetime-load-fragility` — two pre-existing
+  tests (`terminal_lifetime.rs:825`, `:497`) fail reproducibly under CPU
+  saturation; this phase's diff was proven not to cause or worsen it.
+- `260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper` — the
+  pre-existing `tests/routes.rs` detached-helper leak, now also carrying two
+  findings surfaced this phase: a panic-path gap in the `HelperReaper` guard,
+  and a note that `pgrep -f terminal-helper` over-counts against the true live
+  set.
+- `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails` —
+  pre-existing, unrelated to this phase's diff (spun out in Phase 1; still
+  open).
+- `260725-bug-agent-synthetic-load-cleanup-guard` — a dogfood lesson captured
+  during this phase's verification work.
+
+Pid-mismatch/pid-reuse negative coverage is deliberately not added at the
+integration level (would require racing genuine OS pid allocation, flaky by
+construction); it stays covered at the unit level only
+(`kill_verified_refuses_to_kill_on_start_time_mismatch`, part of the `--lib`
+result above). The browser-facing UI/WebSocket gate remains an explicit,
+recorded gap — this phase closes the process/socket-level half of the
+live-lifecycle acceptance, not the browser-facing half.

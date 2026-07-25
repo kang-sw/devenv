@@ -46,3 +46,20 @@ macOS-port defect.
   a process-wide sweep at test-binary exit) open for triage.
 
 None of the above is decided; this ticket captures the finding for triage.
+
+- `terminal_lifetime.rs` has the same gap on its panic path. `HelperReaper`
+  is constructed only at `:712` (dead-shell) and `:892` (the new
+  close-kill test). The two restart tests at `:237` and `:437` clean up only
+  on their happy path. Evidence: 7 deliberately failing load runs left 20
+  stale `/tmp/ws-dashboard-terminal-lifetime-*` dirs, ALL of them
+  `*-row2-*` — i.e. all from
+  `terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_reattach`,
+  and none from the new close-kill test, whose reaper cleaned up every time
+  including under load. This also explains a previously unattributed
+  observation of 8 stale `state-row2`/`root-row2` dirs: they are the row-2
+  test's panic-path leak, not a mystery.
+- `pgrep -f terminal-helper` over-counts and should not be cited for
+  absolute numbers. It also matches any shell or grep process whose command
+  line contains the string — it reported 104 when `ps`-based extraction of
+  processes actually carrying `--registry-dir` reported the true 84.
+  Harmless for before/after delta claims, misleading for absolute ones.
