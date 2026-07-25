@@ -153,419 +153,142 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260622-epic-ws-dashboard-session-key-realignment` | idea | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
-| `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
-| `260722-feat-dashboard-hotkey-config-framework` | done | Foundation hotkey binding registry: tmux-style leader-only model, `Ctrl+Space` leader, leader-sub-first-class binding schema |
-| `260722-feat-dashboard-settings-panel` | ready | Dashboard general settings modal: section registry, shared namespaced prefs store, Terminal-style first section |
-| `260722-feat-dashboard-which-key-hint-overlay` | done | Which-key/lazyvim-style leader hint overlay reading the hotkey config framework's binding registry (both phases done, incl. Playwright verification) |
-| `260724-idea-dashboard-hotkey-leader-dispatch-gap` | idea | Global leader-key `executeCommand` call has no registered handler for `terminal.create` and most other default leaf commandIds, so leader-sub dispatch silently no-ops for them |
-| `260722-feat-dashboard-hint-click-fast-jump` | ready | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
-| `260722-idea-dashboard-git-status-diff-inspector` | idea | Dedicated right-sidebar surface to inspect changed files' contents and diffs, focused via `<leader> g s` |
-| `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
-| `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
-| `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
-| `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract (demoted 2026-07-22, see Disposition) |
-| `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
-| `260525-feat-ws-dashboard-workroot-polishing-backlog` | ready | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
-| `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
-| `260723-feat-dashboard-terminal-lifetime-daemon-decouple` | done | Terminal PTY lifetime decoupled from the daemon: per-terminal detached helper owns the PTY, daemon is a proxy over NDJSON native-IPC, `boot_reconcile` re-adopts live helpers so terminals survive a daemon restart (both Unix + Windows) |
+| `260725-bug-dashboard-terminal-platform-macos-unsupported` | ready | Dashboard daemon does not build on macOS: the `#[cfg(unix)]` terminal platform layer is Linux-only (pidfd syscalls + `/proc` start-time) |
+| `260725-feat-dashboard-nav-row-two-line-open-state` | ready | Left-nav work-root rows: two-line layout with open-surface counts, plus open-vs-closed de-emphasis |
+| `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
+| `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
+| `260523-bug-implement-merge-target-discovery` | todo | Investigate safer merge-target discovery for nested implement branches |
+| `260524-bug-ws-agent-register-stale-dir-result-hang` | todo | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
+| `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
-| `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
-| `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
-| `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
-| `260626-bug-sage-review-config-setter-missing` | idea | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
-| `260627-bug-write-ticket-bypasses-tickets-create` | idea | Capture dogfood failure where ticket authoring manually created a file instead of invoking `ws.tickets.create` |
-| `260627-bug-enter-implement-direct-edit-policy-gap` | idea | Investigate `ws.enter.implement` lacking a direct-edit/no-delegation policy override for narrow multi-file text changes |
-| `260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood` | idea | Investigate branch-local playbook render or cache-refresh guidance for source rsrc dogfood |
-| `260627-research-lead-proceed-route-matrix-authoring` | idea | Research whether Route Facts and Route Matrix tables would make `lead-proceed` routing clearer without semantic drift |
-| `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
-| `260626-bug-workflow-manual-bootstrap-sentinel-surface` | idea | Investigate the fresh workflow-manual sentinel guidance not matching the visible session-state tool surface during dogfooding |
-| `260626-bug-prefer-subagent-recursive-delegate-escape` | idea | Investigate forked workers that complete work through a second delegate despite an explicit direct-edit handoff boundary |
-| `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
+| `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
+| `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
+| `260605-epic-ws-playbook-factory-pivot` | todo | Playbook-factory board coordinating the spawn-removal / native-subagent pivot; M0-M4 done, board kept open for residual fill items (see git log for closed-milestone detail) |
+| `260611-bug-agent-context-exhaustion-opaque-failure` | todo | ws named agent fails opaquely on context exhaustion |
+| `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit` | todo | rsrc manifest regen missed after a shipped-file edit slips past verification |
+| `260612-bug-ws-rsrc-dev-server-new-file-staleness` | todo | Dev MCP server reports newly added rsrc files as "manifest-listed file missing" until restart |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
-| `260616-refactor-wsflow-product-mode-convergence` | done | Collapsed wsflow onto product-mode playbook rendering and removed curated skill bodies |
-| `260616-refactor-explicit-namespace-render-vars` | done | Replaced implicit ws->wsflow playbook string substitution with explicit reserved namespace render vars |
-| `260617-feat-fresh-reader-audit-playbook` | idea | Add a reusable fresh-reader audit playbook for skill and prompt authoring |
-| `260617-refactor-mcp-stateless-subagent-context` | done | Make MCP subagent context stateless and filesystem-backed |
-| `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
-| `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
-| `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
-| `260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky` | idea | Investigate sticky agent tab close confirmation in browser acceptance |
-| `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
-| `260620-bug-mercenary-path-visible-when-prefer-off` | idea | Reduce mercenary dispatch guidance salience when prefer_mercenary is off |
-| `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
-| `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
-| `260620-feat-ws-ticket-status-transition-tools` | done | New `tickets.close` and `tickets.move` MCP tools for atomic ticket status transitions (promotion/demotion/close/drop) with convention guards |
-| `260622-feat-sage-review-ticket-gate` | done | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and `sage_review*` config substrate (all 3 phases done) |
-| `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
-| `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | done | Fixed exec finalize/reconcile race + too-tight abort window flaking the full-suite abort test (260620 Phase 2) |
+| `260620-bug-mercenary-path-visible-when-prefer-off` | todo | Reduce mercenary dispatch guidance salience when prefer_mercenary is off |
+| `260620-bug-ws-delegate-playbook-output-language-unbound` | todo | Delegate playbooks do not bind subagent output language to English |
+| `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
+| `260624-epic-pre-release-cleanup` | todo | Pre-release cleanup epic: merge-gate items before main |
+| `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O; now the pre-written substrate for the `260725` PTY-agent pivot |
+| `260626-bug-sage-review-config-setter-missing` | todo | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
+| `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
+| `260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood` | todo | Investigate branch-local playbook render or cache-refresh guidance for source rsrc dogfood |
+| `260630-epic-skill-playbook-diet` | todo | Epic: skill playbook diet — trim playbook bodies, MCP surface, and unnecessary golden rules |
+| `260702-research-destructive-dedup-methodology` | todo | Aggressive playbook dedup: audit methodology for destructive-first section merges |
+| `260703-bug-claude-plugin-cache-stuck-below-source-version-mcp-refuses-start` | todo | Claude plugin cache stuck two versions behind source; MCP refuses to start |
+| `260703-chore-review-delegates-true-classification` | todo | Review `delegates: true` classification across rsrc playbooks |
+| `260703-chore-windows-branch-pinned-acceptance` | todo | Branch-pinned Windows acceptance for the playbook-factory epic |
+| `260708-feat-lead-revive-hook-replacement` | todo | Delete `lead-revive`, replace post-compaction session-key reload with a plugin-bundled hook; needs a fresh sage design review before its next `ready` promotion |
+| `260710-bug-lead-write-ticket-playbook-runtime-schema-drift` | todo | `lead-write-ticket` playbook uses a stale `tickets.create` schema |
+| `260710-bug-project-index-ticket-focus-stale-status` | todo | This ticket: project index Tickets table / Ticket Focus drifted from live ticket directories; mechanical reconciliation done, recurrence-prevention mechanism still sage-design-blocked |
+| `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
+| `260711-epic-ws-dashboard-command-surface` | todo | ws dashboard command surface board: quick-open, custom commands, shortcuts |
+| `260711-idea-dashboard-command-bus-quick-open-shortcuts` | todo | Unify dashboard quick-open command bar, custom command buttons, and keyboard shortcuts on one command bus |
+| `260711-idea-dashboard-git-status-polling-index-lock-contention` | todo | Overlapping git status polling risks `.git/index.lock` contention, especially on Windows |
+| `260714-chore-dashboard-windows-gateway-frontend-drift` | todo | Windows dogfood gateway serves a stale frontend build; repoint its static-dir at the WSL build |
+| `260716-feat-mental-model-comment-placement-rule` | todo | Anchor-scope placement rule: site-local traps to code comments, cross-cutting invariants to mental-model |
+| `260716-feat-mental-model-openup-injection` | todo | Deterministic mental-model pointer-injection at delegation open-up |
+| `260716-feat-sage-related-mental-model-curation` | todo | Sage design review curates related-mental-model via prose recommendation + lead-owned frontmatter edit |
+| `260716-feat-ws-doc-condition-diagnostics` | todo | Hidden doc-condition diagnostics: verification crawl, consumption counters, workflow health metrics |
+| `260722-feat-dashboard-hint-click-fast-jump` | todo | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
+| `260722-refactor-dashboard-app-tsx-state-decomposition` | todo | Decompose App.tsx: untangle the WorkbenchShell/App() state core (design-gated) |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
 | `260523-bug-worktree-local-index-missing` | idea | Explore dashboard-managed propagation of ignored local workflow context across worktrees |
-| `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
-| `260523-bug-ws-mcp-launcher-runtime-repair-race` | idea | Investigate ws-mcp launcher runtime repair race behavior |
-| `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
-| `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit` | idea | Capture wsflow rsrc mirror drift when canonical shipped rsrc edits are not mirrored |
-| `260626-bug-wsflow-lead-revive-skill-inventory-drift` | idea | Capture wsflow lead-revive shipped skill inventory drift blocking the wsflow package test suite |
-| `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
-| `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
-| `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
-| `260525-bug-lead-implement-delegation-pre-edit-guard` | idea | Require an explicit direct-edit verdict or implementer spawn before lead-implement mutates source |
+| `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
-| `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
+| `260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky` | idea | Investigate sticky agent tab close confirmation in browser acceptance |
+| `260605-research-ws-native-subagent-pivot` | idea | ws native-subagent pivot: spawn removal and playbook-factory direction (migration anchor research) |
+| `260610-chore-wsflow-explore-playbook-mirroring` | idea | wsflow parity for the explore playbook + native-Explore delegation |
+| `260611-research-ws-per-role-delegation-tuning-config` | idea | Config surface for per-role / per-partition delegation tuning (tier + prompt) at the ws level |
+| `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Normalize Codex app-server/OpenCode ACP activity through a dashboard agent-client provider contract; demoted 2026-07-22, now suspended 2026-07-25 under the agent-GUI suspension |
+| `260622-epic-ws-dashboard-session-key-realignment` | idea | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
+| `260624-bug-ws-installed-cache-missing-rsrc-manifest` | idea | ws installed cache missing rsrc manifest |
+| `260624-feat-ws-dashboard-managed-cli-recent-sessions` | idea | ws dashboard managed CLI recent sessions |
+| `260625-research-fork-posture-leak-system-guarantee` | idea | Fork posture-leak: prefer-subagent forks echo deferral instead of executing; system-level guarantee needed |
+| `260626-research-playbook-print-lead-surface-leak` | idea | `playbook.print` of lead skill/manual bodies leaks gated bootstrap surface to subagents |
+| `260626-research-ws-todo-stack-nesting-model` | idea | Research enter/exit stack-based todo-list nesting model |
+| `260627-research-lead-proceed-route-matrix-authoring` | idea | Research whether Route Facts and Route Matrix tables would make `lead-proceed` routing clearer without semantic drift |
+| `260629-research-fork-worker-persona-bleed` | idea | Fork worker persona-bleed (model-conditioned, notably Opus 4.8) |
+| `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` | idea | Dogfood the SSH-tunnel and localhost-forwarding linked-server paths across a real WSL/Windows boundary; demoted 2026-07-10, still parked on an unresolved SSH-probe escalation |
+| `260708-research-lead-revive-low-salience` | idea | `lead-revive`'s post-compaction trigger has low model-attention salience; prerequisite for `260708-feat-lead-revive-hook-replacement` |
+| `260710-bug-release-downstream-plugin-layout-untested` | idea | Release shipping does not verify downstream plugin installation layout |
+| `260710-idea-dashboard-open-work-root-full-registry-redundant-rediscovery` | idea | Avoid re-discovering every opened work root on every open-work-root call |
+| `260710-idea-dogfood-credential-redaction-regex-miss` | idea | Session tooling's credential-redaction regex missed a linked-server passphrase fragment during a dogfood run |
+| `260711-idea-dashboard-agent-facing-mcp-control-surface` | idea | Dashboard-owned MCP surface for agent-driven dashboard control (open-file, execution approval, worktree management) |
+| `260711-idea-dashboard-workroot-scoped-artifact-consolidation` | idea | Consolidate dashboard-managed workroot files under `.ws-dashboard/`, shared across worktrees |
+| `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` | idea | `dashboard-acceptance.spec.ts` e2e fails: transcript stays hidden after Codex tile click |
+| `260713-feat-ws-dashboard-activity-session-fork-cursor` | idea | `ActivitySessionForkRequest` needs a cursor/turn-cut-point field |
+| `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` | idea | Wire agent chat UI to real Codex/Claude adapters (MVP-complete) |
+| `260713-idea-dashboard-agent-chat-bubble-visual-design` | idea | Agent chat bubble visual design is undifferentiated (all roles share the same box style) |
+| `260714-idea-dashboard-linked-server-localhost-ipv6-hang` | idea | Linked-server endpoint using bare `localhost` can wedge the daemon's outbound client on WSL2 (IPv6 `::1` not forwarded) |
+| `260714-idea-dashboard-workbench-active-root-derivation-fragility` | idea | Dashboard workbench "active work root" derivation is structurally fragile — three regressions in one locus in one session |
+| `260714-research-dashboard-workroot-watch-push-channel` | idea | Backend "watched work-root" subscription/push channel to replace fixed-interval polling |
+| `260720-research-remote-serverroute-masking-audit` | idea | Audit remote-only latent bugs masked by the server-local fallback pattern |
+| `260721-bug-lead-write-ticket-sage-ready-ordering` | idea | `lead-write-ticket` attempts a ready move before the sage gate |
+| `260721-idea-dashboard-worktree-label-alias-split` | idea | Dashboard workspace label is basename-derived, so differently-named path aliases to the same physical directory still split into separate buckets |
+| `260722-bug-dashboard-daemon-git-ops-block-api` | idea | ws-dashboard daemon: long-running git ops (clone/refresh) block the whole async API surface |
+| `260722-bug-dashboard-terminal-bottom-row-clip-scrollbar` | idea | ws-dashboard terminal bottom-row clipping and spurious scrollbar at fractional heights |
+| `260722-bug-ws-sage-record-index-lock-race-on-concurrent-calls` | idea | `ws sage_record` (and other git-writing ws tools) race on `.git/index.lock` when invoked concurrently |
+| `260722-idea-dashboard-git-status-diff-inspector` | idea | Dedicated right-sidebar surface to inspect changed files' contents and diffs, focused via `<leader> g s` |
+| `260723-bug-dashboard-terminal-detached-helper-leaks-in-tests` | idea | Dashboard terminal: detached helper processes leak indefinitely when a caller never explicitly closes the terminal |
+| `260724-bug-dashboard-daemon-long-session-transcript-oN-degradation` | idea | ws-dashboard daemon: long-uptime responsiveness degrades from O(conversation) live-transcript rebuild + unbounded projector growth |
+| `260724-idea-dashboard-daemon-side-git-poll-response-timeout` | idea | Daemon has no bounded timeout around git `Command` invocations, so a wedged git child can hang a request unboundedly server-side |
+| `260724-idea-dashboard-daemon-terminal-lifetime-test-interactive-shell-timing` | idea | Daemon `terminal_lifetime` tests are not robust to interactive-shell startup timing and fail on interactive-zsh hosts |
+| `260724-idea-dashboard-hotkey-leader-dispatch-gap` | idea | Global leader-key `executeCommand` call has no registered handler for `terminal.create` and most other default leaf commandIds, so leader-sub dispatch silently no-ops for them |
+| `260724-idea-dashboard-hotkey-rebind-editor-settings-section` | idea | Dashboard hotkey-rebind editor settings section, split from `260722-feat-dashboard-settings-panel` Phase 2 |
+| `260725-refactor-dashboard-agent-gui-physical-module-isolation` | idea | Tier 2 wire-out: physically extract the suspended agent-GUI modules (FE+BE) from the live dashboard build; needs sage design gating before `ready` |
+| `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
 
 ## Ticket Focus
 
-- `260724-bug-dashboard-terminal-dead-shell-undetected-steady-state` (ready,
-  bug) - Windows dogfood finding: a shell that dies without PTY EOF leaves a
-  zombie pane. Fix is a `#[cfg(windows)]` reaper thread blocking on the
-  shell's duplicated process HANDLE (`WaitForSingleObject`), plus frontend
-  retain-with-clear retirement + idempotent close. Sage combined = passed
-  (design+completeness). Spec addressing via `## Spec Impact`
-  (`ws-web-dashboard/index.md`, Contract-first: no). Related to
-  `260723-feat-dashboard-terminal-lifetime-daemon-decouple` (introduced-by).
-  Phase 1 (Windows reaper, `b07f40ad`), Phase 2 (frontend retain-with-clear
-  retirement + idempotent close, `2b4d0e0b`; spec
-  `#260724-terminal-pane-dead-session-retire`), and the Phase 3 Unix-regression
-  leg (`terminal_live_pty_eof_exit_flips_status_to_exited`, `e2990574`) landed
-  on `goal/drain-ready-queue`. Only the Phase 3 native-Windows acceptance leg
-  remains - Blocked (2026-07-24) on the user's real Windows dogfood harness
-  (PowerShell), so goal-drain skips this ticket until the user enables the
-  Windows leg; the leg is also carved out as the
-  `260724-chore-dashboard-windows-terminal-reaper-native-acceptance` ready
-  chore, runnable via the validated dogfood harness in `_index.local.md`.
-- `260714-bug-git-status-poll-index-lock-staleness` (`.done/`, bug) - closed
-  2026-07-20: Phase 1 (`--no-optional-locks` on the poll's `git status` call
-  in `git_toolbar.rs`, plus spec update) landed as commit `18e97569`,
-  confirmed fully merged and pushed to `ws-dashboard-dev`.
-- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`idea`, chore) -
-  test plan for `260525`'s live remote-dogfood gap. Phase 1 partially
-  executed 2026-07-07: SSH connectivity probe blocked by this session's own
-  auto-mode classifier (escalation, still unresolved - needs a human-run
-  probe outside this harness); reversed-topology direct-endpoint leg
-  surfaced a genuine new bug
-  (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`,
-  now `.done/` - both phases landed) that blocked walking the rest of that
-  leg. A plain-TCP-relay fallback for the SSH leg was found and documented
-  (see ticket Escalations). Phase 2 (2026-07-10) fully re-walked the
-  reversed-topology leg past the fix: all forwarded operations (resources,
-  root-picker, work-roots/open, files, Git, terminal create + WS relay)
-  confirmed working, recorded as a dated append to `260525`. Demoted to
-  `idea` (2026-07-10, not urgent) with a note added to reconsider promoting
-  plain-TCP forwarding to a first-tier WSL<->Windows-native interop
-  mechanism rather than treating it only as an SSH-unreachable fallback -
-  still parked on the unresolved SSH-probe escalation for the original leg.
-- **Dashboard MVP epic split (2026-07-10):** `260514-epic-ws-web-dashboard-mvp`
-  closed to `.done/` - its own Completion Criteria were already met by
-  completed child milestones. Split into two successor boards: `260622-epic-
-  ws-dashboard-session-key-realignment` (agent-harness/session-key direction;
-  gained `260525-feat-ws-dashboard-server-scoped-operation-forwarding` as an
-  explicit child) and the new `260710-epic-ws-dashboard-terminal-ux-polishing`
-  (dashboard-centric UX/terminal-polish backlog: `260517` control-key bug,
-  `260523-research-persistable-ui-state-map`, `260525-bug-agent-tab-close-
-  confirmation-sticky`, `260525-feat-document/workroot-polishing-backlog`,
-  `260524-research-visual-design-system-refresh`,
-  `260524-research-react-aria-ui-primitives`). No remaining open child of the
-  old epic was left orphaned.
-- `260622-feat-playbook-render-tier-label` (ready, feat) - make
-  `playbook.render` expose harness-resolved native spawn `model` and
-  `reasoning_effort` metadata, then teach the Codex workflow manual to pass
-  those exact fields. Spec addressing via `## Spec Impact` (`mcp-tools.md` and
-  `workflow-skills.md`, Contract-first: no).
-- `260702-bug-config-unset-asymmetry` (`.done/`, bug) - redefine config `unset`
-  as reset-to-builtin (not clear-to-empty) and add `session` scope to
-  `config_prompt_unset`; spec addressing via `## Spec Impact`
-  (`mcp-tools.md`, Contract-first: no). Sage review completed.
-- `260702-bug-lead-manual-sections-thin` (`.done/`, bug) - fill the empty
-  `workflow_manual` `Session setup`/`User preferences` sections with the
-  ferrule reuse-discipline; spec addressing via `## Spec Impact`
-  (`mcp-tools.md`, Contract-first: no). Sage review completed.
-- `260702-feat-agenda-enumerate-and-clear-all` (`.done/`, feat) - add
-  `agenda_list` and/or `agenda_clear(all: true)` to enumerate/clear agenda
-  blob keys; spec addressing via `## Spec Impact` (`mcp-tools.md`,
-  Contract-first: no). Sage review completed.
-- `260702-feat-enter-implement-policy-feedback` (`.done/`, feat) - `enter_implement`
-  verdict notes when a caller policy field was outside its applicability
-  window and ignored; spec addressing via `## Spec Impact` (`mcp-tools.md`,
-  Contract-first: no). Sage review completed.
-- `260702-feat-tickets-move-ready-gate-warning` (`.done/`, feat) - `tickets_move`
-  to `ready` emits a soft non-blocking warning when no spec addressing is
-  detected; spec addressing via `## Spec Impact` (`mcp-tools.md`,
-  Contract-first: no). Sage review completed.
-- `260702-feat-lead-revive-session-key-candidates` (`.dropped/`, feat) - **sage
-  review blocked**: design premise assumed transient in-memory session-key
-  storage, but storage is actually persistent per-key disk files with no
-  eviction; needs re-authoring before promotion.
-- `260702-feat-workflow-manual-state-only-view` (`.done/`, feat) - add a
-  lead-only session-state-only MCP tool (name TBD, e.g. `session_state`)
-  returning only the Session State (todos/agenda) for the caller's key,
-  reusing `workflow_manual`'s key-validation behavior; spec addressing via
-  `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
-  completed (re-authored after initial completeness block: added Phase 1 +
-  verification criteria, resolved lead-only-gating design concern).
-- `260622-chore-windows-shipping-hardening` (`.done/`, chore, child of 260605) -
-  successor to the done 260620; makes the Windows surface shipping-correct with
-  mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
-  verifiable on Windows), B launcher cold-load robustness, C branch-pinned
-  real-Windows acceptance. 260620 verified `go test` only, never the launcher
-  cold-install path. **Epic merge to `main` is deferred until this passes.**
-  Implementation-ready; spec addressing via `## Spec Impact` (Contract-first: no —
-  Windows conformance to existing `named-agent-runtime` + `plugin-runtime`
-  contracts). **Phases A+B done** (branch `implement/260622-windows-shipping-hardening`,
-  unmerged). Phase A (`8461b4cf`): 7 Windows Go fixes, partitioned-review clean,
-  cross-compile green. Phase B (`da1047fb`): canonical Python launcher cold-load
-  hardening — best-effort rsrc-tree wait, OS-aware contract-read timeout +
-  `(OSError, ValueError)` retry, bounded `os.replace` retry; 39 launcher tests
-  green, review clean (1 correctness critical fixed). Canonical-launcher-only;
-  wsflow divergence captured as `260622-bug-wsflow-launcher-coldload-divergence`.
-  Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
-  Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
-  — gates the epic merge to `main`.
-- `260627-feat-enter-proceed-deterministic-verdict-engine` (`.done/`, feat, child
-  of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
-  at the routing-facts-complete boundary. The playbook keeps fact gathering and
-  ambiguous judgments, while MCP owns normalized precedence, warnings, JSON
-  result shape, canonical raw verdict text, `next_instruction`, agenda storage,
-  and proceed todo replacement. Spec addressing via `## Spec Impact`
-  (Contract-first: no — ticket pins the implementation slice; closeout updates
-  `workflow-skills` and `mcp-tools`). Sage review completed. **Phases 1-3 done**
-  on branch `implement/260627-enter-proceed-verdict-engine` (latest
-  `cc930648`), unmerged: deterministic `ws.enter.proceed` resolver, canonical
-  raw/JSON verdict output, concrete raw/JSON next-action directives with common
-  follow rails, two-item proceed todo replacement, lead-proceed MCP handoff,
-  docs, manifests, wsflow mirror, and partitioned review clean for Phase 1.
-- `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
-  not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
-  `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
-  `internal/wsrsrc` call-time loader + `playbook.print`/`playbook.render` MCP tools
-  with harness-aware rendering; spec stems `260609-playbook-tools` /
-  `-harness-rendering` / `-rsrc-playbook-distribution` implemented. M2
-  `260609-refactor-ws-skill-text-playbook-conversion` (`.done/`, 2026-06-10, merged
-  `b6850dc3`): all lead-* procedure text moved to `agents-plugin/rsrc/` playbooks —
-  11 thin entry-skill shims + 8 internal procedures; subquery→Explore absorption;
-  spec `260610-entry-skill-surface-reduction` and
-  `260610-subquery-explore-delegation-shift` implemented. `ws/subquery`/`agents.*`
-  runtime stays callable but unreferenced by shipped skill text (reshape/deletion
-  is M3). **M3 done** (`260609-refactor-ws-spawn-runtime-deletion-session-auth`,
-  `.done/`, merged `be8c39e6`) — spawn engine → scoped mercenary reshape + ephemeral per-call
-  session-key auth (drops actor/wsstore/authority); promoted to ready with
-  contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
-  `260610-mercenary-delegation-surface`). **M3 Phase 1 (additive session-auth)
-  merged to the epic branch** (`c917c9f0` no-ff; Phase 1 result `447946f4`).
-  **Phase 2a complete** (`9649a4bf`): actor model + `ws.setup` + setup-fence
-  deleted, mandatory `session_key`, `root` stripped from all schemas, registry
-  re-keyed off actorID. **Phase 2b complete** (`60015691`, branch
-  `implement/ws-session-auth-phase2b`, stacked on unmerged 2a — both pending a
-  combined merge): gemini runner impl + subquery runtime + retired-path
-  diagnostics deleted (harness-neutral Runner interface kept as deferred plug), 3
-  resolved-by-deletion bug tickets dropped. **Phase 2c complete** (`0c7c0f50`,
-  branch `implement/ws-session-auth-phase2c`, stacked on unmerged 2a+2b — all
-  three pending a combined merge): `agents.*` reshaped to the mercenary surface —
-  render-minted child keys via keyed `playbook.render`, `ws.lead.prefer_mercenary`
-  guidance flip + always-on tip, register schema narrowed (`prompts`/`tier`/`model`
-  dropped), native-shaped `agentId=` handle; diagnostic minimization a deliberate
-  no-op (spec retains debug.*); bugs `260517`+`260524` re-triaged as live (not
-  dropped). **Phase 3 complete** (`ec2ad888`, stacked on 2a+2b+2c): exec fully
-  stateless (`exec_jobs.owner_actor_id` dropped via generalized recreate-table
-  migration); capability-scope enforcement folded into the keyed session-key gate
-  (`WS_MCP_TOOL_PROFILE` retired — `Server.role`/`requestedToolRole`/env
-  propagation removed; keyed `callTool` gate is sole authority); dashboard
-  build-fix (test-fixture only, no feature change). **All phases merged to the
-  epic** (`be8c39e6`, combined --no-ff); 260609 closed `.done/`. Open fill
-  (delegate `role:`/`tier:` asset + per-spawn/per-role tier routing +
-  reviewer-tier default) re-homed to
-  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (done, was promoted
-  2026-06-11). **M4**
-  (`260616-refactor-remove-agent-backed-api-tools`, done) — removed the
-  agent-backed `api.ask` family and stale guidance from the playbook pivot while
-  retaining `api.list` only as deterministic cache-domain discovery. The dropped
-  corpus-routing predecessor is replaced by a
-  future outside-epic board:
-  `260616-epic-api-namespace-documentation-memory-tooling`, where `api.*` becomes
-  pure documentation, corpus, hierarchical memory, and playbook-manual tooling
-  with no MCP-owned agent delegation. **Post-M4 complete**
-  (`260616-refactor-wsflow-product-mode-convergence`, `.done/`): wsflow is
-  converged onto product-mode playbook rendering. Phase 1
-  landed product-marker rendering, Phase 1.5
-  `260616-refactor-explicit-namespace-render-vars` (`.done/`, `ae0c6959`) replaced
-  broad playbook namespace rewriting with explicit reserved render vars. Phase 2
-  (`6ca530ab`) absorbed legacy `prompt.render` context materialization into
-  wsflow-mode `playbook.render`.
-  Phase 3 (`87aec145`) collapsed shipped wsflow skill bodies to thin
-  `wsflow/playbook.print` shims over shared rsrc playbooks. Phase 4
-  (`6fec9107`) removed the wsflow-only `prompt.render` MCP/runtime surface and
-  stale migration doctrine; wsflow delegate prompts now render through
-  `playbook.render`. Dogfood follow-up
-  `260617-refactor-mcp-stateless-subagent-context` (**done** `f757f70f`,
-  `.done/`) replaced the in-memory session registry with a flat per-key
-  filesystem store (`keys/<key>.json`), so native subagents that start fresh
-  MCP instances resolve session keys from disk instead of shared process state.
-  Open: Codex non-skill `rsrc/` cache materialization
-  (prereqs `260523`, `260524-codex-cache`).
-- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,
-  refactor; ready→.done 2026-06-12) - first-class `small/medium/large/xlarge` tier
-  vocab + `light/core/deep` alias demotion, mercenary per-spawn tier routing, full
-  delegate-prompt convergence onto rsrc, `wsprompt` loader retirement, and the
-  `agents.*`→`ws.mercenary.*` delegation-surface rename. All 7 phases complete
-  (P1 `3019ade9`, P2 `54e53d70`, P3 `fc1cdc5f`+`45f32b80`, P4 `5a26b1d6`,
-  P5 `5023562c`, P6 `6be3bb64`, P6b `6873b480`, P7 `d18883a0` — agents.*→
-  ws.mercenary.* MCP/CLI/runtime/rsrc/spec rename, hard rename no alias). P4-7
-  merged to the epic at `04452233`; P1-3 had already merged at `016c1425`.
-  **Live follow-ups:** deferred config-surface slice
-  (`config.agents_tier`→`config.model_alias`, `config.role_tier`), the
-  `(skill,role)→tier` override surface, and `ref/ws-agent-runtime.md` pre-M3
-  staleness cleanup.
-- `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
-  the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
-  layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
-  **capability level** (subscription/plan rejected as leaky); alias mapping
-  `light↦small`/`core↦medium`/`deep↦large` locked; the actionable above is now
-  unblocked. The session-key word-chain generator generalization to other id
-  surfaces remains reserved as `260610-refactor-ws-wordchain-id-generalization`
-  (todo, follow-up).
-- `260619-epic-ws-layered-config-prompt-tuning` (**.done**, epic) - user-tunable
-  playbook prompt config, all four children landed on the epic branch:
-  layered `session>project>global>builtin` config substrate
-  (`260619-feat-ws-layered-config-scope-substrate`: `acf1be70` resolver/scopes/
-  file-lock + `c65326bd` `prefer_mercenary` migration, closed `260618`),
-  block-marker override engine (`260619-feat-ws-prompt-override-marker-engine`,
-  `DelegationSection` seed), data plane (`260619-feat-ws-config-prompt-tool-self-doc`:
-  `24e7e0d1` `config.prompt.set` + `4e4460a1` `config.prompt()` listing, merged
-  `461fef11`), and the `ws:lead-tune` umbrella tuning skill
-  (`260619-feat-ws-lead-tune-skill`: `670e37dd`, merged `d3ca7a90`). Future
-  `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
-  fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
-- `260620-chore-pre-shipping-windows-surface-verification` (done, chore, in
-  `.done/`; parent `260605` epic, gates its closure) - **All phases DONE: 1
-  (`d89e6539`), 2 (`f6c4e7d1`), 3 (`326fa74f`), 4 (`994974af`); branch
-  unmerged pending merge to the `260605` epic.** Pre-ship
-  hardening of the Windows surface (six `*_windows.go` files were 0%-covered on
-  Linux). All phases live on branch `implement/260620-win-surface` (unmerged; was
-  `implement/win-cancel-process-tree`, renamed when Phase 2 stacked on). **Phase
-  1:** both Windows cancel paths (`cancelAsyncProcessTree` + execjob
-  `cancelProcess`) now reap the whole spawned subtree via Toolhelp32 PID-tree
-  enumeration (was root-pid-only → orphans); deterministic cross-platform reap
-  tests added. **Phase 2:** fixed the flaky exec abort (`260616`, now `.done/`) —
-  a real `finalize()`/`reconcile()` race (active-map delete moved inside the `mu`
-  section, after the terminal status write) plus a too-tight abort window;
-  green under `-race`. **Phase 3:** first real Windows full-suite run
-  (go1.26.3) — `go test ./...` now green 12/12. It found a real defect Phase 1
-  could not (the subtree kill worked but Windows `processAlive` mis-reported an
-  exited-but-unreaped process as alive); fixed across wsagent/execjob/wsstate
-  with a zero-timeout `WaitForSingleObject` signaled-state check (also closes a
-  Windows recovery-path defect). Three anticipated test-side divergences
-  (abort timing, JSON-path matching, separator) also fixed; review clean. Single
-  host / single toolchain. Contract unchanged (`260505-agent-cancel-recovery`
-  best-effort + `cleanup_needed`; no new contract). **Phase 4:** dropped the
-  Windows skip on the linked-worktree layout test (`internal/wsstate/paths_test.go`,
-  `994974af`) so it runs on a Windows drive-letter root; test-only, no defect
-  found (key derivation was already correct on Windows), review clean. **Hard
-  constraint:** tree-kills scoped
-  to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
-  because the dogfooding WSL2 host runs a live `claude.exe`.
-- `260703-chore-implement-branch-rename-default-allow` (`.done/`, chore) -
-  default `policy.branch.allow_rename` to `yes` in `enter.implement`'s
-  branch plan resolver so the lead no longer needs explicit per-invocation
-  user consent before a rename verdict is reachable; existing
-  `TargetExists`/`Upstream`/`Ahead`/`Behind` guardrails are unchanged and
-  remain the safety net. Spec addressing via Phase 1 (spec update bullet
-  added per completeness-reviewer finding, Contract-first: no). Sage
-  review completed.
-- `260707-feat-forge-autonomy-bootstrap-chaining` (`.done/`, feat) - narrow
-  `lead-forge-spec`'s per-ambiguous-item classification loop to auto-proceed
-  (inline `<!-- AMBIGUOUS: ... -->` markers, summarized in the final report),
-  leaving the destructive archive gate and one-time domain-list confirmation
-  untouched; add a `lead-forge-spec` wrap-up chaining prompt into
-  `lead-forge-mental-model` (covers all entry paths, since bootstrap has no
-  call/return path back from an indirectly-triggered forge-spec run).
-  Complements `260707-feat-doc-coverage-live-bootstrap-alarm`'s cross-session
-  safety net. Spec addressing via `## Spec Impact` (`workflow-skills.md`,
-  Contract-first: no). Sage review completed.
-- `260707-feat-doc-coverage-live-bootstrap-alarm` (`.done/`, feat) - add a live
-  (non-persisted, no set/clear flag) session-bootstrap check for whether
-  `ai-docs/spec/`/`ai-docs/mental-model/` each contain at least one
-  frontmatter-bearing `.md` file, surfaced via `ferrule`/`workflow_manual`
-  and muted by a single new combined `wsconfig.Item*` entry; reuses
-  `260703-chore-bootstrap-staleness-alarm`'s warning-delivery-channel
-  pattern and rejects a generic `config.set_flag`-shaped setter for the same
-  reason that ticket already rejected one. Spec addressing via
-  `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
-  no). Sage review completed.
-- `260708-feat-lead-revive-hook-replacement` (todo, feat, prerequisite
-  260708-research-lead-revive-low-salience) - delete `lead-revive` and
-  replace post-compaction session-key reload with a plugin-bundled
-  `SessionStart`/`compact` hook (Claude) and an unconditional `SessionStart`
-  hook (Codex), both shaped as `workflow_manual(<session-key-if-known>)`
-  calls relying on the tool's existing lead-only/sentinel gating for
-  safety. Deliberately demoted from `ready` back to `todo`: this is a
-  bigger update (skill deletion, cross-doc reference cleanup, two-host
-  hook wiring) the user wants to schedule properly rather than ship now.
-  The independently valuable `git.commit`-tip continuity improvement was
-  split out as `260708-chore-git-commit-session-key-tip` (follow-up) so it
-  can proceed on its own without waiting on this larger ticket. Not
-  currently implementation-ready; needs a fresh sage design review before
-  its next `ready` promotion (frontmatter reset to `required`). The
-  independently shippable `git.commit`-tip piece
-  (`260708-chore-git-commit-session-key-tip`) shipped and closed to `.done/`:
-  `git.commit`'s text-mode response now appends a `tip: preserve this
-  session key: <key> during compaction` trailer after the todo-reinjection
-  block (spec `260708-git-commit-session-key-tip` in `mcp-tools.md`;
-  mental-model bullet in `git-workflow-tools.md`).
-- `260713-workset-workflow-dogfood-bugs` (todo, workset) - non-hierarchical
-  board draining the idea-stage workflow/tooling dogfood bug backlog
-  accumulated since the 260605 pivot. Two dropped as resolved by unrelated
-  prior work, two done (`260630`, `260713-bug-tickets-move...`), two
-  blocked pending further investigation/decision (`260627`,
-  `260710-bug-project-index...`), two backlogged by user decision
-  (`260703`, and `260627` shares that backlog reasoning).
-- `260722-feat-dashboard-settings-panel` - general settings modal (react-aria
-  popup + section registry + namespaced prefs store + Terminal-style first
-  section); ready, prioritized as next drain target ahead of
-  hint-click-fast-jump.
-- `260723-feat-dashboard-terminal-lifetime-daemon-decouple` (`.done/`, feat) -
-  closed 2026-07-23: Phase 1 decoupled terminal PTY lifetime from the daemon.
-  Per-terminal detached helper process owns the portable-pty PTY; the daemon is
-  a proxy over NDJSON native-IPC (Unix domain socket / Windows named pipe);
-  a registry file (pid + start-time identity) plus `boot_reconcile` (6-row
-  identity-gated adopt/kill/drop table) re-adopts live helpers so terminals
-  survive a daemon restart with gapless cursor continuity. Both platforms
-  landed (Decision B): Unix E2E-verified here; Windows Job-Object breakaway
-  implemented + cross-compile-checked + unit-tested, with **live native-Windows
-  E2E acceptance still owed by user dogfood**. Impl `45a8a71f`..`1b8d8f9e`, spec
-  `86c023f4`, mental-model `e674e796`; three Important review findings
-  remediated and re-reviewed clean. Merged into `goal/drain-ready-queue` (no-ff);
-  **`goal` -> `ws-dashboard-dev` final merge + push HELD for explicit user
-  approval.** Follow-up idea ticket:
-  `260723-bug-dashboard-terminal-detached-helper-leaks-in-tests`.
+- `260725-bug-dashboard-terminal-platform-macos-unsupported` (ready, bug) —
+  **priority target (owner: macOS must be feature-complete, 2026-07-25).**
+  The daemon does not compile on macOS: `terminal_platform.rs`'s
+  `#[cfg(unix)]` module is Linux-only (pidfd syscalls, `/proc` start-time),
+  so `260723`'s "both platforms" claim really means Linux + Windows. Kill
+  mechanism is pinned (verify → `kill(2)` → best-effort post-kill re-read via
+  `proc_pidinfo`/`PROC_PIDTBSDINFO`; kqueue and `task_for_pid` rejected with
+  reasons in the ticket). Phase 1 build/identity, Phase 2 native macOS
+  lifecycle acceptance. Spec addressing via `## Spec Impact`
+  (`ws-web-dashboard/index.md`, Contract-first: no) — includes amending the
+  currently-absolute never-kill-a-recycled-pid guarantee into a platform
+  tier. Sage combined = passed.
+- `260725-feat-dashboard-nav-row-two-line-open-state` (ready, feat) —
+  owner UX request: left-nav work-root rows get a second line showing open
+  terminal/document counts, plus open-vs-closed de-emphasis by saturation.
+  Agent counter deliberately deferred until the PTY pivot settles what an
+  agent pane is. The substantial part is data plumbing, not CSS:
+  `terminalPanes` is `WorkbenchShell`-local while the nav renders from
+  `App()`. Spec addressing via `## Spec Impact`
+  (`#260516-ws-web-dashboard-inspectable-navigation-shell`, Contract-first:
+  no). Sage combined = passed.
 
-## Session Notes
+**Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
+surface away from the structured provider-adapter chat GUI and back to a thin
+decorative layer over a vendor agent CLI running in the existing
+terminal/PTY substrate — reusing the terminal registry, NDJSON IPC, output
+ring, and xterm frontend wholesale (load-bearing invariant: no parallel PTY
+subsystem). See `260725-research-ws-dashboard-pty-agent-pivot` for the
+direction and `260725-refactor-dashboard-agent-gui-physical-module-isolation`
+for the paired Tier 2 wire-out (physically extract the suspended agent-GUI
+FE/BE modules; needs sage design gating before promotion to `ready`). This
+follows the already-landed Tier 1 suspension (`AGENT_GUI_SUSPENDED` flag,
+`c3f5b42b`) and turns away from the structured-adapter track
+(`260620-feat-ws-dashboard-agent-client-activity-sources` and related
+agent-GUI tickets, now suspended). `260624-feat-ws-dashboard-managed-cli-terminal`
+is the pre-written PTY-agent substrate design for this pivot.
 
-Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
-assignment remains deferred.
-
-### Closeout: 260625 Phase 2 forge migration (260626)
-
-Dogfooding the ws session-state machine. Lead session key
-`thong-surfboard-container-easiness-26`. The unresolved forge audit from WIP
-`14244ca6` was closed by `72503fd1`; commit-message heading normalization
-followed in `41b2163e`, and `2a4aaba7` recorded Phase 2 completion. Dev-merge
-`47aebbf9` integrated `implement/260625-forge-migration-audit-fix` into
-`feature/ferrule`, and the merge path bumped `ws`/`wsflow` to `0.30.11`.
-
-Phase 2 is fully complete on `feature/ferrule`: enter-call integration,
-forge/delegate migration, audit fixes, wsrsrc manifest regeneration, wsflow
-mirror regeneration, and the additive `lead-sprint` closeout are all recorded.
-The ticket remains open until the larger branch is integrated to its final
-target. `python3 -m unittest discover agents-plugin-wsflow/tests` still fails
-only on pre-existing `lead-revive` inventory drift, captured as
-`260626-bug-wsflow-lead-revive-skill-inventory-drift`.
-
-Dogfood findings from this session remain under epic
-`260605-epic-ws-playbook-factory-pivot`; the sage-review posture surface ticket
-is closed, while follow-up tuning and session-key retention work remain active
-in their respective idea/todo tickets.
+- `260710-bug-project-index-ticket-focus-stale-status` (todo, bug) — this
+  ticket. The mechanical reconciliation half is done as of this pass; the
+  recurrence-prevention-mechanism half remains sage-design-blocked (pick
+  automated guard vs. documented manual-regen procedure vs. some other
+  shape) before it can promote to `ready`.
