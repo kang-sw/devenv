@@ -1051,17 +1051,20 @@ posture resolution, the legacy single-field `sage-review:` migration, the
 standalone-versus-combined mode selection. For `ask` it returns the exact
 question to relay; the caller re-invokes with `answer` (`yes`/`no`), and each
 still-pending `recommended` stage is asked separately (design first) so one
-answer never resolves another stage. A declined `ask` and a config-fallback
-resolution each persist the resolved posture and commit. The tool never spawns
-reviewers — for `run` it names the reviewer(s) to dispatch and leaves spawning
-to the lead. `tickets.sage_stamp(stem, stage, verdicts)` (renamed from
+answer never resolves another stage. A declined `ask` persists the resolved
+posture and commits; a config-fallback resolution only persists the resolved
+posture — it never commits. The tool never spawns reviewers — for `run` it
+names the reviewer(s) to dispatch and leaves spawning to the lead.
+`tickets.sage_stamp(stem, stage, verdicts)` (renamed from
 `tickets.sage_record`, 260723 Phase 2) aggregates the supplied stage verdicts
-into the final posture, writes the frontmatter field(s), renders any
+into the final posture, writes the frontmatter field(s), and renders any
 `## Blocked` section from a Go-owned template whose output is byte-identical
-to the prior playbook templates, commits with the canonical title, and returns
-the applied posture plus the commit reference. A `stage` whose expected
-reviewer verdict is absent from `verdicts` is rejected with an error rather
-than recording a passing posture for a review that did not run.
+to the prior playbook templates, returning the applied posture only. It does
+**not** stage or commit (260725): the caller commits the posture change,
+together with any other uncommitted edits it holds, via its own
+`ws/git.commit` under caller-supplied `## AI Context`. A `stage` whose
+expected reviewer verdict is absent from `verdicts` is rejected with an error
+rather than recording a passing posture for a review that did not run.
 `tickets.sage_stamp` is **lead-only** (`isLeadOnlyTool`): it is the sole
 terminal writer of sage-review posture and the `## Blocked` companion, and a
 delegate/leaf-scoped session key is rejected at the keyed capability gate
