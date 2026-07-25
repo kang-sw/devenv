@@ -209,6 +209,14 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260725-feat-ws-cli-mcp-fallback-surface` - MCP-independent CLI fallback for
+  Windows disconnects, where the host does not auto-reconnect and the re-enable
+  path is undiscoverable. Ready: generic `ws-cli tools`/`call` passthrough over
+  `filteredTools()`/`callTool`, namespace-scoped `bin/` shims with per-plugin env
+  baked in, and a self-contained `mcp-server-repair` skill plus pointers in the
+  four session entry-point front doors (eight files — the wsflow copies are
+  hand-curated, not mirrored). No dependency on other ready work; Windows `PATH`
+  resolution and per-call cost are unverified and deferred to downstream dogfood.
 - `260723-epic-ticket-write-reshape` (todo, epic) - coordinates the ticket-write
   reshape: verify-commit gate as mechanical floor, must-not-forget tool collapse,
   concept-doc consolidation. Board artifact, not an implementation target.
