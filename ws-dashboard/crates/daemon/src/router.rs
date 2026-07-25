@@ -91,6 +91,10 @@ pub struct AppState {
     pub linked_server_sessions: LinkedServerSessions,
     pub linked_server_tunnels: LinkedServerTunnels,
     pub registry_persist_lock: Arc<Mutex<()>>,
+    /// Fired by the in-app "shut down dashboard" action to trigger the same
+    /// graceful (terminal-preserving) exit path as an external ctrl-c signal.
+    /// Detached terminal helpers survive and are re-adopted on next boot.
+    pub shutdown: Arc<tokio::sync::Notify>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -102,6 +106,8 @@ pub fn build_router(state: AppState) -> Router {
     // protected router so handlers remain oblivious to serving mode.
     let protected = Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/dashboard/build-info", get(dashboard_build_info))
+        .route("/api/dashboard/shutdown", post(dashboard_shutdown))
         .route("/api/dashboard/resources", get(dashboard_resources))
         .route("/api/dashboard/servers", get(dashboard_servers))
         .route(
@@ -380,6 +386,10 @@ pub fn build_router(state: AppState) -> Router {
             get(terminal_websocket),
         )
         .route(
+            "/api/dashboard/terminals/kill-all",
+            post(crate::terminal::close_all_terminals),
+        )
+        .route(
             "/api/dashboard/terminals/{terminal_id}",
             axum::routing::delete(close_terminal),
         )
@@ -527,6 +537,48 @@ async fn require_owner_auth(
 
 async fn healthz() -> Response {
     (StatusCode::OK, "ok\n").into_response()
+}
+
+/// File-mtime (unix seconds) of a build artifact, if it can be stat'd.
+fn artifact_build_unix_secs(path: &std::path::Path) -> Option<u64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    Some(
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs(),
+    )
+}
+
+/// Reports the running daemon binary's build time and the served frontend
+/// bundle's build time, both derived by stat'ing the actual artifacts (the
+/// daemon exe and `<static-dir>/index.html`) rather than a compile-time stamp,
+/// so the numbers always reflect what is really running/served.
+async fn dashboard_build_info(State(state): State<AppState>) -> Response {
+    let daemon_build = std::env::current_exe()
+        .ok()
+        .and_then(|exe| artifact_build_unix_secs(&exe));
+    let frontend_build = state
+        .config
+        .static_dir
+        .as_deref()
+        .and_then(|dir| artifact_build_unix_secs(&dir.join("index.html")));
+    axum::Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "daemonBuildUnixSecs": daemon_build,
+        "frontendBuildUnixSecs": frontend_build,
+    }))
+    .into_response()
+}
+
+/// Triggers the same graceful, terminal-preserving shutdown as an external
+/// ctrl-c: only the daemon process exits; detached terminal helpers keep
+/// running and are re-adopted on the next daemon boot. Kept ungated in the
+/// loopback no-auth debug profile; real deployments gate this behind owner auth
+/// (see ticket 260725-feat-dashboard-graceful-shutdown-from-settings).
+async fn dashboard_shutdown(State(state): State<AppState>) -> Response {
+    state.shutdown.notify_one();
+    (StatusCode::ACCEPTED, "shutting down\n").into_response()
 }
 
 async fn index(State(state): State<AppState>) -> Response {

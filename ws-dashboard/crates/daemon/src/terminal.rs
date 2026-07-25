@@ -346,6 +346,19 @@ impl TerminalRegistry {
         });
         removed
     }
+
+    // CONTRACT (same kill obligation as `remove_for_work_roots`): drains the
+    // ENTIRE registry and returns every removed session so the caller can
+    // `terminate()` each. Backs the "kill all terminals" teardown - a detached
+    // helper keeps running orphaned unless explicitly killed, so the map drain
+    // alone is not enough.
+    pub fn drain_all(&self) -> Vec<Arc<TerminalSession>> {
+        let mut sessions = self
+            .sessions
+            .write()
+            .expect("terminal registry lock poisoned");
+        sessions.drain().map(|(_, session)| session).collect()
+    }
 }
 
 fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
@@ -796,6 +809,22 @@ pub async fn close_terminal(
     };
     session.terminate().await;
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// Tears down every terminal on this daemon, helper processes included: drains
+/// the whole registry and `terminate()`s each session (graceful IPC shutdown +
+/// verified-PID kill, which also collapses each helper's kill-on-close job and
+/// its child shell). This is the deliberate, UI-native counterpart to a blanket
+/// `taskkill /IM` - unlike a daemon shutdown, it does NOT preserve terminals.
+/// Global teardown, so it bypasses the per-terminal work-root access check that
+/// `close_terminal` applies. Returns the number of terminals closed.
+pub async fn close_all_terminals(State(state): State<AppState>) -> Response {
+    let sessions = state.terminals.drain_all();
+    let closed = sessions.len();
+    for session in sessions {
+        session.terminate().await;
+    }
+    Json(serde_json::json!({ "closed": closed })).into_response()
 }
 
 impl TerminalSession {

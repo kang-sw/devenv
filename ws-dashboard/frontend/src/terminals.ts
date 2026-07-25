@@ -349,6 +349,21 @@ export async function closeTerminal(
   }
 }
 
+// Deliberate teardown of every terminal on the local daemon, helper processes
+// included (the UI-native counterpart to a blanket `taskkill /IM`). Unlike
+// closeTerminal this is NOT idempotent-by-404: it always drains whatever is
+// live and returns the count closed.
+export async function killAllTerminals(): Promise<number> {
+  const response = await fetch("/api/dashboard/terminals/kill-all", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(await terminalErrorMessage(response));
+  }
+  const body = (await response.json()) as { closed?: number };
+  return body.closed ?? 0;
+}
+
 export function terminalPaneLogicalKey(
   workRootId: string,
   terminalId: string,

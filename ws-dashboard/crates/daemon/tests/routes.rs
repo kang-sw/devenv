@@ -180,6 +180,7 @@ fn app_state_with_opened_and_store(
         linked_server_sessions: LinkedServerSessions::default(),
         linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: Arc::new(tokio::sync::Notify::new()),
     }
 }
 
@@ -202,6 +203,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         linked_server_sessions: LinkedServerSessions::default(),
         linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: Arc::new(tokio::sync::Notify::new()),
     }
 }
 
@@ -428,6 +430,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         linked_server_sessions: LinkedServerSessions::default(),
         linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: Arc::new(tokio::sync::Notify::new()),
     };
     let expired_token = expired_state
         .auth
@@ -8229,6 +8232,7 @@ fn app_state_with_activity_cache_and_codex_home(
         linked_server_sessions: LinkedServerSessions::default(),
         linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: Arc::new(tokio::sync::Notify::new()),
     }
 }
 
@@ -13995,6 +13999,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         linked_server_sessions: LinkedServerSessions::default(),
         linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: Arc::new(tokio::sync::Notify::new()),
     }
 }
 

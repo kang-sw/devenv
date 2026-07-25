@@ -102,6 +102,9 @@ where
         crate::terminal::DEFAULT_RECONCILE_CONNECT_TIMEOUT,
     )
     .await;
+    // In-app "shut down dashboard" trigger: an HTTP handler fires this Notify,
+    // which the shutdown_task below selects on alongside the external signal.
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
     let app = build_router(AppState {
         config,
         auth,
@@ -117,10 +120,14 @@ where
         linked_server_sessions: crate::servers::LinkedServerSessions::default(),
         linked_server_tunnels: crate::servers::LinkedServerTunnels::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: shutdown_notify.clone(),
     });
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_task = tokio::spawn(async move {
-        shutdown.await;
+        tokio::select! {
+            () = shutdown => {}
+            () = shutdown_notify.notified() => {}
+        }
         let _ = shutdown_tx.send(true);
     });
     let server = axum::serve(listener, app)

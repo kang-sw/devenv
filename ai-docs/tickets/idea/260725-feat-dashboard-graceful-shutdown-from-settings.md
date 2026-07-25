@@ -80,6 +80,29 @@ Two distinct destructive actions, deliberately separated:
 - Cross-platform parity: the footgun is described on Windows; confirm the same
   affordances behave correctly for the Unix detached-helper path.
 
+## Implementation notes (dogfood v1, 2026-07-25)
+
+A first cut landed directly (dogfood-driven, `--no-auth` local daemon):
+
+- Daemon: `GET /api/dashboard/build-info` (daemon exe mtime + served
+  `index.html` mtime + `CARGO_PKG_VERSION`), `POST /api/dashboard/shutdown`
+  (fires an `AppState.shutdown` `Notify` that the existing shutdown_task selects
+  on alongside ctrl-c — terminal-preserving by construction), and
+  `POST /api/dashboard/terminals/kill-all` (`TerminalRegistry::drain_all()` →
+  `terminate()` each, bypassing the per-terminal work-root access check).
+- Frontend: a new **Advanced** settings section — build info at the top,
+  arm/confirm-guarded **Shut down** and **Close all** buttons at the bottom. Plus
+  the cosmetic sidebar change (settings gear relocated to a top-left square brand
+  affordance; `[brand] SERVERS … [+]` single row).
+
+Chosen for v1: **Stop-only** (not Restart-via-self-re-exec) and **ungated** (fine
+for the loopback `--no-auth` dogfood). Still open, tracked here:
+
+- **Auth gating** before any non-dogfood deployment (the endpoints are currently
+  reachable by anyone who can reach the daemon).
+- **Restart variant** via self-re-exec, so the page reconnects instead of dying.
+- Cross-platform parity check for the kill-all helper teardown on Unix.
+
 ## Prior Art
 
 - `_index.local.md` "terminal-preserving restart" runbook — the manual
