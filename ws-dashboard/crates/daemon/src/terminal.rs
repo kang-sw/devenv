@@ -25,7 +25,7 @@ use crate::terminal_helper_protocol::{
 use crate::terminal_ipc_transport::{IpcReadHalf, IpcWriteHalf};
 use crate::terminal_reconcile::{classify, IdentityStatus, IpcStatus, ReconcileRow};
 use crate::terminal_registry_file::{
-    delete_registry_entry, scan_registry_dir, TerminalRegistryEntry,
+    delete_registry_entry, registry_entry_path, scan_registry_dir, TerminalRegistryEntry,
 };
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
@@ -847,9 +847,38 @@ impl TerminalSession {
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
 
-        let connected = connect_and_handshake(&socket_path, connect_timeout)
-            .await
-            .ok_or(TerminalError::BadRequest("terminal spawn failed"))?;
+        let connected = connect_and_handshake(&socket_path, connect_timeout).await;
+        if connected.is_none() {
+            // CONTRACT (260725 Phase 1, fail-loudly finding): the helper is
+            // spawned with all three standard streams to `/dev/null`
+            // (above) and dispatches before `logging::init` in `main.rs`, so
+            // an `Err` from the helper's own process (e.g. a failed
+            // self-identity lookup in `run_terminal_helper`) is otherwise
+            // completely invisible - nothing about the generic "terminal
+            // spawn failed" response below distinguishes "helper crashed
+            // before writing its registry entry" from "helper wrote the
+            // entry but the daemon could not connect/handshake in time".
+            // Checking for the registry entry file here, from the
+            // daemon side, is the cheapest way to surface that distinction
+            // without risking two OS processes (daemon + helper) racing to
+            // write the same rolling log file.
+            if registry_entry_path(registry_dir, &id).exists() {
+                tracing::error!(
+                    terminal_id = %id,
+                    socket_path = %socket_path.display(),
+                    "terminal helper wrote a registry entry but the daemon could not connect \
+                     or complete the handshake before the connect timeout"
+                );
+            } else {
+                tracing::error!(
+                    terminal_id = %id,
+                    "terminal helper never wrote a registry entry before the connect timeout - \
+                     likely failed during startup (e.g. self-identity lookup) before reaching \
+                     write_registry_entry"
+                );
+            }
+        }
+        let connected = connected.ok_or(TerminalError::BadRequest("terminal spawn failed"))?;
 
         Ok(Self::from_connection(
             id,

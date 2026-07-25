@@ -26,9 +26,27 @@ const POLL_TIMEOUT: Duration = Duration::from_secs(8);
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+// CONTRACT (macOS Unix-domain-socket path-length ceiling, surfaced running
+// this target natively on macOS for the first time - 260725 Phase 1, same
+// root cause as `routes.rs::terminal_registry_temp_dir`): `state_home` here
+// becomes `WS_DASHBOARD_STATE_HOME`, which the real daemon subprocess joins
+// with `terminals/<opaque_terminal_id>.sock` for the live IPC socket. Under
+// macOS's long per-session `$TMPDIR` (e.g. `/var/folders/<hash>/T/`,
+// 40-60 bytes on its own), that full path alone can exceed the 104-byte
+// `sockaddr_un.sun_path` ceiling before the `.sock` filename is even
+// appended, so `UnixListener::bind` fails inside the detached helper and
+// `create_terminal` observes a generic 400 instead of 200. `/tmp` (which
+// macOS symlinks to the short `/private/tmp`) stays comfortably under the
+// limit. Scoped to macOS only: Linux's 108-byte `sun_path` has no equivalent
+// headroom problem with `$TMPDIR`, so Linux keeps `std::env::temp_dir()`
+// unchanged.
 fn temp_fixture_path(name: &str) -> PathBuf {
     let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
+    #[cfg(target_os = "macos")]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(target_os = "macos"))]
+    let base = std::env::temp_dir();
+    base.join(format!(
         "ws-dashboard-terminal-lifetime-{name}-{}-{unique}",
         std::process::id()
     ))
@@ -587,12 +605,14 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
 // `<terminal_id>.json` registry entry (written under the `terminals/`
 // subdirectory of `WS_DASHBOARD_STATE_HOME`, i.e. `<state_home>/terminals/`)
 // carries the helper's real `pid` and `startTime`. It verifies the PID's
-// `/proc` start-time matches before signalling, so a recycled PID is never
-// killed. Then it removes the temp dirs.
+// start-time (via the crate's cfg-independent `terminal_platform::
+// process_start_time` re-export - `/proc/<pid>/stat` on Linux, `proc_pidinfo`
+// on macOS) matches before signalling, so a recycled PID is never killed.
+// Then it removes the temp dirs.
 //
-// CONTRACT: the identity-verified reap (pid + /proc start-time match) closes the
-// PID-reuse window entirely. The only residual risk is a panic in the razor-thin
-// window after `create_terminal` returns but before the helper has flushed its
+// CONTRACT: the identity-verified reap (pid + OS-reported start-time match)
+// closes the PID-reuse window entirely. The only residual risk is a panic in
+// the razor-thin window after `create_terminal` returns but before the helper has flushed its
 // registry `.json`; such an untracked helper is left to the OS, which EOF-exits
 // it once its orphaned PTY master is dropped. Fix #1 (the marker handshake)
 // makes the panic path rare regardless, so this guard is defense in depth.
@@ -628,7 +648,9 @@ impl Drop for HelperReaper {
                 ) else {
                     continue;
                 };
-                if proc_start_time(pid) != Some(start_time) {
+                if ws_dashboard_daemon::terminal_platform::process_start_time(pid as u32)
+                    != Some(start_time)
+                {
                     // PID gone or recycled for another process - never signal a stranger.
                     continue;
                 }
@@ -641,16 +663,6 @@ impl Drop for HelperReaper {
         let _ = std::fs::remove_dir_all(&self.state_home);
         let _ = std::fs::remove_dir_all(&self.work_root);
     }
-}
-
-// Mirror of `terminal_platform::unix::process_start_time`: `/proc/<pid>/stat`
-// field 22 (`starttime`), read after the `)` that closes the (possibly
-// space-containing) comm field. `None` if the process is gone.
-#[cfg(unix)]
-fn proc_start_time(pid: u64) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_comm = stat.rsplit_once(')')?.1;
-    after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 // CONTRACT (260724 dead-shell Phase 3, Unix-regression leg): guard the LIVE,
