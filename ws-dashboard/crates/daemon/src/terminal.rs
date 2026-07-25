@@ -540,10 +540,34 @@ impl TerminalRegistry {
             .sessions
             .write()
             .expect("terminal registry lock poisoned");
-        sessions.retain(|_, session| session.is_live());
+        // CONTRACT (260725 Phase 5 review cycle 1, finding A): this eviction
+        // is a FIFTH session-removal path alongside `remove`/
+        // `remove_for_work_roots` below - capture the ids it drops so their
+        // attention entries can be forgotten too (see the `for evicted_ids`
+        // loops below). Without this, a helper that exits without ever
+        // reaching a browser `DELETE` (tab closed, agent CLI quit, helper
+        // crash) has its last recorded state silently evicted from
+        // `sessions` here while its `AttentionHub` entry survives and leaks
+        // into every future `attentionSnapshot` for the daemon's lifetime -
+        // nothing else ever removes it, since this path never calls
+        // `remove`/`remove_for_work_roots`. Whether the callback-token half
+        // of this same gap is also worth closing is Phase 4's inherited
+        // debt, not this phase's; only the attention half is fixed here.
+        let mut evicted_ids = Vec::new();
+        sessions.retain(|id, session| {
+            if session.is_live() {
+                true
+            } else {
+                evicted_ids.push(id.clone());
+                false
+            }
+        });
         if sessions.len() >= MAX_TERMINAL_SESSIONS {
             drop(sessions);
             self.clear_profile_pending(&terminal_id);
+            for evicted_id in &evicted_ids {
+                self.attention.forget(evicted_id);
+            }
             return Err(TerminalError::BadRequest("too many terminal sessions"));
         }
         self.remember_token(&session);
@@ -556,6 +580,9 @@ impl TerminalRegistry {
         // race, and why getting this ordering backwards would reopen it.
         drop(sessions);
         self.clear_profile_pending(&terminal_id);
+        for evicted_id in &evicted_ids {
+            self.attention.forget(evicted_id);
+        }
         Ok(())
     }
 
@@ -2961,6 +2988,54 @@ mod terminal_portability_skeleton_tests {
         assert!(
             registry.attention.snapshot().is_empty(),
             "remove_for_work_roots must forget every removed session's attention entry"
+        );
+    }
+
+    // CONTRACT (260725 Phase 5 review cycle 1, finding A): `insert`'s own
+    // opening `sessions.retain(|_, s| s.is_live())` is a FIFTH
+    // session-removal path, distinct from `remove`/`remove_for_work_roots`
+    // above - this test watches THAT specific path (not just any removal),
+    // since the finding was that a removal path was silently missed even
+    // though the other two were wired correctly.
+    #[tokio::test]
+    async fn insert_forgets_the_attention_entry_of_a_session_its_own_eviction_retain_drops() {
+        let registry = TerminalRegistry::default();
+        insert_fake_live_session_for_test(&registry, "term_evicted_by_insert").await;
+        registry.attention.record_and_publish(
+            "term_evicted_by_insert".to_owned(),
+            WorkRootId::from("fake-work-root".to_owned()),
+            crate::agent_turn_state::TurnState::Ready,
+        );
+        assert_eq!(registry.attention.snapshot().len(), 1);
+
+        // Mark the fake session not-live, mirroring a helper that exited
+        // without the browser ever issuing a `DELETE` for it - so the NEXT
+        // `insert` call's eviction `retain` (not `remove`, not
+        // `remove_for_work_roots`) is what drops it from `sessions`.
+        {
+            let sessions = registry
+                .sessions
+                .read()
+                .expect("terminal registry lock poisoned");
+            let evicted = sessions
+                .get("term_evicted_by_insert")
+                .expect("fake session must be present before eviction");
+            evicted.apply_helper_status(TerminalStatus::Exited, 1);
+        }
+
+        // A fresh, unrelated, real `insert` (not `insert_unchecked` -
+        // `insert_unchecked` skips the eviction retain entirely and would
+        // not exercise this path) is what runs the retain under test.
+        let trigger_session = Arc::new(fake_terminal_session().await);
+        registry
+            .insert(trigger_session)
+            .expect("inserting an unrelated live session must succeed");
+
+        assert!(
+            registry.attention.snapshot().is_empty(),
+            "insert's eviction retain must forget the evicted session's attention entry, not \
+             just remove it from `sessions` - otherwise a helper that exits without a browser \
+             DELETE leaks its last state into every future snapshot for the daemon's lifetime"
         );
     }
 

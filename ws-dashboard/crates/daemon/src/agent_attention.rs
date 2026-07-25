@@ -98,12 +98,29 @@ impl AttentionHub {
     /// Records `terminal_id`'s new state in the snapshot map, then broadcasts
     /// it. Returns the built view so a caller (currently just
     /// `post_terminal_turn_state`) never needs to reconstruct it separately.
+    ///
+    /// CONTRACT (260725 Phase 5 review cycle 1, finding B): the map write and
+    /// the broadcast send happen under ONE held write-guard - never take the
+    /// guard, write, drop it, and THEN send. Dropping the guard before
+    /// sending would let two concurrent calls for the SAME `terminal_id`
+    /// interleave as "A inserts, B inserts, B sends, A sends", which
+    /// broadcasts in the opposite order from the map write and pins an
+    /// already-connected subscriber on a stale state indefinitely (the
+    /// permanently-stuck-spinner symptom this whole feature exists to
+    /// prevent). Sampling `now_ms()` after the guard is taken (rather than
+    /// before, as a prior version of this function did) is part of the same
+    /// fix: a timestamp sampled before the lock could itself be inverted
+    /// relative to lock/send order, so a client could not even fall back to
+    /// ordering by `updated_at_ms`. Nothing between taking the guard and
+    /// sending ever awaits, so holding it across `self.tx.send(...)` cannot
+    /// span a suspension point or block another async task's executor.
     pub fn record_and_publish(
         &self,
         terminal_id: String,
         work_root_id: WorkRootId,
         state: TurnState,
     ) -> AttentionEventView {
+        let mut entries = self.entries.write().expect("attention hub lock poisoned");
         let view = AttentionEventView {
             event_type: "terminal.attentionChanged".to_owned(),
             terminal_id: terminal_id.clone(),
@@ -111,11 +128,9 @@ impl AttentionHub {
             state,
             updated_at_ms: now_ms(),
         };
-        self.entries
-            .write()
-            .expect("attention hub lock poisoned")
-            .insert(terminal_id, view.clone());
+        entries.insert(terminal_id, view.clone());
         let _ = self.tx.send(view.clone());
+        drop(entries);
         view
     }
 
@@ -247,5 +262,78 @@ mod tests {
 
         let received = rx.recv().await.expect("subscriber receives the broadcast event");
         assert_eq!(received, published);
+    }
+
+    // CONTRACT (260725 Phase 5 review cycle 1, finding B): a true OS-thread
+    // race that lands exactly in the (pre-fix) gap between "drop the entries
+    // write lock" and "send on the broadcast channel" is a few-instructions
+    // wide and not reliably forceable without an artificial delay hook this
+    // module deliberately does not add to production code (that would be
+    // its own scope creep). Instead this test hammers `record_and_publish`
+    // from many threads for the SAME `terminal_id` and asserts an invariant
+    // that holds BY CONSTRUCTION once map-write and send share one critical
+    // section: whichever call is serialized last is definitionally both the
+    // map's final value AND the last value observed on the broadcast
+    // channel, for every possible interleaving the scheduler picks - so the
+    // assertion cannot pass "by luck" the way a single fixed-timing
+    // reproduction could. Reverting the fix (dropping the guard before the
+    // send) reopens the gap this stresses; see the implementer report for
+    // the actual mutation-testing run and failure message.
+    #[test]
+    fn record_and_publish_keeps_broadcast_order_consistent_with_the_map_under_concurrent_writers() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let hub = Arc::new(AttentionHub::default());
+        let mut rx = hub.subscribe();
+        let terminal_id = "term_race".to_owned();
+        let root = work_root("root_race");
+
+        let handles: Vec<_> = (0..8u32)
+            .map(|i| {
+                let hub = hub.clone();
+                let terminal_id = terminal_id.clone();
+                let root = root.clone();
+                thread::spawn(move || {
+                    for j in 0..50u32 {
+                        let state = if (i + j) % 2 == 0 {
+                            TurnState::Working
+                        } else {
+                            TurnState::Ready
+                        };
+                        hub.record_and_publish(terminal_id.clone(), root.clone(), state);
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("writer thread must not panic");
+        }
+
+        let snapshot = hub.snapshot();
+        assert_eq!(snapshot.len(), 1, "all 8 threads write the same terminal_id");
+        let final_state = snapshot[0].state;
+
+        // Drain every frame the broadcast channel still has buffered,
+        // skipping over any lag (400 sends against a 64-capacity channel
+        // will lag) rather than stopping at the first gap - we only care
+        // about the LAST value the receiver can observe, which lag-skipping
+        // does not change.
+        let mut last_received = None;
+        loop {
+            match rx.try_recv() {
+                Ok(event) => last_received = Some(event.state),
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+
+        assert_eq!(
+            last_received,
+            Some(final_state),
+            "the last broadcast frame must match the map's final state - a stale `working` \
+             while the snapshot already says `ready` is exactly the permanently-stuck-spinner \
+             symptom finding B describes"
+        );
     }
 }
