@@ -1430,15 +1430,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		commitRes, commitErr := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
-			Paths:     result.CommitPaths,
-			Title:     result.CommitTitle,
-			AIContext: result.AIContext,
-		})
-		if commitErr != nil {
-			return toolTextResponse(req.ID, "", commitErr)
-		}
-		return toolTextResponse(req.ID, formatSageRecord(result, commitRes.Hash), nil)
+		return toolTextResponse(req.ID, formatSageRecord(result), nil)
 	case "tickets.verify":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2783,7 +2775,7 @@ func sageStageForReviewers(result wsdoc.SageGateResult) string {
 	return result.Mode
 }
 
-func formatSageRecord(result wsdoc.SageRecordResult, commitHash string) string {
+func formatSageRecord(result wsdoc.SageRecordResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "verdict: %s\n", result.Verdict)
 	for _, field := range []string{"sage-review-design", "sage-review-completeness"} {
@@ -2794,13 +2786,10 @@ func formatSageRecord(result wsdoc.SageRecordResult, commitHash string) string {
 	if result.BlockedSection != "" {
 		b.WriteString("blocked_section: appended\n")
 	}
-	if commitHash != "" {
-		fmt.Fprintf(&b, "commit: %s (%s)\n", commitHash, result.CommitTitle)
-	}
 	if result.Verdict == "concern" {
-		b.WriteString("next_instruction: Recorded as completed; the concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
+		b.WriteString("next_instruction: Recorded but not committed; commit this posture change via ws/git.commit before proceeding. The concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
 	} else {
-		b.WriteString("next_instruction: Sage review recorded and committed; follow this confirmation and proceed to handoff.")
+		b.WriteString("next_instruction: Sage review posture recorded but not committed; commit this change via ws/git.commit, then proceed to handoff.")
 	}
 	return b.String()
 }
@@ -4145,7 +4134,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_stamp",
-			"description": "Lead-only. Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, commits with the canonical title, and returns the applied posture and commit ref. This is the thin, lead-only replacement for the former tickets.sage_record write; reviewers never call this tool.",
+			"description": "Lead-only. Record sage-review verdicts after reviewers ran: aggregates design/completeness verdicts (incl. resolution: missing escalation), writes the resolved frontmatter posture, renders any Blocked section from the Go-owned template, and returns the applied posture. Does not stage or commit; the caller commits the posture change (and any other uncommitted edits it holds) via its own ws/git.commit. This is the thin, lead-only replacement for the former tickets.sage_record write; reviewers never call this tool.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -71,22 +71,36 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 		Verdict:        "block",
 		Posture:        map[string]string{"sage-review-design": "blocked", "sage-review-completeness": "blocked"},
 		BlockedSection: "## Blocked (2026-07-20)",
-		CommitTitle:    "docs(sage): block ticket on sage review",
-	}, "deadbeef")
-	for _, want := range []string{"verdict: block", "sage-review-design: blocked", "sage-review-completeness: blocked", "blocked_section: appended", "commit: deadbeef"} {
+	})
+	for _, want := range []string{"verdict: block", "sage-review-design: blocked", "sage-review-completeness: blocked", "blocked_section: appended"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("formatSageRecord missing %q in:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "commit:") {
+		t.Fatalf("formatSageRecord should not claim a commit:\n%s", out)
+	}
 
-	// concern surfaces the manual-escalation instruction.
+	// concern surfaces the manual-escalation instruction and routes the lead to
+	// its own commit rather than claiming one happened.
 	concernOut := formatSageRecord(wsdoc.SageRecordResult{
-		Verdict:     "concern",
-		Posture:     map[string]string{"sage-review-design": "completed"},
-		CommitTitle: "docs(sage): mark sage review completed",
-	}, "cafe")
+		Verdict: "concern",
+		Posture: map[string]string{"sage-review-design": "completed"},
+	})
 	if !strings.Contains(concernOut, "verdict: concern") || !strings.Contains(concernOut, "escalate to block manually") {
 		t.Fatalf("formatSageRecord concern output:\n%s", concernOut)
+	}
+	if !strings.Contains(concernOut, "Recorded but not committed") || !strings.Contains(concernOut, "ws/git.commit") {
+		t.Fatalf("formatSageRecord concern output should route to ws/git.commit:\n%s", concernOut)
+	}
+
+	// pass surfaces the same no-commit routing.
+	passOut := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict: "pass",
+		Posture: map[string]string{"sage-review-design": "completed"},
+	})
+	if !strings.Contains(passOut, "recorded but not committed") || !strings.Contains(passOut, "ws/git.commit") {
+		t.Fatalf("formatSageRecord pass output should route to ws/git.commit:\n%s", passOut)
 	}
 }
 
@@ -114,9 +128,17 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 func TestServeStdioSageStampDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sr.md"),
+	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-sr.md")
+	mustWrite(t, root, ticketRel,
 		"---\ntitle: Sage\nsage-review-design: required\n---\n\nBody.\n")
 	initGit(t, root)
+	// Commit the ticket file first so the subsequent posture write can be
+	// distinguished as modified-but-unstaged rather than merely untracked —
+	// this is the shape the ticket's swallow bug depends on (an already
+	// committed ticket file with further uncommitted edits at sage_stamp time).
+	runGit(t, root, "add", ticketRel)
+	runGit(t, root, "commit", "-m", "initial ticket")
+	logBefore := runGitOutput(t, root, "log", "--oneline")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
@@ -130,8 +152,19 @@ func TestServeStdioSageStampDispatch(t *testing.T) {
 			map[string]any{"reviewer": "design", "verdict": "pass"},
 		},
 	})
-	if !strings.Contains(resp, "verdict: pass") || !strings.Contains(resp, "sage-review-design: completed") || !strings.Contains(resp, "commit:") {
+	if !strings.Contains(resp, "verdict: pass") || !strings.Contains(resp, "sage-review-design: completed") {
 		t.Fatalf("sage_stamp dispatch response:\n%s", resp)
+	}
+	if strings.Contains(resp, "commit:") {
+		t.Fatalf("sage_stamp dispatch should not report a commit:\n%s", resp)
+	}
+	logAfter := runGitOutput(t, root, "log", "--oneline")
+	if string(logBefore) != string(logAfter) {
+		t.Fatalf("sage_stamp dispatch must not create a commit: before=%q after=%q", logBefore, logAfter)
+	}
+	status := strings.TrimRight(string(runGitOutput(t, root, "status", "--porcelain", ticketRel)), "\n")
+	if status != " M "+filepath.ToSlash(ticketRel) {
+		t.Fatalf("sage_stamp dispatch should leave the ticket modified-but-unstaged, got status %q", status)
 	}
 
 	// Missing verdict for the requested stage must surface as a tool error, not a
