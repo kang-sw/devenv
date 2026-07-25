@@ -1089,6 +1089,79 @@ Verification: a state transition for a NON-selected work root reaches the
 client with no Activity Console pane open — the exact case the rejected reuse
 path could not serve; and a reconnect receives pending state via the snapshot.
 
+### Result (79f21023) - 2026-07-26
+
+Done. Commits: `4b89a13d` (plan), `c9582bfb` (contract-first spec),
+`8ed291c6` (daemon hub + SSE route pair + turn-state wiring), `d5f858c9`
+(frontend subscription), then review fixes `9336c8ba` and `79f21023`.
+
+An `AttentionHub` holds a broadcast sender plus a per-terminal snapshot map,
+following `DocumentEventHub` rather than inventing a second pattern. The
+SSE route pair — local plus a forwarding sibling — lives inside the
+owner-auth protected router and is modelled on the existing
+`server_scoped_work_root_activity_events`/document-events precedent. The
+Phase 4 turn-state handler, which previously accepted and discarded, now
+publishes to the hub. The browser opens one `EventSource` per eligible
+linked server rather than one global subscription, since a terminal on a
+linked server runs under that remote daemon. The stream carries an initial
+snapshot on connect and ends the stream on broadcast lag so the client
+reconnects and re-reads the snapshot. Nothing renders in this phase — the
+state lands in `App.tsx`'s new `attentionByKey` where Phase 6 can consume
+it; confirmed from the diff (`App.tsx` diffs to +140 lines of state/effect
+wiring only, no JSX/return changes, no `frontend/e2e/` changes), so no
+browser gate applies to this phase.
+
+**Verification (this machine, 2026-07-26).** `cargo test -p
+ws-dashboard-daemon --lib > out 2>&1; echo $?` → 201 passed, 0 failed, 2
+ignored, exit 0 (Phase 4 baseline was 190, net +11). `cargo test -p
+ws-dashboard-daemon --test routes > out 2>&1; echo $?` → 174 passed, 2
+failed, exit 101 — the two failures are the known pre-existing pair
+`dashboard_resources_refresh_prunes_workspace_without_available_work_roots`
+and `online_missing_work_root_returns_bounded_unavailable_without_path_leak`.
+`cargo check -p ws-dashboard-daemon --tests > out 2>&1; echo $?` → exit 0,
+no diagnostics.
+
+**Review outcome.** Three significant findings were dispositioned and
+fixed in `9336c8ba`/`79f21023`. Findings that carry forward:
+
+1. **A fifth session-removal path leaked attention entries.** Four choke
+   points were wired to forget a terminal's attention state; `insert`'s own
+   eviction `retain` was not, so a helper that exited without a browser
+   `DELETE` kept its last state in every future snapshot for the daemon's
+   lifetime — directly contradicting the spec sentence this phase had just
+   landed contract-first. Fixed by making the code true rather than
+   weakening the sentence, with a test watching that specific path. The
+   callback-token half of the same gap is pre-existing Phase 4 debt and was
+   deliberately left alone.
+2. **The map write and the broadcast were not one critical section**, so
+   two concurrent posts for one terminal could publish in the opposite
+   order to the stored state — subscribers pinned on a stale `working`
+   while the snapshot said `ready`, which is the never-clearing spinner
+   this feature exists to prevent. Fixed by making them a single critical
+   section. The evidence is unusually strong: reverting the fix and
+   running an invariant test fifty times reproduced the failure on run 42
+   from real thread scheduling, not from a staged delay.
+3. **The browser had no `onerror`**, so a 401 or a forwarder 502 killed a
+   stream permanently while the dedup guard prevented replacement —
+   silently defeating the lag-to-reconnect-to-snapshot resync that is this
+   design's only resync path. Fixed by dropping a permanently-`CLOSED`
+   source so the next poll tick recreates it, bounded by that existing 5s
+   tick rather than a new timer.
+
+**Non-vacuity.** Each guard was proven by mutation and revert: removing the
+`forget` call fails the eviction test; the pre-fix lock ordering fails the
+concurrency invariant; forcing the replace-predicate to false fails the
+frontend test.
+
+**Known gap, recorded honestly.** The frontend suite covers the
+`readyState` decision as a pure predicate but NOT the surrounding
+`EventSource` open/close/dedup wiring end to end, because this repo has no
+jsdom harness. This is the same subscription-lifecycle gap the test review
+raised, accepted as Minor and inherited by Phase 6 rather than widened
+here.
+
+**Deferred / not done.** Phase 6 and all later phases.
+
 ### Phase 6: tab-label indicator — end-to-end slice closes here
 
 Depends on Phase 5.

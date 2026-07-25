@@ -286,7 +286,13 @@ dropped tickets live in hidden archive dirs and git history.
   (files created at 0600 rather than chmod'd after), the base URL comes from
   the in-memory bound address, and end-to-end delivery is asserted by driving
   the real CLI against the real route. The notify silence itself is unchanged
-  and its ticket stays open. Next unfinished phase is Phase 5.
+  and its ticket stays open. Phase 5 is DONE (`79f21023`) — a broadcast hub
+  with a per-terminal snapshot, a server-scoped SSE route pair, and one
+  browser subscription per eligible server rather than one global one.
+  Nothing renders yet; the state is parked for Phase 6, which is the next
+  unfinished phase and inherits one known gap: the EventSource subscription
+  lifecycle is covered only as a pure predicate, not end to end, because this
+  repo has no jsdom harness.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
