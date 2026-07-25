@@ -1078,15 +1078,16 @@ button {
   outline-offset: -2px;
 }
 
-.resource-row-selected {
+/* 260725 nav-row-two-line-open-state Phase 1, Decision 2/3: compound
+   selector (specificity 0,2,0) so selection's rail/ring structurally
+   outranks the later-declared tone rules (.resource-row-ready/-muted/-error,
+   also 0,1,0, styles.css:2746-2757) regardless of source order - previously
+   a same-specificity, later-in-source tone rule silently won this tie. No
+   `background` here: that axis is now owned by tone/openness (see
+   [data-resource-open="false"] below) - the old gradient stays retired per
+   the mental model's semantic-token/square-style guidance, not restored. */
+.resource-row.resource-row-selected {
   border-left-color: var(--ws-color-action);
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--ws-color-action) 18%, transparent),
-      transparent 58%
-    ),
-    color-mix(in srgb, var(--ws-color-panel-selected) 78%, var(--ws-color-text-primary) 22%);
   box-shadow:
     inset 0 0 0 var(--ws-border-width-hairline)
       color-mix(in srgb, var(--ws-color-text-primary) 24%, transparent),
@@ -2733,8 +2734,17 @@ button {
   padding-bottom: var(--ws-space-03);
 }
 
-.resource-row[data-resource-presentation="workRoot"] {
-  min-height: 34px;
+/* 260725 nav-row-two-line-open-state Phase 1, Decision 5: workRoot and
+   compactWorkRoot rows reserve a second line under the title (see
+   .resource-row-counts below), so both get a taller floor than the base
+   .resource-row above. Uniform across open/closed states of the same
+   presentation - the second line always renders, only its text varies - so
+   this never causes a row-height jump on open/close (ticket constraint).
+   workspace rows are intentionally excluded (Decision 4) and keep the base
+   34px min-height. */
+.resource-row[data-resource-presentation="workRoot"],
+.resource-row[data-resource-presentation="compactWorkRoot"] {
+  min-height: 52px;
   padding-top: var(--ws-space-03);
   padding-bottom: var(--ws-space-03);
 }
@@ -2755,6 +2765,61 @@ button {
 .resource-row-error {
   border-left-color: var(--ws-color-state-error-strong);
   background: var(--ws-color-notice-error);
+}
+
+/* 260725 nav-row-two-line-open-state Phase 1, Decision 2: base/openness own
+   `background` here via specificity ordering only (attribute selector below
+   is 0,2,0 vs this class selector's 0,1,0) - error tone re-asserts itself
+   below so it always wins regardless of open state. */
+.resource-row[data-resource-open="false"]:not(.resource-row-error) {
+  /* Very slight brightness drop: mix the row surface toward the darker
+     canvas token rather than introducing a new color. */
+  background: color-mix(
+    in srgb,
+    var(--ws-color-surface-context) 92%,
+    var(--ws-color-canvas) 8%
+  );
+}
+
+/* `.row-title` (styles.css:1141) and `.resource-kind-glyph` (below, second
+   declaration wins) set their own explicit `color`, so color does not
+   inherit from the row - the desaturation has to be reasserted per
+   descendant rather than once on the row itself. Mixing toward the
+   disabled-text token reduces both saturation and brightness without
+   introducing a new palette entry. */
+.resource-row[data-resource-open="false"]:not(.resource-row-error)
+  .row-title {
+  color: color-mix(
+    in srgb,
+    var(--ws-color-text-primary) 70%,
+    var(--ws-color-text-disabled) 30%
+  );
+}
+
+.resource-row[data-resource-open="false"]:not(.resource-row-error)
+  .resource-kind-glyph {
+  color: color-mix(
+    in srgb,
+    var(--ws-color-text-disabled) 70%,
+    var(--ws-color-canvas) 30%
+  );
+}
+
+/* Reserved second line (Decision 5): always rendered for workRoot/
+   compactWorkRoot rows regardless of open state, so height never jumps on
+   open/close - only the text varies. Offset to sit under .row-title, not
+   under .resource-row-main's 20px glyph column - see the layout note on
+   .resource-row-main below. Type scale is one step down from .row-title
+   (font-size-01 vs -03) to express the ~65:35 split via type scale, not
+   grid-template-rows percentages. */
+.resource-row-counts {
+  overflow: hidden;
+  padding-left: calc(20px + var(--ws-space-04));
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-01);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .resource-row-select {
