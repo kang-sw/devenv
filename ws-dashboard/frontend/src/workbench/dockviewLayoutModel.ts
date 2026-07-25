@@ -1,3 +1,4 @@
+import type { AgentAttentionState } from "../agentAttention.js";
 import type { WorkbenchPaneCategory } from "./editorGroupModel.js";
 import type { SurfaceKind } from "./surfaceRegistry.js";
 
@@ -12,6 +13,7 @@ export type DockviewWorkbenchPanelParamsForSync = {
   readonly meta: readonly string[];
   readonly body?: unknown;
   readonly contentRevision?: string;
+  readonly attentionState?: AgentAttentionState;
 };
 
 export type DockviewPanelForActiveSync = {
@@ -52,6 +54,21 @@ export function shouldUpdateDockviewWorkbenchPanelParams(
   // Avoid Dockview parameter churn for output/socket metadata so ordinary
   // command output does not blur the emulator between keystrokes.
   if (next.surfaceKind === "persistentTerminal") {
+    // CONTRACT (260725 Phase 6, REQUIRED fix - load-bearing): the attention
+    // comparison must run BEFORE the socket-status early return, not after.
+    // A terminal tab showing an attention indicator is by definition an
+    // agent terminal that is CONNECTED (`meta[1]` is `"connected"`), which
+    // is exactly the case the return below suppresses - so without this
+    // branch a `working` -> `ready` -> cleared transition changes
+    // `attentionState` correctly in the pane model and then never reaches
+    // Dockview's `updateParameters`, leaving the tab painted with a stale
+    // (or absent) badge until some unrelated remount happens to repaint it.
+    // The blur concern the early return exists for does not apply here:
+    // `attentionState` changes at most once per turn boundary, not per
+    // output chunk.
+    if (current.attentionState !== next.attentionState) {
+      return true;
+    }
     const socketStatus = next.meta[1];
     return socketStatus !== "connecting" && socketStatus !== "connected";
   }

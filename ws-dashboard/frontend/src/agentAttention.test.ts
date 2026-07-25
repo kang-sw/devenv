@@ -1,8 +1,10 @@
 import {
   ATTENTION_SOURCE_CLOSED_READY_STATE,
+  acknowledgeAttentionEntry,
   attentionEventsEndpoint,
   parseAgentAttentionEntry,
   parseAgentAttentionSnapshot,
+  pendingAttentionStateFor,
   shouldReplaceAttentionSourceOnError,
   type AgentAttentionEntry,
 } from "./agentAttention.js";
@@ -179,3 +181,88 @@ assertEqual(
   false,
   "an OPEN EventSource has not failed and must be left alone",
 );
+
+// --- pendingAttentionStateFor (260725 Phase 6 tab indicator) -------------
+
+const readyEntry: AgentAttentionEntry = {
+  terminalId: "term_abc",
+  workRootId: "root-abc",
+  state: "ready",
+  updatedAtMs: 1_700_000_000_000,
+};
+
+assertEqual(
+  pendingAttentionStateFor(readyEntry, undefined, "running"),
+  "ready",
+  "an unacknowledged non-idle entry on a running session shows its state",
+);
+assertEqual(
+  pendingAttentionStateFor(
+    { ...readyEntry, state: "working" },
+    undefined,
+    "running",
+  ),
+  "working",
+  "the working state is surfaced too, not only ready",
+);
+assertEqual(
+  pendingAttentionStateFor({ ...readyEntry, state: "idle" }, undefined, "running"),
+  null,
+  "idle is the explicit nothing-to-show state, never a badge",
+);
+assertEqual(
+  pendingAttentionStateFor(undefined, undefined, "running"),
+  null,
+  "a terminal with no attention entry at all shows nothing",
+);
+assertEqual(
+  pendingAttentionStateFor(readyEntry, readyEntry.updatedAtMs, "running"),
+  null,
+  "an acknowledged revision clears the indicator",
+);
+assertEqual(
+  pendingAttentionStateFor(readyEntry, readyEntry.updatedAtMs - 1, "running"),
+  "ready",
+  "an ack of an OLDER revision must not suppress a newer turn boundary",
+);
+// The stale-indicator fix (plan step 2): the daemon keeps listing a
+// dead-but-in-grace-window terminal for up to 30s with a non-running status,
+// and its AttentionHub entry outlives even that - so liveness is gated here,
+// at render time, rather than by a daemon-side reaper.
+for (const deadStatus of ["exited", "terminated", "error", "starting"]) {
+  assertEqual(
+    pendingAttentionStateFor(readyEntry, undefined, deadStatus),
+    null,
+    `a '${deadStatus}' session never shows a stale attention indicator`,
+  );
+}
+
+// --- acknowledgeAttentionEntry ------------------------------------------
+
+assertDeepEqual(
+  acknowledgeAttentionEntry({}, "server-local/term_abc", readyEntry),
+  { "server-local/term_abc": readyEntry.updatedAtMs },
+  "acknowledging records the entry's current revision under its key",
+);
+{
+  const acknowledged = { "server-local/term_abc": readyEntry.updatedAtMs };
+  assertEqual(
+    acknowledgeAttentionEntry(acknowledged, "server-local/term_abc", readyEntry),
+    acknowledged,
+    "re-acknowledging the same revision returns the same object identity (no re-render)",
+  );
+  assertEqual(
+    acknowledgeAttentionEntry(acknowledged, "server-local/term_abc", undefined),
+    acknowledged,
+    "selecting a terminal with no attention entry is a no-op",
+  );
+  assertDeepEqual(
+    acknowledgeAttentionEntry(acknowledged, "server-local/term_abc", {
+      ...readyEntry,
+      state: "working",
+      updatedAtMs: readyEntry.updatedAtMs + 5,
+    }),
+    { "server-local/term_abc": readyEntry.updatedAtMs + 5 },
+    "a newer revision overwrites the watermark rather than being ignored",
+  );
+}

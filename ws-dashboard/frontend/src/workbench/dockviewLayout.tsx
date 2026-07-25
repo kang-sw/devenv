@@ -17,6 +17,7 @@ import {
   dockviewPanelIsSelectedWithinGroup,
   shouldUpdateDockviewWorkbenchPanelParams,
 } from "./dockviewLayoutModel.js";
+import type { AgentAttentionState } from "../agentAttention.js";
 import type { WorkbenchPaneCategory } from "./editorGroupModel.js";
 import { defaultSurfaceRegistry, type SurfaceKind } from "./surfaceRegistry.js";
 
@@ -29,6 +30,7 @@ export type DockviewWorkbenchPane = {
   readonly meta: readonly string[];
   readonly contentRevision?: string;
   readonly body?: ReactNode;
+  readonly attentionState?: AgentAttentionState;
   readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
 
@@ -93,6 +95,7 @@ type DockviewWorkbenchPanelParams = WorkbenchDockviewPanelParams & {
   readonly meta: readonly string[];
   readonly contentRevision?: string;
   readonly body?: ReactNode;
+  readonly attentionState?: AgentAttentionState;
   readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
 
@@ -360,6 +363,14 @@ function DockviewWorkbenchTab({
       data-workbench-close-confirmation={registry.closeConfirmationPolicy}
       data-workbench-group-id={params.groupId}
       data-workbench-pane-id={params.paneId}
+      // CONTRACT (260725 Phase 6): ALWAYS present, `"none"` when there is
+      // nothing to show, rather than omitted - a browser assertion for the
+      // CLEARED state must be able to distinguish "indicator gone" from
+      // "tab not rendered yet"/"attribute never written", which an absent
+      // attribute cannot. Matches this component's existing
+      // `data-workbench-*` attribute convention so the affordance is
+      // assertable without CSS or visual inspection.
+      data-attention-state={params.attentionState ?? "none"}
       role="tab"
       title={api.title ?? params.title}
     >
@@ -375,6 +386,13 @@ function DockviewWorkbenchTab({
         className="workbench-tab-icon"
         data-workbench-tab-icon={params.surfaceKind}
       />
+      {params.attentionState ? (
+        <span
+          aria-hidden="true"
+          className="workbench-tab-attention"
+          data-workbench-tab-attention={params.attentionState}
+        />
+      ) : null}
       <span className="workbench-tab-title">{api.title ?? params.title}</span>
       <button
         aria-label={`Close ${api.title ?? params.title}`}
@@ -536,6 +554,7 @@ function toDockviewWorkbenchPanelParams(
     meta: pane.meta,
     contentRevision: pane.contentRevision,
     body: pane.body,
+    attentionState: pane.attentionState,
     onRequestClosePane,
   };
 }

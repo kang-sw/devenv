@@ -742,6 +742,60 @@ assert(
   "Dockview pane params update when the stable content revision changes",
 );
 
+// --- persistentTerminal attention param diff (260725 Phase 6) ------------
+// The `persistentTerminal` early return deliberately suppresses param churn
+// while the socket is connected. The attention comparison must be evaluated
+// BEFORE it, or a turn-state transition on a live agent terminal - the only
+// terminal that ever HAS one - never reaches Dockview's `updateParameters`
+// and the tab keeps its stale badge.
+const connectedTerminalParams = {
+  groupId: "group-1",
+  groupLabel: "Primary",
+  paneId: "terminal:server-local%2Fterm_abc",
+  category: "pinned" as const,
+  surfaceKind: "persistentTerminal" as const,
+  title: "agent",
+  detail: "term_abc",
+  meta: ["running", "connected", "80x24"],
+  contentRevision: "terminal:terminal:server-local%2Fterm_abc",
+};
+
+assert(
+  !shouldUpdateDockviewWorkbenchPanelParams(connectedTerminalParams, {
+    ...connectedTerminalParams,
+    meta: ["running", "connected", "120x40"],
+  }),
+  "a connected terminal still suppresses ordinary socket/size metadata churn",
+);
+assert(
+  shouldUpdateDockviewWorkbenchPanelParams(connectedTerminalParams, {
+    ...connectedTerminalParams,
+    attentionState: "working",
+  }),
+  "a connected terminal repaints when an attention indicator first appears",
+);
+assert(
+  shouldUpdateDockviewWorkbenchPanelParams(
+    { ...connectedTerminalParams, attentionState: "working" },
+    { ...connectedTerminalParams, attentionState: "ready" },
+  ),
+  "a connected terminal repaints on a SECOND transition (working -> ready), not only the first",
+);
+assert(
+  shouldUpdateDockviewWorkbenchPanelParams(
+    { ...connectedTerminalParams, attentionState: "ready" },
+    connectedTerminalParams,
+  ),
+  "a connected terminal repaints when acknowledgement clears the indicator",
+);
+assert(
+  !shouldUpdateDockviewWorkbenchPanelParams(
+    { ...connectedTerminalParams, attentionState: "ready" },
+    { ...connectedTerminalParams, attentionState: "ready", meta: ["running", "connected", "120x40"] },
+  ),
+  "an unchanged attention state does not defeat the connected-terminal suppression",
+);
+
 const groupOne = workbenchGroupId("group-1");
 const groupTwo = workbenchGroupId("group-2");
 const agentKey = surfaceLogicalKey(
