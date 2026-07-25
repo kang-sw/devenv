@@ -96,8 +96,14 @@ grep-sweep, since line numbers drift):
   playbook doctrine.
 - **Cleaner**: `rsrc/executor-wrapup.md` step that removes completed tickets from
   the section (currently ~line 48).
-- **Reader instruction**: `skills/lead-bootstrap/AGENTS.template.md` "Check
-  `## Ticket Focus` … before starting implementation" line (ws ~:79, wsflow ~:80).
+- **Reader instruction (template + generated live copies)**:
+  `skills/lead-bootstrap/AGENTS.template.md` "Check `## Ticket Focus` … before
+  starting implementation" line (ws ~:79, wsflow ~:80), **and its generated live
+  copy in this repo's own managed root `AGENTS.md` (~:199, a template consumer at
+  `<!-- Template Version: v0041 -->`)**. devenv consumes its own template, so the
+  reader line must leave the managed `AGENTS.md` too — through the bootstrap
+  regeneration path below, never a hand-edit (a hand-edit is re-added on the next
+  bootstrap upgrade).
 - **Semantics / keep-list / mental-model membership**:
   `skills/lead-bootstrap/WORKFLOW.md` (~:47, :107, :120) and its generated live
   copy `ai-docs/WORKFLOW.md`; `rsrc/lead-bootstrap/lead-bootstrap.md` keep-list
@@ -111,9 +117,12 @@ grep-sweep, since line numbers drift):
   manual's Ticket System Concepts text if it names the section.
 - **Managed-template propagation**: add a new `AGENTS.template.md` version entry
   (ws next after v0041; wsflow next after v0004) instructing bootstrap to drop
-  the Ticket Focus reader instruction and not re-add the section, so downstream
-  projects' managed `AGENTS.md`/`WORKFLOW.md` regenerate without it. Bump the
-  template version accordingly.
+  the Ticket Focus reader instruction and not re-add the section, so managed
+  `AGENTS.md`/`WORKFLOW.md` consumers regenerate without it. Bump the template
+  version accordingly. **This repo is itself such a consumer** (currently at
+  v0041): after the bump, regenerate devenv's own managed `AGENTS.md`/`WORKFLOW.md`
+  through the same bootstrap upgrade path so its reader instruction is removed by
+  regeneration, not by hand.
 
 Mechanics: edit rsrc bodies through the normal rsrc path and regenerate
 `rsrc/manifest.json` (ws + wsflow) plus the wsflow rsrc mirror via the
@@ -134,8 +143,9 @@ Verification:
 - wsflow rsrc mirror test green (`TestWsflowRsrcMirrorUpToDate`); rsrc + skills
   manifest-up-to-date tests green; `go build ./...`, `go vet ./...`, and the
   `internal/mcp` + `cmd/ws-mcp` + `internal/wsrsrc` suites green; the wsflow
-  python bundle suite green; any AGENTS-template-version assertion green after
-  the bump.
+  python bundle suite green; the bootstrap/AGENTS template-version test green
+  after the bump (locate it via the template-version constant the bootstrap
+  suite asserts, e.g. the `Template Version: vNNNN` marker check).
 
 ## Spec Impact
 
