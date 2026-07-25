@@ -9,3 +9,4 @@ Recover your ws `session_key` from the compaction summary, then call
 `ws/workflow_manual(session_key: <recovered key>)` and execute the returned
 reference inline. If no key is recoverable (genuinely fresh start), call
 `ws/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
+If this call fails to connect, run `/ws:mcp-server-repair`.

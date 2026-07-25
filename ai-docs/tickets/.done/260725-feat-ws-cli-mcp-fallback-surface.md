@@ -500,3 +500,77 @@ the mirrored body; `go test ./internal/wsrsrc/...` and the wsflow bundle test bo
 pass with the new skill registered; each of the eight front doors changes by
 exactly the pointer line (plus, in the two wsflow cases, removal of the replaced
 sentence).
+
+### Result (adbf5ec3) - 2026-07-25
+
+Authored `agents-plugin/skills/mcp-server-repair/SKILL.md` as a Choreography-layout
+skill (Invariants -> On: X handlers -> Templates -> Doctrine), fully self-contained
+with **no MCP call** anywhere in its body — the whole point is to keep working after
+the MCP server drops. It covers the `ws-cli tools` / `ws-cli tools <name>` /
+`ws-cli call <name> '<json>'` surface, the mapping rule
+(`ws/x.y(a: b)` -> `ws-cli call x.y '{"a": "b"}'`), the cold-start
+`ws-cli call workflow_manual '{"session_key": "obsidian-latch", "root": "<abs worktree>"}'`
+sequence, the PATH-independent `python3 <plugin-root>/bin/ws-mcp-launcher.py` fallback,
+the stale-runtime slow-first-call note, and a "relay verbatim to the user" reconnect
+template. The reconnect steps are described functionally (plugin-provided stdio server,
+not auto-reconnected: run `/mcp`, toggle the server off/on or `/reload-plugins`, else
+restart the session) rather than hardcoding the `plugin:ws-plugin:ws` identifier — the
+literal identifier does not survive the `ws:`/`ws/`/`ws-cli` substitution and would
+leave a wrong string in the wsflow mirror, so a namespace-neutral description keeps both
+mirrors correct.
+
+Registered on all four enumeration surfaces: appended `"mcp-server-repair"` to
+`substitutionMirroredSkills` (`internal/wsrsrc/skills_mirror_test.go`); regenerated the
+wsflow mirror via `WS_REGEN_WSFLOW_SKILLS=1 ... TestRegenerateWsflowSkillsMirror`
+(produces `wsflow-cli`/`wsflow/` in the generated body; `ws-mcp-launcher.py` correctly
+stays verbatim because the wsflow package ships that same filename); regenerated
+`agents-plugin/skills/manifest.json` via `WSRSRC_REGEN_SKILLS=1 ...
+TestGenerateRealSkillsManifest` (skills manifest only — the rsrc regens were never run);
+and added `mcp-server-repair` to `EXPECTED_SKILLS` + `EXPECTED_INLINE_SKILLS` in
+`test_wsflow_skill_bundle.py` and to both the Shipped-Skills list and the
+Substitution-Mirrored curated list in `ai-docs/ref/wsflow-mirroring.md`. Confirmed the
+source is namespace-only: zero lowercased `ws.` substring and none of the other
+disqualifying tokens, so `guardSubstitutionEligible` passes.
+
+Added the one-line pointer to eight front doors. The six that carried no prior blocker
+line simply gain it — ws `lead-discuss`/`lead-sprint`/`lead-revive`/`lead-proceed` gain
+`` If this call fails to connect, run `/ws:mcp-server-repair`. ``, and wsflow
+`lead-discuss`/`lead-sprint` gain the `` /wsflow:mcp-server-repair `` form. The two
+wsflow front doors that ended in a "stop and report that blocker" sentence
+(`lead-proceed`, `lead-revive`) have that sentence **replaced** by the pointer. Updated
+the two hardcoded `re.fullmatch` bundle tests with per-skill exact tails (not loosened
+optional groups): `test_skill_files_are_thin_playbook_shims` excludes `lead-proceed` and
+gains a dedicated `test_lead_proceed_shim_carries_repair_pointer`;
+`test_parallel_init_skill_files_are_playbook_shims` uses an explicit per-skill
+`pointer_tail` map so a missing pointer on discuss/sprint fails loudly.
+
+**New skill discoverability (recorded here because the `ai-docs/_index.md` refresh was
+skipped this round — a concurrent unrelated session holds uncommitted edits there):** the
+new `mcp-server-repair` skill is invocable as `/ws:mcp-server-repair` (full ws) and
+`/wsflow:mcp-server-repair` (wsflow). It is the CLI-fallback recovery skill for when the
+MCP tools vanish or a tool call fails to connect.
+
+Verification: from `agents-plugin-tool/`, `go build ./...` / `go vet ./...` clean;
+`go test ./internal/wsrsrc/... ./cmd/ws-mcp/...` green (including
+`TestWsflowSkillsMirrorUpToDate` now covering `mcp-server-repair` and
+`TestSkillsManifestDriftIsVisible`); from repo root `python3 -m unittest discover
+agents-plugin-wsflow/tests` green (10 tests, including the two updated exact-match tests
+and the new dedicated lead-proceed check). Diff-checked all eight front doors: each
+changed by exactly the pointer line, with the two wsflow replacements also removing the
+old blocker sentence.
+
+Deviations: none from the plan contract. Committed under strict explicit-pathspec
+isolation from the concurrent session's five uncommitted files
+(`agents-plugin{,-wsflow}/rsrc/lead-write-ticket/lead-write-ticket.md`, both
+`rsrc/manifest.json`, `ai-docs/_index.md`) — none were staged. The implementation
+landed in `adbf5ec3`; this Result is recorded in the follow-up docs commit per the
+Phase 1/2 convention.
+
+Review (range `b4fc0ff5..e453d9e8`, three partitioned opus reviewers): **clean** on
+all three partitions — correctness (skill self-containment / no-MCP-call, reconnect-
+procedure accuracy, `guardSubstitutionEligible` pass, per-file pointer gain-vs-replace,
+wsflow mirror substitution, manifest hashes), fit (Choreography layout, lead-skill-
+authoring invariants, surgical discipline, four-surface registration completeness,
+FORBIDDEN_PATTERNS), and test (both `re.fullmatch` fixes proven load-bearing via
+mutation testing, all suites green). Zero critical / important / minor. No fixups
+required before merge.

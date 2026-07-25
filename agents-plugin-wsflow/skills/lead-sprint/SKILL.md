@@ -10,3 +10,4 @@ Call in parallel:
 - `wsflow/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
 After both return, execute the procedure returned by `wsflow/playbook.print`.
+If this call fails to connect, run `/wsflow:mcp-server-repair`.
