@@ -9,6 +9,7 @@ import {
   terminalCommandPlanForPlatform,
   type TerminalCommandPlan,
 } from "../src/terminalCommandPlan.js";
+import { formatOpenSurfaceCounts } from "../src/resourcePresentation.js";
 // mirrors src/agentGuiSuspended.ts - agent GUI suspended 2026-07-25 (260713
 // family). While true, the agent-GUI acceptance steps below are quarantined.
 import { AGENT_GUI_SUSPENDED } from "../src/agentGuiSuspended.js";
@@ -2802,6 +2803,80 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
         `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
         "Ctrl-C, ctrl-u, ctrl-w, clear-screen control rendering/recovery, paste, committed Hangul input, IME composition guard, and no document scroll",
+    );
+  });
+
+  // --- 260725 nav-row-two-line-open-state Phase 1: reserved second line and
+  // --- open/closed de-emphasis. Runs after both "preview, close, and pin
+  // --- read-only file tabs" and "create terminal and run a command" so
+  // --- `workRoot` already has a known nonzero terminal count and a known
+  // --- nonzero document count with no new fixture setup. The count text is
+  // --- cross-checked against the currently-mounted Dockview tabs (not a
+  // --- hardcoded number): both the nav row and the workbench tabs are
+  // --- driven by the same terminalPanes/readOnlyFilePanes state, so this
+  // --- also catches a wiring bug between the two render paths, not just a
+  // --- text-formatting bug. ---------------------------------------------
+  await test.step("nav row shows open-surface counts and openness de-emphasis", async () => {
+    const activeContainer = page.locator('[data-workbench-root-active="true"]');
+    const liveTerminalCount = await activeContainer
+      .locator('.dockview-workbench-tab[data-workbench-pane-id^="terminal:"]')
+      .count();
+    const livePinnedDocCount = await activeContainer
+      .locator('.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]')
+      .count();
+    const livePreviewDocCount = await activeContainer
+      .locator(
+        '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+      )
+      .count();
+    const liveDocCount = livePinnedDocCount + livePreviewDocCount;
+    expect(liveTerminalCount).toBeGreaterThan(0);
+    expect(liveDocCount).toBeGreaterThan(0);
+
+    const openRow = page
+      .locator('.resource-row[data-resource-presentation="compactWorkRoot"]', {
+        hasText: workRootDisplayName(workRoot),
+      })
+      .first();
+    await expect(openRow).toHaveAttribute("data-resource-open", "true");
+    await expect(openRow.locator(".resource-row-counts")).toHaveText(
+      formatOpenSurfaceCounts(liveTerminalCount, liveDocCount),
+    );
+    const openRowHeight = (await openRow.boundingBox())?.height ?? 0;
+    expect(openRowHeight).toBeGreaterThan(34);
+    note(
+      `nav row height (compactWorkRoot, open, two-line): ${openRowHeight}px`,
+    );
+
+    // Close the git-linked worktree row created in "git workspace overflow
+    // adds linked worktree" (it auto-opens on creation and nothing after
+    // that step still depends on it staying open) to get a still-listed but
+    // closed workRoot-presentation row, without adding a new fixture root.
+    if (gitWorkRoot) {
+      const closedRow = page
+        .locator('.resource-row[data-resource-presentation="workRoot"]', {
+          hasText: "Browser-Gate-Branch",
+        })
+        .first();
+      await expect(closedRow).toHaveAttribute("data-resource-open", "true");
+      await expect(closedRow.locator(".resource-row-counts")).toHaveText(
+        formatOpenSurfaceCounts(0, 0),
+      );
+      await closedRow.locator('[data-command-id="workRoot.close"]').click();
+      await expect(closedRow).toHaveAttribute("data-resource-open", "false");
+      await expect(closedRow.locator(".resource-row-counts")).toHaveText(
+        formatOpenSurfaceCounts(0, 0),
+      );
+      const closedRowHeight = (await closedRow.boundingBox())?.height ?? 0;
+      note(`nav row height (workRoot, closed, two-line): ${closedRowHeight}px`);
+    } else {
+      note(
+        "nav row closed-state: skipped because no daemon-host Git workRoot is configured",
+      );
+    }
+
+    note(
+      "nav row: reserved second line renders live terminal/document counts for the open root, matching the mounted workbench tabs, and data-resource-open flips true/false with the row staying listed either way",
     );
   });
 
