@@ -2867,11 +2867,25 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       `nav row height (compactWorkRoot, open, two-line): ${openRowHeight}px`,
     );
 
-    // Close the git-linked worktree row created in "git workspace overflow
-    // adds linked worktree" (it auto-opens on creation and nothing after
-    // that step still depends on it staying open) to get a still-listed but
-    // closed workRoot-presentation row, without adding a new fixture root.
+    // Reuse the git-linked worktree row created in "git workspace overflow
+    // adds linked worktree" to get a still-listed workRoot-presentation row
+    // to flip open->closed, without adding a new fixture root. That row's
+    // resource-tree entry survives the `page.reload()` above (the tree comes
+    // from the daemon), but `openWorkRootKeys` (App.tsx) is bare in-memory
+    // `useState` with no persistence, so the reload silently drops it back
+    // to closed. This step therefore establishes its own openness
+    // precondition - selecting the row here, the same `resource.select` path
+    // `openWorkRootInBrowser`/`selectWorkRootInBrowser` use, is what the
+    // App.tsx:1093 effect actually keys the "open" write on - rather than
+    // (falsely) assuming residue from the earlier step survives the reload.
     if (gitWorkRoot) {
+      const worktreeDir = path.join(
+        gitWorkRoot,
+        ".ws-dashboard",
+        "worktrees",
+        "Browser-Gate-Branch",
+      );
+      await selectWorkRootInBrowser(page, worktreeDir);
       const closedRow = page
         .locator('.resource-row[data-resource-presentation="workRoot"]', {
           hasText: "Browser-Gate-Branch",
@@ -2888,6 +2902,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       );
       const closedRowHeight = (await closedRow.boundingBox())?.height ?? 0;
       note(`nav row height (workRoot, closed, two-line): ${closedRowHeight}px`);
+      // Closing the currently-selected root re-selects the next open root
+      // (App.tsx workRoot.close handler); with only `workRoot` left open
+      // that lands back on it automatically, but reselect explicitly so
+      // later steps never depend on that fold-through staying true.
+      await selectWorkRootInBrowser(page, workRoot);
     } else {
       note(
         "nav row closed-state: skipped because no daemon-host Git workRoot is configured",
