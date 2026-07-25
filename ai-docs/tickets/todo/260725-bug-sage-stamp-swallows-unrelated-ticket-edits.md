@@ -5,7 +5,7 @@ related:
   260725-idea-ws-git-commit-rename-and-payload-rejections: blocking prerequisite — once sage_stamp stops committing, the caller commits the posture change through git.commit, which today fails whenever a status transition is staged
   260721-bug-lead-write-ticket-sage-ready-ordering: edits the same Sage Review Gate step, and its open question about retrying tickets.move after sage_record commits the posture is invalidated by this ticket's decision
 sage-review-design: completed
-sage-review-completeness: recommended
+sage-review-completeness: completed
 ---
 
 # tickets.sage_stamp commits unrelated ticket edits under a stub review message
@@ -216,3 +216,9 @@ happens to hold*, not "review-driven edits", because the playbook has no step
 that produces the latter and adding one is explicitly out of scope above — a
 criterion phrased around review-response content would not be reproducible from
 the documented flow.
+
+Also verify the phase's two non-`sage_stamp` actions, which the criteria above do
+not otherwise reach: `lead-write-ticket`'s Sage Review Gate step issues an
+explicit commit after stamping, and `tickets.sage_gate`'s ask-decline path
+matches whichever outcome was chosen — either it no longer commits, or it still
+does and the ticket carries the recorded rationale for leaving it.
