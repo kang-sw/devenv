@@ -41,6 +41,17 @@ token, installs an HTTP-only owner session cookie with `SameSite=Lax`, and
 redirects browser callers to a token-free stable app URL. Missing, invalid,
 reused, or expired pairing tokens fail without installing a session cookie and
 without redirecting into an authenticated-looking app route.
+
+A second, distinct entrypoint class also sits outside the owner-session
+boundary: the per-terminal turn-state callback route
+(`POST /api/dashboard/terminals/{terminal_id}/turn-state`) is authorized per
+request by an opaque, daemon-generated callback token instead of the owner
+session cookie. It is never reachable from a browser context, never issues or
+consumes the owner session cookie, and is the one route in this surface a
+spawned agent terminal's own hook process calls directly. The pairing route
+remains the only unauthenticated *browser* entrypoint; this callback route is
+a non-browser, token-authed exception to that browser-facing rule, not a
+second hole in it.
 {#260516-ws-web-dashboard-token-free-pairing-landing}
 
 Authenticated owner sessions have broad host-control authority for dashboard

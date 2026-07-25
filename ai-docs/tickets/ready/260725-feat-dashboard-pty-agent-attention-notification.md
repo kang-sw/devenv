@@ -982,6 +982,85 @@ restart on a DIFFERENT port with a live helper still running, a callback from
 that helper must still arrive. Testing only token survival would pass while
 pointing at a dead port.
 
+### Result (f134aa8a) - 2026-07-26
+
+Done. Commits: `60f74c5d` (plan), `12604d64` (token store), `384b1924`
+(route), `00576d6f` (GC sweep), then review-cycle fixes `4952822c`,
+`f4ee632c`, `eec756f2`, `f134aa8a`.
+
+A daemon-owned per-terminal token lives at `terminal-tokens/<id>.json`,
+created at mode `0600` from the moment it is written rather than chmod'd
+after the fact. `POST /api/dashboard/terminals/{terminal_id}/turn-state` is
+registered outside `require_owner_auth` with a handler-level constant-time
+token check; an unknown terminal id and a wrong token return the identical
+401. `boot_reconcile` recovers the token on adopt and rewrites
+`callback.json` with the restarted daemon's fresh base URL, so a
+re-adopted helper's already-materialized `--callback` argv keeps resolving
+a live target. The GC sweep over `agent-profiles/` keys on terminal
+liveness and is spawned strictly after the awaited `boot_reconcile`
+completes.
+
+**Verification (this machine, 2026-07-26; the lead independently
+reproduced the lib figure and the end-to-end test).** `cargo test -p
+ws-dashboard-daemon --lib` -> 190 passed, 0 failed, 2 ignored (Phase 3
+baseline 168, net +22). `cargo test -p ws-dashboard-daemon --test
+terminal_notify_callback_restart` -> 1 passed. `cargo test -p
+ws-dashboard-daemon --test terminal_notify_end_to_end` -> 1 passed. `cargo
+test -p ws-dashboard-daemon --test terminal_notify` -> 2 passed. `cargo
+test -p ws-dashboard-daemon --test server` -> 16 passed. `cargo test -p
+ws-dashboard-daemon --test terminal_lifetime` -> 4 passed. `cargo test -p
+ws-dashboard-daemon --test routes` -> 170 passed, 2 failed, both
+independently confirmed pre-existing at the base commit in a separate
+worktree. `cargo check --tests` -> exit 0. Owner auth was ENABLED in every
+test, as this phase requires.
+
+**Non-vacuity.** Each guard was proven by mutation and revert: reverting
+the pending-registration-set union fails the concurrent-spawn test;
+skipping the callback-URL rewrite fails the restart test; racing the sweep
+ahead of reconcile fails the ordering test; making delivery a silent no-op
+fails the end-to-end test; accepting any known token fails the
+cross-terminal test.
+
+**Review outcome.** Four significant findings were dispositioned and
+fixed; three Minors were reviewed and accepted without action (recorded
+below). Findings that carry forward:
+
+1. **A concurrent-spawn GC race, Critical.** The sweep snapshotted liveness
+   BEFORE listing directories, so a terminal whose profile directory
+   existed but whose session was not yet inserted into `sessions` — the
+   insert happens only after helper spawn AND the IPC handshake — was
+   classified an orphan and had its live config and token deleted. This is
+   the SAME invariant the boot-ordering guard protects, reappearing in the
+   steady-state case where nothing guarded it. Fixed with an explicit
+   pending-registration set marked before the directory is created and
+   cleared only after the id is visible in `sessions`, so the sweep's
+   liveness view is always a superset. A minimum-age guard was considered
+   and rejected: it would need a principled upper bound on
+   spawn-plus-handshake latency, and there is none.
+2. **The GC task leaked.** It was a bare spawn with a discarded handle and
+   no self-termination, unlike the daemon's one other tracked task. Now
+   aborted on shutdown in both select arms.
+3. **The `0600` helper was duplicated across two modules**, justified by a
+   precedent that did not actually support it. This is the
+   security-sensitive sequence the phase was told to get right, and two
+   copies means a future fix lands on one. Now a single shared helper.
+4. **The end-to-end delivery assertion was missing**, though reported as
+   done. Every new test hand-built the JSON POST rather than driving the
+   real `terminal-notify` CLI against the real route. That mattered
+   specifically because the CLI is silent by design with no expiry, so a
+   broken delivery path leaves no signal anywhere and only a test can
+   catch it. Now covered by a test that interposes a transparent TCP relay
+   between the real CLI and the real daemon, asserting the real 204 the
+   route returns — with no production change made to create that
+   observability.
+
+**Minors accepted without action.** No narrow unit test of the adopt-arm
+token recovery; untested unreadable-directory branches in the sweep; no
+concurrent same-terminal POST test. Recorded so a later reader knows these
+were seen and judged, not missed.
+
+**Deferred / not done.** Phase 5 and all later phases.
+
 ### Phase 5: server-scoped attention event stream
 
 Depends on Phase 4. Owes the NEW spec entry named in `## Spec Impact` before

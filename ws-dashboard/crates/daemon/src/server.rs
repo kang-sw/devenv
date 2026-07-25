@@ -27,6 +27,14 @@ pub struct StartupInfo {
 
 pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
 
+// CONTRACT (260725 Phase 4): no existing periodic-background-task precedent
+// in this codebase to match (see plan Codebase Findings) - chosen generous
+// enough that it never contends with normal terminal churn (a stale
+// `agent-profiles/` directory sitting around for up to this long between
+// sweeps is harmless; the important guarantee is ordering relative to
+// `boot_reconcile`, not sweep frequency).
+const AGENT_PROFILE_GC_SWEEP_PERIOD: Duration = Duration::from_secs(300);
+
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     run_with_shutdown(config, shutdown_signal())
         .await
@@ -69,6 +77,16 @@ where
     let bound_addr = listener.local_addr()?;
     let info = startup_info(bound_addr, &auth, config.owner_auth_enabled);
 
+    // CONTRACT (260725 Phase 4): computed once, unconditionally, so it can
+    // be threaded into BOTH `write_bound_base_url` below and
+    // `TerminalRegistry::boot_reconcile` further down - the single source
+    // of truth `agent_callback.rs`'s own CONTRACT insists on (never re-read
+    // `bound-base-url.json` to derive a per-terminal `callback.json`'s
+    // `baseUrl`, which would reintroduce the rejected multi-daemon-steal
+    // shape).
+    let base_url = format!("http://{}", display_addr(bound_addr));
+    let state_dir = crate::persistent_state::default_state_dir();
+
     // CONTRACT (260725 Phase 3 step 3, "ephemeral port"): written
     // unconditionally on every bind, strictly BEFORE `boot_reconcile` below -
     // it needs no terminal/registry state, only the bound address, and
@@ -76,9 +94,8 @@ where
     // callback rewrite can already find a fresh file. Best-effort: a warning
     // on failure, not a startup abort, mirrors how startup already tolerates
     // a missing state dir elsewhere (`opened_work_roots` seeding).
-    if let Some(state_dir) = crate::persistent_state::default_state_dir() {
-        let base_url = format!("http://{}", display_addr(bound_addr));
-        if let Err(error) = crate::agent_callback::write_bound_base_url(&state_dir, &base_url) {
+    if let Some(state_dir) = state_dir.as_deref() {
+        if let Err(error) = crate::agent_callback::write_bound_base_url(state_dir, &base_url) {
             tracing::warn!(%error, "failed to write bound-base-url file");
         }
     }
@@ -114,8 +131,47 @@ where
         crate::terminal::default_helper_binary(),
         crate::terminal::default_registry_dir(),
         crate::terminal::DEFAULT_RECONCILE_CONNECT_TIMEOUT,
+        state_dir.clone(),
+        base_url,
     )
     .await;
+
+    // CONTRACT (260725 Phase 4, GC sweep ordering - LOAD-BEARING): this
+    // spawn statement is textually AND temporally AFTER the already-awaited
+    // `boot_reconcile` call above. Running the sweep any earlier (e.g.
+    // against a freshly-constructed, still-empty registry) would see zero
+    // live terminal ids and delete the profile directory of every helper
+    // `boot_reconcile` is about to adopt a moment later - see
+    // `agent_profile_gc.rs`'s module CONTRACT and
+    // `crates/daemon/tests/terminal_notify_callback_restart.rs`'s ordering
+    // regression test, which is what actually proves this placement rather
+    // than merely documenting it.
+    // CONTRACT (260725 Phase 4 review cycle 1, finding B): unlike this
+    // crate's other untracked `tokio::spawn` calls (`spawn_ipc_reader_task`,
+    // the `claude_cli`/`codex_app_server` reader loops), this task is
+    // self-bounding on NOTHING - it is an infinite `loop { tick; sweep }`
+    // with no connection/pipe to close underneath it. Left untracked, it
+    // would run forever regardless of this daemon's own shutdown signal,
+    // unlike `shutdown_task` below (this crate's one other background task,
+    // tracked and `.abort()`-ed in both `select!` arms). Track the
+    // `JoinHandle` and abort it alongside `shutdown_task` so it participates
+    // in the same graceful-shutdown path instead of leaking.
+    let gc_sweep_task = state_dir.map(|state_dir| {
+        let sweep_registry = terminals.clone();
+        tokio::spawn(async move {
+            crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
+            let mut interval = tokio::time::interval(AGENT_PROFILE_GC_SWEEP_PERIOD);
+            // The first tick fires immediately; the sweep above already
+            // covered "run once immediately at boot", so this first tick is
+            // consumed without triggering a redundant second sweep.
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
+            }
+        })
+    });
+
     let app = build_router(AppState {
         config,
         auth,
@@ -145,10 +201,16 @@ where
     tokio::select! {
         result = &mut server => {
             shutdown_task.abort();
+            if let Some(gc_sweep_task) = &gc_sweep_task {
+                gc_sweep_task.abort();
+            }
             result?;
         }
         () = force_after_shutdown(shutdown_rx, grace_period) => {
             shutdown_task.abort();
+            if let Some(gc_sweep_task) = &gc_sweep_task {
+                gc_sweep_task.abort();
+            }
             tracing::warn!(
                 grace_period_ms = grace_period.as_millis(),
                 "forcing ws-dashboard daemon shutdown after grace period"
