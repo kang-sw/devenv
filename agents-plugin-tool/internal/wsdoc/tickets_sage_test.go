@@ -300,9 +300,6 @@ func TestSageRecordDesignStandalone(t *testing.T) {
 	if res.Posture["sage-review-design"] != "blocked" {
 		t.Fatalf("posture = %v, want blocked", res.Posture)
 	}
-	if res.CommitTitle != "docs(sage): block ticket on design review" {
-		t.Fatalf("commit title = %q", res.CommitTitle)
-	}
 	body := readFileString(t, path)
 	wantSection := "## Blocked (2026-07-20)\n\n### Design Reviewer — block\n\n| # | Title | Severity | Resolution |\n|---|-------|----------|------------|\n| 1 | T | high | missing |"
 	if !strings.Contains(body, wantSection) {
@@ -324,7 +321,7 @@ func TestSageRecordDesignStandalone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SageRecord pass: %v", err)
 	}
-	if res2.CommitTitle != "docs(sage): mark design review completed" || res2.BlockedSection != "" {
+	if res2.Posture["sage-review-design"] != "completed" || res2.BlockedSection != "" {
 		t.Fatalf("pass result = %+v", res2)
 	}
 	if strings.Contains(readFileString(t, path2), "## Blocked") {
@@ -344,8 +341,8 @@ func TestSageRecordCompletenessStandalone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SageRecord: %v", err)
 	}
-	if res.CommitTitle != "docs(sage): block ticket on completeness review" {
-		t.Fatalf("commit title = %q", res.CommitTitle)
+	if res.Posture["sage-review-completeness"] != "blocked" {
+		t.Fatalf("posture = %v, want blocked", res.Posture)
 	}
 	// Completeness table omits the Resolution column.
 	wantSection := "### Completeness Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | T | med |"
@@ -370,7 +367,7 @@ func TestSageRecordCombinedAggregation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SageRecord: %v", err)
 	}
-	if res.Verdict != "block" || res.CommitTitle != "docs(sage): block ticket on sage review" {
+	if res.Verdict != "block" {
 		t.Fatalf("design-block aggregate = %+v", res)
 	}
 	if res.Posture["sage-review-design"] != "blocked" || res.Posture["sage-review-completeness"] != "blocked" {
@@ -407,7 +404,7 @@ func TestSageRecordCombinedAggregation(t *testing.T) {
 	if res3.Verdict != "concern" {
 		t.Fatalf("missing-resolution aggregate = %q, want concern", res3.Verdict)
 	}
-	if res3.Posture["sage-review-design"] != "completed" || res3.CommitTitle != "docs(sage): mark sage review completed" {
+	if res3.Posture["sage-review-design"] != "completed" || res3.Posture["sage-review-completeness"] != "completed" {
 		t.Fatalf("concern should still write completed: %+v", res3)
 	}
 
@@ -424,7 +421,7 @@ func TestSageRecordCombinedAggregation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SageRecord: %v", err)
 	}
-	if res4.Verdict != "pass" || res4.CommitTitle != "docs(sage): mark sage review completed" {
+	if res4.Verdict != "pass" || res4.Posture["sage-review-design"] != "completed" {
 		t.Fatalf("all-pass aggregate = %+v", res4)
 	}
 }

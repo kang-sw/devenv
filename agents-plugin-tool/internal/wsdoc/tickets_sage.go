@@ -16,11 +16,14 @@ import (
 // effectiveSageReviewPostures, ResolvedSageReviewPosture, writeFrontmatterField)
 // so the two mechanisms cannot drift.
 //
-// Commit boundary: like tickets_mutate.go these functions never import wsgit;
-// they compute the frontmatter write, the Blocked-section render, and the commit
-// title/paths/ai_context, and return them for the MCP dispatch layer to actually
-// commit via wsgit.NewClient().Commit(...). This keeps commit output byte-for-byte
-// identical to today's git.commit-produced commits.
+// Commit boundary: like tickets_mutate.go these functions never import wsgit.
+// SageGate still computes commit title/paths/ai_context for its ask-decline
+// path, returned for the MCP dispatch layer to commit via
+// wsgit.NewClient().Commit(...) (kept byte-for-byte identical to today's
+// git.commit-produced commits). SageRecord does not: it only writes the
+// frontmatter posture and any Blocked section and returns the applied
+// outcome — the caller commits separately via its own ws/git.commit, so
+// SageRecordResult carries no commit metadata.
 
 // SageGateOptions carries the sage-review gate inputs.
 type SageGateOptions struct {
@@ -67,15 +70,14 @@ type SageRecordOptions struct {
 	Today      string // YYYY-MM-DD, caller-supplied for testability
 }
 
-// SageRecordResult is the applied outcome. The MCP layer commits CommitPaths
-// under CommitTitle/AIContext.
+// SageRecordResult is the applied outcome. It writes the frontmatter posture
+// (and any Blocked section) directly; it does not stage or commit — the MCP
+// dispatch layer returns it as-is and the caller commits separately via its
+// own ws/git.commit.
 type SageRecordResult struct {
 	Verdict        string            // aggregate: "pass" | "concern" | "block"
 	Posture        map[string]string // frontmatter fields written
 	BlockedSection string            // rendered Blocked section, empty when not blocked
-	CommitTitle    string
-	CommitPaths    []string
-	AIContext      []string
 }
 
 // stageOutcome is the internal per-stage resolution used to compose the gate.
@@ -394,7 +396,7 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 		}
 	}
 	verdict := normalizeVerdict(v.Verdict)
-	res := SageRecordResult{Verdict: verdict, Posture: map[string]string{}, CommitPaths: []string{ticketRel}}
+	res := SageRecordResult{Verdict: verdict, Posture: map[string]string{}}
 
 	if verdict == "block" {
 		section := renderBlockedSection(today, []blockedReviewerSection{
@@ -408,8 +410,6 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 		if err := writeFrontmatterField(ticketAbs, map[string]string{field: "blocked"}); err != nil {
 			return SageRecordResult{}, err
 		}
-		res.CommitTitle = "docs(sage): block ticket on " + reviewer + " review"
-		res.AIContext = []string{reviewer + " review blocked"}
 		return res, nil
 	}
 
@@ -418,8 +418,6 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 	if err := writeFrontmatterField(ticketAbs, map[string]string{field: "completed"}); err != nil {
 		return SageRecordResult{}, err
 	}
-	res.CommitTitle = "docs(sage): mark " + reviewer + " review completed"
-	res.AIContext = []string{reviewer + " review passed"}
 	return res, nil
 }
 
@@ -447,7 +445,7 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 		final = "pass"
 	}
 
-	res := SageRecordResult{Verdict: final, Posture: map[string]string{}, CommitPaths: []string{ticketRel}}
+	res := SageRecordResult{Verdict: final, Posture: map[string]string{}}
 
 	if final == "block" {
 		section := renderBlockedSection(today, []blockedReviewerSection{
@@ -463,8 +461,6 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 		if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "blocked", "sage-review-completeness": "blocked"}); err != nil {
 			return SageRecordResult{}, err
 		}
-		res.CommitTitle = "docs(sage): block ticket on sage review"
-		res.AIContext = []string{"sage review blocked: design and/or completeness issues"}
 		return res, nil
 	}
 
@@ -473,8 +469,6 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 	if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "completed", "sage-review-completeness": "completed"}); err != nil {
 		return SageRecordResult{}, err
 	}
-	res.CommitTitle = "docs(sage): mark sage review completed"
-	res.AIContext = []string{"sage review passed"}
 	return res, nil
 }
 
