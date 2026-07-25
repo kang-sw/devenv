@@ -274,7 +274,14 @@ dropped tickets live in hidden archive dirs and git history.
   Phase 4: helper argv is world-readable via `ps`, and while it now carries
   scrub marker NAMES alongside file paths, that does not relax the rule — the
   callback token must never be threaded through argv, `--env-overlay`
-  included.
+  included. Phase 3 is DONE (`4ffb22c8`) — a `0600` per-terminal hook config
+  whose path travels in argv, a `bound-base-url.json` rewritten on every bind,
+  and a hidden `terminal-notify` that resolves it at fire time. Next
+  unfinished phase is Phase 4, which inherits three constraints recorded in
+  `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry`: the notify
+  silence has no expiry, the 0600 write sequence has a pre-chmod umask window
+  that only matters once a token is written, and Phase 4 must NOT derive
+  `callback.json`'s baseUrl from the shared `bound-base-url.json`.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
