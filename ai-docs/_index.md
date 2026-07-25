@@ -271,6 +271,18 @@ dropped tickets live in hidden archive dirs and git history.
   `App()`. Spec addressing via `## Spec Impact`
   (`#260516-ws-web-dashboard-inspectable-navigation-shell`, Contract-first:
   no). Sage combined = passed.
+- `260725-feat-dashboard-terminal-steady-state-stream-throughput` (ready, feat)
+  — open-state terminal streaming throughput: four independent,
+  behavior-preserving per-output-chunk fixes remaining after the `260723`
+  batch — Phase 1 xterm WebGL renderer (canvas/DOM fallback), Phase 2 port the
+  daemon O(1) `output_after` to the helper ring, Phase 3 batched Output frame
+  (array of chunks) across both IPC hops, Phase 4 debounce the per-chunk
+  `refocusActiveTerminal`. Deliberately scoped away from a retention/replay
+  redesign (would collide with the gapless-contiguous sequence invariant and
+  xterm-owned scrollback). Phase 1 shipped live as a hotfix; Phases 2–4 open.
+  Spec addressing via `## Spec Impact`
+  (`#260516-ws-web-dashboard-terminal-io-transport`, Contract-first: no). Sage
+  combined = passed.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin

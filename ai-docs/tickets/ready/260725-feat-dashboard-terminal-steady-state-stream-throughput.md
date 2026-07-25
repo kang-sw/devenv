@@ -44,6 +44,20 @@ disconnected/HTTP-poll fallback (already batched). It is therefore excluded.
 - Phases are independent and may land in any order; Phase 1 is the highest
   leverage and is being shipped ahead of the others as a hotfix.
 
+## Spec Impact
+
+Applies to Phase 3 only; Phases 1, 2, and 4 are behavior-preserving with no
+caller-visible contract change and need no spec addressing.
+
+- Target spec area: `ws-web-dashboard/index.md` terminal-io-transport anchor
+  (`260516-ws-web-dashboard-terminal-io-transport`), the terminal output message
+  contract.
+- Expected caller-visible change: the WS/IPC output message gains a batched
+  form (array of chunks) alongside or replacing the single-chunk form.
+- Contract-first spec: no — the exact batched-frame shape and back-compat
+  strategy will be settled during Phase 3 implementation; spec text is updated at
+  implementation close, not authored ahead.
+
 ## Phases
 
 ### Phase 1: xterm WebGL renderer with canvas/DOM fallback
@@ -92,18 +106,8 @@ change — keep or version the single-chunk variant so mixed old/new ends do not
 break.
 
 Verification: fewer frames under high chunk rate; frontend applies the batched
-array in order; no reordering or gaps.
-
-#### Spec Impact
-
-- Target spec area: `ws-web-dashboard/index.md` terminal-io-transport anchor
-  (`260516-ws-web-dashboard-terminal-io-transport`), the terminal output message
-  contract.
-- Expected caller-visible change: the WS/IPC output message gains a batched
-  form (array of chunks) alongside or replacing the single-chunk form.
-- Contract-first spec: no — the exact batched-frame shape and back-compat
-  strategy will be settled during Phase 3 implementation; spec text is updated at
-  implementation close, not authored ahead.
+array in order; no reordering or gaps. Spec addressing for this phase's
+caller-visible wire change is in the `## Spec Impact` section above.
 
 ### Phase 4: Debounce refocusActiveTerminal off the per-chunk path
 
