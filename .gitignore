@@ -14,6 +14,7 @@ data
 *.docx
 *Zone.Identifier
 ai-docs/**/*.local.md
+ai-docs/**/*.local.sh
 ai-docs/.deps/
 claude/infra/__pycache__/
 agents-plugin/.runtime/
