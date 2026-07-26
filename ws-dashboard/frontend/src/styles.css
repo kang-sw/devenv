@@ -2910,7 +2910,13 @@ button {
    PSEUDO-ELEMENT, which is a different box from the row and therefore does
    not enter the row's own `background` ladder at all (base (0,1,0) < openness
    (0,3,0) < openness+hover (0,4,0) < `.resource-row-error`). Nothing here can
-   win or lose against those rules; that is the point of using ::after. */
+   win or lose against those rules; that is the point of using ::after.
+
+   The keyframes below are UNPREFIXED, matching this file's two existing
+   keyframes (`activity-cue-breathe`, `git-spin`). An earlier draft prefixed
+   them `ws-`; there is no `ws-`-prefixed keyframe convention in this
+   stylesheet, and `@keyframes` names are already global, so the prefix would
+   have been the odd one out rather than a namespace. */
 .resource-row[data-row-attention="working"]::after,
 .resource-row[data-row-attention="ready"]::after,
 .server-row[data-row-attention="working"]::after,
@@ -2928,7 +2934,7 @@ button {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--ws-color-state-warning) 82%, transparent),
     inset 0 0 12px -2px color-mix(in srgb, var(--ws-color-state-warning) 60%, transparent);
-  animation: ws-nav-attention-flash 1.4s ease-in-out infinite;
+  animation: nav-attention-flash 1.4s ease-in-out infinite;
 }
 
 /* Quieter sibling: `working` is a background condition, not a summons, so it
@@ -2937,10 +2943,10 @@ button {
 .server-row[data-row-attention="working"]::after {
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--ws-color-state-info) 58%, transparent);
-  animation: ws-nav-attention-flash-quiet 2.6s ease-in-out infinite;
+  animation: nav-attention-flash-quiet 2.6s ease-in-out infinite;
 }
 
-@keyframes ws-nav-attention-flash {
+@keyframes nav-attention-flash {
   0%,
   100% {
     opacity: 0.35;
@@ -2950,27 +2956,13 @@ button {
   }
 }
 
-@keyframes ws-nav-attention-flash-quiet {
+@keyframes nav-attention-flash-quiet {
   0%,
   100% {
     opacity: 0.25;
   }
   50% {
     opacity: 0.7;
-  }
-}
-
-/* The first `prefers-reduced-motion` block in this stylesheet, added with the
-   first infinitely-animating nav element. The overlay stays - the tint is the
-   information - only its motion stops, so a reduced-motion user still sees
-   which row is pending. */
-@media (prefers-reduced-motion: reduce) {
-  .resource-row[data-row-attention="working"]::after,
-  .resource-row[data-row-attention="ready"]::after,
-  .server-row[data-row-attention="working"]::after,
-  .server-row[data-row-attention="ready"]::after {
-    animation: none;
-    opacity: 0.8;
   }
 }
 
@@ -4447,4 +4439,45 @@ button.git-status-segment:disabled {
 .agent-chat-prompt-send:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* --- Reduced motion ------------------------------------------------------
+   The first `prefers-reduced-motion` block in this stylesheet (260725 Phase
+   7). It deliberately covers EVERY infinite animation in this file, not only
+   the overlay this phase adds: silencing the new nav flash while
+   `activity-cue-breathe` - the very rule the flash is modelled on - and
+   `git-spin` keep looping a few pixels away would be an ad hoc opt-out rather
+   than a reduced-motion behaviour. Extending it is a no-op for users without
+   the preference.
+
+   In each case the STATE stays legible and only the motion stops: the nav
+   overlay keeps its tint, the activity cue keeps its dot at full opacity
+   (`activity-cue-breathe` animates `transform`/`opacity`, so it needs an
+   explicit resting `transform` or it would keep the 0.85 scale of no frame at
+   all), and the git spinner simply stops rotating.
+
+   Placement: this block must stay LAST in the file. `animation: none` here
+   competes at equal specificity with each rule it overrides
+   (`.git-spinner`, :4105, is (0,1,0) - the same as this block's own
+   `.git-spinner` selector), so it wins on source order alone. Moving it above
+   any of those declarations silently disables it for them. Any future
+   infinitely-animating rule belongs in this block too. */
+@media (prefers-reduced-motion: reduce) {
+  .resource-row[data-row-attention="working"]::after,
+  .resource-row[data-row-attention="ready"]::after,
+  .server-row[data-row-attention="working"]::after,
+  .server-row[data-row-attention="ready"]::after {
+    animation: none;
+    opacity: 0.8;
+  }
+
+  .activity-ribbon-item[data-dirty="true"] .activity-ribbon-cue {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .git-spinner {
+    animation: none;
+  }
 }

@@ -1015,10 +1015,15 @@ nothing is open. The counts describe live workbench state — surfaces mounted
 for that root right now — so they change as terminals and documents are opened
 and closed, and a root with no open surfaces says so rather than showing
 nothing. The counting scope is per root: a row never reports another root's
-surfaces. The same line also reports the root's agent terminals, split into
-how many are currently working and how many are waiting for the user, and the
-split is reported whenever the root has any agent terminal at all — including
-one that has just been spawned and has not yet reported a turn. An agent
+surfaces. The same line also reports the root's agent terminals: how many the
+root has, and how many of those are signalling working or waiting states the
+user has not yet acknowledged — so a state the user has already looked at
+stops being reported even while that agent is still mid-turn. The agent report
+appears whenever the root has any agent terminal at all, including one just
+spawned that has not yet reported a turn, and it leads the line ahead of the
+terminal and document counts so it stays readable when the line is too long
+for the sidebar. A root whose only open surfaces are agent terminals reports
+those agents rather than describing itself as having nothing open. An agent
 terminal is reported by the agent counts only and is never also included in
 the terminal count, so no open surface is counted twice. Every work-root row
 reserves the vertical space for the second line whether or not it currently
@@ -1036,7 +1041,9 @@ carry neither.
 
 A row whose agents are working or waiting also carries an attention level,
 with waiting outranking working, and a server row carries the highest such
-level among its own work roots while carrying no counts of its own. That
+level among the work roots that are themselves shown as rows beneath it —
+never one that no visible row would account for — while carrying no counts of
+its own. That
 level is presented as an animated overlay layered over the row rather than as
 a change to the row's own background, so it never competes with the row's
 open-state, hover, selection, or error appearance, and it is suppressed to a

@@ -88,16 +88,25 @@ assertEqual(
 );
 assertEqual(
   formatOpenSurfaceCounts(1, 0, { agents: 2, working: 1, ready: 1 }),
-  "1 terminal, 0 documents · 2 agents: 1 working, 1 ready",
-  "the agent segment reports the split, working before ready, alongside the non-agent terminal count",
+  "2 agents: 1 working, 1 ready · 1 terminal, 0 documents",
+  "the agent segment reports the split, working before ready, and LEADS the line so the ~225px nowrap ellipsis box spends its width on the agent numbers",
 );
+// Review cycle 1, Important 1: a root whose only open surface is an agent
+// terminal must not read "no open surfaces · 1 agent: ...". That state is
+// this feature's primary flow - the moment right after an agent is spawned
+// into a freshly opened root - not an exotic corner.
 assertEqual(
   formatOpenSurfaceCounts(0, 0, { agents: 1, working: 0, ready: 0 }),
-  "no open surfaces · 1 agent: 0 working, 0 ready",
-  "an agent with nothing pending still reports itself, and both halves stay visible at zero",
+  "1 agent: 0 working, 0 ready",
+  "an agents-only root reports its agent alone rather than contradicting itself with 'no open surfaces'",
 );
 assertEqual(
   formatOpenSurfaceCounts(0, 0, { agents: 1, working: 1, ready: 0 }),
-  "no open surfaces · 1 agent: 1 working, 0 ready",
+  "1 agent: 1 working, 0 ready",
   "the working half is rendered as its own number (Phase 3 spike), not folded into a single total",
+);
+assertEqual(
+  formatOpenSurfaceCounts(0, 2, { agents: 1, working: 0, ready: 1 }),
+  "1 agent: 0 working, 1 ready · 0 terminals, 2 documents",
+  "a root with agents and documents but no shell terminal still reports the surfaces half",
 );

@@ -600,12 +600,15 @@ test("nav row agent counter", async ({ page }) => {
   // Literal expected strings, not `formatOpenSurfaceCounts(...)` calls: this
   // gate must fail if the formatter's own contract drifts, and comparing a
   // row against the very function that rendered it could not.
-  const bothPending = "1 terminal, 0 documents · 2 agents: 1 working, 1 ready";
-  const bothReady = "1 terminal, 0 documents · 2 agents: 0 working, 2 ready";
+  const bothPending = "2 agents: 1 working, 1 ready · 1 terminal, 0 documents";
+  const bothReady = "2 agents: 0 working, 2 ready · 1 terminal, 0 documents";
   const oneAcknowledged =
-    "1 terminal, 0 documents · 2 agents: 0 working, 1 ready";
+    "2 agents: 0 working, 1 ready · 1 terminal, 0 documents";
   const allAcknowledged =
-    "1 terminal, 0 documents · 2 agents: 0 working, 0 ready";
+    "2 agents: 0 working, 0 ready · 1 terminal, 0 documents";
+  // Agents-only: the shell terminal closed, both agents still open. Review
+  // cycle 1, Important 1 - this must NOT read "no open surfaces · ...".
+  const agentsOnly = "2 agents: 0 working, 0 ready";
 
   let plainTerminalId = "";
   let agentOneId = "";
@@ -681,6 +684,49 @@ test("nav row agent counter", async ({ page }) => {
       ).toHaveText(bothPending);
     });
 
+    await test.step("the agent segment is not clipped away at the default sidebar width", async () => {
+      // Review cycle 1, Minor 1. `.resource-row-counts` is a single nowrap
+      // ellipsis line: measured in this very fixture, the full two-part
+      // string is 313px inside a 225px content box, so ~28% of it is ALWAYS
+      // cut. `toHaveText` compares `textContent`, which ellipsis does not
+      // touch, so every other assertion in this spec is blind to that.
+      //
+      // What is asserted is not "nothing overflows" (the line legitimately
+      // does) but "the overflow does not eat THIS phase's numbers": the right
+      // edge of the agent segment must land inside the visible content box.
+      // Measured with a Range over the leading text, so it fails if the
+      // segments are reordered back.
+      const overflowPx = await workRootRow(page, workRootB)
+        .locator(".resource-row-counts")
+        .evaluate((node) => {
+          const textNode = Array.from(node.childNodes).find(
+            (child): child is Text =>
+              child.nodeType === Node.TEXT_NODE &&
+              (child.textContent ?? "").includes("agents:"),
+          );
+          if (!textNode) {
+            return Number.NaN;
+          }
+          const text = textNode.textContent ?? "";
+          const separator = text.indexOf(" · ");
+          const range = document.createRange();
+          range.setStart(textNode, 0);
+          range.setEnd(textNode, separator === -1 ? text.length : separator);
+          return (
+            range.getBoundingClientRect().right -
+            (node.getBoundingClientRect().left + node.clientWidth)
+          );
+        });
+      expect(
+        Number.isNaN(overflowPx),
+        "the counts line must expose the agent segment as a leading text node",
+      ).toBe(false);
+      expect(
+        overflowPx,
+        `agent segment overflows the visible counts box by ${overflowPx}px`,
+      ).toBeLessThanOrEqual(0);
+    });
+
     await test.step("server-row aggregation: ready outranks working across the server's roots", async () => {
       await expect(page.locator(".server-row").first()).toHaveAttribute(
         "data-row-attention",
@@ -750,10 +796,22 @@ test("nav row agent counter", async ({ page }) => {
       );
     });
 
+    await test.step("a root whose only open surfaces are agents does not read 'no open surfaces'", async () => {
+      // Review cycle 1, Important 1. Closing the shell terminal leaves the
+      // root with two agent panes and nothing else - the same shape a freshly
+      // opened root has the moment an agent is spawned into it, which is this
+      // feature's primary flow. Reached by closing T0 rather than by a fourth
+      // fixture root, so it also doubles as the first half of teardown.
+      await closeTerminalById(page, plainTerminalId);
+      await expect(terminalTabsLocator(page)).toHaveCount(2);
+      await expect(
+        workRootRow(page, workRootB).locator(".resource-row-counts"),
+      ).toHaveText(agentsOnly);
+    });
+
     await test.step("cleanup: close every terminal this gate spawned", async () => {
       await closeTerminalById(page, agentOneId);
       await closeTerminalById(page, agentTwoId);
-      await closeTerminalById(page, plainTerminalId);
       await expect(terminalTabsLocator(page)).toHaveCount(0);
       await expect(
         workRootRow(page, workRootB).locator(".resource-row-counts"),

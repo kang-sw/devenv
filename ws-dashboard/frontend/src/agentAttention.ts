@@ -185,6 +185,19 @@ export type NavAttentionInput = {
 // counter reuses the tab indicator's ONE acknowledgement watermark: a row's
 // badge clears exactly when its last pending child terminal is acknowledged,
 // with no second watermark and no timer of its own.
+//
+// SEMANTICS, stated so a future reader does not "fix" them (review cycle 1,
+// Minor 2): `working`/`ready` count PENDING - i.e. UNACKNOWLEDGED - states,
+// not live agent activity. Selecting a working agent's tab acknowledges that
+// entry, so the row drops to `0 working` while that agent is still mid-turn,
+// and the number rises again at its next turn boundary. This is required, not
+// incidental: the pinned rule makes the row badge derived from exactly the
+// per-tab acknowledgement state, so a LIVE count would either keep the row
+// flashing after the user has already looked at every pending tab, or need a
+// second watermark to stop it - the thing this ticket forbids. If a future
+// phase genuinely needs "how many agents are running right now", that is a
+// SEPARATE derivation from the same panes (no ack lookup at all), not a
+// change to these fields.
 export function aggregateNavAttentionCounts(
   panes: readonly NavAttentionPane[],
   attention: NavAttentionInput,

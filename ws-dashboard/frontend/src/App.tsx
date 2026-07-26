@@ -3178,12 +3178,23 @@ function ServerRows({
   // string prefix of another can never leak a neighbour's state onto this
   // row. Rows for roots the browser has closed contribute nothing because
   // the counts map is pane-derived in the first place.
+  //
+  // Scoped to roots that ACTUALLY GET A ROW (review cycle 1, Minor 3).
+  // Walking `workspace.workRoots` wholesale also swept in the base root of a
+  // multi-root workspace (represented by the `workspace`-presentation row,
+  // which per Decision 4 carries no agent counts) and worktrees the user has
+  // hidden - so an agent finishing a turn in the primary root of a repo with
+  // linked worktrees flashed this row orange while no visible descendant row
+  // showed anything to attribute it to.
   const serverAttentionTone = aggregateNavAttentionTone(
     agentAttentionByRoot,
     (resources?.workspaces ?? []).flatMap((workspace) =>
-      workspace.workRoots.map((root) =>
-        serverScopedIdentity(server.id, root.id),
-      ),
+      navAttentionWorkRootIds(
+        workspace,
+        workNavOrder.hiddenWorktreesByWorkspace[
+          serverScopedIdentity(server.id, workspace.id)
+        ],
+      ).map((rootId) => serverScopedIdentity(server.id, rootId)),
     ),
   );
   return (
@@ -7577,6 +7588,33 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
   );
 }
 
+// The work roots under one workspace that actually get a nav ROW carrying
+// agent counts (260725 Phase 7, review cycle 1, Minor 3). Used by `ServerRows`
+// for the pinned server roll-up, so the server row can only ever flash for a
+// state some visible descendant row is also showing.
+//
+// CONTRACT: this must select the same SET as `WorkspaceRows` below renders
+// with an `agentCounts` prop, and it is built from the same three primitives
+// that component uses (`compactWorkspaceWorkRoot`, `isWorkspaceNavChildWorkRoot`,
+// `applyHiddenWorktrees`) so the two cannot drift apart. The one step it
+// omits, `applySiblingOrder`, is a pure reordering and cannot change set
+// membership. The plain `workspace`-presentation row is deliberately absent:
+// per the nav ticket's Decision 4 it has no single rootKey and receives no
+// counts, so its base root must not contribute here either.
+function navAttentionWorkRootIds(
+  workspace: WorkspaceView,
+  hiddenIds: readonly string[] | undefined,
+): string[] {
+  const compactRoot = compactWorkspaceWorkRoot(workspace);
+  if (compactRoot) {
+    return [compactRoot.id];
+  }
+  return applyHiddenWorktrees(
+    workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+    hiddenIds,
+  ).map((root) => root.id);
+}
+
 function WorkspaceRows({
   workspace,
   serverId,
@@ -7617,6 +7655,8 @@ function WorkspaceRows({
   const baseRoot = workspaceBaseWorkRoot(workspace);
   const worktreeScopeKey = serverScopedIdentity(serverId, workspace.id);
   const hiddenIds = hiddenWorktreesByWorkspace[worktreeScopeKey];
+  // Set membership here is mirrored by `navAttentionWorkRootIds` above (the
+  // server-row roll-up) - keep the two in step if this filter changes.
   const navChildWorkRoots = workspace.workRoots.filter(
     isWorkspaceNavChildWorkRoot,
   );
@@ -7944,6 +7984,16 @@ function ResourceRow({
   // by CSS (level-driven, following the `activity-cue-breathe` precedent), so
   // acknowledging the last pending child tab clears the flash with no
   // separate nav-row action.
+  //
+  // NAMING (review cycle 1, Minor 5): `data-row-attention` here and Phase 6's
+  // `data-attention-state` on the terminal tab
+  // (`workbench/dockviewLayout.tsx`) are deliberately different names for
+  // different GRAIN, not two spellings of one attribute. The tab's carries
+  // ONE terminal's own pending state; this one carries a whole row's
+  // AGGREGATE over its child terminals (`ready` > `working` > none) and so
+  // can read `ready` while no single tab does. Values overlap by design
+  // (`working`/`ready`/`none`) because both render the same vocabulary; a
+  // future reader must not merge them into one attribute name.
   const rowAttentionTone = navAttentionTone(agentCounts) ?? "none";
   return (
     <div
