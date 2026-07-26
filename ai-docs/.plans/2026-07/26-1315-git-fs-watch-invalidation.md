@@ -130,6 +130,11 @@ Instead, at arm time run **one** spawn per repo:
 git -C <worktree> --no-optional-locks status --porcelain=v1 -uno --ignored=matching -z
 ```
 
+> **CORRECTION (2026-07-26, verified on git 2.43.0) — do not implement the command
+> above.** `-uno` suppresses the `!!` output entirely: this repo yields 0 ignored
+> entries with `-uno` and 10 with `-unormal`. Use `-unormal`. The ticket carries the
+> corrected form and a unit test pinning the argv.
+
 and collect the `!! path/` entries into a per-repo `IgnoreSet`. That is git's own answer, collapsed to directories. Re-derive when a `.gitignore` / `.git/info/exclude` / `core.excludesFile` event is seen. On failure: empty ignore set → watch everything (correct, just noisier).
 
 Load-bearing consequence for Linux: the measured noisy-dir counts (264/1565, 384/803, 6600/7164, 131/264 = ~7,379 of ~9,796) are exactly this set. Pruning it takes the watch-descriptor requirement from ~9,800 to **~2,400**, comfortably under the default `max_user_watches` of 8192.
@@ -307,9 +312,9 @@ struct ArmedRepo { targets: WatchTargets, ignore: IgnoreSet, registered_dirs: BT
 struct WatchTargets { worktree: PathBuf, git_dir: PathBuf, common_dir: PathBuf }
 pub struct RepoEpochs { worktree: AtomicU64, refs: AtomicU64 }
 enum EpochKind { Worktree, Refs, Both }
-enum WatchStrategy { RecursiveSubtree, PerDirectory }
+enum WatchStrategy { RecursiveSubtree, PerDirectory }  // SUPERSEDED: no strategy enum; see ticket
 pub enum WatchHealth { Armed, Degraded { reason: &'static str }, Unarmed }
-struct IgnoreSet { dirs: BTreeSet<PathBuf> }   // from `git status --ignored=matching -uno -z`
+struct IgnoreSet { dirs: BTreeSet<PathBuf> }   // CORRECTED: `--ignored=matching -unormal -z` (`-uno` returns nothing)
 struct DirBudget { limit: usize, used: usize }
 pub enum WatchMode { Off, Auto, Force }        // WS_DASHBOARD_GIT_WATCH
 ```
