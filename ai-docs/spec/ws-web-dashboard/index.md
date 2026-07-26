@@ -1015,10 +1015,20 @@ nothing is open. The counts describe live workbench state — surfaces mounted
 for that root right now — so they change as terminals and documents are opened
 and closed, and a root with no open surfaces says so rather than showing
 nothing. The counting scope is per root: a row never reports another root's
-surfaces. Agent counts are not part of this line. Every work-root row reserves
-the vertical space for the second line whether or not it currently has counts
-to show, so opening or closing a root changes what a row says without changing
-how tall it is and without reflowing the rows around it.
+surfaces. The same line also reports the root's agent terminals: how many the
+root has, and how many of those are signalling working or waiting states the
+user has not yet acknowledged — so a state the user has already looked at
+stops being reported even while that agent is still mid-turn. The agent report
+appears whenever the root has any agent terminal at all, including one just
+spawned that has not yet reported a turn, and it leads the line ahead of the
+terminal and document counts so it stays readable when the line is too long
+for the sidebar. A root whose only open surfaces are agent terminals reports
+those agents rather than describing itself as having nothing open. An agent
+terminal is reported by the agent counts only and is never also included in
+the terminal count, so no open surface is counted twice. Every work-root row
+reserves the vertical space for the second line whether or not it currently
+has counts to show, so opening or closing a root changes what a row says
+without changing how tall it is and without reflowing the rows around it.
 
 A work-root row also encodes open-versus-closed state visually, not only
 through the presence of its close affordance: a root that is not currently
@@ -1027,7 +1037,28 @@ hoverable with the same hover feedback as any other row. A row that is
 reporting an error keeps its error appearance regardless of open state. Both
 the second line and the open-state emphasis apply to work-root rows —
 including the compact single-work-root form — and not to workspace rows, which
-carry neither. {#260725-nav-row-open-surface-counts-and-open-state}
+carry neither.
+
+A row whose agents are working or waiting also carries an attention level,
+with waiting outranking working. Every open work root the nav shows is
+reported by exactly one row for this purpose: its own row where it has one,
+and otherwise the row that stands for it — a workspace's base root has no row
+of its own, so its agents raise the level on the workspace row, which takes
+the level without taking the second line or any counts. A hidden worktree is
+the deliberate exception: it is reported by no row at all, neither its own nor
+any row standing above it, because the user asked not to see that root and
+silence about its agents is part of what was asked for. A server row carries
+the highest such level among the roots reported beneath it, while carrying no
+counts of its own, so no shown root's agents go unreported and no level
+appears that no row below would account for. That level is presented as an animated overlay layered over the row rather than as
+a change to the row's own background, so it never competes with the row's
+open-state, hover, selection, or error appearance, and it is suppressed to a
+static tint for viewers who ask for reduced motion. The level is derived, not
+separately dismissed: it is raised and cleared entirely by the acknowledgement
+state of the root's own agent terminals, so acknowledging the last still-
+pending terminal clears the row and its server row with no separate row-level
+action, and a row keeps reporting its agents while another root is selected.
+{#260725-nav-row-open-surface-counts-and-open-state}
 
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route

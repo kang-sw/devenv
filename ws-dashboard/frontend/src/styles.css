@@ -1029,6 +1029,12 @@ button {
 
 .resource-row {
   display: grid;
+  /* 260725 Phase 7: containing block for the agent-attention flash overlay
+     (`.resource-row[data-row-attention]::after`, below). The only
+     absolutely-positioned descendant that existed before this establishes its
+     own containing block (`.workspace-row-menu-wrap { position: relative }`),
+     so promoting this element is inert for existing layout. */
+  position: relative;
   width: 100%;
   min-height: 46px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2861,6 +2867,105 @@ button {
   white-space: nowrap;
 }
 
+/* 260725 Phase 7: the two agent glyph halves inline in the second line
+   (spinner for `working`, bell for `ready`), each rendered only when its own
+   count is non-zero. Both are SVGs and contribute no text, so the counts
+   line's textContent stays exactly `formatOpenSurfaceCounts`' output. */
+.resource-row-agent-glyph {
+  display: inline-flex;
+  vertical-align: -1px;
+  align-items: center;
+  margin-right: 3px;
+}
+
+.resource-row-agent-glyph[data-row-agent-glyph="working"] {
+  color: var(--ws-color-state-info);
+}
+
+.resource-row-agent-glyph[data-row-agent-glyph="ready"] {
+  color: var(--ws-color-state-warning);
+}
+
+/* 260725 Phase 7: agent-attention flash, as an INDEPENDENT OVERLAY LAYER.
+   Two senses of independence, both deliberate:
+     (i)  CSS-layer independence. Five rules already write `background` on
+          `.resource-row` (base :1030 / :2748, `:hover`, `-error`, the
+          openness rule and its hover re-assertion), so animating `background`
+          would fight all of them. This is a pseudo-element that only ever
+          animates `opacity` and paints `box-shadow`; it never touches
+          `background` on the row itself.
+     (ii) Presentation independence. The flash is driven by the row's
+          aggregate `data-row-attention` level while the counter renders the
+          numbers, so neither rendering path needs to know about the other.
+   It is NOT independent in the sense of owning its own dismissal: the
+   animation is LEVEL-driven off the data attribute (the `activity-cue-breathe`
+   precedent at :2338, same shape), never edge-triggered with its own timer -
+   an edge-triggered flash with its own timer would BE a second
+   acknowledgement watermark, which this ticket pins against. It stops
+   because the derived attribute goes back to "none" when the last pending
+   child tab is acknowledged, and for no other reason.
+
+   Specificity, per the `.resource-row` cascade rule in the mental model:
+   these selectors are (0,2,0) - one class + one attribute - on the
+   PSEUDO-ELEMENT, which is a different box from the row and therefore does
+   not enter the row's own `background` ladder at all (base (0,1,0) < openness
+   (0,3,0) < openness+hover (0,4,0) < `.resource-row-error`). Nothing here can
+   win or lose against those rules; that is the point of using ::after.
+
+   The keyframes below are UNPREFIXED, matching this file's two existing
+   keyframes (`activity-cue-breathe`, `git-spin`). An earlier draft prefixed
+   them `ws-`; there is no `ws-`-prefixed keyframe convention in this
+   stylesheet, and `@keyframes` names are already global, so the prefix would
+   have been the odd one out rather than a namespace. */
+.resource-row[data-row-attention="working"]::after,
+.resource-row[data-row-attention="ready"]::after,
+.server-row[data-row-attention="working"]::after,
+.server-row[data-row-attention="ready"]::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.resource-row[data-row-attention="ready"]::after,
+.server-row[data-row-attention="ready"]::after {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ws-color-state-warning) 82%, transparent),
+    inset 0 0 12px -2px color-mix(in srgb, var(--ws-color-state-warning) 60%, transparent);
+  animation: nav-attention-flash 1.4s ease-in-out infinite;
+}
+
+/* Quieter sibling: `working` is a background condition, not a summons, so it
+   breathes slower and never reaches full opacity. */
+.resource-row[data-row-attention="working"]::after,
+.server-row[data-row-attention="working"]::after {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ws-color-state-info) 58%, transparent);
+  animation: nav-attention-flash-quiet 2.6s ease-in-out infinite;
+}
+
+@keyframes nav-attention-flash {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes nav-attention-flash-quiet {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 .resource-row-select {
   grid-template-columns: minmax(0, 1fr);
   align-content: center;
@@ -2923,6 +3028,9 @@ button {
 
 .server-row {
   display: grid;
+  /* 260725 Phase 7: containing block for the aggregate flash overlay, same
+     role as the one on `.resource-row`. */
+  position: relative;
   width: 100%;
   min-height: 34px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -4331,4 +4439,49 @@ button.git-status-segment:disabled {
 .agent-chat-prompt-send:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* --- Reduced motion ------------------------------------------------------
+   The first `prefers-reduced-motion` block in this stylesheet (260725 Phase
+   7). It deliberately covers EVERY infinite animation in this file, not only
+   the overlay this phase adds: silencing the new nav flash while
+   `activity-cue-breathe` - the very rule the flash is modelled on - and
+   `git-spin` keep looping a few pixels away would be an ad hoc opt-out rather
+   than a reduced-motion behaviour. Extending it is a no-op for users without
+   the preference.
+
+   In each case the STATE stays legible and only the motion stops: the nav
+   overlay keeps its tint, the activity cue keeps its dot visible, and the git
+   spinner simply stops rotating. The `transform`/`opacity` declarations on the
+   activity cue are REDUNDANT, not load-bearing (review cycle 2): once
+   `animation: none` applies no keyframe governs, so each property falls back
+   to its own cascaded value - `transform` to the base rule's absent (i.e.
+   `none`) value, `opacity` to the `1` the `[data-dirty="true"]` rule already
+   sets. They are spelled out only so the resting appearance is readable here
+   without cross-referencing :2345.
+
+   Placement: this block must stay LAST in the file. `animation: none` here
+   competes at equal specificity with each rule it overrides - `.git-spinner`
+   (:4097-4098) is (0,1,0), the same as this block's own `.git-spinner`
+   selector - so it wins on source order alone. Moving it above any of those
+   declarations silently disables it for them. Any future infinitely-animating
+   rule belongs in this block too. */
+@media (prefers-reduced-motion: reduce) {
+  .resource-row[data-row-attention="working"]::after,
+  .resource-row[data-row-attention="ready"]::after,
+  .server-row[data-row-attention="working"]::after,
+  .server-row[data-row-attention="ready"]::after {
+    animation: none;
+    opacity: 0.8;
+  }
+
+  .activity-ribbon-item[data-dirty="true"] .activity-ribbon-cue {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .git-spinner {
+    animation: none;
+  }
 }
