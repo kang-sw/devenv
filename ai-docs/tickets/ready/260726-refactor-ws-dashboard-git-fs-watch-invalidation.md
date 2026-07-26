@@ -867,6 +867,146 @@ rather than a new one.
 
 Estimated diff ~+270/−95 production, ~+160 test, 4 files.
 
+### Result (b8e4f89b) - 2026-07-26
+
+Landed as planned: `GitStateCache` with two independently-revalidated slots per
+`WatchKey` (`worktree`, `refs`), a compound `(epoch, ttl)` validity check, and
+`MutationEpochSource` — the plan's `StaticZero` label was corrected during
+survey (see the plan's `## Lead Dispositions` D3) to real per-key counters,
+since a literal always-zero source cannot be told apart from "never bumped"
+and this phase's own mutating routes need to bump it. `compute_ref_state`
+folds both routes' refs computation into one union fill (D1), which is what
+makes the payoff arithmetic below possible.
+
+**Spawn accounting, measured (not estimated).** Cold-cache, one concurrent
+`/git/status` + `/git/branches` pair: single-branch/no-upstream fixture
+7 → 6; upstream-tracked-current-branch + one extra tracked branch 10 → 8. This
+is the phase's honest ceiling, not its steady-state number — every steady-state
+poll tick still misses the 2 s TTL by design (D6: no TTL-driven win is claimed;
+the win is D1 de-duplication plus D2 burst-coalescing on a concurrent miss).
+Mutating routes cost slightly *more* after cycle-1 remediation than the
+original commit: `git_switch_branch`/`git_create_branch` now bump both `refs`
+and `worktree` (see R1 below), so their own `status_for_path` read forces a
+worktree-slot miss even when a prior `/git/status` had just warmed it —
+roughly `1 + B` extra spawns per switch/create response in that specific
+scenario, traded deliberately for correctness (a `.gitignore` difference
+between branches can flip untracked/status output even when the switch
+succeeds tree-neutrally on its own args).
+
+**Review.** One cycle, three partitions (correctness, fit, test), all
+non-clean: correctness 3 Important + 5 Minor, fit 1 Important + 6 Minor, test
+3 Important + 6 Minor. All 8 Important findings accepted and fixed
+(`a07b67f7` production, `b8e4f89b` tests):
+
+- Correctness: `git_switch_branch`/`git_create_branch` bumped only `refs`, not
+  `worktree`, though both can change tracked-vs-ignored status output —
+  verified end to end with a real fixture (a `.gitignore` difference flipping
+  `?? build/out.o` to empty across a switch). `mutate_no_body`'s `Err(_)` arm
+  bumped nothing, though a failed `git pull --ff-only` has already mutated
+  `refs/remotes/*` via its embedded fetch before the ff-only merge aborts —
+  verified with a real diverged-then-abort fixture (exit 128,
+  `refs/remotes/origin/main` advanced, `rev-list --left-right --count`
+  `0 1 → 1 1`). `git_worktree.rs`'s `git worktree add`/`remove` handlers
+  already called `GitProbeCache::clear()` with a comment explaining why the
+  memoized `worktree list` answer goes stale; `GitStateCache` was not cleared
+  alongside it, so a dashboard-driven worktree add/remove could leave
+  `/git/branches` reporting a released/deleted/just-created branch's
+  checked-out state incorrectly for the rest of the TTL. Fixed with
+  `GitStateCache::clear()`, called repo-wide (not per-key) at both sites —
+  repo-wide because the epoch is keyed per worktree path while `refs/heads`
+  and `worktree list --porcelain` are repository-wide (see the carry-forward
+  below).
+- Fit: `git_cache_ttl_from_env()` read a raw `env::var` on every request,
+  diverging from both in-repo precedents for this pattern
+  (`GitProbeCache`'s TTL captured once into `default()`;
+  `git_exec::git_timeout_from_env` behind a `OnceLock` whose doc comment
+  states the convention explicitly) while its own doc comment claimed to
+  follow one of them. Fixed with a `OnceLock`, matching `git_exec`'s pattern
+  exactly. The per-call `ttl: Duration` parameter on
+  `GitStateCache::worktree`/`refs` was kept unchanged and is still the
+  intended Phase 4 injection surface for the 120 s-armed/2 s-degraded pair —
+  the reviewer's alternative (a `ttl` field on `GitStateCache` itself) was
+  declined for exactly that reason.
+- Test: the D2 single-flight payoff test asserted a `bySubcommand.branch`
+  delta of 1, which a purely *serial* pass (second request takes an ordinary
+  TTL hit) also satisfies — it pinned D1 (shared fill) but not D2
+  (single-flight collapsing a genuinely overlapping pair of misses). Fixed
+  with a deterministic cache-layer test mirroring `discovery.rs`'s existing
+  `ProbeSlots` single-flight test (blocking-probe closure, two threads, assert
+  the probe ran exactly once). The test named as the D7 pin sampled the epoch
+  itself and passed it in as a `u64`, so it could not fail against a caller
+  that sampled the epoch *after* the git invocation — D7's actual requirement
+  lives in `status_for_path`/`branches_for_path`, not in `GitStateCache`.
+  Fixed with a call-counting `EpochSource` asserting exactly one sample per
+  request. The only genuinely new computation in the diff — the
+  `current_branch_counts` reuse in `compute_ref_state`, including the
+  self-introduced duplicate-`rev-list` regression the implementer caught and
+  fixed mid-implementation — had zero coverage: no test anywhere asserted
+  `branches[].ahead`/`.behind`. Fixed with a fixture covering all three
+  reachable legs (current-branch reuse, non-current fallback, no-upstream
+  null), with the reuse and fallback legs constructed to be numerically
+  distinct (1/1 vs 0/1) so a dropped guard would fail loudly rather than
+  coincide. `EpochBump::RefsAndWorktree` (the enum this phase introduced to
+  distinguish `pull --ff-only` from fetch/push) was nowhere discriminated
+  from `RefsOnly` — every existing pull fixture only pulled committed files,
+  so the worktree axis never mattered. Fixed with a fixture asserting the
+  pull response reflects a pre-existing local modification the pull itself
+  does not touch.
+
+No second review cycle: I independently re-verified cycle-1's remediation
+myself rather than dispatching a fourth reviewer pass — re-ran both suites
+(lib 154/0/2, routes 172/0/0, both growing only by the new tests), re-ran
+clippy (22 warnings all-targets, byte-identical to the pre-remediation
+baseline), and read the full diff of both remediation commits line by line
+against the adjudication.
+
+**Verification.** `cargo test -p ws-dashboard-daemon --lib` 154 passed 0
+failed 2 ignored (149 baseline + 5 remediation-cycle tests);
+`--test routes` 172 passed 0 failed (171 baseline + 1 remediation-cycle
+test). `cargo clippy -p ws-dashboard-daemon --all-targets`: 22 warnings,
+unchanged from the pre-remediation commit and from Phase 2's baseline. Named
+pins executed: `git_toolbar_status_gates_and_reports_counts_without_paths`,
+`git_toolbar_branches_switch_and_create_revalidate_state` (unmodified, as the
+verification boundary requires),
+`git_toolbar_status_and_branches_concurrent_cold_miss_share_one_refs_fill`
+(renamed from `..._collapse_refs_computation_to_one_spawn_set` to stop
+overclaiming what it pins — see the test finding above),
+`refs_slot_single_flights_concurrent_misses_for_one_key`,
+`status_for_path_samples_the_epoch_exactly_once`,
+`branches_for_path_samples_the_epoch_exactly_once`,
+`git_toolbar_pull_ff_only_bumps_the_worktree_epoch_so_the_response_reflects_a_pre_existing_local_modification`.
+`changes_for_path`'s four in-file tests kept working verbatim, as required.
+
+**Not verified, stated rather than claimed.**
+
+- The diag-delta acceptance numbers (~20/s Activity pane open, ~0.67/s
+  closed) were never measured on a running daemon. This is the third phase in
+  a row to close without that dogfood measurement; Phase 4 should take it
+  rather than defer it again, since Phase 4 is when the TTL actually widens
+  enough for the number to mean something.
+- The mutating-route spawn cost noted above (`1 + B` extra per
+  switch/create when the worktree slot was already warm) is reasoned from the
+  code, not measured with a diag-delta before/after pair the way the cold-miss
+  numbers were.
+- `git_toolbar_pull_ff_only_bumps_the_worktree_epoch_...`'s own doc comment
+  records an honest determinism caveat: it is deterministic provided the
+  warm-to-pull window stays under the TTL (true by a wide margin for an
+  in-process HTTP round trip), and on a stall its failure mode is not a false
+  pass — a slot that separately expired would produce the same "correct"
+  assertion for the wrong reason. Flagged in the test itself rather than
+  silently shipped.
+
+**Carry-forward to Phase 4** (also noted inline at Phase 4 step 7/8 below):
+the epoch is keyed per worktree path (`WatchKey`), but `refs/heads` and
+`worktree list --porcelain` are repository-wide, so a switch/create in linked
+worktree A leaves sibling worktree B's cached `branch_list`/`checked_out`
+stale for up to the TTL. Bounded and self-healing (worst case is one stale
+TTL window), and `GitStateCache::clear()` from R3 above is deliberately
+repo-wide rather than per-key so it does not make this worse. Phase 4 already
+widens `DiscoveredWorkRoot` with `git_dir`/`common_dir`; that is the natural
+place to key the refs axis by common dir instead of worktree path, closing
+this for good rather than leaving it self-healing.
+
 ### Phase 4: The `notify` watcher — real epochs on every platform
 
 New `crates/daemon/src/work_root_watch.rs`. **Every platform arms under `auto`**,
@@ -1113,6 +1253,15 @@ fully testable without any I/O:
    **`WS_DASHBOARD_GIT_ARMED_TTL_MS` the armed one**. The armed ceiling is the
    least-verified number in this ticket and it must not require
    `WS_DASHBOARD_GIT_WATCH=off` — i.e. giving up watching entirely — to walk back.
+   **Carry-forward from Phase 3's result, 2026-07-26.** `GitStateCache`'s
+   `WatchKey` is per worktree path, but the `refs`/`worktree list` answers it
+   caches are repository-wide, so a mutation in one linked worktree leaves a
+   sibling's cached refs stale for up to the TTL — bounded and self-healing at
+   the 2 s TTL today, but worth closing now that this step widens
+   `DiscoveredWorkRoot` with `git_dir`/`common_dir`: key the refs axis (or the
+   whole `WatchKey`) by common dir instead of worktree path so all worktrees
+   of one repo share one slot, the way they will share one `notify`
+   registration under step 4's dedup rule.
 9. **Config:** `WS_DASHBOARD_GIT_WATCH=off|auto|force`,
    `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS`, and `WS_DASHBOARD_GIT_WATCH_MAX_DIRS`
    (default 1024, Linux-only effect). Semantics, stated because the plan left
