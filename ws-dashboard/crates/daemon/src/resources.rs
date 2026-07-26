@@ -8,6 +8,7 @@ use crate::discovery::{GitProbeCache, LocalDashboardResourcesProvider, LocalWork
 use crate::git_exec::GitSpawnStats;
 use crate::router::AppState;
 use crate::work_root_files::OpenedWorkRoots;
+use crate::work_root_watch::WatchRegistry;
 
 // CONTRACT: Provider seam shared by the live local provider and the mock
 // fixture provider. Implementations return the same public core view-model
@@ -32,8 +33,9 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
     let opened = state.opened_work_roots.clone();
     let git_probes = state.git_probe_cache.clone();
     let git_stats = state.git_spawn_stats.clone();
+    let watch_registry = state.watch_registry.clone();
     let (view, pruned_work_root_ids) = tokio::task::spawn_blocking(move || {
-        live_dashboard_resources_with_sync(&opened, &git_probes, &git_stats)
+        live_dashboard_resources_with_sync(&opened, &git_probes, &git_stats, &watch_registry)
     })
     .await
     .expect("dashboard resources discovery task panicked");
@@ -60,17 +62,20 @@ pub fn live_dashboard_resources(
     opened: &OpenedWorkRoots,
     git_probes: &GitProbeCache,
     git_stats: &Arc<GitSpawnStats>,
+    watch_registry: &WatchRegistry,
 ) -> DashboardResourcesView {
-    live_dashboard_resources_with_sync(opened, git_probes, git_stats).0
+    live_dashboard_resources_with_sync(opened, git_probes, git_stats, watch_registry).0
 }
 
 /// NOTE: this is not a pure read. The registry side effects below
-/// (`unregister` for pruned roots, `sync_discovered_roots`) run on EVERY call;
-/// only the `git` probes inside discovery are memoized by `git_probes`.
+/// (`unregister` for pruned roots, `sync_discovered_roots`, `reconcile`) run
+/// on EVERY call; only the `git` probes inside discovery are memoized by
+/// `git_probes`.
 pub fn live_dashboard_resources_with_sync(
     opened: &OpenedWorkRoots,
     git_probes: &GitProbeCache,
     git_stats: &Arc<GitSpawnStats>,
+    watch_registry: &WatchRegistry,
 ) -> (DashboardResourcesView, Vec<WorkRootId>) {
     let sync = LocalDashboardResourcesProvider::with_registry_activations(
         opened
@@ -87,5 +92,11 @@ pub fn live_dashboard_resources_with_sync(
         opened.unregister(work_root_id);
     }
     opened.sync_discovered_roots(sync.discovered_registry_roots);
+    // Ticket step 7: `reconcile` is the one hook every availability
+    // transition (including "this root disappeared entirely between polls")
+    // routes through, so it runs on every resources refresh - the same
+    // cadence the dashboard's 5s poll and the open-workRoot route already
+    // drive this function at.
+    watch_registry.reconcile(&sync.watch_reconcile_entries);
     (sync.view, sync.pruned_work_root_ids)
 }

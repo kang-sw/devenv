@@ -31,3 +31,4 @@ pub mod terminal_registry_file;
 pub mod work_root_activity;
 mod work_root_activity_registry;
 pub mod work_root_files;
+pub mod work_root_watch;

@@ -30,6 +30,7 @@ plans:
 related-mental-model:
   - ws-web-dashboard
 sage-review-completeness: completed
+completed: 2026-07-26
 ---
 
 # Replace interval-driven git polling with FS-watch-driven epoch invalidation
@@ -1375,6 +1376,167 @@ Estimated diff ~+480/−70 production, ~+240 test, 9 files — the walk, cap, an
 incremental registration formerly scoped as Phase 5 are in scope here, but only on
 the Linux path.
 
+### Result (fcb69d9b) - 2026-07-26
+
+Landed as planned: the `notify`-backed watcher core (`work_root_watch.rs`,
+classify/`IgnoreSet`/`plan_watch_set`/arming/event-pipeline/`reconcile`),
+widened `GitDiscovery`/`DiscoveredWorkRoot` with `git_dir`/`common_dir`/
+`worktree_dir`, `DashboardResourcesSync` extension threading `reconcile`
+inputs through all 5 confirmed call sites, real `EpochSource` wiring shared
+between `GitStateCache` and the watcher, TTL selection by `WatchHealth`
+(120s armed / 2s degraded), config knobs (`WS_DASHBOARD_GIT_WATCH`,
+`_DEBOUNCE_MS`, `_MAX_DIRS`, `WS_DASHBOARD_GIT_ARMED_TTL_MS`), and
+`dashboard_diag_git`'s `repos[]` extension.
+
+D6's 8 incremental checkpoints landed each green before the next
+(`5665674a` classify, `3096d024` `IgnoreSet`+`plan_watch_set`, `92a8f00a`
+arming+event pipeline, `77ef8e9b` Linux incremental registration,
+`20151d7d` `DiscoveredWorkRoot`/`GitDiscovery` widening, `99e7437f`
+`reconcile`+rate-limit rules, `a3fad660` `EpochSource` wiring+TTL,
+`87682402` config knobs+diag), plus 3 follow-on commits (`a920a347`
+`tests/git_watch.rs`, `aa0efcec` Windows cross-target compile fixes,
+`eb808729` spec/mental-model closeout) before review.
+
+**Review — 1 cycle, 3 partitions, all non-clean, all 12 MUST FIX items
+fixed.**
+
+- Correctness: 2 Critical + 7 Important (one folded as a cheap Minor).
+  Both Criticals shared one root cause and one fix: `WatchTargets.worktree`
+  was the registered path's identity form while `git_dir`/`common_dir` came
+  from a symlink-resolving `git rev-parse` — the mismatch silently defeated
+  both `walk_worktree_dirs`'s git-dir prune test (so the whole `.git` tree
+  got walked and registered against the Constraints' explicit exclusion) and
+  `classify`'s `strip_prefix` checks (so `HEAD`/`refs/**` changes never
+  bumped `Refs`, serving stale `/git/branches` for the full 120s armed TTL
+  after an external `fetch`/`switch`), and independently defeated
+  `owners_for_path` on macOS entirely (FSEvents delivers canonical paths;
+  the repo reports `Armed` while never bumping any epoch — the exact
+  silent-and-armed failure the pre-arm gate exists to prevent). Fixed by
+  canonicalizing all three `WatchTargets` fields through the module's
+  existing `canonical_or_normalized` chain and building `worktree` from
+  `GitDiscovery.worktree_dir` (also fixing a third bug: a work root
+  registered at a repository sub-directory got a watch set and ignore set
+  that couldn't cover what `/git/status` reports). Also fixed: an
+  event-pipeline ignore-order inversion (thousands of spurious bumps from
+  `.gitignore` files inside `node_modules/`), a TOCTOU between the
+  rate-limit read and the attempt-timestamp stamp, `set_degraded_after_disarm`
+  never actually escalating its backoff (read `was_degraded` after
+  `do_disarm` had already forced `Unarmed` — D8's sticky exponential backoff
+  was silently dead), a hardcoded `Degraded` reason discarding the real
+  Linux re-derive failure, non-deterministic Linux arm order, and a Windows
+  disarm-before-remove race against the same request's own scheduled arm.
+- Fit: 1 Important — D9's binding requirement (the eventual Result must name
+  the `open_work_root` reconcile-bypass gap explicitly) was unmet in the
+  diff/commit trail at review time. Named here instead (see below); no code
+  change required, since the gap itself is accepted out of scope.
+- Test: 2 Important — the Windows worktree-remove test only asserted
+  `status == OK`, which holds on Linux regardless of whether the disarm call
+  fired (Linux raises no sharing violation for a watched directory);
+  strengthened to assert the linked key's `WatchHealth` directly.
+  `classify`'s ~25-case table was missing the ignore-set-vs-ignore-rule-file
+  precedence case (a `.gitignore` inside an already-ignored directory must
+  stay `None`); added.
+
+No second review cycle: re-verified all three suites (lib 180/0/2, routes
+172/0/0, git_watch 12/0/0 — identical pass counts before and after
+remediation), clippy (18 distinct warnings, byte-identical set to the
+pre-Phase-4 baseline both before and after remediation, diffed by hand), and
+read all 7 remediation commits' diffs against the adjudication myself,
+including the two Critical fixes and the trickiest Important ones (backoff
+escalation ordering, reason propagation) line by line.
+
+**D9 acknowledgment (my own responsibility per the plan's Lead Disposition
+D9, not the implementer's):** `open_work_root` (`root_picker.rs`) bypasses
+`reconcile` — a work root opened for the first time is not armed until the
+next `live_dashboard_resources` poll (up to 5s later), so its response can
+reflect a not-yet-armed watcher state. Accepted out of scope per the plan:
+the gap is bounded (one poll tick) and self-healing. No code change made.
+
+**D1/D2 carry-forward dispositions — confirmed landed as specified, not
+merely asserted:**
+- D1 (`GitProbeCache::evict` key-derivation bug, deferred): confirmed
+  harmless for `reconcile`'s disarm path (availability-driven, uncached).
+  The required kind-flip-across-outage test
+  (`availability_lifecycle_reports_the_stale_kind_immediately_then_the_correct_kind_after_the_probe_ttl`)
+  drives a real git-repo → plain-directory → git-repo cycle, not an
+  unchanged-repo reappear — confirmed by both the fit and test reviewers
+  independently, and by the lead reading the test body.
+- D2 (`GitStateCache` refs-axis re-keying by `common_dir`, deferred):
+  confirmed `GitStateCache`'s cache key is untouched; the required
+  route-driven fanout test
+  (`a_route_driven_branch_create_on_one_worktree_bumps_a_sibling_linked_worktrees_refs`)
+  drives the mutation through the real `POST .../git/branches` →
+  `git_create_branch` route, not a raw fixture write — confirmed by reading
+  the router table.
+- Neither underlying bug is fixed in this phase; both remain follow-up
+  material (see below).
+
+**D3 diag-delta measurement — taken this phase, after three phases of
+deferral.** Dogfooded on this host (Linux/WSL2, not Windows) against this
+real devenv monorepo (6 registered work roots): two 60s windows of
+`/api/dashboard/diag/git` reads, Activity-Console-pane-open (SSE subscribed)
+vs pane-closed, produced **identical** spawn deltas (+22 total across both
+windows, driven entirely by `/api/dashboard/resources` polling) — the
+watcher/epoch pipeline is fully decoupled from SSE subscription state, and
+`registeredWatches` stayed stable across all snapshots. This is the number
+the ticket has been asking for since Phase 1; it is finally measured, on
+this host, not the Windows dogfood target the ticket's own Verification
+Plan ultimately cares about.
+
+**D4 cross-target check.** `x86_64-pc-windows-gnu`: `cargo check
+--all-targets` compiles with 0 errors after fixing two real bugs invisible
+to a Linux-only check (`DRIVE_FIXED`/`DRIVE_RAMDISK` imported from the wrong
+`windows-sys` module; an unsized `Vec` inference trap in
+`do_arm_recursive`) — both fixed in `aa0efcec` before review.
+`x86_64-apple-darwin`: fails before reaching this crate's own code (the
+transitive `ring` crate's C build script needs a macOS-capable `cc`,
+unavailable on this host) — an environment/toolchain gap, not a Phase 4
+defect, reported rather than worked around.
+
+**D5 cfg-gating.** Confirmed by two independent reviewers (correctness and
+fit) plus the lead's own grep: the only platform `#[cfg(...)]` in
+`work_root_watch.rs` are on registration-backend dispatch, the Linux
+inotify budget reader, and mount-type resolution. `classify`, `IgnoreSet`,
+debounce, `RepoRuntime`/epoch bookkeeping, and `reconcile` carry zero
+platform `cfg`.
+
+**Verification.** `cargo test -p ws-dashboard-daemon --lib` 180 passed 0
+failed 2 ignored; `--test routes` 172 passed 0 failed; `--test git_watch`
+(new suite, 12 tests, ~30s due to a real-TTL D1 test) 12 passed 0 failed.
+`cargo clippy -p ws-dashboard-daemon --all-targets`: 18 distinct warning
+messages, confirmed byte-identical (full diff, not just count) to the
+pre-Phase-4 baseline both before and after remediation.
+
+**Not verified, stated rather than claimed.**
+
+- Every "live-only" item the ticket's own Verification Plan names (sustained
+  spawns/s and CPU% on a Windows dogfood daemon, RSS/handle-count deltas
+  across all 9 real roots, `/proc/*/fd` inotify accounting on WSL,
+  watcher-thread CPU during a real `cargo build`/`git gc`/`git fetch`, and
+  `frontend/e2e/` toolbar-freshness) remains unmeasured — this ticket's
+  sandbox is Linux/WSL-only and cannot produce these numbers.
+- macOS's Critical finding (#2) is argued from `notify`'s FSEvents source
+  and fixed by the same canonicalization change as the Linux/Windows
+  finding, but the fix itself was never exercised on a real macOS host (no
+  `cc` toolchain available here to even compile the crate's transitive
+  dependencies for that target, let alone run it).
+- Windows's disarm-before-remove race fix (finding 9) and the strengthened
+  sharing-violation test (finding 11) are both reasoned from source and
+  type-checked via the D4 cross-target `cargo check`, never executed on
+  real Windows.
+
+**Follow-up idea tickets to file at ticket closeout:** `GitProbeCache::evict`'s
+key-derivation bug (D1, confirmed non-load-bearing but never fixed across 2
+phases it was carried forward through), plus two narrow gaps this phase's
+own correctness review surfaced and declined as out of scope: the
+foreign-mount allowlist gate checks only `targets.worktree`, not
+`common_dir`/`git_dir` (a linked worktree with `common_dir` on a different
+foreign mount arms but never sees ref changes); and `common_dir/info`
+created after arming is never watched on Linux (`info/exclude` edits missed
+until the next full re-arm).
+
+This closes all four phases of the ticket.
+
 ### Phase 5: Linux `PerDirectory` arming with a counted descriptor budget [absorbed into Phase 4]
 
 **Not a separate phase. Superseded on 2026-07-26** — retained unrenumbered per
@@ -1439,3 +1601,8 @@ Phase 2 is a self-contained rewrite of one function.
   either way.
 - **Frontend scheduler changes.** The three timers stay exactly as they are;
   this ticket makes their ticks cheap rather than removing them.
+
+
+## Resolution (2026-07-26)
+
+All four phases landed: git-exec seam (`0c48065a`), per-root git context (`3b66441d`), result cache with a real `EpochSource` (`b8e4f89b`), and the `notify`-backed watcher wiring real epochs on every platform (`fcb69d9b`). Interval-driven git polling is replaced by FS-watch-driven epoch invalidation behind cached `/git/status`/`/git/branches`, with a 120s-armed/2s-degraded TTL as the missed-event safety net. Follow-up gaps split into `260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps` (idea), `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` (todo), and `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots` (idea).

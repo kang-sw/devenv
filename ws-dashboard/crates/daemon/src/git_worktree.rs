@@ -282,7 +282,12 @@ pub async fn git_worktree_add_submit(
         tracing::warn!(%error, "failed to persist added Git worktree");
         return bounded_error(StatusCode::INTERNAL_SERVER_ERROR, "persist workRoot failed");
     }
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
+    let resources = live_dashboard_resources(
+        &state.opened_work_roots,
+        &state.git_probe_cache,
+        &state.git_spawn_stats,
+        &state.watch_registry,
+    );
     let created_present = resources
         .workspaces
         .iter()
@@ -345,7 +350,12 @@ fn resolve_worktree_remove(
     state: &AppState,
     work_root_id: &WorkRootId,
 ) -> Result<WorktreeRemoveContext, GitWorkspaceError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
+    let resources = live_dashboard_resources(
+        &state.opened_work_roots,
+        &state.git_probe_cache,
+        &state.git_spawn_stats,
+        &state.watch_registry,
+    );
     let workspace = resources
         .workspaces
         .iter()
@@ -538,9 +548,33 @@ pub async fn git_worktree_remove_submit(
         );
     }
 
+    // Ticket Constraints: on Windows the watcher holds directory handles
+    // (`notify` opens with `FILE_SHARE_DELETE` so the delete itself is
+    // permitted, but a held handle can still race a rename/remove). Disarm
+    // unconditionally rather than behind a `#[cfg(windows)]` gate - cheap and
+    // idempotent everywhere (a no-op if the repo was never armed), and D5
+    // keeps `#[cfg(...)]` restricted to the registration backend, the Linux
+    // inotify budget read, and mount-type resolution. `reconcile` re-arms the
+    // surviving primary root on the next resources poll; the removed
+    // worktree itself simply drops out of the next `entries` set.
+    //
+    // `disarm_and_suppress_arm` (not plain `disarm_now`) - review finding 9:
+    // `resolve_worktree_remove` above already ran its own `reconcile` (via
+    // `live_dashboard_resources`), which may have dispatched a
+    // `spawn_blocking` arm for this exact key before this line runs. Plain
+    // `disarm_now` cannot stop that in-flight arm from completing and
+    // re-registering the directory handle after this disarm and while
+    // `git worktree remove` runs below. The suppression is cleared by
+    // `resume_arm` right after the removal command finishes, whether it
+    // succeeded or failed.
+    let target_watch_key = crate::discovery::watch_key(&context.target_path);
+    state.watch_registry.disarm_and_suppress_arm(&target_watch_key);
+
     let mut command =
         worktree_remove_command(&context.primary_root_path, &context.target_path, request.force);
-    let output = match command.output() {
+    let output = command.output();
+    state.watch_registry.resume_arm(&target_watch_key);
+    let output = match output {
         Ok(output) => output,
         Err(_) => {
             return bounded_error(StatusCode::INTERNAL_SERVER_ERROR, "git worktree remove failed")
@@ -609,7 +643,12 @@ pub async fn git_worktree_remove_submit(
     state.codex_sessions.remove_for_work_roots(&ids);
     state.claude_sessions.remove_for_work_roots(&ids);
 
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
+    let resources = live_dashboard_resources(
+        &state.opened_work_roots,
+        &state.git_probe_cache,
+        &state.git_spawn_stats,
+        &state.watch_registry,
+    );
     let removed = !resources
         .workspaces
         .iter()
@@ -767,7 +806,12 @@ fn resolve_workspace_git(
     state: &AppState,
     workspace_id: &WorkspaceId,
 ) -> Result<GitWorkspaceContext, GitWorkspaceError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
+    let resources = live_dashboard_resources(
+        &state.opened_work_roots,
+        &state.git_probe_cache,
+        &state.git_spawn_stats,
+        &state.watch_registry,
+    );
     let workspace = resources
         .workspaces
         .iter()

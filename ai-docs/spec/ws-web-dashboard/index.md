@@ -707,6 +707,21 @@ Git toolbar routes remain owner-authenticated,
 address workRoots by opaque `workRootId`, keep Git work off async workers, and
 avoid exposing host paths in command logs or bounded browser-visible errors.
 
+Behind that poll, Git status/branch freshness is change-triggered with a TTL
+ceiling rather than recomputed on every tick: a per-repo `notify` filesystem
+watcher, armed when the repo's mount supports it, invalidates the cached
+answer as soon as a relevant file changes, so the poll only re-reads when
+something actually moved. The TTL is the ceiling on how stale a read can be
+when no watcher event arrived: 120 s while the watcher is armed, 2 s when it
+is degraded (unsupported mount, over the per-process directory-watch budget)
+or unarmed. Watcher unavailability degrades freshness, never correctness — a
+degraded repo still answers from the same lock-free poll path, just on the
+tighter TTL. User-initiated mutations (branch switch/create, fetch, push,
+pull, worktree add/remove) are never TTL-delayed: they invalidate the cached
+answer directly, independent of whether a watcher event has arrived. Watcher
+health, and each repo's current worktree/refs invalidation counters, are
+visible at [`GET /api/dashboard/diag/git`](#260726-dashboard-git-invocation-budget-and-spawn-diagnostics).
+
 Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots
 with offline activation return a bounded offline response. Online workRoots
@@ -725,7 +740,19 @@ the sole correctness mechanism: explicit refresh remains deterministic, polling
 does not become browser-side resource authority, overlapping refresh requests
 are suppressed, stale poll results do not overwrite newer open or activation
 resource views, and refresh failures keep the last known resource tree visible.
-Filesystem watchers, if added later, act only as refresh hints.
+The per-repo filesystem watchers described above act only as an invalidation
+hint for the Git status/branch cache; they do not replace this canonical
+resource refresh as the source of workRoot availability, and a watcher outage
+degrades cache freshness, not availability correctness.
+
+An *unavailable* Git workRoot (known to the registry, but its Git probe
+currently fails) answers Git toolbar routes with `409 workRoot unavailable`.
+An *unknown* workRoot id (not present in the registry at all — for example
+after the canonical resource refresh has pruned it) answers with
+`404 unknown workRoot`. The two are deliberately distinct: unavailable is a
+transient, retryable read against a workRoot the caller may still recover,
+while unknown means the id no longer resolves to anything and the caller must
+re-open the workRoot by path.
 
 ## Git Invocation Budget And Spawn Diagnostics {#260726-dashboard-git-invocation-budget-and-spawn-diagnostics}
 
@@ -760,11 +787,34 @@ expiries are logged with the subcommand, exit code, bounded stderr, and elapsed
 time; host paths are not exposed.
 
 `GET /api/dashboard/diag/git` is owner-authenticated and reports cumulative
-counters for the current daemon process:
+counters for the current daemon process, plus one entry per repo the
+filesystem watcher currently knows about:
 
 ```json
-{ "totalSpawns": 0, "timeouts": 0, "failures": 0, "bySubcommand": {}, "uptimeMs": 0 }
+{
+  "totalSpawns": 0, "timeouts": 0, "failures": 0, "bySubcommand": {}, "uptimeMs": 0,
+  "repos": [
+    {
+      "key": "/abs/path/to/repo",
+      "health": "armed",
+      "reason": null,
+      "worktreeEpoch": 0,
+      "refsEpoch": 0,
+      "lastEventMs": null,
+      "registeredWatches": 0
+    }
+  ]
+}
 ```
+
+`health` is one of `armed`, `degraded`, or `unarmed`; `reason` is set only for
+`degraded` (for example an over-budget directory count or an unsupported
+mount) and is otherwise `null`. `worktreeEpoch`/`refsEpoch` are the cache
+invalidation counters described above — a caller comparing two reads a known
+interval apart can tell whether either axis changed, and `registeredWatches`
+is a rough sizing signal, not a correctness guarantee. This array reports
+watcher state, not Git spawn activity, so a pane that only re-renders from
+already-armed watcher events (no new poll ticks) does not grow `totalSpawns`.
 
 `failures` already includes `timeouts`, so a consumer must not add them. The
 counters cover Git invocations that go through the shared execution path — the

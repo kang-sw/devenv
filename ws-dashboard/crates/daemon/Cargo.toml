@@ -28,6 +28,7 @@ tracing-appender.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true
 sha2.workspace = true
+notify = { version = "8", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -36,8 +37,10 @@ libc = "0.2"
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
 ] }
 
 [dev-dependencies]

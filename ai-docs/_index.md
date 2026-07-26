@@ -284,109 +284,19 @@ dropped tickets live in hidden archive dirs and git history.
   (`#260516-ws-web-dashboard-terminal-io-transport`, Contract-first: no). Sage
   combined = passed.
 
-- `260726-refactor-ws-dashboard-git-fs-watch-invalidation` (ready, refactor) —
-  owner-directed 2026-07-26: replace interval-driven git polling with
-  FS-watch-driven epoch invalidation behind cheap cached endpoints, keeping
-  polling as a hard TTL ceiling (**120 s armed** / 2 s degraded) so a missed event
-  self-heals with no resync protocol — the armed ceiling is only the
-  missed-event safety net, since real changes land within one tick via the epoch
-  bump. Measured driver: 9.6 git spawns/s (~830k/day) at 12.0% of a core, cut to
-  2.1/s and 5.7% by the already-landed probe-memo hotfix (`18037cc3`) — which is
-  only amortizing the fan-out behind a 30 s TTL, not removing it. **Four phases
-  in scope:** 1 git-exec seam (timeout, concurrent pipe drain, explicit spawn
-  stats, warn only on unexpected failure) which also closes
-  `260724-idea-dashboard-daemon-side-git-poll-response-timeout`; 2 per-root
-  `resolve_git_context` reusing the existing `resolve_online_available_work_root`
-  gate, plus the `git_identity` memo that is the real measurable win; 3 result
-  cache with `EpochSource` stubbed; 4 the `notify` watcher, which **arms on every
-  platform** — that is what it absorbed from the former Phase 5. Governing
-  invariant (owner 2026-07-26): *never register a watch we did not count.*
-  Registration is therefore platform-split, and deliberately so: **recursive on
-  Windows/macOS** (count is 1 per target by construction — one kernel handle / one
-  FSEvents stream, no walk, no cap; the ignore set only filters events), and
-  **gitignore-aware walk → per-directory `NonRecursive` → counted against a cap
-  (default 1024) → arm all or degrade wholly on Linux**, because there is no kernel
-  subtree primitive and `notify`'s emulation registers descriptors we cannot count.
-  Recursive-on-Linux is a Non-Goal. The Phase 5 heading is retained only as
-  history — split off, dropped, inverted to uniform-per-directory, then corrected
-  back to the split; the ticket records all four states. Two verified facts:
-  pruned directory counts are **~200/repo, not the ~2,400 previously assumed**
-  (which is what makes the Linux cap a safety valve rather than a live limit), and
-  **`git status -uno --ignored=matching` returns zero `!!` entries** on git 2.43.0
-  — the ticket's original command would have silently produced an empty ignore set
-  on every repo; use `-unormal`. Decided against git SSE push (the problem is CPU,
-  not latency, and FS events are lossy hints). Plan at
-  `ai-docs/.plans/2026-07/26-1315-git-fs-watch-invalidation.md`. Spec addressing
-  via `## Spec Impact` (`#260524-ws-dashboard-git-aware-workroot-toolbar`,
-  Contract-first: no). Sage combined = passed (design concern, all findings
-  applied). **Phase 1 landed 2026-07-26 (`0c48065a`, impl plan
-  `ai-docs/.plans/2026-07/26-1511-git-exec-seam.md`)** — the git-exec seam ships
-  with `GET /api/dashboard/diag/git` and `WS_DASHBOARD_GIT_TIMEOUT_MS` (default
-  10 000; `0` = unbounded), spec'd at
-  `#260726-dashboard-git-invocation-budget-and-spawn-diagnostics`. Two facts to
-  carry into Phase 2: the phase's own acceptance number (spawns/s from two diag
-  reads 60 s apart on the Windows dogfood host) was **never measured** — the
-  sandbox is Linux, so whichever phase needs it must take it; and the `#[cfg(windows)]`
-  test counterparts were written but never executed on Windows. The seam's bound
-  means "bounded except a child wedged in uninterruptible I/O"; that residue plus
-  the per-timeout detached reader threads are forwarded to
-  `260726-refactor-ws-dashboard-long-uptime-leak-hardening` Phase 2, whose
-  bounded-timeout half is now delivered. `git_worktree.rs`'s 8 direct git spawns
-  stay outside the seam and counters by design →
-  `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` (todo; the
-  budget, not the counting, is the open question, since `worktree add` can
-  legitimately outrun any poll-path budget). **Phase 2 landed 2026-07-26
-  (`3b66441d`, impl plan `ai-docs/.plans/2026-07/26-1717-per-root-git-context.md`,
-  dispositions D1-D7)** with a simpler mechanism than the phase specified: no
-  separate identity cache, no `WS_DASHBOARD_GIT_IDENTITY_NEGATIVE_TTL_MS`, and no
-  `WatchKey` (deferred to Phase 3, its first real consumer). `GitDiscovery::probe`
-  already answers `--show-toplevel`/`--git-common-dir` in **one** memoized spawn,
-  so the Activity identity is derived from the shared `GitProbeCache` instead of
-  re-asking in two; `None` rides the existing 30 s probe TTL, which makes the
-  Activity pane agree with the sidebar's git/plain label rather than
-  self-correcting 27 s earlier. Spec'd at
-  `#260726-dashboard-shared-git-probe-memo-and-per-root-git-context`. Three things
-  to carry forward: the accepted "unavailable ⇒ 409" delta is **only true for one
-  poll interval** — `live_dashboard_resources_with_sync` unregisters the root and
-  the id goes back to 404, filed as
-  `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots`;
-  **Phase 4 must not assume `GitProbeCache::evict` works**, because its key
-  (`discovered.path`) diverges from the warm memo key (`canonical_or_normalized`,
-  `\\?\`-prefixed on Windows) so the evict silently misses on the reappear
-  transition the reconcile exists to handle (pre-existing `18037cc3`, noted inline
-  in Phase 4); and a git probe that fails to answer is now memoized as "not a
-  repository" for the full TTL, emptying the Activity pane for up to 30 s after one
-  timeout. The diag delta acceptance number is **still unmeasured** — two phases
-  in a row have closed without it, so Phase 3 or 4 should take it rather than
-  inherit it again. **Phase 3 landed 2026-07-26 (`b8e4f89b`, impl plan
-  `ai-docs/.plans/2026-07/26-1830-git-state-cache.md`, dispositions D1-D8)**:
-  `GitStateCache` with two independently-revalidated slots per `WatchKey`
-  (`worktree`, `refs`) and `MutationEpochSource` (real per-key counters,
-  correcting the ticket's `StaticZero` label — a literal always-zero source
-  cannot be told apart from "never bumped"). Measured cold-cache payoff for
-  one concurrent `/git/status` + `/git/branches` pair: 7 → 6 spawns
-  (no-upstream) / 10 → 8 (upstream-tracked); no TTL-driven win is claimed,
-  since every steady-state 5 s poll tick still misses the 2 s TTL by design —
-  the win is de-duplicating the union refs fill plus single-flight burst
-  coalescing on a concurrent miss. One review cycle (3 partitions, 8
-  Important findings total, all fixed): switch/create branch was TTL-delaying
-  the *worktree* axis (a `.gitignore` difference between branches can flip
-  tracked/untracked status even on a tree-neutral switch); a failed
-  `pull --ff-only` was not invalidating refs despite its embedded fetch
-  having already mutated `refs/remotes/*` before the ff-only merge aborted;
-  `git worktree add`/`remove` cleared `GitProbeCache` but not the new
-  `GitStateCache`, so a dashboard-driven worktree change could leave
-  `/git/branches` stale; the TTL env var was read per-request instead of once
-  per process; and three tests (the D2 single-flight payoff, the D7
-  epoch-sample-before-probe pin, and the `current_branch_counts` reuse path)
-  passed under implementations that violated the property each claimed to
-  pin. Carry-forward to Phase 4: `WatchKey` is keyed per worktree path but
-  `refs/heads`/`worktree list` are repository-wide, so a mutation in one
-  linked worktree can leave a sibling's cached refs stale for up to the TTL
-  (bounded, self-healing) — Phase 4 already widens `DiscoveredWorkRoot` with
-  `git_dir`/`common_dir`, which is where the refs axis should be re-keyed by
-  common dir instead. The diag delta acceptance number is **still unmeasured
-  after three phases**; Phase 4 should take it.
+- `260726-refactor-ws-dashboard-git-fs-watch-invalidation` — **done, closed
+  2026-07-26** (`ai-docs/tickets/.done/`). All four phases landed: git-exec
+  seam (`0c48065a`), per-root git context (`3b66441d`), `GitStateCache` with
+  a real `EpochSource` (`b8e4f89b`), and the `notify`-backed watcher arming
+  real epochs on every platform (`fcb69d9b`). Interval-driven git polling is
+  replaced by FS-watch-driven epoch invalidation behind cached
+  `/git/status`/`/git/branches`, with a 120 s-armed/2 s-degraded TTL as the
+  missed-event safety net. See the ticket's own `### Result` sections for
+  full per-phase detail. Follow-ups split out:
+  `260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps`
+  (idea), `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam`
+  (todo), `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots`
+  (idea).
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin

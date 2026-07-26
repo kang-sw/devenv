@@ -151,6 +151,24 @@ fn test_terminal_registry() -> TerminalRegistry {
     )
 }
 
+// `Off`: unrelated route tests must not pick up Phase 4's arm-on-reconcile
+// side effects (an extra `git status --ignored=matching` spawn, or a
+// `spawn_blocking`-offloaded arm racing a test's own before/after
+// `git_spawn_stats`/`diag/git` delta assertions - see e.g.
+// `zero_spawn_activity_snapshot_after_git_toolbar_warms_the_shared_discovery_memo`).
+// Dedicated watcher-arming coverage lives in `tests/git_watch.rs`, which
+// builds its own `AppState` with an `Auto`-mode registry.
+fn test_watch_registry() -> ws_dashboard_daemon::work_root_watch::WatchRegistry {
+    ws_dashboard_daemon::work_root_watch::WatchRegistry::new(
+        Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
+        Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
+        ws_dashboard_daemon::work_root_watch::WatchConfig {
+            mode: ws_dashboard_daemon::work_root_watch::WatchMode::Off,
+            ..Default::default()
+        },
+    )
+}
+
 fn app_state() -> AppState {
     app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled())
 }
@@ -172,6 +190,7 @@ fn app_state_with_opened_and_store(
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
         epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
+        watch_registry: test_watch_registry(),
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
@@ -199,6 +218,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
         epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
+        watch_registry: test_watch_registry(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -430,6 +450,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
         epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
+        watch_registry: test_watch_registry(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -8951,6 +8972,7 @@ fn app_state_with_activity_cache_and_codex_home(
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
         epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
+        watch_registry: test_watch_registry(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -14718,6 +14740,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
         epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
+        watch_registry: test_watch_registry(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::new(Some(TranslationProviderConfig {
