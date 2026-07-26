@@ -252,77 +252,18 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260725-feat-dashboard-pty-agent-attention-notification` (ready, feat) —
-  the PTY agent's primary entry-point feature: a vendor turn-boundary hook
-  injected at spawn reports to a token-authed daemon endpoint, which fans out
-  over a new server-scoped SSE stream to the tab label, the nav row, and
-  (opt-in) the browser. Eight phases; 1-6 are one vertical slice. Load-bearing
-  results of the review pass: the activity SSE cannot carry this (disk-poll
-  watch path, pane-gated), `attention` already means "error" so ready-for-input
-  needs its own field, the callback token lives in daemon-owned state and never
-  in helper argv or the registry, and the spawn seam must SCRUB inherited env
-  (a nested agent inherits `CLAUDE_CODE_CHILD_SESSION` and loses transcript
-  saving). Sage combined = passed after one block/revise cycle.
-  Progress: Phase 3's step-1 gate is closed (turn-start hook verified) and
-  Phase 1 is DONE (`9f4a16ca`) — the spawn seam carries explicit argv plus an
-  env overlay, with an enumerated 11-marker Claude deny-list scrubbed at both
-  hops. Phase 2 is DONE (`5bc8ad28`) — an opaque profile id on the create
-  request resolves against a daemon-side registry, the vacated toolbar slot
-  spawns through it without touching the suspended agent-chat surface, and the
-  pane carries the resolved profile. Next unfinished phase is Phase 3
-  (steps 2-3; step 1's gate is already closed). Carry-forward constraint for
-  Phase 4: helper argv is world-readable via `ps`, and while it now carries
-  scrub marker NAMES alongside file paths, that does not relax the rule — the
-  callback token must never be threaded through argv, `--env-overlay`
-  included. Phase 3 is DONE (`4ffb22c8`) — a `0600` per-terminal hook config
-  whose path travels in argv, a `bound-base-url.json` rewritten on every bind,
-  and a hidden `terminal-notify` that resolves it at fire time. Next
-  unfinished phase is Phase 4, which inherits three constraints recorded in
-  `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry`: the notify
-  silence has no expiry, the 0600 write sequence has a pre-chmod umask window
-  that only matters once a token is written, and Phase 4 must NOT derive
-  `callback.json`'s baseUrl from the shared `bound-base-url.json`. Phase 4 is
-  now DONE (`f134aa8a`) and discharged all three: the umask window is closed
-  (files created at 0600 rather than chmod'd after), the base URL comes from
-  the in-memory bound address, and end-to-end delivery is asserted by driving
-  the real CLI against the real route. The notify silence itself is unchanged
-  and its ticket stays open. Phase 5 is DONE (`79f21023`) — a broadcast hub
-  with a per-terminal snapshot, a server-scoped SSE route pair, and one
-  browser subscription per eligible server rather than one global one.
-  Nothing rendered in that phase; the state was parked for Phase 6. Phase 6 is
-  now DONE (`0d712ccb`) and closes the end-to-end slice — the terminal tab
-  carries a badge fed from the stream, cleared by a revision-keyed ack
-  watermark with two triggers (pane activation AND a click on the
-  already-active tab, the second one load-bearing because the primary flow
-  raises the badge on a tab that never changes activation). The Phase 5 jsdom
-  gap is discharged incidentally: the new browser gate exercises the
-  EventSource subscription end to end. Verified against the real `claude` CLI,
-  not only synthesized POSTs — two real turns produced
-  `working`/`ready`/ack-`none`/`working`/`ready` on a non-focused tab, matching
-  the CLI's own transcript timestamps. Next unfinished phase is Phase 7, which
-  inherits one constraint: the nav row aggregates a COUNT, and Phase 6's
-  render-layer liveness gate does not generalize to one — the daemon still
-  holds attention entries for terminals whose helper died without a browser
-  `DELETE`, so Phase 7 must cross-reference live sessions or wire
-  `attention.forget` into the IPC-death path rather than counting
-  `attentionByKey` directly. Phase 7 is now DONE (`4e4f1752`) — the nav row
-  carries an agent counter plus a level-driven attention overlay, counted by
-  iterating panes through `pendingAttentionStateFor`, which makes a dead
-  agent's surviving daemon entry structurally unreachable; the entry carries no
-  profile, so map-derived counting was never viable and the daemon-side
-  `attention.forget` leak stays open as priced debt. The server roll-up went
-  wide -> narrow -> narrow-plus-stand-in: narrowing alone silenced the base
-  root of every multi-root workspace (an under-flash, worse than the
-  unattributable over-flash it replaced), so the workspace row now takes the
-  base root's level without taking its counts. A hidden worktree is reported by
-  no row at all, deliberately. Next unfinished phase is Phase 8
-  (browser-level notification), which inherits two things: derive from the same
-  `pendingAttentionStateFor` predicate instead of adding a second
-  acknowledgement watermark, and settle whether hidden-worktree nav silence
-  should extend to an OS-level notification. Carry-forward evidence rule:
-  `npx playwright test` serves a prebuilt `frontend/dist`, so any
-  `frontend/src` mutation used as non-vacuity evidence must be rebuilt with
-  `npm run build` first (`260726-chore-e2e-playwright-serves-stale-frontend-dist`).
+- `260725-feat-dashboard-pty-agent-attention-notification` — CLOSED
+  (`.done/`, Phase 8 `bd32b10c`). All eight phases landed: the vendor
+  turn-boundary hook injected at spawn, the token-authed callback endpoint, the
+  server-scoped SSE stream, and the three surfaces it feeds — tab label, nav
+  row, and browser chrome. Detail lives in the ticket's per-phase Results and in
+  the `ws-web-dashboard` spec/mental-model entries; do not re-derive it here.
+  One thread stays open and is NOT discharged by the close: the OS notification
+  permission tier is manual-by-design and has never been driven by a human
+  (`260726-chore-dashboard-verify-notification-permission-tier-manually`).
+  Priced debt left behind: the daemon-side `attention.forget` leak, and the
+  unenforced rebuild-before-Playwright rule
+  (`260726-chore-e2e-playwright-serves-stale-frontend-dist`).
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the

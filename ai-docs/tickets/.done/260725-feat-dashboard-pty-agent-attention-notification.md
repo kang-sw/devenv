@@ -14,6 +14,7 @@ related-mental-model:
   - developer-environment-tools
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-26
 ---
 
 # PTY-agent attention notification
@@ -1498,3 +1499,90 @@ limitation is visible rather than surprising.
 Verification: the title/favicon tier asserted in browser acceptance; the
 permission tier verified manually and recorded, since driving a real permission
 prompt in the harness is not worth its cost.
+
+### Result (bd32b10c) - 2026-07-26
+
+Both tiers ship. Tier 1 alternates `document.title` and swaps the favicon for a
+badged SVG data URI whenever a document-level attention level is non-none; Tier
+2 raises a real OS `Notification` on entry into `ready`, gated by a new Settings
+> Notifications toggle that requests permission only from its own click. Spec:
+new `#260726-dashboard-browser-level-attention-cue` entry, plus the Notifications
+paragraph on `#260722-ws-dashboard-settings-panel`.
+
+**The one decision that carried the phase.** Phase 7's forward note left two
+requirements that read as separate — derive from `pendingAttentionStateFor`
+rather than adding a second watermark, and settle whether a hidden worktree's
+nav silence extends to an OS notification. They collapse into one move: build
+the document-level tone from the same unexported `navAttentionWorkRootIds`
+output the nav rows already feed to `aggregateNavAttentionTone`. That bottoms
+out in `pendingAttentionStateFor` by construction, and a hidden root never
+enters the key list, so the filtering is inherited rather than reimplemented.
+No new state, and no parallel rule that could drift from the nav's.
+
+**Hidden-worktree question, settled.** Yes, the silence extends: a root the
+owner asked not to see stays silent in the browser chrome too. Decided by the
+lead under goal-run posture as reversible and local, not held for the owner.
+Consistent with the `CONTRACT:` comment requiring the nav-attention id set and
+the rendered child-row list to mirror each other.
+
+**Deviation from the plan's stated placement.** The plan named
+`App.tsx:4356-4379` as "the existing `agentAttentionByRoot` derivation"; that
+span is a `useMemo` local to `WorkbenchShell`, which has no `resourcesByServer`
+/`workNavOrder`/`notificationPrefs` in scope (a failed build proved it). The
+derivation and both effects live in `App()` instead, reading `App()`'s own
+`agentAttentionByRoot` state — the same value every nav consumer renders from,
+so the relocation removes no ordering guarantee. Verified independently by
+review rather than accepted on the implementer's word, because a one-render lag
+here would have been a real defect.
+
+**Verification.** Unit suites for the pure cue builders, the prefs module, and
+the settings registry; `npm run build`; four Playwright tests in
+`agent-attention-indicator.spec.ts` passing against a freshly built bundle; the
+daemon suites showing no new failure site (`--lib` clean, `--test routes` at its
+two known pre-existing failures). Non-vacuity for the three new browser
+assertions was established by the test reviewer's own mutation runs, not the
+implementer's self-report — title toggling, favicon change, and teardown
+restore each observed failing at their intended site after a rebuild.
+
+**Review: two fix cycles, and both were worth their cost.** Cycle 1 raised 3
+Important and several Minors. Cycle 2's two Importants were both *introduced by
+cycle 1's own fixes* — the pattern this ticket has now hit twice. Cycle 3 was
+clean.
+
+Three findings are worth carrying forward as knowledge rather than history:
+
+- The unguarded `new Notification(...)`. Guards covered "API absent" and "not
+  permitted" but not the third state: global present, permission `granted`,
+  constructor still throws (Android Chrome, which requires a service worker).
+  With no error boundary anywhere in this frontend, that is an app-level blank
+  screen on every `ready` edge, not a degraded feature.
+- Two of six new prefs assertions could not fail. `DEFAULT_NOTIFICATION_PREFS`
+  is `{ enabled: false }`, which is also what a permissive parser yields for a
+  missing field — and for a `null` payload the parser's throw was swallowed by
+  `loadNamespacedPrefs`'s own unrelated catch. Invisible to a suite-level
+  mutation run, because the runner stops at the first failure. Fixed by
+  exporting the parser, per this repo's own `parseTerminalFontSizeInput`
+  precedent.
+- A comment asserting a guarantee its code does not provide, again — this time
+  the false claim originated in a reviewer's finding text and the lead relayed
+  it unverified. `removeResourcesByServer` does have call sites; the true claim
+  is narrower and is now what the comment says.
+
+Both traps generalize and are recorded in the `ws-web-dashboard` mental model.
+
+**Accepted as known behavior, not defects** (all reviewer-confirmed unable to
+make a cue disagree with a badge): reloading while an agent waits notifies
+again, since the aggregate level rises from none on load; a second agent
+reaching `ready` while another already is fires nothing, since the aggregate
+never left `ready`; the favicon round-trips on a `working`↔`ready` flip; the
+`useRef` initializer re-queries the DOM each render. The first two are stated
+in the spec so they are met as description rather than diagnosed as bugs.
+
+**OUTSTANDING — the ticket's own verification boundary is not fully
+discharged.** Tier 2's permission tier is manual-by-design and has NOT been
+performed: no human has driven a real permission prompt. Everything automatable
+about Tier 2 is verified (single call site from the gesture, secure-context
+guards, edge-detector contract, no watermark), but "a real OS notification
+actually appears" rests on reasoning, not observation. Tracked as
+`260726-chore-dashboard-verify-notification-permission-tier-manually`, which
+carries the exact steps.
