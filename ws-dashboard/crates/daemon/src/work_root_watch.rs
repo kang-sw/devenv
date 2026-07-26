@@ -1231,6 +1231,17 @@ fn handle_fs_event(inner: &Arc<RegistryInner>, event: Event) {
                 let Some(armed) = repo.armed.as_ref() else {
                     continue;
                 };
+                // Ignore-set match must be checked first, mirroring
+                // `classify`'s own (correct) order - a gitignored
+                // `.gitignore` (e.g. under `node_modules/`) must be ignored
+                // outright, not routed into the ignore-rule-file branch
+                // below, which would spuriously bump `Worktree` and schedule
+                // an `IgnoreSet` re-derivation for every file inside an
+                // ignored tree that happens to be a directory prefix match
+                // (review finding 3).
+                if armed.ignore.matches(path) {
+                    continue;
+                }
                 if is_ignore_rule_file(path, armed) {
                     repo.ignore_stale = true;
                     let due = repo
