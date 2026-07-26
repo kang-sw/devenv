@@ -58,6 +58,11 @@ See the workflow manual's **Ticket System Concepts** section for what a phase is
 - Ticket stems are **immutable absolute references** — history is queried by stem (`git log --grep`).
 - If a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `.dropped/`.
 
+## Content
+
+- Record the judgment implementation cannot re-derive: the choice among workable alternatives, why the others lost, agreed interfaces, and what the ticket deliberately leaves untouched.
+- Point at code by the search that finds it rather than by surveyed coordinates; `file:line` earns its place as evidence for a claim, not as an edit target.
+
 ## General
 
 - Phase plan text before the first `### Result` is frozen after that Result is written. Unimplemented phases remain editable.
