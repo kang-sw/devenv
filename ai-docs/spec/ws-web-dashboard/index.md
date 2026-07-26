@@ -2264,6 +2264,46 @@ stream ([Activity Console Read Model](#260521-ws-dashboard-activity-console-read
 [Activity Console Watch Stream](#260521-ws-dashboard-activity-console-watch-stream)):
 it carries no Activity Console item data and does not affect that projection.
 
+## Terminal Tab Attention Indicator {#260726-dashboard-terminal-tab-attention-indicator}
+
+A workbench terminal tab label carries a state affordance driven by the
+[Terminal Attention Event Stream](#260726-dashboard-terminal-attention-event-stream),
+so an agent that has finished its turn is visible on the tab itself without
+opening the pane. The affordance reuses the stream's three-value vocabulary
+rather than introducing a parallel one: `working` and `ready` each render a
+distinct badge, and `idle` — like the absence of an entry — renders nothing.
+
+The indicator is suppressed unless the terminal session's daemon-reported
+status is live. The daemon reclaims a dead terminal's attention entry lazily,
+so an entry can outlive the session it describes; gating the render on live
+status is what keeps a retired or exited pane from showing a badge for a turn
+that ended with the process. This is a presentation gate, not a daemon
+guarantee, and it is deliberately the only defense — see
+[Terminal Pane](#260516-ws-web-dashboard-terminal-pane) for retirement.
+
+Acknowledgement clears the badge and is **revision-keyed, not sticky**:
+acknowledging records the acknowledged transition's own revision against the
+same server-scoped terminal identity the stream is keyed by, so a *later* turn
+boundary on the same terminal raises the badge again. Acknowledgement state is
+browser-local presentation state — it is not persisted and stays outside the
+[WorkRoot IO Restore Model](#260516-ws-web-dashboard-workroot-io-restore-model),
+the same way Activity acknowledgement state does.
+
+Acknowledgement has two triggers, and the second is load-bearing rather than
+redundant: activating the terminal's pane, **and** clicking the tab that is
+already active. The feature's primary flow is an agent left running in the
+active tab while the owner is away from the browser, so the badge routinely
+appears on a tab that never changes activation; a trigger that fires only on
+activation *change* can never clear it, and `ready` is terminal. Both triggers
+are idempotent.
+
+For the same reason, a state transition repaints a terminal tab that is
+already mounted, active, and connected. Terminal tabs otherwise suppress
+presentation refreshes while their session is connected, to keep the emulator
+from being disturbed mid-keystroke; the attention state is an explicit
+exception to that suppression, and one that only shows up on the *second*
+transition of a session.
+
 ## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 
 The dashboard combines daemon-owned live terminal state, read-only file pane
