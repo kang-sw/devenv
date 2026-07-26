@@ -71,3 +71,33 @@ assertEqual(
   "2 terminals, 3 documents",
   "plural terminal and document counts",
 );
+
+// 260725 Phase 7: the agent split. The zero-agent strings above are asserted
+// BYTE-IDENTICAL through the three-argument form below, because
+// dashboard-acceptance.spec.ts compares live row text against this
+// function's own output on its existing two-argument call sites.
+assertEqual(
+  formatOpenSurfaceCounts(0, 0, { agents: 0, working: 0, ready: 0 }),
+  "no open surfaces",
+  "an explicit all-zero agent triple leaves the empty-state text byte-identical",
+);
+assertEqual(
+  formatOpenSurfaceCounts(2, 3, { agents: 0, working: 0, ready: 0 }),
+  "2 terminals, 3 documents",
+  "an explicit all-zero agent triple leaves the populated text byte-identical",
+);
+assertEqual(
+  formatOpenSurfaceCounts(1, 0, { agents: 2, working: 1, ready: 1 }),
+  "1 terminal, 0 documents · 2 agents: 1 working, 1 ready",
+  "the agent segment reports the split, working before ready, alongside the non-agent terminal count",
+);
+assertEqual(
+  formatOpenSurfaceCounts(0, 0, { agents: 1, working: 0, ready: 0 }),
+  "no open surfaces · 1 agent: 0 working, 0 ready",
+  "an agent with nothing pending still reports itself, and both halves stay visible at zero",
+);
+assertEqual(
+  formatOpenSurfaceCounts(0, 0, { agents: 1, working: 1, ready: 0 }),
+  "no open surfaces · 1 agent: 1 working, 0 ready",
+  "the working half is rendered as its own number (Phase 3 spike), not folded into a single total",
+);

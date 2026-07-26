@@ -1,12 +1,17 @@
 import {
   ATTENTION_SOURCE_CLOSED_READY_STATE,
   acknowledgeAttentionEntry,
+  aggregateNavAttentionCounts,
+  aggregateNavAttentionTone,
   attentionEventsEndpoint,
+  navAttentionCountsSignature,
+  navAttentionTone,
   parseAgentAttentionEntry,
   parseAgentAttentionSnapshot,
   pendingAttentionStateFor,
   shouldReplaceAttentionSourceOnError,
   type AgentAttentionEntry,
+  type NavAttentionPane,
 } from "./agentAttention.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -266,3 +271,242 @@ assertDeepEqual(
     "a newer revision overwrites the watermark rather than being ignored",
   );
 }
+
+// --- aggregateNavAttentionCounts (260725 Phase 7 nav-row counter) --------
+
+function navPane(overrides: Partial<NavAttentionPane> = {}): NavAttentionPane {
+  return {
+    serverRoute: "server-local",
+    terminalId: "term_1",
+    workRootId: "root-a",
+    status: "running",
+    profileId: "claude",
+    ...overrides,
+  };
+}
+
+const ROOT_A = "server-local/root-a";
+const ROOT_B = "server-local/root-b";
+
+assertDeepEqual(
+  aggregateNavAttentionCounts([], { attentionByKey: {}, acknowledgements: {} }),
+  {},
+  "no panes aggregate to an empty map",
+);
+
+// THE partition rule this counter is pinned to: the agent predicate is the
+// pane-recorded spawn profile, not the presence of an attention entry. A
+// shell terminal must never enter the agent map even when (impossibly) an
+// entry exists for it, and an agent that has never finished a turn must
+// still be counted.
+assertDeepEqual(
+  aggregateNavAttentionCounts(
+    [
+      navPane({ terminalId: "term_shell", profileId: null }),
+      navPane({ terminalId: "term_agent" }),
+    ],
+    {
+      attentionByKey: {
+        "server-local/term_shell": {
+          terminalId: "term_shell",
+          workRootId: "root-a",
+          state: "ready",
+          updatedAtMs: 10,
+        },
+      },
+      acknowledgements: {},
+    },
+  ),
+  { [ROOT_A]: { agents: 1, working: 0, ready: 0 } },
+  "profileId partitions agent from shell terminals; a shell terminal's entry is unreachable, and a fresh agent with no entry still counts as an agent",
+);
+
+assertDeepEqual(
+  aggregateNavAttentionCounts(
+    [
+      navPane({ terminalId: "term_w" }),
+      navPane({ terminalId: "term_r" }),
+      navPane({ terminalId: "term_idle" }),
+      navPane({ terminalId: "term_other", workRootId: "root-b" }),
+    ],
+    {
+      attentionByKey: {
+        "server-local/term_w": {
+          terminalId: "term_w",
+          workRootId: "root-a",
+          state: "working",
+          updatedAtMs: 1,
+        },
+        "server-local/term_r": {
+          terminalId: "term_r",
+          workRootId: "root-a",
+          state: "ready",
+          updatedAtMs: 2,
+        },
+        "server-local/term_idle": {
+          terminalId: "term_idle",
+          workRootId: "root-a",
+          state: "idle",
+          updatedAtMs: 3,
+        },
+        "server-local/term_other": {
+          terminalId: "term_other",
+          workRootId: "root-b",
+          state: "ready",
+          updatedAtMs: 4,
+        },
+      },
+      acknowledgements: {},
+    },
+  ),
+  {
+    [ROOT_A]: { agents: 3, working: 1, ready: 1 },
+    [ROOT_B]: { agents: 1, working: 0, ready: 1 },
+  },
+  "working and ready are counted as a split, idle contributes to neither, and the scope is per work root",
+);
+
+assertDeepEqual(
+  aggregateNavAttentionCounts([navPane({ status: "exited" })], {
+    attentionByKey: {
+      "server-local/term_1": {
+        terminalId: "term_1",
+        workRootId: "root-a",
+        state: "ready",
+        updatedAtMs: 7,
+      },
+    },
+    acknowledgements: {},
+  }),
+  { [ROOT_A]: { agents: 1, working: 0, ready: 0 } },
+  "a non-running agent session contributes to neither working nor ready (the liveness gate), while still being a mounted agent pane",
+);
+
+assertDeepEqual(
+  aggregateNavAttentionCounts([navPane()], {
+    attentionByKey: {
+      "server-local/term_1": {
+        terminalId: "term_1",
+        workRootId: "root-a",
+        state: "ready",
+        updatedAtMs: 7,
+      },
+    },
+    acknowledgements: { "server-local/term_1": 7 },
+  }),
+  { [ROOT_A]: { agents: 1, working: 0, ready: 0 } },
+  "an acknowledged entry contributes to neither half - the row badge reuses the tab indicator's single ack watermark, with no second watermark of its own",
+);
+
+assertDeepEqual(
+  aggregateNavAttentionCounts([navPane()], {
+    attentionByKey: {
+      "server-local/term_1": {
+        terminalId: "term_1",
+        workRootId: "root-a",
+        state: "ready",
+        updatedAtMs: 8,
+      },
+    },
+    acknowledgements: { "server-local/term_1": 7 },
+  }),
+  { [ROOT_A]: { agents: 1, working: 0, ready: 1 } },
+  "an ack of an OLDER revision must not suppress the row badge for a newer turn boundary",
+);
+
+assertDeepEqual(
+  aggregateNavAttentionCounts(
+    [navPane({ serverRoute: "server-windows" })],
+    {
+      attentionByKey: {
+        "server-windows/term_1": {
+          terminalId: "term_1",
+          workRootId: "root-a",
+          state: "ready",
+          updatedAtMs: 1,
+        },
+      },
+      acknowledgements: {},
+    },
+  ),
+  { "server-windows/root-a": { agents: 1, working: 0, ready: 1 } },
+  "both the root key and the terminal join key are server-scoped, matching terminalAttentionKey's join exactly",
+);
+
+// --- navAttentionTone / aggregateNavAttentionTone ------------------------
+
+assertEqual(navAttentionTone(undefined), null, "a root with no agents has no tone");
+assertEqual(
+  navAttentionTone({ agents: 2, working: 0, ready: 0 }),
+  null,
+  "agents present but nothing pending shows no tone",
+);
+assertEqual(
+  navAttentionTone({ agents: 1, working: 1, ready: 0 }),
+  "working",
+  "working alone shows the working tone",
+);
+assertEqual(
+  navAttentionTone({ agents: 1, working: 0, ready: 1 }),
+  "ready",
+  "ready alone shows the ready tone",
+);
+assertEqual(
+  navAttentionTone({ agents: 2, working: 1, ready: 1 }),
+  "ready",
+  "PINNED priority: ready outranks working when both are pending on the same row",
+);
+
+{
+  const countsByRoot = {
+    [ROOT_A]: { agents: 1, working: 1, ready: 0 },
+    [ROOT_B]: { agents: 1, working: 0, ready: 1 },
+  };
+  assertEqual(
+    aggregateNavAttentionTone(countsByRoot, [ROOT_A, ROOT_B]),
+    "ready",
+    "PINNED server roll-up: ready outranks working across a server's work roots",
+  );
+  assertEqual(
+    aggregateNavAttentionTone(countsByRoot, [ROOT_B, ROOT_A]),
+    "ready",
+    "the roll-up is order-independent - a later working root cannot demote an earlier ready one",
+  );
+  assertEqual(
+    aggregateNavAttentionTone(countsByRoot, [ROOT_A]),
+    "working",
+    "a server sees only the roots it is given, so a neighbour's ready never leaks in",
+  );
+  assertEqual(
+    aggregateNavAttentionTone(countsByRoot, []),
+    null,
+    "a server with no work roots has no tone",
+  );
+  assertEqual(
+    aggregateNavAttentionTone(countsByRoot, ["server-local/root-missing"]),
+    null,
+    "an unknown root key contributes nothing rather than throwing",
+  );
+}
+
+// --- navAttentionCountsSignature ----------------------------------------
+
+assertEqual(
+  navAttentionCountsSignature({}),
+  "",
+  "an empty count map has an empty signature",
+);
+assertEqual(
+  navAttentionCountsSignature({
+    [ROOT_B]: { agents: 1, working: 0, ready: 1 },
+    [ROOT_A]: { agents: 2, working: 1, ready: 0 },
+  }),
+  "server-local/root-a:2:1:0,server-local/root-b:1:0:1",
+  "the signature is sorted, so key insertion order alone never invalidates the memo",
+);
+assertEqual(
+  navAttentionCountsSignature({ [ROOT_A]: { agents: 2, working: 1, ready: 0 } }) ===
+    navAttentionCountsSignature({ [ROOT_A]: { agents: 2, working: 0, ready: 1 } }),
+  false,
+  "a working -> ready transition at a constant agent count MUST change the signature, or the nav row would never repaint on a turn boundary",
+);

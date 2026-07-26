@@ -9,7 +9,10 @@
 // per-work-root path segment: attention is keyed by terminal id across the
 // whole daemon, not scoped to a workRoot.
 
-import { localCompatibleDashboardApiRoute } from "./resourceModel.js";
+import {
+  localCompatibleDashboardApiRoute,
+  serverScopedIdentity,
+} from "./resourceModel.js";
 
 export type AgentAttentionState = "working" | "ready" | "idle";
 
@@ -118,6 +121,152 @@ export function acknowledgeAttentionEntry(
     return acknowledgements;
   }
   return { ...acknowledgements, [key]: entry.updatedAtMs };
+}
+
+// --- 260725 Phase 7: nav-row agent counter -----------------------------
+//
+// Per-work-root roll-up of the agent terminals open under that root, split
+// into the pinned three-state vocabulary's two visible halves.
+// `agents` counts every AGENT terminal mounted for the root regardless of
+// turn state; `working`/`ready` count only those currently showing a pending
+// state. `agents - working - ready` is therefore the idle/acknowledged
+// remainder, not an error.
+export type NavAttentionCounts = {
+  agents: number;
+  working: number;
+  ready: number;
+};
+
+export const EMPTY_NAV_ATTENTION_COUNTS: NavAttentionCounts = {
+  agents: 0,
+  working: 0,
+  ready: 0,
+};
+
+// CONTRACT (import direction): this is a MINIMAL STRUCTURAL restatement of
+// the fields `TerminalPaneState.session` carries, declared here rather than
+// imported from `workbench/terminalWorkbenchPane.ts`. That module is
+// reachable from the `workbench/index.ts` barrel, and a back-import from a
+// barrel-reachable module drags all of `App.tsx` into the NodeNext
+// route-tests program (mental model `ws-web-dashboard` `## Common
+// Mistakes`). The KEY STRINGS built below are byte-identical to
+// `terminalAttentionKey`'s join, which is the only coupling that matters.
+export type NavAttentionPane = {
+  readonly serverRoute?: string;
+  readonly terminalId: string;
+  readonly workRootId: string;
+  readonly status: string;
+  // The Phase 2 pane-recorded spawn profile. `!= null` IS the agent
+  // predicate this counter is pinned to - NOT "the daemon minted a hook
+  // config" and NOT "this terminal has posted a hook event", either of which
+  // reads zero for a freshly spawned agent that has not finished a turn.
+  readonly profileId: string | null;
+};
+
+export type NavAttentionInput = {
+  readonly attentionByKey: Readonly<Record<string, AgentAttentionEntry>>;
+  readonly acknowledgements: AgentAttentionAcknowledgements;
+};
+
+// CONTRACT (260725 Phase 7, the phase's central decision): the count is
+// derived by ITERATING PANES and classifying each through
+// `pendingAttentionStateFor`, never by iterating `attentionByKey`. Three
+// consequences, all load-bearing:
+//   1. An `AgentAttentionEntry` carries no profile field, so a map-derived
+//      count could not tell an agent terminal from a shell terminal.
+//   2. A freshly spawned agent that has not finished a turn has no entry at
+//      all, yet must still increment `agents` (the pinned carrier rule).
+//   3. A dead agent's entry can outlive its session daemon-side (Phase 5
+//      Result finding 1 - `AttentionHub` has no IPC-death hook). Iterating
+//      panes makes such an entry structurally UNREACHABLE rather than merely
+//      filtered, and the same holds for entries in work roots the browser
+//      has closed.
+// Routing every pane through `pendingAttentionStateFor` also means this
+// counter reuses the tab indicator's ONE acknowledgement watermark: a row's
+// badge clears exactly when its last pending child terminal is acknowledged,
+// with no second watermark and no timer of its own.
+export function aggregateNavAttentionCounts(
+  panes: readonly NavAttentionPane[],
+  attention: NavAttentionInput,
+): Record<string, NavAttentionCounts> {
+  const byRoot: Record<string, NavAttentionCounts> = {};
+  for (const pane of panes) {
+    if (pane.profileId == null) {
+      continue;
+    }
+    const rootKey = serverScopedIdentity(pane.serverRoute, pane.workRootId);
+    const counts = (byRoot[rootKey] ??= { agents: 0, working: 0, ready: 0 });
+    counts.agents += 1;
+    const terminalKey = serverScopedIdentity(pane.serverRoute, pane.terminalId);
+    const pending = pendingAttentionStateFor(
+      attention.attentionByKey[terminalKey],
+      attention.acknowledgements[terminalKey],
+      pane.status,
+    );
+    if (pending === "working") {
+      counts.working += 1;
+    } else if (pending === "ready") {
+      counts.ready += 1;
+    }
+  }
+  return byRoot;
+}
+
+// The pinned per-row priority: `ready` outranks `working` outranks none.
+export function navAttentionTone(
+  counts: NavAttentionCounts | undefined,
+): "ready" | "working" | null {
+  if (!counts) {
+    return null;
+  }
+  if (counts.ready > 0) {
+    return "ready";
+  }
+  if (counts.working > 0) {
+    return "working";
+  }
+  return null;
+}
+
+// The pinned SERVER-row roll-up: the highest-priority state among that
+// server's work roots, same `ready > working > none` order. Callers pass the
+// root keys they know belong to the server rather than prefix-matching the
+// map, so a server whose route string is a prefix of another's can never
+// absorb its neighbour's rows.
+export function aggregateNavAttentionTone(
+  countsByRoot: Readonly<Record<string, NavAttentionCounts>>,
+  rootKeys: readonly string[],
+): "ready" | "working" | null {
+  let tone: "ready" | "working" | null = null;
+  for (const rootKey of rootKeys) {
+    const candidate = navAttentionTone(countsByRoot[rootKey]);
+    if (candidate === "ready") {
+      return "ready";
+    }
+    if (candidate === "working") {
+      tone = "working";
+    }
+  }
+  return tone;
+}
+
+// Change-detector string for the count map, mirroring
+// `terminalCountByRootSignature`'s role in `WorkbenchShell`: `terminalPanes`
+// churns on every batched output-cursor flush, so the derived map must only
+// be rebuilt (and pushed up to `App()`) when a root's actual agent/working/
+// ready triple moves. The DERIVED counts go in, not the raw maps - an
+// `attentionByKey` write that changes no visible count must not re-render
+// the nav tree.
+export function navAttentionCountsSignature(
+  countsByRoot: Readonly<Record<string, NavAttentionCounts>>,
+): string {
+  return Object.entries(countsByRoot)
+    .map(
+      ([rootKey, counts]) =>
+        `${rootKey}:${counts.agents}:${counts.working}:${counts.ready}`,
+    )
+    .sort()
+    .join(",");
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

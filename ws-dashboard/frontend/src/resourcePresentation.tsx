@@ -6,6 +6,10 @@ import { normalizeServerRouteLocation } from "./routeBasis.js";
 // the plain-Node route-tests runner (tsconfig.route-tests.json), which has
 // no CSS loader. Same runtime behavior, narrower module graph.
 import { decideSurfaceClose } from "./workbench/policy.js";
+import {
+  EMPTY_NAV_ATTENTION_COUNTS,
+  type NavAttentionCounts,
+} from "./agentAttention.js";
 import type { SurfaceKind } from "./workbench/surfaceRegistry.js";
 import type {
   InstanceView,
@@ -166,12 +170,31 @@ export function countByRootKey<T>(
 // workRoot/compactWorkRoot rows regardless of open state - only its text
 // varies, per the ticket's no-height-jump constraint - so this needs a
 // single formatter covering both the "nothing open yet" and populated cases.
+//
+// 260725 Phase 7 adds the agent split as a THIRD, optional argument rather
+// than a required one, deliberately: the agent segment is appended only when
+// `agents > 0`, so both zero-agent strings ("no open surfaces" /
+// "N terminals, M documents") stay BYTE-IDENTICAL to Phase 1's. That is what
+// keeps `dashboard-acceptance.spec.ts`'s existing two-argument call sites
+// (:2862/:2914/:2927, which compare row text against this function's own
+// output) correct rather than merely compiling. The terminal count passed in
+// EXCLUDES agent terminals (see `terminalCountByRoot`'s profileId filter in
+// App.tsx) - an agent pane is counted in the agent segment only, never in
+// both halves.
 export function formatOpenSurfaceCounts(
   terminalCount: number,
   documentCount: number,
+  agentCounts: NavAttentionCounts = EMPTY_NAV_ATTENTION_COUNTS,
 ): string {
-  if (terminalCount === 0 && documentCount === 0) {
-    return "no open surfaces";
+  const surfaces =
+    terminalCount === 0 && documentCount === 0
+      ? "no open surfaces"
+      : `${terminalCount} terminal${terminalCount === 1 ? "" : "s"}, ${documentCount} document${documentCount === 1 ? "" : "s"}`;
+  if (agentCounts.agents === 0) {
+    return surfaces;
   }
-  return `${terminalCount} terminal${terminalCount === 1 ? "" : "s"}, ${documentCount} document${documentCount === 1 ? "" : "s"}`;
+  // Both halves always render once there is at least one agent (working
+  // before ready), so the Phase 3 turn-start spike's `working` spinner is
+  // visible rather than being collapsed away whenever it happens to be zero.
+  return `${surfaces} · ${agentCounts.agents} agent${agentCounts.agents === 1 ? "" : "s"}: ${agentCounts.working} working, ${agentCounts.ready} ready`;
 }

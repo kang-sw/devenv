@@ -70,10 +70,38 @@ function workRootDisplayName(rootPath: string) {
   return match ? match[0] : normalized;
 }
 
+// 260725 Phase 7 (nav-row agent counter) adds a SECOND `test(...)` to this
+// file rather than a third spec: every helper below (temp state home +
+// on-disk token read, the direct turn-state POST, the minimal open/select
+// helpers, the tab locators, the unconditional force-close teardown) is
+// module-local and unexported, so a sibling file would duplicate them and
+// boot a third daemon. What that second test proves, at browser level:
+//   1. The counter SPLIT - one `working` agent and one `ready` agent are
+//      reported as separate numbers on the same row at the same time.
+//   2. NO DOUBLE COUNT - the row reads 2 agents and exactly 1 terminal while
+//      three terminal tabs are mounted, so the `1` is an exclusion rather
+//      than a stale read.
+//   3. A badge on a work root that is NOT the selected one.
+//   4. Acknowledging the LAST pending tab clears the row badge, with no
+//      nav-row action of any kind - the derived-never-separately-acknowledged
+//      rule.
+//   5. The pinned server-row roll-up (`ready` outranks `working`).
+
 let daemon: DaemonHandle;
 let workRoot: string;
+// Second fixture root (Phase 7). Root A stays the tab-indicator gate's root;
+// every Phase 7 terminal is spawned under root B so "a badge on a work root
+// that is not selected" is expressible by selecting root A.
+let workRootB: string;
 let stateHome: string;
 let previousStateHome: string | undefined;
+// The daemon's owner pairing URL is ONE-TIME, so the second test cannot pair
+// again: it reuses the cookie the first test's pairing installed, exactly as
+// `dashboard-acceptance.spec.ts` does for its own second test (:4137). This
+// is why the file stays in serial mode.
+let ownerCookies:
+  | Awaited<ReturnType<import("@playwright/test").BrowserContext["cookies"]>>
+  | undefined;
 
 test.describe.configure({ mode: "serial" });
 
@@ -82,6 +110,11 @@ test.beforeAll(async () => {
   writeFileSync(
     path.join(workRoot, "readme.txt"),
     "agent attention indicator browser gate fixture\n",
+  );
+  workRootB = mkdtempSync(path.join(os.tmpdir(), "ws-dash-navcount-"));
+  writeFileSync(
+    path.join(workRootB, "readme.txt"),
+    "nav row agent counter browser gate fixture\n",
   );
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
   // DEVIATION from the plan's Codebase Findings (recorded deliberately): the
@@ -108,6 +141,7 @@ test.afterAll(async () => {
     await daemon.stop();
   }
   rmSync(workRoot, { recursive: true, force: true });
+  rmSync(workRootB, { recursive: true, force: true });
   rmSync(stateHome, { recursive: true, force: true });
   if (previousStateHome === undefined) {
     delete process.env.WS_DASHBOARD_STATE_HOME;
@@ -120,6 +154,18 @@ async function pairOwner(page: Page) {
   await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".app-shell")).toBeVisible();
   expect(new URL(page.url()).pathname).not.toContain("/pair");
+  ownerCookies = await page.context().cookies(daemon.baseUrl);
+}
+
+async function attachOwnerSession(page: Page) {
+  if (!ownerCookies) {
+    throw new Error(
+      "ownerCookies not captured - the owner-pairing test must run first (serial mode) before this test can reuse the session cookie",
+    );
+  }
+  await page.context().addCookies(ownerCookies);
+  await page.goto(daemon.baseUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-shell")).toBeVisible();
 }
 
 async function openWorkRootMinimal(page: Page, rootPath: string) {
@@ -284,6 +330,63 @@ async function forceCloseTerminals(page: Page, terminalIds: string[]) {
       // Page already closed/crashed - nothing more this side can do.
     }
   }
+}
+
+// Spawns one terminal into a NAMED work root through the daemon route
+// directly (not the toolbar), which is the only way to put terminals in a
+// root that is not the one the browser currently has selected - and the only
+// way to choose the spawn profile, which is the pinned agent carrier.
+// `profileId: null` produces an ordinary shell terminal.
+async function spawnTerminalInRoot(
+  page: Page,
+  workRootId: string,
+  profileId: string | null,
+  title: string,
+): Promise<string> {
+  const endpoint = workRootTerminalsEndpoint(workRootId);
+  const created = await page.evaluate(
+    async ({ endpoint, profileId, title }) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          columns: 80,
+          rows: 24,
+          title,
+          cwdHint: null,
+          profileId,
+        }),
+      });
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: await response.json(),
+      };
+    },
+    { endpoint, profileId, title },
+  );
+  expect(
+    created.ok,
+    `terminal create (${title}, profile ${profileId ?? "none"}): ${JSON.stringify(created)}`,
+  ).toBe(true);
+  expect(created.body.profileId ?? null).toBe(profileId);
+  const terminalId = created.body.terminalId as string;
+  expect(terminalId).toBeTruthy();
+  return terminalId;
+}
+
+// The nav row for one work root. Both fixture roots are single-workRoot
+// workspaces, so each renders as one `compactWorkRoot` row - the
+// presentation that carries the reserved second line.
+function workRootRow(page: Page, rootPath: string) {
+  return page
+    .locator('.resource-row[data-resource-presentation="compactWorkRoot"]', {
+      hasText: workRootDisplayName(rootPath),
+    })
+    .first();
 }
 
 test("agent attention indicator", async ({ page }) => {
@@ -485,5 +588,182 @@ test("agent attention indicator", async ({ page }) => {
     });
   } finally {
     await forceCloseTerminals(page, [agentTerminalId, plainTerminalId]);
+  }
+});
+
+test("nav row agent counter", async ({ page }) => {
+  await attachOwnerSession(page);
+  await openWorkRootMinimal(page, workRoot);
+  await openWorkRootMinimal(page, workRootB);
+  const workRootBId = await resolveWorkRootId(page, workRootB);
+
+  // Literal expected strings, not `formatOpenSurfaceCounts(...)` calls: this
+  // gate must fail if the formatter's own contract drifts, and comparing a
+  // row against the very function that rendered it could not.
+  const bothPending = "1 terminal, 0 documents · 2 agents: 1 working, 1 ready";
+  const bothReady = "1 terminal, 0 documents · 2 agents: 0 working, 2 ready";
+  const oneAcknowledged =
+    "1 terminal, 0 documents · 2 agents: 0 working, 1 ready";
+  const allAcknowledged =
+    "1 terminal, 0 documents · 2 agents: 0 working, 0 ready";
+
+  let plainTerminalId = "";
+  let agentOneId = "";
+  let agentTwoId = "";
+
+  try {
+    let agentOneToken = "";
+    let agentTwoToken = "";
+
+    await test.step("spawn one shell terminal and two agent terminals under work root B", async () => {
+      plainTerminalId = await spawnTerminalInRoot(
+        page,
+        workRootBId,
+        null,
+        "Nav Counter Shell",
+      );
+      agentOneId = await spawnTerminalInRoot(
+        page,
+        workRootBId,
+        "dummy-echo-hooked",
+        "Nav Counter Agent 1",
+      );
+      agentTwoId = await spawnTerminalInRoot(
+        page,
+        workRootBId,
+        "dummy-echo-hooked",
+        "Nav Counter Agent 2",
+      );
+      agentOneToken = readCallbackToken(agentOneId);
+      agentTwoToken = readCallbackToken(agentTwoId);
+
+      // Same restoration path the first test uses: the direct POSTs above
+      // bypassed this tab's React state.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await selectWorkRootMinimal(page, workRootB);
+      await expect(terminalTabsLocator(page)).toHaveCount(3, {
+        timeout: 20_000,
+      });
+
+      // Park the ACTIVE tab on the shell terminal, so nothing that follows
+      // can acknowledge an agent tab as a side effect of selection.
+      await terminalTab(page, plainTerminalId).click();
+      await expect(
+        page.locator(`.terminal-pane[data-terminal-id="${plainTerminalId}"]`),
+      ).toHaveCount(1, { timeout: 20_000 });
+      await expect(workRootRow(page, workRootB)).toHaveAttribute(
+        "data-row-attention",
+        "none",
+      );
+    });
+
+    await test.step("counter split: one working and one ready are reported as separate numbers", async () => {
+      // Holding BOTH states live at once is what makes this non-vacuous - a
+      // single-state fixture would pass against a collapsed single total.
+      await postTurnState(agentOneId, agentOneToken, "working");
+      await postTurnState(agentTwoId, agentTwoToken, "ready");
+      // Deliberately the AGENT SEGMENT only, not the whole line: this step
+      // owns the split, and the surrounding terminal count is the next step's
+      // subject. Keeping the two assertions disjoint is what makes each
+      // mutation fail at its own site instead of both tripping the first one.
+      await expect(
+        workRootRow(page, workRootB).locator(".resource-row-counts"),
+      ).toContainText("2 agents: 1 working, 1 ready", { timeout: 20_000 });
+    });
+
+    await test.step("no double count: 2 agents and exactly 1 terminal while three tabs are mounted", async () => {
+      // The mounted-tab count is asserted in the SAME step as the row text,
+      // so the `1 terminal` is proven to be an exclusion of the two agent
+      // panes rather than a stale read taken before they existed.
+      await expect(terminalTabsLocator(page)).toHaveCount(3);
+      await expect(
+        workRootRow(page, workRootB).locator(".resource-row-counts"),
+      ).toHaveText(bothPending);
+    });
+
+    await test.step("server-row aggregation: ready outranks working across the server's roots", async () => {
+      await expect(page.locator(".server-row").first()).toHaveAttribute(
+        "data-row-attention",
+        "ready",
+      );
+    });
+
+    await test.step("a badge survives on a work root that is NOT the selected one", async () => {
+      await selectWorkRootMinimal(page, workRoot);
+      const rowA = workRootRow(page, workRoot);
+      const rowB = workRootRow(page, workRootB);
+      await expect(rowA).toHaveClass(/resource-row-selected/);
+      await expect(rowB).not.toHaveClass(/resource-row-selected/);
+      // Root B's workbench instance is still mounted but no longer the
+      // active one (App.tsx renders inactive roots with display:none), which
+      // is exactly the state a selected-root-only aggregation would drop.
+      await expect(
+        page
+          .locator('[data-workbench-root-active="true"]')
+          .locator(
+            `.dockview-workbench-tab[data-workbench-pane-id*="${agentOneId}"]`,
+          ),
+      ).toHaveCount(0);
+      await expect(rowB).toHaveAttribute("data-row-attention", "ready");
+      await expect(rowB.locator(".resource-row-counts")).toHaveText(
+        bothPending,
+      );
+    });
+
+    await test.step("acknowledging the LAST pending tab clears the row badge, with no nav-row action", async () => {
+      await selectWorkRootMinimal(page, workRootB);
+      // Park the active tab on the shell terminal again, so the two tab
+      // clicks below are the only acknowledgements in this step.
+      await terminalTab(page, plainTerminalId).click();
+      await expect(
+        page.locator(`.terminal-pane[data-terminal-id="${plainTerminalId}"]`),
+      ).toHaveCount(1, { timeout: 20_000 });
+
+      await postTurnState(agentOneId, agentOneToken, "ready");
+      const rowB = workRootRow(page, workRootB);
+      await expect(rowB.locator(".resource-row-counts")).toHaveText(bothReady, {
+        timeout: 20_000,
+      });
+      await expect(rowB).toHaveAttribute("data-row-attention", "ready");
+
+      // Two agents, acknowledged one at a time: this proves the badge clears
+      // when NO child is still pending, not merely on any acknowledgement.
+      await terminalTab(page, agentOneId).click();
+      await expect(rowB.locator(".resource-row-counts")).toHaveText(
+        oneAcknowledged,
+        { timeout: 20_000 },
+      );
+      await expect(rowB).toHaveAttribute("data-row-attention", "ready");
+
+      await terminalTab(page, agentTwoId).click();
+      await expect(rowB.locator(".resource-row-counts")).toHaveText(
+        allAcknowledged,
+        { timeout: 20_000 },
+      );
+      await expect(rowB).toHaveAttribute("data-row-attention", "none");
+      // The agent panes are still mounted - the badge cleared because every
+      // child terminal is acknowledged, not because the panes went away.
+      await expect(terminalTabsLocator(page)).toHaveCount(3);
+      await expect(page.locator(".server-row").first()).toHaveAttribute(
+        "data-row-attention",
+        "none",
+      );
+    });
+
+    await test.step("cleanup: close every terminal this gate spawned", async () => {
+      await closeTerminalById(page, agentOneId);
+      await closeTerminalById(page, agentTwoId);
+      await closeTerminalById(page, plainTerminalId);
+      await expect(terminalTabsLocator(page)).toHaveCount(0);
+      await expect(
+        workRootRow(page, workRootB).locator(".resource-row-counts"),
+      ).toHaveText("no open surfaces");
+    });
+  } finally {
+    await forceCloseTerminals(page, [
+      plainTerminalId,
+      agentOneId,
+      agentTwoId,
+    ]);
   }
 });
