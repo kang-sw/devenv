@@ -71,6 +71,8 @@
     "src/settingsStore.test.ts",
     "src/terminalPrefs.ts",
     "src/terminalPrefs.test.ts",
+    "src/notificationPrefs.ts",
+    "src/notificationPrefs.test.ts",
     "src/settingsSections.tsx",
     "src/settingsSections.test.ts",
     "src/resourcePresentation.tsx",
