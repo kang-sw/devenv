@@ -11,11 +11,12 @@ related:
     caps stay equivalent" is false against the current playbook; corrected in the
     same logical change as this ticket
   260714-feat-playbook-tier-model-render-vars: shipped the render-resolved tier-model
-    vars Phase 2's capacity elevation uses instead of hardcoded model names
+    vars — deliberately NOT used by this ticket, since they resolve only in
+    playbook.render output and would surface literally in a generated Instruction
 spec:
   - 260612-reviewer-allocation-tier-default
   - 260619-stateless-implement-review-continuity
-sage-review-design: blocked
+sage-review-design: completed
 sage-review-completeness: required
 ---
 
@@ -147,7 +148,7 @@ admissible reasons to exactly three, which determines what the adjudicator reads
 
 | Implementer's defense | Evidence the adjudicator weighs |
 |---|---|
-| conflicts with local patterns | codebase-wide patterns, convention docs, commit precedent — **not** the diff |
+| **style suggestion** conflicting with local patterns | codebase-wide patterns, convention docs, commit precedent — **not** the diff |
 | requires scope expansion beyond the plan | the plan and the ticket/inline authority |
 | disproven by specific evidence | the offered evidence itself |
 
@@ -165,12 +166,14 @@ and must be stated as explicitly.
 - `[out-of-scope: <reason>]` — the finding is valid but outside the plan; route
   to plan amendment or defer.
 
-The third verdict is why the role exists at all. A correctness finding that
-requires out-of-plan scope makes `implementer-relay`'s constraints jointly
-unsatisfiable — it forbids won't-fix for correctness while requiring fixes to
-stay inside the plan. The reviewer cannot amend the plan and the implementer is
-forbidden to refuse; the adjudicator is the only party that can name the
-deadlock.
+The third verdict is why the role exists at all. A correctness finding needing
+out-of-plan scope puts `implementer-relay` in a bind: it forbids won't-fix for
+correctness while requiring fixes to stay inside the plan. Its Process step 3
+supplies an escape — escalate for a plan update — but escalating only moves the
+question, it does not answer it, and the reviewer cannot amend the plan. The
+adjudicator is the party that decides whether the plan should absorb the finding
+or the finding should be deferred. See Phase 3 for why this makes the trigger
+two-armed.
 
 **Capacity escalation is mechanical and lead-side, not an adjudicator verdict.**
 A finding relayed twice with no won't-fix offered and still non-clean indicates
@@ -255,8 +258,10 @@ if Phase 3 never lands, Phases 1 and 2 still close the observed defect.
 
 - Delegate prompts stay self-contained (`260619`'s stateless premise). The
   adjudicator's inputs are files: plan, review findings paths, disposition
-  record, commit range, authority. No cycle state may be phrased as
-  implementer-visible state.
+  record, commit range, authority. Budget accounting stays lead-owned — the
+  delegate is told the current cycle number but never asked to enforce or track
+  the budget. `implementer-relay` already renders `ReviewCycle` into the
+  implementer's prompt; that stays.
 - Changed prompt and generated-instruction lines are skill text: apply
   `agents-plugin/skills/lead-skill-authoring/SKILL.md`'s invariant checklist to
   each one.
@@ -280,17 +285,18 @@ if Phase 3 never lands, Phases 1 and 2 still close the observed defect.
 
 ### Phase 1: Restore the budget and the final-cycle behavior
 
-Close the spec violation without introducing the adjudicator. Two surfaces.
+Close the spec violation without introducing the adjudicator. **One surface: the
+generated Instruction. `lead-implement.md` is not edited.**
 
-**Playbook** — two path-independent invariant lines added to `lead-implement.md`'s
-Review block, one rule each per `lead-skill-authoring`'s one-line requirement:
-
-```markdown
-- A review cycle is one review round; the relay budget is per slice, not per partition.
-- At the final cycle, stop relaying, complete closeout, and carry unresolved findings with their dispositions into the final report.
-```
-
-Regenerate the wsflow mirror rather than editing its copy.
+Rejected: adding a summary invariant line to the playbook's Review block.
+`lead-skill-authoring`'s destructive-first test deletes playbook prose that
+restates what an MCP tool returns post-call, and since this phase's verification
+boundary requires the Instruction to carry the budget and the completes-not-halts
+behavior, any playbook line stating them is a restatement by construction. The
+ticket's own argument settles it: a lead is positively instructed not to
+supplement the Instruction from memory, so the playbook line would be inert as
+well as redundant. This also means Phase 1 touches no `rsrc/` file and needs no
+mirror or manifest regeneration.
 
 **Generated todo instruction** — `implementReviewInstruction` states the budget
 per branch, since the generator already holds `review_alloc` and is the cheapest
@@ -311,8 +317,8 @@ thing this ticket is trying to stop.
 Verification boundary: a `partitioned:` verdict's review todo Instruction names a
 3-review-cycle slice budget and the completes-not-halts behavior; a `single`
 verdict's names 2; the fallback branch names 3; a `lead-only` verdict's names
-neither; both `lead-implement.md` copies carry the two lines with no number, and
-the wsflow mirror test passes without a hand-edit.
+neither; `lead-implement.md` is byte-identical to its pre-phase state in both
+copies.
 
 ### Phase 2: Root-cause escalation and capacity elevation
 
@@ -328,13 +334,31 @@ this condition is the load-bearing half and the count only the backstop.
 
 **Capacity elevation.** A finding relayed twice with no won't-fix offered and
 still non-clean means the implementer cannot fix it rather than that a defense is
-contested. Dispatch the next relay at an elevated tier — name it by capability
-tier (`large`), never by model name and never by a render variable, per the
-Instruction constraint above.
+contested. The next relay should run at a higher capability tier than
+`implementer-relay`'s declared `medium`.
 
-Verification boundary: the `partitioned:` and fallback Instructions each state
-both conditions and distinguish them from the numeric budget; `single` and
-`lead-only` state neither; no `{{` appears in any generated Instruction.
+> **Blocked on a mechanism decision — do not implement this half until it is
+> settled.** No live surface elevates a delegate's tier per dispatch.
+> `playbook.render` takes the tier strictly from front-matter
+> (`playbook_tools.go`, `recommendedTier := pb.Meta.Tier`) with no caller
+> override, `RoleModel` injection overwrites caller context for reserved names,
+> and spec `#260612-reviewer-allocation-tier-default` states that a delegate's
+> declared `tier:` makes the rendered `recommended-tier` authoritative. The three
+> candidate mechanisms are: (1) instruct the lead to deviate from dispatch
+> metadata for this case, (2) raise `implementer-relay`'s declared tier
+> unconditionally, (3) add a render-time tier override. Each needs a matching
+> spec amendment, and (3) changes MCP API semantics. Shipping the Instruction
+> text without picking one would state behavior the spec contradicts — the same
+> defect class this ticket exists to close. The root-cause half of this phase is
+> independent and may land first.
+
+Verification boundary: the `partitioned:` and fallback Instructions state the
+root-cause condition and distinguish it from the numeric budget; `single` and
+`lead-only` state neither; no `{{` appears in any generated Instruction. The
+capacity half is verified only once its mechanism is chosen, and its boundary
+must include the behavior, not only the Instruction text — an Instruction that
+names an elevated tier no dispatch path honors would pass a text-only check while
+the behavior stays unreachable.
 
 ### Phase 3: Adjudicator delegate
 
@@ -348,9 +372,19 @@ requires the manifest regeneration named in `## Constraints` before the mirror
 regeneration.
 
 **Review Instruction clause** for the `partitioned:` and fallback branches only:
-the `[maintained]` trigger, the adjudicator spawn method, that an override ships
-as the next relay and consumes its budget rather than adding one, and that the
-step is **optional when no dispute was maintained**.
+the trigger, the adjudicator spawn method, that an override ships as the next
+relay and consumes its budget rather than adding one, and that the step is
+**optional when neither trigger fired**.
+
+The trigger has two arms, not one. `[maintained]` covers a contested won't-fix.
+It does **not** cover the `[out-of-scope]` case: `implementer-relay` Process step
+3 already tells the implementer to "escalate for a plan update if a required fix
+needs ticket material or a plan deviation", and its constraints forbid won't-fix
+for correctness — so a compliant implementer facing an out-of-plan correctness
+finding escalates rather than refusing, producing no won't-fix and no
+`[maintained]`. The deadlock the third verdict exists to name would bypass the
+role. The second arm is therefore an implementer plan-update escalation, which
+routes to the adjudicator for the same accept/override/out-of-scope judgment.
 
 **Spec update, required.** `#260612-reviewer-allocation-tier-default` currently
 reads "3 cycles for partitioned with lead adjudication at cycle 2". This phase
