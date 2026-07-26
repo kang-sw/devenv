@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.36.16 - 2026-07-26
+
+### Changed
+- **Ticket completeness review now uses the same severity and verdict vocabulary
+  as design review.** The lead reads both verdicts in one flow, and the two
+  prompts previously gave the same field names different meanings. Severity is
+  anchored to a consequence — a fresh reader who cannot start or cannot tell when
+  a phase is done (`critical`), one who proceeds on a wrong reading of the goal,
+  approach, or acceptance criteria (`important`), one who proceeds correctly with
+  avoidable friction (`minor`) — and the verdict carries the same required
+  `sufficiency` line. The rows are adapted rather than copied: completeness reads
+  only the ticket file, so a design-review row about contradicting a live spec
+  entry would be unreachable in its lane.
+- **`resolution: missing` now means the same thing in both ticket reviewers.**
+  Completeness read "requires user input or authoring work", which routed any
+  writing gap to `block`, while its own scope-boundary check already defined the
+  in-lane meaning as a design-shaped gap the reviewer must not fill. Both prompts
+  now state it as a user decision or design input the lead or implementer cannot
+  supply. The `concern` threshold also drops the same tautology fixed in
+  `v0.36.15`.
+
 ## v0.36.15 - 2026-07-26
 
 ### Changed
