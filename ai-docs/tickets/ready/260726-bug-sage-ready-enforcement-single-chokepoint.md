@@ -81,8 +81,9 @@ auditable waiver already exists: at posture `recommended`, `sage_gate(answer:
   This posture is non-waivable per ticket by design. Changing it means
   changing the `sage_review` config item; ws/config.show reports the
   resolved config path.
-  What design review checks: ticket document recoverability, not whether
-  the underlying research is settled.
+  What design review checks: design coherence, whether this is the right
+  problem, and whether an implementer can execute without filling in
+  design gaps — not whether the underlying research is settled.
   ```
 
 - **The message must ride the path an agent actually takes.** Putting it only on
@@ -100,10 +101,13 @@ auditable waiver already exists: at posture `recommended`, `sage_gate(answer:
   has not run".
 
 - **The last line is load-bearing.** Downstream, the owner waived review because
-  "we've already verified this enough", meaning the *research*. Sage reviewers
-  assess *ticket document recoverability* — a disjoint concern. Once that was
-  named, the owner reversed the waiver. Surfacing review scope is the
-  cheapest high-value change in this ticket.
+  "we've already verified this enough", meaning the *research*. That is not what
+  either reviewer assesses: design checks coherence, right-problem, and
+  implementer-executability against the specs and mental models the ticket links;
+  completeness checks structure, fields, and fresh-reader clarity from the ticket
+  file alone. Both are disjoint from "is the research settled". Once that was
+  named, the owner reversed the waiver. Surfacing review scope is the cheapest
+  high-value change in this ticket.
 - **`ready/`'s guarantee narrows, and that is accepted.** Today "in `ready/`"
   is filesystem-enforced to mean "passed sage". After this change it means
   "passed sage **if the landing was committed through `ws/git.commit`**". The

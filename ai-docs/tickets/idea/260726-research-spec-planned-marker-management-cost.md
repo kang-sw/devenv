@@ -84,15 +84,77 @@ recorded here so it is not re-derived:
   backing `ready/` ticket, and how many went stale after their ticket closed are
   all countable and none are counted.
 
+## Measured 2026-07-26
+
+Counted before opining, because nobody had:
+
+- **Real `🚧` usage across the whole spec corpus: exactly 1.** Six of the seven
+  matches are in `documentation-system.md` describing the mechanism itself. The
+  only live marker is `ws-web-dashboard/index.md:231`,
+  `{#260524-dashboard-workspace-root-prune-policy}`.
+- **That one is stale.** Its backing ticket
+  `260524-feat-ws-dashboard-workspace-root-prune-policy` is in `.done/`. Per
+  `documentation-system.md:240` the marker should have been stripped on
+  implementation. It was not. So 100% of real usage sits in the failure state the
+  mechanism exists to prevent, and nothing enforces stripping at close.
+- **Contract-first declarations across live tickets: 1 yes / 8 no.** The single
+  `yes` (`260722-feat-goal-run-autonomy-posture`) is in `todo/` and has produced
+  no marker.
+
+**Confound, stated so it is not lost:** adoption was measured over a period when
+the mechanism was unusable — the ordering cycle in
+`260726-bug-spec-planned-marker-ready-ticket-cycle` dead-ends anyone who tries
+contract-first. Low adoption therefore mixes "not wanted" with "not possible".
+The eight explicit `no` declarations are judge *choices* rather than mid-procedure
+failures, which favours "not wanted", but does not settle it.
+
+**Coverage shape, the structural finding.** `🚧` catches a ticket-vs-ticket
+collision only when *both* tickets chose contract-first. Since that is a
+per-ticket judge decision, coverage is the **square** of the adoption rate — at
+50% adoption it catches 25% of collisions. Any surface driven by `ready/`
+membership instead is linear. So the collision argument, taken seriously, is an
+argument against `🚧` as its implementation rather than for it.
+
+## Resolution direction (owner, 2026-07-26)
+
+The question was reframed from "keep vs retire `🚧`" to **"where does each bundled
+function belong"**, and the reviewer-role split settled it:
+
+| Bundled function | Home |
+|---|---|
+| Contradiction with existing spec text | **design reviewer** — extended to read the `## Spec Impact` target, not only `spec:` frontmatter |
+| Ticket-vs-ticket collision | **design reviewer** — scans `ready/` inventory `## Spec Impact` |
+| Contract-vocabulary forcing | unresolved; the only remaining question for `🚧` |
+
+Completeness was considered and **rejected on a hard constraint**: its prompt says
+"Read only the ticket file at the provided path; do not load linked docs, specs,
+or mental-model files." Corpus-wide checking there would delete the property that
+defines the role. Design already reads specs, mental models, and related tickets
+and carries the `right-problem check`, so this is a range extension, not a remit
+change.
+
+**Scan scope: `ready/` only** (owner decision). `todo/` and `idea/` are not
+committed to landing, and including them trades bounded cost for noise.
+
+**Landed inline, 2026-07-26** — the design-reviewer prose change shipped without
+its own ticket, as an additive contract that is valuable whether or not `🚧`
+survives. `wsrsrc` reads playbooks from the filesystem rather than `go:embed`, so
+it is live in-tree immediately; downstream distribution still needs the next
+plugin version bump to carry it.
+
 ## Topics
 
-### 1. What does `🚧` do that `## Spec Impact` cannot?
+### 1. Does contract-vocabulary forcing justify the mechanism on its own?
 
-Enumerate honestly, then test each claim against the corpus. Candidate answers:
-contradiction resolution in place (above); giving planned behavior a stable
-anchor other specs can reference; forcing the author to write the contract in the
-spec's own vocabulary rather than the ticket's. Whether any of these survives
-contact with actual usage is the crux.
+The only function not relocated above. The claim: writing planned behavior into
+the spec's own vocabulary, in place, produces better thinking than describing it
+in ticket prose. Two sub-questions: is the claim true, and if true is it worth a
+second management point plus an unstripped-marker failure mode that has already
+fired once out of one.
+
+Also still open: does `🚧` give planned behavior a stable anchor that other specs
+can cross-reference? Check whether any spec actually references a `🚧` anchor —
+with n=1 corpus-wide, likely no, but confirm rather than assume.
 
 ### 2. What is the real cost?
 
