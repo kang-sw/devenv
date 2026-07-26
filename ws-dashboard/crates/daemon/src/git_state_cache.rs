@@ -10,9 +10,9 @@
 //! deliberately its own type rather than a `ProbeSlots<GitCacheSlot>`
 //! instantiation - see `GitStateCache`'s doc comment for why.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::env;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::discovery::WatchKey;
@@ -20,20 +20,34 @@ use crate::git_toolbar::{GitBranchEntry, GitChangeSummary, GitSyncSummary};
 
 const DEFAULT_GIT_CACHE_TTL_MS: u64 = 2000;
 
+static GIT_CACHE_TTL: OnceLock<Duration> = OnceLock::new();
+
 /// TTL for a warm `GitStateCache` slot under a stable epoch, read from
-/// `WS_DASHBOARD_GIT_CACHE_TTL_MS` (default 2000ms, modeled on
-/// `discovery::git_probe_ttl_from_env`). At the frontend's 5s poll interval
+/// `WS_DASHBOARD_GIT_CACHE_TTL_MS` (default 2000ms) once per process and
+/// cached in a `OnceLock`, matching `git_exec::git_timeout_from_env`'s
+/// pattern exactly (R4, Phase 3 review adjudication - the prior per-request
+/// `env::var` read diverged from that precedent while claiming to follow it).
+/// That in turn mirrors `discovery::git_probe_ttl_from_env`, which is read
+/// once into `GitProbeCache::default`. At the frontend's 5s poll interval
 /// every steady-state tick still misses this TTL by design (Phase 3 D6): with
 /// no watcher yet, a short ceiling is what keeps stale git state from being
 /// served. This phase's spawn reduction comes from intra-tick de-duplication
 /// (D1) and single-flight burst coalescing (D2), not from TTL hits; the
 /// TTL-driven win arrives only with Phase 4's armed, much longer ceiling.
+///
+/// The TTL itself stays a per-call `Duration` parameter on
+/// `GitStateCache::worktree`/`refs` (not a field on `GitStateCache`): that is
+/// the injection surface Phase 4's two TTLs (120s armed / 2s degraded) will
+/// select at the call site. This function only changes how the *default*
+/// value is read, not how it is threaded through.
 pub(crate) fn git_cache_ttl_from_env() -> Duration {
-    let millis = env::var("WS_DASHBOARD_GIT_CACHE_TTL_MS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_GIT_CACHE_TTL_MS);
-    Duration::from_millis(millis)
+    *GIT_CACHE_TTL.get_or_init(|| {
+        let millis = env::var("WS_DASHBOARD_GIT_CACHE_TTL_MS")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .unwrap_or(DEFAULT_GIT_CACHE_TTL_MS);
+        Duration::from_millis(millis)
+    })
 }
 
 /// Pluggable per-key mutation-epoch source for `GitStateCache`'s two
@@ -124,7 +138,12 @@ pub(crate) struct RefState {
     pub(crate) upstream: Option<String>,
     pub(crate) sync: GitSyncSummary,
     pub(crate) branch_list: Vec<GitBranchEntry>,
-    pub(crate) checked_out: BTreeSet<String>,
+    // R13 (Phase 3 review adjudication): a `checked_out: BTreeSet<String>`
+    // field was here, populated in `compute_ref_state` but never read off a
+    // `RefState`/`refs` value anywhere (`checked_out_branches(root, stats)`'s
+    // return is consumed locally, before being folded into each
+    // `GitBranchEntry.checked_out`). Deleted: dead cached state is stale-data
+    // surface no test can observe.
 }
 
 #[derive(Default)]
@@ -210,6 +229,30 @@ impl GitStateCache {
         let value = probe();
         guard.refs = Some((epoch, Instant::now(), value.clone()));
         value
+    }
+
+    /// Drop every cached slot for every root (R3, Phase 3 review
+    /// adjudication). Called from `git_worktree.rs`'s `git worktree add`/
+    /// `remove` handlers, alongside the pre-existing
+    /// `GitProbeCache::clear()` call there, for the same reason: this daemon
+    /// just changed the worktree/branch set outside the mutating
+    /// `git_toolbar.rs` routes (which invalidate via `EpochSource` bumps),
+    /// so the cached `worktree list --porcelain` (`checked_out`/
+    /// `disabledReason`) and `refs/heads` (`branch_list`) answers are stale.
+    ///
+    /// Repo-wide, not per-key: the epoch/slot is keyed per worktree path
+    /// (`WatchKey`), but `refs/heads` and `worktree list --porcelain` are
+    /// repository-wide, so a per-key clear would leave sibling worktrees'
+    /// cached `branch_list`/`checked_out` stale (carried forward to Phase 4,
+    /// which is where the refs axis should be keyed by common dir instead).
+    /// Also closes the slot map's unbounded growth (one entry per `WatchKey`
+    /// for the daemon's lifetime, with no prior eviction path), matching
+    /// `GitProbeCache`'s `evict`/`clear` pair.
+    pub(crate) fn clear(&self) {
+        self.slots
+            .lock()
+            .expect("git state cache slot map lock poisoned")
+            .clear();
     }
 }
 

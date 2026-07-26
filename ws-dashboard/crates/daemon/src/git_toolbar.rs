@@ -227,10 +227,20 @@ pub async fn git_switch_branch(
             GitFailureExpectation::Unexpected,
         ) {
             Ok(()) => {
-                // A user-initiated switch is never TTL-delayed: bump the
-                // refs epoch before the now-cache-aware status read below, so
-                // that read misses the (now-stale) cached refs slot.
-                epoch_source.bump_refs(&watch_key(&context.root_path));
+                // A user-initiated switch is never TTL-delayed: bump BOTH
+                // axes before the now-cache-aware status read below, not just
+                // refs. `git switch` can change working-tree contents even
+                // when it succeeds tree-neutrally on its own args - e.g. a
+                // `.gitignore` difference between branches flips
+                // untracked/status output for files whose content never
+                // changed - so a refs-only bump can leave the worktree slot
+                // serving pre-switch `changes` for the rest of the TTL
+                // (Phase 3 review adjudication R1, overriding plan step 5:
+                // the plan's own rationale here claimed mutating routes are
+                // never TTL-delayed, which refs-only made false).
+                let key = watch_key(&context.root_path);
+                epoch_source.bump_refs(&key);
+                epoch_source.bump_worktree(&key);
                 Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
             }
             Err(_) => bounded_error(
@@ -296,8 +306,13 @@ pub async fn git_create_branch(
         match run_git(stats, &context.root_path, &args, GitFailureExpectation::Unexpected) {
             Ok(()) => {
                 // See git_switch_branch: never TTL-delay a user-initiated
-                // mutation.
-                epoch_source.bump_refs(&watch_key(&context.root_path));
+                // mutation, on either axis. `switch -c <new> <base>` (when a
+                // base was given) checks out a different tree entirely, and
+                // even the no-base form is subject to the same
+                // .gitignore-flips-untracked-output case as a plain switch.
+                let key = watch_key(&context.root_path);
+                epoch_source.bump_refs(&key);
+                epoch_source.bump_worktree(&key);
                 Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
             }
             Err(_) => bounded_error(
@@ -378,15 +393,21 @@ async fn mutate_no_body(
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
-        match run_git(stats, &context.root_path, args, GitFailureExpectation::Unexpected) {
-            Ok(()) => {
-                let key = watch_key(&context.root_path);
-                epoch_source.bump_refs(&key);
-                if epoch_bump == EpochBump::RefsAndWorktree {
-                    epoch_source.bump_worktree(&key);
-                }
-                Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
-            }
+        let key = watch_key(&context.root_path);
+        let outcome = run_git(stats, &context.root_path, args, GitFailureExpectation::Unexpected);
+        // R2 (Phase 3 review adjudication): bump BEFORE matching on the
+        // result, not only in the Ok(()) arm. A command that ran at all may
+        // have already mutated refs even on a non-zero exit - e.g.
+        // `pull --ff-only`'s embedded `fetch` advances `refs/remotes/*`
+        // before the ff-only merge itself aborts - so the error response's
+        // own embedded status, and every read for the rest of the TTL, must
+        // see the post-attempt state, not a pre-attempt cached one.
+        epoch_source.bump_refs(&key);
+        if epoch_bump == EpochBump::RefsAndWorktree {
+            epoch_source.bump_worktree(&key);
+        }
+        match outcome {
+            Ok(()) => Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response(),
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 failure,
@@ -583,7 +604,6 @@ fn compute_ref_state(root: &Path, stats: &GitSpawnStats) -> RefState {
         upstream,
         sync,
         branch_list,
-        checked_out,
     }
 }
 
