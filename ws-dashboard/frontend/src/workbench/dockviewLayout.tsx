@@ -429,8 +429,16 @@ function DockviewWorkbenchTab({
       // handler existed the badge was unclearable - permanently so with a
       // single open pane. `onAcknowledgePane` performs no selection, so
       // firing it alongside `onSelectPane` on a genuine tab change is
-      // idempotent, not a double-select. The close button stops propagation,
-      // so closing a tab never routes through here.
+      // idempotent, not a double-select. The close button's own `onClick`
+      // stops propagation, so it does prevent the React `click` from ever
+      // reaching THIS handler - but it does not prevent activation: dockview
+      // binds a NATIVE `pointerdown` listener on `.dv-tab` that synchronously
+      // activates the panel on press, before React's synthetic `click` (and
+      // its `stopPropagation()`) runs at all. For `persistentTerminal` panes
+      // that native activation fires `acknowledgePaneAttention` via
+      // `onSelectPane` above, so pressing close on a never-activated,
+      // attention-bearing tab still acknowledges it first (260726 Correction
+      // 3/6).
       onClick={() => {
         params.onAcknowledgePane?.(params.paneId);
       }}

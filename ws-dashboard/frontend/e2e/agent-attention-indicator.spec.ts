@@ -458,12 +458,22 @@ function workspaceRow(page: Page, rootPath: string) {
 // helper would pass for the wrong reason. Both were measured to hold before
 // being pinned here (`aria-selected="false"` for a reload-restored tab, and
 // a pre-reload turn-state surviving the reload unacknowledged).
+//
+// `onTerminalId` is invoked immediately after `spawnTerminalInRoot` resolves,
+// before any of the risk-bearing steps below (reload, work-root reselect,
+// attribute assertions with 20s timeouts) run. This lets the caller stash the
+// id for `finally`-block cleanup right away, matching every other spawn in
+// this file where the id is captured directly off `spawnTerminalInRoot`'s
+// return before further risky steps run - if a later step here throws, the
+// caller still has the id and `forceCloseTerminals` will not skip a live
+// `terminal-helper` process.
 async function spawnRestoredNeverActivatedTerminal(
   page: Page,
   workRootId: string,
   rootPath: string,
   title: string,
   attention: "working" | "ready" | null,
+  onTerminalId: (terminalId: string) => void,
 ): Promise<string> {
   const terminalId = await spawnTerminalInRoot(
     page,
@@ -471,6 +481,7 @@ async function spawnRestoredNeverActivatedTerminal(
     attention ? "dummy-echo-hooked" : null,
     title,
   );
+  onTerminalId(terminalId);
   if (attention) {
     const token = readCallbackToken(terminalId);
     await postTurnState(terminalId, token, attention);
@@ -1272,24 +1283,30 @@ test("restored, never-activated terminal tab closes on its first x click", async
   let plainId = "";
   try {
     await test.step("PRIMARY/BINDING: badged, never-activated tab closes on first x click", async () => {
-      badgedId = await spawnRestoredNeverActivatedTerminal(
+      await spawnRestoredNeverActivatedTerminal(
         page,
         workRootId,
         workRoot,
         "Restored Badged Close",
         "ready",
+        (id) => {
+          badgedId = id;
+        },
       );
       await closeNeverActivatedTerminalByFirstClick(page, badgedId);
       await expect(terminalTab(page, badgedId)).toHaveCount(0);
     });
 
     await test.step("SECONDARY (D2): no-attention, never-activated tab also closes on first x click", async () => {
-      plainId = await spawnRestoredNeverActivatedTerminal(
+      await spawnRestoredNeverActivatedTerminal(
         page,
         workRootId,
         workRoot,
         "Restored Plain Close",
         null,
+        (id) => {
+          plainId = id;
+        },
       );
       await closeTerminalById(page, plainId);
       await expect(terminalTab(page, plainId)).toHaveCount(0);

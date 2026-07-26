@@ -1171,7 +1171,7 @@ not show mock or default panes when no live or user-opened surface exists.
 
 Tab lifecycle affordances stay live independently of Dockview parameter
 refresh timing and independently of whether the tab has ever been the active
-pane. A tab restored by a page refresh and never activated responds to its
+pane. A tab restored by a page refresh and never activated must respond to its
 close and acknowledge affordances on the first interaction, with no preceding
 tab-body click required. A tab's attention indicator must not change the tab's
 close-affordance geometry when it appears or clears, because the indicator can
