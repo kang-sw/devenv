@@ -111,6 +111,7 @@ impl LocalDashboardResourcesProvider {
         let mut workspaces = BTreeMap::<WorkspaceKey, WorkspaceBuilder>::new();
         let mut discovered_registry_roots = Vec::new();
         let mut pruned_work_root_ids = Vec::new();
+        let mut watch_reconcile_entries = Vec::new();
 
         for candidate in &self.candidates {
             let owner = discover_work_root(&candidate.path, &self.git_probes, &self.git_stats);
@@ -120,6 +121,7 @@ impl LocalDashboardResourcesProvider {
             } else {
                 Vec::new()
             };
+            watch_reconcile_entries.push(watch_reconcile_entry_for(&owner));
             let workspace = workspaces
                 .entry(workspace_key.clone())
                 .or_insert_with(|| WorkspaceBuilder::new(&self.server_id, workspace_key.clone()));
@@ -147,6 +149,7 @@ impl LocalDashboardResourcesProvider {
                         provenance: WorkRootProvenance::Discovered,
                     });
                 }
+                watch_reconcile_entries.push(watch_reconcile_entry_for(&linked));
                 workspace.push(linked, linked_activation, false);
             }
         }
@@ -168,6 +171,7 @@ impl LocalDashboardResourcesProvider {
             },
             discovered_registry_roots,
             pruned_work_root_ids,
+            watch_reconcile_entries,
         }
     }
 
@@ -200,6 +204,21 @@ pub struct DashboardResourcesSync {
     pub view: DashboardResourcesView,
     pub discovered_registry_roots: Vec<RegisteredWorkRoot>,
     pub pruned_work_root_ids: Vec<WorkRootId>,
+    /// One entry per root this call discovered (owner candidates and their
+    /// linked worktrees alike), built straight from the widened
+    /// [`DiscoveredWorkRoot`] fields at zero extra `git` spawn cost (ticket
+    /// step 7). `None` targets means "not a git root" - `reconcile` (a later
+    /// checkpoint) disarms/no-ops those the same way it does an absent root.
+    /// `resources::live_dashboard_resources_with_sync` feeds this straight
+    /// into `WatchRegistry::reconcile`.
+    // `#[allow(dead_code)]`: not yet read anywhere - the reconcile call site
+    // lands in a later checkpoint (ticket step 7). Scoped to this one field
+    // (not the whole module, unlike `work_root_watch.rs`'s build-out) since
+    // `discovery.rs` is otherwise fully wired; remove once
+    // `resources::live_dashboard_resources_with_sync` consumes it.
+    #[allow(dead_code)]
+    pub(crate) watch_reconcile_entries:
+        Vec<(WatchKey, Option<crate::work_root_watch::WatchTargets>, WorkRootAvailability)>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -362,6 +381,14 @@ struct DiscoveredWorkRoot {
     status: WorkRootStatus,
     availability: WorkRootAvailability,
     error: Option<String>,
+    /// `git_dir`/`common_dir` from the same memoized `GitDiscovery` probe
+    /// that already computed `kind` - `None` for a plain-directory or
+    /// unusable root. Phase 4's `reconcile` builds a
+    /// [`crate::work_root_watch::WatchTargets`] straight from these two
+    /// fields plus `path`, at the cost of zero additional `git` spawns
+    /// (ticket step 7).
+    git_dir: Option<PathBuf>,
+    common_dir: Option<PathBuf>,
 }
 
 fn discover_work_root(
@@ -453,6 +480,8 @@ fn discover_existing_dir(
             status: WorkRootStatus::Online,
             availability: WorkRootAvailability::Available,
             error: None,
+            git_dir: Some(git.git_dir.clone()),
+            common_dir: Some(git.common_dir.clone()),
         },
         None => DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
@@ -467,6 +496,8 @@ fn discover_existing_dir(
             status: WorkRootStatus::Online,
             availability: WorkRootAvailability::Available,
             error: None,
+            git_dir: None,
+            common_dir: None,
         },
     }
 }
@@ -490,6 +521,8 @@ fn discovered_unusable(
         status,
         availability,
         error: Some(error.to_owned()),
+        git_dir: None,
+        common_dir: None,
     }
 }
 
@@ -568,6 +601,25 @@ pub struct WatchKey(String);
 /// `GitProbeKey`'s normalization chain (see `normalized_probe_key`).
 pub(crate) fn watch_key(path: &Path) -> WatchKey {
     WatchKey(normalized_probe_key(path))
+}
+
+/// Build one `reconcile` input straight from a widened [`DiscoveredWorkRoot`],
+/// at no extra `git` spawn cost (ticket step 7). `None` targets for a
+/// plain-directory or unusable root; `reconcile` treats that the same as an
+/// absent root.
+fn watch_reconcile_entry_for(
+    discovered: &DiscoveredWorkRoot,
+) -> (WatchKey, Option<crate::work_root_watch::WatchTargets>, WorkRootAvailability) {
+    let key = watch_key(&discovered.path);
+    let targets = match (&discovered.git_dir, &discovered.common_dir) {
+        (Some(git_dir), Some(common_dir)) => Some(crate::work_root_watch::WatchTargets {
+            worktree: discovered.path.clone(),
+            git_dir: git_dir.clone(),
+            common_dir: common_dir.clone(),
+        }),
+        _ => None,
+    };
+    (key, targets, discovered.availability)
 }
 
 struct CachedProbe<T> {
@@ -767,6 +819,12 @@ fn git_probe_ttl_from_env() -> Duration {
 struct GitDiscovery {
     common_dir: PathBuf,
     worktree_dir: PathBuf,
+    /// `git rev-parse --git-dir`: equal to `common_dir` for a primary root,
+    /// or `common_dir/worktrees/<name>` for a linked worktree. Previously
+    /// parsed and discarded (used only to derive `kind` below); Phase 4
+    /// needs it verbatim to build a [`crate::work_root_watch::WatchTargets`]
+    /// without a second `git` spawn.
+    git_dir: PathBuf,
     kind: WorkRootKind,
 }
 
@@ -824,6 +882,7 @@ impl GitDiscovery {
         Some(Self {
             common_dir,
             worktree_dir,
+            git_dir,
             kind,
         })
     }
