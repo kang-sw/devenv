@@ -10,6 +10,7 @@ spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # Dashboard terminal tab close button is inert on a reload-restored tab until the tab is clicked once
@@ -440,6 +441,113 @@ invariant, which is true and asserted either way.
 - Route/helper tests are not sufficient on their own; if the fix lands in
   `dockviewLayoutModel.ts`, add or extend a `test:workbench` case for the
   predicate change as well, but the browser gate remains the closing evidence.
+
+### Result (fb0d5553) - 2026-07-27
+
+The defect reproduced, correction 6 is the confirmed mechanism, and the
+decision rule selected **F1**. Both discriminator lines, verbatim, measured in
+Chromium against unfixed source:
+
+```
+terminal=term_vid4b3ZC51hTD86RrL ariaSelectedBefore=false attentionBefore=ready
+  attentionAfter=none beforeX=574.0 duringX=563.0 shiftPx=-11.0
+  firstClickOpenedPopover=false secondClickOpenedPopover=true
+terminal=term_ybGFjUTodZPEWNfAb1 ariaSelectedBefore=false attentionBefore=none
+  attentionAfter=none beforeX=548.1 duringX=548.1 shiftPx=0.0
+  firstClickOpenedPopover=true secondClickOpenedPopover=false
+```
+
+- **Badged: reproduced.** First `×` swallowed, second opened the popover.
+- **Unbadged: did NOT reproduce.** First `×` opened the popover, zero shift.
+- `-11.0px` is exactly the 7px dot plus one 4px flex gap, so the geometry is
+  fully accounted for; there is no residual unexplained displacement.
+
+That is decision-rule case 1, so **F1** landed: `.workbench-tab-attention`
+becomes `position: absolute` against a now-`position: relative`
+`.dockview-workbench-tab`, placed as a corner badge on the leading icon. The
+span stays conditionally rendered, so the existing `toHaveCount(0)` cleared-state
+assertion remains valid and F1' was not needed. **D1** landed alongside it as
+the `closePane` stable `callbacksRef` forwarder. F3 did not land, so activation
+and acknowledgement semantics are unchanged for every surface kind, and the
+`×`-acknowledges-attention side effect the ticket told us not to pin still
+happens exactly as before. F4 never came into play.
+
+**Verification.** `npm run test:browser`: 6 passed, 1 failed, 1 not run. The
+sole failing site is `e2e/dashboard-acceptance.spec.ts:3779` (expected 120,
+received 47), the pre-existing failure owned by
+`260725-bug-dashboard-fitnow-short-viewport-shrink`; its serial sibling at
+`:4020` did not run as a consequence. All five
+`agent-attention-indicator.spec.ts` tests pass. `tsc -p
+tsconfig.e2e-tests.json --noEmit` exit 0.
+
+**Non-vacuity was proven, not assumed, and then re-proven independently.** With
+only the CSS hunk reverted, the new test fails at the geometry assertion
+(expected 583.9375, received 572.9375). The test reviewer re-ran that same
+revert-and-run independently and reproduced the identical failure, then restored
+the tree.
+
+**Deviations.**
+
+- The PRIMARY assertion uses a hand-orchestrated `page.mouse` gesture rather
+  than the plan's `closeTerminalById`. `Locator.click()` does not separate press
+  and release with a frame-synchronized wait, so it cannot observe - and would
+  not reliably reproduce - a mid-gesture geometry shift; a `.click()`-only test
+  would have passed against unfixed code. The SECONDARY assertion still uses
+  `closeTerminalById` verbatim.
+- The plan's `-g "Phase 1 discriminator"` filter cannot work: the spec file is
+  `mode: "serial"` and only its first test pairs the owner, so a filtered run
+  throws `ownerCookies not captured`. The whole file was run instead.
+- The discriminator demoted its preconditions to logged observations while
+  measuring, because a throw there would have destroyed the evidence it existed
+  to collect. Both were restored as assertions in the permanent test once
+  observed to hold.
+
+**Ticket text this phase found to be stale.** The `Build trap (must be obeyed)`
+bullet above is no longer accurate: it states `playwright.config.ts` declares no
+`globalSetup`, but `951b0f27` added one that rebuilds the production frontend on
+every Playwright invocation except two announced skip paths. The manual
+`npm run build` discipline it prescribes is superseded on the ordinary path. A
+residual the correction does not cover: `cargo build -p ws-dashboard-daemon`
+still lives only in the `test:browser` script, so a bare `npx playwright test`
+can still serve a stale daemon binary.
+
+**Left open, deliberately.** F1 closes the attention-indicator-driven reflow
+only. `TabsContainer.setActivePanel` still assigns `parentElement.scrollLeft` to
+reveal a partially-visible tab, so the same lost `click` can reproduce on an
+overflowing tab strip with no badge involved. This was verified in dockview
+source during review and has never been reproduced in a browser; this phase's
+assertions use too few terminals to overflow the strip, so their green result
+carries no information about it. Captured as
+`260727-bug-dashboard-tab-strip-scroll-swallows-close-click` (`idea/`) rather
+than folded in, because pre-selecting F3 for it would buy an unobserved defect
+with a cross-surface behavior change.
+
+#### Edition (f6eab3b5) - 2026-07-27
+
+Review remediation, three findings.
+
+- The new substrate-spec sentence read as achieved behavior rather than as a
+  requirement, which would have published coverage of the tab-strip-scroll path
+  that the fix does not provide. Raised independently by the correctness and fit
+  reviewers. The invariant is kept - this ticket's `## Spec Impact` asked for it
+  and a spec states what must hold - and is now normative (`responds` ->
+  `must respond`). The coverage claim lives in the acceptance-gate entry, which
+  both reviewers confirmed is scoped to exactly what the new assertions
+  establish; it was left untouched.
+- The comment beside the tab click handler in `dockviewLayout.tsx` asserted that
+  closing a tab "never routes through here" because the close button stops
+  propagation. Correction 3 of this ticket had already falsified that for
+  dockview's native `pointerdown`, and the fix had left it standing directly
+  beside the code whose behavior it mis-describes. Corrected.
+- `spawnRestoredNeverActivatedTerminal` returned its terminal id only after a
+  reload, a work-root reselect, and three 20s-timeout assertions - all running
+  after the daemon had created a live terminal. A throw anywhere in that tail
+  left the caller's id empty, `forceCloseTerminals`'s `filter(Boolean)` skipped
+  it, and a `terminal-helper` process leaked. The id now reaches the caller
+  through a callback fired the moment it exists.
+
+Re-verified after remediation: `tsc` exit 0, `npx playwright test
+e2e/agent-attention-indicator.spec.ts` 5 passed.
 
 ## Spec Impact
 
