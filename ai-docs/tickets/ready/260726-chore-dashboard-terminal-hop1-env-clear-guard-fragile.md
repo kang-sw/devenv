@@ -2,6 +2,8 @@
 title: hop-1 default-spawn env regression guard is fragile and platform-partial
 related:
   260725-feat-dashboard-pty-agent-attention-notification: found-during
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # hop-1 default-spawn env regression guard is fragile and platform-partial
@@ -122,8 +124,14 @@ assertion no longer reads a rendering of the decision, it reads the decision
 itself**. `assert_eq!(helper_env_plan(None, None, fixture), HelperEnvPlan::InheritHost)`
 compiles and runs identically on every target, depends on no std formatting,
 and cannot be silently defeated by an unrelated refactor of the built
-`Command`. It closes the fragility defect and the Windows defect with the
-same change, which is what the capture asked for.
+`Command`. It closes the fragility defect on every platform, which is what
+the capture asked for. **It does not close the Windows defect outright**: it
+gives Windows the same primary-guard coverage as unix for every
+plan-routed decision (Windows now runs the identical `assert_eq!` unix
+runs), but Windows gains no coverage for an `env_clear()` written directly
+into `build_helper_command` outside the plan-application site - that residual
+is platform-universal, not Windows-specific, and is named explicitly in
+Constraints below and in the surviving CONTRACT comment.
 
 **Resolved under goal-run posture (owner away, reversible local call):**
 keep a *hardened, self-validating* unix `Debug` check as a secondary
@@ -172,6 +180,23 @@ self-checking.
   off `command.is_some()`, exactly as the current branch does, and keeps the
   defensive `scrub.unwrap_or(&agent_env_profile::CLAUDE)` fallback
   (`terminal.rs:1326`) rather than panicking or skipping the scrub.
+- **One fallback resolution, shared by both consumers.** Today the single
+  `let scrub = scrub.unwrap_or(&CLAUDE);` binding at `terminal.rs:1326`
+  feeds BOTH the env scrub (`terminal.rs:1329`) and the `--scrub-marker`
+  argv loop that threads the same list to hop 2 (`terminal.rs:1337`,
+  CONTRACT C1). Moving the fallback entirely inside `helper_env_plan`
+  removes that shared binding from `build_helper_command` - the argv loop
+  would then have only the unresolved `Option<&EnvScrubProfile>` to read
+  `.markers` from, which does not compile on `None` and, if patched
+  independently (e.g. `if let Some(scrub) = scrub { ... }`), would silently
+  make hop 1 clear with the `CLAUDE` fallback while hop 2 receives zero
+  markers on the defensive `command=Some`/`scrub=None` path. The
+  implementation must resolve the fallback exactly once - either by keeping
+  the resolution in `build_helper_command` and passing the resolved
+  `&'static EnvScrubProfile` into `helper_env_plan`, or by having
+  `helper_env_plan` return the resolved profile alongside the plan - so the
+  argv loop and the env plan are provably reading the same resolved profile,
+  not two independently-defaulted ones.
 - **Known residual, must be named in code, not silently dropped.** An
   `env_clear()` added directly inside `build_helper_command` outside the
   single plan-application site is invisible to std's public API on every
@@ -225,8 +250,15 @@ dependency worth splitting.
 - `build_helper_command` computes the plan once and applies it at a single
   site; that site carries a CONTRACT comment recording (a) std's missing
   clear-flag introspection, (b) that the plan value — not the built
-  `Command` — is the guarded surface, and (c) the named residual from
-  Constraints.
+  `Command` — is the guarded surface, (c) the named residual from
+  Constraints, and (d) that `build_helper_command` still evaluates
+  `command.is_some()` twice - once in its own `if let Some((program, args))
+  = command` argv branch (unchanged, owns `--command`/`--command-arg`/
+  `--env-overlay`/`--scrub-marker`) and once inside the `match
+  helper_env_plan(command, scrub, host_env)` env site - and that both
+  branches are given the same `command` reference so they cannot diverge;
+  the comment must say this explicitly since no test asserts the two
+  branches agree with each other.
 - `helper_spawn_default_no_command_matches_existing_arg_shape` keeps its name
   (it still owns the default-path arg-shape assertions) and keeps its
   platform-neutral `get_envs()` assertion, but its `#[cfg(unix)]`
