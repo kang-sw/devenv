@@ -4527,10 +4527,15 @@ function WorkbenchShell({
   // freshly spawned agent that has not finished a turn). Adding the agent map
   // while leaving this one counting agents too would double-count the same
   // pane across this ticket and 260725-feat-dashboard-nav-row-two-line-open-state.
-  // Known gap, deliberately not papered over here:
-  // 260726-bug-dashboard-agent-profile-provenance-lost-on-restart means a
-  // daemon-restart-ADOPTED agent session comes back with `profileId: null` and
-  // therefore reverts to counting as a plain terminal.
+  // A daemon-restart-ADOPTED agent session normally keeps its `profileId` and
+  // so keeps counting as an agent: the daemon persists the spawn profile in a
+  // per-terminal sidecar and restores it during boot reconciliation
+  // (260726-bug-dashboard-agent-profile-provenance-lost-on-restart). It can
+  // still come back null when no readable sidecar survives to adopt time
+  // (spawned before the sidecar existed, no daemon state dir, a failed write,
+  // an unreadable file) - such a pane counts as a plain terminal, the pre-fix
+  // behavior. No frontend compensation is needed or wanted here - this
+  // predicate is a pure function of the one bit the daemon supplies.
   const nonAgentTerminalPanes = Object.values(terminalPanes).filter(
     (pane) => pane.session.profileId == null,
   );

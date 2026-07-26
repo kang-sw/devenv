@@ -10,6 +10,7 @@ related-mental-model:
   - ws-web-dashboard
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # Re-adopted agent terminals permanently lose profile provenance after a daemon restart
@@ -422,3 +423,90 @@ decision above).
   bug as live behavior.
 - Confirm the degrade paths: no `state_dir` and a failed sidecar write both
   leave spawn succeeding and adoption reporting `null`, exactly as today.
+
+### Result (6ae8f96b) - 2026-07-27
+
+A terminal spawned with any resolved profile now records its profile id in
+`<state_dir>/agent-profiles/<terminal_id>/profile.json` (0600, atomic
+temp-rename), and `reconcile_entry`'s adopt arm reads it back beside
+`recover_callback_token`, replacing the literal `None`. New module
+`agent_profile_store` (`write_profile`, `read_profile_id`, `profile_path`)
+reuses `agent_token_store::create_new_file_at_mode_0600` unchanged - a third
+instance of the existing pattern, not a new one. `recover_callback_token` still
+gates on the FILE `callback.json`, not the directory, which is what keeps a
+now-directory-owning hookless profile from being handed a credential.
+
+The pending-mark hoist landed as designed, with one correction to the ticket's
+own framing: the correct gate is `profile_id.is_some()`, not
+`hook_config.is_some()`. `resolve_create_command` returns `(None, _, None,
+None)` when no profile is named and errors on an unresolvable id before
+returning, so hook-config presence strictly implies profile presence but not
+the reverse (`dummy-echo` has `hook_config: None`). Exactly one production
+`mark_profile_pending` call site moved, from inside the hook branch to ahead of
+it; the three `clear_profile_pending` paths were already unconditional and were
+not touched.
+
+Deviations from the plan, all within ticket scope and confirmed so by the fit
+review: the ordering proof moved from a `routes.rs` timing poll to a lock-gated
+lib test in `terminal.rs` (an integration test cannot reach the private
+`pending_profile_ids`); two extra assertions on the hookless test pinning the
+never-merge-the-lanes decision; one extra test that a request naming no profile
+writes nothing; one comment-sweep site beyond the plan's list
+(`agent_callback.rs`, which asserted the token is recoverable "unlike
+`profile_id`"); and a `close_terminal_for_test` helper so the new tests do not
+leak a helper process.
+
+Verification:
+
+- Restart harness, shown NON-VACUOUS: with only the read side reverted, the new
+  assertion fails at `terminal_notify_callback_restart.rs:405` with `"profileId":
+  Null`; with the fix it passes.
+- Hookless spawn-side test is mutation-proven: reverting the gate to
+  `hook_config.is_some()` fails it with `hookless spawn must write
+  .../profile.json: No such file or directory`.
+- Ordering proof is lock-gated, not a timing poll: `mark_profile_pending` takes
+  the write lock on `pending_profile_ids`, so a test holding a read guard parks
+  the spawn task on that exact line and the sidecar write provably cannot have
+  landed. **It is not fully deterministic** - it pins where the task parks, not
+  when it got there, so the 750 ms window must stay generous enough for a
+  mis-ordered build to have written. A mis-ordered build does fail it at the
+  intended assertion. Review re-ran it 25 times (15 sequential, 10 concurrent):
+  all green, and confirmed the load-failure direction is a vacuous pass, never a
+  false fail.
+- lib 212 passed / 0 failed. `--test routes` 176 passed / 2 failed at exactly
+  the two known pre-existing sites (`routes.rs:1066`, `:1383`), matched by test
+  name. `agent_hook_missing_state_dir` passes unchanged with its literal
+  substring `"no persistent state directory resolved"` intact at `:215` - the
+  degrade warning was reworded and that substring deliberately preserved.
+- Comment sweep: 11 sites edited across `terminal.rs`, `agent_callback.rs`,
+  `App.tsx`, and `terminals.ts`. Final repo-wide grep of
+  `profile_id`/`profileId` under `crates/daemon/src` and `frontend/src`
+  reviewed by hand; no surviving comment describes the loss as live behavior.
+
+#### Edition (b5e70c32) - 2026-07-27
+
+Review remediation. The correctness and fit reviewers independently found that
+the new comments - and the spec sentence, which inherited the framing from this
+ticket's own `## Spec Impact` - enumerated the residual "reattaches without
+provenance" cases as exhaustive when four paths exist, not two: the ticket's
+two, plus a `write_profile` that fails at spawn and a sidecar that is missing
+or malformed at read time. Since this phase's `## Constraints` makes comment
+accuracy a deliverable, shipping a fresh instance of that defect class inside
+the sweep meant to remove it would have been self-defeating; the enumerations
+are now open, with the canonical list on the `TerminalSession::profile_id`
+field doc. Also: the ordering test's CONTRACT no longer presents its
+`pending_guard.is_empty()` assertion as observed evidence (it is entailed by
+holding the guard; `!profile_root.exists()` is the load-bearing one), an unused
+`Default` derive is gone, and the two new routes tests capture-close-assert so
+a failing assertion cannot leak a helper process on a machine where nothing is
+authorized to reap it.
+
+Mental-model entries landed separately in `ad3f771a`: the pending-mark gate
+rule, the lock-gated ordering-proof technique with its non-determinism limit,
+the unversioned-sidecar guardrail, and the `agent_hook_missing_state_dir.rs:215`
+literal-substring dependency.
+
+Accepted without change: the 750 ms ordering window's disclosed residual; the
+no-profile test having no discriminating mutation evidence of its own; the
+atomicity test not observing atomicity; the ordering test being `#[cfg(unix)]`
+only.

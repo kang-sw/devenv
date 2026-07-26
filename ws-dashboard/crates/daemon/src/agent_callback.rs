@@ -152,8 +152,11 @@ pub fn write_bound_base_url(state_dir: &Path, base_url: &str) -> io::Result<()> 
 /// Called twice over a terminal's lifetime: once at fresh spawn (fresh
 /// `base_url`, fresh `token`) and once more on boot-reconcile adopt, when a
 /// restart changes the daemon's bound port (fresh `base_url`, SAME `token` -
-/// see `terminal.rs`'s `reconcile_entry` adopt-arm CONTRACT on why the token
-/// is recoverable, unlike `profile_id`).
+/// see `terminal.rs`'s `recover_callback_token` CONTRACT on why the token is
+/// recoverable). Spawn-profile provenance is recovered on adopt too, but by
+/// its own separate file (`agent_profile_store.rs`'s `profile.json`) - the
+/// two must never be merged into this one, because a hookless profile has
+/// provenance and must still never be handed a credential.
 pub fn write_callback_target(
     profile_dir: &Path,
     base_url: &str,

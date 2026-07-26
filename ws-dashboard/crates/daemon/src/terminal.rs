@@ -163,7 +163,8 @@ pub struct TerminalRegistry {
     // concurrent-spawn GC race, does not merely shrink it): `sessions` only
     // gains a terminal's id at `insert`/`insert_unchecked`, which lands AFTER
     // `TerminalSession::spawn` has already created `agent-profiles/<id>/` on
-    // disk (token write, `callback.json` write) and completed a real process
+    // disk (`profile.json` write, and for a hooked profile the token and
+    // `callback.json` writes too) and completed a real process
     // spawn plus an IPC handshake - a real interval on the order of tens to
     // hundreds of milliseconds during which the directory exists but the id
     // is in neither `sessions` nor (before this field existed) anywhere the
@@ -345,6 +346,7 @@ impl TerminalRegistry {
                 let connected =
                     connected.expect("adopt rows are only reachable with a live connection");
                 let callback_token = self.recover_callback_token(&entry.terminal_id);
+                let profile_id = self.recover_profile_id(&entry.terminal_id);
                 let session = TerminalSession::from_connection(
                     entry.terminal_id.clone(),
                     WorkRootId::from(entry.work_root_id.clone()),
@@ -354,33 +356,35 @@ impl TerminalRegistry {
                     connected,
                     entry.columns,
                     entry.rows,
-                    // CONTRACT (260725 Phase 2, browser spawn profile):
-                    // `TerminalRegistryEntry` never carries a profile id
-                    // (hard constraint - see
-                    // `terminal_registry_file.rs::TerminalRegistryEntry`),
-                    // so a re-adopted session always reports
-                    // `profileId: null` even when the underlying process is
-                    // still running a resolved vendor profile (e.g.
-                    // `claude`). Unlike turn state (which self-corrects on
-                    // the next hook after adoption), profile provenance has
-                    // NO self-correction signal - nothing re-announces "I am
-                    // a claude-profile terminal" after adopt - so this is a
-                    // PERMANENT loss for this terminal's remaining lifetime,
-                    // not a transient one. Consequence for Phase 7: its
-                    // post-restart agent-terminal counter will UNDER-count
-                    // this terminal until it is closed and a fresh one is
-                    // spawned. Out of scope for Phase 2 (sniffing the
-                    // process's own argv via OS APIs would be a new
-                    // mechanism, not "extend the seam"); flagged for a
-                    // follow-up ticket, not fixed here.
+                    // CONTRACT (260726 profile-provenance fix): the profile
+                    // id is recovered from the daemon-owned sidecar
+                    // `agent-profiles/<terminal_id>/profile.json`, NOT from
+                    // `TerminalRegistryEntry` - that file is written by the
+                    // helper process (`terminal_helper_process.rs`) and still
+                    // carries no profile field (hard constraint, see
+                    // `terminal_registry_file.rs::TerminalRegistryEntry`).
+                    // The recovered id is echoed verbatim: this field is
+                    // provenance (what spawned this terminal), not a live
+                    // capability claim, so it is deliberately NOT re-resolved
+                    // through `agent_profile_registry::resolve` - doing so
+                    // would erase provenance for a still-running terminal the
+                    // moment its profile is renamed or retired.
                     //
-                    // CONTRACT (260725 Phase 4, callback token - NOT the same
-                    // shape as profile_id above): unlike profile provenance,
-                    // the callback token IS recoverable across a restart -
-                    // see `recover_callback_token`'s own CONTRACT for why. Do
-                    // not read the comment above as applying to the token
-                    // too; the two fields have opposite recoverability.
-                    None,
+                    // The recovery still yields `None` whenever no readable
+                    // sidecar survives to this point; the known ways to get
+                    // there are listed on `TerminalSession::profile_id`'s
+                    // CONTRACT (known cases, not a closed set). All of them
+                    // degrade to the pre-fix observable behavior
+                    // (`profileId: null`), never to a wrong id. See
+                    // `recover_profile_id`.
+                    //
+                    // CONTRACT (260725 Phase 4, callback token): recovered by
+                    // its own separate path from `terminal-tokens/` plus
+                    // `callback.json` - see `recover_callback_token`. The two
+                    // files stay separate on purpose (a hookless profile has
+                    // provenance but must never get a token); do not merge
+                    // the two recoveries into one file read.
+                    profile_id,
                     callback_token,
                 );
                 self.insert_unchecked(session);
@@ -400,17 +404,38 @@ impl TerminalRegistry {
         }
     }
 
-    // CONTRACT (260725 Phase 4): unlike `profile_id` (permanently lost on
-    // adopt - see the CONTRACT on `reconcile_entry`'s adopt arm above), the
-    // callback token IS recoverable: it was written once, at fresh spawn, to
+    // CONTRACT (260726 profile-provenance fix): reads back the sidecar
+    // `TerminalSession::spawn` wrote for ANY resolved profile - hooked or
+    // hookless - so a session re-adopted after a daemon restart reports the
+    // profile it was spawned with instead of `null`. Deliberately tolerant in
+    // both directions: no `state_dir` and a missing or malformed sidecar all
+    // return `None`, which is exactly the pre-fix observable behavior rather
+    // than a new failure mode. No re-validation against
+    // `agent_profile_registry::resolve` - see the adopt arm's CONTRACT for
+    // why the recorded id is echoed verbatim.
+    fn recover_profile_id(&self, terminal_id: &str) -> Option<String> {
+        let state_dir = self.state_dir.as_deref()?;
+        let profile_dir = state_dir.join("agent-profiles").join(terminal_id);
+        crate::agent_profile_store::read_profile_id(&profile_dir)
+    }
+
+    // CONTRACT (260725 Phase 4): the callback token is recovered by a
+    // DIFFERENT file from `profile_id`'s sidecar (`recover_profile_id`
+    // above), and the two must not be merged - the presence of
+    // `callback.json` is load-bearing on its own, below. The token was
+    // written once, at fresh spawn, to
     // `terminal-tokens/<terminal_id>.json` and never rotates for this
     // terminal's lifetime (one token per terminal, generated once, valid
     // until close - Design Answer 1). The presence of
     // `agent-profiles/<terminal_id>/callback.json` on disk is what
     // distinguishes "this terminal was spawned with hooks" (recover its
     // token, rewrite its callback target with the fresh `base_url`) from a
-    // plain shell terminal (no profile dir ever existed, `None` is not a
-    // loss - there was never a token to recover). An unresolved
+    // terminal that never had a token to recover, where `None` is not a loss:
+    // a plain shell (no profile dir at all) or a resolved HOOKLESS profile,
+    // which since the 260726 fix DOES have a profile dir holding
+    // `profile.json` but still, deliberately, no `callback.json` and no
+    // token. Testing for the file rather than the directory is what keeps
+    // those two apart. An unresolved
     // `state_dir` also falls through to `None`, same as the fresh-spawn
     // path's own degrade.
     fn recover_callback_token(&self, terminal_id: &str) -> Option<String> {
@@ -496,12 +521,13 @@ impl TerminalRegistry {
         ids
     }
 
-    // CONTRACT (260725 Phase 4 review cycle 1, finding A): called by
-    // `TerminalSession::spawn` BEFORE it creates `agent-profiles/<id>/` on
-    // disk (i.e. before the first `write_token`/`write_callback_target`
-    // call) - this ordering is what makes the id visible to
-    // `live_terminal_ids()` before the directory a sweep could race against
-    // even exists.
+    // CONTRACT (260725 Phase 4 review cycle 1, finding A; hoisted by the
+    // 260726 profile-provenance fix): called by `TerminalSession::spawn`
+    // BEFORE it creates `agent-profiles/<id>/` on disk - i.e. before the
+    // first `write_profile`/`write_token`/`write_callback_target` call, for
+    // ANY resolved profile rather than only a hooked one - and this ordering
+    // is what makes the id visible to `live_terminal_ids()` before the
+    // directory a sweep could race against even exists.
     fn mark_profile_pending(&self, terminal_id: &str) {
         self.pending_profile_ids
             .write()
@@ -774,16 +800,29 @@ pub struct TerminalSession {
     title: String,
     cwd_hint: Option<String>,
     created_at_ms: u64,
-    // CONTRACT (260725 Phase 2, browser spawn profile): provenance only -
-    // which registry profile (if any) produced this session. NOT persisted
-    // to `TerminalRegistryEntry` (hard constraint), so this does not survive
-    // a daemon restart; see `reconcile_entry`'s adopt-arm CONTRACT comment.
+    // CONTRACT (260725 Phase 2, browser spawn profile; 260726 restart
+    // provenance): provenance only - which registry profile (if any) produced
+    // this session. NOT persisted to `TerminalRegistryEntry` (hard
+    // constraint), but it DOES survive a daemon restart: it is written at
+    // spawn to the daemon-owned sidecar
+    // `agent-profiles/<terminal_id>/profile.json` and read back by
+    // `recover_profile_id` in `reconcile_entry`'s adopt arm. The general
+    // condition for `None` after adoption is "no readable sidecar at adopt
+    // time"; the known ways to reach it are a terminal spawned before the
+    // sidecar existed (no backfill, self-clears within one restart), a daemon
+    // with no resolvable `state_dir` (which wrote none at spawn), a
+    // `write_profile` that failed at spawn (logged as an error there, which
+    // already says the terminal will report a null profile id), and a sidecar
+    // missing or malformed at read time. Treat that as the known set, not a
+    // closed one; every case degrades to the pre-fix `profileId: null`.
     profile_id: Option<String>,
     // CONTRACT (260725 Phase 4): mirrors `profile_id`'s shape (provenance
-    // slot, not persisted to `TerminalRegistryEntry` - hard constraint), but
-    // NOT its recoverability: this IS recovered on boot-reconcile adopt
-    // (read back from `terminal-tokens/<terminal_id>.json`), unlike
-    // `profile_id`. `None` for a plain shell terminal (`hook_config: None`
+    // slot, not persisted to `TerminalRegistryEntry` - hard constraint) and,
+    // since the 260726 fix, its recoverability too - but through a DIFFERENT
+    // file: this one is read back from `terminal-tokens/<terminal_id>.json`
+    // gated on `callback.json`'s presence, not from `profile.json`. The two
+    // must stay separate: a hookless profile has provenance but must never be
+    // handed a credential. `None` for a plain shell terminal (`hook_config: None`
     // at spawn) or when token/callback materialization failed. The only
     // reader is `TerminalRegistry::remember_token`; this field itself is
     // never logged, never serialized (no `Serialize` derive reads it), and
@@ -828,10 +867,13 @@ pub struct TerminalSessionView {
     rows: u16,
     created_at_ms: u64,
     cwd_hint: Option<String>,
-    // CONTRACT (260725 Phase 2, browser spawn profile): read-only echo of
-    // which registry profile produced this session, `null` for the
-    // unchanged default-shell path and for any adopted (post-restart)
-    // session - see `TerminalSession::profile_id`'s CONTRACT.
+    // CONTRACT (260725 Phase 2, browser spawn profile; 260726 restart
+    // provenance): read-only echo of which registry profile produced this
+    // session, `null` for the unchanged default-shell path. An adopted
+    // (post-restart) session reports its spawn profile like any other, except
+    // when no readable sidecar survived to adopt time - see
+    // `TerminalSession::profile_id`'s CONTRACT for the known ways that
+    // happens.
     profile_id: Option<String>,
 }
 
@@ -1441,7 +1483,18 @@ impl TerminalSession {
         // filesystem access, deliberately kept that way).
         let mut command = command;
         let mut callback_token: Option<String> = None;
-        if let (Some(hook_config), Some((_, args))) = (hook_config, command.as_mut()) {
+        // CONTRACT (260726 profile-provenance fix, GATE IS LOAD-BEARING):
+        // this branch is gated on `profile_id.is_some()`, NOT
+        // `hook_config.is_some()`. `resolve_create_command` (this file) is
+        // the only producer of both values and returns `hook_config` only
+        // for a profile it already resolved, so `hook_config.is_some()`
+        // strictly implies `profile_id.is_some()` but not the reverse: a
+        // resolved HOOKLESS profile (`dummy-echo`, `hook_config: None`)
+        // reaches this line with a `Some` profile id and must still get a
+        // `profile.json` sidecar - that is the whole point of the fix.
+        // Widening the gate is therefore what makes the pending-mark hoist
+        // below mandatory rather than cosmetic.
+        if let Some(resolved_profile_id) = profile_id.as_deref() {
             // FIX (review cycle 1, finding E): a `None` state dir used to
             // fall back to `std::env::temp_dir()`, landing an EXECUTED
             // command line (`settings.json`'s hook `command` string) under
@@ -1465,8 +1518,9 @@ impl TerminalSession {
                     // LOAD-BEARING, closes the concurrent-spawn GC race):
                     // mark this id pending in the registry BEFORE the first
                     // byte of `agent-profiles/<id>/` is created below (the
-                    // upcoming `write_token`/`write_callback_target` calls
-                    // are exactly what `create_dir_all`s it). From this line
+                    // upcoming `write_profile`/`write_token`/
+                    // `write_callback_target` calls are exactly what
+                    // `create_dir_all`s it). From this line
                     // until either `insert`/`insert_unchecked` clears the
                     // mark (success) or one of this function's own later
                     // `?`/early-return failure paths clears it directly
@@ -1476,61 +1530,104 @@ impl TerminalSession {
                     // `pending_profile_ids`'s field doc on `TerminalRegistry`
                     // for the full argument that this brackets the race with
                     // no gap, unlike shrinking the sweep's snapshot window.
+                    //
+                    // CONTRACT (260726 profile-provenance fix, WHY THIS LINE
+                    // MOVED OUT OF THE HOOK-CONFIG BRANCH): this mark used to
+                    // live inside the nested `hook_config.is_some()` branch
+                    // below, which was sound only while that branch was the
+                    // ONLY creator of `agent-profiles/<id>/`. The sidecar
+                    // write below now creates that directory for a hookless
+                    // profile too, i.e. on a path the old mark did not cover,
+                    // so leaving the mark nested would reopen exactly the
+                    // concurrent-spawn GC race `pending_profile_ids` exists
+                    // to close. It must stay ahead of EVERY directory-creating
+                    // call in this block, hooked or hookless.
                     registry.mark_profile_pending(&id);
-                    // CONTRACT (260725 Phase 4, token generation and write
-                    // order - load-bearing): the token and `callback.json`
-                    // are written BEFORE `materialize_hook_config` below, so
-                    // the vendor `settings.json` this call produces always
-                    // points its `--callback` argv at a file that already
-                    // exists (even if empty/stale from a write failure) by
-                    // the time the spawned process can possibly fire a
-                    // hook. Generated once per fresh spawn, never rotated
-                    // (Design Answer 1) - `reconcile_entry`'s adopt arm
-                    // recovers this SAME token on restart rather than
-                    // regenerating it.
-                    let token = generate_callback_token();
-                    let write_result = crate::agent_token_store::write_token(state_dir, &id, &token)
-                        .and_then(|()| {
-                            crate::agent_callback::write_callback_target(
-                                &profile_dir,
-                                base_url,
-                                &id,
-                                &token,
-                            )
-                        });
-                    match write_result {
-                        Ok(()) => callback_token = Some(token),
-                        Err(error) => tracing::error!(
+                    // Provenance sidecar for ANY resolved profile (hooked or
+                    // hookless) - read back by `recover_profile_id` on
+                    // boot-reconcile adopt. A write failure degrades to a
+                    // logged error and the spawn continues: a terminal must
+                    // never fail to start over provenance metadata, and the
+                    // observable result of the degrade is exactly today's
+                    // pre-fix behavior (`profileId: null` after a restart).
+                    if let Err(error) =
+                        crate::agent_profile_store::write_profile(&profile_dir, resolved_profile_id)
+                    {
+                        tracing::error!(
                             terminal_id = %id,
                             %error,
-                            "failed to write callback token or target; turn-state hooks for \
-                             this terminal will not authenticate"
-                        ),
+                            "failed to write the spawn-profile provenance sidecar; this \
+                             terminal will report a null profile id if it is re-adopted after \
+                             a daemon restart"
+                        );
                     }
-
-                    let callback_path = crate::agent_callback::callback_path(&profile_dir);
-                    match crate::agent_hook_config::materialize_hook_config(
-                        &profile_dir,
-                        &hook_config,
-                        &default_helper_binary(),
-                        &callback_path,
-                    ) {
-                        Ok(settings_path) => {
-                            args.push("--settings".to_owned());
-                            args.push(settings_path.display().to_string());
+                    // Everything below is unchanged hook-config work, now
+                    // nested one level deeper: it stays gated on
+                    // `hook_config.is_some()` so a hookless profile still
+                    // mints no callback token and materializes no
+                    // `settings.json` - only the sidecar above is new for it.
+                    if let (Some(hook_config), Some((_, args))) = (hook_config, command.as_mut()) {
+                        // CONTRACT (260725 Phase 4, token generation and write
+                        // order - load-bearing): the token and `callback.json`
+                        // are written BEFORE `materialize_hook_config` below, so
+                        // the vendor `settings.json` this call produces always
+                        // points its `--callback` argv at a file that already
+                        // exists (even if empty/stale from a write failure) by
+                        // the time the spawned process can possibly fire a
+                        // hook. Generated once per fresh spawn, never rotated
+                        // (Design Answer 1) - `reconcile_entry`'s adopt arm
+                        // recovers this SAME token on restart rather than
+                        // regenerating it.
+                        let token = generate_callback_token();
+                        let write_result =
+                            crate::agent_token_store::write_token(state_dir, &id, &token).and_then(
+                                |()| {
+                                    crate::agent_callback::write_callback_target(
+                                        &profile_dir,
+                                        base_url,
+                                        &id,
+                                        &token,
+                                    )
+                                },
+                            );
+                        match write_result {
+                            Ok(()) => callback_token = Some(token),
+                            Err(error) => tracing::error!(
+                                terminal_id = %id,
+                                %error,
+                                "failed to write callback token or target; turn-state hooks for \
+                                 this terminal will not authenticate"
+                            ),
                         }
-                        Err(error) => tracing::error!(
-                            terminal_id = %id,
-                            %error,
-                            "failed to materialize agent hook config; spawning without hooks"
-                        ),
+
+                        let callback_path = crate::agent_callback::callback_path(&profile_dir);
+                        match crate::agent_hook_config::materialize_hook_config(
+                            &profile_dir,
+                            &hook_config,
+                            &default_helper_binary(),
+                            &callback_path,
+                        ) {
+                            Ok(settings_path) => {
+                                args.push("--settings".to_owned());
+                                args.push(settings_path.display().to_string());
+                            }
+                            Err(error) => tracing::error!(
+                                terminal_id = %id,
+                                %error,
+                                "failed to materialize agent hook config; spawning without hooks"
+                            ),
+                        }
                     }
                 }
+                // CONTRACT (`crates/daemon/tests/agent_hook_missing_state_dir.rs`
+                // asserts the literal substring "no persistent state directory
+                // resolved" against real daemon stdout): keep that phrase
+                // intact when rewording this warning.
                 None => tracing::warn!(
                     terminal_id = %id,
                     "no persistent state directory resolved; spawning without agent hooks \
-                     rather than materializing an executed command line under a predictable, \
-                     world-writable temp path"
+                     and without recording spawn-profile provenance, rather than materializing \
+                     an executed command line under a predictable, world-writable temp path"
                 ),
             }
         }
@@ -3059,6 +3156,156 @@ mod terminal_portability_skeleton_tests {
             "a write through the accessor's returned handle must be visible through the \
              registry's own internal handle"
         );
+    }
+
+    // CONTRACT (260726 profile-provenance fix, ORDERING PROOF for the hoisted
+    // `mark_profile_pending` - deliberately NOT a timing poll):
+    //
+    // What has to hold is that `spawn` marks the id pending BEFORE the first
+    // byte of `agent-profiles/<id>/` exists, now that a HOOKLESS profile
+    // (`dummy-echo`) creates that directory too. A poll that races the spawn
+    // and hopes to observe the in-between state proves little, so this test
+    // removes the race instead: `mark_profile_pending` takes the WRITE lock
+    // on `pending_profile_ids`, so a READ guard held by this test parks the
+    // spawn task ON that exact line. While parked it cannot execute a single
+    // statement past the mark - including `write_profile`.
+    //
+    // The single load-bearing assertion is `!profile_root.exists()`. Its
+    // premise is that the task has entered `spawn` (it signalled from inside
+    // itself, and everything between that signal and the mark is
+    // straight-line synchronous code with no `.await`, so it cannot be parked
+    // anywhere else) and is therefore parked on `mark_profile_pending`'s
+    // `.write()`, which cannot return while this test holds a read guard. A
+    // build that wrote the sidecar before marking would have written it from
+    // the same parked position, so the absent directory is what discriminates.
+    // Releasing the guard then lets the same spawn finish the write, so the
+    // negative half cannot be vacuous for want of a reachable write.
+    //
+    // The `pending_guard.is_empty()` assertion below is NOT independent
+    // evidence of ordering - it is entailed by holding the read guard, since
+    // no writer can publish into the set meanwhile. It is kept as a cheap
+    // tripwire: it fires only if some future refactor lets the pending mark
+    // become visible without taking that write lock, which is exactly the
+    // premise the paragraph above rests on.
+    //
+    // Honest residual: this pins WHERE the task is parked, not the wall-clock
+    // instant it got there, so the window below still has to be generous
+    // enough for a mis-ordered build to have performed its write. That is the
+    // one assumption left, and it is the assumption a mutation run checks.
+    //
+    // The helper binary is deliberately nonexistent: `spawn_detached` fails
+    // with ENOENT well AFTER the sidecar write, so no real helper process is
+    // ever created and this test asserts nothing about `spawn`'s return.
+    #[cfg(unix)]
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spawn_marks_the_profile_pending_before_writing_the_first_sidecar_byte() {
+        let unique = format!("{}-{}", std::process::id(), now_ms());
+        let base = std::env::temp_dir().join(format!("ws-dashboard-profile-pending-order-{unique}"));
+        let state_dir = base.join("state");
+        let registry_dir = base.join("terminals");
+        let root_path = base.join("root");
+        std::fs::create_dir_all(&root_path).expect("create work root fixture");
+
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(200),
+            Some(state_dir.clone()),
+            String::new(),
+        );
+        let profile_root = state_dir.join("agent-profiles");
+
+        let pending_guard = registry
+            .pending_profile_ids
+            .read()
+            .expect("terminal registry lock poisoned");
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+        let task_registry = registry.clone();
+        let task_registry_dir = registry_dir.clone();
+        let task_state_dir = state_dir.clone();
+        let task_root_path = root_path.clone();
+        let spawn_task = tokio::spawn(async move {
+            let (command, env_overlay, scrub, hook_config) =
+                resolve_create_command(Some("dummy-echo")).expect("dummy-echo must resolve");
+            assert!(
+                hook_config.is_none(),
+                "this test's whole point is the HOOKLESS path; dummy-echo must stay hookless"
+            );
+            started_tx
+                .send(())
+                .expect("ordering-proof start signal receiver alive");
+            let _ = TerminalSession::spawn(
+                &task_registry,
+                Path::new("/nonexistent-unused-helper-binary"),
+                &task_registry_dir,
+                Duration::from_millis(200),
+                Some(task_state_dir.as_path()),
+                "",
+                WorkRootId::from("root-ordering-proof".to_owned()),
+                task_root_path,
+                "Ordering proof".to_owned(),
+                80,
+                24,
+                None,
+                command,
+                env_overlay,
+                Some("dummy-echo".to_owned()),
+                scrub,
+                hook_config,
+            )
+            .await;
+        });
+
+        started_rx.await.expect("ordering-proof start signal");
+        tokio::time::sleep(Duration::from_millis(750)).await;
+
+        assert!(
+            pending_guard.is_empty(),
+            "the spawn task must still be parked ON mark_profile_pending's write lock; a \
+             non-empty set here would mean it got past the mark while this read guard is held, \
+             invalidating the rest of this proof"
+        );
+        assert!(
+            !profile_root.exists(),
+            "mark_profile_pending must run BEFORE the first byte of agent-profiles/<id>/ for a \
+             hookless profile - found {profile_root:?} while the mark itself is provably still \
+             blocked"
+        );
+
+        drop(pending_guard);
+        spawn_task.await.expect("ordering-proof spawn task");
+
+        // The negative half above is only meaningful if the write is reachable
+        // at all once the mark is unblocked.
+        let written: Vec<PathBuf> = std::fs::read_dir(&profile_root)
+            .expect("agent-profiles must exist once the mark is released")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .collect();
+        assert_eq!(
+            written.len(),
+            1,
+            "exactly one hookless profile directory must have been created: {written:?}"
+        );
+        assert_eq!(
+            crate::agent_profile_store::read_profile_id(&written[0]).as_deref(),
+            Some("dummy-echo")
+        );
+        assert!(
+            !written[0].join("callback.json").exists(),
+            "a hookless profile must never get a callback target"
+        );
+        assert!(
+            registry
+                .pending_profile_ids
+                .read()
+                .expect("terminal registry lock poisoned")
+                .is_empty(),
+            "spawn's own failure path must clear the pending mark it set"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 

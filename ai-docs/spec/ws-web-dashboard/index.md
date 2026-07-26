@@ -2133,9 +2133,18 @@ small daemon-side profile registry (spawn argv, env scrub list, hook config
 shape). An absent profile id keeps the default interactive-shell spawn
 unchanged, byte for byte, from a request that names no profile at all. The
 resolved profile — if any — is recorded read-only on the session for
-provenance, but that provenance does not survive a daemon restart: a session
-reattached during boot reconciliation is rebuilt from the on-disk terminal
-registry alone, which never carries a profile id.
+provenance, and that provenance survives a daemon restart: the daemon records
+the resolved profile id in daemon-owned per-terminal state at spawn time and
+restores it when boot reconciliation reattaches the session, so a reattached
+agent terminal keeps reporting the profile it was spawned with. The on-disk
+terminal registry still never carries a profile id — it is written by the
+helper process, not the daemon. A session reattaches without provenance
+whenever no readable per-terminal record survives to reattach time — cases
+include a terminal spawned before this behavior existed (there is no backfill),
+a daemon with no resolvable state directory, which records nothing at spawn, a
+record whose write failed at spawn, and a record missing or unreadable at
+restore time. Every such case reports no profile, which is the behavior before
+this provenance existed; none of them reports a different profile.
 {#260725-ws-web-dashboard-terminal-spawn-profile}
 
 Each helper records its identity — process id and process start-time — in a
