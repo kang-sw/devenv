@@ -227,11 +227,14 @@ reading of this host's actual `max_user_watches` (see Constraints).
   the frontend recomputes, and `git status` observes the new file. Only
   per-file-fidelity systems are hurt, and this one needs exactly "something under
   X changed."
-- **`notify` v8 with `default-features = false`** (avoids the
-  `crossbeam-channel` pull-in); forward the callback into a
-  `tokio::sync::mpsc`. Rejected `notify-debouncer-full`: it maintains a file-ID
-  cache sized to the watched tree and we need no rename correlation, only
-  "something under X changed."
+- **`notify` v8 with `default-features = false`**; forward the callback into a
+  `tokio::sync::mpsc`. Do **not** justify this as "avoids the `crossbeam-channel`
+  pull-in" — that reason is void: `crossbeam-channel` is already in `Cargo.lock`
+  via `tracing-appender`, a direct daemon dependency (`crates/daemon/Cargo.toml:27`,
+  used in `logging.rs`). The decision stands on keeping one channel type on the
+  event path rather than on dependency count. Rejected `notify-debouncer-full`: it
+  maintains a file-ID cache sized to the watched tree and we need no rename
+  correlation, only "something under X changed."
 - **gitoxide is out of scope and demoted.** Once invalidation is event-driven
   the number of git invocations collapses, so replacing the remaining few with
   an embedded implementation has little left to win.
@@ -257,6 +260,13 @@ reading of this host's actual `max_user_watches` (see Constraints).
 
   See Decisions for why this stays platform-split rather than being unified onto
   the per-directory path.
+
+  **Read both inotify limits, not just the watch count.**
+  `/proc/sys/fs/inotify/max_user_instances` is **128** on this host and is consumed
+  one per `notify` watcher instance; `max_user_watches` bounds descriptors within an
+  instance. Harmless at 9 roots with a single shared watcher, but the ticket's own
+  "never assume the host's limit" rule has to cover both, and it constrains any
+  future move to one watcher per repo.
 - **Measured directory counts (2026-07-26, this WSL2 host).** Gitignore pruning
   is a 15-19× reduction and lands at ~200 directories per repo:
 
@@ -322,6 +332,27 @@ reading of this host's actual `max_user_watches` (see Constraints).
   anything not known-good**, i.e. allowlist local filesystems rather than
   blocklisting known-bad ones — a blocklist silently mis-arms the next
   filesystem nobody thought of, and the failure is invisible.
+
+  **Allowlist membership, per platform — enumerate it here rather than leaving it
+  to be invented**, since this gate runs on every armed platform and an
+  over-conservative guess degrades every repo:
+  - **Linux:** resolve the mount via `/proc/self/mountinfo` and allow
+    `ext2|ext3|ext4|btrfs|xfs|f2fs|zfs|overlay|tmpfs`. `overlay` and `tmpfs` are
+    in deliberately — container roots and `TMPDIR`-backed test fixtures are local
+    VFS and do deliver events, and excluding them would fail Phase 4's own
+    integration tier on any host whose temp dir is not on a disk filesystem. Reject
+    everything else, notably `9p`/`drvfs` (WSL2 `/mnt/*`, verified `9p` on this
+    host), `nfs*`, `cifs`/`smb*`, `fuse*`, `sshfs`.
+  - **Windows:** this is the production host, so it needs the same gate, not an
+    exemption — a mapped network drive or a UNC work root has the identical
+    silent-and-armed failure. Use `GetDriveType` plus a `\\`-prefix check on the
+    resolved path: allow `DRIVE_FIXED` and `DRIVE_RAMDISK`; reject
+    `DRIVE_REMOTE`, `DRIVE_REMOVABLE`, `DRIVE_CDROM`, `DRIVE_UNKNOWN`, and any UNC
+    path. (`ReadDirectoryChangesW` can work over some SMB mounts but not
+    dependably, and "sometimes armed" is the state this rule exists to forbid.)
+  - **macOS:** `statfs.f_fstypename` in `{apfs, hfs}`; reject `nfs`, `smbfs`,
+    `webdav`, `osxfuse`/`macfuse`.
+  - Resolution failure ⇒ degrade, never assume local.
   `Degraded{"filesystem does not deliver events"}` puts the repo on the 2 s
   polling TTL, which is the correct answer for these mounts. Owner note
   (2026-07-26): opening a dashboard work root on a WSL `/mnt/` path is an
@@ -531,10 +562,24 @@ Estimated diff ~+260/−70 across 7 files.
   restart, which is exactly the class of live-registration change the sibling
   `260726-idea-dashboard-moved-workroot-red-with-no-recovery-affordance` is
   about. Eviction owner, stated because Phase 2 has no availability signal of its
-  own (the reconcile hook that carries availability arrives in Phase 4): in
-  Phase 2, **cache only `Some` results and always re-probe on `None`**, so the
-  not-yet-a-repo case is self-correcting and only the stable case is memoized.
-  Phase 4's reconcile then evicts on any non-`Available` transition. This kills
+  own (the reconcile hook that carries availability arrives in Phase 4): cache
+  `Some` under the normal TTL, and cache `None` under a **short negative TTL**
+  (`WS_DASHBOARD_GIT_IDENTITY_NEGATIVE_TTL_MS`, default 3000) so the
+  not-yet-a-repo case still self-corrects within one user-visible beat.
+  Phase 4's reconcile then evicts on any non-`Available` transition.
+
+  **A short negative TTL, not "always re-probe on `None`"** — an earlier revision
+  said the latter and it left the headline storm intact. `git_identity` returns
+  `None` for non-git roots, bare repos, and any repo whose common dir is not named
+  `.git`, so under always-re-probe a **plain-directory work root with the Activity
+  pane open sustains ~10-20 spawns/s indefinitely** through the 200 ms SSE loop
+  (`work_root_activity.rs:378` → `watch_snapshot_blocking` →
+  `resolve_work_root_state_dir` at `:486` → `git_identity`, 2 spawns) — the exact
+  number this bullet exists to remove, in one of the configurations it lists as
+  motivation. The `git init` argument above rules out a *permanent* negative
+  cache, not a 3 s one: three seconds is below the 3 s activity poll and far below
+  any human reaction time, so the self-correcting property survives intact while
+  the storm does not. This kills
   both the 3 s activity poll's 2 spawns/tick **and** the Activity SSE's ~20/s.
 - Add `discovery::watch_key`.
 
@@ -560,7 +605,12 @@ the steady-state spawn reduction from the `resolve_git_context` rewrite alone is
 **near zero**. What this phase actually buys:
 
 1. The `git_identity` memo — 0.67/s from the 3 s activity poll, plus ~20/s
-   whenever the Activity pane is open. This is the measurable win.
+   whenever the Activity pane is open. This is the measurable win, **and it only
+   materializes if `None` is cached under the short negative TTL**: the pane's
+   200 ms loop hits `git_identity` for every root, and `None` is what a
+   plain-directory or bare-repo root returns, so an always-re-probe policy would
+   leave the headline number untouched for exactly those roots. Verify with a
+   plain-directory root selected, not only a git one.
 2. Removal of the latency spike: a `/git/status` call that misses the probe TTL
    currently pays the whole `2N+W` fan-out inline before answering.
 3. The 409 correctness convergence above.
@@ -597,6 +647,14 @@ pub struct GitStateCache { slots: Arc<Mutex<HashMap<WatchKey, Arc<Mutex<GitCache
   `(&GitStateCache, &EpochSource, &Path)` and read/fill the two slot parts.
   `changes_for_path` stays a pure function so its four in-file tests keep
   working verbatim.
+- **Sample the epoch BEFORE invoking git, and stamp the slot with that sample.**
+  Reading it after `git status` returns absorbs any write that landed
+  mid-invocation into a slot stamped with the newer epoch, which then reads as
+  valid for the entire TTL. This is structurally the same hole the leading-only
+  debounce discussion in Phase 4 rejects, on the read side instead of the write
+  side, and the 120 s armed TTL makes it 60× more damaging than on the 2 s path.
+  A unit test must pin it: bump the epoch between the sample and the fill, then
+  assert the next read is a miss.
 - `EpochSource` is a trait with a `StaticZero` impl in this phase and the
   watcher impl in Phase 4 — so this phase is TTL-only and independently
   testable, and Phase 4 becomes purely "make the epoch real".
@@ -643,47 +701,81 @@ dev host as a matter of course.
 Implement in this order, because the first step is the correctness core and is
 fully testable without any I/O:
 
-1. **`classify(path, &ArmedRepo) -> Option<EpochKind>`** — pure function.
-   **Branch on "is this under `git_dir`/`common_dir`?" first**, then:
-   - *Not under a git dir* (the overwhelmingly common case): under an `IgnoreSet`
-     dir ⇒ ignore; `.gitignore` / `.git/info/exclude` ⇒ `Worktree` + mark the
-     ignore set stale; else ⇒ `Worktree`.
-   - *Under a git dir:* `objects|lfs|modules` ⇒ ignore; `*.lock` ⇒ ignore (git's
-     create-then-rename lock dance is pure noise, and `index.lock` churn is
-     exactly what `260711` was filed about);
-     `{HEAD,packed-refs,FETCH_HEAD,ORIG_HEAD}` or `refs/**` or `worktrees/**` ⇒
-     `Refs`; `index` ⇒ `Worktree`.
+1. **`classify(path, &ArmedRepo) -> Option<EpochKind>`** — pure function, in this
+   order:
+   1. **Ignore-set match ⇒ ignore.** First, because it is the hot path: recursive
+      registration delivers every gitignored-tree event on Windows (see
+      Constraints), so a `cargo build` sends order 10⁴-10⁵ paths through this
+      function and they all exit here, on one test. This is safe to put first
+      because `git status --ignored` never reports paths under `.git`, so no
+      git-internal path can match the ignore set.
+   2. **Explicit ignore-rule files ⇒ `Worktree`** + signal the ignore set stale:
+      any `.gitignore`, plus `common_dir/info/exclude`. **`info/exclude` must be
+      matched here, before the git-dir branch below**, or it is unreachable — it
+      lives at `$GIT_COMMON_DIR/info/exclude` by definition, so a git-dir-first
+      order routes it into the git chain where it matches nothing and is silently
+      dropped. On Linux this also means `common_dir/info/` must be added to the
+      registered git-internal targets in step 3; the previously specified set
+      (`common_dir` top level, `refs/**`, `worktrees/**`) never watches it.
+   3. **Under `git_dir` / `common_dir`:** `objects|lfs|modules` ⇒ ignore; `*.lock`
+      ⇒ ignore (git's create-then-rename lock dance is pure noise, and
+      `index.lock` churn is exactly what `260711` was filed about);
+      `{HEAD,packed-refs,FETCH_HEAD,ORIG_HEAD}` or `refs/**` or `worktrees/**` ⇒
+      `Refs`; `index` ⇒ `Worktree`; **anything else under a git dir ⇒ ignore** —
+      an explicit fallthrough, so `config`, `COMMIT_EDITMSG`, `hooks/`, and
+      `logs/` are decided rather than left to the reader.
+   4. **Otherwise ⇒ `Worktree`.**
+
+   **Ignore-set entries are path prefixes, and they are not all directories.**
+   Measured on this repo: of the 10 `!!` entries, **5 are files** —
+   `.claude/scheduled_tasks.lock`, `ai-docs/_index.local.md`,
+   `ai-docs/_install.local.sh`, `ai-docs/tickets/ready/.gitkeep-local`. Match
+   directory entries (trailing `/`) as prefixes and file entries as exact paths.
+   Treating the set as directories-only — which earlier wording did — leaves an
+   ignored file inside a tracked directory neither pruned nor filtered, so every
+   write to it bumps `Worktree` and buys a recompute. Two of those five files are
+   written by this workflow, so the daemon would recompute git status on its own
+   routine writes in its own repo.
 
    `classify` returns only a classification — it never spawns git and never
-   mutates the ignore set. The stale-marking case is handled by the pipeline in
-   step 5.
-
-   **This ordering is deliberate and load-bearing on Windows.** Recursive
-   registration delivers events for gitignored trees (see Constraints), so a
-   `cargo build` sends every `target/` write through this function — measured
-   scale: 16,531 files under `target/` and 17,817 under `frontend/node_modules/`
-   in this workspace, so order 10⁴-10⁵ events for a clean build. Checking the git
-   prefix first makes each of those exit in **two comparisons** (not under a git
-   dir → in the ignore set → ignore) instead of walking four git-specific checks
-   to reach the ignore-set test. Linux never sees these events at all because
-   ignored directories are not registered, so this is a Windows-shaped concern
-   living in shared code — do not "simplify" the order back.
+   mutates the ignore set. The stale signal is returned to the caller and handled
+   by the pipeline in step 5.
 2. **`IgnoreSet::derive(worktree)`** — one `git_exec::capture` with **`-unormal`**
    (see Constraints: `-uno` returns nothing), parse `!!` entries from `-z` output.
-   Entries arrive as collapsed directory prefixes, which suits both the Linux walk
-   and event filtering.
+   Keep the trailing-`/` distinction from the raw output: directory entries become
+   prefixes, file entries become exact matches (see step 1). Verified property the
+   walk depends on: `-unormal --ignored=matching` **does** report ignored
+   directories nested inside untracked directories (`!! untracked_dir/build/`), so
+   pruning will not miss those.
 3. **`plan_watch_set(worktree, git_dir, common_dir, &IgnoreSet) ->
    Result<Vec<PathBuf>, TooLarge>`** — the Linux walk, written as a pure function
-   over a fixture tree. Descend from `worktree`, prune any directory in the ignore
-   set and prune `git_dir` / `common_dir` from **registration** (not merely from
-   `classify` — see Constraints), then append the git-internal targets explicitly
-   (`common_dir` top level, `refs/**`, `worktrees/**`). Count as it goes and bail
-   with `TooLarge { found }` the moment the per-repo cap is crossed, so a
-   pathological monorepo costs a partial walk rather than a full one.
-4. **Arming.** Both paths share one pre-arm gate and one post-arm rule.
+   over a fixture tree. Descend from `worktree`, prune any directory matching the
+   ignore set and prune `git_dir` / `common_dir` from **registration** (not merely
+   from `classify` — see Constraints), then append the git-internal targets
+   explicitly: `common_dir` top level, **`common_dir/info/`** (required by step 1's
+   `info/exclude` rule), `refs/**`, `worktrees/**`. Count as it goes and bail with
+   `TooLarge { found }` the moment the per-repo cap is crossed, so a pathological
+   monorepo costs a partial walk rather than a full one.
+4. **Arming.** Both paths share the target-dedup rule, one pre-arm gate, and one
+   post-arm rule.
+   - **Dedup targets by `WatchKey`, then fan events out to every owning repo.**
+     A primary root and its linked worktrees **share one `common_dir`** — verified
+     in the measured topology itself: `/home/swkang/devenv` and
+     `/home/swkang/devenv/.worktree/ws-dashboard-dev`, the two repos in the
+     Constraints table, both report `/home/swkang/devenv/.git`. Registering it once
+     per root would deliver every shared-`.git` write N times on Windows and
+     double-count it against the Linux cap. Maintain one registration per distinct
+     target with a reverse index target → owning repos; an event bumps the
+     classified epoch for each owner.
    - **Windows/macOS:** `watch(target, RecursiveMode::Recursive)` for the worktree
      plus, for a linked worktree, `git_dir` and `common_dir` when they sit outside
-     it. Three calls, no walk, no cap.
+     it. No walk, no cap. **Note the volume this admits:** a recursive `common_dir`
+     registration covers the 256-way `objects/` fanout and packfiles, which the
+     event-cost sizing in Constraints does not include (it sizes only worktree-side
+     `target/` and `node_modules/`). Those events are dropped by `classify` step 3,
+     but they are the reason `objects|lfs|modules` exclusion stays first in the
+     git-dir arm, and the live-only measurement must cover a `git gc` / fetch as
+     well as a `cargo build`.
    - **Linux:** register every path from step 3 `NonRecursive`, all-or-nothing —
      on any registration error, unregister what was already added and report
      `Degraded`, because a half-armed repo reports `Armed` while missing changes.
@@ -701,13 +793,17 @@ fully testable without any I/O:
    one long-lived tokio task that maps each path through `classify` and bumps the
    resulting `EpochKind`s.
 
-   **No git command runs on this path.** A bump is an `AtomicU64` increment marking
-   a cache slot for recomputation; git runs only when a route is served, i.e. on the
-   frontend's existing poll. So an event burst of any size costs N atomic
-   increments and **zero** spawns, and the effective minimum interval between git
-   invocations is the poll cadence (5 s per root) with no additional throttle
-   needed. The floor is the status quo: a file changing continuously means every
-   poll recomputes, which is exactly today's behavior.
+   **At most one git spawn per 30 s per repo originates from this path**, and none
+   at all from an ordinary file event. A bump is an `AtomicU64` increment marking a
+   cache slot for recomputation; git runs when a route is served, i.e. on the
+   frontend's existing poll. So a burst of ordinary writes of any size costs N
+   atomic increments and **zero** spawns, and the effective minimum interval
+   between git invocations is the poll cadence (5 s per root) with no additional
+   throttle needed. The floor is the status quo: a file changing continuously means
+   every poll recomputes, which is exactly today's behavior. The single exception is
+   the rate-limited `IgnoreSet` re-derivation below — stated as an exception rather
+   than as "no git ever runs here", which an earlier revision claimed in bold six
+   paragraphs above its own counterexample.
 
    **Coalescing is leading + trailing, at most two bumps per kind per window** —
    `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS` default 100, window closing 100 ms after
@@ -742,6 +838,17 @@ fully testable without any I/O:
    `git status` itself reads the ignore rules fresh on every invocation and stays
    accurate throughout. That asymmetry is what makes a long re-derive interval
    safe.
+
+   **On Linux a new ignore set also changes the registration set, so specify that
+   path rather than implying it.** Re-derivation there is: compute the new set →
+   `plan_watch_set` again → if it returns `TooLarge`, disarm wholly and report
+   `Degraded{"watch set outgrew cap"}` → otherwise apply the diff (unregister paths
+   no longer planned, register newly planned ones) → bump both epochs, because the
+   filter changed and previously-suppressed paths may now be significant. A diff,
+   not a disarm-and-re-arm: re-arming would re-enter the 30 s arm-interval guard and
+   re-spawn `IgnoreSet::derive` for the set just computed. On Windows/macOS there is
+   no registration change — only the filter is swapped — so the same 30 s limit
+   bounds one spawn and nothing else.
 6. **Linux only — new directories register incrementally, re-checking the cap.**
    A `Create` event whose path is a directory, is not ignored, and is not under
    `git_dir`/`common_dir` ⇒ register it and increment the count; if that would
@@ -771,21 +878,36 @@ fully testable without any I/O:
    `remove_workspace`, and `git_worktree_remove_submit` instead of six separate
    hooks.
    **Two rules this hook must not get wrong:**
-   - **`Degraded` is sticky, and re-arm is backed off.** The arm condition is
-     `Unarmed`, never "not armed" — `Degraded` must not re-enter it, or a repo
-     that failed to arm gets re-armed every reconcile, i.e. every 5 s, each
-     attempt costing one `IgnoreSet::derive` spawn (plus a walk on Linux). That is a spawn
-     storm of exactly the shape this ticket exists to remove. Retry a `Degraded`
-     repo on an exponential backoff (start 60 s, cap 15 min) or on an explicit
-     availability transition, never on the reconcile cadence.
+   - **Arm attempts are rate-limited per repo regardless of why the repo is
+     unarmed.** Two separate guards, and the second is not optional:
+     - `Degraded` is sticky and retried on exponential backoff (start 60 s, cap
+       15 min). The arm condition is `Unarmed`, never "not armed" — `Degraded` must
+       not re-enter it.
+     - **A minimum 30 s interval between arm attempts per repo**, checked before
+       any arm work runs. This exists because the `Degraded` backoff alone does not
+       cover the availability path: `not Available ⇒ disarm` yields `Unarmed`,
+       which *is* the arm-eligible state, so a flapping root re-arms on every
+       reconcile tick with the backoff never consulted. Availability is recomputed
+       from deliberately-uncached `fs::metadata`/`read_dir` every 5 s
+       (`discovery.rs:336` CONTRACT), so a transient failure — or the rename cycle
+       Phase 4's own integration tier exercises — drives arm work at the reconcile
+       cadence. Each attempt costs one `IgnoreSet::derive` spawn (a
+       `git status --ignored=matching` over the whole tree, the same command Phase 1
+       warns can exceed the 64 KB pipe buffer) plus, on Linux, a
+       several-hundred-`read_dir` walk. That is the unbounded-rate anti-pattern this
+       ticket exists to remove, reachable through the one hook everything is routed
+       through — so the interval guard is load-bearing, not defensive.
    - **Arming never runs inline on the resources route.** `reconcile` computes the
      desired delta and hands arm/disarm work to the watcher task over the same
      channel the event pipeline uses. Arming inline would put an
      `IgnoreSet::derive` spawn and, on Linux, a several-hundred-`read_dir` walk on
      the 5 s poll handler — reintroducing the latency this ticket removes.
 8. **Wire the real `EpochSource`** into `GitStateCache`; select TTL from
-   `WatchHealth` (120 000 ms armed, 2 000 ms degraded/unarmed;
-   `WS_DASHBOARD_GIT_CACHE_TTL_MS` overrides the degraded value).
+   `WatchHealth` — 120 000 ms armed, 2 000 ms degraded/unarmed, with
+   `WS_DASHBOARD_GIT_CACHE_TTL_MS` overriding the degraded value and
+   **`WS_DASHBOARD_GIT_ARMED_TTL_MS` the armed one**. The armed ceiling is the
+   least-verified number in this ticket and it must not require
+   `WS_DASHBOARD_GIT_WATCH=off` — i.e. giving up watching entirely — to walk back.
 9. **Config:** `WS_DASHBOARD_GIT_WATCH=off|auto|force`,
    `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS`, and `WS_DASHBOARD_GIT_WATCH_MAX_DIRS`
    (default 1024, Linux-only effect). Semantics, stated because the plan left
@@ -820,9 +942,14 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
 
 - *Unit:* `classify` table test (~25 cases) covering `objects/` exclusion,
   `HEAD`/`refs/` inclusion, `index.lock` suppression, ignore-set membership, and
-  linked-worktree `git_dir` — including one case pinning that a path under an
-  ignored directory is rejected **without** consulting the git-specific checks, so
-  the branch order from Phase 4 step 1 cannot silently regress. Debounce coalescing
+  linked-worktree `git_dir`. Cases that pin the defects found in re-review, since
+  each was reachable from plausible-looking wording: `common_dir/info/exclude` ⇒
+  `Worktree` + stale signal (**not** dropped into the git-dir arm); an ignored
+  **file** inside a tracked directory ⇒ ignore (the set is not directories-only);
+  `common_dir/config` and `COMMIT_EDITMSG` ⇒ ignore via the explicit git-dir
+  fallthrough. Do **not** attempt to assert branch *order* — a pure function cannot
+  expose which branches ran, so order is pinned by outcomes above, not by
+  introspection. Debounce coalescing
   with an injected clock, asserting the leading+trailing shape specifically: one
   event ⇒ exactly **one** bump (leading only — no trailing bump when nothing
   followed it); two events inside one window ⇒ exactly **two**; a thousand events
@@ -848,8 +975,15 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   `target/` ⇒ **no** bump. **Burst containment, asserted against Phase 1's spawn
   counter:** write 1,000 tracked files without serving a request, then assert the
   spawn total is **unchanged** and one subsequent `/git/status` costs the normal
-  fixed number — the direct pin that an event burst never drives git from the
-  event path. Availability lifecycle: rename the root away ⇒
+  fixed number — the direct pin that an ordinary event burst never drives git from
+  the event path. Then the exception case, which the tracked-file burst does not
+  reach: rewrite `.gitignore` 50 times in a row and assert **at most one**
+  additional spawn, so the 30 s re-derive limit is pinned rather than described.
+  Availability flap: toggle a root unavailable/available 10 times across reconcile
+  ticks and assert arm attempts are bounded by the 30 s interval, not one per tick.
+  Shared `common_dir` dedup: register a primary root and a linked worktree, then
+  assert one `refs` write bumps **both** repos while the target is registered
+  **once**. Availability lifecycle: rename the root away ⇒
   reconcile disarms and bumps ⇒ status reports unavailable ⇒ rename back ⇒
   re-arms. Windows: worktree-remove while armed does not fail with a sharing
   violation (existing worktree-remove pins are the reference). All
@@ -876,7 +1010,10 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   which is the one estimate in Decisions that was never measured** — the claim is
   that 10⁴-10⁵ discarded `target/` events cost well under 1% against the build, so
   sample the watcher thread's CPU time across a build and record whether
-  `need_rescan()` fired and how often; and end-to-end perceived freshness, which
+  `need_rescan()` fired and how often — **and measure a `git gc` and a `git fetch`
+  too, not only a `cargo build`**, because the recursive `common_dir` registration
+  admits the whole `objects/` fanout and packfile churn, which the Constraints
+  sizing does not cover; and end-to-end perceived freshness, which
   per the `ws-web-dashboard` Domain Rules needs a browser-level assertion in
   `frontend/e2e/` for the toolbar chip updating after an external edit.
 
