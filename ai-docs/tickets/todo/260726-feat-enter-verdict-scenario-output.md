@@ -1,6 +1,6 @@
 ---
 title: "enter.* verdict output as an executable scenario — decision trace and per-axis prose fragments"
-sage-review-design: blocked
+sage-review-design: completed
 related:
   260627-feat-enter-implement-deterministic-verdict-engine: substrate; authored the current raw verdict format and the "no long explanatory prose in raw output" rule this ticket deliberately reverses
   260627-feat-enter-proceed-deterministic-verdict-engine: substrate; authored the proceed route vocabulary and its preservation constraint
@@ -64,7 +64,8 @@ returns a structured `route` label in a `<family>.<specific>` taxonomy
   this ticket and is explicitly not the same class of problem as
   `260630-bug-enter-implement-explicit-direct-edit-schema-undocumented`.
   Retaining the capability is separate from `lead-implement` continuing to
-  request it — see Constraints; the playbook stops requesting it in Phase 3.
+  request it — see Constraints; the playbook stops requesting it in Phase 3,
+  confirmed by the user 2026-07-26.
 - Model prose per axis, not per verdict tuple. Each enum value owns one authored
   fragment; the assembler owns ordering and connective tissue. Authoring a
   paragraph per verdict combination is rejected — the implement verdict spans
@@ -137,6 +138,10 @@ are broken deliberately in Phase 3 and preserved through Phases 1 and 2.
   retained for CLI-side testing; only the playbook's use of it is dropped. This
   is the change the original request asked for ("make the rendered prose prompt
   the default"), and it lands in Phase 3 with the scenario, not earlier.
+  **Confirmed by the user 2026-07-26** on the grounds that the output scenario
+  changes substantially enough to warrant it — this satisfies the `AGENTS.md`
+  ask-first requirement for an observable workflow change, which was the sole
+  blocker on this ticket's design posture.
 - `enter.proceed` is the only tool with a live text-reading caller today
   (`lead-proceed.md:29` passes no `format`). Any claim about improving what the
   implement lead actually reads depends on the playbook change above.
