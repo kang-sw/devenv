@@ -179,8 +179,9 @@ two-armed.
 A finding relayed twice with no won't-fix offered and still non-clean indicates
 the implementer cannot fix it, not that a defense is contested — so it never
 produces a `[maintained]` and never reaches the adjudicator. Handle it as a plain
-condition on the next relay: dispatch at an elevated tier. This keeps the
-adjudicator's job single-purpose. Rejected: widening the adjudicator's input to
+routing condition on the next relay: dispatch a distinct `implementer-elevated`
+delegate (Phase 4) rather than elevating `implementer-relay`'s tier. This keeps
+the adjudicator's job single-purpose. Rejected: widening the adjudicator's input to
 "all unresolved findings after cycle 2" and adding a `[capacity]` verdict, which
 dilutes judging-a-defense into judging-everything.
 
@@ -320,50 +321,33 @@ verdict's names 2; the fallback branch names 3; a `lead-only` verdict's names
 neither; `lead-implement.md` is byte-identical to its pre-phase state in both
 copies.
 
-### Phase 2: Root-cause escalation and capacity elevation
+### Phase 2: Root-cause escalation
 
-Depends on Phase 1 — both conditions qualify the budget it establishes. Text
-only, no new delegate, both appended to the same `partitioned:`/fallback review
+Depends on Phase 1 — the condition qualifies the budget it establishes. Text
+only, no new delegate, appended to the same `partitioned:`/fallback review
 Instruction.
 
-**Root-cause escalation.** Relaying a finding whose root cause matches an
-already-relayed finding is itself an escalation signal, independent of cycle
-count. This is the lead-side counterpart to `impl-playbook`'s repetition check,
-which cannot fire across stateless fresh-spawn relays. The observed run argues
-this condition is the load-bearing half and the count only the backstop.
+Relaying a finding whose root cause matches an already-relayed finding is itself
+an escalation signal, independent of cycle count. This is the lead-side
+counterpart to `impl-playbook`'s repetition check, which cannot fire across
+stateless fresh-spawn relays. The observed run argues this condition is the
+load-bearing half and the count only the backstop.
 
-**Capacity elevation.** A finding relayed twice with no won't-fix offered and
-still non-clean means the implementer cannot fix it rather than that a defense is
-contested. The next relay should run at a higher capability tier than
-`implementer-relay`'s declared `medium`.
+Capacity elevation is deliberately **not** in this phase. A condition whose
+dispatch target does not exist is inert text, and stating one would repeat this
+ticket's own defect class; it moves to Phase 4 with the delegate that answers it.
 
-> **Blocked on a mechanism decision — do not implement this half until it is
-> settled.** No live surface elevates a delegate's tier per dispatch.
-> `playbook.render` takes the tier strictly from front-matter
-> (`playbook_tools.go`, `recommendedTier := pb.Meta.Tier`) with no caller
-> override, `RoleModel` injection overwrites caller context for reserved names,
-> and spec `#260612-reviewer-allocation-tier-default` states that a delegate's
-> declared `tier:` makes the rendered `recommended-tier` authoritative. The three
-> candidate mechanisms are: (1) instruct the lead to deviate from dispatch
-> metadata for this case, (2) raise `implementer-relay`'s declared tier
-> unconditionally, (3) add a render-time tier override. Each needs a matching
-> spec amendment, and (3) changes MCP API semantics. Shipping the Instruction
-> text without picking one would state behavior the spec contradicts — the same
-> defect class this ticket exists to close. The root-cause half of this phase is
-> independent and may land first.
+Spec: this adds a stopping condition `#260612-reviewer-allocation-tier-default`
+does not describe. Amend the anchor with this phase.
 
 Verification boundary: the `partitioned:` and fallback Instructions state the
 root-cause condition and distinguish it from the numeric budget; `single` and
-`lead-only` state neither; no `{{` appears in any generated Instruction. The
-capacity half is verified only once its mechanism is chosen, and its boundary
-must include the behavior, not only the Instruction text — an Instruction that
-names an elevated tier no dispatch path honors would pass a text-only check while
-the behavior stays unreachable.
+`lead-only` state neither; no `{{` appears in any generated Instruction.
 
 ### Phase 3: Adjudicator delegate
 
-Depends on Phase 2 — the adjudicator resolves the disputes Phase 2's conditions
-surface.
+Depends on Phase 2 — the adjudicator resolves the disputes its condition
+surfaces.
 
 **New rsrc delegate** modeled on `ticket-reviewer-design`, `tier: large`,
 carrying the aperture constraint, the read table, and the three-verdict output
@@ -399,6 +383,57 @@ adjudicator prompt states the do-not-re-review-the-diff constraint and the three
 verdicts; the delegate prompt is self-contained under a fresh spawn with no prior
 conversation; the spec anchor no longer says "lead adjudication"; manifest and
 wsflow mirror tests pass without hand-edits.
+
+### Phase 4: Elevated implementer delegate and capacity escalation
+
+Depends on Phase 3 — same trigger surface, same regeneration pass, same
+delegate-prompt shape, and the pair only reads coherently once both last-resort
+roles exist. Sequenced last because it is the one arm the observed run does not
+evidence directly.
+
+**New rsrc delegate `implementer-elevated`**, declaring `tier: large` in its own
+front-matter. This is what makes capacity escalation implementable at all: no
+render-time tier override exists, and spec `#260612-reviewer-allocation-tier-default`
+makes a delegate's declared tier authoritative — so a separate delegate
+*satisfies* that sentence where a per-dispatch elevation of `implementer-relay`
+would contradict it. Rejected accordingly: instructing the lead to deviate from
+dispatch metadata, raising `implementer-relay`'s declared tier unconditionally
+(which is not conditional at all), and adding a render-time tier override (an MCP
+API-semantics change for a single case).
+
+**The prompt must differ in kind, not only in tier.** A tier-only copy would be
+near-duplicate prose — the debt `260630-epic-skill-playbook-diet` exists to
+reduce — and would not help: a larger model executing the same instruction
+executes the same failed approach more competently. What distinguishes it:
+
+- **Inputs** add the prior cycles' fix commits and dispositions — the record of
+  what was already attempted.
+- **Posture**: question whether the previous fixes addressed a symptom rather
+  than the cause, before writing another patch. Licensed to propose a different
+  approach inside the plan, and to escalate for a plan update when the right fix
+  is outside it.
+- **Output**: state what was attempted and why it failed even when it also fails,
+  so three cycles of evidence survive the handoff.
+
+**Capacity condition**, added to the `partitioned:`/fallback review Instruction:
+a finding relayed twice with no won't-fix offered and still non-clean routes the
+next relay to `implementer-elevated` instead of `implementer-relay`. No won't-fix
+means no defense is contested, so this is a capacity signal rather than an
+adjudication one — it is the third arm alongside Phase 3's two, and together they
+cover the three failure classes this ticket separates: wrong finding and scope
+deadlock to the adjudicator, failed approach here.
+
+Spec: amend `#260612-reviewer-allocation-tier-default` for the new delegate and
+its dispatch condition.
+
+Verification boundary: `playbook.render(name: "implementer-elevated")` returns
+`recommended-tier: large` with no caller override; its prompt differs from
+`implementer-relay` in inputs, posture, and output contract rather than only in
+front-matter; the capacity condition appears in the `partitioned:` and fallback
+Instructions and nowhere else; manifest and wsflow mirror tests pass without
+hand-edits. The behavior is verified by dispatching, not by reading Instruction
+text — a named tier that no dispatch path honors passes a text-only check, which
+is how the original cap was lost.
 
 ## Non-Goals
 
