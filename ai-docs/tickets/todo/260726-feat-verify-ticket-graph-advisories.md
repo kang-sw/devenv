@@ -25,9 +25,15 @@ The whole cross-file graph is parsed and then discarded.
 
 Two consequences observed on the live board (436 tickets scanned):
 
-1. **No closure nudge.** An epic whose children have all landed goes unnoticed.
-   `260723-epic-ticket-write-reshape` satisfies its own stated Completion
-   Criteria today and nothing surfaced that.
+1. **No closure nudge.** The last child of an epic landing is not distinguishable
+   from any other commit, so an epic that has become closable goes unnoticed.
+   `260723-epic-ticket-write-reshape` is closable today and nothing surfaced it.
+   Note that a naive "all children closed" trigger would *still* miss that epic:
+   one child (`260723-feat-ready-spec-address-hard-gate`) sits in `idea/` and its
+   Completion Criteria explicitly permit closure with that child deferred. This is
+   why the ACTION line has two tiers (see **Ancestor walk**), and why the general
+   deferred-child case stays out of reach — deciding it requires reading
+   `## Completion Criteria`, which **No epic-body checks** rules out by decision.
 2. **Reference drift is invisible.** An unresolvable `parent:` or `related:` stem,
    a `parent:` cycle, and a `parent:` pointing at a non-epic all pass verify
    silently. All are currently at zero on the live board — the intended steady
@@ -89,7 +95,7 @@ identical; only the commit-path presentation adds the recipe.
 | Output | Fires when |
 |---|---|
 | Integrity checks (`FIX:`/`CHECK:` reference resolution) | always |
-| Board-block ACTION line (ancestor whose children have all closed) | always |
+| Board-block ACTION line (both tiers) and the ancestor-already-closed NOTE | always |
 | Board-block sibling listing (`N of M open` plus the list) | only when a verified path sits under `.done/` or `.dropped/` |
 
 Verify runs on every ticket-touching commit, far more often than a close. The
@@ -110,13 +116,21 @@ with `260724-bug-ws-git-commit-verify-fails-on-staged-rename`.
 authority for the child edge set, and the epic body is not consulted at all — see
 **No epic-body checks** below for why every body-reading candidate was rejected.
 
-**Stem resolution spans two namespaces.** A `related:` or `parent:` key resolves
+**Two-namespace resolution applies to `related:` only.** A `related:` key resolves
 against ticket stems **union spec anchor stems** (`{#YYMMDD-slug}` in
 `ai-docs/spec/`). Measured: of 10 `related:` keys that are not ticket stems, 4 are
 spec anchors — `260513-harness-local-agent-tier-config` in three tickets and
-`260505-lead-skill-namespace-surface` in one. Pointing a ticket's `related:` at a
-spec anchor is an established repeated pattern, so resolving against tickets only
-would emit false `FIX:` advisories against deliberate references.
+`260505-lead-skill-namespace-surface` in `.dropped/260525-bug-ws-setup-cwd-plugin-cache-root`.
+Pointing a ticket's `related:` at a spec anchor is an established repeated pattern,
+so resolving against tickets only would emit false `FIX:` advisories against
+deliberate references.
+
+**`parent:` resolves against ticket stems only.** A parent is walked as a graph
+node — the walk needs its status, its frontmatter, and its own child set, none of
+which a spec anchor has. Extending the union to `parent:` would create a case with
+no measured instance and no defined walk behavior, so a `parent:` naming a spec
+anchor is simply an unresolvable stem and reports as `FIX:`. The walk therefore
+never encounters a non-ticket node.
 
 The remaining 6 are genuinely unresolved (`260524-mcp-actor-setup-bootstrap` in
 four tickets, `260611-bug-rsrc-manifest-regen-missed` — a truncation of the real
@@ -130,14 +144,16 @@ must be synthetic rather than board-derived.
 
 | Check | Shape | Live hits |
 |---|---|---|
-| `parent:` names an unresolvable stem | `FIX:` | 0 |
-| `related:` key names an unresolvable stem | `FIX:` | 0 open (6 in `.done`/`.dropped`) |
-| `parent:` chain contains a cycle | `FIX:` | 0 |
+| `parent:` names a stem that is not a ticket | `FIX:` | 0 |
+| `related:` key names neither a ticket nor a spec anchor | `FIX:` | 0 open (6 in `.done`/`.dropped`) |
+| `parent:` chain contains a cycle | `CHECK:` | 0 |
 | `parent:` target is not an `epic` | `CHECK:` | 0 |
 | Ancestor board status (`N of M open`, or all-closed) | board block | n/a |
 
-"Unresolvable" means the stem is neither a ticket stem nor a spec anchor stem,
-per the two-namespace rule above.
+A cycle is `CHECK:` rather than `FIX:` because the remedy is not mechanical —
+which edge in the cycle is the wrong one is exactly a judgment call. When the walk
+hits a cycle it reports the cycle and emits **no** `## Parent Board` block for that
+ticket, since ancestor status is undefined on a cyclic chain.
 
 **Every integrity check currently has zero live hits.** That is the intended
 steady state for a compile-style guard, not evidence the checks are pointless —
@@ -216,9 +232,20 @@ what the note says.
 
 - Walk `parent:` upward from each verified ticket, unbounded depth, with a cycle
   guard. Current board maximum depth is 2.
-- An ancestor already in `.done/`/`.dropped/` emits a note, not an action: the
-  child closed after its parent, and the remedy is editing the parent's
-  `### Result`, never reopening it.
+- **The ACTION line has two tiers**, both status-only:
+  - *All children closed* — the plain closure nudge.
+  - *All children in `todo/`/`ready/` closed, only `idea/` children remain* —
+    conventions make `todo/` the accepted backlog, so an epic whose every accepted
+    child has landed is in a materially different state from one still in flight.
+    Measured: exactly one live instance, `260723-epic-ticket-write-reshape`, and
+    zero false fires — the other four open epics with children all have accepted
+    children open. This tier exists because the epic that motivated the feature
+    falls in it.
+- An ancestor already in `.done/`/`.dropped/` emits a note, not an action. The note
+  is worded path-neutrally: it states that the parent is already closed and that
+  the remedy is editing the parent's `### Result` rather than reopening it. It must
+  not assert *when* the child closed, because the same block renders on an ordinary
+  `todo/`-path commit where nothing closed at all.
 - The walk needs each ancestor's frontmatter and each ancestor's child set — the
   same graph load the integrity checks need, which is why board block and integrity
   checks are one implementation rather than two tickets.
@@ -252,7 +279,13 @@ Sibling listing is capped at 5 rows followed by an overflow line. Because rows a
 sorted by status, the cap can land mid-group and the hidden rows may span several
 statuses, so the overflow line always renders per-status counts in the same sort
 order rather than a single status: `... +3 more open (3 idea)`,
-`... +3 more open (1 todo, 2 idea)`. Completed children are never listed.
+`... +3 more open (1 todo, 2 idea)`.
+
+**Closed children render only in the all-closed tier.** In the sibling listing they
+are always omitted — the question there is what remains. In the all-closed tier the
+closed rows *are* the evidence a reader needs to judge closure, so they render and
+the closed sort order (`.done` -> `.dropped`) applies. In the `idea/`-only tier the
+closed rows render for the same reason, followed by the remaining `idea/` rows.
 
 Ancestors are labelled `Parent [N]:` by depth.
 
@@ -299,14 +332,30 @@ Ancestor already closed:
 ```
 Parent [1]: 260503-epic-agents-plugin-skill-porting [.done] - parent already closed
 
-  NOTE: This ticket closed after its parent. No action needed. If the parent's
-    `### Result` should mention this work, edit the parent's Result; do not reopen.
+  NOTE: This parent is already closed. No action needed. If its `### Result`
+    should mention this work, edit that Result; do not reopen the parent.
+```
+
+Only `idea/` children remain — the second ACTION tier:
+
+```
+Parent [1]: 260723-epic-ticket-write-reshape [todo] - 2 of 3 closed, 1 idea/ remaining
+    .done   | 260723-feat-ticket-write-verify-commit-gate
+    .done   | 260723-feat-ticket-system-concept-doc  (just now)
+    idea    | 260723-feat-ready-spec-address-hard-gate
+
+  ACTION: Every accepted child has landed; only idea/ children remain. Check
+    whether this epic can be closed - read its `## Completion Criteria`, which
+    may permit closure with the remaining children deferred.
 ```
 
 Multi-level chain:
 
 ```
-Parent [1]: 260624-epic-pre-release-cleanup [todo] - all 7 child tickets closed
+Parent [1]: 260624-epic-pre-release-cleanup [todo] - all 3 child tickets closed
+    .done   | 260622-bug-wsflow-launcher-coldload-divergence
+    .done   | 260622-chore-windows-shipping-hardening
+    .done   | 260624-feat-prefer-mercenary-hide-option  (just now)
 
   ACTION: Check whether this epic can be closed. Read its `## Completion
     Criteria` first.
@@ -326,13 +375,19 @@ FIX:   related: `260611-bug-rsrc-manifest-regen-missed` resolves to no ticket st
        `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`?
        Correct or remove the entry.
 
-CHECK: parent: `260619-epic-ws-layered-config-prompt-tuning` is category `epic`
-       but resolves to a spec anchor, not a ticket. Confirm the intended parent.
+CHECK: parent: `260619-epic-ws-layered-config-prompt-tuning` resolves to a ticket
+       whose category is `refactor`, not `epic`. A parent must be an epic; confirm
+       the intended parent.
 ```
 
 On the commit path only, an advisory carrying a mechanical remedy gets the recipe
 sentence appended: `Then git commit --amend --no-edit.` The standalone
 `ws/tickets.verify` output omits it.
+
+The standalone tool **does** render the `## Parent Board` block and the integrity
+advisories — same verdict, same advisories, minus the amend sentence. That is what
+makes it usable for a mid-edit board check, and it is the only difference the
+identical-verdict guarantee of `{#260723-tickets-verify-tool}` permits.
 
 ## Constraints
 
@@ -347,8 +402,15 @@ sentence appended: `Then git commit --amend --no-edit.` The standalone
   time there is nothing to amend. Advisories therefore ride `ws/git.commit`'s
   **response**, after the commit exists, which is what makes the amend recipe
   valid.
-- Cross-file checks resolve against frontmatter only. Prose lists are compared
-  against frontmatter but are never the source of truth.
+- Cross-file checks resolve against frontmatter and status directories only.
+- **A graph-load failure must degrade to silence, never to a commit veto.**
+  `verifyAdapter` returns `TicketVerify`'s Go error straight to `wsgit.Verifier`,
+  which vetoes the commit, and today that error path is caller-input-only
+  (`internal/wsdoc/tickets_verify.go:41`, "paths requires at least one path").
+  Phase 2 adds a whole-board load plus a spec-anchor scan, either of which can fail
+  on a malformed file unrelated to the commit. Such a failure drops the advisories
+  and lets the commit proceed; it never becomes an error return, or the
+  non-blocking invariant would be violated by the very code meant to honor it.
 - `ws/git.commit` has **two entry points** wired through the same adapter — the
   MCP dispatch (`internal/mcp/server.go:1076`) and the ws-cli path
   (`cmd/ws-mcp/main.go:496` via the exported `mcp.VerifyAdapter`,
@@ -429,10 +491,15 @@ guardrails start reaching the caller at the moment they matter.
 
 Widen the verify-to-commit channel so `ws/git.commit`'s response carries warning
 text alongside the commit result, without letting warnings affect `OK` and
-without importing `internal/wsdoc` into `wsgit`. Whether the `Verifier` signature
-grows an advisory return or `git.commit` collects advisories on a second path is
-an implementation choice; either is acceptable if the boundary and the
-non-blocking semantics hold.
+without importing `internal/wsdoc` into `wsgit`.
+
+**Advisories must arrive inside `wsgit.CommitResult`** (`internal/wsgit/git.go:434`),
+which means the `Verifier` boundary carries them. Both entry points render through
+an argument-free formatter — `formatGitCommit(result)` at
+`internal/mcp/server.go:1093` and `mcp.FormatGitCommit(result)` at
+`cmd/ws-mcp/main.go:509` — so anything collected outside the result struct is
+silently lost on the CLI path. Collecting advisories on a second path is therefore
+not an available option.
 
 Verification boundary: an existing warning class (`unresolved-phases` on close,
 or `spec-address` on a `ready/` ticket) appears in `ws/git.commit`'s response,
@@ -453,10 +520,13 @@ against.
 This is not a fallback — the board cannot verify this work. Every integrity check
 sits at zero live hits, and the board-block output is a function of counts that
 change with every ticket-landing commit. Coverage must include all four integrity
-checks, the board block in each of its four renderings (all-closed, siblings
-remain, cap applied, ancestor already closed), the two-namespace stem resolution,
-the ancestor dedup across a multi-ticket path list, the no-`parent:` case emitting
-no section, both caps, and the `todo/`-vs-`.done/` emission gating.
+checks, the board block in each of its five renderings (all closed, `idea/`-only
+remaining, siblings remain, cap applied, ancestor already closed), `related:`
+two-namespace resolution against a `parent:` that resolves to tickets only, the
+ancestor dedup across a multi-ticket path list, the no-`parent:` case emitting no
+section, cycle detection suppressing the board block, a graph-load failure
+degrading to silence with the commit still landing, both caps, and the
+`todo/`-vs-`.done/` emission gating.
 
 Three deliberate **negative** cases, each a false positive an earlier draft of this
 ticket would have emitted, are worth constructing as fixtures because each cost a
@@ -484,16 +554,28 @@ move with every landing commit.
 - **Any check that reads a ticket body.** Epic bodies stay format-flexible by
   decision; the four rejected body-reading candidates and their measurements are
   recorded under **No epic-body checks** so they are not re-derived.
-- **Epic convention prose.** The real lesson from `260630-epic-skill-playbook-diet`
-  is a convention gap, not a missing check: implementation detail must be extracted
-  to an implementation ticket, an epic stays a light board for one decomposed
-  outcome, and unsettled deliberation about an epic belongs in a research ticket
-  rather than the epic body. That is a `ticket-conventions` plus epic-template
-  change, which AGENTS.md puts behind explicit approval, and it is a separate
-  ticket. Supporting measurements to carry over: research is 3 of 93 children of
-  open epics, only 4 of 36 research tickets carry any `parent:`, and epic template
-  conformance is perfectly bimodal at 5 clean versus 2 with 6 and 2 non-template
-  sections.
+- **Epic convention prose — partly landed already; do not redo it.** The real
+  lesson from `260630-epic-skill-playbook-diet` is a convention gap, not a missing
+  check. Two of the three rules landed directly in `ticket-conventions.md` at
+  **`120e2b25`**: implementation detail moves to an implementation child ticket,
+  and deliberation that outgrows a settled decision line moves to a `research`
+  ticket. No ticket was opened for that half; it is recoverable from that commit.
+
+  Two pieces remain:
+  - The third rule — an epic stays a light board for one decomposed outcome — is
+    meaning rather than operation, so it belongs in the workflow manual's
+    **Ticket System Concepts**, not in the conventions doc. Unwritten. The manual
+    is loaded once per session, so it has a wider blast radius than the conventions
+    doc and was deliberately held back.
+  - `120e2b25` is **not shipped**. The conventions doc is `go:embed`'d into
+    `ws-mcp` and plugin-cache invalidation keys on the version string, so installed
+    caches serve the old text until `bump-ws-version.sh` runs.
+
+  Measurements not to re-derive: research is 3 of 93 children of open epics and only
+  4 of 36 research tickets carry any `parent:` — both normal, since a research
+  ticket is primarily a home for discussion with nowhere else to go and only
+  epic-scale discussion earns the link. Epic template conformance is perfectly
+  bimodal: 5 open epics with zero non-template sections, 2 with 6 and 2.
 - **`workset` retirement.** The category is slated for removal now that goal-loop
   batching over `ready/` absorbs its grouping role. Footprint measured for whoever
   picks it up: 5 workset tickets ever (4 `.done`, 1 open), against 5 playbooks,
