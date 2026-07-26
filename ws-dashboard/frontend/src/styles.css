@@ -4451,17 +4451,21 @@ button.git-status-segment:disabled {
    the preference.
 
    In each case the STATE stays legible and only the motion stops: the nav
-   overlay keeps its tint, the activity cue keeps its dot at full opacity
-   (`activity-cue-breathe` animates `transform`/`opacity`, so it needs an
-   explicit resting `transform` or it would keep the 0.85 scale of no frame at
-   all), and the git spinner simply stops rotating.
+   overlay keeps its tint, the activity cue keeps its dot visible, and the git
+   spinner simply stops rotating. The `transform`/`opacity` declarations on the
+   activity cue are REDUNDANT, not load-bearing (review cycle 2): once
+   `animation: none` applies no keyframe governs, so each property falls back
+   to its own cascaded value - `transform` to the base rule's absent (i.e.
+   `none`) value, `opacity` to the `1` the `[data-dirty="true"]` rule already
+   sets. They are spelled out only so the resting appearance is readable here
+   without cross-referencing :2345.
 
    Placement: this block must stay LAST in the file. `animation: none` here
-   competes at equal specificity with each rule it overrides
-   (`.git-spinner`, :4105, is (0,1,0) - the same as this block's own
-   `.git-spinner` selector), so it wins on source order alone. Moving it above
-   any of those declarations silently disables it for them. Any future
-   infinitely-animating rule belongs in this block too. */
+   competes at equal specificity with each rule it overrides - `.git-spinner`
+   (:4097-4098) is (0,1,0), the same as this block's own `.git-spinner`
+   selector - so it wins on source order alone. Moving it above any of those
+   declarations silently disables it for them. Any future infinitely-animating
+   rule belongs in this block too. */
 @media (prefers-reduced-motion: reduce) {
   .resource-row[data-row-attention="working"]::after,
   .resource-row[data-row-attention="ready"]::after,

@@ -202,9 +202,17 @@ export function countByRootKey<T>(
 // is a single nowrap ellipsis line in a ~225px-wide content box, and the full
 // two-part string measures ~313px there, so roughly the last quarter is
 // always clipped. Putting the agent numbers first spends the visible width on
-// this phase's information instead of truncating exactly it; the browser gate
-// measures the segment's right edge against the content box so this ordering
-// cannot silently regress.
+// this phase's information instead of truncating exactly it.
+//
+// How the browser gate holds that (stated precisely, review cycle 2 - an
+// earlier version of this comment credited the geometry guard with more than
+// it does): TWO separate assertions are load-bearing, neither sufficient
+// alone. The exact-text literals pin the ORDER - they spell out
+// "N agents: ... · N terminals, ..." and fail on any reorder. The Range
+// measurement pins the GEOMETRY - it measures the leading segment's right
+// edge against the content box. The guard measures whatever segment leads,
+// so it would happily pass on a reordered line by measuring the short
+// surfaces half; it is the literals, not the guard, that stop that.
 export function formatOpenSurfaceCounts(
   terminalCount: number,
   documentCount: number,

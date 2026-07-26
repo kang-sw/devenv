@@ -7594,13 +7594,19 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
 // state some visible descendant row is also showing.
 //
 // CONTRACT: this must select the same SET as `WorkspaceRows` below renders
-// with an `agentCounts` prop, and it is built from the same three primitives
-// that component uses (`compactWorkspaceWorkRoot`, `isWorkspaceNavChildWorkRoot`,
-// `applyHiddenWorktrees`) so the two cannot drift apart. The one step it
-// omits, `applySiblingOrder`, is a pure reordering and cannot change set
-// membership. The plain `workspace`-presentation row is deliberately absent:
-// per the nav ticket's Decision 4 it has no single rootKey and receives no
-// counts, so its base root must not contribute here either.
+// with an `agentCounts` prop, and it is built from the same primitives that
+// component uses (`compactWorkspaceWorkRoot`, `workspaceBaseWorkRoot`,
+// `isWorkspaceNavChildWorkRoot`, `applyHiddenWorktrees`) so the two cannot
+// drift apart. The one step it omits, `applySiblingOrder`, is a pure
+// reordering and cannot change set membership.
+//
+// The multi-root case includes the BASE root (review cycle 2): it has no row
+// of its own, but the `workspace`-presentation row stands in for it - that row
+// receives the base root's `agentCounts` and renders them as TONE ONLY, since
+// `ResourceRow` gates the count text (not the tone attribute) off
+// `presentation !== "workspace"`. Excluding it here would restore the
+// under-flash where an agent finishing a turn in the primary root of a repo
+// with linked worktrees raised no nav signal anywhere.
 function navAttentionWorkRootIds(
   workspace: WorkspaceView,
   hiddenIds: readonly string[] | undefined,
@@ -7609,10 +7615,14 @@ function navAttentionWorkRootIds(
   if (compactRoot) {
     return [compactRoot.id];
   }
-  return applyHiddenWorktrees(
-    workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
-    hiddenIds,
-  ).map((root) => root.id);
+  const baseRoot = workspaceBaseWorkRoot(workspace);
+  return [
+    ...(baseRoot ? [baseRoot.id] : []),
+    ...applyHiddenWorktrees(
+      workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+      hiddenIds,
+    ).map((root) => root.id),
+  ];
 }
 
 function WorkspaceRows({
@@ -7742,6 +7752,29 @@ function WorkspaceRows({
         isOpenWorkRoot={
           baseRoot != null &&
           openWorkRootKeys.has(serverScopedIdentity(serverId, baseRoot.id))
+        }
+        // 260725 Phase 7, review cycle 2: the workspace row is the ONLY nav
+        // representation of a multi-root workspace's BASE root - a first-class
+        // open root (it is what `closeWorkRootId`/`isOpenWorkRoot` above act
+        // on), but one with no row of its own. Passing its counts here gives
+        // that root a nav-level signal again; without it, an agent finishing a
+        // turn in the primary root of any repo with linked worktrees produced
+        // no row tone and no server tone at all, only the Phase 6 tab badge,
+        // which requires that root to already be selected to be seen. That
+        // under-flash is worse than the over-flash the roll-up narrowing
+        // removed: a silently missing badge beats an unattributable one only
+        // when the badge is genuinely not needed.
+        //
+        // This does NOT put a count line on a workspace row (Decision 4).
+        // `ResourceRow` gates the second line and `data-resource-open` off
+        // `showOpenSurfaceCounts = presentation !== "workspace"`, while
+        // `data-row-attention` is computed and emitted unconditionally - so
+        // this yields TONE WITHOUT COUNT TEXT, which honours Decision 4 and
+        // the pinned server-aggregation rule at the same time.
+        agentCounts={
+          baseRoot
+            ? agentAttentionByRoot[serverScopedIdentity(serverId, baseRoot.id)]
+            : undefined
         }
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}

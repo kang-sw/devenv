@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -70,6 +71,42 @@ function workRootDisplayName(rootPath: string) {
   return match ? match[0] : normalized;
 }
 
+// The linked worktree's directory name, which is also the label of the child
+// nav row the workspace renders beneath its own row.
+const NAV_BASE_WORKTREE_LABEL = "Nav-Base-Branch";
+
+// Builds the multi-root workspace the base-root tone gate needs. Mirrors
+// `dashboard-acceptance.spec.ts::initGitFixture` (:317) plus one linked
+// worktree. Discovery picks the worktree up on its own - the daemon runs
+// `git worktree list --porcelain` for every available candidate root
+// (`discovery.rs::git_worktree_paths`, called at :73) and folds the results
+// into the opening root's workspace - so this gate never has to drive the
+// worktree-creation modal.
+function initMultiRootGitFixture(rootPath: string) {
+  const run = (...args: string[]) =>
+    execFileSync("git", args, { cwd: rootPath, stdio: "ignore" });
+  run("init");
+  execFileSync("git", ["config", "user.email", "ws-dashboard@example.local"], {
+    cwd: rootPath,
+  });
+  execFileSync("git", ["config", "user.name", "ws dashboard"], {
+    cwd: rootPath,
+  });
+  writeFileSync(
+    path.join(rootPath, "README.md"),
+    "nav row base-root tone browser gate fixture\n",
+  );
+  run("add", "README.md");
+  run("commit", "-m", "seed");
+  run(
+    "worktree",
+    "add",
+    "-b",
+    "nav-base-branch",
+    path.join(".ws-dashboard", "worktrees", NAV_BASE_WORKTREE_LABEL),
+  );
+}
+
 // 260725 Phase 7 (nav-row agent counter) adds a SECOND `test(...)` to this
 // file rather than a third spec: every helper below (temp state home +
 // on-disk token read, the direct turn-state POST, the minimal open/select
@@ -93,6 +130,11 @@ let workRoot: string;
 // every Phase 7 terminal is spawned under root B so "a badge on a work root
 // that is not selected" is expressible by selecting root A.
 let workRootB: string;
+// Third fixture (Phase 7 review cycle 2): a git repo with one linked
+// worktree, so its workspace holds TWO work roots and therefore renders as a
+// `workspace`-presentation row with `workRoot` children - the only shape in
+// which a base root exists with no row of its own.
+let gitWorkRoot: string;
 let stateHome: string;
 let previousStateHome: string | undefined;
 // The daemon's owner pairing URL is ONE-TIME, so the second test cannot pair
@@ -116,6 +158,8 @@ test.beforeAll(async () => {
     path.join(workRootB, "readme.txt"),
     "nav row agent counter browser gate fixture\n",
   );
+  gitWorkRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-navbase-"));
+  initMultiRootGitFixture(gitWorkRoot);
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
   // DEVIATION from the plan's Codebase Findings (recorded deliberately): the
   // plan concluded the harness plumbs no state-dir override and that this
@@ -142,6 +186,7 @@ test.afterAll(async () => {
   }
   rmSync(workRoot, { recursive: true, force: true });
   rmSync(workRootB, { recursive: true, force: true });
+  rmSync(gitWorkRoot, { recursive: true, force: true });
   rmSync(stateHome, { recursive: true, force: true });
   if (previousStateHome === undefined) {
     delete process.env.WS_DASHBOARD_STATE_HOME;
@@ -378,12 +423,24 @@ async function spawnTerminalInRoot(
   return terminalId;
 }
 
-// The nav row for one work root. Both fixture roots are single-workRoot
+// The nav row for one work root. Fixture roots A and B are single-workRoot
 // workspaces, so each renders as one `compactWorkRoot` row - the
 // presentation that carries the reserved second line.
 function workRootRow(page: Page, rootPath: string) {
   return page
     .locator('.resource-row[data-resource-presentation="compactWorkRoot"]', {
+      hasText: workRootDisplayName(rootPath),
+    })
+    .first();
+}
+
+// The nav row a MULTI-root workspace renders for itself. Deliberately a
+// different presentation from `workRootRow`'s: this is the row that has no
+// second line at all, and it is the only nav representation of the
+// workspace's base root.
+function workspaceRow(page: Page, rootPath: string) {
+  return page
+    .locator('.resource-row[data-resource-presentation="workspace"]', {
       hasText: workRootDisplayName(rootPath),
     })
     .first();
@@ -694,8 +751,13 @@ test("nav row agent counter", async ({ page }) => {
       // What is asserted is not "nothing overflows" (the line legitimately
       // does) but "the overflow does not eat THIS phase's numbers": the right
       // edge of the agent segment must land inside the visible content box.
-      // Measured with a Range over the leading text, so it fails if the
-      // segments are reordered back.
+      //
+      // SCOPE (review cycle 2): this step pins GEOMETRY only. It measures
+      // whatever segment leads, so on a reordered line it would measure the
+      // short surfaces half and pass. What actually catches a reorder is the
+      // exact-text literal at the `no double count` step above, which spells
+      // the order out and fails first. Do not weaken those literals on the
+      // strength of this step.
       const overflowPx = await workRootRow(page, workRootB)
         .locator(".resource-row-counts")
         .evaluate((node) => {
@@ -823,5 +885,114 @@ test("nav row agent counter", async ({ page }) => {
       agentOneId,
       agentTwoId,
     ]);
+  }
+});
+
+// Review cycle 2, Important: the roll-up narrowing that landed in cycle 1
+// ("a server row carries only levels a visible row accounts for") silently
+// dropped the base root of every multi-root workspace, because that root has
+// no row of its own. An agent finishing a turn in the primary root of any
+// repo with linked worktrees then produced no nav signal at all. The fix
+// gives the workspace row the base root's counts and puts the base root back
+// into the server roll-up. Both halves are browser-visible, so both are
+// asserted here rather than at unit level.
+test("base-root agent tone on a multi-root workspace", async ({ page }) => {
+  await attachOwnerSession(page);
+  await openWorkRootMinimal(page, gitWorkRoot);
+
+  let agentId = "";
+  const wsRow = workspaceRow(page, gitWorkRoot);
+
+  try {
+    let agentToken = "";
+
+    await test.step("the fixture really is a multi-root workspace", async () => {
+      // Non-negotiable precondition: if this repo compacted to a single
+      // `compactWorkRoot` row, every assertion below would be about the wrong
+      // presentation and would pass for the wrong reason.
+      await expect(wsRow).toHaveCount(1);
+      await expect(
+        page.locator('.resource-row[data-resource-presentation="workRoot"]', {
+          hasText: NAV_BASE_WORKTREE_LABEL,
+        }),
+      ).toHaveCount(1);
+    });
+
+    await test.step("spawn one agent terminal into the BASE root", async () => {
+      const baseRootId = await resolveWorkRootId(page, gitWorkRoot);
+      agentId = await spawnTerminalInRoot(
+        page,
+        baseRootId,
+        "dummy-echo-hooked",
+        "Nav Base Agent",
+      );
+      agentToken = readCallbackToken(agentId);
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await selectWorkRootMinimal(page, gitWorkRoot);
+      await expect(terminalTab(page, agentId)).toHaveCount(1, {
+        timeout: 20_000,
+      });
+      await expect(wsRow).toHaveAttribute("data-row-attention", "none");
+      await expect(page.locator(".server-row").first()).toHaveAttribute(
+        "data-row-attention",
+        "none",
+      );
+      // No tab parking is needed the way the second test needs it: only a tab
+      // CLICK acknowledges (the first test in this file posts `working` and
+      // `ready` to an already-active, connected tab at :531/:549 and both
+      // land), and nothing between here and the assertions below clicks a tab.
+    });
+
+    await test.step("a ready turn in the base root tones the workspace row", async () => {
+      await postTurnState(agentId, agentToken, "ready");
+      await expect(wsRow).toHaveAttribute("data-row-attention", "ready", {
+        timeout: 20_000,
+      });
+    });
+
+    await test.step("...and still renders NO count text on that row", async () => {
+      // Decision 4 (the pinned rule): the second line belongs to work-root
+      // rows only. The fix passes counts to this row purely for its tone, and
+      // `ResourceRow` gates the count line on
+      // `showOpenSurfaceCounts = presentation !== "workspace"` - so the row
+      // must carry the attribute while having no `.resource-row-counts`
+      // element at all. Asserted in the SAME state as the tone above, so a
+      // regression that widened the count line onto workspace rows to obtain
+      // the tone cannot pass this gate.
+      await expect(wsRow.locator(".resource-row-counts")).toHaveCount(0);
+    });
+
+    await test.step("...and the server roll-up covers the base root again", async () => {
+      await expect(page.locator(".server-row").first()).toHaveAttribute(
+        "data-row-attention",
+        "ready",
+      );
+    });
+
+    await test.step("acknowledging that agent's tab clears the workspace row too", async () => {
+      // The derived-never-separately-dismissed rule, asserted on the row shape
+      // that has no second line: the workspace row's tone is raised and
+      // cleared entirely by its base root's agent terminals, with no nav-row
+      // action of any kind.
+      await terminalTab(page, agentId).click();
+      await expect(wsRow).toHaveAttribute("data-row-attention", "none", {
+        timeout: 20_000,
+      });
+      await expect(terminalTab(page, agentId)).toHaveCount(1);
+    });
+
+    await test.step("cleanup: close the agent terminal", async () => {
+      // ORDERING NOTE (observed, not assumed): the tab click in the step above
+      // is also what makes this close work. Against a tab that was restored by
+      // the reload and never clicked, the `×` click produced no confirmation
+      // popover and no close at all - the pane stayed running. Reported as a
+      // product surprise; this gate does not own that flow (tests 1 and 2
+      // cover the close popover), so it closes from a clicked tab.
+      await closeTerminalById(page, agentId);
+      await expect(terminalTab(page, agentId)).toHaveCount(0);
+    });
+  } finally {
+    await forceCloseTerminals(page, [agentId]);
   }
 });
