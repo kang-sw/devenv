@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260726-bug-dashboard-agent-profile-provenance-lost-on-restart` | ready | Re-adopted agent terminals permanently lose profile provenance (spawn-source badge, notification routing) after a daemon restart |
 | `260726-bug-dashboard-restored-tab-close-inert-until-activated` | ready | Terminal tab close button is inert on a reload-restored tab until the tab is clicked once |
 | `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry` | ready | `terminal-notify`'s deliberate silence has no expiry, no failure counter, and no reader anywhere |
 | `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` | ready | hop-1 default-spawn env-clear regression guard is fragile and platform-partial |
