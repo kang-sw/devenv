@@ -30,6 +30,7 @@ plans:
 related-mental-model:
   - ws-web-dashboard
 sage-review-completeness: completed
+completed: 2026-07-26
 ---
 
 # Replace interval-driven git polling with FS-watch-driven epoch invalidation
@@ -1600,3 +1601,8 @@ Phase 2 is a self-contained rewrite of one function.
   either way.
 - **Frontend scheduler changes.** The three timers stay exactly as they are;
   this ticket makes their ticks cheap rather than removing them.
+
+
+## Resolution (2026-07-26)
+
+All four phases landed: git-exec seam (`0c48065a`), per-root git context (`3b66441d`), result cache with a real `EpochSource` (`b8e4f89b`), and the `notify`-backed watcher wiring real epochs on every platform (`fcb69d9b`). Interval-driven git polling is replaced by FS-watch-driven epoch invalidation behind cached `/git/status`/`/git/branches`, with a 120s-armed/2s-degraded TTL as the missed-event safety net. Follow-up gaps split into `260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps` (idea), `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` (todo), and `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots` (idea).
