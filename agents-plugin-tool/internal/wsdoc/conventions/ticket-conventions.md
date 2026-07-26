@@ -35,6 +35,8 @@ See the workflow manual's **Ticket System Concepts** section for epic-vs-workset
 
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
+- Move implementation detail out of the epic body into an implementation child ticket; the epic body carries scope, cross-child invariants, and closure conditions only.
+- Move deliberation that outgrows a settled decision line out of the epic body into a `research` ticket and reference it; the epic body carries settled decisions only.
 
 ## Workset Tickets
 
