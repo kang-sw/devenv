@@ -266,12 +266,18 @@ mod tests {
         crate::discovery::watch_key(Path::new(path))
     }
 
+    /// R12 (Phase 3 review adjudication): split from a single combined
+    /// hit+expiry test into this hit-only leg plus
+    /// `worktree_slot_is_a_miss_once_a_short_ttl_elapses` below. A long TTL
+    /// removes the former 150ms hit-vs-expiry margin as a flakiness source -
+    /// this leg cannot spuriously miss on a loaded box the way a
+    /// short-margin hit could.
     #[test]
-    fn worktree_slot_is_a_ttl_hit_under_a_fixed_epoch_and_a_miss_once_ttl_elapses() {
+    fn worktree_slot_is_a_hit_under_a_fixed_epoch_within_a_long_ttl() {
         let cache = GitStateCache::default();
-        let k = key("/tmp/ws-dashboard-git-state-cache-ttl-fixture");
+        let k = key("/tmp/ws-dashboard-git-state-cache-ttl-hit-fixture");
         let calls = AtomicU64::new(0);
-        let ttl = Duration::from_millis(150);
+        let ttl = Duration::from_secs(60);
 
         let first = cache.worktree(&k, 0, ttl, || {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -296,9 +302,30 @@ mod tests {
             "must return the cached value, not re-probe"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 
-        std::thread::sleep(Duration::from_millis(200));
-        let third = cache.worktree(&k, 0, ttl, || {
+    /// See `worktree_slot_is_a_hit_under_a_fixed_epoch_within_a_long_ttl`'s
+    /// doc comment (R12). A short TTL plus a short sleep - a fraction of the
+    /// former combined test's 200ms - pins only the expiry boundary.
+    #[test]
+    fn worktree_slot_is_a_miss_once_a_short_ttl_elapses() {
+        let cache = GitStateCache::default();
+        let k = key("/tmp/ws-dashboard-git-state-cache-ttl-expiry-fixture");
+        let calls = AtomicU64::new(0);
+        let ttl = Duration::from_millis(20);
+
+        let first = cache.worktree(&k, 0, ttl, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            GitChangeSummary {
+                added_lines: 1,
+                ..Default::default()
+            }
+        });
+        assert_eq!(first.added_lines, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        std::thread::sleep(Duration::from_millis(40));
+        let second = cache.worktree(&k, 0, ttl, || {
             calls.fetch_add(1, Ordering::SeqCst);
             GitChangeSummary {
                 added_lines: 2,
@@ -306,18 +333,77 @@ mod tests {
             }
         });
         assert_eq!(
-            third.added_lines, 2,
+            second.added_lines, 2,
             "TTL elapsed under the same epoch must re-probe"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
-    /// Pins the epoch-sample-before-fill correctness requirement: a probe
-    /// closure that bumps the epoch mid-execution (simulating a concurrent
-    /// mutating route landing while this fill's `git` spawn is in flight)
-    /// must NOT poison the slot with the post-bump epoch. The slot is
-    /// stamped with the epoch sampled BEFORE the probe ran, so the very next
-    /// read - which samples the now-bumped epoch - is a miss and re-probes.
+    /// R5 (Phase 3 review adjudication), mirroring
+    /// `discovery::git_probe_memo_single_flights_concurrent_misses_for_one_key`:
+    /// two threads race into `GitStateCache::refs` for the same key at the
+    /// same epoch, the first probe sleeping to force an overlap window, and
+    /// only ONE probe call must be observed. This is the layer at which D2's
+    /// single-flight guarantee actually lives (the map lock in `slot_for` is
+    /// released before the per-key lock is taken, and the per-key lock is
+    /// held across `probe()`) - the integration test in `tests/routes.rs`
+    /// (`git_toolbar_status_and_branches_concurrent_cold_miss_share_one_refs_fill`)
+    /// pins D1 (the two routes share one refs fill) but is equally satisfied
+    /// by a purely serial execution, so it does not by itself discriminate
+    /// single-flight from an ordinary sequential TTL hit.
+    #[test]
+    fn refs_slot_single_flights_concurrent_misses_for_one_key() {
+        let cache = GitStateCache::default();
+        let k = key("/tmp/ws-dashboard-git-state-cache-single-flight-fixture");
+        let probes = Arc::new(AtomicU64::new(0));
+        let ttl = Duration::from_secs(60);
+
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let cache = cache.clone();
+                let k = k.clone();
+                let probes = Arc::clone(&probes);
+                std::thread::spawn(move || {
+                    cache.refs(&k, 0, ttl, || {
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(100));
+                        RefState {
+                            branch_name: Some("single-flight".to_owned()),
+                            ..Default::default()
+                        }
+                    })
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let value = handle.join().expect("refs probe thread");
+            assert_eq!(value.branch_name.as_deref(), Some("single-flight"));
+        }
+
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "concurrent misses for one key at one epoch must collapse into a single probe"
+        );
+    }
+
+    /// Pins the cache layer's stamp contract only: a probe closure that
+    /// bumps the epoch mid-execution (simulating a concurrent mutating route
+    /// landing while this fill's `git` spawn is in flight) must NOT poison
+    /// the slot with the post-bump epoch. The slot is stamped with the
+    /// epoch sampled BEFORE the probe ran, so the very next read - which
+    /// samples the now-bumped epoch - is a miss and re-probes.
+    ///
+    /// This does NOT pin D7's real requirement (`epoch_source.epochs(&key)`
+    /// must run once, before either fill closure, at the CALLER) - this test
+    /// samples the epoch itself and passes a plain `u64` in, and
+    /// `GitStateCache::refs` holds no `EpochSource`, so it is structurally
+    /// incapable of catching a caller that re-samples between the worktree
+    /// and refs fills. That caller-level property is pinned by
+    /// `status_for_path_samples_the_epoch_exactly_once`/
+    /// `branches_for_path_samples_the_epoch_exactly_once` in
+    /// `git_toolbar.rs` (R6, Phase 3 review adjudication).
     #[test]
     fn refs_fill_samples_the_epoch_before_the_probe_so_a_mid_fill_bump_forces_the_next_read_to_miss(
     ) {

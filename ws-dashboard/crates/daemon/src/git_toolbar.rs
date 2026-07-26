@@ -1015,4 +1015,69 @@ mod tests {
         fs::remove_file(&lock_path).ok();
         fs::remove_dir_all(&dir).ok();
     }
+
+    /// R6 (Phase 3 review adjudication): D7's real requirement -
+    /// `epoch_source.epochs(&key)` must run exactly once, before either fill
+    /// closure - lives here in `status_for_path`/`branches_for_path`, not in
+    /// `GitStateCache`, which holds no `EpochSource` and so is structurally
+    /// incapable of pinning it. A refactor that samples the refs epoch AFTER
+    /// `cache.worktree`'s fill (e.g. `cache.refs(&key,
+    /// epoch_source.epochs(&key).1, ...)`) would leave the whole existing
+    /// suite green; this spy catches exactly that by counting calls. One
+    /// call proves the epoch cannot have been re-sampled between the two
+    /// fills - the cheapest form that still discriminates the violation.
+    #[derive(Default)]
+    struct CountingEpochSource {
+        calls: AtomicU64,
+    }
+
+    impl EpochSource for CountingEpochSource {
+        fn epochs(&self, _key: &crate::discovery::WatchKey) -> (u64, u64) {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            (0, 0)
+        }
+
+        fn bump_worktree(&self, _key: &crate::discovery::WatchKey) {}
+
+        fn bump_refs(&self, _key: &crate::discovery::WatchKey) {}
+    }
+
+    #[test]
+    fn status_for_path_samples_the_epoch_exactly_once() {
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
+        let cache = GitStateCache::default();
+        let epoch_source = CountingEpochSource::default();
+
+        let _ = status_for_path(&cache, &epoch_source, &dir, &stats);
+
+        assert_eq!(
+            epoch_source.calls.load(Ordering::Relaxed),
+            1,
+            "status_for_path must sample epochs() exactly once, before either the \
+             worktree or refs fill runs (D7) - re-sampling between the two fills \
+             would leave this at 2"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn branches_for_path_samples_the_epoch_exactly_once() {
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
+        let cache = GitStateCache::default();
+        let epoch_source = CountingEpochSource::default();
+
+        let _ = branches_for_path(&cache, &epoch_source, &dir, &stats);
+
+        assert_eq!(
+            epoch_source.calls.load(Ordering::Relaxed),
+            1,
+            "branches_for_path must sample epochs() exactly once, before the refs \
+             fill runs"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }

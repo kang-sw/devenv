@@ -1076,6 +1076,21 @@ mod tests {
         assert_eq!(GitProbeKey::for_path(mixed), GitProbeKey::for_path(unified));
     }
 
+    // R11 (Phase 3 review adjudication): `watch_key` has no test of its own -
+    // the sibling test above only exercises `GitProbeKey`'s use of the
+    // shared `normalized_probe_key` chain. If `WatchKey` ever stopped routing
+    // through that shared chain, two spellings of one root would get two
+    // `GitStateCache` slots and two `MutationEpochSource` counters, and every
+    // other test would stay green (the `git_state_cache.rs` unit tests use
+    // `watch_key` only as an opaque handle).
+    #[test]
+    fn watch_key_collapses_mixed_separator_spellings_of_one_path() {
+        let mixed = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git\\ws-worktree\\jpeg");
+        let unified = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git/ws-worktree/jpeg");
+
+        assert_eq!(watch_key(mixed), watch_key(unified));
+    }
+
     #[test]
     fn discover_work_root_reports_missing_immediately_and_evicts_the_probe_memo() {
         let root = temp_path("probe-evict");

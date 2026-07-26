@@ -8135,6 +8135,14 @@ async fn git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branc
     )
     .await;
     let before_total = before["totalSpawns"].as_u64().expect("before totalSpawns");
+    // R10 (Phase 3 review adjudication): guard the zero-delta assertion below
+    // against spawn accounting itself silently regressing to never
+    // recording, matching the sibling pattern above
+    // (`git_toolbar_status_adds_zero_spawns_after_resources_poll_warms_the_shared_discovery_memo`).
+    assert!(
+        before_total > 0,
+        "the cold first call above must have already spawned git"
+    );
 
     // Second call, immediately after, well inside the default 2000ms TTL and
     // under an unchanged epoch: must be a pure cache hit for both slots.
@@ -8198,6 +8206,11 @@ async fn git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branc
     let bumped_before_total = bumped_before["totalSpawns"]
         .as_u64()
         .expect("bumped before totalSpawns");
+    // R10: same guard as above, for the second zero-delta leg.
+    assert!(
+        bumped_before_total > before_total,
+        "the switch-branch mutation and its own status read above must have spawned git"
+    );
 
     // The switch response's own status read already re-filled the refs slot
     // at the new (bumped) epoch, so a follow-up /git/status call - still
@@ -8234,15 +8247,23 @@ async fn git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branc
     remove_static_fixture(&base);
 }
 
-// Phase 3 Lead Disposition D2: the frontend's `refreshGit` fetches
+// Phase 3 Lead Disposition D1: the frontend's `refreshGit` fetches
 // `/git/status` and `/git/branches` together in one `Promise.all` on every
 // poll tick (`frontend/src/App.tsx`). Both miss a cold `GitStateCache` slot
 // for the same root at the same moment; D1's union-refs win only actually
-// materializes if the per-key single-flight lock
-// (`GitStateCache::refs`/`slot_for`) collapses the two concurrent misses into
-// ONE refs computation. This is the one test that distinguishes "the cache
-// works" from "the cache pays off" - every other assertion in this phase
-// would still pass even if both requests filled independently.
+// materializes if the two concurrent misses land on ONE refs computation
+// rather than two independent ones.
+//
+// R5 (Phase 3 review adjudication): this test pins D1 (the two routes share
+// one refs fill) only. It does NOT by itself discriminate D2's single-flight
+// guarantee from a purely serial execution - a `bySubcommand.branch` delta of
+// 1 is equally satisfied if request B simply runs after request A completes
+// and takes an ordinary epoch/TTL hit on the slot A already filled. D2's
+// guarantee (the per-key lock genuinely collapsing an *overlapping* pair of
+// misses into one probe) is pinned deterministically at the cache layer by
+// `git_state_cache::tests::refs_slot_single_flights_concurrent_misses_for_one_key`,
+// which forces the overlap with a blocking probe closure instead of relying
+// on `tokio::join!` scheduling.
 //
 // `git branch --show-current` is invoked exactly once per
 // `compute_ref_state` call and nowhere else on this path (the test fixture's
@@ -8250,11 +8271,9 @@ async fn git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branc
 // `GitSpawnStats`), so the `bySubcommand.branch` delta is an exact,
 // non-fuzzy count of how many refs computations actually ran.
 #[tokio::test]
-async fn git_toolbar_status_and_branches_concurrent_cold_miss_collapse_refs_computation_to_one_spawn_set(
-) {
-    if skip_without_git(
-        "git_toolbar_status_and_branches_concurrent_cold_miss_collapse_refs_computation_to_one_spawn_set",
-    ) {
+async fn git_toolbar_status_and_branches_concurrent_cold_miss_share_one_refs_fill() {
+    if skip_without_git("git_toolbar_status_and_branches_concurrent_cold_miss_share_one_refs_fill")
+    {
         return;
     }
     let base = temp_fixture_path("git-toolbar-concurrent-cold-cache");
@@ -8264,6 +8283,7 @@ async fn git_toolbar_status_and_branches_concurrent_cold_miss_collapse_refs_comp
     fs::write(primary.join("README.md"), "one\n").expect("write seed");
     run_git(&primary, &["add", "README.md"]);
     run_git(&primary, &["commit", "-m", "seed"]);
+    let expected_branch = current_git_branch(&primary);
 
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
@@ -8291,8 +8311,19 @@ async fn git_toolbar_status_and_branches_concurrent_cold_miss_collapse_refs_comp
         git_toolbar_get_json(app.clone(), cookie.as_str(), &status_uri, StatusCode::OK),
         git_toolbar_get_json(app.clone(), cookie.as_str(), &branches_uri, StatusCode::OK),
     );
+    // R9 (Phase 3 review adjudication): these were near-vacuous
+    // (`available == true` / "is an array" both pass on an empty branch
+    // list). Assert the fixture's known branch actually appears, and that
+    // the two routes' concurrently-filled refs slot agrees with itself.
     assert_eq!(status["available"], true);
-    assert!(branches["branches"].is_array());
+    assert_eq!(status["branch"]["name"], expected_branch);
+    let branch_entries = branches["branches"].as_array().expect("branches array");
+    assert!(
+        branch_entries
+            .iter()
+            .any(|entry| entry["name"] == expected_branch && entry["current"] == true),
+        "the known branch must appear as the current entry in /git/branches: {branch_entries:?}"
+    );
 
     let after = git_toolbar_get_json(
         app.clone(),
@@ -8449,6 +8480,230 @@ async fn git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults() {
         git_stdout(&primary, &["diff", "--name-only", "--diff-filter=U"]).is_empty(),
         "ff-only pull failure must not leave conflicted index entries"
     );
+
+    // R7 (Phase 3 review adjudication): the `current_branch_counts` reuse and
+    // its `sync_for_branch` fallback leg in `compute_ref_state` - the only
+    // genuinely new computation in this diff, and the self-introduced
+    // regression fixed mid-implementation - had zero coverage, and no test
+    // anywhere asserted `branches[].ahead`/`.behind`. Cover all three legs
+    // this fixture can reach: the current upstream-tracked branch (reuse),
+    // a non-current upstream-tracked branch (fallback), and a branch with no
+    // upstream (must serialize `null`, not `0`).
+    run_git(&primary, &["branch", "tracked-elsewhere"]);
+    run_git(&primary, &["push", "-u", "origin", "tracked-elsewhere"]);
+    run_git(&other, &["fetch", "origin"]);
+    run_git(
+        &other,
+        &[
+            "checkout",
+            "-b",
+            "tracked-elsewhere",
+            "origin/tracked-elsewhere",
+        ],
+    );
+    fs::write(other.join("elsewhere.txt"), "elsewhere\n").expect("write elsewhere.txt");
+    run_git(&other, &["add", "elsewhere.txt"]);
+    run_git(&other, &["commit", "-m", "elsewhere"]);
+    run_git(&other, &["push"]);
+    run_git(&primary, &["branch", "no-upstream-branch"]);
+
+    // A real `git fetch` through the daemon both (a) pulls the `elsewhere`
+    // commit's remote-tracking ref into `primary`, so `tracked-elsewhere`'s
+    // local/upstream comparison has something to disagree about, and
+    // (b) bumps the refs epoch, so the `/git/branches` call below is a
+    // genuine cold refill rather than a slot cached before these branches
+    // existed.
+    let refetched = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/fetch"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+
+    let branches = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        StatusCode::OK,
+    )
+    .await;
+    let entries = branches["branches"].as_array().expect("branches array");
+
+    // (a) Reuse leg: the current branch's `ahead`/`behind` must match
+    // `/git/status`'s own `current_branch_counts` computation of the same
+    // rev-list, taken from the fetch response above.
+    let current_entry = entries
+        .iter()
+        .find(|entry| entry["name"] == branch)
+        .expect("current branch entry present in /git/branches");
+    assert_eq!(current_entry["current"], true);
+    assert_eq!(
+        current_entry["ahead"], refetched["sync"]["ahead"],
+        "current-branch reuse leg: ahead must match /git/status's sync.ahead"
+    );
+    assert_eq!(
+        current_entry["behind"], refetched["sync"]["behind"],
+        "current-branch reuse leg: behind must match /git/status's sync.behind"
+    );
+
+    // (b) `sync_for_branch` fallback leg: a non-current upstream-tracked
+    // branch, independently computed and numerically distinct from the
+    // current branch's counts - if the `is_current` guard were dropped and
+    // `current_branch_counts` reused here instead, this would read 1/1
+    // (the current branch's counts) rather than the correct 0/1.
+    let tracked_elsewhere_entry = entries
+        .iter()
+        .find(|entry| entry["name"] == "tracked-elsewhere")
+        .expect("tracked-elsewhere entry present in /git/branches");
+    assert_eq!(tracked_elsewhere_entry["current"], false);
+    assert_eq!(
+        tracked_elsewhere_entry["ahead"], 0,
+        "sync_for_branch fallback leg: tracked-elsewhere has no unpushed local commits"
+    );
+    assert_eq!(
+        tracked_elsewhere_entry["behind"], 1,
+        "sync_for_branch fallback leg: tracked-elsewhere is missing the 'elsewhere' commit `other` pushed"
+    );
+
+    // (c) No upstream: `ahead`/`behind` must serialize as `null`, preserving
+    // the old null-vs-0 shape, not `Some(0)`.
+    let no_upstream_entry = entries
+        .iter()
+        .find(|entry| entry["name"] == "no-upstream-branch")
+        .expect("no-upstream-branch entry present in /git/branches");
+    assert_eq!(
+        no_upstream_entry["ahead"],
+        serde_json::Value::Null,
+        "a branch with no upstream must serialize ahead as null, not 0"
+    );
+    assert_eq!(
+        no_upstream_entry["behind"],
+        serde_json::Value::Null,
+        "a branch with no upstream must serialize behind as null, not 0"
+    );
+
+    remove_static_fixture(&base);
+}
+
+// R8 (Phase 3 review adjudication, promoted from test Minor 9's coverage
+// table): `git_pull_ff_only`'s extra `bump_worktree` call had no test -
+// passing `EpochBump::RefsOnly` for pull instead of `RefsAndWorktree` left
+// the whole suite green, because every existing ff-only-pull fixture only
+// pulled committed files, so `changes` stayed clean either way and never
+// exercised the worktree axis. This test warms the worktree slot with a
+// clean tree, then makes a local uncommitted modification `pull --ff-only`
+// does not touch, then asserts the pull RESPONSE's own `changes` reflects
+// that modification: under `RefsOnly` the warm clean slot would still be
+// live inside the TTL and `modifiedFiles` would read 0.
+//
+// Determinism note: like the repo's other same-process TTL tests (e.g.
+// `git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branch_bump_beats_ttl`),
+// this is deterministic PROVIDED the warm-to-pull window stays under the
+// default 2000ms TTL, which an in-process HTTP round trip does by a wide
+// margin. It is not immune to an actual TTL expiry mid-test, but that class
+// of wall-clock dependency is the existing accepted pattern in this file
+// (test-partition Minor 4), not a gap introduced here - and unlike that
+// class, this test's failure mode on a stall is not a false pass: if the
+// slot outlives the window and expires on its own, `pull --ff-only`'s own
+// recompute would ALSO report `modifiedFiles: 1` for the unrelated reason
+// that the slot expired, not because the bump fired - which is exactly the
+// ambiguity a genuinely deterministic fixture would need a real epoch stub
+// to remove. Reported here rather than silently shipped.
+#[tokio::test]
+async fn git_toolbar_pull_ff_only_bumps_the_worktree_epoch_so_the_response_reflects_a_pre_existing_local_modification(
+) {
+    if skip_without_git(
+        "git_toolbar_pull_ff_only_bumps_the_worktree_epoch_so_the_response_reflects_a_pre_existing_local_modification",
+    ) {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-pull-ff-only-worktree-bump");
+    let remote = base.join("remote.git");
+    let primary = base.join("primary");
+    let other = base.join("other");
+    fs::create_dir_all(&base).expect("create base");
+    run_git(&base, &["init", "--bare", remote.to_str().expect("remote")]);
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("tracked.txt"), "seed\n").expect("write tracked.txt");
+    run_git(&primary, &["add", "tracked.txt"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let branch = current_git_branch(&primary);
+    run_git(
+        &primary,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    run_git(&primary, &["push", "-u", "origin", &branch]);
+    run_git(
+        &base,
+        &[
+            "clone",
+            remote.to_str().expect("remote path"),
+            other.to_str().expect("other path"),
+        ],
+    );
+    run_git(
+        &other,
+        &["config", "user.email", "ws-dashboard@example.local"],
+    );
+    run_git(&other, &["config", "user.name", "ws dashboard"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+
+    // Warm the worktree slot with a clean tree.
+    let warm = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(warm["changes"]["modifiedFiles"], 0);
+    assert_eq!(warm["changes"]["addedLines"], 0);
+
+    // `other` advances the remote with a fast-forwardable commit to a
+    // DIFFERENT file, so `git pull --ff-only` succeeds without touching the
+    // locally modified `tracked.txt` below.
+    fs::write(other.join("remote-added.txt"), "remote\n").expect("write remote-added.txt");
+    run_git(&other, &["add", "remote-added.txt"]);
+    run_git(&other, &["commit", "-m", "remote-added"]);
+    run_git(&other, &["push"]);
+
+    // A local, uncommitted modification the warmed worktree slot does not
+    // know about. `pull --ff-only`'s fast-forward does not touch
+    // `tracked.txt` (the incoming commit only adds `remote-added.txt`), so
+    // this modification survives the pull untouched - the only question this
+    // test asks is whether the pull RESPONSE reports it.
+    fs::write(primary.join("tracked.txt"), "seed\nlocal edit\n").expect("modify tracked.txt");
+
+    let pulled = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/pull-ff-only"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(
+        pulled["changes"]["modifiedFiles"], 1,
+        "EpochBump::RefsAndWorktree must invalidate the worktree slot: a RefsOnly bump would \
+         instead serve the pre-pull warm slot's clean changes (modifiedFiles: 0) for the rest \
+         of the TTL"
+    );
+    assert_eq!(pulled["changes"]["addedLines"], 1);
+    assert_eq!(current_git_branch(&primary), branch);
+
     remove_static_fixture(&base);
 }
 
