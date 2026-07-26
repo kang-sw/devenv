@@ -741,6 +741,13 @@ struct RepoRuntime {
     last_arm_attempt_ms: Option<u64>,
     last_event_at_ms: Option<u64>,
     ignore_stale: bool,
+    /// When the last ignore-set re-derivation was *scheduled* (not
+    /// necessarily finished yet) for this repo. Gates the ticket's "at most
+    /// once per 30 s per repo" limit - checked before scheduling, not before
+    /// running, so N `.gitignore` writes landing faster than one
+    /// `IgnoreSet::derive` spawn still coalesce into one re-derivation
+    /// instead of queuing several.
+    last_ignore_rederive_attempt_ms: Option<u64>,
     debounce: HashMap<EpochKind, Debouncer>,
 }
 
@@ -755,6 +762,7 @@ impl RepoRuntime {
             last_arm_attempt_ms: None,
             last_event_at_ms: None,
             ignore_stale: false,
+            last_ignore_rederive_attempt_ms: None,
             debounce: HashMap::new(),
         }
     }
@@ -906,13 +914,27 @@ async fn run_event_loop(
     }
 }
 
-/// Step 5: an event owns a set of repos (via [`owners_for_path`]), each path
-/// is classified against that repo's [`ArmedRepo`], and a classified event
-/// feeds that repo/kind's [`Debouncer`]. A `need_rescan` event (the OS
+/// Step 5/6: an event owns a set of repos (via [`owners_for_path`]), each
+/// path is classified against that repo's [`ArmedRepo`], and a classified
+/// event feeds that repo/kind's [`Debouncer`]. A `need_rescan` event (the OS
 /// watcher itself reporting possibly-dropped events) skips classification
 /// entirely and degrades every currently-armed repo for one TTL window
 /// instead - there is no path to classify against.
-fn handle_fs_event(inner: &RegistryInner, event: Event) {
+///
+/// Two side channels ride alongside the classify+debounce hot path:
+/// - An ignore-rule-file write ([`is_ignore_rule_file`]) schedules an
+///   `IgnoreSet` re-derivation via `spawn_blocking` at most once per 30 s per
+///   repo (step 5's `.gitignore` rule), rather than re-deriving inline on
+///   this thread.
+/// - Linux only: a `Create` event whose path is an in-scope directory
+///   registers it incrementally (step 6), so a subsequent write inside it is
+///   observed without waiting for the next full re-arm.
+///
+/// `inner` is `&Arc<RegistryInner>` (not `&RegistryInner`) specifically so
+/// the ignore-rederive side channel can clone it into a `spawn_blocking`
+/// closure without threading a second parameter through every call in this
+/// module.
+fn handle_fs_event(inner: &Arc<RegistryInner>, event: Event) {
     let now = clock_ms();
     if event.need_rescan() {
         let mut state = inner.state.lock().expect("watch registry state lock poisoned");
@@ -945,42 +967,82 @@ fn handle_fs_event(inner: &RegistryInner, event: Event) {
         if owners.is_empty() {
             continue;
         }
-        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
-        for owner in &owners {
-            let Some(repo) = state.repos.get_mut(owner) else {
-                continue;
-            };
-            repo.last_event_at_ms = Some(now);
-            let Some(armed) = repo.armed.as_ref() else {
-                continue;
-            };
-            if is_ignore_rule_file(path, armed) {
-                repo.ignore_stale = true;
+
+        // Step 6, Linux only: a new in-scope directory registers itself
+        // before classification runs, so the mkdir's own event (handled by
+        // the classify/debounce block below regardless) and any write that
+        // races it both land in an already-registered directory. Runs
+        // outside the mutable `state` lock taken below - it takes that same
+        // lock internally (and, on cap overflow, calls `do_disarm`, which
+        // also locks it), so holding it here would deadlock.
+        #[cfg(target_os = "linux")]
+        if event.kind.is_create() && path.is_dir() {
+            for owner in &owners {
+                register_incremental_directory(inner, owner, path);
+            }
+        }
+
+        let mut rederive_due: Vec<WatchKey> = Vec::new();
+        {
+            let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+            for owner in &owners {
+                let Some(repo) = state.repos.get_mut(owner) else {
+                    continue;
+                };
+                repo.last_event_at_ms = Some(now);
+                let Some(armed) = repo.armed.as_ref() else {
+                    continue;
+                };
+                if is_ignore_rule_file(path, armed) {
+                    repo.ignore_stale = true;
+                    let due = repo
+                        .last_ignore_rederive_attempt_ms
+                        .map(|last| now.saturating_sub(last) >= IGNORE_REDERIVE_INTERVAL_MS)
+                        .unwrap_or(true);
+                    if due {
+                        repo.last_ignore_rederive_attempt_ms = Some(now);
+                        rederive_due.push(owner.clone());
+                    }
+                    let debouncer = repo
+                        .debounce
+                        .entry(EpochKind::Worktree)
+                        .or_insert_with(|| Debouncer::new(inner.config.debounce_ms));
+                    if debouncer.record_event(now) == DebounceEvent::BumpNow {
+                        inner.epoch_source.bump_worktree(owner);
+                    }
+                    continue;
+                }
+                let Some(kind) = classify(path, armed) else {
+                    continue;
+                };
                 let debouncer = repo
                     .debounce
-                    .entry(EpochKind::Worktree)
+                    .entry(kind)
                     .or_insert_with(|| Debouncer::new(inner.config.debounce_ms));
                 if debouncer.record_event(now) == DebounceEvent::BumpNow {
-                    inner.epoch_source.bump_worktree(owner);
-                }
-                continue;
-            }
-            let Some(kind) = classify(path, armed) else {
-                continue;
-            };
-            let debouncer = repo
-                .debounce
-                .entry(kind)
-                .or_insert_with(|| Debouncer::new(inner.config.debounce_ms));
-            if debouncer.record_event(now) == DebounceEvent::BumpNow {
-                match kind {
-                    EpochKind::Worktree => inner.epoch_source.bump_worktree(owner),
-                    EpochKind::Refs => inner.epoch_source.bump_refs(owner),
+                    match kind {
+                        EpochKind::Worktree => inner.epoch_source.bump_worktree(owner),
+                        EpochKind::Refs => inner.epoch_source.bump_refs(owner),
+                    }
                 }
             }
         }
+
+        // The re-derive itself spawns `git status` (and, on Linux, re-walks
+        // the tree) - both real I/O, so it runs on the blocking pool rather
+        // than this event-consumption thread (ticket step 5: "re-derivation
+        // never runs on the event thread").
+        for key in rederive_due {
+            let inner = Arc::clone(inner);
+            tokio::task::spawn_blocking(move || rederive_ignore_set(&inner, &key));
+        }
     }
 }
+
+/// Ticket step 5: at most one `IgnoreSet` re-derivation per repo per this
+/// interval, coalescing every staleness mark inside it into the one
+/// re-derivation the first mark already scheduled.
+const IGNORE_REDERIVE_INTERVAL_MS: u64 = 30_000;
 
 fn flush_debounce_windows(inner: &RegistryInner) {
     let now = clock_ms();
@@ -1147,8 +1209,11 @@ fn do_arm(inner: &RegistryInner, key: &WatchKey, targets: &WatchTargets) {
 
     let ignore = IgnoreSet::derive(&targets.worktree, &inner.git_stats);
 
+    // A fresh arm is the "diff against nothing" case of the same
+    // registration-diff logic the ignore-set re-derive uses (see
+    // `linux_plan_and_apply`'s doc comment).
     #[cfg(target_os = "linux")]
-    let outcome = do_arm_linux(inner, targets, &ignore);
+    let outcome = linux_plan_and_apply(inner, targets, &ignore, &[]);
     #[cfg(not(target_os = "linux"))]
     let outcome = do_arm_recursive(inner, targets);
 
@@ -1164,8 +1229,22 @@ fn do_arm(inner: &RegistryInner, key: &WatchKey, targets: &WatchTargets) {
 /// events under whichever directory failed, which is the exact
 /// worse-than-`Unarmed` failure mode the pre-arm mount gate exists to avoid
 /// for the whole-filesystem case.
+///
+/// Applies the *difference* against `old_dirs` rather than registering the
+/// full planned set unconditionally: `finish_arm`'s `update_dir_index` call
+/// (run by every caller right after this returns) already unregisters
+/// whatever is no longer planned, so this function only needs to watch what
+/// is newly planned. A fresh arm (`old_dirs` empty) and an ignore-set
+/// re-derive's registration change (`old_dirs` the repo's current
+/// `registered_dirs`) are therefore the same operation - ticket step 5: "a
+/// diff, not a disarm-and-re-arm".
 #[cfg(target_os = "linux")]
-fn do_arm_linux(inner: &RegistryInner, targets: &WatchTargets, ignore: &IgnoreSet) -> Result<Vec<PathBuf>, String> {
+fn linux_plan_and_apply(
+    inner: &RegistryInner,
+    targets: &WatchTargets,
+    ignore: &IgnoreSet,
+    old_dirs: &[PathBuf],
+) -> Result<Vec<PathBuf>, String> {
     let dirs = plan_watch_set(
         &targets.worktree,
         &targets.git_dir,
@@ -1175,11 +1254,14 @@ fn do_arm_linux(inner: &RegistryInner, targets: &WatchTargets, ignore: &IgnoreSe
     )
     .map_err(|TooLarge { found }| format!("watch set too large: {found} dirs"))?;
 
+    let old_set: HashSet<&PathBuf> = old_dirs.iter().collect();
+    let to_add: Vec<PathBuf> = dirs.iter().filter(|dir| !old_set.contains(dir)).cloned().collect();
+
     let existing: HashSet<PathBuf> = {
         let state = inner.state.lock().expect("watch registry state lock poisoned");
         state.dir_index.keys().cloned().collect()
     };
-    let new_dir_count = dirs.iter().filter(|dir| !existing.contains(*dir)).count();
+    let new_dir_count = to_add.iter().filter(|dir| !existing.contains(*dir)).count();
     {
         let state = inner.state.lock().expect("watch registry state lock poisoned");
         let used = state.dir_index.len();
@@ -1193,12 +1275,16 @@ fn do_arm_linux(inner: &RegistryInner, targets: &WatchTargets, ignore: &IgnoreSe
         return Err("watcher unavailable".to_owned());
     };
     let mut newly_registered: Vec<PathBuf> = Vec::new();
-    for dir in &dirs {
+    for dir in &to_add {
         if existing.contains(dir) {
+            // Already registered - either a sibling repo sharing this
+            // target (`common_dir` dedup, D2), or this exact directory was
+            // already registered incrementally (step 6) before this diff
+            // ran.
             continue;
         }
         if let Err(error) = watcher.watch(dir.as_path(), RecursiveMode::NonRecursive) {
-            tracing::warn!(?dir, %error, "failed to register inotify watch; unwinding this arm attempt");
+            tracing::warn!(?dir, %error, "failed to register inotify watch; unwinding this registration change");
             for registered in &newly_registered {
                 let _ = watcher.unwatch(registered);
             }
@@ -1207,6 +1293,147 @@ fn do_arm_linux(inner: &RegistryInner, targets: &WatchTargets, ignore: &IgnoreSe
         newly_registered.push(dir.clone());
     }
     Ok(dirs)
+}
+
+/// Step 6, Linux only: a `Create` event for an in-scope directory
+/// (`dir` - not ignored, not under `git_dir`/`common_dir`, not already
+/// registered) registers it immediately and increments the repo's directory
+/// count; crossing the per-repo cap disarms the whole repo rather than
+/// leaving it half-covered (ticket step 6, mirroring `plan_watch_set`'s own
+/// bail-out). A no-op for any repo that is not currently `Armed`, or where
+/// `dir` fails the same admission checks `plan_watch_set` would have applied
+/// at arm time.
+#[cfg(target_os = "linux")]
+fn register_incremental_directory(inner: &RegistryInner, key: &WatchKey, dir: &Path) {
+    let over_cap = {
+        let state = inner.state.lock().expect("watch registry state lock poisoned");
+        let Some(repo) = state.repos.get(key) else {
+            return;
+        };
+        if !matches!(repo.registration_health, WatchHealth::Armed) {
+            return;
+        }
+        let Some(armed) = repo.armed.as_ref() else {
+            return;
+        };
+        if armed.ignore.matches(dir) {
+            return;
+        }
+        if dir.starts_with(&armed.git_dir) || dir.starts_with(&armed.common_dir) {
+            return;
+        }
+        if state.dir_index.contains_key(dir) {
+            return;
+        }
+        repo.registered_dirs.len() + 1 > inner.config.max_dirs
+    };
+
+    if over_cap {
+        do_disarm(inner, key);
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        if let Some(repo) = state.repos.get_mut(key) {
+            repo.registration_health = WatchHealth::Degraded("watch set outgrew cap".to_owned());
+        }
+        return;
+    }
+
+    let watched = {
+        let mut watcher_guard = inner.watcher.lock().expect("watcher lock poisoned");
+        match watcher_guard.as_mut() {
+            Some(watcher) => watcher.watch(dir, RecursiveMode::NonRecursive).is_ok(),
+            None => false,
+        }
+    };
+    if !watched {
+        return;
+    }
+
+    let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+    let Some(repo) = state.repos.get_mut(key) else {
+        return;
+    };
+    // Re-check health under the write lock: a concurrent disarm (e.g. this
+    // same repo's cap was crossed by a sibling's incremental registration
+    // between the read above and this write) must not resurrect bookkeeping
+    // for a repo that is no longer armed.
+    if !matches!(repo.registration_health, WatchHealth::Armed) {
+        return;
+    }
+    repo.registered_dirs.push(dir.to_path_buf());
+    state.dir_index.entry(dir.to_path_buf()).or_default().insert(key.clone());
+}
+
+/// Ticket step 5's `.gitignore`/`info/exclude` re-derivation: recompute the
+/// `IgnoreSet`, then - Linux only - apply the registration diff it implies
+/// (`linux_plan_and_apply`, disarming wholly on `TooLarge`); non-Linux swaps
+/// only the in-memory filter, since recursive registration needs no
+/// registration change when the filter changes. Bumps both epochs on success
+/// either way: "the filter changed and previously-suppressed paths may now
+/// be significant" (ticket step 5). Runs on the blocking pool - see
+/// `handle_fs_event`'s `spawn_blocking` call site.
+fn rederive_ignore_set(inner: &RegistryInner, key: &WatchKey) {
+    let Some(targets) = ({
+        let state = inner.state.lock().expect("watch registry state lock poisoned");
+        state
+            .repos
+            .get(key)
+            .filter(|repo| matches!(repo.registration_health, WatchHealth::Armed))
+            .map(|repo| repo.targets.clone())
+    }) else {
+        return;
+    };
+
+    let ignore = IgnoreSet::derive(&targets.worktree, &inner.git_stats);
+
+    #[cfg(target_os = "linux")]
+    {
+        let old_dirs = {
+            let state = inner.state.lock().expect("watch registry state lock poisoned");
+            state.repos.get(key).map(|repo| repo.registered_dirs.clone()).unwrap_or_default()
+        };
+        match linux_plan_and_apply(inner, &targets, &ignore, &old_dirs) {
+            Ok(new_dirs) => apply_rederive_success(inner, key, ignore, new_dirs),
+            Err(_) => {
+                do_disarm(inner, key);
+                let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+                if let Some(repo) = state.repos.get_mut(key) {
+                    repo.registration_health = WatchHealth::Degraded("watch set outgrew cap".to_owned());
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let existing_dirs = {
+            let state = inner.state.lock().expect("watch registry state lock poisoned");
+            state.repos.get(key).map(|repo| repo.registered_dirs.clone()).unwrap_or_default()
+        };
+        apply_rederive_success(inner, key, ignore, existing_dirs);
+    }
+}
+
+/// Shared success path for [`rederive_ignore_set`]: swap the `ArmedRepo`'s
+/// `IgnoreSet` (the copy `classify` actually consults), reconcile
+/// `registered_dirs`/`dir_index` against `new_dirs` (a no-op on non-Linux,
+/// where `new_dirs` is always the unchanged existing set), clear the
+/// staleness flag, and bump both epochs.
+fn apply_rederive_success(inner: &RegistryInner, key: &WatchKey, ignore: IgnoreSet, new_dirs: Vec<PathBuf>) {
+    let old_dirs = {
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        let Some(repo) = state.repos.get_mut(key) else {
+            return;
+        };
+        let old_dirs = std::mem::replace(&mut repo.registered_dirs, new_dirs.clone());
+        if let Some(armed) = repo.armed.as_mut() {
+            armed.ignore = ignore;
+        }
+        repo.ignore_stale = false;
+        old_dirs
+    };
+    update_dir_index(inner, key, &old_dirs, &new_dirs);
+    inner.epoch_source.bump_worktree(key);
+    inner.epoch_source.bump_refs(key);
 }
 
 /// Windows/macOS backend: one kernel-level recursive watch per target (at
