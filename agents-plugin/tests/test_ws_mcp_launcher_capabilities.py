@@ -71,6 +71,25 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         self.assertFalse(launcher.version_compatible("0.18.2", contract))
         self.assertFalse(launcher.version_compatible("0.19.0", contract))
 
+    def test_version_compatibility_allow_same_minor_accepts_patch_drift(self):
+        launcher = load_launcher()
+        contract = self.capability_contract()
+
+        # allow_same_minor loosens the gate for the local-devenv loop, where the
+        # live source version drifts ahead of the installed snapshot's contract.
+        # Same (major, minor) with any patch is accepted, incl. a -dev suffix.
+        self.assertTrue(launcher.version_compatible("0.18.1", contract, allow_same_minor=True))
+        self.assertTrue(launcher.version_compatible("0.18.0", contract, allow_same_minor=True))
+        self.assertTrue(launcher.version_compatible("0.18.9", contract, allow_same_minor=True))
+        self.assertTrue(launcher.version_compatible("0.18.9-dev", contract, allow_same_minor=True))
+        # A different minor or major is still rejected even with the flag: a
+        # minor bump is a real contract change that needs a re-snapshot.
+        self.assertFalse(launcher.version_compatible("0.19.0", contract, allow_same_minor=True))
+        self.assertFalse(launcher.version_compatible("0.17.9", contract, allow_same_minor=True))
+        self.assertFalse(launcher.version_compatible("1.18.1", contract, allow_same_minor=True))
+        # Unparseable versions still fail closed.
+        self.assertFalse(launcher.version_compatible("garbage", contract, allow_same_minor=True))
+
     def test_capabilities_probe_validates_full_contract_from_one_response(self):
         launcher = load_launcher()
         binary = Path("/tmp/ws-mcp")
@@ -160,7 +179,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             binary = temp / "ws-mcp"
             binary.write_text("stub", encoding="utf-8")
 
-            launcher.runtime_capabilities_compatible = lambda got_binary, contract: got_binary == binary
+            launcher.runtime_capabilities_compatible = lambda got_binary, contract, **kwargs: got_binary == binary
 
             def forbidden_fanout(*args, **kwargs):
                 raise AssertionError("fallback validation should not run after a successful capabilities probe")
@@ -290,7 +309,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.os.replace = fake_replace
             # Disable the sleep so the retry loop runs fast in tests.
             launcher.time.sleep = lambda _: None
-            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir: got_binary == binary
+            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir, **kwargs: got_binary == binary
 
             installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 

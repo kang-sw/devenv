@@ -143,12 +143,22 @@ def version_tuple(value: str) -> tuple[int, int, int] | None:
         return None
 
 
-def version_compatible(version: str, contract: dict) -> bool:
+def version_compatible(version: str, contract: dict, *, allow_same_minor: bool = False) -> bool:
     actual = version_tuple(version)
     plugin = version_tuple(str(contract.get("plugin_version", "")))
     if actual is None or plugin is None:
         return False
-    return actual == plugin
+    if actual == plugin:
+        return True
+    # Local-devenv builds run the live source, whose version routinely drifts a
+    # few patches ahead of the installed plugin snapshot's contract between
+    # `install.sh update` runs. Requiring an exact patch match there breaks the
+    # MCP server on every local bump; accept same-minor drift so the dev loop
+    # survives a bump without a re-snapshot. Released/downloaded runtimes keep
+    # the strict exact-match check (allow_same_minor stays False for them).
+    if allow_same_minor and actual[0] == plugin[0] and actual[1] == plugin[1]:
+        return True
+    return False
 
 
 def sha256_file(path: Path) -> str:
@@ -411,7 +421,7 @@ def copy_runtime(source: Path, destination: Path) -> None:
         pass
 
 
-def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Path, message: str) -> bool:
+def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Path, message: str, *, allow_same_minor: bool = False) -> bool:
     # Bounded retry on OSError: AV scanners and concurrent installers can hold
     # the target file open briefly on Windows, causing a sharing-violation error.
     # Mirrors the Phase A Go-side MoveFileEx bounded retry (~5 attempts, ~10ms
@@ -431,7 +441,7 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
                 time.sleep(_replace_backoff * (2 ** attempt))
     # Replace budget exhausted; fall through to the existing compatible-binary
     # fallback before failing hard.
-    if runtime_fully_compatible(binary, contract, runtime_dir):
+    if runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=allow_same_minor):
         note(f"using compatible runtime already installed at {binary} after replace failed: {last_exc}")
         return False
     fail(f"failed to install runtime at {binary}: {last_exc}")
@@ -592,8 +602,8 @@ def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, 
         env=local_devenv_build_env(os_name),
         check=False,
     )
-    if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
-        install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
+    if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
+        install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}", allow_same_minor=True)
         return True
     tmp.unlink(missing_ok=True)
     note(f"local devenv build failed or produced incompatible runtime: exit={proc.returncode}")
@@ -618,8 +628,8 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
     for candidate in candidates:
         if candidate.is_file():
             copy_runtime(candidate, tmp)
-            if runtime_fully_compatible(tmp, contract, runtime_dir):
-                install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed local devenv runtime from {candidate}")
+            if runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
+                install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed local devenv runtime from {candidate}", allow_same_minor=True)
                 return True
             tmp.unlink(missing_ok=True)
             note(f"local devenv runtime candidate is incompatible: {candidate}")
@@ -665,7 +675,7 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
         install_downloaded_runtime(binary, runtime_dir, asset, contract)
 
 
-def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
+def runtime_capabilities_compatible(binary: Path, contract: dict, *, allow_same_minor: bool = False) -> bool:
     try:
         proc = run_binary(binary, ["runtime", "capabilities"])
     except Exception as exc:
@@ -682,7 +692,7 @@ def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
     if not isinstance(payload, dict):
         return False
 
-    if not version_compatible(str(payload.get("version", "")), contract):
+    if not version_compatible(str(payload.get("version", "")), contract, allow_same_minor=allow_same_minor):
         note("runtime capabilities version mismatch")
         return False
 
@@ -698,10 +708,10 @@ def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
         return False
     return True
 
-def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) -> bool:
+def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path, *, allow_same_minor: bool = False) -> bool:
     if not binary.is_file():
         return False
-    if runtime_capabilities_compatible(binary, contract):
+    if runtime_capabilities_compatible(binary, contract, allow_same_minor=allow_same_minor):
         return True
     if _capabilities_match_exact(contract):
         return False
@@ -709,7 +719,7 @@ def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) ->
         proc = run_binary(binary, ["version"])
     except Exception:
         return False
-    if proc.returncode != 0 or not version_compatible(proc.stdout.strip(), contract):
+    if proc.returncode != 0 or not version_compatible(proc.stdout.strip(), contract, allow_same_minor=allow_same_minor):
         return False
     return tools_compatible(binary, contract, runtime_dir) and commands_compatible(binary, contract)
 
@@ -855,7 +865,7 @@ def main() -> int:
     elif install_forced and local_enabled:
         note("local devenv source changed or runtime missing; rebuilding from source")
         need_install = True
-    elif runtime_fully_compatible(binary, contract, runtime_dir):
+    elif runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
     else:
         need_install = True
@@ -864,7 +874,7 @@ def main() -> int:
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
         install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_enabled)
-        if not runtime_fully_compatible(binary, contract, runtime_dir):
+        if not runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
             fail("incompatible ws-mcp runtime after repair")
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
 

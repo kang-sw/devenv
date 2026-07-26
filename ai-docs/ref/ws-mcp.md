@@ -221,6 +221,17 @@ path before building. Legacy fixed-name source-cache binaries such as
 If no compatible local runtime can be installed while a valid marker is active,
 startup fails instead of falling back to the published release asset.
 
+While a valid marker is active, the runtime version gate is relaxed from an exact
+patch match to a **same-minor** match: a locally built runtime is accepted when
+its `(major, minor)` equals the installed snapshot's `plugin_version`, regardless
+of patch (a `-dev` suffix is ignored). The live source version routinely drifts a
+few patches ahead of the installed snapshot's `runtime.json` between
+`install.sh update` runs, and the exact-match gate would otherwise reject the
+freshly built runtime after every local patch bump, breaking the MCP server until
+a re-snapshot. A different minor or major is still rejected, because a minor bump
+is a real contract change that must go through a re-snapshot. Released/downloaded
+runtimes (no marker) keep the strict exact-match gate unchanged.
+
 ### Enabling the local dogfood loop (manual setup)
 
 The marker is per-machine and gitignored, so place it once in the source
