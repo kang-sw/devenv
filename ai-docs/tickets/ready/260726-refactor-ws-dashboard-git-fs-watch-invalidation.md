@@ -190,16 +190,26 @@ reading of this host's actual `max_user_watches` (see Constraints).
   default rather than from a reading. The budget mechanism still matters, because
   a distro at 8,192 or a monorepo an order of magnitude larger is entirely
   plausible; it just must not be justified with a number nobody measured.
-- **WSL2 `/mnt/*` (DrvFs / 9P) does not deliver inotify events for changes made
-  from the Windows side.** This is exactly this project's dogfood topology, so a
-  WSL-side daemon watching a work root under `/mnt/d` would arm successfully and
-  then silently never fire. The TTL ceiling bounds the damage to one window, but
-  silent-and-armed is the worst reporting state: the diag route would claim
-  `Armed` while behaving `Unarmed`. Detect the filesystem before arming (a
-  `/mnt/`-prefixed or `9p`/`drvfs` mount for the target ⇒
-  `Degraded{"filesystem does not deliver events"}`) rather than trusting the
-  arm to have worked. Note the live daemon runs natively on Windows and is
-  unaffected; this hazard belongs to WSL-side developer daemons.
+- **Foreign-mount filesystems arm successfully and then never fire, so detect
+  them before arming and fall back to polling.** The concrete case is WSL2
+  `/mnt/*` (DrvFs / 9P), which does not deliver inotify events for changes made
+  from the Windows side — exactly this project's dogfood topology — but the same
+  hazard applies to network and FUSE mounts generally (NFS, CIFS/SMB, SSHFS):
+  inotify is a local-VFS mechanism and cannot see writes that never pass through
+  this kernel. The TTL ceiling bounds the damage to one window, but
+  silent-and-armed is the worst reporting state, because the diag route would
+  claim `Armed` while behaving `Unarmed`.
+
+  Rule: **resolve the target's mount filesystem type before arming and degrade on
+  anything not known-good**, i.e. allowlist local filesystems rather than
+  blocklisting known-bad ones — a blocklist silently mis-arms the next
+  filesystem nobody thought of, and the failure is invisible.
+  `Degraded{"filesystem does not deliver events"}` puts the repo on the 2 s
+  polling TTL, which is the correct answer for these mounts. Owner note
+  (2026-07-26): opening a dashboard work root on a WSL `/mnt/` path is an
+  anti-pattern in the first place, so this check is a guard against a
+  misconfiguration, not support for it. The live daemon runs natively on Windows
+  and is unaffected; this belongs to WSL-side developer daemons.
 - Over-budget repos must be **left entirely unarmed** (`Degraded`), never
   partially armed. Enforce a process budget of
   `min(max_user_watches * 60 / 100, WS_DASHBOARD_GIT_WATCH_MAX_DIRS)` (default
@@ -630,9 +640,9 @@ Phase 4 (it fills in the strategy Phase 4 declared and stubbed).
 - A directory created inside a watched tree registers that directory and
   re-checks the budget. The known inotify race — a directory created and
   populated before registration — is exactly what the TTL fallback covers.
-- Pre-arm filesystem check from Constraints: a target on a WSL `/mnt` DrvFs/9P
-  mount degrades rather than arming, because it would arm successfully and never
-  fire.
+- Pre-arm filesystem check from Constraints: resolve the target's mount
+  filesystem type and degrade on anything outside the known-local allowlist
+  (DrvFs/9P, NFS, CIFS, FUSE), because those arm successfully and never fire.
 - Expose `registeredDirs` per repo in `/api/dashboard/diag/git`.
 
 **Verification boundary.** Unit: `DirBudget` arithmetic and the over-budget
