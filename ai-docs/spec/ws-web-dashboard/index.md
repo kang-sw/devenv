@@ -773,6 +773,53 @@ worktree add and remove flows, which invoke Git directly. Two reads taken a
 known interval apart yield the daemon's Git invocation rate, which is the
 intended use.
 
+## Shared Git Probe Memo And Per-WorkRoot Git Context {#260726-dashboard-shared-git-probe-memo-and-per-root-git-context}
+
+One memoized Git probe per work root answers three questions for every consumer:
+whether the directory is a Git work tree, whether it is a primary root or a
+linked worktree, and which canonical worktree and common root the WorkRoot
+Activity projection reads its per-project state under. Resource discovery, the
+Git toolbar routes, and the Activity projection share that one answer, so
+whichever of them runs first pays for it and the others read it for free until
+it expires. `WS_DASHBOARD_GIT_PROBE_TTL_MS` (default `30000`) bounds how long the
+answer is reused.
+
+Two consequences follow from sharing, and both are intended:
+
+- A directory that becomes a repository — or a repository whose topology changes
+  — is reflected in the toolbar, the sidebar classification, and the Activity
+  pane **together**, within the memo's lifetime rather than immediately. The
+  three surfaces cannot disagree about whether a work root is a repository.
+- A probe that fails to answer at all, such as one that exceeds the Git
+  invocation budget, is remembered as "not a repository" for the same lifetime.
+  A work root whose Git probe times out therefore reads as non-Git, and its
+  Activity pane as empty, until the memo expires. This is bounded and
+  self-healing, and it replaces re-running a full-budget Git invocation on every
+  poll tick.
+
+Resolving a single work root's Git context reads the registry and the
+filesystem directly rather than enumerating every known work root, so the cost
+of answering a Git toolbar request does not grow with the number of open work
+roots. The Git toolbar routes are pure reads with respect to the registry: they
+no longer register newly discovered linked worktrees as a side effect. Newly
+created linked worktrees still appear through the canonical resource endpoint's
+polling refresh, and immediately after a dashboard-initiated worktree add.
+
+An online work root whose directory has become unreadable answers the Git
+toolbar routes with the bounded unavailable response described under
+[Git-Aware WorkRoot Toolbar](#260524-ws-dashboard-git-aware-workroot-toolbar).
+That response is what the caller observes only until the next canonical resource
+refresh: that refresh removes work roots it can no longer see from the registry,
+after which the same id is no longer known and the routes answer not-found
+instead. Both answers are bounded and path-free; a caller must not treat either
+one as a durable classification of the same work root.
+
+> [!note] Implementation Gap · 2026-07-26
+> Missing behavior: the registry removal above discards a work root the user
+> explicitly opened, on the strength of one failed availability read, with no
+> affordance to recover it. Recovering the work root currently requires opening
+> it again by path.
+
 ## Worktree Removal Confirmation And Hide UX {#260722-ws-dashboard-worktree-removal-hide-ux}
 
 Removing a linked worktree always opens a real confirmation modal — never a
