@@ -1,6 +1,6 @@
 ---
 title: "Retire lead-sprint and lead-salvage; relocate lead-skill-authoring out of the distribution surface"
-sage-review-design: required
+sage-review-design: blocked
 related:
   260630-epic-skill-playbook-diet: supersedes this epic's lead-sprint diet target and lead-salvage out-of-scope entry
   260605-research-ws-native-subagent-pivot: migration anchor; entry-skill surface shrinks
@@ -10,6 +10,7 @@ related:
   260702-research-destructive-dedup-methodology: references lead-skill-authoring as method source
 spec-remove:
   - 260505-sprint-session-container
+  - 260523-sprint-episode-workflow-shell
   - 260513-wsflow-sprint-skill
   - 260510-salvage-recovery-workflow-skill
 related-mental-model:
@@ -37,9 +38,16 @@ user-invocable `/ws:<name>` trigger list:
   as an invocable skill, which is a packaging error rather than a dead skill.
 
 Grep across `agents-plugin/{rsrc,skills}` and `agents-plugin-wsflow/{rsrc,skills}`
-finds **zero** references to any of the three from any other skill or playbook
-body. This is the same evidence bar the diet epic used to authorize the
-`lead-verify-design` deletion on 2026-07-20.
+finds **zero** references to any of the three hyphenated skill names from any
+other skill or playbook body. This is the same evidence bar the diet epic used to
+authorize the `lead-verify-design` deletion on 2026-07-20.
+
+That grep is scoped to the skill name, and there is exactly one **semantic**
+caller it does not catch: `agents-plugin/rsrc/lead-implement/lead-implement.md:84`
+(mirrored at `agents-plugin-wsflow/rsrc/lead-implement/lead-implement.md:84`)
+reads "Stop for the user's choice: merge, new slice, sprint, or stop." After
+`lead-sprint` is gone that offers a destination that does not exist, so it is an
+edit surface, not an incidental mention.
 
 ## Decisions
 
@@ -57,16 +65,18 @@ body. This is the same evidence bar the diet epic used to authorize the
   heading (e.g. "On auditing skill/playbook content") so a session looking for
   authoring rules still finds it without a plugin round-trip.
 - **UNCONFIRMED — disposition of the `enter.sprint` and `enter.salvage` MCP
-  tools.** Not decided by the user; Phase 1 must not execute this step until it
-  is. Deleting the skills strands both tools: each is a static mode switch with
-  no resolver, no facts, and no verdict, and each has exactly one caller, which
-  this ticket removes. Two readings are live — (a) retire them, so the public MCP
-  schema does not carry two tools no procedure can reach; (b) keep the handlers
-  as CLI-testable primitives, the same argument that preserved `format: "json"`
-  in `260726-feat-enter-verdict-scenario-output`, and record them as caller-less.
-  Phase 1's tool-removal step assumes (a) and is gated on confirmation.
-  Registration sites if (a): dispatch `server.go:559-562`, schemas
-  `server.go:3488` and `:3502`, handlers `session_state.go:1129-1135`.
+  tools.** Not decided by the user. Isolated into Phase 4, which is gated on
+  confirmation and must not run before it; Phases 1-3 are executable today and
+  leave both tools intact. Deleting the skills strands both tools: each is a
+  static mode switch with no resolver, no facts, and no verdict, and each has
+  exactly one caller, which Phase 1 removes. Two readings are live — (a) retire
+  them, so the public MCP schema does not carry two tools no procedure can reach;
+  (b) keep the handlers as CLI-testable primitives, the same argument that
+  preserved `format: "json"` in `260726-feat-enter-verdict-scenario-output`, and
+  record them as caller-less. Under `AGENTS.md` this is always-ask (deleting
+  functionality / changing protocol semantics), so it cannot be settled by
+  implementer judgment. The interim state after Phase 1 — two live tools whose
+  only caller is gone — is coherent and compiles; it is not a broken tree.
 - **Phase boundaries follow blast radius, not skill count.** The two deletions
   share identical mechanics and land together; the relocation is separate because
   it must repoint a binding `AGENTS.md` invariant in the same commit that moves
@@ -96,11 +106,23 @@ body. This is the same evidence bar the diet epic used to authorize the
   one `enter.*` tool each"** and enumerates all four. After Phase 1 this is two.
   This bullet is load-bearing for `enter.*` call-site placement and must be
   rewritten, not just trimmed.
+- **`runtime.json` declares the served tool set and is asserted exactly.** Both
+  `agents-plugin/runtime.json:19-20` and `agents-plugin-wsflow/runtime.json:22-23`
+  carry `enter.sprint` / `enter.salvage` capability ranges, and
+  `agents-plugin-tool/cmd/ws-mcp/main_test.go` compares the served tool set to
+  each contract with `slices.Equal` (wsflow at `:159`, full ws at `:653`). The
+  wsflow launcher matches the same manifest with
+  `runtime_capabilities.match "exact"`, so a partial edit breaks wsflow at
+  runtime, not just in tests. Any change to the served tool set must edit both
+  files in the same commit. Note the interaction with the version rule below:
+  the tool-name keys in `runtime.json` are hand-edited here; the version string
+  in the same file is not — that remains the bump script's alone.
 - **`CHANGELOG.md` is append-only history.** It mentions all three names; do not
   rewrite historical entries.
-- **`.done/` tickets and `ai-docs/.plans/` are historical artifacts.** They are
-  the bulk of the raw grep hit count (62/42/78 total hits) and are explicitly out
-  of the cascade scope.
+- **`.done/`, `.dropped/`, and `ai-docs/.plans/` are historical artifacts.** They
+  are the bulk of the raw grep hit count (62/42/78 total hits) and are explicitly
+  out of the cascade scope. `.dropped/260619-research-claude-teammate-mode-subagent-collection-doc-gap.md`
+  is the single `.dropped/` hit.
 - **Version bump on dev-merge** runs through
   `agents-plugin-tool/scripts/bump-ws-version.sh`; never hand-edit edition points.
 
@@ -117,38 +139,57 @@ body. This is the same evidence bar the diet epic used to authorize the
 
 ## Spec Impact
 
-Target area: `ai-docs/spec/workflow-skills.md`.
+Target areas: `ai-docs/spec/workflow-skills.md` and `ai-docs/spec/mcp-tools.md`.
 
-Removed stems (declared in `spec-remove:`):
+Removed stems (declared in `spec-remove:`), all in `workflow-skills.md`:
 
-- `260505-sprint-session-container` — the whole `## Sprint Session Shell` section
-  (`:936`).
-- `260513-wsflow-sprint-skill` — the wsflow sprint mirror paragraph (`:213-225`).
-- `260510-salvage-recovery-workflow-skill` — the two salvage paragraphs
-  (`:401-416`).
+- `260505-sprint-session-container` and `260523-sprint-episode-workflow-shell` —
+  the `## Sprint Session Shell` section spans `:936-955` and carries **two**
+  anchors: the section heading at `:936` and a second at `:955` closing the
+  sprint-edit episode paragraph. Both must be declared, or deleting the section
+  silently removes an undeclared stem. Neither is referenced outside `.done/`.
+- `260513-wsflow-sprint-skill` — the wsflow sprint mirror paragraph, `:213-221`
+  (anchor at `:221`).
+- `260510-salvage-recovery-workflow-skill` — the two salvage paragraphs,
+  `:401-416`.
 
-Edited, not removed:
+Edited, not removed, in `workflow-skills.md`:
 
 - The skill-name list (`:30-48`) loses three entries.
 - The invocable-surface sentence (`:54-58`) drops from 15 entry skills to 12 and
   loses `lead-sprint`, `lead-salvage`, and `lead-skill-authoring` from the
   `/ws:<name>` enumeration.
 - `260513-wsflow-agentless-skill-surface` (`:201-211`) loses `lead-sprint` from
-  the shipped list; its exclusion sentence (`:227-229`) reduces to
-  `lead-write-skeleton` alone once the other two names no longer exist.
+  the shipped list.
+- The wsflow exclusion sentence is `:223-225`, **not** `:227-229` — `:225` holds
+  the end of the exclusion sentence and the start of the unrelated thin-shim
+  sentence. Do not delete it as part of the `260513-wsflow-sprint-skill` removal
+  above; it is a separate sentence that reduces to `lead-write-skeleton` alone
+  once the other two names are gone.
 - The documentation-closure sentence (`:782`) loses its `lead-sprint` clause.
 - `260514-skill-authoring-carried-context` (`:199`) must state where the
   authoring manual now lives.
 
-Caller-visible change: three `/ws:<name>` entry points and two MCP tools
-disappear from the public surface. Contract-first spec: no — this removes
-existing documented behavior rather than introducing new contract.
+Edited in `mcp-tools.md` — only when Phase 4 runs, since these describe the tools
+rather than the skills:
+
+- `:261` enumerates `enter.implement`, `enter.proceed`, `enter.sprint`, and
+  `enter.salvage` as the typed mode switches.
+- `:366-367` carry per-mode todo-derivation bullets for both retiring tools.
+- Both sit inside `## Session State Tools {#260625-session-state-tools}`, an
+  anchor that survives — hence its correct absence from `spec-remove:`.
+
+Caller-visible change: three `/ws:<name>` entry points disappear from the public
+surface in Phases 1-2, and two MCP tools disappear in Phase 4 if it is approved.
+Contract-first spec: no — this removes existing documented behavior rather than
+introducing new contract.
 
 ## Phases
 
-### Phase 1: Retire lead-sprint and lead-salvage
+### Phase 1: Retire the lead-sprint and lead-salvage skills
 
-Delete both skills and their `enter.*` tools, leaving the tree green.
+Delete both skills from the distribution surface, leaving the tree green. The
+`enter.sprint` / `enter.salvage` tools are **not** touched here — see Phase 4.
 
 Surfaces to remove:
 
@@ -160,31 +201,40 @@ Surfaces to remove:
 - Manifest entries in `agents-plugin/skills/manifest.json`,
   `agents-plugin/rsrc/manifest.json`, `agents-plugin-wsflow/rsrc/manifest.json`
   (regenerate; do not hand-edit hashes)
-- `handleEnterSprint`, `handleEnterSalvage`, `deriveSprintTodos`,
-  `deriveSalvageTodos` in `agents-plugin-tool/internal/mcp/session_state.go`
-- The `enter.sprint` / `enter.salvage` schema blocks in
-  `agents-plugin-tool/internal/mcp/server.go` and their dispatch entries
 - Assertions in `agents-plugin-tool/internal/mcp/playbook_tools_test.go` and
   `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`
 
-Spec and mental-model edits for these two skills land in this phase, on contact:
-the three removed spec stems, the skill-name and invocable-surface lists, the
-wsflow shipped list, the `:782` documentation-closure clause, and the
-`{#260625-ws-session-state-machine}` "four core lead skills" bullet.
+Edits in this phase, on contact:
+
+- `agents-plugin/rsrc/lead-implement/lead-implement.md:84` and its wsflow mirror
+  — drop `sprint` from the closeout choice list. No successor is substituted.
+- The `workflow-skills.md` removals and edits listed under Spec Impact, except
+  the `lead-skill-authoring` clauses, which belong to Phase 2.
+- The wsflow exclusion sentence (`:223-225`) loses `lead-salvage` now, so the
+  spec does not spend a commit documenting an exclusion policy for a deleted
+  skill. Phase 2 removes `lead-skill-authoring` from the same sentence.
+- `mental-model/workflow-skills.md:73` — the "four core lead skills call one
+  `enter.*` tool each" bullet becomes two skills. This is required in Phase 1
+  even though the tools survive, because the bullet is about which *skills* call
+  them. Mark-remove the anchored `lead-salvage` bullet at `:72` per the
+  `lead-verify-design` precedent rather than deleting it.
 
 Verification: `go test ./...` in `agents-plugin-tool`, the wsflow bundle test,
 `ws/spec_index_verify`, and a repo grep confirming no live (non-`.done/`,
-non-`.plans/`) reference to either name survives outside the ticket graph, which
-Phase 3 handles.
+non-`.dropped/`, non-`.plans/`) reference to either skill name survives outside
+the ticket graph, which Phase 3 handles.
 
 ### Phase 2: Relocate lead-skill-authoring to ai-docs/ref/
 
 Move the content out of the distribution surface without losing it.
 
 - Move `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md` to
-  `ai-docs/ref/`. Strip the `kind: print` frontmatter, which is playbook-serving
-  metadata with no meaning outside rsrc. Preserve the body otherwise verbatim;
-  this phase is a relocation, not a rewrite.
+  `ai-docs/ref/skill-authoring.md`. The destination basename is fixed here on
+  purpose: five separate sites must be repointed at the exact literal path in the
+  same commit, so it cannot be left to implementer choice. Strip the
+  `kind: print` frontmatter, which is playbook-serving metadata with no meaning
+  outside rsrc. Preserve the body otherwise verbatim; this phase is a relocation,
+  not a rewrite.
 - Delete `agents-plugin/skills/lead-skill-authoring/` (SKILL.md and
   `agents/openai.yaml`), `agents-plugin/rsrc/lead-skill-authoring/`,
   `agents-plugin-wsflow/rsrc/lead-skill-authoring/`, the two `defaultPrompt`
@@ -193,11 +243,23 @@ Move the content out of the distribution surface without losing it.
   manifest entries.
 - Repoint all three `AGENTS.md` sites (`:79`, `:160`, `:169`) at the new path in
   this same commit.
-- Add the `_index.md` reference under an auditing-oriented heading — the
-  document is now found by reading, not by invoking a skill, so the pointer must
-  say when to read it.
-- Update `{#260514-skill-authoring-carried-context}` and the
-  `260513-wsflow-agentless-skill-surface` exclusion sentence.
+- Repoint `ai-docs/_index.md` — it carries the same class of binding pointer as
+  `AGENTS.md` and the same same-commit rule applies. Four sites: `:66`, the
+  "Read Before Editing" table row naming the old SKILL.md path; `:79`, the prose
+  "Before editing skill, agent, prompt, or convention text, read
+  `agents-plugin/skills/lead-skill-authoring/SKILL.md`"; `:41`, which claims the
+  Codex UI install has verified `ws:lead-skill-authoring`, a skill that will no
+  longer be installable; and `:157`, which describes `workflow-skills.md` as
+  covering "sprint work".
+- The `_index.md:64-77` "Read Before Editing" table is the correct home for the
+  relocated document — it is the existing register for exactly this class of
+  mandatory pre-read reference. Retitle the row's description toward auditing
+  ("On auditing skill/playbook content") rather than adding a separate heading;
+  the document is now found by reading, not by invoking a skill, so the pointer
+  must say when to read it.
+- Update `{#260514-skill-authoring-carried-context}` and remove
+  `lead-skill-authoring` from the `260513-wsflow-agentless-skill-surface`
+  exclusion sentence, which then reduces to `lead-write-skeleton` alone.
 
 Verification: same test set as Phase 1, plus a check that no live file references
 the old plugin path.
@@ -224,7 +286,37 @@ Also sweep `ai-docs/ref/wsflow-mirroring.md` and `ai-docs/ref/codex-integration.
 
 Closing verification: `ws/references_trace`, `ws/spec_index_verify`, full Go and
 wsflow test runs, and a final grep whose only surviving hits are `CHANGELOG.md`,
-`.done/` tickets, `.plans/`, and this ticket.
+`.done/` and `.dropped/` tickets, `.plans/`, and this ticket.
+
+### Phase 4: GATED — retire the enter.sprint and enter.salvage MCP tools
+
+**Do not start this phase until the tool disposition in `## Decisions` is
+confirmed.** If reading (b) wins, this phase is dropped and Phases 1-3 stand on
+their own; annotate both handlers as caller-less instead.
+
+The served tool set is asserted for exact equality against two hand-maintained
+contracts, so every surface below must land in one commit or the build fails and
+the wsflow launcher breaks at runtime:
+
+- `agents-plugin/runtime.json:19-20` and `agents-plugin-wsflow/runtime.json:22-23`
+  — remove both capability entries. Hand-edit the tool-name keys only; the
+  version string in these files stays owned by `bump-ws-version.sh`.
+- `agents-plugin-tool/internal/mcp/server.go` — dispatch cases `:559-562`,
+  schema blocks at `:3488` and `:3502`.
+- `agents-plugin-tool/internal/mcp/session_state.go:1129-1135` —
+  `handleEnterSprint`, `handleEnterSalvage`, and the now-unreferenced
+  `deriveSprintTodos` / `deriveSalvageTodos`.
+- `agents-plugin-tool/internal/mcp/session_state_test.go:406-410` — asserts the
+  todo key sets of both derive functions by direct call. Deleting the functions
+  without this edit is a **compile** error that stops the whole `internal/mcp`
+  test package from building, not a failing assertion. The other `"sprint"`
+  occurrences in that file (`:819`, `:2809-2822`) are unrelated agenda-key
+  strings; leave them.
+- `ai-docs/spec/mcp-tools.md:261` and `:366-367` — see Spec Impact.
+
+Verification: `go test ./...` must pass, with specific attention to the exact
+tool-set comparisons in `agents-plugin-tool/cmd/ws-mcp/main_test.go` at `:159`
+(wsflow) and `:653` (full ws), which are what catch a half-finished edit.
 
 ## Out of Scope
 
@@ -233,8 +325,25 @@ wsflow test runs, and a final grep whose only surviving hits are `CHANGELOG.md`,
   epic's entries; it does not execute the rest of the diet.
 - `260726-feat-enter-verdict-scenario-output`. That ticket already scopes
   `enter.sprint`/`enter.salvage` as out of scope for verdict-scenario work; this
-  ticket removes them outright, so the two are compatible and must not be
-  sequenced against each other.
+  ticket's Phase 4 may remove them outright, so the two are compatible and must
+  not be sequenced against each other.
 - Rewriting the relocated `lead-skill-authoring` body. Content revision is a
   separate concern from packaging.
 - Any replacement for sprint-edit or salvage workflows.
+
+## Blocked (2026-07-26)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | enter.sprint / enter.salvage disposition is explicitly undecided and gates Phase 1 | critical | missing |
+| 2 | runtime.json tool contracts omitted; Phase 1 verification is guaranteed to fail | critical | autonomous |
+| 3 | ai-docs/spec/mcp-tools.md is not in the Spec Impact scope but documents both tools | important | autonomous |
+| 4 | session_state_test.go omitted; deleting the derive funcs breaks compilation | important | autonomous |
+| 5 | spec-remove list is incomplete — the Sprint Session Shell section holds a second anchor | important | autonomous |
+| 6 | _index.md carries the same binding lead-skill-authoring path guarded only in AGENTS.md | important | autonomous |
+| 7 | lead-implement offers "sprint" as a live user choice with no successor after deletion | important | autonomous |
+| 8 | Spec Impact line references for the wsflow exclusion sentence are wrong | minor | autonomous |
+| 9 | Phase 1 leaves the spec asserting wsflow excludes a skill that no longer exists | minor | autonomous |
+| 10 | Phase 2 does not name the relocation target filename | minor | autonomous |
