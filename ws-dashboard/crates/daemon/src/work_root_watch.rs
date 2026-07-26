@@ -1540,6 +1540,20 @@ fn do_disarm(inner: &RegistryInner, key: &WatchKey) {
     inner.epoch_source.bump_refs(key);
 }
 
+/// Whether `key` is currently `Degraded`, read fresh under the state lock.
+/// Callers that are about to call `do_disarm` (which unconditionally forces
+/// `Unarmed`) must snapshot this BEFORE calling it - `do_disarm` itself
+/// destroys the very fact `set_degraded_after_disarm`'s backoff escalation
+/// needs to read (review finding 5).
+fn is_currently_degraded(inner: &RegistryInner, key: &WatchKey) -> bool {
+    let state = inner.state.lock().expect("watch registry state lock poisoned");
+    state
+        .repos
+        .get(key)
+        .map(|repo| matches!(repo.registration_health, WatchHealth::Degraded(_)))
+        .unwrap_or(false)
+}
+
 /// Sets `key`'s health to `Degraded(reason)` and applies `finish_arm`'s same
 /// backoff bookkeeping (double only on a consecutive `Degraded`, reset
 /// otherwise), for the two call sites that disarm-and-degrade a repo without
@@ -1549,13 +1563,19 @@ fn do_disarm(inner: &RegistryInner, key: &WatchKey) {
 /// `reconcile`'s exponential-backoff guard entirely (D8) - they would always
 /// read as freshly-degraded (`degraded_backoff_ms` still at its default) and
 /// retry every 60 s forever instead of backing off.
-fn set_degraded_after_disarm(inner: &RegistryInner, key: &WatchKey, reason: String) {
+///
+/// `was_degraded` MUST be read by the caller before calling `do_disarm`
+/// (review finding 5): both call sites run `do_disarm` first, which
+/// unconditionally sets `Unarmed`, so reading `registration_health` from
+/// inside this function - after `do_disarm` already ran - always observes
+/// `Unarmed` and never escalates the backoff, no matter how many consecutive
+/// times the repo has actually degraded.
+fn set_degraded_after_disarm(inner: &RegistryInner, key: &WatchKey, reason: String, was_degraded: bool) {
     let now = clock_ms();
     let mut state = inner.state.lock().expect("watch registry state lock poisoned");
     let Some(repo) = state.repos.get_mut(key) else {
         return;
     };
-    let was_degraded = matches!(repo.registration_health, WatchHealth::Degraded(_));
     repo.degraded_backoff_ms = next_degraded_backoff_ms(was_degraded, true, repo.degraded_backoff_ms);
     repo.registration_health = WatchHealth::Degraded(reason);
     repo.last_arm_attempt_ms = Some(now);
@@ -1715,8 +1735,9 @@ fn register_incremental_directory(inner: &RegistryInner, key: &WatchKey, dir: &P
     };
 
     if over_cap {
+        let was_degraded = is_currently_degraded(inner, key);
         do_disarm(inner, key);
-        set_degraded_after_disarm(inner, key, "watch set outgrew cap".to_owned());
+        set_degraded_after_disarm(inner, key, "watch set outgrew cap".to_owned(), was_degraded);
         return;
     }
 
@@ -1776,9 +1797,17 @@ fn rederive_ignore_set(inner: &RegistryInner, key: &WatchKey) {
         };
         match linux_plan_and_apply(inner, &targets, &ignore, &old_dirs) {
             Ok(new_dirs) => apply_rederive_success(inner, key, ignore, new_dirs),
-            Err(_) => {
+            Err(reason) => {
+                // Propagate the real failure reason (review finding 6):
+                // `linux_plan_and_apply` can fail with "watch set too large:
+                // N dirs", "process-wide inotify budget exhausted", or
+                // "arm error: ..." (a registration failure), and
+                // `/api/dashboard/diag/git` (ticket step 9) needs to
+                // distinguish those, not see every Linux re-derive failure
+                // reported as the same hardcoded over-cap string.
+                let was_degraded = is_currently_degraded(inner, key);
                 do_disarm(inner, key);
-                set_degraded_after_disarm(inner, key, "watch set outgrew cap".to_owned());
+                set_degraded_after_disarm(inner, key, reason, was_degraded);
             }
         }
     }
