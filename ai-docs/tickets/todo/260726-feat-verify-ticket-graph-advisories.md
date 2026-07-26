@@ -576,6 +576,25 @@ move with every landing commit.
   ticket is primarily a home for discussion with nowhere else to go and only
   epic-scale discussion earns the link. Epic template conformance is perfectly
   bimodal: 5 open epics with zero non-template sections, 2 with 6 and 2.
+
+  **Epics need no new staging vocabulary** (`milestone`, `step`, `### Ticket N:`),
+  and the reason is positive rather than absence of demand: the demand exists and
+  the item line already absorbs it. `260605-epic-ws-playbook-factory-pivot` groups
+  its children into milestones as parentheticals on each `## Child Tickets` line
+  (`(ready, M1 — playbook surface MVP)`, `(done .done/, M2 — ...)`), and
+  `260723-epic-ticket-write-reshape` expresses sequencing the same way ("blocked on
+  the collocator child"). Ordering and grouping are edge annotations on the item
+  line, not containers. Keeping items as flat bullets rather than `###` headings is
+  load-bearing: a heading invites body content beneath it, which is how
+  implementation work ended up in `260630`'s body.
+
+  A generated `## Child Tickets` list was also considered and rejected. Notes are
+  effectively universal (17 of 20 entries on `260514`, 4 of 4 on `260723`) and the
+  stem is the anchor the note hangs from, so generating the stem half cannot
+  preserve the other half; the only removable duplication would be bare-stem lists,
+  which barely occur. A tool that rewrites a doc section is also the pattern this
+  repo is backing out of — see `260725-idea-retire-ticket-focus-root-regen` and
+  `260710-bug-project-index-ticket-focus-stale-status`.
 - **`workset` retirement.** The category is slated for removal now that goal-loop
   batching over `ready/` absorbs its grouping role. Footprint measured for whoever
   picks it up: 5 workset tickets ever (4 `.done`, 1 open), against 5 playbooks,
