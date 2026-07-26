@@ -7,6 +7,8 @@ spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # The e2e build step lives only in the test:browser npm script, so a direct npx playwright test bypasses it and serves a stale bundle
@@ -142,16 +144,36 @@ the ticket.
   can serve a stale daemon too. Not addressed here: a Rust build is a different
   cost class than 2.4 s and the measurement that settles the frontend question
   does not transfer. Recorded so a future session knows it was seen, not missed.
-- **Skip the build only where `frontend/dist` is provably not what gets
-  served.** Two such cases exist and both must skip, or the run pays for a build
-  nobody consumes: `WS_DASHBOARD_STATIC_DIR` is set (`daemonHarness.ts:120`,
+- **Skip the build only where `frontend/dist` is not the harness-constructed
+  static dir.** Two such cases exist and both must skip, or the run pays for a
+  build nobody consumes: `WS_DASHBOARD_STATIC_DIR` is set (`daemonHarness.ts:120`,
   `:216`), or external mode is selected (`daemonHarness.ts:103`:
   `WS_DASHBOARD_DAEMON_MODE=external`, `WS_DASHBOARD_DAEMON_BASE_URL`, or
   `WS_DASHBOARD_DAEMON_PAIRING_URL`). Skips must announce themselves on stdout;
-  a silent skip is the failure mode this ticket is about.
+  a silent skip is the failure mode this ticket is about. Note that neither
+  condition actually proves `frontend/dist` is unused: `WS_DASHBOARD_STATIC_DIR`
+  is exactly `<repoRoot>/frontend/dist` by default (`daemonHarness.ts:216`), and
+  an external daemon may itself have been started against that same directory.
+  Both skip conditions knowingly leave that overlap to the manual-rebuild
+  discipline the Spec Impact section keeps alive for these two paths — the skip
+  is a mechanical trigger on env shape, not a freshness proof, and must not be
+  described as one.
 - **A failing build must fail the run.** A non-zero build exit propagates out of
   `globalSetup` as a hard stop, never a warning that lets Playwright proceed
   against the previous bundle.
+- **The build must be invoked through a portable spawn.** `spawn("npm", ["run",
+  "build"])` throws `ENOENT` on native Windows, because `npm` resolves to
+  `npm.cmd` there and `child_process.spawn` does not consult `PATHEXT`/shell
+  resolution by default; combined with the "failing build must fail the run"
+  rule above, an unguarded spawn call would make every Windows invocation die in
+  `globalSetup` before any test runs, so the guard this ticket adds could never
+  fire on that platform. Use `shell: true` (or resolve the platform npm
+  executable explicitly), mirroring the win32 handling this harness already
+  carries elsewhere — `dashboardBinaryName`'s win32 branch
+  (`daemonHarness.ts:125-129`, unit-tested at `daemonHarness.test.ts:94-96`) and
+  `terminalPortabilityEvidence.ts`'s per-platform evidence shape. Windows is a
+  live concern here, not a hypothetical: `260714-chore-dashboard-windows-gateway-frontend-drift`
+  sits in `todo/`.
 - **File ownership vs `260725-bug-dashboard-e2e-harness-destroys-daemon-diagnostics`
   (todo/).** That ticket's Phase 1 edits `e2e/daemonHarness.ts::startDaemon`
   (the stdout/stderr no-op drain) and `e2e/dashboard-acceptance.spec.ts`'s
@@ -212,8 +234,14 @@ to an existing entry, not new behavior.
 Close the bypass so no invocation path can serve a stale `frontend/dist`.
 
 **Completed behavior.** `playwright.config.ts` declares `globalSetup` pointing
-at a new `ws-dashboard/frontend/e2e/globalSetup.ts`. That setup runs
-`npm run build` in `ws-dashboard/frontend` before any test starts, and a
+at a new `ws-dashboard/frontend/e2e/globalSetup.ts`. That setup derives
+`ws-dashboard/frontend` from its own module location — the same
+`fileURLToPath(import.meta.url)` idiom `daemonHarness.ts:5-7` already uses to
+derive `repoRoot` — rather than from `process.cwd()`, since Playwright invokes
+`globalSetup` with whatever cwd the runner was launched from and this ticket's
+own premise is that invocation paths vary (bare `npx`, single-spec, an IDE
+runner launched from the repo root). It runs `npm run build` there, through a
+portable spawn per the Constraints entry above, before any test starts, and a
 non-zero exit propagates out of `globalSetup` as a run-ending failure. It skips
 the build — announcing the skip and the reason on stdout — only when
 `WS_DASHBOARD_STATIC_DIR` is set or external mode is selected via
@@ -252,8 +280,15 @@ the original failure, re-run:
 4. Revert the `src` mutation and confirm the same command returns to green.
 5. Prove both skip conditions announce and do not rebuild: run once with
    `WS_DASHBOARD_STATIC_DIR` pointed at a prebuilt directory, and once with
-   `WS_DASHBOARD_DAEMON_MODE=external`, and check the skip line and reason
-   appear on stdout.
+   `WS_DASHBOARD_DAEMON_MODE=external` alone, and check the skip line and
+   reason appear on stdout in both cases. The `WS_DASHBOARD_DAEMON_MODE=external`
+   run is expected to end red without ever reaching a test: with no
+   `WS_DASHBOARD_DAEMON_BASE_URL`/`WS_DASHBOARD_DAEMON_PAIRING_URL` supplied,
+   `startDaemon` throws its own "external daemon mode requires ..." error
+   (`daemonHarness.ts:199-201`) after `globalSetup` has already emitted the skip
+   line. The evidence for this step is the stdout skip line alone, not the
+   run's overall color — unlike step 3, a red run here does not mean the guard
+   misfired.
 6. Record the measured `globalSetup` build overhead on a warm tree in the
    Result, so a future reader can re-check the ~2.4 s premise this decision
    rests on rather than inheriting it as folklore.
