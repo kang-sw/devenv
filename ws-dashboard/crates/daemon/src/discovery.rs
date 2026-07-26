@@ -634,8 +634,8 @@ impl fmt::Debug for GitProbeCache {
 }
 
 // Identity comparison: two handles are equal exactly when they share one memo.
-// Keeps `LocalDashboardResourcesProvider`'s derived `Eq` meaningful without
-// making memo contents part of provider equality.
+// Keeps `LocalDashboardResourcesProvider`'s hand-written `Eq` meaningful
+// without making memo contents part of provider equality.
 impl PartialEq for GitProbeCache {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)

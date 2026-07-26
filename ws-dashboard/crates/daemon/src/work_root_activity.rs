@@ -2437,6 +2437,10 @@ fn git_identity(root_path: &Path, git_stats: &GitSpawnStats) -> Option<GitIdenti
     })
 }
 
+/// Strict-UTF-8 by design: every caller (`git_identity`) feeds this straight
+/// into `std::fs::canonicalize`, which is the "stdout becomes filesystem paths"
+/// case `GitOutcome::stdout`'s doc comment reserves for `stdout_strict`. This
+/// also preserves the pre-seam `String::from_utf8(..).ok()?` semantics.
 fn git_output(repo: &Path, args: &[&str], git_stats: &GitSpawnStats) -> Option<String> {
     capture(
         git_stats,
@@ -2447,7 +2451,7 @@ fn git_output(repo: &Path, args: &[&str], git_stats: &GitSpawnStats) -> Option<S
     )
     .ok()
     .and_then(|outcome| {
-        let trimmed = outcome.stdout.trim();
+        let trimmed = outcome.stdout_strict()?.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_owned())
     })
 }

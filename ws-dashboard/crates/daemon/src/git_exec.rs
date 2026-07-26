@@ -30,7 +30,7 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Result of a successful (zero-exit, non-timed-out) `capture` call.
@@ -299,15 +299,53 @@ fn next_poll_interval(previous: Duration) -> Duration {
     previous.saturating_mul(2).min(MAX_POLL_INTERVAL)
 }
 
+/// Result of waiting for one reader thread to deliver its collected bytes.
+enum ReaderCollect {
+    /// The reader reached EOF and handed over everything it read.
+    Collected(Vec<u8>),
+    /// The budget expired before EOF, which means some process other than the
+    /// direct child still holds a write end of the pipe.
+    Expired,
+}
+
+/// Bounded receive of one reader thread's output.
+///
+/// This is why the readers deliver through a channel instead of a
+/// `JoinHandle`: `join()` cannot be bounded, and `read_to_end` returns only
+/// once *every* write end of the pipe is closed, so a child that exited while
+/// a descendant kept the inherited pipes would block an un-bounded join
+/// forever - on the success path, where the poll loop's deadline is no longer
+/// in play.
+///
+/// `deadline == None` (`WS_DASHBOARD_GIT_TIMEOUT_MS=0`) blocks: the operator
+/// explicitly opted out of bounding. A disconnected channel means the reader
+/// thread panicked before sending, treated as empty output to match the
+/// previous `join().unwrap_or_default()`.
+fn collect_reader(rx: &mpsc::Receiver<Vec<u8>>, deadline: Option<Instant>) -> ReaderCollect {
+    let Some(deadline) = deadline else {
+        return ReaderCollect::Collected(rx.recv().unwrap_or_default());
+    };
+    match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(bytes) => ReaderCollect::Collected(bytes),
+        Err(mpsc::RecvTimeoutError::Disconnected) => ReaderCollect::Collected(Vec::new()),
+        Err(mpsc::RecvTimeoutError::Timeout) => ReaderCollect::Expired,
+    }
+}
+
 /// Spawn `git -C <root> <args>`, bounded by `budget` (a zero `budget` means
 /// unbounded, see [`git_timeout_from_env`]).
 ///
 /// Drains stdout/stderr concurrently with the wait (one reader thread per
 /// pipe, reading to EOF) so a child that fills a pipe buffer (~64 KB) before
 /// exiting can never deadlock the wait loop. On expiry the child is killed and
-/// reaped and the reader threads are *detached* (see the comment at the detach
-/// site) before returning `GitFailure::Timeout`, so the call never outlives
-/// `budget` by more than one kill-and-reap.
+/// reaped and the reader threads are left *detached and uncollected* (see the
+/// comment at that site) before returning `GitFailure::Timeout`, so the call
+/// never outlives `budget` by more than one kill-and-reap.
+///
+/// The bound covers *both* halves uniformly: waiting for the exit and then
+/// collecting the readers' output. A child that exits within `budget` but
+/// leaves a descendant holding the inherited pipes also yields
+/// `GitFailure::Timeout` rather than a possibly-truncated success.
 ///
 /// Every call increments `stats.total` and the per-subcommand counter,
 /// regardless of outcome. `stats.timeouts`/`stats.failures` are incremented
@@ -368,18 +406,28 @@ fn capture_with_program(
 
     let mut stdout_pipe = child.stdout.take().expect("child stdout is piped");
     let mut stderr_pipe = child.stderr.take().expect("child stderr is piped");
-    let stdout_reader = std::thread::spawn(move || {
+    // The readers are detached on every path and deliver their bytes through a
+    // channel rather than through `JoinHandle::join`, so that *collecting* the
+    // output is bounded by the same deadline as waiting for the exit (see
+    // `collect_reader`). Each closure captures only its own owned pipe handle
+    // and `Sender`, never `stats`, `child`, or any borrow of this frame, so a
+    // reader that outlives this call cannot touch freed state.
+    let (stdout_tx, stdout_rx) = mpsc::channel();
+    let (stderr_tx, stderr_rx) = mpsc::channel();
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout_pipe.read_to_end(&mut buf);
-        buf
+        let _ = stdout_tx.send(buf);
     });
-    let stderr_reader = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stderr_pipe.read_to_end(&mut buf);
-        buf
+        let _ = stderr_tx.send(buf);
     });
 
-    let deadline = deadline_for(Instant::now(), budget);
+    // Measured from `start`, not from here, so the budget the caller gets and
+    // the `elapsed_ms` the timeout warning reports agree.
+    let deadline = deadline_for(start, budget);
     let mut poll_interval = INITIAL_POLL_INTERVAL;
     let status = loop {
         match child.try_wait() {
@@ -400,10 +448,9 @@ fn capture_with_program(
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                // Detached, not joined, for the same reason as the timeout
-                // path below: a grandchild may still hold the pipes open.
-                drop(stdout_reader);
-                drop(stderr_reader);
+                // The readers are left to finish on their own and their output
+                // is never collected, for the same reason as the timeout path
+                // below: a grandchild may still hold the pipes open.
                 stats.record_failure();
                 tracing::warn!(
                     subcommand = subcommand.as_str(),
@@ -419,25 +466,23 @@ fn capture_with_program(
         // Budget expired. Kill and reap the DIRECT child only: `wait()`
         // returns promptly even while a grandchild is still alive.
         //
-        // DELIBERATE THREAD LEAK: the reader threads are detached, never
-        // joined, on this path. `read_to_end` returns only once EVERY write
-        // end of the pipe is closed, and `kill()` signals the direct child
-        // alone - so `fetch`/`push`/`pull` (which exec `ssh` and credential
-        // helpers with inherited stdout/stderr) and `switch` (post-checkout
-        // hooks) would keep a joining `capture` blocked long past `budget`,
-        // making the "bounded wait" unbounded for exactly the network
-        // operations the bound exists for. Each timeout therefore leaks two
-        // threads plus their two pipe read handles until the pipe finally
-        // closes on its own; the cost is bounded by timeout frequency, and
-        // the captured output is discarded on this path anyway.
+        // DELIBERATE THREAD LEAK: the reader threads are left running and
+        // their output is never collected on this path. `read_to_end` returns
+        // only once EVERY write end of the pipe is closed, and `kill()`
+        // signals the direct child alone - so `fetch`/`push`/`pull` (which
+        // exec `ssh` and credential helpers with inherited stdout/stderr) and
+        // `switch` (post-checkout hooks) would keep a waiting `capture`
+        // blocked long past `budget`, making the "bounded wait" unbounded for
+        // exactly the network operations the bound exists for. Each timeout
+        // therefore leaks two threads plus their two pipe read handles until
+        // the pipe finally closes on its own; the cost is bounded by timeout
+        // frequency, and the captured output is discarded on this path anyway.
         //
-        // Rejected alternative: joining with a grace period. Any grace long
-        // enough to be useful can still push the total wait past `budget`,
-        // which is the defect this avoids.
+        // Rejected alternative: waiting for the readers with a grace period.
+        // Any grace long enough to be useful can still push the total wait
+        // past `budget`, which is the defect this avoids.
         let _ = child.kill();
         let _ = child.wait();
-        drop(stdout_reader);
-        drop(stderr_reader);
         stats.record_timeout();
         let elapsed_ms = start.elapsed().as_millis() as u64;
         tracing::warn!(
@@ -448,8 +493,45 @@ fn capture_with_program(
         return Err(GitFailure::Timeout);
     };
 
-    let stdout_bytes = stdout_reader.join().unwrap_or_default();
-    let stderr_bytes = stderr_reader.join().unwrap_or_default();
+    // The child exited, but collecting its output is bounded by the SAME
+    // deadline: `read_to_end` reaches EOF only when every write end of the pipe
+    // is closed, so a descendant that inherited stdout/stderr and outlived the
+    // direct child (`ssh` and credential helpers under `fetch`/`push`/`pull`,
+    // post-checkout hooks under `switch`) keeps the readers blocked with no
+    // deadline left in play. Bounding only the exit wait made "no `capture`
+    // call outlives `budget`" false on the most common path.
+    let collected = match collect_reader(&stdout_rx, deadline) {
+        ReaderCollect::Collected(stdout_bytes) => match collect_reader(&stderr_rx, deadline) {
+            ReaderCollect::Collected(stderr_bytes) => Some((stdout_bytes, stderr_bytes)),
+            ReaderCollect::Expired => None,
+        },
+        ReaderCollect::Expired => None,
+    };
+    let Some((stdout_bytes, stderr_bytes)) = collected else {
+        // TRADE-OFF: a git invocation that completed successfully but whose
+        // output could not be read within the budget reports `Timeout` rather
+        // than returning possibly-truncated stdout. Truncated-but-successful is
+        // the more dangerous outcome: callers like `for-each-ref` and
+        // `worktree list --porcelain` parse stdout and would treat a short read
+        // as a complete answer.
+        //
+        // `kill()` is a no-op here (the child was already reaped by
+        // `try_wait`); it is kept so this path cannot leave a live direct child
+        // behind if the exit detection ever changes. The readers are left
+        // running and uncollected exactly as on the expiry path above.
+        let _ = child.kill();
+        stats.record_timeout();
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        tracing::warn!(
+            subcommand = subcommand.as_str(),
+            elapsed_ms,
+            // Distinct from the "git command timed out" message above so a
+            // descendant holding the pipes is diagnosable apart from a
+            // genuinely slow git.
+            "git command exited but its output was still held open by a descendant process",
+        );
+        return Err(GitFailure::Timeout);
+    };
     let elapsed = start.elapsed();
     let (stdout, stdout_valid_utf8) = decode_output(&stdout_bytes);
     let (stderr, _) = decode_output(&stderr_bytes);
@@ -638,6 +720,41 @@ mod tests {
         assert_eq!(stats.snapshot().timeouts, 1);
     }
 
+    /// Success-path twin of the pin above, and the reason output collection is
+    /// bounded rather than joined: the direct child exits ZERO within the
+    /// budget, but a descendant keeps the inherited pipes open. Joining the
+    /// readers here reported `ok` only after the descendant exited (measured
+    /// 3002.9ms under a 200ms budget); the bound must hold on every exit path,
+    /// not just on expiry. Unix-only because provoking a descendant needs a
+    /// shell; the behavior it pins is platform-independent.
+    #[cfg(unix)]
+    #[test]
+    fn capture_times_out_when_a_zero_exit_child_leaves_a_descendant_holding_the_pipes() {
+        let stats = GitSpawnStats::default();
+        let start = Instant::now();
+        let result = capture_with_program(
+            "sh",
+            &stats,
+            Path::new("."),
+            &["-c", "sleep 5 & exit 0"],
+            GitFailureExpectation::Unexpected,
+            Duration::from_millis(200),
+        );
+
+        assert!(
+            matches!(result, Err(GitFailure::Timeout)),
+            "a zero-exit child whose descendant holds the pipes must still be bounded, got {result:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "capture must not wait for the descendant to release the pipes; took {:?}",
+            start.elapsed()
+        );
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.timeouts, 1);
+        assert_eq!(snapshot.failures, 1);
+    }
+
     #[cfg(unix)]
     #[test]
     fn capture_survives_a_child_emitting_more_than_1mb_of_stdout() {
@@ -720,6 +837,34 @@ mod tests {
             "an Unexpected non-zero exit must emit a tracing warning"
         );
         assert_eq!(stats.snapshot().failures, 1);
+    }
+
+    /// The unbounded branch of `collect_reader`
+    /// (`WS_DASHBOARD_GIT_TIMEOUT_MS=0`): with no deadline the output is
+    /// collected with a plain blocking receive, so a zero budget must return at
+    /// child exit and must never report a timeout. Portable: reuses `EXIT_ONE`.
+    #[test]
+    fn a_zero_budget_capture_collects_output_at_child_exit_without_timing_out() {
+        let stats = GitSpawnStats::default();
+
+        let result = capture_with_program(
+            EXIT_ONE.0,
+            &stats,
+            Path::new("."),
+            EXIT_ONE.1,
+            GitFailureExpectation::ExpectedNonZero,
+            Duration::ZERO,
+        );
+
+        assert!(
+            matches!(result, Err(GitFailure::Status(1))),
+            "an unbounded budget must still observe the real exit status, got {result:?}"
+        );
+        assert_eq!(
+            stats.snapshot().timeouts,
+            0,
+            "a zero budget opts out of bounding and must never report a timeout"
+        );
     }
 
     /// Portable on purpose: `total` and `by_subcommand` are recorded before
