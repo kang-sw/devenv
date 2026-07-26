@@ -111,6 +111,8 @@ where
         opened_work_roots,
         git_probe_cache: crate::discovery::GitProbeCache::default(),
         git_spawn_stats: Arc::new(crate::git_exec::GitSpawnStats::default()),
+        git_state_cache: crate::git_state_cache::GitStateCache::default(),
+        epoch_source: Arc::new(crate::git_state_cache::MutationEpochSource::default()),
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         terminals,

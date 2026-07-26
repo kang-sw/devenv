@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod document_translation;
 pub mod events;
 pub mod git_exec;
+pub mod git_state_cache;
 pub mod git_toolbar;
 pub mod git_worktree;
 pub mod logging;

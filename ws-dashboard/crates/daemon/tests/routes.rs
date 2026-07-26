@@ -170,6 +170,8 @@ fn app_state_with_opened_and_store(
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
+        git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
+        epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
@@ -195,6 +197,8 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
+        git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
+        epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -424,6 +428,8 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
+        git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
+        epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -8081,6 +8087,230 @@ async fn git_toolbar_branches_switch_and_create_revalidate_state() {
     remove_static_fixture(&base);
 }
 
+// Phase 3 (git-state-cache) Verification boundary: hit `/git/status` twice
+// inside the TTL and assert the second call adds ZERO spawns; then
+// `POST /git/switch-branch` and assert the epoch bump beats the still-live
+// TTL - the very next `/git/status` must reflect the new branch AND show a
+// non-zero spawn delta (it recomputed, it did not serve the stale slot).
+#[tokio::test]
+async fn git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branch_bump_beats_ttl()
+{
+    if skip_without_git(
+        "git_toolbar_status_repeats_add_zero_spawns_within_ttl_then_switch_branch_bump_beats_ttl",
+    ) {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-cache-ttl-and-bump");
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "one\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let original_branch = current_git_branch(&primary);
+    run_git(&primary, &["branch", "topic"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+
+    // First call: cold fill (the shared discovery memo AND the new
+    // GitStateCache slot are both cold here).
+    let first = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(first["branch"]["name"], original_branch);
+
+    let before = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let before_total = before["totalSpawns"].as_u64().expect("before totalSpawns");
+
+    // Second call, immediately after, well inside the default 2000ms TTL and
+    // under an unchanged epoch: must be a pure cache hit for both slots.
+    let second = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    // Compare only the cache-derived fields: `refreshedAtMs` is stamped fresh
+    // on every call regardless of cache hit (it marks response construction
+    // time, not cache fill time), so it deliberately differs even on a pure
+    // hit and must be excluded from this comparison.
+    assert_eq!(second["branch"], first["branch"], "a TTL/epoch hit must return the same cached branch state");
+    assert_eq!(second["changes"], first["changes"], "a TTL/epoch hit must return the same cached changes state");
+    assert_eq!(second["sync"], first["sync"], "a TTL/epoch hit must return the same cached sync state");
+
+    let after = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let after_total = after["totalSpawns"].as_u64().expect("after totalSpawns");
+    assert_eq!(
+        after_total, before_total,
+        "a second /git/status call inside the TTL under an unchanged epoch must add zero git spawns: before={before_total} after={after_total}"
+    );
+
+    // POST /git/switch-branch mutates AND bumps the refs epoch (Phase 3
+    // step 5) before its own cache-aware status read - the still-live TTL
+    // must not shadow that bump.
+    let switched = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/switch-branch"),
+        serde_json::json!({"branchName": "topic"}),
+        StatusCode::OK,
+    )
+    .await;
+    // The switch handler bumps the refs epoch BEFORE its own internal
+    // `status_for_path` call (Phase 3 step 5), so this response is already
+    // the proof that the bump beat the still-live TTL: the refs slot was
+    // cached at `original_branch` well inside the 2000ms TTL (the two calls
+    // above ran microseconds apart), and an epoch-blind cache would have
+    // served that stale value here instead of recomputing to "topic".
+    assert_eq!(
+        switched["branch"]["name"], "topic",
+        "epoch bump must beat the still-live TTL: a stale hit would have returned {original_branch:?}"
+    );
+
+    let bumped_before = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let bumped_before_total = bumped_before["totalSpawns"]
+        .as_u64()
+        .expect("bumped before totalSpawns");
+
+    // The switch response's own status read already re-filled the refs slot
+    // at the new (bumped) epoch, so a follow-up /git/status call - still
+    // inside the same TTL window - must now be a pure cache hit: same branch,
+    // zero further spawns. This closes the loop on the cache's coherence
+    // after a mutation, distinct from the "bump beats TTL" property pinned
+    // above.
+    let after_switch = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(after_switch["branch"], switched["branch"]);
+    assert_eq!(after_switch["changes"], switched["changes"]);
+    assert_eq!(after_switch["sync"], switched["sync"]);
+
+    let bumped_after = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let bumped_after_total = bumped_after["totalSpawns"]
+        .as_u64()
+        .expect("bumped after totalSpawns");
+    assert_eq!(
+        bumped_after_total, bumped_before_total,
+        "a /git/status call after the switch response already re-filled the (now-current) refs slot must be a pure cache hit, adding zero further spawns: before={bumped_before_total} after={bumped_after_total}"
+    );
+
+    remove_static_fixture(&base);
+}
+
+// Phase 3 Lead Disposition D2: the frontend's `refreshGit` fetches
+// `/git/status` and `/git/branches` together in one `Promise.all` on every
+// poll tick (`frontend/src/App.tsx`). Both miss a cold `GitStateCache` slot
+// for the same root at the same moment; D1's union-refs win only actually
+// materializes if the per-key single-flight lock
+// (`GitStateCache::refs`/`slot_for`) collapses the two concurrent misses into
+// ONE refs computation. This is the one test that distinguishes "the cache
+// works" from "the cache pays off" - every other assertion in this phase
+// would still pass even if both requests filled independently.
+//
+// `git branch --show-current` is invoked exactly once per
+// `compute_ref_state` call and nowhere else on this path (the test fixture's
+// own `run_git` helper spawns `git` directly, never through
+// `GitSpawnStats`), so the `bySubcommand.branch` delta is an exact,
+// non-fuzzy count of how many refs computations actually ran.
+#[tokio::test]
+async fn git_toolbar_status_and_branches_concurrent_cold_miss_collapse_refs_computation_to_one_spawn_set(
+) {
+    if skip_without_git(
+        "git_toolbar_status_and_branches_concurrent_cold_miss_collapse_refs_computation_to_one_spawn_set",
+    ) {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-concurrent-cold-cache");
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "one\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+
+    let before = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let before_branch_spawns = before["bySubcommand"]["branch"].as_u64().unwrap_or(0);
+
+    // Genuinely concurrent: both futures are polled together by `join!`, and
+    // each route's own handler hands its git work off to
+    // `tokio::task::spawn_blocking`, so the two `git` computations really do
+    // race on the blocking thread pool rather than merely interleaving on one
+    // executor thread.
+    let status_uri = format!("/api/dashboard/work-roots/{git_id}/git/status");
+    let branches_uri = format!("/api/dashboard/work-roots/{git_id}/git/branches");
+    let (status, branches) = tokio::join!(
+        git_toolbar_get_json(app.clone(), cookie.as_str(), &status_uri, StatusCode::OK),
+        git_toolbar_get_json(app.clone(), cookie.as_str(), &branches_uri, StatusCode::OK),
+    );
+    assert_eq!(status["available"], true);
+    assert!(branches["branches"].is_array());
+
+    let after = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let after_branch_spawns = after["bySubcommand"]["branch"].as_u64().unwrap_or(0);
+    assert_eq!(
+        after_branch_spawns - before_branch_spawns,
+        1,
+        "concurrent /git/status + /git/branches against a cold cache for the same root must run `git branch --show-current` exactly once (the shared, single-flighted refs fill), not once per route: before={before_branch_spawns} after={after_branch_spawns}"
+    );
+
+    remove_static_fixture(&base);
+}
+
 #[tokio::test]
 async fn git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults() {
     if skip_without_git("git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults") {
@@ -8464,6 +8694,8 @@ fn app_state_with_activity_cache_and_codex_home(
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
+        git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
+        epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -14229,6 +14461,8 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
+        git_state_cache: ws_dashboard_daemon::git_state_cache::GitStateCache::default(),
+        epoch_source: Arc::new(ws_dashboard_daemon::git_state_cache::MutationEpochSource::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::new(Some(TranslationProviderConfig {
