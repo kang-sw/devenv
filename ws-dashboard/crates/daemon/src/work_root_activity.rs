@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path as AxumPath, Query, State};
@@ -18,6 +18,7 @@ use ws_dashboard_core::{
     WorkRootActivityView, WorkRootId,
 };
 
+use crate::git_exec::{capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats};
 use crate::router::AppState;
 use crate::work_root_activity_registry::{
     read_activity_agent_instance_records, read_activity_agent_records,
@@ -100,8 +101,9 @@ impl WorkRootActivityProjector {
         &self,
         work_root_id: WorkRootId,
         root_path: &Path,
+        git_stats: &Arc<GitSpawnStats>,
     ) -> WorkRootActivityView {
-        self.project_with_recent_limit(work_root_id, root_path, None)
+        self.project_with_recent_limit(work_root_id, root_path, None, git_stats)
             .await
     }
 
@@ -110,6 +112,7 @@ impl WorkRootActivityProjector {
         work_root_id: WorkRootId,
         root_path: &Path,
         recent_limit: Option<usize>,
+        git_stats: &Arc<GitSpawnStats>,
     ) -> WorkRootActivityView {
         // CONTRACT: Phase 1 reads wsstate/wsagent agent records for this opened
         // workRoot through daemon-owned projection logic. Browser callers never
@@ -122,6 +125,7 @@ impl WorkRootActivityProjector {
         let codex_home = self.codex_home.clone();
         let root_path = root_path.to_path_buf();
         let recent_limit = normalize_recent_activity_limit(recent_limit);
+        let git_stats = Arc::clone(git_stats);
         tokio::task::spawn_blocking(move || {
             project_blocking(
                 work_root_id,
@@ -129,6 +133,7 @@ impl WorkRootActivityProjector {
                 cache_home.as_deref(),
                 codex_home.as_deref(),
                 recent_limit,
+                &git_stats,
             )
         })
         .await
@@ -143,10 +148,12 @@ impl WorkRootActivityProjector {
         cursor: Option<String>,
         before: Option<String>,
         limit: Option<usize>,
+        git_stats: &Arc<GitSpawnStats>,
     ) -> ActivityTranscript {
         let cache_home = self.cache_home.clone();
         let codex_home = self.codex_home.clone();
         let root_path = root_path.to_path_buf();
+        let git_stats = Arc::clone(git_stats);
         tokio::task::spawn_blocking(move || {
             named_agent_transcript_blocking(
                 work_root_id,
@@ -157,6 +164,7 @@ impl WorkRootActivityProjector {
                 cursor.as_deref(),
                 before.as_deref(),
                 normalize_transcript_limit(limit),
+                &git_stats,
             )
         })
         .await
@@ -167,16 +175,19 @@ impl WorkRootActivityProjector {
         &self,
         work_root_id: WorkRootId,
         root_path: &Path,
+        git_stats: &Arc<GitSpawnStats>,
     ) -> ActivityWatchSnapshot {
         let cache_home = self.cache_home.clone();
         let codex_home = self.codex_home.clone();
         let root_path = root_path.to_path_buf();
+        let git_stats = Arc::clone(git_stats);
         tokio::task::spawn_blocking(move || {
             watch_snapshot_blocking(
                 work_root_id,
                 &root_path,
                 cache_home.as_deref(),
                 codex_home.as_deref(),
+                &git_stats,
             )
         })
         .await
@@ -197,7 +208,12 @@ pub async fn work_root_activity(
 
     let mut feed = state
         .work_root_activity
-        .project_with_recent_limit(work_root_id.clone(), &root_path, query.recent_limit)
+        .project_with_recent_limit(
+            work_root_id.clone(),
+            &root_path,
+            query.recent_limit,
+            &state.git_spawn_stats,
+        )
         .await;
     // Step 6: merge live Codex app-server sessions into the unified feed's
     // `items` (never `agents`) so Codex activity is visible through this same
@@ -265,6 +281,7 @@ pub async fn work_root_activity_transcript(
                 query.cursor,
                 query.before,
                 query.limit,
+                &state.git_spawn_stats,
             )
             .await,
     )
@@ -284,7 +301,7 @@ pub async fn work_root_activity_events(
 
     let snapshot = state
         .work_root_activity
-        .watch_snapshot(work_root_id.clone(), &root_path)
+        .watch_snapshot(work_root_id.clone(), &root_path, &state.git_spawn_stats)
         .await;
     let stream = ActivityEventPollStream::new(
         state.work_root_activity.clone(),
@@ -292,6 +309,7 @@ pub async fn work_root_activity_events(
         root_path,
         query.after,
         snapshot,
+        Arc::clone(&state.git_spawn_stats),
     )
     .into_stream();
 
@@ -312,6 +330,11 @@ struct ActivityEventPollStream {
     previous: ActivityWatchSnapshot,
     pending: VecDeque<ActivityConsoleEvent>,
     next_cursor: u64,
+    // Owned so the poll loop below (which runs for the SSE connection's
+    // whole lifetime, well past the handler's own stack frame) can keep
+    // calling `watch_snapshot` with the daemon's shared counters instead of
+    // a per-poll throwaway instance.
+    git_stats: Arc<GitSpawnStats>,
 }
 
 impl ActivityEventPollStream {
@@ -321,6 +344,7 @@ impl ActivityEventPollStream {
         root_path: PathBuf,
         after: Option<String>,
         snapshot: ActivityWatchSnapshot,
+        git_stats: Arc<GitSpawnStats>,
     ) -> Self {
         let mut next_cursor = after
             .as_deref()
@@ -369,6 +393,7 @@ impl ActivityEventPollStream {
             previous: snapshot,
             pending,
             next_cursor,
+            git_stats,
         }
     }
 
@@ -378,7 +403,7 @@ impl ActivityEventPollStream {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let next = state
                     .projector
-                    .watch_snapshot(state.work_root_id.clone(), &state.root_path)
+                    .watch_snapshot(state.work_root_id.clone(), &state.root_path, &state.git_stats)
                     .await;
                 state.enqueue_diff(next);
             }
@@ -480,11 +505,26 @@ fn activity_access_error(error: WorkRootAccessError) -> Response {
 /// layout, no agents" empty projection. Exposed so daemon route tests can seed
 /// fixture cache trees at the same location the projector reads.
 pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
-    resolve_work_root_state_dir(cache_home, root_path).map(|state_dir| state_dir.join("agents"))
+    // CONTRACT: `resolve_work_root_agents_dir` has zero production callers -
+    // every production path into `git_identity` goes through
+    // `resolve_work_root_state_dir`, which threads the daemon's shared
+    // `GitSpawnStats` explicitly. This throwaway, discarded-after-the-call
+    // instance is safe ONLY because this function stays a test-fixture-
+    // seeding utility (see the doc comment above). Adding a production
+    // caller here would create an uncounted git-spawn path invisible to
+    // `GET /api/dashboard/diag/git` - route any new production caller
+    // through `resolve_work_root_state_dir` instead.
+    let git_stats = GitSpawnStats::default();
+    resolve_work_root_state_dir(cache_home, root_path, &git_stats)
+        .map(|state_dir| state_dir.join("agents"))
 }
 
-fn resolve_work_root_state_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
-    let identity = git_identity(root_path)?;
+fn resolve_work_root_state_dir(
+    cache_home: &Path,
+    root_path: &Path,
+    git_stats: &GitSpawnStats,
+) -> Option<PathBuf> {
+    let identity = git_identity(root_path, git_stats)?;
     let project_key = short_hash(&canonical_path_bytes(&identity.common_root));
     let worktree_key = if identity.worktree_root == identity.common_root {
         project_key
@@ -501,9 +541,10 @@ fn project_blocking(
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
     recent_limit: Option<usize>,
+    git_stats: &GitSpawnStats,
 ) -> WorkRootActivityView {
     let projections = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path, git_stats))
         .map(|state_dir| registry_named_agents(&state_dir, codex_home, recent_limit))
         .unwrap_or_default();
 
@@ -518,7 +559,7 @@ fn project_blocking(
         .map(named_agent_activity_item)
         .collect::<Vec<_>>();
     if let Some(state_dir) = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path, git_stats))
     {
         items.extend(registry_historical_agent_items(
             &state_dir,
@@ -548,9 +589,17 @@ fn watch_snapshot_blocking(
     root_path: &Path,
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
+    git_stats: &GitSpawnStats,
 ) -> ActivityWatchSnapshot {
-    let view = project_blocking(work_root_id, root_path, cache_home, codex_home, None);
-    let item_versions = activity_item_versions(root_path, cache_home, codex_home);
+    let view = project_blocking(
+        work_root_id,
+        root_path,
+        cache_home,
+        codex_home,
+        None,
+        git_stats,
+    );
+    let item_versions = activity_item_versions(root_path, cache_home, codex_home, git_stats);
     let mut items = BTreeMap::new();
     let mut transcript_cursors = BTreeMap::new();
     for item in view.items {
@@ -569,9 +618,10 @@ fn activity_item_versions(
     root_path: &Path,
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
+    git_stats: &GitSpawnStats,
 ) -> BTreeMap<String, String> {
     let Some(state_dir) = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path, git_stats))
     else {
         return BTreeMap::new();
     };
@@ -1346,6 +1396,7 @@ fn named_agent_transcript_blocking(
     cursor: Option<&str>,
     before: Option<&str>,
     limit: usize,
+    git_stats: &GitSpawnStats,
 ) -> ActivityTranscript {
     let source_id = activity_source_from_id(&activity_id);
     let fallback_agent_key = match &source_id {
@@ -1354,7 +1405,7 @@ fn named_agent_transcript_blocking(
         None => "agent",
     };
     let Some(state_dir) = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path, git_stats))
     else {
         return unavailable_transcript(
             work_root_id,
@@ -2354,11 +2405,21 @@ struct GitIdentity {
 /// Discover the canonical Git worktree root and common root for `root_path`,
 /// matching `wsstate.gitIdentity`. Returns `None` when the `git` binary is
 /// unavailable, the path is not in a Git repository, or the repository is bare.
-fn git_identity(root_path: &Path) -> Option<GitIdentity> {
-    let toplevel = git_output(root_path, &["rev-parse", "--show-toplevel"])?;
+fn git_identity(root_path: &Path, git_stats: &GitSpawnStats) -> Option<GitIdentity> {
+    // ExpectedNonZero: this runs every ~200ms per opened root while the
+    // Activity pane is open, over every opened root including plain
+    // directories. A plain-directory root makes `rev-parse --show-toplevel`
+    // fail routinely (that's how this reports "not a repo") - warning here
+    // would reproduce the poll-storm warning noise this phase removes.
+    let toplevel = git_output(
+        root_path,
+        &["rev-parse", "--show-toplevel"],
+        git_stats,
+    )?;
     let common_git_dir = git_output(
         root_path,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        git_stats,
     )?;
 
     let worktree_root = std::fs::canonicalize(&toplevel).ok()?;
@@ -2376,19 +2437,19 @@ fn git_identity(root_path: &Path) -> Option<GitIdentity> {
     })
 }
 
-fn git_output(repo: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8(output.stdout).ok()?;
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+fn git_output(repo: &Path, args: &[&str], git_stats: &GitSpawnStats) -> Option<String> {
+    capture(
+        git_stats,
+        repo,
+        args,
+        GitFailureExpectation::ExpectedNonZero,
+        git_timeout_from_env(),
+    )
+    .ok()
+    .and_then(|outcome| {
+        let trimmed = outcome.stdout.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
 }
 
 /// Displayable form of `path` with the Windows `\\?\` / `\\?\UNC\` verbatim

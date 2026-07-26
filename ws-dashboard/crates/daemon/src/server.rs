@@ -110,6 +110,7 @@ where
         auth,
         opened_work_roots,
         git_probe_cache: crate::discovery::GitProbeCache::default(),
+        git_spawn_stats: Arc::new(crate::git_exec::GitSpawnStats::default()),
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         terminals,

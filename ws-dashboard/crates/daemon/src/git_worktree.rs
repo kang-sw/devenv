@@ -277,7 +277,7 @@ pub async fn git_worktree_add_submit(
         tracing::warn!(%error, "failed to persist added Git worktree");
         return bounded_error(StatusCode::INTERNAL_SERVER_ERROR, "persist workRoot failed");
     }
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
     let created_present = resources
         .workspaces
         .iter()
@@ -340,7 +340,7 @@ fn resolve_worktree_remove(
     state: &AppState,
     work_root_id: &WorkRootId,
 ) -> Result<WorktreeRemoveContext, GitWorkspaceError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
     let workspace = resources
         .workspaces
         .iter()
@@ -485,7 +485,7 @@ pub async fn git_worktree_remove_preview(
             .into_response()
         }
     };
-    let changes = changes_for_path(&context.target_path);
+    let changes = changes_for_path(&context.target_path, &state.git_spawn_stats);
     let has_uncommitted = changes.modified_files > 0 || changes.untracked_files > 0;
     let branch_unmerged = context
         .branch_name
@@ -524,7 +524,7 @@ pub async fn git_worktree_remove_submit(
 
     // B-1 force gate: never destroy uncommitted/untracked work without an
     // explicit force flag set after the owner has seen the data-loss warning.
-    let changes = changes_for_path(&context.target_path);
+    let changes = changes_for_path(&context.target_path, &state.git_spawn_stats);
     let has_uncommitted = changes.modified_files > 0 || changes.untracked_files > 0;
     if has_uncommitted && !request.force {
         return bounded_error(
@@ -600,7 +600,7 @@ pub async fn git_worktree_remove_submit(
     state.codex_sessions.remove_for_work_roots(&ids);
     state.claude_sessions.remove_for_work_roots(&ids);
 
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
     let removed = !resources
         .workspaces
         .iter()
@@ -758,7 +758,7 @@ fn resolve_workspace_git(
     state: &AppState,
     workspace_id: &WorkspaceId,
 ) -> Result<GitWorkspaceContext, GitWorkspaceError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache, &state.git_spawn_stats);
     let workspace = resources
         .workspaces
         .iter()

@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path as AxumPath, State};
@@ -10,6 +9,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{WorkRootActivation, WorkRootAvailability, WorkRootId, WorkRootKind};
 
+use crate::git_exec::{capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats};
 use crate::resources::live_dashboard_resources;
 use crate::router::AppState;
 
@@ -139,7 +139,11 @@ pub async fn git_status(
     let state_for_task = state.clone();
     tokio::task::spawn_blocking(
         move || match resolve_git_context(&state_for_task, &work_root_id) {
-            Ok(context) => Json(status_for_path(&context.root_path)).into_response(),
+            Ok(context) => Json(status_for_path(
+                &context.root_path,
+                &state_for_task.git_spawn_stats,
+            ))
+            .into_response(),
             Err(error) => bounded_error(error.status_code(), error.message(), None),
         },
     )
@@ -155,7 +159,11 @@ pub async fn git_branches(
     let state_for_task = state.clone();
     tokio::task::spawn_blocking(
         move || match resolve_git_context(&state_for_task, &work_root_id) {
-            Ok(context) => Json(branches_for_path(&context.root_path)).into_response(),
+            Ok(context) => Json(branches_for_path(
+                &context.root_path,
+                &state_for_task.git_spawn_stats,
+            ))
+            .into_response(),
             Err(error) => bounded_error(error.status_code(), error.message(), None),
         },
     )
@@ -171,31 +179,37 @@ pub async fn git_switch_branch(
     let work_root_id = WorkRootId::from(work_root_id);
     let state_for_task = state.clone();
     tokio::task::spawn_blocking(move || {
+        let stats: &GitSpawnStats = &state_for_task.git_spawn_stats;
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
         let branch = request.branch_name.trim();
-        if !branch_exists(&context.root_path, branch) {
+        if !branch_exists(&context.root_path, stats, branch) {
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch is unavailable",
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             );
         }
-        if branch_checked_out_elsewhere(&context.root_path, branch) {
+        if branch_checked_out_elsewhere(&context.root_path, stats, branch) {
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch is already checked out",
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             );
         }
-        match run_git(&context.root_path, &["switch", branch]) {
-            Ok(()) => Json(status_for_path(&context.root_path)).into_response(),
+        match run_git(
+            stats,
+            &context.root_path,
+            &["switch", branch],
+            GitFailureExpectation::Unexpected,
+        ) {
+            Ok(()) => Json(status_for_path(&context.root_path, stats)).into_response(),
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch switch failed",
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             ),
         }
     })
@@ -211,6 +225,7 @@ pub async fn git_create_branch(
     let work_root_id = WorkRootId::from(work_root_id);
     let state_for_task = state.clone();
     tokio::task::spawn_blocking(move || {
+        let stats: &GitSpawnStats = &state_for_task.git_spawn_stats;
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
@@ -219,18 +234,18 @@ pub async fn git_create_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "create without switch is unsupported",
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             );
         }
         let branch = request.branch_name.trim();
-        if !valid_branch_name(&context.root_path, branch)
-            || branch_exists(&context.root_path, branch)
-            || branch_checked_out_elsewhere(&context.root_path, branch)
+        if !valid_branch_name(&context.root_path, stats, branch)
+            || branch_exists(&context.root_path, stats, branch)
+            || branch_checked_out_elsewhere(&context.root_path, stats, branch)
         {
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch cannot be created",
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             );
         }
         let mut args = vec!["switch", "-c", branch];
@@ -240,21 +255,21 @@ pub async fn git_create_branch(
             .map(str::trim)
             .filter(|base| !base.is_empty())
         {
-            if !branch_exists(&context.root_path, base) {
+            if !branch_exists(&context.root_path, stats, base) {
                 return bounded_error(
                     StatusCode::BAD_REQUEST,
                     "base branch is unavailable",
-                    Some(status_for_path(&context.root_path)),
+                    Some(status_for_path(&context.root_path, stats)),
                 );
             }
             args.push(base);
         }
-        match run_git(&context.root_path, &args) {
-            Ok(()) => Json(status_for_path(&context.root_path)).into_response(),
+        match run_git(stats, &context.root_path, &args, GitFailureExpectation::Unexpected) {
+            Ok(()) => Json(status_for_path(&context.root_path, stats)).into_response(),
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch create failed",
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             ),
         }
     })
@@ -308,16 +323,17 @@ async fn mutate_no_body(
     failure: &'static str,
 ) -> Response {
     tokio::task::spawn_blocking(move || {
+        let stats: &GitSpawnStats = &state.git_spawn_stats;
         let context = match resolve_git_context(&state, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
-        match run_git(&context.root_path, args) {
-            Ok(()) => Json(status_for_path(&context.root_path)).into_response(),
+        match run_git(stats, &context.root_path, args, GitFailureExpectation::Unexpected) {
+            Ok(()) => Json(status_for_path(&context.root_path, stats)).into_response(),
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 failure,
-                Some(status_for_path(&context.root_path)),
+                Some(status_for_path(&context.root_path, stats)),
             ),
         }
     })
@@ -329,7 +345,11 @@ fn resolve_git_context(
     state: &AppState,
     work_root_id: &WorkRootId,
 ) -> Result<GitContext, GitContextError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
+    let resources = live_dashboard_resources(
+        &state.opened_work_roots,
+        &state.git_probe_cache,
+        &state.git_spawn_stats,
+    );
     let root = resources
         .workspaces
         .iter()
@@ -355,14 +375,27 @@ fn resolve_git_context(
     Ok(GitContext { root_path })
 }
 
-fn status_for_path(root: &Path) -> WorkRootGitStatus {
-    let branch_name = git_text(root, &["branch", "--show-current"]).unwrap_or_default();
+fn status_for_path(root: &Path, stats: &GitSpawnStats) -> WorkRootGitStatus {
+    let branch_name = git_text(
+        stats,
+        root,
+        &["branch", "--show-current"],
+        GitFailureExpectation::Unexpected,
+    )
+    .unwrap_or_default();
     let detached_oid = if branch_name.is_empty() {
-        git_text(root, &["rev-parse", "--short", "HEAD"])
+        // Fails routinely on an unborn HEAD (no commits yet).
+        git_text(
+            stats,
+            root,
+            &["rev-parse", "--short", "HEAD"],
+            GitFailureExpectation::ExpectedNonZero,
+        )
     } else {
         None
     };
     let upstream = git_text(
+        stats,
         root,
         &[
             "rev-parse",
@@ -370,8 +403,10 @@ fn status_for_path(root: &Path) -> WorkRootGitStatus {
             "--symbolic-full-name",
             "@{upstream}",
         ],
+        // Fails routinely for every branch with no upstream configured.
+        GitFailureExpectation::ExpectedNonZero,
     );
-    let sync = sync_for_path(root, upstream.clone());
+    let sync = sync_for_path(root, stats, upstream.clone());
     WorkRootGitStatus {
         available: true,
         reason: None,
@@ -380,7 +415,7 @@ fn status_for_path(root: &Path) -> WorkRootGitStatus {
             detached_oid,
             upstream: upstream.clone(),
         }),
-        changes: changes_for_path(root),
+        changes: changes_for_path(root, stats),
         sync: sync.clone(),
         operations: Some(GitOperationAvailability {
             can_fetch: true,
@@ -391,21 +426,34 @@ fn status_for_path(root: &Path) -> WorkRootGitStatus {
     }
 }
 
-fn branches_for_path(root: &Path) -> GitBranchList {
-    let current = git_text(root, &["branch", "--show-current"]).unwrap_or_default();
+fn branches_for_path(root: &Path, stats: &GitSpawnStats) -> GitBranchList {
+    let current = git_text(
+        stats,
+        root,
+        &["branch", "--show-current"],
+        GitFailureExpectation::Unexpected,
+    )
+    .unwrap_or_default();
     let detached_oid = if current.is_empty() {
-        git_text(root, &["rev-parse", "--short", "HEAD"])
+        git_text(
+            stats,
+            root,
+            &["rev-parse", "--short", "HEAD"],
+            GitFailureExpectation::ExpectedNonZero,
+        )
     } else {
         None
     };
-    let checked_out = checked_out_branches(root);
+    let checked_out = checked_out_branches(root, stats);
     let output = git_text(
+        stats,
         root,
         &[
             "for-each-ref",
             "--format=%(refname:short)%00%(upstream:short)",
             "refs/heads",
         ],
+        GitFailureExpectation::Unexpected,
     )
     .unwrap_or_default();
     let mut branches = Vec::new();
@@ -416,7 +464,7 @@ fn branches_for_path(root: &Path) -> GitBranchList {
             continue;
         }
         let upstream = (!upstream_raw.trim().is_empty()).then(|| upstream_raw.trim().to_owned());
-        let sync = sync_for_branch(root, name, upstream.clone());
+        let sync = sync_for_branch(root, stats, name, upstream.clone());
         let is_checked_out = checked_out.contains(name);
         branches.push(GitBranchEntry {
             name: name.to_owned(),
@@ -437,7 +485,7 @@ fn branches_for_path(root: &Path) -> GitBranchList {
     }
 }
 
-pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
+pub(crate) fn changes_for_path(root: &Path, stats: &GitSpawnStats) -> GitChangeSummary {
     let mut summary = GitChangeSummary::default();
     // Use the plumbing `diff-index` instead of the porcelain `diff`. The
     // porcelain form opportunistically refreshes and rewrites the on-disk
@@ -452,6 +500,7 @@ pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
     // mode-change cases. Mode-only changes surface as `0\t0\tpath`, summed
     // harmlessly below.
     if let Some(numstat) = git_text(
+        stats,
         root,
         &[
             "--no-optional-locks",
@@ -461,6 +510,7 @@ pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
             "HEAD",
             "--",
         ],
+        GitFailureExpectation::Unexpected,
     ) {
         for line in numstat.lines() {
             let mut parts = line.split('\t');
@@ -475,6 +525,7 @@ pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
         }
     }
     if let Some(status) = git_text(
+        stats,
         root,
         &[
             "--no-optional-locks",
@@ -482,6 +533,7 @@ pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
             "--porcelain=v1",
             "--untracked-files=all",
         ],
+        GitFailureExpectation::Unexpected,
     ) {
         let mut modified = BTreeSet::new();
         let mut untracked = BTreeSet::new();
@@ -503,10 +555,10 @@ pub(crate) fn changes_for_path(root: &Path) -> GitChangeSummary {
     summary
 }
 
-fn sync_for_path(root: &Path, upstream: Option<String>) -> GitSyncSummary {
+fn sync_for_path(root: &Path, stats: &GitSpawnStats, upstream: Option<String>) -> GitSyncSummary {
     let (ahead, behind) = upstream
         .as_deref()
-        .and_then(|upstream| rev_counts(root, "HEAD", upstream))
+        .and_then(|upstream| rev_counts(root, stats, "HEAD", upstream))
         .unwrap_or((0, 0));
     GitSyncSummary {
         ahead,
@@ -515,24 +567,37 @@ fn sync_for_path(root: &Path, upstream: Option<String>) -> GitSyncSummary {
     }
 }
 
-fn sync_for_branch(root: &Path, branch: &str, upstream: Option<String>) -> Option<(u64, u64)> {
+fn sync_for_branch(
+    root: &Path,
+    stats: &GitSpawnStats,
+    branch: &str,
+    upstream: Option<String>,
+) -> Option<(u64, u64)> {
     upstream
         .as_deref()
-        .and_then(|upstream| rev_counts(root, branch, upstream))
+        .and_then(|upstream| rev_counts(root, stats, branch, upstream))
 }
 
-fn rev_counts(root: &Path, left: &str, right: &str) -> Option<(u64, u64)> {
+fn rev_counts(root: &Path, stats: &GitSpawnStats, left: &str, right: &str) -> Option<(u64, u64)> {
     let spec = format!("{right}...{left}");
-    let output = git_text(root, &["rev-list", "--left-right", "--count", &spec])?;
+    let output = git_text(
+        stats,
+        root,
+        &["rev-list", "--left-right", "--count", &spec],
+        GitFailureExpectation::Unexpected,
+    )?;
     let mut parts = output.split_whitespace();
     let behind = parts.next()?.parse().ok()?;
     let ahead = parts.next()?.parse().ok()?;
     Some((ahead, behind))
 }
 
-fn branch_exists(root: &Path, branch: &str) -> bool {
+fn branch_exists(root: &Path, stats: &GitSpawnStats, branch: &str) -> bool {
+    // Routinely non-zero for a branch name that does not exist - that's the
+    // check's entire purpose.
     !branch.is_empty()
         && run_git(
+            stats,
             root,
             &[
                 "show-ref",
@@ -540,50 +605,73 @@ fn branch_exists(root: &Path, branch: &str) -> bool {
                 "--quiet",
                 &format!("refs/heads/{branch}"),
             ],
+            GitFailureExpectation::ExpectedNonZero,
         )
         .is_ok()
 }
 
-fn branch_checked_out_elsewhere(root: &Path, branch: &str) -> bool {
-    if git_text(root, &["branch", "--show-current"]).as_deref() == Some(branch) {
+fn branch_checked_out_elsewhere(root: &Path, stats: &GitSpawnStats, branch: &str) -> bool {
+    if git_text(
+        stats,
+        root,
+        &["branch", "--show-current"],
+        GitFailureExpectation::Unexpected,
+    )
+    .as_deref()
+        == Some(branch)
+    {
         return false;
     }
-    checked_out_branches(root).contains(branch)
+    checked_out_branches(root, stats).contains(branch)
 }
 
-fn checked_out_branches(root: &Path) -> BTreeSet<String> {
-    let raw = git_text(root, &["worktree", "list", "--porcelain"]).unwrap_or_default();
+fn checked_out_branches(root: &Path, stats: &GitSpawnStats) -> BTreeSet<String> {
+    let raw = git_text(
+        stats,
+        root,
+        &["worktree", "list", "--porcelain"],
+        GitFailureExpectation::Unexpected,
+    )
+    .unwrap_or_default();
     raw.lines()
         .filter_map(|line| line.strip_prefix("branch refs/heads/"))
         .map(str::to_owned)
         .collect()
 }
 
-fn valid_branch_name(root: &Path, branch: &str) -> bool {
-    !branch.is_empty() && run_git(root, &["check-ref-format", "--branch", branch]).is_ok()
+fn valid_branch_name(root: &Path, stats: &GitSpawnStats, branch: &str) -> bool {
+    // Validates user-entered branch names; a bad name is an expected
+    // non-zero exit, not a daemon-side failure.
+    !branch.is_empty()
+        && run_git(
+            stats,
+            root,
+            &["check-ref-format", "--branch", branch],
+            GitFailureExpectation::ExpectedNonZero,
+        )
+        .is_ok()
 }
 
-fn git_text(root: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+fn git_text(
+    stats: &GitSpawnStats,
+    root: &Path,
+    args: &[&str],
+    expect: GitFailureExpectation,
+) -> Option<String> {
+    capture(stats, root, args, expect, git_timeout_from_env())
+        .ok()
+        .map(|outcome| outcome.stdout.trim().to_owned())
 }
 
-fn run_git(root: &Path, args: &[&str]) -> Result<(), ()> {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
+fn run_git(
+    stats: &GitSpawnStats,
+    root: &Path,
+    args: &[&str],
+    expect: GitFailureExpectation,
+) -> Result<(), ()> {
+    capture(stats, root, args, expect, git_timeout_from_env())
+        .map(|_| ())
         .map_err(|_| ())
-        .and_then(|output| output.status.success().then_some(()).ok_or(()))
 }
 
 fn bounded_error(
@@ -619,7 +707,11 @@ mod tests {
     // process at the same millisecond (parallel test execution).
     static FIXTURE_SEQ: AtomicU64 = AtomicU64::new(0);
 
-    fn init_fixture_repo() -> PathBuf {
+    fn test_run_git(stats: &GitSpawnStats, dir: &Path, args: &[&str]) {
+        run_git(stats, dir, args, GitFailureExpectation::Unexpected).expect("run_git");
+    }
+
+    fn init_fixture_repo(stats: &GitSpawnStats) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "ws-dashboard-git-toolbar-test-{}-{}-{}",
             std::process::id(),
@@ -627,22 +719,23 @@ mod tests {
             FIXTURE_SEQ.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&dir).expect("create fixture dir");
-        run_git(&dir, &["init", "-q"]).expect("git init");
-        run_git(&dir, &["config", "user.email", "test@example.com"]).expect("git config email");
-        run_git(&dir, &["config", "user.name", "Test"]).expect("git config name");
+        test_run_git(stats, &dir, &["init", "-q"]);
+        test_run_git(stats, &dir, &["config", "user.email", "test@example.com"]);
+        test_run_git(stats, &dir, &["config", "user.name", "Test"]);
         fs::write(dir.join("tracked.txt"), "one\n").expect("write tracked.txt");
-        run_git(&dir, &["add", "tracked.txt"]).expect("git add");
-        run_git(&dir, &["commit", "-q", "-m", "init"]).expect("git commit");
+        test_run_git(stats, &dir, &["add", "tracked.txt"]);
+        test_run_git(stats, &dir, &["commit", "-q", "-m", "init"]);
         dir
     }
 
     #[test]
     fn changes_for_path_reports_modified_and_untracked_without_index_lock() {
-        let dir = init_fixture_repo();
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
         fs::write(dir.join("tracked.txt"), "one\ntwo\n").expect("modify tracked.txt");
         fs::write(dir.join("new.txt"), "new\n").expect("write new.txt");
 
-        let summary = changes_for_path(&dir);
+        let summary = changes_for_path(&dir, &stats);
         assert_eq!(summary.modified_files, 1);
         assert_eq!(summary.untracked_files, 1);
 
@@ -680,13 +773,14 @@ mod tests {
     /// against the plumbing `git diff-index` form that this fix installs.
     #[test]
     fn changes_for_path_does_not_rewrite_index_or_take_lock() {
-        let dir = init_fixture_repo();
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
         make_stat_dirty_content_clean(&dir);
 
         let index_path = dir.join(".git").join("index");
         let before = fs::read(&index_path).expect("read index before");
 
-        let _summary = changes_for_path(&dir);
+        let _summary = changes_for_path(&dir, &stats);
 
         let after = fs::read(&index_path).expect("read index after");
         assert_eq!(
@@ -706,13 +800,14 @@ mod tests {
     /// for the mode change (emitted as `0\t0\tpath`, summed harmlessly).
     #[test]
     fn changes_for_path_line_totals_cover_modified_rename_and_mode_change() {
-        let dir = init_fixture_repo();
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
 
         // Extra tracked files, committed clean, for the rename and mode cases.
         fs::write(dir.join("rename-me.txt"), "r1\nr2\n").expect("write rename-me.txt");
         fs::write(dir.join("mode.txt"), "x\n").expect("write mode.txt");
-        run_git(&dir, &["add", "rename-me.txt", "mode.txt"]).expect("stage extra files");
-        run_git(&dir, &["commit", "-q", "-m", "extra"]).expect("commit extra files");
+        test_run_git(&stats, &dir, &["add", "rename-me.txt", "mode.txt"]);
+        test_run_git(&stats, &dir, &["commit", "-q", "-m", "extra"]);
 
         // Modified tracked file: +2 lines, -0.
         fs::write(dir.join("tracked.txt"), "one\ntwo\nthree\n").expect("modify tracked.txt");
@@ -720,7 +815,7 @@ mod tests {
         // an *exact* rename, matched by git's exact-rename pass independent of
         // `-M`'s similarity threshold, so the 0/0 result is deterministic and
         // not marginal-similarity sensitive (see the follow-up flake probe).
-        run_git(&dir, &["mv", "rename-me.txt", "renamed.txt"]).expect("git mv rename");
+        test_run_git(&stats, &dir, &["mv", "rename-me.txt", "renamed.txt"]);
         // Mode-only change (content unchanged).
         #[cfg(unix)]
         {
@@ -733,7 +828,7 @@ mod tests {
             fs::set_permissions(&mode_path, perms).expect("chmod mode.txt");
         }
 
-        let summary = changes_for_path(&dir);
+        let summary = changes_for_path(&dir, &stats);
         assert_eq!(
             summary.added_lines, 2,
             "added lines (modified +2, rename/mode 0)"
@@ -758,12 +853,13 @@ mod tests {
     /// lock* is not disturbed and does not corrupt the poll result.
     #[test]
     fn changes_for_path_leaves_externally_held_index_lock_untouched() {
-        let dir = init_fixture_repo();
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
         fs::write(dir.join("tracked.txt"), "one\ntwo\n").expect("modify tracked.txt");
         fs::write(dir.join("new.txt"), "new\n").expect("write new.txt");
 
         // Baseline summary with no lock present.
-        let expected = changes_for_path(&dir);
+        let expected = changes_for_path(&dir, &stats);
         assert_eq!(expected.modified_files, 1, "baseline modified files");
         assert_eq!(expected.untracked_files, 1, "baseline untracked files");
         assert_eq!(expected.added_lines, 1, "baseline added lines");
@@ -773,7 +869,7 @@ mod tests {
         let lock_bytes = b"STRAY-AGENT-LOCK\n".to_vec();
         fs::write(&lock_path, &lock_bytes).expect("create stray index.lock");
 
-        let with_lock = changes_for_path(&dir);
+        let with_lock = changes_for_path(&dir, &stats);
 
         // (a) The poll result is unaffected by the externally-held lock.
         assert_eq!(

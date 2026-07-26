@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use axum::extract::State;
 use axum::Json;
 use ws_dashboard_core::{DashboardResourcesView, WorkRootId};
 
 use crate::discovery::{GitProbeCache, LocalDashboardResourcesProvider, LocalWorkRootCandidate};
+use crate::git_exec::GitSpawnStats;
 use crate::router::AppState;
 use crate::work_root_files::OpenedWorkRoots;
 
@@ -28,8 +31,9 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
     // keep it off the async worker threads.
     let opened = state.opened_work_roots.clone();
     let git_probes = state.git_probe_cache.clone();
+    let git_stats = state.git_spawn_stats.clone();
     let (view, pruned_work_root_ids) = tokio::task::spawn_blocking(move || {
-        live_dashboard_resources_with_sync(&opened, &git_probes)
+        live_dashboard_resources_with_sync(&opened, &git_probes, &git_stats)
     })
     .await
     .expect("dashboard resources discovery task panicked");
@@ -55,8 +59,9 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
 pub fn live_dashboard_resources(
     opened: &OpenedWorkRoots,
     git_probes: &GitProbeCache,
+    git_stats: &Arc<GitSpawnStats>,
 ) -> DashboardResourcesView {
-    live_dashboard_resources_with_sync(opened, git_probes).0
+    live_dashboard_resources_with_sync(opened, git_probes, git_stats).0
 }
 
 /// NOTE: this is not a pure read. The registry side effects below
@@ -65,6 +70,7 @@ pub fn live_dashboard_resources(
 pub fn live_dashboard_resources_with_sync(
     opened: &OpenedWorkRoots,
     git_probes: &GitProbeCache,
+    git_stats: &Arc<GitSpawnStats>,
 ) -> (DashboardResourcesView, Vec<WorkRootId>) {
     let sync = LocalDashboardResourcesProvider::with_registry_activations(
         opened
@@ -75,6 +81,7 @@ pub fn live_dashboard_resources_with_sync(
         opened.activation_by_work_root_id(),
     )
     .with_git_probe_cache(git_probes.clone())
+    .with_git_spawn_stats(git_stats.clone())
     .dashboard_resources_with_registry_sync();
     for work_root_id in &sync.pruned_work_root_ids {
         opened.unregister(work_root_id);
