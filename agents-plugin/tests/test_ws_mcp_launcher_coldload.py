@@ -291,7 +291,7 @@ class InstallTmpRuntimeReplaceRetryTest(unittest.TestCase):
                 replace_calls.append((source, destination))
                 raise PermissionError("target is busy")
 
-            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir: got_binary == binary
+            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir, **kwargs: got_binary == binary
 
             with mock.patch("os.replace", always_fails):
                 installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
@@ -316,7 +316,7 @@ class InstallTmpRuntimeReplaceRetryTest(unittest.TestCase):
             def always_fails(source, destination):
                 raise PermissionError("target is busy")
 
-            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir: False
+            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir, **kwargs: False
 
             with mock.patch("os.replace", always_fails):
                 with self.assertRaises(SystemExit):

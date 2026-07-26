@@ -52,6 +52,13 @@ compatibility contract. A runtime is considered stale when it cannot satisfy the
 declared plugin patch version, tool list, or command list.
 Development binaries such as `X.Y.Z-dev` are compatible with plugin version
 `X.Y.Z`; older or newer patch releases are not reused from cache.
+The one exception is the active local-devenv dogfood path (a valid
+`.local-devenv-runtime` marker): there the version gate is relaxed from exact
+patch match to same-minor match, so a source-built runtime whose `(major, minor)`
+equals the installed snapshot's `plugin_version` is accepted regardless of patch.
+This keeps the MCP server alive across local patch bumps that run ahead of the
+last `install.sh` snapshot; a differing minor or major is still rejected, and
+released/downloaded runtimes keep the strict exact-match gate.
 
 The full ws runtime contract includes the `exec.*` MCP job surface, so launcher
 compatibility checks reject stale runtimes that lack the accepted
