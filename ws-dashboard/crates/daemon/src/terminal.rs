@@ -370,12 +370,13 @@ impl TerminalRegistry {
                     // would erase provenance for a still-running terminal the
                     // moment its profile is renamed or retired.
                     //
-                    // Residual `None` cases, both benign and both landing on
-                    // the pre-fix behavior rather than anything worse: a
-                    // terminal spawned before this sidecar existed (no
-                    // backfill, self-clears within one restart), and a daemon
-                    // with no resolvable `state_dir` (which also wrote no
-                    // sidecar at spawn). See `recover_profile_id`.
+                    // The recovery still yields `None` whenever no readable
+                    // sidecar survives to this point; the known ways to get
+                    // there are listed on `TerminalSession::profile_id`'s
+                    // CONTRACT (known cases, not a closed set). All of them
+                    // degrade to the pre-fix observable behavior
+                    // (`profileId: null`), never to a wrong id. See
+                    // `recover_profile_id`.
                     //
                     // CONTRACT (260725 Phase 4, callback token): recovered by
                     // its own separate path from `terminal-tokens/` plus
@@ -805,9 +806,15 @@ pub struct TerminalSession {
     // constraint), but it DOES survive a daemon restart: it is written at
     // spawn to the daemon-owned sidecar
     // `agent-profiles/<terminal_id>/profile.json` and read back by
-    // `recover_profile_id` in `reconcile_entry`'s adopt arm. Residual `None`
-    // after adoption is limited to a terminal spawned before that sidecar
-    // existed (no backfill) or a daemon with no resolvable `state_dir`.
+    // `recover_profile_id` in `reconcile_entry`'s adopt arm. The general
+    // condition for `None` after adoption is "no readable sidecar at adopt
+    // time"; the known ways to reach it are a terminal spawned before the
+    // sidecar existed (no backfill, self-clears within one restart), a daemon
+    // with no resolvable `state_dir` (which wrote none at spawn), a
+    // `write_profile` that failed at spawn (logged as an error there, which
+    // already says the terminal will report a null profile id), and a sidecar
+    // missing or malformed at read time. Treat that as the known set, not a
+    // closed one; every case degrades to the pre-fix `profileId: null`.
     profile_id: Option<String>,
     // CONTRACT (260725 Phase 4): mirrors `profile_id`'s shape (provenance
     // slot, not persisted to `TerminalRegistryEntry` - hard constraint) and,
@@ -864,9 +871,9 @@ pub struct TerminalSessionView {
     // provenance): read-only echo of which registry profile produced this
     // session, `null` for the unchanged default-shell path. An adopted
     // (post-restart) session reports its spawn profile like any other, except
-    // in the two residual cases named on `TerminalSession::profile_id`'s
-    // CONTRACT (spawned before the sidecar existed, or no resolvable
-    // `state_dir`).
+    // when no readable sidecar survived to adopt time - see
+    // `TerminalSession::profile_id`'s CONTRACT for the known ways that
+    // happens.
     profile_id: Option<String>,
 }
 
@@ -3163,16 +3170,23 @@ mod terminal_portability_skeleton_tests {
     // spawn task ON that exact line. While parked it cannot execute a single
     // statement past the mark - including `write_profile`.
     //
-    // Three facts are then observed together, and it is their CONJUNCTION
-    // that is the proof: (1) the task has entered `spawn` (it signalled from
-    // inside itself, and everything between that signal and the mark is
-    // straight-line synchronous code with no `.await`, so the task cannot be
-    // parked anywhere else); (2) the mark has NOT landed yet (the set behind
-    // the guard we hold is still empty); (3) no `agent-profiles/` byte
-    // exists. If the write ran before the mark, (1) and (2) would be
-    // unchanged and (3) would fail. Releasing the guard then lets the same
-    // spawn finish the write, so the negative half cannot be vacuous for
-    // want of a reachable write.
+    // The single load-bearing assertion is `!profile_root.exists()`. Its
+    // premise is that the task has entered `spawn` (it signalled from inside
+    // itself, and everything between that signal and the mark is
+    // straight-line synchronous code with no `.await`, so it cannot be parked
+    // anywhere else) and is therefore parked on `mark_profile_pending`'s
+    // `.write()`, which cannot return while this test holds a read guard. A
+    // build that wrote the sidecar before marking would have written it from
+    // the same parked position, so the absent directory is what discriminates.
+    // Releasing the guard then lets the same spawn finish the write, so the
+    // negative half cannot be vacuous for want of a reachable write.
+    //
+    // The `pending_guard.is_empty()` assertion below is NOT independent
+    // evidence of ordering - it is entailed by holding the read guard, since
+    // no writer can publish into the set meanwhile. It is kept as a cheap
+    // tripwire: it fires only if some future refactor lets the pending mark
+    // become visible without taking that write lock, which is exactly the
+    // premise the paragraph above rests on.
     //
     // Honest residual: this pins WHERE the task is parked, not the wall-clock
     // instant it got there, so the window below still has to be generous

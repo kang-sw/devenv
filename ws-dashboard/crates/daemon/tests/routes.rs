@@ -16563,28 +16563,35 @@ async fn spawning_a_hookless_profile_writes_the_provenance_sidecar_and_no_creden
     )
     .await;
 
+    // Every observation is CAPTURED before the close and asserted after it:
+    // the helper is a real detached OS process, and a panic between spawn and
+    // `close_terminal_for_test` would leak it permanently (the close is
+    // success-path only, so it never runs during unwind).
     let profile_dir = state_dir.join("agent-profiles").join(&terminal_id);
     let sidecar = profile_dir.join("profile.json");
-    let raw = fs::read_to_string(&sidecar)
-        .unwrap_or_else(|error| panic!("hookless spawn must write {sidecar:?}: {error}"));
-    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("profile sidecar JSON");
-    assert_eq!(parsed["profileId"], "dummy-echo");
-
-    assert!(
-        !profile_dir.join("callback.json").exists(),
-        "a hookless profile must never get a callback target: {profile_dir:?}"
-    );
-    assert!(
-        !state_dir
-            .join("terminal-tokens")
-            .join(format!("{terminal_id}.json"))
-            .exists(),
-        "a hookless profile must never get a callback token minted for it"
-    );
+    let raw = fs::read_to_string(&sidecar);
+    let callback_target_exists = profile_dir.join("callback.json").exists();
+    let token_exists = state_dir
+        .join("terminal-tokens")
+        .join(format!("{terminal_id}.json"))
+        .exists();
 
     close_terminal_for_test(app, cookie.as_str(), &terminal_id).await;
     remove_static_fixture(&root);
     let _ = fs::remove_dir_all(&state_dir);
+
+    let raw = raw.unwrap_or_else(|error| panic!("hookless spawn must write {sidecar:?}: {error}"));
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("profile sidecar JSON");
+    assert_eq!(parsed["profileId"], "dummy-echo");
+
+    assert!(
+        !callback_target_exists,
+        "a hookless profile must never get a callback target: {profile_dir:?}"
+    );
+    assert!(
+        !token_exists,
+        "a hookless profile must never get a callback token minted for it"
+    );
 }
 
 // A default-shell spawn (no `profileId` in the request) must take no new
@@ -16624,20 +16631,23 @@ async fn spawning_without_a_profile_writes_no_provenance_sidecar() {
         .await
         .expect("create terminal body bytes");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
-    assert!(value["profileId"].is_null());
+    // Same capture-close-assert order as the test above: the terminal id is
+    // read out FIRST so every later observation can be asserted after the
+    // real helper process has been closed, instead of leaking it on a panic.
     let terminal_id = value["terminalId"].as_str().expect("terminal id").to_owned();
-
-    assert!(
-        !state_dir
-            .join("agent-profiles")
-            .join(&terminal_id)
-            .exists(),
-        "a request that names no profile must create no agent-profiles directory"
-    );
+    let profile_id_is_null = value["profileId"].is_null();
+    let profile_dir = state_dir.join("agent-profiles").join(&terminal_id);
+    let profile_dir_exists = profile_dir.exists();
 
     close_terminal_for_test(app, cookie.as_str(), &terminal_id).await;
     remove_static_fixture(&root);
     let _ = fs::remove_dir_all(&state_dir);
+
+    assert!(profile_id_is_null);
+    assert!(
+        !profile_dir_exists,
+        "a request that names no profile must create no agent-profiles directory"
+    );
 }
 
 // Test hygiene only: the helper is a real detached OS process (see
