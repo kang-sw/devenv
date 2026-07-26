@@ -1,6 +1,6 @@
 ---
 title: "enter.* verdict output as an executable scenario — decision trace and per-axis prose fragments"
-sage-review-design: required
+sage-review-design: blocked
 related:
   260627-feat-enter-implement-deterministic-verdict-engine: substrate; authored the current raw verdict format and the "no long explanatory prose in raw output" rule this ticket deliberately reverses
   260627-feat-enter-proceed-deterministic-verdict-engine: substrate; authored the proceed route vocabulary and its preservation constraint
@@ -59,10 +59,12 @@ returns a structured `route` label in a `<family>.<specific>` taxonomy
   scenario: situation, decision with its cause, ordered acts each carrying its
   own how-to, and stop conditions.
 - Scope is the two verdict engines only: `enter.implement` and `enter.proceed`.
-- Keep `format: "json"`. It has standing value for CLI-side testing. Whether it
-  stays visible in the public JSON Schema is not settled by this ticket and is
-  explicitly not the same class of problem as
+- Keep the `format: "json"` capability. It has standing value for CLI-side
+  testing. Whether it stays visible in the public JSON Schema is not settled by
+  this ticket and is explicitly not the same class of problem as
   `260630-bug-enter-implement-explicit-direct-edit-schema-undocumented`.
+  Retaining the capability is separate from `lead-implement` continuing to
+  request it — see Constraints; the playbook stops requesting it in Phase 3.
 - Model prose per axis, not per verdict tuple. Each enum value owns one authored
   fragment; the assembler owns ordering and connective tissue. Authoring a
   paragraph per verdict combination is rejected — the implement verdict spans
@@ -76,8 +78,13 @@ returns a structured `route` label in a `<family>.<specific>` taxonomy
   multi-axis.
 - Treat `branch_plan.action == "stop"` as a global suppression mode applied once
   at assembly, not as an axis value. It currently appears as an `isBranchStop`
-  guard in nine of ten instruction builders, each with its own hand-written
-  variant of the same sentence.
+  guard in eight instruction builders (prep, edit, review, the three doc
+  builders, final-action, merge), each with its own hand-written variant of the
+  same sentence. Two acts are deliberately outside that suppression and must stay
+  outside it: `implementRouteInstruction` handles stop as a `case "stop"` in its
+  branch-action switch because the route act must *state* the blocker rather than
+  be silenced by it, and `implementCompletionInstruction` has no stop handling
+  because it is installed only for branch action `current`, which cannot be stop.
 - Emit a decision trace from the resolver: which predicate branch fired, and for
   multi-term eligibility predicates, which term failed. This is a new output
   field, not a new decision rule.
@@ -120,9 +127,19 @@ are broken deliberately in Phase 3 and preserved through Phases 1 and 2.
   buckets is not acceptable when the current playbook has a specific
   deterministic input or stop reason." Demoting `Conditions:` to JSON must
   preserve the vocabulary, not collapse it.
-- The lead reads `raw`, so carrying the scenario in the `raw` field means no
-  playbook edit is strictly required. `agents-plugin/rsrc/lead-implement/lead-implement.md:45`
-  may keep passing `format: "json"`.
+- Carrying the scenario in `raw` is **not** sufficient for the implement caller.
+  `agents-plugin/rsrc/lead-implement/lead-implement.md:45` passes
+  `format: "json"`, so `handleEnterImplement` (`session_state.go:1036-1039`)
+  returns `json.MarshalIndent(result)` — the scenario arrives as a single
+  JSON-escaped string in the `raw` field, and gets *worse* the more prose-like it
+  becomes. `lead-implement` must stop passing `format: "json"` for the scenario to
+  reach the lead as rendered text. The `format: "json"` capability itself is
+  retained for CLI-side testing; only the playbook's use of it is dropped. This
+  is the change the original request asked for ("make the rendered prose prompt
+  the default"), and it lands in Phase 3 with the scenario, not earlier.
+- `enter.proceed` is the only tool with a live text-reading caller today
+  (`lead-proceed.md:29` passes no `format`). Any claim about improving what the
+  implement lead actually reads depends on the playbook change above.
 - `resolveImplement` populates `result.Raw` at `implement_resolver.go:493`,
   before the handler derives todos at `session_state.go:1022`. The renderer
   cannot currently see the todo instructions it must narrate. Plumbing must
@@ -130,10 +147,23 @@ are broken deliberately in Phase 3 and preserved through Phases 1 and 2.
 - `handleEnterImplement` (`session_state.go:996`) has two input contracts. The
   legacy branch (`session_state.go:1043-1067`) accepts `delegation`,
   `plan_depth`, `review_alloc`, `need_review`, and `need_doc` directly, bypassing
-  the resolver entirely. It is reachable only when `target` is absent, which the
-  tool schema forbids (`server.go` enter.implement `"required": ["session_key",
-  "target"]`). A resolver-bypassing path cannot carry a decision trace, so its
-  status must be settled before Phase 2.
+  the resolver entirely. It is gated purely on `args["target"]` presence. The
+  schema's `"required": ["session_key", "target"]` is advertised but not enforced
+  at dispatch, and `agents-plugin/bin/ws-cli` is a six-line shim that execs
+  `ws-mcp-launcher.py` with arguments forwarded unchanged and no input-schema
+  validation. **The legacy branch is therefore reachable** from `ws-cli` and from
+  any non-validating MCP host. It must be kept, and the fragment assembler must
+  record that verdicts arriving through it carry no decision trace. Do not remove
+  it under this ticket — functionality deletion is always-ask per AGENTS.md.
+- `deriveImplementPlanDepth` (`implement_resolver.go:610`) returns `survey` for
+  delegated and `none` for every other path; its `ChangePoints`/`SideEffectRisk`
+  test is dead because both remaining branches return `none`. The resolver
+  therefore never emits `research`, while `implementPrepTitle`,
+  `implementPrepInstruction`, and `implementEditInstruction` all carry `research`
+  cases, and `parseLegacyImplementPlanDepth` rejects `research` on both legacy
+  paths. Since this ticket forbids judgment changes, those fragments carry into
+  the table as resolver-unreachable entries and must be labelled as such so a
+  later reader does not mistake them for live combinations.
 - Both packages ship a wsflow mirror; rsrc manifest and wsflow mirror
   regeneration apply to any shared playbook edit.
 
@@ -171,12 +201,14 @@ Target spec areas:
 - `ai-docs/spec/mcp-tools.md` — `enter.implement` and `enter.proceed` output
   contract: scenario text shape, decision-trace fields, and what moves from text
   to JSON only.
-- `ai-docs/spec/workflow-skills.md` — only if `lead-implement` or `lead-proceed`
-  consumption text changes; the constraint above expects it will not.
+- `ai-docs/spec/workflow-skills.md` — `lead-implement` consumption changes in
+  Phase 3: it stops requesting `format: "json"` and reads the rendered scenario
+  directly.
 
 Expected caller-visible change: the default text return of both tools changes
 from a field dump to an ordered scenario; JSON gains decision-trace fields and
-retains the normalized condition vocabulary.
+retains the normalized condition vocabulary; `lead-implement` receives rendered
+text instead of a JSON document.
 
 Contract-first spec: no. Behavior is pinned by the phases below; specs are
 updated at implementation closeout to match what shipped.
@@ -204,25 +236,34 @@ Required behavior:
 - Move `result.Raw` population so it happens after todo derivation, or move todo
   derivation into the resolver; the renderer must be able to read todo
   instructions.
-- Determine whether the legacy `handleEnterImplement` input branch is reachable
-  through any live caller, including `ws-cli` — specifically whether `ws-cli`
-  validates against the tool schema. If unreachable, remove it. If reachable,
-  keep it and record explicitly that it produces no decision trace, so Phase 2
-  does not assume single-contract input.
+- Keep the legacy `handleEnterImplement` input branch (it is reachable — see
+  Constraints) and record in the assembler that verdicts arriving through it
+  carry no decision trace, so Phase 2 does not assume single-contract input.
+- Label resolver-unreachable fragments (`plan_depth=research`) as such in the
+  table.
 
 Acceptance:
 
-- Output is byte-identical to pre-change output for every covered verdict
-  combination, with one declared exception: the consolidated branch-stop
-  fragment replaces the nine per-builder variants and its wording is chosen
-  once.
+- The derived todo instruction set is byte-identical to pre-change output for
+  every covered verdict combination, with one declared exception: the
+  consolidated branch-stop fragment replaces the eight per-builder variants and
+  its wording is chosen once.
+- Raw text output is byte-identical with no exception; Phase 1 does not touch
+  `renderImplementRaw` or `renderProceedRaw` content.
 
 Verification:
 
-- Golden tests over enter.implement and enter.proceed text output across
-  delegation, branch action, plan depth, review allocation, doc mode, and merge
-  confirm combinations, asserting byte equality against captured pre-change
-  output outside the declared stop-fragment exception.
+- Golden tests over the **derived todo instruction set** — the surface the
+  extracted strings actually reach. The instruction strings live only in
+  `todoItem.Instruction`; `renderImplementRaw` never prints them and the
+  response body is `result.Raw` or JSON, so a raw-text golden would pass even if
+  every extracted fragment were corrupted. Cover delegation, branch action, plan
+  depth, review allocation, doc mode, and merge confirm combinations.
+- Separate raw-text goldens asserting byte equality for both tools.
+- If todo derivation moves into `resolveImplement` rather than deferring the
+  `Raw` write, `implementResult` gains a todos field and JSON output changes
+  shape. Declare which option was taken and cover the JSON shape explicitly;
+  byte-equality applies to text, not to the JSON document.
 - Existing resolver, session-state, and playbook golden tests pass unchanged.
 - rsrc manifest and wsflow mirror regeneration if any shared text moved.
 
@@ -238,9 +279,14 @@ Required behavior:
   false.
 - Equivalent trace emission for plan depth, review allocation, doc mode, and
   branch plan derivation.
-- Replace `implementReason` output with a cause statement built from the trace.
-- For `enter.proceed`, reuse the existing `route` label as the trace and replace
-  its predicate-echo `reason` with a cause statement.
+- Build a cause statement from the trace and expose it as a new result field.
+  Do **not** repoint `implementReason`/`result.Reason` at it in this phase:
+  `renderImplementRaw` prints `Reason: %s` (`implement_resolver.go:818`) and
+  `renderProceedRaw` prints it at `proceed_resolver.go:546`, so swapping the
+  value would change text output. The `Reason:` line adopts the cause statement
+  in Phase 3, where text output changes anyway.
+- For `enter.proceed`, reuse the existing `route` label as the trace and derive
+  its cause statement from the same taxonomy.
 - No verdict changes. Every existing resolver test asserting a verdict value
   passes unmodified.
 
@@ -249,7 +295,8 @@ Verification:
 - Unit tests asserting the trace names the correct firing branch or failing term
   for each predicate, including the multi-term eligibility predicates.
 - Full existing resolver test suite passes with no expected-verdict edits.
-- JSON output carries the trace; text output is unchanged in this phase.
+- JSON output carries the trace and the cause statement; text output is
+  unchanged, including the existing `Reason:` line.
 
 ### Phase 3: Scenario rendering and fragment authoring
 
@@ -258,19 +305,45 @@ Rewrite the fragments and the assembly into scenario form.
 Required behavior:
 
 - Compose situation, decision with its Phase 2 cause, ordered acts carrying
-  their how-to, and stop conditions.
+  their how-to, and stop conditions. Repoint the `Reason:` line at the Phase 2
+  cause statement.
 - Author proceed's fragments from zero, keyed on the existing `route` taxonomy.
+  These are **not** installed as todo instructions — `deriveProceedTodos`
+  (`session_state.go:678`) keeps its two route-independent title-only items, so
+  this phase introduces no proceed todo behavior change.
 - Remove `Conditions:` and the duplicated `Agenda:` block from text output;
   preserve the normalized condition vocabulary in JSON per the proceed
   constraint above.
-- Keep the todo list as the authoritative runbook; the scenario must be derived
-  from the same fragments the todos use.
+- Drop `format: "json"` from `lead-implement.md:45` so the lead reads the
+  rendered scenario instead of a JSON document, and adjust the surrounding
+  consumption text (`lead-implement.md:60` currently says to read `raw`,
+  `next_instruction`, and warnings). Mirror into wsflow.
+- Keep the todo list as the authoritative runbook for implement; the implement
+  scenario must be derived from the same fragments the todos use.
 
 Verification:
 
 - Golden tests over the new scenario text for each covered verdict combination.
-- Assert the scenario and the installed todo instructions cannot diverge — a
-  test that fails if a todo instruction has no corresponding scenario fragment.
+- Anti-drift test for **implement only**: fails if a derived todo instruction has
+  no corresponding scenario fragment. Proceed is excluded by construction — its
+  todos carry no instructions and its authoritative next step is
+  `NextInstruction`, not the todo list.
 - JSON retains every normalized condition value present before this phase.
-- `ai-docs/spec/mcp-tools.md` updated to the shipped output contract.
+- `ai-docs/spec/mcp-tools.md` updated to the shipped output contract;
+  `ai-docs/spec/workflow-skills.md` updated for the `lead-implement`
+  consumption change.
 - Full test suite, rsrc manifest regeneration, wsflow mirror regeneration.
+
+## Blocked (2026-07-26)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | lead-implement reads JSON, so the scenario ships as an escaped string inside the field dump it replaces | critical | missing |
+| 2 | Phase 1 acceptance test does not cover the surface Phase 1 refactors | important | autonomous |
+| 3 | Phase 2 contradicts itself on text-output stability | important | autonomous |
+| 4 | Phase 3 anti-drift invariant is unsatisfiable for enter.proceed | important | autonomous |
+| 5 | branch-stop guard count is off and route's shape differs | minor | autonomous |
+| 6 | legacy input branch is reachable; the removal instruction authorizes an always-ask deletion | minor | autonomous |
+| 7 | plan_depth axis has an unreachable enum value the fragment table will encode | minor | autonomous |
