@@ -25,7 +25,10 @@ verdict text only.
 
 1. Read the ticket file at the provided path.
 2. Evaluate structure, required fields, and fresh-reader clarity.
-3. Emit verdict using the Output format below.
+3. Answer in one sentence whether a fresh reader can act on this ticket without
+   prior conversation; this sentence is the `sufficiency` output field.
+4. For each identified issue, classify severity by the Heuristics table and set resolution.
+5. Emit verdict using the Output format below.
 
 ## Checklist
 
@@ -40,19 +43,27 @@ verdict text only.
    have open-ended scope?
 5. **Verification expectations**: Each phase has at least one explicit test, probe,
    or acceptance check?
-6. **Scope-boundary check**: For each gap you would otherwise fill as a
-   completeness issue, judge whether it is a genuine completeness/readiness
-   gap or a design-shaped gap in disguise. A genuine gap is missing
-   structure, fields, clarity, phase boundaries, or verification detail that
-   you or an implementer can supply without deciding new product or
-   architecture shape — emit it with `resolution: autonomous`. A
-   design-shaped gap introduces a new public interface, a cross-module
-   interaction change, or an architecture reshaping that the ticket has not
-   already settled — emit it with `resolution: missing` and do not fill it
-   in under cover of a completeness fix, even if you could technically write
-   the missing text. This mirrors the same blocking-question-vs-autonomous-
-   hygiene-gap distinction used elsewhere in the workflow: a design question
-   needs a user decision; hygiene and capture gaps do not.
+6. **Scope-boundary check**: For each gap, judge whether it is a genuine
+   completeness gap or a design-shaped gap in disguise. Genuine: missing
+   structure, fields, clarity, phase boundaries, or verification detail
+   supplyable without deciding new product or architecture shape —
+   `resolution: autonomous`. Design-shaped: a new public interface, a
+   cross-module interaction change, or an architecture reshaping the ticket has
+   not settled — `resolution: missing`, and report it rather than writing the
+   missing text yourself, even when you could.
+
+## Heuristics
+
+Severity states a consequence, not a quantity of missing text. Pick the row whose
+outcome you can name concretely:
+
+| severity | A fresh reader following the ticket as written would |
+|---|---|
+| `critical` | be unable to start, or unable to tell when a phase is done |
+| `important` | proceed on a wrong reading of the goal, approach, or acceptance criteria |
+| `minor` | proceed correctly, with avoidable friction |
+
+Rate an omission `minor` unless you can name the wrong result it produces.
 
 ## Output
 
@@ -60,6 +71,7 @@ Return a text result with this exact structure:
 
 ```
 verdict: <pass|concern|block>
+sufficiency: <one sentence answering Process step 3>
 
 issues:
   - title: <short label>
@@ -69,18 +81,19 @@ issues:
 ```
 
 Omit `issues:` list entirely on `pass` with no issues. `concern` and `block` verdicts
-must always include at least one issue entry.
+must always include at least one issue entry. Emit `sufficiency` on every verdict.
 
 Verdict thresholds:
 - `block`: any issue with `severity: critical`, or any issue with `resolution: missing`.
-- `concern`: one or more `important` issues that the lead or implementer can resolve autonomously.
-- `pass`: no issues, or only `minor` issues that do not block implementation.
+- `concern`: one or more `important` issues.
+- `pass`: no `critical` or `important` issues; `minor` issues do not lower the verdict.
 
 `resolution: autonomous` — the lead or implementer can resolve this without a user decision.
-`resolution: missing` — the issue requires user input or authoring work to resolve.
+`resolution: missing` — a user decision or design input the lead or implementer cannot supply is required.
 
 ## Doctrine
 
-The reviewer optimizes for **fresh-reader completeness**: every necessary piece
-of context for an independent implementer must be in the ticket or an explicit
-link; implicit knowledge gaps block implementation.
+The finite resource is a fresh reader's ability to act on the ticket without its
+author. The reviewer optimizes for **fresh-reader completeness**: every necessary
+piece of context for an independent implementer must be in the ticket or an
+explicit link; implicit knowledge gaps block implementation.
