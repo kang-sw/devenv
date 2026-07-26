@@ -567,9 +567,10 @@ move with every landing commit.
     **Ticket System Concepts**, not in the conventions doc. Unwritten. The manual
     is loaded once per session, so it has a wider blast radius than the conventions
     doc and was deliberately held back.
-  - `120e2b25` is **not shipped**. The conventions doc is `go:embed`'d into
-    `ws-mcp` and plugin-cache invalidation keys on the version string, so installed
-    caches serve the old text until `bump-ws-version.sh` runs.
+  - `120e2b25` is shipped as of `dea5e6c4` (`0.36.13`). The conventions doc is
+    `go:embed`'d into `ws-mcp` and plugin-cache invalidation keys on the version
+    string, so the bump — not the content commit — is what made the two rules
+    reachable by installed plugins.
 
   Measurements not to re-derive: research is 3 of 93 children of open epics and only
   4 of 36 research tickets carry any `parent:` — both normal, since a research
