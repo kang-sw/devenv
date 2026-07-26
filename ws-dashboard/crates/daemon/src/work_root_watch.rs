@@ -2009,6 +2009,13 @@ mod tests {
                 p("/repo/ai-docs/_index.local.md"),
                 None,
             ),
+            (
+                "ignore-set-vs-ignore-rule-file precedence: a .gitignore living \
+                 inside an already-ignored directory must stay ignored (None), \
+                 not become Worktree - the ignore-set check runs first",
+                p("/repo/target/.gitignore"),
+                None,
+            ),
             (".gitignore anywhere -> Worktree", p("/repo/.gitignore"), Some(EpochKind::Worktree)),
             (
                 "nested .gitignore -> Worktree",

@@ -831,6 +831,26 @@ async fn worktree_remove_while_armed_does_not_fail_with_a_sharing_violation_on_w
          (the route disarms it before running `git worktree remove`)"
     );
 
+    // The `status == OK` assertion above is true on Linux regardless of
+    // whether `disarm_now`/`disarm_and_suppress_arm` ever ran (Linux does
+    // not raise a sharing violation for a watched directory), so it alone
+    // does not prove the disarm call actually fired - only that removal
+    // succeeded (review finding 11). Query diag directly (no intervening
+    // `/api/dashboard/resources` call, which would itself disarm the now-
+    // absent worktree via `reconcile` and mask whether the route's own
+    // disarm ran) and assert the linked key is no longer reported `armed`
+    // immediately after the remove response.
+    let diag_after_remove = get_json(app.clone(), &cookie, "/api/dashboard/diag/git").await;
+    let health_after_remove = diag_health(&diag_after_remove, &linked_key);
+    assert!(
+        matches!(health_after_remove.as_deref(), None | Some("unarmed")),
+        "the linked worktree's WatchHealth must be absent or Unarmed \
+         immediately after the remove response, proving the disarm call \
+         actually fired rather than merely coinciding with a Linux host \
+         that would not have raised a sharing violation anyway - got \
+         {health_after_remove:?}"
+    );
+
     remove_fixture(&primary);
 }
 
