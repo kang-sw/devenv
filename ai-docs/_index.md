@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260726-bug-dashboard-restored-tab-close-inert-until-activated` | ready | Terminal tab close button is inert on a reload-restored tab until the tab is clicked once |
 | `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry` | ready | `terminal-notify`'s deliberate silence has no expiry, no failure counter, and no reader anywhere |
 | `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` | ready | hop-1 default-spawn env-clear regression guard is fragile and platform-partial |
 | `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: automate the reachable gate and fix the insecure-context permission guard left undischarged by Phase 8 |
@@ -199,6 +198,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260716-feat-ws-doc-condition-diagnostics` | todo | Hidden doc-condition diagnostics: verification crawl, consumption counters, workflow health metrics |
 | `260722-feat-dashboard-hint-click-fast-jump` | todo | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-refactor-dashboard-app-tsx-state-decomposition` | todo | Decompose App.tsx: untangle the WorkbenchShell/App() state core (design-gated) |
+| `260725-bug-dashboard-e2e-harness-destroys-daemon-diagnostics` | todo | e2e browser-acceptance harness drains and discards the daemon's stdout/stderr instead of preserving diagnostics for failure analysis |
+| `260725-bug-dashboard-fitnow-short-viewport-shrink` | todo | macOS short-viewport regression gate fails: `fitNow()` shrinks the terminal to 47 rows instead of holding 120 |
+| `260725-bug-dashboard-terminal-create-failure-silent` | todo | Terminal creation failure is invisible in the UI: a failed `create_terminal` call is swallowed with no toast, console error, or state change |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -250,9 +252,13 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-bug-agent-synthetic-load-cleanup-guard` | idea | Agent-generated synthetic CPU load must record PIDs at spawn and self-limit; a review subagent's load experiment leaked 70 orphaned busy loops |
 | `260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper` | idea | Integration tests in `tests/routes.rs` leak detached helper processes with no reaper (platform-independent, found during macOS Phase 1 port) |
 | `260725-bug-dashboard-terminal-lifetime-load-fragility` | idea | Two pre-existing `terminal_lifetime` tests fail reproducibly under CPU-saturation load (found during macOS Phase 2 acceptance) |
+| `260725-bug-dashboard-terminal-registry-schema-evolution-orphans-helpers` | idea | Terminal registry entries have no schema versioning, so adding a field would orphan live helpers permanently |
+| `260725-bug-dashboard-terminal-socket-path-length-unguarded` | idea | Production terminal helper socket path has no guard against the macOS 104-byte `sockaddr_un` ceiling |
 | `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails` | idea | `discovery.rs::canonical_or_normalized` hashes a resolved vs. unresolved path depending on whether the workRoot exists, so `WorkRootId` flips across directory removal/recreation when a path segment is a symlink |
+| `260725-idea-ws-git-commit-rename-and-payload-rejections` | idea | `ws/git.commit` cannot commit a staged ticket rename and rejects large `ai_context` payloads with a misleading error |
 | `260725-refactor-dashboard-agent-gui-physical-module-isolation` | idea | Tier 2 wire-out: physically extract the suspended agent-GUI modules (FE+BE) from the live dashboard build; needs sage design gating before `ready` |
 | `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
+| `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` | idea | Deferred sibling of `260726`: tab-strip scroll on activation may swallow the close click on an overflowing workbench tab strip; verified in dockview source, never reproduced in a browser |
 
 ## Ticket Focus
 
@@ -273,6 +279,24 @@ dropped tickets live in hidden archive dirs and git history.
   external daemon mode and announcing the skip. The daemon-binary half of the
   same hazard is deliberately still open: `cargo build -p ws-dashboard-daemon`
   lives only in `test:browser`.
+
+- `260726-bug-dashboard-restored-tab-close-inert-until-activated` — CLOSED
+  (`.done/`, 2026-07-27). Fixed one member of a lost-`click` family on
+  terminal tab close buttons: on a reload-restored, never-activated tab, the
+  attention badge's presence in the tab's layout flow slid the close button
+  under the pointer between press and release, so the `click` landed on the
+  tab body instead and was silently swallowed. Taking the badge out of
+  layout flow fixed it (measured shift `-11.0px` -> `0.0px`). Deliberately
+  NOT discharged by this closure: a second, distinct trigger for the same
+  lost-click symptom — tab-strip scroll on activation shifting an
+  overflowing tab strip under the pointer — is verified in dockview source
+  but has never been reproduced in a browser. That is tracked separately at
+  `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` (`idea/`; not
+  promoted to `ready` because it lacks a reproduction).
+  After this closure, `ready/` holds three tickets, all `260726`-dated:
+  `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry`,
+  `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile`, and
+  `260726-chore-dashboard-verify-notification-permission-tier-manually`.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
