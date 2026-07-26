@@ -999,8 +999,15 @@ so the section reads `window.isSecureContext` and `Notification.permission`
 live (both readable with no permission prompt of their own) and shows the
 current state — including an explicit "unavailable, insecure context"
 message — rather than only surprising the user after an unresponsive click.
-This preference is the sole gate an agent-turn-boundary `Notification` call
-elsewhere in the app checks before firing; it is not itself responsible for
+If the owner grants the permission, the section reflects that as soon as the
+prompt settles rather than at the next unrelated repaint. If the owner denies
+it, the toggle does not stay on: an enabled preference guarding a tier the
+browser will never allow is a control that lies about its own effect, so the
+denial turns the preference back off and the section shows the denied state.
+
+This preference is the sole gate the
+[Browser-Level Attention Cue](#260726-dashboard-browser-level-attention-cue)
+checks before raising an OS notification; it is not itself responsible for
 deciding *when* to notify.
 
 > [!note] Planned 🚧
@@ -2353,6 +2360,53 @@ presentation refreshes while their session is connected, to keep the emulator
 from being disturbed mid-keystroke; the attention state is an explicit
 exception to that suppression, and one that only shows up on the *second*
 transition of a session.
+
+## Browser-Level Attention Cue {#260726-dashboard-browser-level-attention-cue}
+
+The [Terminal Tab Attention Indicator](#260726-dashboard-terminal-tab-attention-indicator)
+is only visible to an owner already looking at the dashboard. A second cue
+carries the same state out to the browser chrome, for the case the whole
+feature exists for: the owner has switched to another tab or another window
+while an agent works.
+
+The cue has two tiers, and the zero-permission one is the default rather than
+a fallback. The dashboard is routinely reached over plain http on a LAN, where
+the page is not a secure context and the browser's `Notification` API is
+absent entirely — not merely un-permissioned. Tier 1 therefore uses only what
+any page may do unasked: it alternates `document.title` between the page's own
+title and an attention-labelled variant, and swaps the favicon for a badged
+one. Tier 2 is a real OS notification, and it is opt-in through the
+[Dashboard Settings Panel](#260722-ws-dashboard-settings-panel).
+
+Both tiers read one document-level attention level, aggregated over every work
+root the navigation tree currently shows, across every connected server, using
+the same `ready` outranks `working` outranks none priority a server row uses.
+Two consequences follow from *shows*, and both are deliberate. A hidden
+worktree contributes nothing here, exactly as it contributes nothing to any
+navigation row — a root the owner asked not to see stays silent in the browser
+chrome too. And the cue cannot disagree with the tab or navigation badges,
+because it is derived from the same per-terminal pending state rather than
+tracking its own.
+
+That derivation is also why the cue needs no acknowledgement of its own.
+Acknowledging the last pending terminal — by the ordinary tab triggers — drops
+the aggregate level to none, and the title and favicon return to the values
+the page loaded with. There is no separate dismiss action, and no second
+acknowledgement watermark that could disagree with the first.
+
+Tier 1 is level-driven: it is present while the level is non-none and absent
+otherwise. Tier 2 is edge-driven instead, and fires only on entry into
+`ready` — `working` is ordinary background progress, not something worth
+interrupting an owner for. Two observable consequences of an aggregate edge:
+reloading the page while an agent is already waiting notifies again, since the
+level rises from none on load; and a second agent reaching `ready` while
+another already is fires nothing, since the aggregate never left `ready`. The
+per-tab badges still distinguish both cases.
+
+A browser that exposes `Notification` may still refuse to construct one — some
+mobile browsers require notifications to go through a service worker, which
+this dashboard does not use — so a failure to raise the OS notification is
+contained to that tier and never disturbs the page.
 
 ## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 
