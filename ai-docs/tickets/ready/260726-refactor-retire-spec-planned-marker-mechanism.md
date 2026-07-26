@@ -5,8 +5,9 @@ related:
   260726-bug-spec-planned-marker-ready-ticket-cycle: dropped by this decision; its surviving finding is extracted to the ticket below
   260726-bug-inline-playbook-invocation-commit-ownership: the extracted finding — a real defect independent of this retirement
   260723-feat-ready-spec-address-hard-gate: owns the strength of the ready spec-address gate, which becomes the sole spec-addressing path
-sage-review-design: blocked
-sage-review-completeness: blocked
+  260726-feat-verify-ticket-graph-advisories: supplies the advisory-not-blocking reversibility principle, and its mechanical-floor scope is what the ticket-body-read carve-out is measured against
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Retire the 🚧 planned-marker mechanism; pending spec contracts live in the ticket
@@ -18,7 +19,7 @@ the corpus. The short version:
 
 - **Real usage corpus-wide: 1 marker**, and it is stale — its backing ticket
   `260524-feat-ws-dashboard-workspace-root-prune-policy` is in `.done/` and
-  `ws-web-dashboard/index.md:231` still carries the callout.
+  `ai-docs/spec/ws-web-dashboard/index.md:231` still carries the callout.
 - **Contract-first declarations: 1 yes / 10 no** across live tickets.
 - The footprint is **six Go call sites across three files**, an embedded
   convention section, four rsrc playbooks in **both** plugin trees (8 files),
@@ -154,6 +155,7 @@ discovered mid-removal:
   four live ones. The note carries a removal condition in its own `### Result`:
   it is deleted once no supported downstream version can still be emitting markers
   — concretely, one bootstrap ratchet cycle after 2.7's v0045/v0006 ship.
+- **Advisory, never blocking.** Per the reversibility principle already adopted
   in `260726-feat-verify-ticket-graph-advisories`: legacy markers are a migration
   state, not an error. The note routes; it does not fail a commit.
 - **Bootstrap template prose is edited in Phase 2, both trees, no separate
@@ -195,9 +197,11 @@ discovered mid-removal:
   `.done/`, so the behavior it describes is implemented; the entry becomes an
   ordinary implemented spec entry with the marker stripped, not a deletion.
 - `markerContext` (defined `spec_discovery.go:263`; the match condition is line
-  266) is left at its current looseness for its existing callers. The advisory
-  keys on `🚧` alone — see the predicate decision above, which records the
-  measurement that settled it.
+  266) is left at its current looseness for **`specs.find`'s match scoring**
+  (`spec_discovery.go:85`), which is its only surviving consumer once 2.1 rewrites
+  the render paths. Do not justify the retention by "its existing callers" — 2.1
+  removes those. The advisory keys on `🚧` alone regardless; see the predicate
+  decision above.
 - Embedded convention text (`agents-plugin-tool/internal/wsdoc/conventions/`) is
   `go:embed`'d, so the removal only reaches installed plugins through a version
   bump.
@@ -264,6 +268,11 @@ lands.
     move the marker text into the ticket's `## Spec Impact` and strip the marker.
   - no live ticket references this spec → the marker is orphaned; strip it,
     keeping the described behavior as an ordinary implemented entry if it shipped.
+- **Document the advisory in `ai-docs/spec/mcp-tools.md` in this phase**, at the
+  `specs.*` (~828-831) and `project_tree` (~806-810) contracts. Phase 1 changes
+  four documented tool outputs and claims independent value "even if Phase 2 never
+  lands"; under that fallback the contracts would change and never be documented.
+  2.5 then handles only what remains.
 - **Record two things in this phase's `### Result`**: the retained detection
   surface (2.1 may extend but not shrink its stated retain-list), and the compat
   note's removal condition per the temporary-note decision.
@@ -290,7 +299,9 @@ Verification boundary:
    `workflow-skills.md`** — the three files the loose `markerContext` predicate
    matches on prose alone. This is the false-positive check; without it clause 1
    passes on a predicate that flags every document describing the mechanism.
-5. `### Result` names the retained detection surface and the note's removal
+5. `mcp-tools.md` documents the advisory on the `specs.*` and `project_tree`
+   contracts, so Phase 1 leaves no undocumented tool-output change behind.
+6. `### Result` names the retained detection surface and the note's removal
    condition.
 
 ### Phase 2: Remove the mechanism and ratchet downstream
@@ -304,7 +315,9 @@ green, and 2.8 is the delivery vehicle for everything above it.
 and `specs.status` — rewriting them to Phase 1's advisory rather than the old
 planned-count output, and drop the struct fields that fall dangling. Follow the
 compiler and the test suite to the sites; do not work from a hand-copied symbol
-list.
+list. One caveat: Go reports unused locals and imports but **not** unused struct
+fields or unused unexported functions, so the dangling-field half needs `grep` or
+`staticcheck` — a field orphaned by removing a render path still builds green.
 
 Two boundaries, because they are judgment and the compiler cannot supply them:
 
@@ -332,9 +345,15 @@ section and examples. Rewrite the *Implementation Gap Callout*'s resolution path
 (`spec-conventions.md:43-44`), which currently says "convert to `🚧`": the
 replacement is to create the qualifying ticket and carry the gap's contract text
 in that ticket's `## Spec Impact`, removing the callout at implementation
-closeout. The callout itself survives — only its exit path changes. Check
-`ticket-conventions.md:29-30` (both the contract-first invocation clause and the
-line after it).
+closeout. The callout itself survives — only its exit path changes.
+
+`ticket-conventions.md:29` says `lead-write-ticket` "invokes `lead-write-spec`
+only for contract-first planned spec entries". After 2.4 removes that branch the
+answer is **never** — `lead-write-ticket` does not invoke `lead-write-spec` at
+all, and spec addressing runs through `## Spec Impact`. State that once and apply
+it to all three sites carrying the clause: `ticket-conventions.md:29-30`,
+`documentation-system.md:247`, and `workflow-skills.md:322-323` (the latter two
+are 2.5's).
 
 **2.3 rsrc playbooks, both trees.** Sweep each file for *every* `🚧` occurrence
 rather than working from the line list below — an earlier revision named one of
@@ -345,8 +364,17 @@ condition in `judge: split-trigger`, Invariants line 14, step 6's accuracy
 checks); `lead-update-spec` (§5 Strip `🚧` entirely); `lead-forge-spec` (the
 split-condition table row plus the "Implemented or planned?" branch, the
 heading-marker placement step, the `🚧 Planned:` count line, and the two
-strip/review closeout bullets — its forge-time analogue of `lead-update-spec` §5);
-`fresh-reader-audit`.
+strip/review closeout bullets — its forge-time analogue of `lead-update-spec` §5).
+
+**`fresh-reader-audit:58` is out of scope — the same class as 2.1's
+`TicketRefs`.** Under `## What not to flag` it reads "Issues already present in
+text marked explicitly as `TODO` or `🚧`". Paired with `TODO`, that is a generic
+work-in-progress annotation on arbitrary audited text, with no dependence on the
+spec convention. An earlier revision listed the file for removal and clause 2
+mandated a marker-free tree, which together would delete an audit exclusion and
+start flagging issues inside text its author explicitly marked as unfinished.
+This is the one site where reducing the enumeration would have been wrong: it is
+prose with no compiler and no test behind it, so nothing else catches the mistake.
 
 **Delete the `🚧` split condition; do not invent a replacement.** An earlier
 revision called this "a behavior change beyond marker removal" and instructed
@@ -363,15 +391,30 @@ instance is that branch — see its landing-order decision.
 
 **2.5 Repo spec corpus.** The sub-step an earlier revision omitted entirely,
 leaving verification clause "`ai-docs/spec/` contains zero `🚧`" unreachable from
-any stated work:
+any stated work.
+
+**This sub-step's sweep predicate is not the advisory's.** The advisory keys on
+`🚧` alone because it acts on live markers. This sub-step edits *prose describing
+the mechanism*, which is mostly emoji-free — `workflow-skills.md` contains
+**zero** `🚧` yet documents the behavior throughout, so a `🚧` sweep finds nothing
+there and clause 5 passes trivially. Sweep for `🚧` **or** "planned marker /
+planned entry / planned stem / strips planned" in spec-mechanism context. Exclude
+`## Planned References` (`documentation-system.md:146-147`,
+`workflow-skills.md:354-355`) — that is the live workset reference mechanism, a
+different thing the loose predicate hits.
 
 - `ai-docs/spec/documentation-system.md` — the contract-first paragraph
   (98-102), and every other marker mention in the file (at least 104-107, 236-240,
-  247, 258; sweep rather than trusting this list).
-- `ai-docs/spec/workflow-skills.md` (309-312, 320-326) — documents the
-  `lead-write-spec` / `lead-update-spec` marker behavior 2.3 removes.
+  247, 258).
+- `ai-docs/spec/workflow-skills.md` — the `lead-write-spec` / `lead-update-spec`
+  marker behavior 2.3 removes: 309-312, 320-326, **818-819** ("strips planned
+  markers when implementation lands"), and **997** ("associates planned stems with
+  active tickets"), which sits under anchor
+  `{#260707-forge-spec-autoproceed-classification-2}` and is therefore an
+  anchored-entry amendment, not free prose.
 - `ai-docs/spec/mcp-tools.md` — the `specs.*` and `project_tree` output contracts
-  changed by Phase 1 and 2.1 (~807, ~829). Do **not** remove the `tickets=` /
+  changed by Phase 1 and 2.1 (~807, ~829), to the extent Phase 1 has not already
+  documented its own advisory. Do **not** remove the `tickets=` /
   ticket-references documentation; see 2.1's out-of-scope note.
 
 **2.6 The one live marker.** `ai-docs/spec/ws-web-dashboard/index.md:231` is a
@@ -441,16 +484,17 @@ replacement spec-split condition (a convention change, out of scope — see 2.3)
 removing `SpecInfo.TicketRefs` along with the marker fields (a different
 mechanism backing `references.trace` — see 2.1).
 
-Verification boundary, one clause per sub-step:
+Verification boundary, one clause per sub-step (2.2 and 2.3 share one):
 
 1. **2.1** — `project_tree`, `specs.list`, and `specs.status` report no planned
    or WIP counts and no marker context beyond Phase 1's advisory; `references.trace`
    still resolves spec→ticket references and `specs.list` still renders `tickets=`;
    `go test ./...` passes.
 2. **2.2/2.3** — no `🚧` remains in the conventions or in either plugin tree's
-   playbooks; the Implementation Gap Callout states the `## Spec Impact`
-   resolution path; both split-condition sites are deleted with no replacement
-   condition added; wsflow bundle tests pass.
+   playbooks **except `fresh-reader-audit:58`, which must still exclude
+   `TODO`/`🚧`-marked text from flagging**; the Implementation Gap Callout states
+   the `## Spec Impact` resolution path; both split-condition sites are deleted
+   with no replacement condition added; wsflow bundle tests pass.
 3. **2.4** — a fresh `lead-write-ticket` run on a spec-touching ticket reaches
    `ready/` through `## Spec Impact` with no contract-first branch offered.
 4. **2.5** — `documentation-system.md`, `workflow-skills.md`, and `mcp-tools.md`
@@ -472,6 +516,41 @@ Verification boundary, one clause per sub-step:
    the script's edition points.
 8. **2.9** — the cycle ticket is in `.dropped/` with a `## Resolution`, and the
    commit-ownership ticket still exists and still carries the extracted finding.
+
+## Reviewed (2026-07-26, round 3)
+
+Design **concern**, completeness **pass** — first round with no critical and no
+finding needing an owner decision. All six design and six completeness findings
+were folded in before promotion.
+
+Both reviewers independently assessed the 2.1 reduction and reached the same
+conclusion: it removed duplication, not recoverable-only information. The
+symbol entry points it had enumerated were already stated with `file:line`
+elsewhere in the ticket, and what it delegated was only which lines those symbols
+occupy — twice gotten wrong. Design added that round 2's list was net-negative,
+since its `TicketRefs` entry was itself the error.
+
+Findings fixed in this pass:
+
+| # | Lens | Title | Severity |
+|---|------|-------|----------|
+| 1 | design | 2.5's `workflow-skills.md` coverage incomplete and its sweep predicate unstated — the file has **zero** `🚧`, so a marker sweep finds nothing while clause 5 passes trivially; `:818-819` and `:997` were outside the stated ranges | important |
+| 2 | design | 2.3 + clause 2 ordered deletion of `fresh-reader-audit:58`, a generic `TODO`/`🚧` audit exclusion unrelated to this mechanism — same class as round 2's `TicketRefs`, and the one such site with no compiler behind it | important |
+| 3 | design | Phase 1 changes four documented tool contracts but had no spec step, while claiming value "even if Phase 2 never lands" | important |
+| 4 | design | `ticket-conventions.md:29`'s post-removal behavior unanswered across three mirrored sites | minor |
+| 5 | design | `markerContext`'s retention rationale ("for its existing callers") is undercut by 2.1, which removes them; the real surviving consumer is `specs.find` match scoring | minor |
+| 6 | design / completeness | Damaged sentence — the **Advisory, never blocking** decision lost its head during an earlier insertion | minor |
+| 7 | completeness | "Follow the compiler" under-delivers: Go does not report unused struct fields or unexported functions | minor |
+| 8 | completeness | `260726-feat-verify-ticket-graph-advisories` load-bearing twice but absent from `related:` | minor |
+| 9 | completeness | "one clause per sub-step" header vs 8 clauses for 9 sub-steps | minor |
+| 10 | completeness | Background retained one unprefixed spec path | minor |
+
+Accepted without change: Phase 2 still bundles nine sub-steps under one
+completion boundary (round-1 completeness finding 1). Completeness round 3 judged
+this mitigated rather than resolved — the sub-steps are ordered with a stated
+rationale, each has a named acceptance clause, and the Go/prose/distribution work
+is separable without new decisions — and explicitly not worth blocking a third
+time.
 
 ## Blocked (2026-07-26, round 2)
 
