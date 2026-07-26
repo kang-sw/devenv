@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.36.15 - 2026-07-26
+
+### Changed
+- **Ticket design review grades severity by consequence instead of by how much
+  the ticket omits.** `critical`, `important`, and `minor` were undefined
+  vocabulary — the only defined field was `resolution` — so severity was
+  calibrated from the reviewing model's own priors, and the same prompt read
+  markedly harsher under a stronger model. Each level is now anchored to a
+  nameable outcome for an implementer following the ticket as written: builds
+  something that cannot work or contradicts a live contract (`critical`), builds
+  the wrong thing or installs a rule that cannot fire (`important`), builds the
+  right thing less cleanly (`minor`). An omission is `minor` unless the reviewer
+  can name the wrong result it produces.
+- **The design verdict now carries a required `sufficiency` line.** The reviewer
+  was already asked whether a competent implementer can execute the unfinished
+  phases, but the output format had nowhere to record the answer, so the verdict
+  was back-derived from the issue list and `pass` existed only as an empty list.
+  `sufficiency` states that judgment directly, above the issues. The `concern`
+  threshold also drops a tautology: `resolution: missing` already routes to
+  `block`, so every remaining `important` issue was autonomous by construction.
+- **Design-review doctrine bounds what gets reported.** An unimplemented design
+  has unbounded surface — every added sentence creates new implications that can
+  themselves be called under-specified — so findings cannot run dry the way they
+  do against a finite diff. The doctrine now names the finite resource (a fresh
+  implementer's ability to proceed without the ticket's author) and directs the
+  reviewer to report what blocks execution rather than everything that could be
+  specified further.
+
 ## v0.36.14 - 2026-07-26
 
 ### Changed
