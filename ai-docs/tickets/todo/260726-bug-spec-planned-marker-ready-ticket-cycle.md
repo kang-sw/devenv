@@ -5,11 +5,21 @@ related:
   260723-epic-ticket-write-reshape: establishes the verify-as-mechanical-floor boundary this ticket's enforcement point belongs to
   260726-feat-verify-ticket-graph-advisories: cross-file reference resolution at verify is the natural host for a commit-state check
   260723-feat-ready-spec-address-hard-gate: adjacent ready spec-address hardening; that ticket is about the gate's strength, this one about the 🚧 prerequisite
+  260726-research-spec-planned-marker-management-cost: questions whether 🚧 should exist at all; settle it before implementing this ticket
 sage-review-design: blocked
 sage-review-completeness: blocked
 ---
 
 # The 🚧 marker prerequisite is stated as a filesystem invariant that no contract-first path can satisfy
+
+> **Do not implement before `260726-research-spec-planned-marker-management-cost`
+> resolves.** That research asks whether the `🚧` mechanism should exist at all.
+> This ticket assumes it does and makes its ordering satisfiable, so a retirement
+> verdict drops this ticket rather than unblocking it. The one finding that
+> survives either verdict is the inline commit-ownership defect
+> (`lead-write-spec` step 7 commits unconditionally while the contract-first
+> branch invokes it inline) — a real bug independent of `🚧`, to be re-homed
+> rather than dropped with the rest.
 
 ## Background
 
