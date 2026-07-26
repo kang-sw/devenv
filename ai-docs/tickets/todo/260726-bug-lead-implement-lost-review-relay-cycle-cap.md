@@ -103,10 +103,18 @@ into an explicit owner decision.
 
 ## Decisions
 
-**Budget is per slice, not per partition.** The counted event is the relay, and
-one relay carries every non-clean review path at once; only re-review fans back
-out per partition. A per-partition count is therefore not well-defined for the
-event being counted. `260619`'s "per-path cycle cap" phrasing is superseded.
+**A cycle is a review round, not a relay.** Cycle N is the Nth review of the
+slice: cycle 1 is the initial review, so a budget of 3 permits at most 3 reviews
+and therefore at most 2 relays. This is the indexing the restored `write-code`
+branch table uses (`Cycle = 3 and non-clean remain`), and it is the only reading
+under which the observed run — three cycles complete, a fourth relay pending —
+had already reached the cap. Counting relays instead would permit a fourth review
+round, leaving the observed run inside budget and the reported defect unfixed.
+
+**Budget is per slice, not per partition.** One relay carries every non-clean
+review path at once; only re-review fans back out per partition, so a
+per-partition count has no distinct event to count. `260619`'s "per-path cycle
+cap" phrasing is superseded.
 
 **The final cycle completes the run; it does not halt it.** At the last relay,
 stop relaying, proceed to closeout, and carry unresolved findings with their
@@ -182,9 +190,19 @@ playbook keeps only the path-independent invariant; budgets and the adjudication
 step are `review_alloc`-dependent and therefore verdict-specific. This follows
 `lead-implement`'s own stated Doctrine — "route facts go to MCP, verdict-specific
 work goes to todos, and the playbook keeps only shared gates, ownership
-boundaries, and reusable templates". Concretely, the adjudication step is an
-**additional todo item installed only on the partitioned path**, following the
-review item, so no other path surfaces the adjudicator's existence at all.
+boundaries, and reusable templates". Concretely, every budget, adjudication, and
+escalation clause is generated into the **review todo's Instruction**, which
+already branches on `review_alloc` — so the `single` and `lead-only` branches
+never surface the adjudicator's existence at all.
+
+Rejected: installing adjudication as a separate todo item after `review`.
+Adjudication is intra-loop — cycle-2 re-review yields `[maintained]`, the
+adjudicator runs, an override ships as the next relay, and the loop re-enters
+review — but `lead-implement` requires executing the installed todo list as an
+ordered runbook, so a strictly-later item would ask the lead to return to a
+completed step. Keeping the clause inside the review Instruction preserves what
+motivated the separate item — invisibility on non-partitioned paths — without
+contradicting the ordering contract the ticket relies on elsewhere.
 
 The todo layer is not merely a convenient surface, it is the only binding one.
 `lead-implement.md` instructs the lead to "Treat the installed todo list as the
@@ -210,7 +228,7 @@ warrants.
 shape — an independent judgment delegate whose aperture is deliberately wider
 than its sibling reviewer's.
 
-## Open: whether a lead-side root-cause check belongs here
+## Why a lead-side root-cause check is in scope
 
 `impl-playbook` carries a stronger, non-numeric rule: "**Repetition check**
 (mechanical, every failure): Before fixing, ask and answer: 'Is this the same
@@ -228,10 +246,10 @@ matches an already-relayed finding is itself an escalation signal, independent o
 cycle count — and the observed run suggests the condition is the load-bearing
 half, with the count catching it only incidentally.
 
-**Scope is undecided.** This is a third mechanism alongside the budget (Phase 1)
-and the adjudicator (Phase 2), and nothing in the discussion settled whether it
-belongs in this ticket, in a sibling, or nowhere. Resolve before either phase is
-implemented; do not let an implementer infer it either way.
+Scoped into this ticket as Phase 2, alongside capacity elevation: both are
+lead-side conditions expressed as text in the same generated Instruction, and
+neither needs a delegate. Sequencing them before the adjudicator is deliberate —
+if Phase 3 never lands, Phases 1 and 2 still close the observed defect.
 
 ## Constraints
 
@@ -244,8 +262,19 @@ implemented; do not let an implementer infer it either way.
   each one.
 - Touching `agents-plugin-tool/` invokes the dev-merge version bump through
   `agents-plugin-tool/scripts/bump-ws-version.sh`.
-- `agents-plugin-wsflow/rsrc/lead-implement/lead-implement.md` is byte-identical
-  to the full-ws copy and carries the same absence; mirror any playbook change.
+- `agents-plugin-wsflow/rsrc/` is a **generated** byte-identical mirror guarded by
+  `TestWsflowRsrcMirrorUpToDate`; never hand-edit it. After any
+  `agents-plugin/rsrc/` change, regenerate in this order — first
+  `WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealManifest`
+  (required only when a file is added or removed), then
+  `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`.
+  `-count=1` is mandatory. See `ai-docs/ref/wsflow-mirroring.md`; the missed-regen
+  failure mode has its own ticket
+  (`260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`).
+- Generated todo Instructions are plain Go strings with no template resolution.
+  Render-time variables such as `{{.LargeTierModel}}` resolve only in
+  `playbook.render` output and would surface literally if written into an
+  Instruction; name tiers by the capability vocabulary instead.
 
 ## Phases
 
@@ -253,18 +282,25 @@ implemented; do not let an implementer infer it either way.
 
 Close the spec violation without introducing the adjudicator. Two surfaces.
 
-**Playbook** — one path-independent invariant line added to `lead-implement.md`'s
-Review block, and mirrored into the wsflow copy:
+**Playbook** — two path-independent invariant lines added to `lead-implement.md`'s
+Review block, one rule each per `lead-skill-authoring`'s one-line requirement:
 
 ```markdown
-- Relay budget is per slice, not per partition: one relay carries every non-clean path. At the final cycle, stop relaying, proceed to closeout, and carry unresolved findings with their dispositions into the final report. Do not halt the run.
+- A review cycle is one review round; the relay budget is per slice, not per partition.
+- At the final cycle, stop relaying, complete closeout, and carry unresolved findings with their dispositions into the final report.
 ```
+
+Regenerate the wsflow mirror rather than editing its copy.
 
 **Generated todo instruction** — `implementReviewInstruction` states the budget
 per branch, since the generator already holds `review_alloc` and is the cheapest
-place to settle it. The `partitioned:` branch states 3 cycles for the slice; the
-`single` branch states 2. The lead-only and fallback branches are untouched
-because neither runs a relay loop. Update the string pins in
+place to settle it. Three of the four branches run a relay loop and need it: the
+`partitioned:` branch states 3 review cycles for the slice, the `single` branch
+states 2, and the fallback branch (`session_state.go:576`) states 3 — it is
+reachable whenever `review_alloc` is the bare string `partitioned`, which
+`parseImplementReviewAlloc` produces on the legacy `enter.implement` path with no
+`target` argument. Only the `lead-only` branch is untouched, because it dispatches
+no reviewers and therefore never relays. Update the string pins in
 `session_state_test.go`.
 
 Rejected alternative: stating the numbers in the playbook. They are
@@ -273,37 +309,62 @@ Doctrine, and putting a `single`-vs-`partitioned` branch in shared prose is the
 thing this ticket is trying to stop.
 
 Verification boundary: a `partitioned:` verdict's review todo Instruction names a
-3-cycle slice budget and the completes-not-halts behavior; a `single` verdict's
-names 2; a `lead-only` verdict's names neither; the playbook line appears once in
-each of the two `lead-implement.md` copies and states no number.
+3-review-cycle slice budget and the completes-not-halts behavior; a `single`
+verdict's names 2; the fallback branch names 3; a `lead-only` verdict's names
+neither; both `lead-implement.md` copies carry the two lines with no number, and
+the wsflow mirror test passes without a hand-edit.
 
-### Phase 2: Adjudicator delegate and capacity elevation
+### Phase 2: Root-cause escalation and capacity elevation
 
-Depends on Phase 1 — the adjudication step hangs off the budget it consumes.
+Depends on Phase 1 — both conditions qualify the budget it establishes. Text
+only, no new delegate, both appended to the same `partitioned:`/fallback review
+Instruction.
+
+**Root-cause escalation.** Relaying a finding whose root cause matches an
+already-relayed finding is itself an escalation signal, independent of cycle
+count. This is the lead-side counterpart to `impl-playbook`'s repetition check,
+which cannot fire across stateless fresh-spawn relays. The observed run argues
+this condition is the load-bearing half and the count only the backstop.
+
+**Capacity elevation.** A finding relayed twice with no won't-fix offered and
+still non-clean means the implementer cannot fix it rather than that a defense is
+contested. Dispatch the next relay at an elevated tier — name it by capability
+tier (`large`), never by model name and never by a render variable, per the
+Instruction constraint above.
+
+Verification boundary: the `partitioned:` and fallback Instructions each state
+both conditions and distinguish them from the numeric budget; `single` and
+`lead-only` state neither; no `{{` appears in any generated Instruction.
+
+### Phase 3: Adjudicator delegate
+
+Depends on Phase 2 — the adjudicator resolves the disputes Phase 2's conditions
+surface.
 
 **New rsrc delegate** modeled on `ticket-reviewer-design`, `tier: large`,
 carrying the aperture constraint, the read table, and the three-verdict output
-contract from `## Decisions`. Inputs are file paths only.
+contract from `## Decisions`. Inputs are file paths only. Adding an rsrc file
+requires the manifest regeneration named in `## Constraints` before the mirror
+regeneration.
 
-**New todo item** installed by `deriveImplementTodosFromVerdict` only when
-`review_alloc` is partitioned, following the `review` item. This mirrors the
-existing conditional-assembly pattern already used for `NeedReview`, `NeedDoc`,
-and `isCurrentBranchCompletion`. Its Instruction carries: the `[maintained]`
-trigger, the adjudicator spawn method, that an override consumes the next relay's
-budget rather than adding one, and that the step is **optional when no dispute
-was maintained**.
+**Review Instruction clause** for the `partitioned:` and fallback branches only:
+the `[maintained]` trigger, the adjudicator spawn method, that an override ships
+as the next relay and consumes its budget rather than adding one, and that the
+step is **optional when no dispute was maintained**.
 
-**Capacity elevation** stated in the same Instruction as a separate condition:
-a finding relayed twice with no won't-fix offered and still non-clean dispatches
-the next relay at an elevated tier. Use the render-resolved tier-model vars from
-`260714-feat-playbook-tier-model-render-vars` rather than naming a model.
+**Spec update, required.** `#260612-reviewer-allocation-tier-default` currently
+reads "3 cycles for partitioned with lead adjudication at cycle 2". This phase
+makes the adjudicator a delegate and introduces a verdict vocabulary the spec
+does not describe, so the anchor must be updated in the same logical change —
+otherwise this phase opens a new spec divergence while the ticket closes an old
+one.
 
-Verification boundary: a partitioned verdict installs the adjudicate todo and a
-single/lead-only verdict does not; the rendered adjudicator prompt states the
-do-not-re-review-the-diff constraint and the three verdicts; the adjudicate
-Instruction states both the `[maintained]` trigger and the capacity condition and
-marks the step optional; delegate prompt remains self-contained under a fresh
-spawn with no prior conversation.
+Verification boundary: a partitioned verdict's Instruction carries the
+adjudication clause and a single/lead-only verdict's does not; the rendered
+adjudicator prompt states the do-not-re-review-the-diff constraint and the three
+verdicts; the delegate prompt is self-contained under a fresh spawn with no prior
+conversation; the spec anchor no longer says "lead adjudication"; manifest and
+wsflow mirror tests pass without hand-edits.
 
 ## Non-Goals
 
