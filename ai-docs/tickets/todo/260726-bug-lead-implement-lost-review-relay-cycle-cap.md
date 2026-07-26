@@ -316,7 +316,12 @@ defect class.
   `childRoleForPlaybookRole` accepts — `implementer`, `reviewer`, `delegate`,
   `leaf`. Anything else, including a natural-reading `role: adjudicator`, falls to
   the default branch and mints **no child session key, silently**: no error, and a
-  prompt that renders normally. Both new delegates use `role: delegate`. Every
+  prompt that renders normally. `review-adjudicator` uses `role: delegate`;
+  `implementer-elevated` uses `role: implementer`, matching the sibling it
+  replaces. `role` has a second consumer at `playbook_tools.go:763-769` that
+  appends the `prefer_mercenary` guidance block for `implementer`/`reviewer` only,
+  so a drop-in implementer replacement declared `delegate` would silently lose that
+  guidance on the same dispatch path. Every
   input either delegate takes must also appear in `variables:`; `renderPlaybook`
   rejects an undeclared key with `ErrUndeclaredVar`, so Phase 3's added prior-fix
   and prior-disposition inputs are a `variables:` change, not only prose.
@@ -412,6 +417,14 @@ note: this is the one `implementer-relay` edit the ticket makes, and it is addit
 to an output vocabulary rather than a new rule, so it does not reopen Phase 1's
 decision to leave the playbook layer alone.
 
+Because `implementer-relay` is dispatched on **every** relay path, the token also
+reaches a `single`-path lead whose Instruction has no adjudication clause. Under
+this ticket's own "do not supplement the Instruction from memory" contract that is
+an unhandled signal, so the `single` branch gains one sentence: with no
+adjudication slot at a 2-cycle budget, `[escalate]` there is the lead's own
+accept-or-defer call. Naming the degradation is the point — the alternative is a
+structured token that one path defines and another silently ignores.
+
 **Spec update, required.** `#260612-reviewer-allocation-tier-default` currently
 reads "3 cycles for partitioned with lead adjudication at cycle 2". This phase
 makes the adjudicator a delegate and introduces a verdict vocabulary the spec
@@ -428,7 +441,8 @@ no prior conversation; **both** of `implementer-relay`'s token enumerations list
 than by reading one section; the Instruction states that adjudication happens
 within a relay slot without consuming a review and is bounded to one per slot, and
 states the `[out-of-scope]` disposition (leaves the relay list, costs no relay,
-surfaces in completion output); the spec anchor no longer says "lead adjudication";
+surfaces in completion output); the `single` Instruction names the `[escalate]`
+degradation; the spec anchor no longer says "lead adjudication";
 manifest and wsflow mirror tests pass without hand-edits.
 
 ### Phase 3: Elevated implementer delegate and capacity escalation
@@ -482,27 +496,59 @@ never-fires defect class this ticket exists to close. Firing after one failed
 relay spends the second relay on the elevated delegate, which is the only slot
 where it can act.
 
-**Root-cause matching** rides the same route. A finding relayed again whose root
-cause matches an already-relayed finding is an escalation signal independent of
-the count: it is the lead-side counterpart to `impl-playbook`'s repetition check,
-which cannot fire across stateless fresh-spawn relays. It is folded in here rather
-than kept as its own phase because it is a second detector for one signal — the
-approach is failing, not the patch — and routes to the same delegate. The observed
-run argues this detector is the load-bearing half and the count only the backstop.
+**Root-cause matching** rides the same route. A **newly surfaced** finding whose
+root cause matches an already-relayed finding is an escalation signal independent
+of the count: it is the lead-side counterpart to `impl-playbook`'s repetition
+check, which cannot fire across stateless fresh-spawn relays. Word it that way and
+not as "a finding relayed again" — recurrence of the *same* finding is already the
+capacity condition, and the observed run is precisely the other shape: cycles 1, 2,
+and 3 each produced a **distinct** finding sharing one root cause (bounding a
+subprocess's output collection). A recurrence-worded detector would not have fired
+in the run that motivates it. It is folded in here rather than kept as its own
+phase because it is a second detector for one signal — the approach is failing, not
+the patch — and routes to the same delegate. The observed run argues this detector
+is the load-bearing half and the count only the backstop.
 
 **Precedence when both fire.** A relay can carry an adjudicator override list and
 a capacity signal at once. The combined relay goes to `implementer-elevated`
 carrying the override list; the elevated delegate subsumes the relay delegate's
 job, so two relays are never dispatched for one cycle.
 
-**Dispatch surface.** `lead-implement.md`'s **Review relay dispatch** template
-hard-codes `implementer-relay` and its seven inputs, and the delegate dispatch
-task-input mapping alongside it; both must gain the conditional target, together
-with their pinned assertions in `playbook_tools_test.go`. This is not a reversal
-of Phase 1's decision to leave the playbook alone: the playbook's own Doctrine
-keeps *reusable templates* while sending rules to the todo layer, and a dispatch
-template that names a delegate the lead cannot otherwise reach is template
-material, not an invariant.
+**The capacity signal must flow structurally, not by prose correlation.** Phase 2
+checks this for the adjudication arm — `[maintained]` already flows because
+`lead-implement.md`'s **Re-review prompt** asks for it per item, and `[escalate]`
+is added where it did not. The capacity arm needs the same check and currently
+fails it: that Re-review prompt asks for a per-item verdict **only on
+`[won't fix]` items**, so a `[fixed]` item that did not land carries no token at
+all. Without one the lead has to diff a fresh findings file against its own
+disposition record by reading prose, which is judgment work — and this ticket's
+whole argument is that a routing condition the lead must infer is a condition that
+does not fire. Add the symmetric ask: for each `[fixed]` item, respond `[resolved]`
+or `[unresolved: <short reason>]`. This is not the regression-vs-preexisting
+classification that `#260619-stateless-implement-review-continuity` withholds from
+the reviewer — it is a verdict on a named prior finding, the same shape as
+`[accepted]`/`[maintained]`.
+
+**Wording conflict to resolve in the same change.** The live Instruction strings
+(`session_state.go:571,576`) say to use the relay and re-review prompts "only for
+genuinely new non-clean Critical/Important findings". Read literally that forbids
+relaying a persisting finding — the exact relay the capacity condition exists to
+route. The phrase must be restated so a finding reported `[fixed]` and returned
+`[unresolved]` is relayable; it was aimed at reviewer-invented churn, not at
+unresolved carryover.
+
+**Dispatch surface — three templates, not two.** `lead-implement.md`'s **Review
+relay dispatch** template hard-codes `implementer-relay` and its seven inputs, and
+the delegate dispatch task-input mapping sits alongside it; both must gain the
+conditional target, together with their pinned assertions in
+`playbook_tools_test.go`. The **Re-review prompt** template is the third, carrying
+the `[resolved]`/`[unresolved]` ask above — it has no pinned assertion today, so
+nothing would fail if it were skipped, which is why it is named here explicitly.
+None of this reverses Phase 1's decision to leave the playbook alone: the
+playbook's own Doctrine keeps *reusable templates* while sending rules to the todo
+layer, and a dispatch template naming a delegate the lead cannot otherwise reach —
+or a response vocabulary the lead cannot otherwise receive — is template material,
+not an invariant.
 
 Spec: amend `#260612-reviewer-allocation-tier-default` for the new delegate and
 its dispatch condition.
@@ -513,9 +559,14 @@ Verification boundary: `playbook.render(name: "implementer-elevated")` returns
 front-matter, with every added input declared in `variables:` and a render passing
 them all succeeding rather than returning `ErrUndeclaredVar`; both new delegates
 mint a child session key under a fresh render, which is the observable proof their
-`role:` value is in the accepted set; the capacity condition names the
-`[fixed]`-then-still-non-clean disposition and its exclusions; the capacity and
-root-cause conditions both appear in
+`role:` value is in the accepted set, and a `prefer_mercenary` render of
+`implementer-elevated` carries the same guidance block as `implementer-relay`; the
+Re-review prompt asks `[resolved]`/`[unresolved]` per `[fixed]` item, so the
+capacity condition reads a token rather than inferring from prose; no Instruction
+still says relay is "only for genuinely new" findings; the root-cause condition is
+worded on newly surfaced findings rather than recurrences, checked against the
+observed run's shape (three distinct findings, one root cause) rather than by
+reading the sentence; the capacity and root-cause conditions both appear in
 the `partitioned:` and fallback Instructions and nowhere else, with the root-cause
 condition distinguished from the numeric budget; no `{{` appears in any generated
 Instruction; a walkthrough of a 3-cycle slice reaches `implementer-elevated`
