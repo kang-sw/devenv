@@ -24,12 +24,9 @@ the corpus. The short version:
   convention section, four rsrc playbooks in **both** plugin trees (8 files),
   three marker-carrying lead-bootstrap distribution files (2.7 touches five,
   counting the second lineage's template and its pinning test), a judge, and a whole
-  `lead-update-spec` step — for that one stale instance. The Go sites:
-  `markerContext` is called at `spec_discovery.go:255` (via `specMarkerContexts`,
-  reached from line 206) **and** `spec_discovery.go:224` (populating
-  `SpecAnchorInfo.MarkerContext`); `specStats` in `project_tree.go`; and three
-  render sites at `server.go:2526`, `server.go:2628`, and
-  `project_tree.go:150-155`.
+  `lead-update-spec` step — for that one stale instance. The counts size the
+  argument; the sites themselves are the compiler's job, not this document's (see
+  2.1).
 
 The decisive argument is **ownership lifetime, and it survives the adoption
 confound**. Adoption was measured while the mechanism was unusable (the ordering
@@ -302,31 +299,33 @@ Requires Phase 1 landed. Run the sub-steps in the stated order — 2.7 changes
 downstream-visible distribution and must not run before the in-tree removal is
 green, and 2.8 is the delivery vehicle for everything above it.
 
-**2.1 Go removal.** Two explicit lists, because an earlier revision wrote this as
-"remove everything except what Phase 1 retains:" followed by a colon-list that
-read as the retained set and was actually the removal set.
+**2.1 Go removal.** Remove the planned-marker reporting from the tool surfaces —
+`project_tree`'s WIP/planned counting and the marker render paths in `specs.list`
+and `specs.status` — rewriting them to Phase 1's advisory rather than the old
+planned-count output, and drop the struct fields that fall dangling. Follow the
+compiler and the test suite to the sites; do not work from a hand-copied symbol
+list.
 
-*Retain, untouched* — Phase 1's advisory is built on these and 2.1 must not
-weaken them: `markerContext` (`spec_discovery.go:263`), `specMarkerContexts`
-(255, reached from 206), and `SpecInfo.MarkerContexts`. Phase 1's `### Result`
-may extend this list; it may not shrink it.
+Two boundaries, because they are judgment and the compiler cannot supply them:
 
-*Remove*: `specStats`' WIP branch (`project_tree.go:169`); the marker render
-sites at `server.go:2526`, `server.go:2628`, and `project_tree.go:150-155`, each
-rewritten to the Phase 1 advisory rather than the old planned-count output;
-`specAnchorsInText`'s `SpecAnchorInfo.MarkerContext` population (224) and the
-field, once unreferenced. Update `spec_discovery_test.go:33` and the
-`project_tree_test.go` call sites.
+- **Retain whatever Phase 1's advisory is built on.** Phase 1's `### Result`
+  names the retained surface; 2.1 may extend that list, never shrink it. The
+  body-level marker detection Phase 1 reuses is not a removal target.
+- **`SpecInfo.TicketRefs` is not a marker field and is not touched.**
+  `specTicketRefs` reads `ticket:`, `tickets:`, `feature:`, and `features:`
+  frontmatter — a separate mechanism, which the marker convention forbids markers
+  from carrying. It backs `ticketsFromSpecRefs` and therefore the
+  `references.trace` tool, renders as the `tickets=` flag, and is documented in
+  `mcp-tools.md`. An earlier revision listed it among the dangling marker fields
+  and had a verification clause demanding its removal; both were wrong. Its
+  emptiness on *this* corpus is a corpus fact, not grounds to delete a documented
+  capability.
 
-*Explicitly out of scope*: **`SpecInfo.TicketRefs` is not a marker field and is
-not touched.** `specTicketRefs` (`spec_discovery.go:235`) reads `ticket:`,
-`tickets:`, `feature:`, and `features:` frontmatter — a separate mechanism, which
-the marker convention forbids markers from carrying. It backs
-`ticketsFromSpecRefs` (`references.go:81`) and therefore the `references.trace`
-tool, renders as the `tickets=` flag (`server.go:2518-2519`), and is documented at
-`mcp-tools.md:829`. An earlier revision listed it as a dangling marker field and
-had a verification clause demanding its removal; both were wrong. Its emptiness on
-*this* corpus is a corpus fact, not grounds to delete a documented capability.
+Deliberately no symbol-and-line enumeration here. Two review rounds spent their
+critical finding on this sub-step, and the second one — deleting `TicketRefs` —
+is a build break the compiler reports in seconds. Prose has no verifier for a
+symbol graph, and this ticket has already carried two wrong line numbers. The
+ticket owns what is retired and what is off-limits; the compiler owns where.
 
 **2.2 Embedded conventions.** Remove `spec-conventions.md`'s `## 🚧 Markers`
 section and examples. Rewrite the *Implementation Gap Callout*'s resolution path
@@ -444,9 +443,10 @@ mechanism backing `references.trace` — see 2.1).
 
 Verification boundary, one clause per sub-step:
 
-1. **2.1** — no `🚧` or `MarkerContexts` reference remains in Go outside the
-   retained list; `references.trace` still resolves spec→ticket references and
-   `specs.list` still renders `tickets=`; `go test ./...` passes.
+1. **2.1** — `project_tree`, `specs.list`, and `specs.status` report no planned
+   or WIP counts and no marker context beyond Phase 1's advisory; `references.trace`
+   still resolves spec→ticket references and `specs.list` still renders `tickets=`;
+   `go test ./...` passes.
 2. **2.2/2.3** — no `🚧` remains in the conventions or in either plugin tree's
    playbooks; the Implementation Gap Callout states the `## Spec Impact`
    resolution path; both split-condition sites are deleted with no replacement
