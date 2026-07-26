@@ -1681,10 +1681,25 @@ opening a real workRoot, browsing files, creating terminals, switching terminal
 tabs, sending terminal input, observing terminal output, and checking pane
 layout at recorded viewport sizes.
 
-The frontend package exposes this gate through `npm run test:browser`. The gate
-builds the production frontend, serves it through the dashboard daemon, pairs
-as owner through the startup pairing URL, and records textual evidence plus
-regenerable screenshot artifacts outside tracked source.
+The frontend package exposes this gate through `npm run test:browser`. Building
+the production frontend is a property of the gate run itself, not of that one
+script: every Playwright invocation path builds the frontend before the daemon
+is started - except where the gate does not construct the served directory
+itself, described below - so a bare `npx playwright test`, a single-spec run, or
+an IDE runner cannot serve a bundle older than the current frontend source when
+the harness builds that directory. The gate serves
+that build through the dashboard daemon, pairs as owner through the startup
+pairing URL, and records textual evidence plus regenerable screenshot artifacts
+outside tracked source. A build failure ends the run instead of falling back to
+the previous bundle.
+
+The gate skips that build, announcing which condition fired on the run's own
+output, only where it does not construct the served static directory itself: a
+caller-supplied `WS_DASHBOARD_STATIC_DIR`, or external daemon mode
+(`WS_DASHBOARD_DAEMON_MODE=external`, `WS_DASHBOARD_DAEMON_BASE_URL`, or
+`WS_DASHBOARD_DAEMON_PAIRING_URL`). Neither condition proves the built output is
+unused, so on those two paths keeping the served bundle current stays the
+caller's responsibility.
 
 The gate includes viewport containment checks for long file explorer content:
 expanding a large tree must not make the top-level document scroll or push the
