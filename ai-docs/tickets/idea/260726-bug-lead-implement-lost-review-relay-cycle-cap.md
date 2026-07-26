@@ -73,6 +73,58 @@ the lead must hand the design question back.
 
 ## Topics
 
+### Direction: put the cap clause in the review todo's Instruction text
+
+Owner direction (2026-07-26), idea-level: the cap language should land in the
+**review-step description of the todo checklist the lead executes from**, not
+only in playbook prose. Exact wording is TBD.
+
+What makes this the correct surface rather than merely a convenient one:
+`lead-implement.md` instructs the lead to "Treat the installed todo list as the
+ordered runbook" and says "each todo's `Instruction` field is a complete how-to
+for that step — **do not restate or supplement it from memory**." Under that
+contract, a rule absent from the review todo's Instruction is a rule the lead is
+positively instructed not to supply. That is why the observed run had no cap in
+effect: not because the lead could not have known of one, but because the runbook
+it was told to follow exhaustively did not carry it.
+
+Edit surface, verified: this text is generated, not authored in markdown —
+`implementReviewInstruction` in
+`agents-plugin-tool/internal/mcp/session_state.go:563-577`. It already branches
+on `verdict.ReviewAlloc`:
+
+- `:568` lead-only review
+- `:571` `partitioned:` — receives the partition list via `formatReviewPartitions`
+- `:574` `single` — already worded differently ("Relay only new non-clean …")
+- `:576` fallback
+
+Two consequences worth carrying into implementation:
+
+- The generator already knows which of the two documented budgets applies, so the
+  emitted text can state it directly instead of leaving the lead to infer it.
+  That settles the per-partition question below **at the point of generation**,
+  which is the cheapest place to settle it.
+- The change is localized to three of four branches plus the string pins in
+  `session_state_test.go`.
+
+Constraints on doing it: the changed lines are prompt text, so
+`agents-plugin/skills/lead-skill-authoring/SKILL.md`'s invariant checklist
+applies to each one; and because the change touches `agents-plugin-tool/`, the
+dev-merge version bump through `agents-plugin-tool/scripts/bump-ws-version.sh`
+applies.
+
+Wording questions left open on purpose:
+
+- Whether the clause states a number, or states the escalation *condition* (a
+  finding whose root cause repeats an already-relayed one) and leaves the number
+  as a pure backstop. The observed run argues the condition is the load-bearing
+  half — the count only caught it incidentally.
+- Whether it names what happens at the cap (stop and hand the design question to
+  the user with the disposition record) or only that the loop stops. D6 treats
+  reaching the cap as a "contentious" signal, which implies the former.
+- Whether the `single` branch needs the same clause at its own budget, or whether
+  its existing shorter wording is deliberate.
+
 ### Where the cap belongs, and whether it is per-partition
 
 `260619` states it as "partitioned 3 cycles / single 2", and its own summary says
@@ -81,6 +133,10 @@ per-slice. Worth settling before writing text: with `review_alloc: partitioned:
 correctness, test`, is the budget 3 cycles per partition or 3 for the slice? The
 observed run had a clean test partition and three correctness cycles, so the two
 readings differ materially.
+
+Per the topic above this is answerable inside `implementReviewInstruction`, which
+holds the allocation at generation time — so the decision needs to be made once,
+in text, rather than re-derived by each lead.
 
 ### Whether the impl-playbook repetition check already covers it, and why it did not fire
 
