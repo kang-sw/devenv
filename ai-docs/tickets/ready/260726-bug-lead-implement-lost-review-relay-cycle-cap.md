@@ -17,7 +17,7 @@ spec:
   - 260612-reviewer-allocation-tier-default
   - 260619-stateless-implement-review-continuity
 sage-review-design: completed
-sage-review-completeness: required
+sage-review-completeness: completed
 ---
 
 # The review-relay cycle cap is live in spec but absent from the playbook
@@ -584,13 +584,24 @@ check, which is how the original cap was lost.
 - Blocking the dashboard FS-watch ticket. That work continues; this ticket only
   records why its Phase 1 review loop ran to the cap without anything noticing.
 
-## Blocked (2026-07-26)
+## Design review history (2026-07-26)
 
-### Design Reviewer — block
+Five rounds ran; the block was lifted in round 2 and the posture is `completed`.
+Rounds 2-5 returned `concern` with autonomous findings only, all applied
+(`f0a05976`, `82867fb1`, `de32d03e`, `08a9ebd5`, `26694db0`, `e7c42616`). The
+round-5 reviewer stated no sixth round was warranted.
+
+### Round 1 — block, and how each item closed
+
+Item 1 was the only `missing` item and the only reason for the `block` verdict.
+It is closed: the scope question was whether the elevated-implementer work should
+split into a second ticket, and the maintainer settled it as one ticket, on the
+grounds that doing one half first makes the second half's authoring
+"aware" of it. Phases 2 and 3 are that decision.
 
 | # | Title | Severity | Resolution |
 |---|-------|----------|------------|
-| 1 | Open scope question is explicitly unresolved and self-declared blocking | critical | missing |
+| 1 | Open scope question is explicitly unresolved and self-declared blocking | critical | missing — closed by maintainer decision, see above |
 | 2 | Cycle-counting semantics are ambiguous by a full round | important | autonomous |
 | 3 | Phase 2 directs render variables into a surface that is never rendered | important | autonomous |
 | 4 | wsflow rsrc tree is generated; ticket directs a hand-edit and omits regeneration | important | autonomous |
@@ -598,3 +609,11 @@ check, which is how the original cap was lost.
 | 6 | Phase 1's premise about the untouched fallback branch is false | minor | autonomous |
 | 7 | Proposed playbook line fails the invariant checklist the ticket mandates | minor | autonomous |
 | 8 | Spec anchor says lead adjudication; Phase 2 makes it a delegate, with no spec update named | minor | autonomous |
+
+Phase numbers in rows 3, 5, and 8 are the round-1 four-phase layout; the
+root-cause phase later merged into the elevated-implementer phase, so the ticket
+now has three. Items 2-8 are each closed by text in the sections above — the
+review-round cycle definition, the plain-Go-strings constraint, the wsflow
+regeneration constraint, the rejected separate-todo paragraph, Phase 1's fallback
+branch handling, the rejected playbook-invariant paragraph, and the spec
+amendments named in Phases 1 and 2.
