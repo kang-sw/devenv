@@ -386,7 +386,34 @@ dropped tickets live in hidden archive dirs and git history.
   (bounded, self-healing) — Phase 4 already widens `DiscoveredWorkRoot` with
   `git_dir`/`common_dir`, which is where the refs axis should be re-keyed by
   common dir instead. The diag delta acceptance number is **still unmeasured
-  after three phases**; Phase 4 should take it.
+  after three phases**; Phase 4 should take it. **Phase 4 landed 2026-07-26
+  (`fcb69d9b`, impl plan `ai-docs/.plans/2026-07/26-2007-git-fs-watch.md`,
+  dispositions D1-D10)** — the `notify`-backed watcher core, real
+  `EpochSource` wiring, TTL selection by `WatchHealth` (120 s armed / 2 s
+  degraded), config knobs, and diag extension. One review cycle, 3
+  partitions, 12 MUST FIX findings, all fixed: two Critical bugs shared one
+  root cause (`WatchTargets.worktree` was never canonicalized while
+  `git_dir`/`common_dir` were, silently defeating both the git-dir
+  registration prune and `classify`'s git-internal branch, and independently
+  breaking macOS's FSEvents path matching entirely) — fixed by routing all
+  three `WatchTargets` fields through the module's existing
+  `canonical_or_normalized` chain and building `worktree` from
+  `GitDiscovery.worktree_dir` rather than the registered path. The diag-delta
+  acceptance number is **finally measured**, after three phases of deferral:
+  on this host, spawn deltas are identical with the Activity Console pane
+  open vs. closed (+22 total per 60 s window either way), confirming the
+  watcher pipeline is fully decoupled from SSE subscription state. Windows
+  and macOS cross-target `cargo check` both attempted (D4): Windows compiles
+  clean after two real bugs were found and fixed that a Linux-only check
+  cannot see; macOS fails at the `ring` crate's C build script before
+  reaching this crate's own code (toolchain gap, not a Phase 4 defect).
+  Filed `260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps`
+  for the pre-existing `GitProbeCache::evict` key-mismatch bug (carried
+  non-load-bearing through Phases 3 and 4, still unfixed) plus two narrow
+  Phase 4 gaps declined as out of scope (foreign-mount allowlist only checks
+  `worktree`, not `common_dir`/`git_dir`; `common_dir/info` created after
+  arming is never watched on Linux). This closes all four phases of the
+  ticket.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin
