@@ -378,11 +378,20 @@ struct DiscoveredWorkRoot {
     /// `git_dir`/`common_dir` from the same memoized `GitDiscovery` probe
     /// that already computed `kind` - `None` for a plain-directory or
     /// unusable root. Phase 4's `reconcile` builds a
-    /// [`crate::work_root_watch::WatchTargets`] straight from these two
-    /// fields plus `path`, at the cost of zero additional `git` spawns
+    /// [`crate::work_root_watch::WatchTargets`] straight from these fields
+    /// plus `worktree_dir`, at the cost of zero additional `git` spawns
     /// (ticket step 7).
     git_dir: Option<PathBuf>,
     common_dir: Option<PathBuf>,
+    /// `GitDiscovery::worktree_dir` (`git rev-parse --show-toplevel
+    /// --path-format=absolute`), independent of `path` - `path` is whatever
+    /// directory the work root was registered at, which may be a
+    /// sub-directory of the repository. `None` for a plain-directory or
+    /// unusable root. `WatchTargets.worktree` must be built from this field,
+    /// not from `path`: `plan_watch_set`'s walk and `IgnoreSet::derive`'s
+    /// `git status` spawn both need the real worktree root, not whatever
+    /// sub-directory happened to be registered (Phase 4 review finding 8).
+    worktree_dir: Option<PathBuf>,
 }
 
 fn discover_work_root(
@@ -476,6 +485,7 @@ fn discover_existing_dir(
             error: None,
             git_dir: Some(git.git_dir.clone()),
             common_dir: Some(git.common_dir.clone()),
+            worktree_dir: Some(git.worktree_dir.clone()),
         },
         None => DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
@@ -492,6 +502,7 @@ fn discover_existing_dir(
             error: None,
             git_dir: None,
             common_dir: None,
+            worktree_dir: None,
         },
     }
 }
@@ -517,6 +528,7 @@ fn discovered_unusable(
         error: Some(error.to_owned()),
         git_dir: None,
         common_dir: None,
+        worktree_dir: None,
     }
 }
 
@@ -613,16 +625,37 @@ pub fn watch_key(path: &Path) -> WatchKey {
 /// at no extra `git` spawn cost (ticket step 7). `None` targets for a
 /// plain-directory or unusable root; `reconcile` treats that the same as an
 /// absent root.
+///
+/// All three `WatchTargets` fields are routed through `canonical_or_normalized`
+/// (the same chain `watch_key`/`GitProbeKey` already use), even though
+/// `git_dir`/`common_dir` come from `git rev-parse --path-format=absolute`
+/// (already symlink-resolved) - the field that actually needed this is
+/// `worktree_dir`, which is `discovered`'s own identity form. Applying the
+/// same chain to all three keeps them provably in one consistent spelling
+/// rather than relying on git's absolute-path output happening to already
+/// match, and costs nothing extra when it does (review findings 1/2: a
+/// mismatched spelling on any one field defeats `walk_worktree_dirs`'s
+/// `dir == git_dir || dir == common_dir` prune test, `classify`'s
+/// `strip_prefix` checks, and - on macOS - `owners_for_path`'s `dir_index`
+/// lookup against FSEvents' own canonicalized event paths).
 fn watch_reconcile_entry_for(
     discovered: &DiscoveredWorkRoot,
 ) -> (WatchKey, Option<crate::work_root_watch::WatchTargets>, WorkRootAvailability) {
     let key = watch_key(&discovered.path);
-    let targets = match (&discovered.git_dir, &discovered.common_dir) {
-        (Some(git_dir), Some(common_dir)) => Some(crate::work_root_watch::WatchTargets {
-            worktree: discovered.path.clone(),
-            git_dir: git_dir.clone(),
-            common_dir: common_dir.clone(),
-        }),
+    let targets = match (&discovered.git_dir, &discovered.common_dir, &discovered.worktree_dir) {
+        (Some(git_dir), Some(common_dir), Some(worktree_dir)) => {
+            Some(crate::work_root_watch::WatchTargets {
+                // Built from `GitDiscovery::worktree_dir` (the real
+                // `--show-toplevel`), not `discovered.path` - a work root
+                // registered at a sub-directory of a repository must still
+                // watch (and derive its `IgnoreSet` from) the whole
+                // repository, not just the registered sub-directory (review
+                // finding 8). `WatchKey` above stays on `discovered.path`.
+                worktree: canonical_or_normalized(worktree_dir),
+                git_dir: canonical_or_normalized(git_dir),
+                common_dir: canonical_or_normalized(common_dir),
+            })
+        }
         _ => None,
     };
     (key, targets, discovered.availability)
