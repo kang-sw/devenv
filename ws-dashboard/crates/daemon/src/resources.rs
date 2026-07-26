@@ -40,6 +40,7 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
         for session in state.terminals.remove_for_work_roots(&pruned) {
             session.terminate().await;
         }
+        state.codex_sessions.remove_for_work_roots(&pruned);
         state.claude_sessions.remove_for_work_roots(&pruned);
     }
     view
