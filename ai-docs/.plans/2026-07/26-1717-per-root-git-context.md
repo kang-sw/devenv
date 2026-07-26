@@ -332,11 +332,29 @@ cannot pick the TTL from the *cached* value, which is why D2 exists.
 ### D2 (binding, deliberate deviation from the ticket): no `WS_DASHBOARD_GIT_IDENTITY_NEGATIVE_TTL_MS`; negative caching is the existing 30 s probe TTL
 
 The ticket's negative TTL exists so a plain directory the user later `git init`s
-is not stuck on a memoized `None`. Under D1 that hazard is already bounded twice:
-the 30 s probe TTL, and `discover_work_root`'s unconditional
-`git_probes.evict(...)` on **any** non-`Available` result
-(`discovery.rs:416-420`), plus `GitProbeCache::clear()` after this daemon's own
-worktree mutations.
+is not stuck on a memoized `None`.
+
+**Correction (cycle 1 review, fit + correctness reviewers were both right).** This
+disposition originally claimed that hazard was "bounded twice" — by the 30 s probe
+TTL and by `discover_work_root`'s `git_probes.evict(...)` on a non-`Available`
+result (`discovery.rs:416-420`). That second bound does not apply, on two
+independent counts:
+
+- An in-place `git init` is an `Available` → `Available`, plain → git **kind**
+  change. It is not an availability transition, so that eviction never fires for
+  the very scenario named above.
+- Even where availability does change, the evict key is derived from
+  `discovered.path` while the warm memo key comes from `GitProbeKey::for_path` →
+  `canonical_or_normalized`. On Windows the warm key is the `\\?\`-prefixed
+  canonical form and the eviction key (computed once the directory is gone, so
+  `canonicalize` fails) is the plain form — a different key, so the evict is a
+  no-op and the stale probe lives out the full TTL. Pre-existing (`18037cc3`,
+  outside this range) and out of Phase 2's scope, but it means Phase 4's
+  reconcile-driven eviction cannot be assumed to work until that key derivation
+  is fixed.
+
+So the real bound for the named scenario is the 30 s TTL alone. D2 still stands,
+on its second and independent argument only:
 
 The positive argument for 30 s over 3 s: it makes the Activity pane's identity
 **consistent with the sidebar classification the user is looking at**. The
@@ -345,11 +363,21 @@ would make the pane self-correct ~27 s before the root stops being labelled a
 plain directory. The ticket could not weigh that because it assumed identity
 needed a cache of its own.
 
-Escape hatch if the fit reviewer rejects this: add `negative_ttl` to
+Escape hatch if a reviewer rejects this: add `negative_ttl` to
 `GitProbeCacheState` and change `ProbeSlots::get_or_probe`'s `ttl: Duration` to
 `ttl_for: impl Fn(&T) -> Duration` (the two existing call sites pass
 `|_| self.inner.ttl`). That is ~10 lines on top of D1, not a redesign. **Do not
 pre-build it.**
+
+If it is ever built, it must distinguish **three** cases, not two — the cycle-1
+correctness review surfaced the third: git answered "repo" (long TTL), git
+answered "not a repo" (short TTL), and git **failed to answer at all**
+(`GitFailure::Timeout` / `Spawn`, which currently memoizes as "not a repo" for the
+full TTL and so suppresses the Activity agents list for up to 30 s after one
+timed-out `rev-parse`). That third case is an accepted cost of D1 for this phase,
+recorded in the Phase 2 `### Result`: the pre-change alternative was re-spawning a
+10 s-budget `git` every 200 ms per root, which is the storm this phase exists to
+remove, so memoizing the failure is still strictly better than not.
 
 ### D3 (binding): defer `WatchKey` / `watch_key` to Phase 3
 
