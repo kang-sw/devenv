@@ -7735,6 +7735,26 @@ async fn git_toolbar_status_gates_and_reports_counts_without_paths() {
     )
     .await;
     assert_eq!(unknown["error"], "unknown workRoot");
+
+    // D6/Verification Plan: a work root that was available at open time but
+    // whose directory disappears afterward must resolve through
+    // `resolve_online_available_work_root`'s existing `Unavailable` gate
+    // (409), not the old full-registry-scan `Unknown` (404) - the deliberate
+    // convergence-onto-an-existing-invariant behavior delta this phase
+    // documents.
+    let moved = base.join("moved");
+    fs::create_dir_all(&moved).expect("create moved workRoot before opening it");
+    let moved_id = open_work_root_for_test(app.clone(), cookie.as_str(), &moved).await;
+    fs::remove_dir_all(&moved).expect("remove moved workRoot directory after opening it");
+    let moved_status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{moved_id}/git/status"),
+        StatusCode::CONFLICT,
+    )
+    .await;
+    assert_eq!(moved_status["error"], "workRoot unavailable");
+
     remove_static_fixture(&base);
 }
 
@@ -7792,6 +7812,88 @@ async fn dashboard_diag_git_reports_spawn_counters_that_increase_after_git_toolb
         after_total > before_total,
         "expected totalSpawns to increase after a /git/status call: before={before_total} after={after_total}"
     );
+    remove_static_fixture(&base);
+}
+
+// D6 "zero-spawn": once the shared discovery memo (`AppState.git_probe_cache`)
+// is warm for a root, the Activity route's `git_identity` derivation
+// (`GitProbeCache::git_identity`, Phase 2 D1) must ride the same memo entry
+// as the git-toolbar route's `git_root_kind` gate and add zero further
+// spawns - explicitly covering a plain-directory root per the ticket, whose
+// `git_identity` is `None` but still memoized.
+#[tokio::test]
+async fn zero_spawn_activity_snapshot_after_git_toolbar_warms_the_shared_discovery_memo() {
+    if skip_without_git(
+        "zero_spawn_activity_snapshot_after_git_toolbar_warms_the_shared_discovery_memo",
+    ) {
+        return;
+    }
+    let base = temp_fixture_path("zero-spawn-warm-memo");
+    let primary = base.join("primary");
+    let plain = base.join("plain");
+    let cache_home = base.join("cache");
+    fs::create_dir_all(&primary).expect("create primary");
+    fs::create_dir_all(&plain).expect("create plain");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "one\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state_with_activity_cache_home(cache_home);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let plain_id = open_work_root_for_test(app.clone(), cookie.as_str(), &plain).await;
+
+    // Warm the shared discovery memo for both roots via the git-toolbar
+    // route's `resolve_git_context` gate (200 for the git root, 400 NonGit
+    // for the plain root - both still run `GitProbeCache::git_root_kind`,
+    // which memoizes the underlying `git` probe either way).
+    git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{plain_id}/git/status"),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    let before = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let before_total = before["totalSpawns"].as_u64().expect("before totalSpawns");
+
+    let (git_activity_status, _) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &git_id).await;
+    assert_eq!(git_activity_status, StatusCode::OK);
+    let (plain_activity_status, _) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &plain_id).await;
+    assert_eq!(plain_activity_status, StatusCode::OK);
+
+    let after = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let after_total = after["totalSpawns"].as_u64().expect("after totalSpawns");
+    assert_eq!(
+        after_total, before_total,
+        "an Activity snapshot resolution over an already-warm-memo root (git or plain) must add zero git spawns: before={before_total} after={after_total}"
+    );
+
     remove_static_fixture(&base);
 }
 

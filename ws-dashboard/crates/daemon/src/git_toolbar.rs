@@ -7,11 +7,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use ws_dashboard_core::{WorkRootActivation, WorkRootAvailability, WorkRootId, WorkRootKind};
+use ws_dashboard_core::{WorkRootId, WorkRootKind};
 
 use crate::git_exec::{capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats};
-use crate::resources::live_dashboard_resources;
 use crate::router::AppState;
+use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +127,19 @@ impl GitContextError {
             GitContextError::Unknown => StatusCode::NOT_FOUND,
             GitContextError::Offline | GitContextError::Unavailable => StatusCode::CONFLICT,
             GitContextError::NonGit => StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
+// D5 (confirmed): `WorkRootAccessError`'s three variants are byte-identical
+// (message and status code) to `GitContextError`'s corresponding three, so
+// this mapping is a trivial `From`, not a new conversion layer.
+impl From<WorkRootAccessError> for GitContextError {
+    fn from(error: WorkRootAccessError) -> Self {
+        match error {
+            WorkRootAccessError::Unknown => GitContextError::Unknown,
+            WorkRootAccessError::Offline => GitContextError::Offline,
+            WorkRootAccessError::Unavailable => GitContextError::Unavailable,
         }
     }
 }
@@ -341,38 +354,29 @@ async fn mutate_no_body(
     .expect("git mutation task panicked")
 }
 
+// D1/D4 (Phase 2 Lead Dispositions): resolves ONE root's git context directly
+// (no more full-registry discovery scan, `2N+W` spawns -> at most 1). The
+// 404/409/409 gate reuses `resolve_online_available_work_root` as-is (D5) -
+// availability (moved/missing/inaccessible) is already fully settled by that
+// gate's live `is_dir`/`read_dir` check, so the only question left is
+// git-vs-plain, answered by `GitProbeCache::git_root_kind` off the same
+// memoized probe the Activity path's `git_identity` shares (D1's actual win).
 fn resolve_git_context(
     state: &AppState,
     work_root_id: &WorkRootId,
 ) -> Result<GitContext, GitContextError> {
-    let resources = live_dashboard_resources(
-        &state.opened_work_roots,
-        &state.git_probe_cache,
-        &state.git_spawn_stats,
-    );
-    let root = resources
-        .workspaces
-        .iter()
-        .flat_map(|workspace| &workspace.work_roots)
-        .find(|root| root.id == *work_root_id)
-        .ok_or(GitContextError::Unknown)?;
-    if root.activation != WorkRootActivation::Online {
-        return Err(GitContextError::Offline);
+    let root_path = resolve_online_available_work_root(state, work_root_id)?;
+    match state
+        .git_probe_cache
+        .git_root_kind(&root_path, &state.git_spawn_stats)
+    {
+        Some(WorkRootKind::GitPrimaryRoot) | Some(WorkRootKind::GitLinkedWorktree) => {
+            Ok(GitContext { root_path })
+        }
+        // Explicit match against the two known git kinds (D4), not "any
+        // Some", so a future third git kind cannot pass silently.
+        Some(WorkRootKind::PlainDirectory) | None => Err(GitContextError::NonGit),
     }
-    if root.availability != WorkRootAvailability::Available {
-        return Err(GitContextError::Unavailable);
-    }
-    if !matches!(
-        root.kind,
-        WorkRootKind::GitPrimaryRoot | WorkRootKind::GitLinkedWorktree
-    ) {
-        return Err(GitContextError::NonGit);
-    }
-    let root_path = state
-        .opened_work_roots
-        .resolve(work_root_id)
-        .ok_or(GitContextError::Unknown)?;
-    Ok(GitContext { root_path })
 }
 
 fn status_for_path(root: &Path, stats: &GitSpawnStats) -> WorkRootGitStatus {

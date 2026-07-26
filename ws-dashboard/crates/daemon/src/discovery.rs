@@ -663,6 +663,35 @@ impl GitProbeCache {
             })
     }
 
+    /// Git-vs-plain answer for a single work root, for the git-toolbar routes'
+    /// gate (`git_toolbar::resolve_git_context`). Reuses the same memoized
+    /// probe as `discover_work_root`/`git_identity`, so a warm memo costs zero
+    /// additional spawns (Phase 2 Lead Disposition D4).
+    pub(crate) fn git_root_kind(&self, path: &Path, git_stats: &GitSpawnStats) -> Option<WorkRootKind> {
+        self.discover(path, git_stats).map(|git| git.kind)
+    }
+
+    /// Derive the `git_identity`-equivalent worktree/common root pair from the
+    /// same memoized probe, at the cost of zero additional spawns on a warm
+    /// memo (Phase 2 Lead Disposition D1). Preserves every bail-out the
+    /// deleted `work_root_activity::git_identity` had: a total function that
+    /// returns `None` for a bare repository or a non-Git directory.
+    pub(crate) fn git_identity(&self, path: &Path, git_stats: &GitSpawnStats) -> Option<GitIdentity> {
+        let git = self.discover(path, git_stats)?;
+        let worktree_root = git.worktree_dir.canonicalize().ok()?;
+        let common_dir = git.common_dir.canonicalize().ok()?;
+        // wsstate only supports non-bare repositories: the common dir must be
+        // a `.git` directory whose parent is the common root.
+        if common_dir.file_name().and_then(|name| name.to_str()) != Some(".git") {
+            return None;
+        }
+        let common_root = common_dir.parent()?.canonicalize().ok()?;
+        Some(GitIdentity {
+            worktree_root,
+            common_root,
+        })
+    }
+
     fn worktree_paths(&self, path: &Path, git_stats: &GitSpawnStats) -> Vec<PathBuf> {
         self.inner
             .worktree_paths
@@ -700,6 +729,15 @@ struct GitDiscovery {
     common_dir: PathBuf,
     worktree_dir: PathBuf,
     kind: WorkRootKind,
+}
+
+/// Canonical Git worktree root and common root for a work root, matching
+/// `wsstate.gitIdentity`. Lives in discovery alongside the probe it derives
+/// from (Phase 2 Lead Disposition D1) - `work_root_activity.rs`'s
+/// `resolve_work_root_state_dir` consumes it via `GitProbeCache::git_identity`.
+pub(crate) struct GitIdentity {
+    pub(crate) worktree_root: PathBuf,
+    pub(crate) common_root: PathBuf,
 }
 
 impl GitDiscovery {
@@ -1346,6 +1384,196 @@ mod tests {
         );
 
         remove_temp(&base);
+    }
+
+    // Phase 2 (260726-refactor-ws-dashboard-git-fs-watch-invalidation) D6
+    // "identity equivalence": `GitProbeCache::git_identity` replaced
+    // `work_root_activity`'s deleted two-spawn `git_identity`, which
+    // canonicalized `git rev-parse --show-toplevel` /
+    // `--path-format=absolute --git-common-dir` output directly. This test
+    // independently reproduces that exact pre-change derivation (bypassing
+    // the memo entirely, via raw `git` spawns) and asserts the new
+    // memo-derived identity is byte-for-byte the same for both a primary root
+    // and a linked worktree - the one way a normalization difference between
+    // `GitDiscovery::probe`'s `normalize_candidate_path`-then-`canonicalize`
+    // and the old raw-`canonicalize` path could silently repoint every
+    // Activity wsstate `proj/<key>` lookup.
+    #[test]
+    fn git_identity_matches_pre_change_raw_canonicalize_derivation_for_primary_and_linked_worktree()
+    {
+        if !git_available() {
+            return;
+        }
+
+        let base = temp_path("git-identity-equivalence");
+        let primary = base.join("primary");
+        let linked = base.join("linked");
+        fs::create_dir_all(&primary).expect("create primary");
+        git(&primary, &["init"]);
+        git(
+            &primary,
+            &["config", "user.email", "ws-dashboard@example.local"],
+        );
+        git(&primary, &["config", "user.name", "ws dashboard"]);
+        fs::write(primary.join("README.md"), "dashboard\n").expect("write readme");
+        git(&primary, &["add", "README.md"]);
+        git(&primary, &["commit", "-m", "seed"]);
+        git(
+            &primary,
+            &["worktree", "add", linked.to_str().expect("linked path")],
+        );
+
+        let probes = GitProbeCache::default();
+        let stats = GitSpawnStats::default();
+
+        for root in [&primary, &linked] {
+            let toplevel = raw_git_stdout(root, &["rev-parse", "--show-toplevel"]);
+            let common_dir_raw = raw_git_stdout(
+                root,
+                &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            );
+            let expected_worktree_root =
+                fs::canonicalize(toplevel.trim()).expect("canonicalize pre-change toplevel");
+            let expected_common_git_dir = fs::canonicalize(common_dir_raw.trim())
+                .expect("canonicalize pre-change common dir");
+            assert_eq!(
+                expected_common_git_dir
+                    .file_name()
+                    .and_then(|name| name.to_str()),
+                Some(".git"),
+                "fixture must be a non-bare repository"
+            );
+            let expected_common_root = fs::canonicalize(
+                expected_common_git_dir
+                    .parent()
+                    .expect("common dir has a parent"),
+            )
+            .expect("canonicalize pre-change common root");
+
+            let identity = probes
+                .git_identity(root, &stats)
+                .unwrap_or_else(|| panic!("git_identity must resolve for {root:?}"));
+            assert_eq!(
+                identity.worktree_root, expected_worktree_root,
+                "worktree_root must match the pre-change raw-canonicalize derivation for {root:?}"
+            );
+            assert_eq!(
+                identity.common_root, expected_common_root,
+                "common_root must match the pre-change raw-canonicalize derivation for {root:?}"
+            );
+        }
+
+        remove_temp(&base);
+    }
+
+    // D6 "zero-spawn": `git_root_kind` (the git-toolbar gate) and
+    // `git_identity` (the Activity path) must share one memo entry, so once
+    // either has warmed it the other adds zero spawns - the phase's actual
+    // measurable win.
+    #[test]
+    fn git_root_kind_and_git_identity_share_one_warm_discovery_probe() {
+        if !git_available() {
+            return;
+        }
+
+        let base = temp_path("shared-warm-probe-git");
+        let primary = base.join("primary");
+        fs::create_dir_all(&primary).expect("create primary");
+        git(&primary, &["init"]);
+        git(
+            &primary,
+            &["config", "user.email", "ws-dashboard@example.local"],
+        );
+        git(&primary, &["config", "user.name", "ws dashboard"]);
+        fs::write(primary.join("README.md"), "dashboard\n").expect("write readme");
+        git(&primary, &["add", "README.md"]);
+        git(&primary, &["commit", "-m", "seed"]);
+
+        let probes = GitProbeCache::default();
+        let stats = GitSpawnStats::default();
+
+        assert_eq!(
+            probes.git_root_kind(&primary, &stats),
+            Some(WorkRootKind::GitPrimaryRoot)
+        );
+        let after_first = stats.snapshot().total;
+        assert!(
+            after_first > 0,
+            "the cold probe must spawn git at least once"
+        );
+
+        let identity = probes
+            .git_identity(&primary, &stats)
+            .expect("git_identity resolves for a git root");
+        assert_eq!(
+            stats.snapshot().total,
+            after_first,
+            "git_identity must add zero spawns once git_root_kind has warmed the shared memo"
+        );
+        assert_eq!(
+            identity.worktree_root,
+            fs::canonicalize(&primary).expect("canonicalize primary")
+        );
+
+        assert_eq!(
+            probes.git_root_kind(&primary, &stats),
+            Some(WorkRootKind::GitPrimaryRoot)
+        );
+        assert_eq!(
+            stats.snapshot().total,
+            after_first,
+            "a repeat git_root_kind call (mirroring a second /git/status request) must add zero spawns on a warm memo"
+        );
+
+        remove_temp(&base);
+    }
+
+    // D6 "zero-spawn... explicitly cover a plain-directory root": a
+    // plain-directory root's `None` identity must be served from the same
+    // warm memo too, not re-probed every call.
+    #[test]
+    fn git_root_kind_and_git_identity_add_zero_spawns_on_warm_memo_for_plain_directory() {
+        if !git_available() {
+            return;
+        }
+
+        let root = temp_path("shared-warm-probe-plain");
+        fs::create_dir_all(&root).expect("create plain directory");
+
+        let probes = GitProbeCache::default();
+        let stats = GitSpawnStats::default();
+
+        assert_eq!(probes.git_root_kind(&root, &stats), None);
+        let after_first = stats.snapshot().total;
+        assert!(
+            after_first > 0,
+            "the cold probe must spawn git at least once even for a plain directory"
+        );
+
+        assert!(probes.git_identity(&root, &stats).is_none());
+        assert_eq!(
+            stats.snapshot().total,
+            after_first,
+            "git_identity must add zero spawns for a plain directory once the discovery memo is warm"
+        );
+
+        remove_temp(&root);
+    }
+
+    fn raw_git_stdout(path: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .expect("run raw git");
+        assert!(
+            output.status.success(),
+            "raw git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("raw git stdout is UTF-8")
     }
 
     fn git_available() -> bool {
