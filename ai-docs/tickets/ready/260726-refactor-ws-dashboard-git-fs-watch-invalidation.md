@@ -277,11 +277,37 @@ reading of this host's actual `max_user_watches` (see Constraints).
   per target regardless of tree size.
 - **The ignore set is needed on both platforms, but for different jobs.** On Linux
   it decides *what to register*; on Windows/macOS it only *filters events*, since
-  the kernel already delivers the whole subtree. Recursive registration therefore
-  does deliver events for `target/` and `node_modules/` — those are discarded in
-  `classify`, costing some string comparisons during a build, which the debounce
-  window collapses into at most one epoch bump. That cost does not justify
-  per-directory registration.
+  the kernel already delivers the whole subtree. So recursive registration does
+  deliver events for `target/` and `node_modules/`, discarded in `classify`.
+  Sizing that cost, because it is the main objection to recursive registration:
+  - **The kernel side does not touch the filesystem.** `ReadDirectoryChangesW`'s
+    filter is evaluated in the kernel notify path at the moment of the write, when
+    the path string is already in hand — no `stat`, no directory read. It appends a
+    `FILE_NOTIFY_INFORMATION` record (action code + UTF-16 relative path) to a
+    pinned buffer, and that cost is borne by the *writer*, i.e. the compiler, as a
+    small addition to a write it just performed.
+  - **The cost we pay is userspace, per record:** a UTF-16→UTF-8 decode, a
+    `PathBuf` allocation, a channel send, then `classify`. Measured scale in this
+    workspace: 16,531 files under `target/`, 17,817 under
+    `frontend/node_modules/`, average relative path 105 chars (≈223 bytes per
+    record). A clean build is order 10⁴-10⁵ events; at roughly a microsecond each
+    that is tens of milliseconds against a build spending tens of CPU-seconds —
+    well under 1%. **The per-event figure is an estimate, not a measurement**, and
+    is listed under live-only verification for that reason.
+  - **The filter cannot exclude paths.** `ReadDirectoryChangesW` filters by change
+    *type*, not by subtree, so there is no way to suppress `target/` at the source.
+    This is a genuine place where the Linux path is cheaper — ignored directories
+    are never registered, so they generate zero events. It is not enough to
+    outweigh the handle-count difference, but it is why `classify`'s branch order
+    (see Phase 4) is treated as load-bearing rather than cosmetic.
+  - **The real risk is buffer overflow, and it degrades correctly.** If the buffer
+    fills before we drain it, the kernel signals `ERROR_NOTIFY_ENUM_DIR` and
+    `notify` surfaces `need_rescan()`. At ~223 bytes per record a 16 KB buffer holds
+    ~73 records, so a large build produces many completions rather than one
+    overflow; a burst that writes thousands of files at once (`git checkout`) can
+    still overflow. That is not lost data under this design: overflow ⇒ bump both
+    epochs + `Degraded` for one window, i.e. "recompute once", which during a build
+    is the correct answer anyway since files genuinely are changing.
 - **Foreign-mount filesystems arm successfully and then never fire, so detect
   them before arming and fall back to polling.** The concrete case is WSL2
   `/mnt/*` (DrvFs / 9P), which does not deliver inotify events for changes made
@@ -617,14 +643,27 @@ dev host as a matter of course.
 Implement in this order, because the first step is the correctness core and is
 fully testable without any I/O:
 
-1. **`classify(path, &ArmedRepo) -> Option<EpochKind>`** — pure function. Under
-   `common_dir/objects|lfs|modules` ⇒ ignore; `*.lock` under any git dir ⇒
-   ignore (git's create-then-rename lock dance is pure noise, and `index.lock`
-   churn is exactly what `260711` was filed about);
-   `common_dir/{HEAD,packed-refs,FETCH_HEAD,ORIG_HEAD}` or `refs/**` or
-   `worktrees/**` ⇒ `Refs`; `git_dir/index` ⇒ `Worktree`; under an `IgnoreSet`
-   dir ⇒ ignore; `.gitignore` / `.git/info/exclude` ⇒ `Worktree` + mark the
-   ignore set stale; else under `worktree` ⇒ `Worktree`.
+1. **`classify(path, &ArmedRepo) -> Option<EpochKind>`** — pure function.
+   **Branch on "is this under `git_dir`/`common_dir`?" first**, then:
+   - *Not under a git dir* (the overwhelmingly common case): under an `IgnoreSet`
+     dir ⇒ ignore; `.gitignore` / `.git/info/exclude` ⇒ `Worktree` + mark the
+     ignore set stale; else ⇒ `Worktree`.
+   - *Under a git dir:* `objects|lfs|modules` ⇒ ignore; `*.lock` ⇒ ignore (git's
+     create-then-rename lock dance is pure noise, and `index.lock` churn is
+     exactly what `260711` was filed about);
+     `{HEAD,packed-refs,FETCH_HEAD,ORIG_HEAD}` or `refs/**` or `worktrees/**` ⇒
+     `Refs`; `index` ⇒ `Worktree`.
+
+   **This ordering is deliberate and load-bearing on Windows.** Recursive
+   registration delivers events for gitignored trees (see Constraints), so a
+   `cargo build` sends every `target/` write through this function — measured
+   scale: 16,531 files under `target/` and 17,817 under `frontend/node_modules/`
+   in this workspace, so order 10⁴-10⁵ events for a clean build. Checking the git
+   prefix first makes each of those exit in **two comparisons** (not under a git
+   dir → in the ignore set → ignore) instead of walking four git-specific checks
+   to reach the ignore-set test. Linux never sees these events at all because
+   ignored directories are not registered, so this is a Windows-shaped concern
+   living in shared code — do not "simplify" the order back.
 2. **`IgnoreSet::derive(worktree)`** — one `git_exec::capture` with **`-unormal`**
    (see Constraints: `-uno` returns nothing), parse `!!` entries from `-z` output.
    Entries arrive as collapsed directory prefixes, which suits both the Linux walk
@@ -740,7 +779,9 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
 
 - *Unit:* `classify` table test (~25 cases) covering `objects/` exclusion,
   `HEAD`/`refs/` inclusion, `index.lock` suppression, ignore-set membership, and
-  linked-worktree `git_dir`. Debounce coalescing with an injected clock.
+  linked-worktree `git_dir` — including one case pinning that a path under an
+  ignored directory is rejected **without** consulting the git-specific checks, so
+  the branch order from Phase 4 step 1 cannot silently regress. Debounce coalescing with an injected clock.
   `watch_key` normalization against the real mixed-separator string from
   `opened-workroots.json` and its all-forward-slash twin. `IgnoreSet` parsing of
   a fixed `-z` byte string, **plus an argv assertion that the constructed command
@@ -779,10 +820,12 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   ~3 watches per repo rather than ~200 — a large delta would mean the Linux path
   ran); real descriptor consumption on WSL
   (`find /proc/*/fd -lname anon_inode:inotify | wc -l`) against
-  `registeredWatches`; buffer-overflow/rescan handling under a real `cargo build`
-  storm, which is where recursive registration's acceptance of gitignored-tree
-  events actually gets stressed; and end-to-end perceived freshness, which per the
-  `ws-web-dashboard` Domain Rules needs a browser-level assertion in
+  `registeredWatches`; **watcher-task CPU during a clean `cargo build` on Windows,
+  which is the one estimate in Decisions that was never measured** — the claim is
+  that 10⁴-10⁵ discarded `target/` events cost well under 1% against the build, so
+  sample the watcher thread's CPU time across a build and record whether
+  `need_rescan()` fired and how often; and end-to-end perceived freshness, which
+  per the `ws-web-dashboard` Domain Rules needs a browser-level assertion in
   `frontend/e2e/` for the toolbar chip updating after an external edit.
 
 Estimated diff ~+480/−70 production, ~+240 test, 9 files — the walk, cap, and
