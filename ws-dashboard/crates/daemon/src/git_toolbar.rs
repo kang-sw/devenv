@@ -660,6 +660,9 @@ fn valid_branch_name(root: &Path, stats: &GitSpawnStats, branch: &str) -> bool {
         .is_ok()
 }
 
+/// Every caller parses this stdout, so a truncated collection must read as
+/// "no answer" rather than as a short one: `stdout_text` returns `None` when
+/// `GitOutcome::output_truncated` is set.
 fn git_text(
     stats: &GitSpawnStats,
     root: &Path,
@@ -668,9 +671,13 @@ fn git_text(
 ) -> Option<String> {
     capture(stats, root, args, expect, git_timeout_from_env())
         .ok()
-        .map(|outcome| outcome.stdout.trim().to_owned())
+        .and_then(|outcome| outcome.stdout_text().map(|text| text.trim().to_owned()))
 }
 
+/// Status-only: the output is discarded, so `GitOutcome::output_truncated` is
+/// deliberately ignored. A `push`/`fetch`/`switch` whose exit status was observed
+/// must report that status even when a lingering `ssh` master kept the pipes
+/// open — there is no parsed output here to be short.
 fn run_git(
     stats: &GitSpawnStats,
     root: &Path,

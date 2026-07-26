@@ -731,7 +731,8 @@ impl GitDiscovery {
         // Strict UTF-8, as before the git_exec seam: a repo whose paths are not
         // valid UTF-8 must classify as "not a git root" rather than yield
         // replacement-char-mangled `PathBuf`s that fail every later
-        // filesystem call.
+        // filesystem call. `stdout_strict` also rejects a truncated collection,
+        // so a short read never parses as a complete three-line answer.
         let stdout = outcome.stdout_strict()?;
         let mut lines = stdout.lines();
         let worktree_dir = non_empty_path(lines.next()?)?;
@@ -783,7 +784,9 @@ fn probe_git_worktree_paths(path: &Path, git_stats: &GitSpawnStats) -> Vec<PathB
         return Vec::new();
     };
     // Strict UTF-8, as before the git_exec seam: non-UTF-8 worktree paths
-    // yield no linked worktrees rather than mangled ones.
+    // yield no linked worktrees rather than mangled ones. `stdout_strict` also
+    // rejects a truncated collection, so a short read never looks like a repo
+    // with fewer worktrees than it has.
     let Some(stdout) = outcome.stdout_strict() else {
         return Vec::new();
     };

@@ -39,10 +39,20 @@ pub struct GitOutcome {
     pub status: ExitStatus,
     /// Lossy (`from_utf8_lossy`) decode of the child's stdout, which is the
     /// right default for human-facing text output. Call sites that turn stdout
-    /// into filesystem paths must use [`GitOutcome::stdout_strict`] instead.
+    /// into filesystem paths must use [`GitOutcome::stdout_strict`] instead,
+    /// and any call site that *parses* stdout must read it through
+    /// [`GitOutcome::stdout_text`]/[`GitOutcome::stdout_strict`] so
+    /// [`GitOutcome::output_truncated`] cannot be ignored.
     pub stdout: String,
     pub stderr: String,
     pub elapsed: Duration,
+    /// The child's output could not be fully collected: the command itself
+    /// finished and its exit status is real, but the bytes here may be short
+    /// (see the collection-grace path in [`capture`]). Callers that only need
+    /// the exit status (`run_git`) ignore this; every caller that parses stdout
+    /// must treat it as a failure, which the `stdout_*` accessors enforce by
+    /// returning `None`.
+    pub output_truncated: bool,
     stdout_valid_utf8: bool,
 }
 
@@ -50,9 +60,18 @@ impl GitOutcome {
     /// Strict-UTF-8 view of stdout: `None` when the child's stdout was not
     /// valid UTF-8. Preserves the pre-seam `String::from_utf8(..).ok()?`
     /// semantics for the discovery probes, where a replacement-char-mangled
-    /// path is worse than no path at all.
+    /// path is worse than no path at all. Also `None` when the output was
+    /// truncated, so a short read is never parsed as a complete answer.
     pub fn stdout_strict(&self) -> Option<&str> {
-        self.stdout_valid_utf8.then_some(self.stdout.as_str())
+        (self.stdout_valid_utf8 && !self.output_truncated).then_some(self.stdout.as_str())
+    }
+
+    /// Lossy view of stdout for parsing call sites: `None` when the output was
+    /// truncated. The same rule as [`GitOutcome::stdout_strict`] minus the
+    /// UTF-8 strictness, for text output where a replacement char is tolerable
+    /// but a short read is not.
+    pub fn stdout_text(&self) -> Option<&str> {
+        (!self.output_truncated).then_some(self.stdout.as_str())
     }
 }
 
@@ -257,6 +276,15 @@ const INITIAL_POLL_INTERVAL: Duration = Duration::from_micros(250);
 /// wake-up per 5ms instead of a busy spin.
 const MAX_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
+/// Floor for the output-collection phase, applied only after the child has
+/// already exited. Without it a child that exits inside the poll loop's last
+/// (deadline-clamped) sleep reaches collection with zero remaining budget, and a
+/// reader thread that has read everything but not yet been scheduled to `send`
+/// is misread as uncollectable output. A bounded grace for already-queued bytes
+/// is correct once the command itself is done; it can extend a `capture` call by
+/// at most this much beyond `budget`.
+const COLLECT_GRACE: Duration = Duration::from_millis(50);
+
 static GIT_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// `WS_DASHBOARD_GIT_TIMEOUT_MS`-driven default budget for `capture`, default
@@ -299,12 +327,38 @@ fn next_poll_interval(previous: Duration) -> Duration {
     previous.saturating_mul(2).min(MAX_POLL_INTERVAL)
 }
 
+/// One reader thread's delivery.
+struct ReaderOutput {
+    bytes: Vec<u8>,
+    /// The bytes may be short: `read_to_end` ended in an error instead of at
+    /// EOF, or the reader was lost before it could deliver anything. Either way
+    /// the buffer must not be presented as a complete read.
+    truncated: bool,
+}
+
+impl ReaderOutput {
+    /// Nothing was delivered at all (the reader thread disappeared before
+    /// sending). Not an empty read: an empty *complete* read is
+    /// `ReaderOutput { bytes: Vec::new(), truncated: false }`.
+    fn lost() -> Self {
+        Self {
+            bytes: Vec::new(),
+            truncated: true,
+        }
+    }
+}
+
 /// Result of waiting for one reader thread to deliver its collected bytes.
 enum ReaderCollect {
-    /// The reader reached EOF and handed over everything it read.
-    Collected(Vec<u8>),
-    /// The budget expired before EOF, which means some process other than the
-    /// direct child still holds a write end of the pipe.
+    /// The reader delivered its buffer (see [`ReaderOutput::truncated`] for
+    /// whether that buffer is complete).
+    Collected(ReaderOutput),
+    /// The budget expired before the reader delivered anything. The command
+    /// itself has already exited, so what is observed is only that its output
+    /// was not fully collected within the budget; a descendant process that
+    /// inherited the pipes and outlived the direct child is the probable cause,
+    /// but a reader thread that has not been scheduled to `send` yet produces
+    /// the same observation.
     Expired,
 }
 
@@ -319,17 +373,67 @@ enum ReaderCollect {
 ///
 /// `deadline == None` (`WS_DASHBOARD_GIT_TIMEOUT_MS=0`) blocks: the operator
 /// explicitly opted out of bounding. A disconnected channel means the reader
-/// thread panicked before sending, treated as empty output to match the
-/// previous `join().unwrap_or_default()`.
-fn collect_reader(rx: &mpsc::Receiver<Vec<u8>>, deadline: Option<Instant>) -> ReaderCollect {
+/// thread disappeared before sending; that yields no bytes rather than an empty
+/// read, so it is reported as truncated (previously it was indistinguishable
+/// from a complete empty read, via `join().unwrap_or_default()`).
+fn collect_reader(rx: &mpsc::Receiver<ReaderOutput>, deadline: Option<Instant>) -> ReaderCollect {
     let Some(deadline) = deadline else {
-        return ReaderCollect::Collected(rx.recv().unwrap_or_default());
+        return ReaderCollect::Collected(rx.recv().unwrap_or_else(|_| ReaderOutput::lost()));
     };
     match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-        Ok(bytes) => ReaderCollect::Collected(bytes),
-        Err(mpsc::RecvTimeoutError::Disconnected) => ReaderCollect::Collected(Vec::new()),
+        Ok(output) => ReaderCollect::Collected(output),
+        Err(mpsc::RecvTimeoutError::Disconnected) => ReaderCollect::Collected(ReaderOutput::lost()),
         Err(mpsc::RecvTimeoutError::Timeout) => ReaderCollect::Expired,
     }
+}
+
+/// Spawn one detached reader thread draining `pipe` to EOF and delivering its
+/// buffer through `tx`.
+///
+/// `std::thread::Builder::spawn` rather than `std::thread::spawn`: the latter
+/// *panics* when the OS refuses a thread (`EAGAIN`), and an unwind out of
+/// `capture`'s frame would drop a live `Child` — which on Unix neither kills nor
+/// reaps it — leaving a real `git` running (holding e.g. `.git/index.lock`) with
+/// `total` already counted and no failure counter touched. Returning the error
+/// lets `capture` kill and reap the child and report a countable failure.
+///
+/// A read error is delivered as a truncated buffer instead of being discarded,
+/// so a partial read can never be presented as a complete one.
+fn spawn_reader(
+    name: &str,
+    mut pipe: impl Read + Send + 'static,
+    tx: mpsc::Sender<ReaderOutput>,
+) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            let truncated = pipe.read_to_end(&mut bytes).is_err();
+            let _ = tx.send(ReaderOutput { bytes, truncated });
+        })
+        // The handle is dropped on purpose: the readers are detached on every
+        // path (see `collect_reader`), never joined.
+        .map(|_| ())
+}
+
+/// Kill and reap the direct child after a reader thread could not be spawned,
+/// count the failure, and log it. Called instead of letting a `thread::spawn`
+/// panic unwind out of `capture` with a live, unreaped child.
+fn reader_spawn_failed(
+    stats: &GitSpawnStats,
+    subcommand: GitSubcommand,
+    child: &mut std::process::Child,
+    error: io::Error,
+) -> GitFailure {
+    let _ = child.kill();
+    let _ = child.wait();
+    stats.record_failure();
+    tracing::warn!(
+        subcommand = subcommand.as_str(),
+        error = %error,
+        "git output reader thread could not be spawned; child killed",
+    );
+    GitFailure::Spawn(error)
 }
 
 /// Spawn `git -C <root> <args>`, bounded by `budget` (a zero `budget` means
@@ -339,19 +443,28 @@ fn collect_reader(rx: &mpsc::Receiver<Vec<u8>>, deadline: Option<Instant>) -> Re
 /// pipe, reading to EOF) so a child that fills a pipe buffer (~64 KB) before
 /// exiting can never deadlock the wait loop. On expiry the child is killed and
 /// reaped and the reader threads are left *detached and uncollected* (see the
-/// comment at that site) before returning `GitFailure::Timeout`, so the call
-/// never outlives `budget` by more than one kill-and-reap.
+/// comment at that site) before returning `GitFailure::Timeout`.
 ///
-/// The bound covers *both* halves uniformly: waiting for the exit and then
-/// collecting the readers' output. A child that exits within `budget` but
-/// leaves a descendant holding the inherited pipes also yields
-/// `GitFailure::Timeout` rather than a possibly-truncated success.
+/// Every exit path is bounded, and the bound covers *both* halves: waiting for
+/// the exit and then collecting the readers' output. The call therefore never
+/// outlives `budget` by more than one kill-and-reap plus, on the
+/// child-already-exited path only, the fixed [`COLLECT_GRACE`] floor. (Modulo
+/// an unkillable child: `wait()` after `kill()` blocks while a child is wedged
+/// in uninterruptible I/O, which is inherent to reaping rather than leaking.)
+///
+/// A child that exits within `budget` but leaves a descendant holding the
+/// inherited pipes still yields its **real exit status**, with
+/// `GitOutcome::output_truncated` set (or `GitFailure::Status` for a non-zero
+/// exit); it is not reported as a timeout, because the git invocation did not
+/// time out - only the collection of its output did.
 ///
 /// Every call increments `stats.total` and the per-subcommand counter,
 /// regardless of outcome. `stats.timeouts`/`stats.failures` are incremented
-/// on `Timeout`; `stats.failures` alone on `Spawn`/`Status`. `Spawn`/`Timeout`
-/// are always logged via `tracing::warn!`; `Status` (non-zero exit) is logged
-/// only when `expect == GitFailureExpectation::Unexpected`.
+/// on `Timeout`; `stats.failures` alone on `Spawn`/`Status`. A truncated
+/// collection increments neither, since the invocation itself neither timed out
+/// nor failed, but is always logged so the condition stays visible.
+/// `Spawn`/`Timeout` are always logged via `tracing::warn!`; `Status` (non-zero
+/// exit) is logged only when `expect == GitFailureExpectation::Unexpected`.
 pub fn capture(
     stats: &GitSpawnStats,
     root: &Path,
@@ -404,26 +517,25 @@ fn capture_with_program(
         }
     };
 
-    let mut stdout_pipe = child.stdout.take().expect("child stdout is piped");
-    let mut stderr_pipe = child.stderr.take().expect("child stderr is piped");
+    let stdout_pipe = child.stdout.take().expect("child stdout is piped");
+    let stderr_pipe = child.stderr.take().expect("child stderr is piped");
     // The readers are detached on every path and deliver their bytes through a
     // channel rather than through `JoinHandle::join`, so that *collecting* the
     // output is bounded by the same deadline as waiting for the exit (see
-    // `collect_reader`). Each closure captures only its own owned pipe handle
-    // and `Sender`, never `stats`, `child`, or any borrow of this frame, so a
-    // reader that outlives this call cannot touch freed state.
+    // `collect_reader`). Each reader owns only its pipe handle and `Sender`,
+    // never `stats`, `child`, or any borrow of this frame, so a reader that
+    // outlives this call cannot touch freed state.
     let (stdout_tx, stdout_rx) = mpsc::channel();
     let (stderr_tx, stderr_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout_pipe.read_to_end(&mut buf);
-        let _ = stdout_tx.send(buf);
-    });
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stderr_pipe.read_to_end(&mut buf);
-        let _ = stderr_tx.send(buf);
-    });
+    if let Err(error) = spawn_reader("ws-git-stdout", stdout_pipe, stdout_tx) {
+        return Err(reader_spawn_failed(stats, subcommand, &mut child, error));
+    }
+    if let Err(error) = spawn_reader("ws-git-stderr", stderr_pipe, stderr_tx) {
+        // The stdout reader spawned above is left to end on its own: killing
+        // the child closes its write end of that pipe, so `read_to_end`
+        // returns and the thread exits.
+        return Err(reader_spawn_failed(stats, subcommand, &mut child, error));
+    }
 
     // Measured from `start`, not from here, so the budget the caller gets and
     // the `elapsed_ms` the timeout warning reports agree.
@@ -493,45 +605,67 @@ fn capture_with_program(
         return Err(GitFailure::Timeout);
     };
 
-    // The child exited, but collecting its output is bounded by the SAME
-    // deadline: `read_to_end` reaches EOF only when every write end of the pipe
-    // is closed, so a descendant that inherited stdout/stderr and outlived the
-    // direct child (`ssh` and credential helpers under `fetch`/`push`/`pull`,
-    // post-checkout hooks under `switch`) keeps the readers blocked with no
-    // deadline left in play. Bounding only the exit wait made "no `capture`
-    // call outlives `budget`" false on the most common path.
-    let collected = match collect_reader(&stdout_rx, deadline) {
-        ReaderCollect::Collected(stdout_bytes) => match collect_reader(&stderr_rx, deadline) {
-            ReaderCollect::Collected(stderr_bytes) => Some((stdout_bytes, stderr_bytes)),
-            ReaderCollect::Expired => None,
-        },
-        ReaderCollect::Expired => None,
+    // The child exited, but collecting its output is bounded too: `read_to_end`
+    // reaches EOF only when every write end of the pipe is closed, so a
+    // descendant that inherited stdout/stderr and outlived the direct child
+    // (`ssh` with `ControlPersist` and credential helpers under
+    // `fetch`/`push`/`pull`, post-checkout hooks under `switch`) keeps the
+    // readers blocked with no deadline left in play. Bounding only the exit wait
+    // made "no `capture` call outlives `budget`" false on the most common path.
+    //
+    // The collection phase gets a small floor over whatever budget is left: the
+    // poll loop's final sleep ends exactly at the deadline, so a child that
+    // exits in that last interval arrives here with zero remaining budget and a
+    // reader that has simply not been scheduled to `send` yet would be read as
+    // uncollectable (measured: 196/400 such false attributions at a 1ms budget
+    // under CPU contention, with no descendant in existence). The child has
+    // already exited, so a brief bounded grace for bytes that are already queued
+    // is correct; it can extend the total wait by up to `COLLECT_GRACE`,
+    // deterministically.
+    let collect_deadline = deadline.map(|deadline| {
+        Instant::now()
+            .checked_add(COLLECT_GRACE)
+            .map(|floor| deadline.max(floor))
+            .unwrap_or(deadline)
+    });
+    let (stdout_bytes, stdout_truncated) = match collect_reader(&stdout_rx, collect_deadline) {
+        ReaderCollect::Collected(output) => (output.bytes, output.truncated),
+        ReaderCollect::Expired => (Vec::new(), true),
     };
-    let Some((stdout_bytes, stderr_bytes)) = collected else {
-        // TRADE-OFF: a git invocation that completed successfully but whose
-        // output could not be read within the budget reports `Timeout` rather
-        // than returning possibly-truncated stdout. Truncated-but-successful is
-        // the more dangerous outcome: callers like `for-each-ref` and
-        // `worktree list --porcelain` parse stdout and would treat a short read
-        // as a complete answer.
-        //
-        // `kill()` is a no-op here (the child was already reaped by
-        // `try_wait`); it is kept so this path cannot leave a live direct child
-        // behind if the exit detection ever changes. The readers are left
-        // running and uncollected exactly as on the expiry path above.
+    let (stderr_bytes, stderr_truncated) = match collect_reader(&stderr_rx, collect_deadline) {
+        ReaderCollect::Collected(output) => (output.bytes, output.truncated),
+        ReaderCollect::Expired => (Vec::new(), true),
+    };
+    // Whatever bytes arrived are kept, but flagged. The exit status is REAL on
+    // this path and is what classifies the call: a zero-exit `push` succeeded
+    // even if a lingering `ssh` master kept the pipes open, and a non-zero
+    // `fetch` still reports its code and (possibly short) stderr. Reporting a
+    // timeout here would tell the operator a successful push failed, and would
+    // throw away a genuine failure's exit code — while the callers that could be
+    // hurt by a short read are exactly the ones that parse stdout, which
+    // `output_truncated` fails instead (see `GitOutcome::stdout_text`).
+    // `stats.timeouts` is deliberately NOT incremented: the git invocation did
+    // not time out, only our collection of its output did.
+    let output_truncated = stdout_truncated || stderr_truncated;
+    if output_truncated {
+        // `kill()` is a no-op on this path: `try_wait` already reaped the child,
+        // and std suppresses the signal once an exit status has been observed,
+        // so this neither terminates anything nor risks signalling a recycled
+        // pid. The readers are left running and uncollected exactly as on the
+        // expiry path above.
         let _ = child.kill();
-        stats.record_timeout();
-        let elapsed_ms = start.elapsed().as_millis() as u64;
         tracing::warn!(
             subcommand = subcommand.as_str(),
-            elapsed_ms,
-            // Distinct from the "git command timed out" message above so a
-            // descendant holding the pipes is diagnosable apart from a
-            // genuinely slow git.
-            "git command exited but its output was still held open by a descendant process",
+            code = status.code().unwrap_or(-1),
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            // Distinct from the "git command timed out" message above, and
+            // stated as what is observed: the descendant is offered as a
+            // probable cause, not asserted, because an unscheduled reader
+            // produces the same observation.
+            "git command exited but its output was not fully collected within the budget \
+             (a descendant process holding the inherited pipes is the probable cause)",
         );
-        return Err(GitFailure::Timeout);
-    };
+    }
     let elapsed = start.elapsed();
     let (stdout, stdout_valid_utf8) = decode_output(&stdout_bytes);
     let (stderr, _) = decode_output(&stderr_bytes);
@@ -556,6 +690,7 @@ fn capture_with_program(
         stdout,
         stderr,
         elapsed,
+        output_truncated,
         stdout_valid_utf8,
     })
 }
@@ -725,25 +860,95 @@ mod tests {
     /// budget, but a descendant keeps the inherited pipes open. Joining the
     /// readers here reported `ok` only after the descendant exited (measured
     /// 3002.9ms under a 200ms budget); the bound must hold on every exit path,
-    /// not just on expiry. Unix-only because provoking a descendant needs a
-    /// shell; the behavior it pins is platform-independent.
+    /// not just on expiry.
+    ///
+    /// It also pins BOTH halves of the truncation split. The status-only half
+    /// (`run_git`, which is `capture(..).map(|_| ())`) sees `Ok` — a `push` that
+    /// pushed must never be reported as failed just because an `ssh
+    /// ControlPersist` master kept the pipes open. The stdout-parsing half
+    /// (`git_text`/`git_output`/the discovery probes, all of which read stdout
+    /// through `stdout_text`/`stdout_strict`) sees `None`, so no parser can read
+    /// a short collection as a complete answer.
+    ///
+    /// Unix-only because provoking a descendant needs a shell; the behavior it
+    /// pins is platform-independent.
     #[cfg(unix)]
     #[test]
-    fn capture_times_out_when_a_zero_exit_child_leaves_a_descendant_holding_the_pipes() {
+    fn a_descendant_holding_the_pipes_yields_a_truncated_but_real_zero_exit() {
+        let stats = GitSpawnStats::default();
+        let start = Instant::now();
+        let mut captured = None;
+        let events = count_events(|| {
+            captured = Some(capture_with_program(
+                "sh",
+                &stats,
+                Path::new("."),
+                &["-c", "printf held-open; sleep 5 & exit 0"],
+                GitFailureExpectation::Unexpected,
+                Duration::from_millis(200),
+            ));
+        });
+
+        let outcome = captured
+            .expect("capture ran")
+            .expect("a zero-exit child must not be reported as a failure");
+        assert!(
+            events > 0,
+            "an uncollectable output must stay visible in the log even though it is not a failure"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "capture must not wait for the descendant to release the pipes; took {:?}",
+            start.elapsed()
+        );
+        assert!(
+            outcome.status.success(),
+            "the real exit status must survive an uncollectable output"
+        );
+        assert!(
+            outcome.output_truncated,
+            "output that could not be collected must be flagged"
+        );
+        assert_eq!(
+            outcome.stdout_text(),
+            None,
+            "a stdout-parsing caller must see no answer, never a short one"
+        );
+        assert_eq!(outcome.stdout_strict(), None);
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.total, 1);
+        assert_eq!(
+            snapshot.timeouts, 0,
+            "the git invocation did not time out; only collecting its output did"
+        );
+        assert_eq!(
+            snapshot.failures, 0,
+            "a zero-exit git call is not a failure, however its output was collected"
+        );
+    }
+
+    /// The failure twin of the pin above: a non-zero exit whose output cannot be
+    /// collected must keep reporting its exit code, not degrade into `Timeout`.
+    /// Losing the code here would blind the operator in exactly the case this
+    /// phase exists to make visible (a `fetch` that failed while an `ssh` master
+    /// lingers).
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_holding_the_pipes_preserves_a_non_zero_exit_status() {
         let stats = GitSpawnStats::default();
         let start = Instant::now();
         let result = capture_with_program(
             "sh",
             &stats,
             Path::new("."),
-            &["-c", "sleep 5 & exit 0"],
+            &["-c", "sleep 5 & exit 3"],
             GitFailureExpectation::Unexpected,
             Duration::from_millis(200),
         );
 
         assert!(
-            matches!(result, Err(GitFailure::Timeout)),
-            "a zero-exit child whose descendant holds the pipes must still be bounded, got {result:?}"
+            matches!(result, Err(GitFailure::Status(3))),
+            "the observed exit code must survive an uncollectable output, got {result:?}"
         );
         assert!(
             start.elapsed() < Duration::from_secs(3),
@@ -751,8 +956,11 @@ mod tests {
             start.elapsed()
         );
         let snapshot = stats.snapshot();
-        assert_eq!(snapshot.timeouts, 1);
-        assert_eq!(snapshot.failures, 1);
+        assert_eq!(snapshot.timeouts, 0);
+        assert_eq!(
+            snapshot.failures, 1,
+            "a non-zero exit is one failure, counted once"
+        );
     }
 
     #[cfg(unix)]
@@ -786,6 +994,22 @@ mod tests {
     const EXIT_ONE: (&str, &[&str]) = ("sh", &["-c", "exit 1"]);
     #[cfg(windows)]
     const EXIT_ONE: (&str, &[&str]) = ("cmd", &["/C", "exit", "1"]);
+
+    /// A child that writes a known string to stdout and exits zero, so a test
+    /// can assert the *data* path and not just the outcome class. The Windows
+    /// form mirrors the large-stdout pin's `powershell -Command` shape, which is
+    /// the one form already known to survive `Command`'s argument escaping here.
+    #[cfg(unix)]
+    const EMIT_AND_EXIT_ZERO: (&str, &[&str]) = ("sh", &["-c", "printf ws-git-exec-output"]);
+    #[cfg(windows)]
+    const EMIT_AND_EXIT_ZERO: (&str, &[&str]) = (
+        "powershell",
+        &[
+            "-NoProfile",
+            "-Command",
+            "[Console]::Out.Write('ws-git-exec-output')",
+        ],
+    );
 
     #[test]
     fn expected_non_zero_exit_increments_failures_without_logging() {
@@ -842,10 +1066,33 @@ mod tests {
     /// The unbounded branch of `collect_reader`
     /// (`WS_DASHBOARD_GIT_TIMEOUT_MS=0`): with no deadline the output is
     /// collected with a plain blocking receive, so a zero budget must return at
-    /// child exit and must never report a timeout. Portable: reuses `EXIT_ONE`.
+    /// child exit, must actually deliver the child's bytes, and must never report
+    /// a timeout. Both halves are asserted: an emitting child pins the data path
+    /// of the unbounded branch, and `EXIT_ONE` pins that the real exit status is
+    /// still observed (folding `None` into `recv_timeout(0)` would have turned
+    /// that into `Timeout`). Portable on both platforms.
     #[test]
     fn a_zero_budget_capture_collects_output_at_child_exit_without_timing_out() {
         let stats = GitSpawnStats::default();
+
+        let outcome = capture_with_program(
+            EMIT_AND_EXIT_ZERO.0,
+            &stats,
+            Path::new("."),
+            EMIT_AND_EXIT_ZERO.1,
+            GitFailureExpectation::Unexpected,
+            Duration::ZERO,
+        )
+        .expect("an unbounded budget must collect a small stdout at child exit");
+        assert_eq!(
+            outcome.stdout_text().map(str::trim),
+            Some("ws-git-exec-output"),
+            "the unbounded branch must deliver the child's bytes"
+        );
+        assert!(
+            !outcome.output_truncated,
+            "a child that closed its pipes was collected completely"
+        );
 
         let result = capture_with_program(
             EXIT_ONE.0,
@@ -860,9 +1107,10 @@ mod tests {
             matches!(result, Err(GitFailure::Status(1))),
             "an unbounded budget must still observe the real exit status, got {result:?}"
         );
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.total, 2);
         assert_eq!(
-            stats.snapshot().timeouts,
-            0,
+            snapshot.timeouts, 0,
             "a zero budget opts out of bounding and must never report a timeout"
         );
     }
@@ -966,12 +1214,45 @@ mod tests {
             stdout: lossy,
             stderr: String::new(),
             elapsed: Duration::ZERO,
+            output_truncated: false,
             stdout_valid_utf8: valid,
         };
         assert_eq!(
             outcome.stdout_strict(),
             None,
             "path-consuming call sites must see None, as they did before the seam"
+        );
+    }
+
+    /// Unit-level companion to the descendant pins: the accessors every
+    /// stdout-parsing wrapper reads through must refuse a truncated buffer, while
+    /// the raw fields a status-only wrapper reads stay untouched.
+    #[test]
+    fn truncated_output_is_refused_by_both_stdout_accessors() {
+        let complete = GitOutcome {
+            status: ExitStatus::default(),
+            stdout: "refs/heads/main\n".to_owned(),
+            stderr: String::new(),
+            elapsed: Duration::ZERO,
+            output_truncated: false,
+            stdout_valid_utf8: true,
+        };
+        assert_eq!(complete.stdout_text(), Some("refs/heads/main\n"));
+        assert_eq!(complete.stdout_strict(), Some("refs/heads/main\n"));
+
+        let truncated = GitOutcome {
+            output_truncated: true,
+            ..complete
+        };
+        assert_eq!(
+            truncated.stdout_text(),
+            None,
+            "a parsing caller must not receive a short read"
+        );
+        assert_eq!(truncated.stdout_strict(), None);
+        assert!(
+            truncated.status.success(),
+            "the exit status a status-only caller reads is unaffected by truncation"
         );
     }
 }

@@ -2441,6 +2441,8 @@ fn git_identity(root_path: &Path, git_stats: &GitSpawnStats) -> Option<GitIdenti
 /// into `std::fs::canonicalize`, which is the "stdout becomes filesystem paths"
 /// case `GitOutcome::stdout`'s doc comment reserves for `stdout_strict`. This
 /// also preserves the pre-seam `String::from_utf8(..).ok()?` semantics.
+/// `stdout_strict` additionally rejects a truncated collection, so a short read
+/// reports "not a repo" instead of a half path.
 fn git_output(repo: &Path, args: &[&str], git_stats: &GitSpawnStats) -> Option<String> {
     capture(
         git_stats,
