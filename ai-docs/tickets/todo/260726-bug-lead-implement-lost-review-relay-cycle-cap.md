@@ -163,8 +163,8 @@ and must be stated as explicitly.
 
 - `[accept]` — the defense holds; the won't-fix stands.
 - `[override: <reason>]` — the defense fails; relay it as a required fix.
-- `[out-of-scope: <reason>]` — the finding is valid but outside the plan; route
-  to plan amendment or defer.
+- `[out-of-scope: <reason>]` — the finding is valid but outside the plan; it
+  becomes a recorded deferral.
 
 The third verdict is why the role exists at all. A correctness finding needing
 out-of-plan scope puts `implementer-relay` in a bind: it forbids won't-fix for
@@ -175,9 +175,39 @@ adjudicator is the party that decides whether the plan should absorb the finding
 or the finding should be deferred. See Phase 2 for why this makes the trigger
 two-armed.
 
+**`[out-of-scope]` is a deferral with authority, not a plan amendment.** The
+adjudicator does not edit the plan — it has no more authority to do so than the
+reviewer it was brought in to arbitrate, and a delegate rewriting the plan mid-loop
+would silently move the contract the whole run is verified against. The verdict
+does three things and nothing else: the finding leaves the relay list, it costs no
+relay, and it is carried into the run's completion output as unresolved-by-decision
+with the adjudicator's reason. The run may complete with such findings outstanding —
+the same closure `[deferred]` already has, and consistent with the decision that the
+final cycle completes the run rather than halting it. Amending the plan, if anyone
+wants it amended, is a caller-layer action after the run, not a step inside the loop.
+
+**Adjudication happens between reviews and never adds one.** The `[maintained]`
+arm surfaces at a re-review, but the `[escalate]` arm surfaces mid-relay, before
+any review has run. The lead adjudicates it immediately and returns the verdict to
+the implementer within the same relay slot; no review is consumed, because none
+occurred. This is safe precisely because the cap counts reviews: nothing that
+happens between two reviews can expand a budget denominated in reviews. Bound it
+at **one adjudication per relay slot** — if the implementer escalates again after
+receiving a verdict, the lead stops adjudicating and lets the finding reach the
+next review as-is, where it reports non-clean and falls to the ordinary path.
+Without that bound the slot admits an unbounded adjudicate/escalate ping-pong that
+the review budget cannot see.
+
 **Capacity escalation is mechanical and lead-side, not an adjudicator verdict.**
-A finding relayed once with no won't-fix offered and still non-clean at the next
-review indicates the implementer cannot fix it, not that a defense is contested —
+The condition is **a finding the implementer reported `[fixed]` that the next
+review still reports non-clean.** Stated positively, not as "no won't-fix
+offered": the negative form sweeps in `[deferred]`, an adjudicator
+`[out-of-scope]`, and an unresolved `[escalate]` — none of which are won't-fixes,
+all of which the reviewer keeps reporting non-clean, and all of which are settled
+dispositions rather than failures of capacity. Routing a deliberate deferral to a
+larger model as a capacity failure would contradict the three-failure-class
+separation this ticket draws. A claimed-and-rejected fix is the one disposition
+that means the implementer tried and could not — not that a defense is contested,
 so it never produces a `[maintained]` and never reaches the adjudicator. Handle it
 as a plain routing condition on the next relay: dispatch a distinct
 `implementer-elevated` delegate (Phase 3) rather than elevating
@@ -282,6 +312,14 @@ defect class.
   `-count=1` is mandatory. See `ai-docs/ref/wsflow-mirroring.md`; the missed-regen
   failure mode has its own ticket
   (`260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`).
+- New rsrc playbooks declare `role:` from the closed set
+  `childRoleForPlaybookRole` accepts — `implementer`, `reviewer`, `delegate`,
+  `leaf`. Anything else, including a natural-reading `role: adjudicator`, falls to
+  the default branch and mints **no child session key, silently**: no error, and a
+  prompt that renders normally. Both new delegates use `role: delegate`. Every
+  input either delegate takes must also appear in `variables:`; `renderPlaybook`
+  rejects an undeclared key with `ErrUndeclaredVar`, so Phase 3's added prior-fix
+  and prior-disposition inputs are a `variables:` change, not only prose.
 - Generated todo Instructions are plain Go strings with no template resolution.
   Render-time variables such as `{{.LargeTierModel}}` resolve only in
   `playbook.render` output and would surface literally if written into an
@@ -366,10 +404,13 @@ That second arm needs a token to fire on. `implementer-relay`'s Output contract
 offers `[fixed]`/`[won't fix]`/`[deferred]` and nothing else, so a Process-step-3
 escalation currently surfaces only as free-text under "Deviations or blockers" —
 undetectable by a lead following an Instruction. This phase adds
-`[escalate: <reason>]` to that contract. Scope note: this is the one
-`implementer-relay` edit the ticket makes, and it is additive to an output
-vocabulary rather than a new rule, so it does not reopen Phase 1's decision to
-leave the playbook layer alone.
+`[escalate: <reason>]` to that contract. The playbook enumerates the token set
+**twice** — the Output section and Process step 4 — so both sites change together;
+editing only the Output contract leaves the two enumerations contradicting each
+other, which is the failure mode that produced this ticket's own defect. Scope
+note: this is the one `implementer-relay` edit the ticket makes, and it is additive
+to an output vocabulary rather than a new rule, so it does not reopen Phase 1's
+decision to leave the playbook layer alone.
 
 **Spec update, required.** `#260612-reviewer-allocation-tier-default` currently
 reads "3 cycles for partitioned with lead adjudication at cycle 2". This phase
@@ -382,8 +423,12 @@ Verification boundary: a partitioned verdict's Instruction carries the
 adjudication clause and a single/lead-only verdict's does not; the rendered
 `review-adjudicator` prompt states the do-not-re-review-the-diff constraint and
 the three verdicts; the delegate prompt is self-contained under a fresh spawn with
-no prior conversation; `implementer-relay`'s Output contract lists
-`[escalate: <reason>]`; the spec anchor no longer says "lead adjudication";
+no prior conversation; **both** of `implementer-relay`'s token enumerations list
+`[escalate: <reason>]`, verified by grepping the file for the token set rather
+than by reading one section; the Instruction states that adjudication happens
+within a relay slot without consuming a review and is bounded to one per slot, and
+states the `[out-of-scope]` disposition (leaves the relay list, costs no relay,
+surfaces in completion output); the spec anchor no longer says "lead adjudication";
 manifest and wsflow mirror tests pass without hand-edits.
 
 ### Phase 3: Elevated implementer delegate and capacity escalation
@@ -418,10 +463,13 @@ executes the same failed approach more competently. What distinguishes it:
   so three cycles of evidence survive the handoff.
 
 **Capacity condition**, added to the `partitioned:`/fallback review Instruction:
-a finding **relayed once** with no won't-fix offered and still non-clean at the
-next review routes the following relay to `implementer-elevated` instead of
-`implementer-relay`. No won't-fix means no defense is contested, so this is a
-capacity signal rather than an adjudication one — it is the third arm alongside
+a finding the implementer reported `[fixed]` **once** that the next review still
+reports non-clean routes the following relay to `implementer-elevated` instead of
+`implementer-relay`. Findings carrying a settled disposition — `[won't fix]`,
+`[deferred]`, `[out-of-scope]`, or an open `[escalate]` — are excluded, because a
+reviewer keeps reporting those non-clean and they are decisions rather than failed
+attempts. A rejected fix attempt is a capacity signal, not an adjudication one —
+it is the third arm alongside
 Phase 2's two, and together they cover the three failure classes this ticket
 separates: wrong finding and scope deadlock to the adjudicator, failed approach
 here.
@@ -462,7 +510,12 @@ its dispatch condition.
 Verification boundary: `playbook.render(name: "implementer-elevated")` returns
 `recommended-tier: large` with no caller override; its prompt differs from
 `implementer-relay` in inputs, posture, and output contract rather than only in
-front-matter; the capacity condition and the root-cause condition both appear in
+front-matter, with every added input declared in `variables:` and a render passing
+them all succeeding rather than returning `ErrUndeclaredVar`; both new delegates
+mint a child session key under a fresh render, which is the observable proof their
+`role:` value is in the accepted set; the capacity condition names the
+`[fixed]`-then-still-non-clean disposition and its exclusions; the capacity and
+root-cause conditions both appear in
 the `partitioned:` and fallback Instructions and nowhere else, with the root-cause
 condition distinguished from the numeric budget; no `{{` appears in any generated
 Instruction; a walkthrough of a 3-cycle slice reaches `implementer-elevated`
