@@ -305,7 +305,24 @@ dropped tickets live in hidden archive dirs and git history.
   holds attention entries for terminals whose helper died without a browser
   `DELETE`, so Phase 7 must cross-reference live sessions or wire
   `attention.forget` into the IPC-death path rather than counting
-  `attentionByKey` directly.
+  `attentionByKey` directly. Phase 7 is now DONE (`4e4f1752`) — the nav row
+  carries an agent counter plus a level-driven attention overlay, counted by
+  iterating panes through `pendingAttentionStateFor`, which makes a dead
+  agent's surviving daemon entry structurally unreachable; the entry carries no
+  profile, so map-derived counting was never viable and the daemon-side
+  `attention.forget` leak stays open as priced debt. The server roll-up went
+  wide -> narrow -> narrow-plus-stand-in: narrowing alone silenced the base
+  root of every multi-root workspace (an under-flash, worse than the
+  unattributable over-flash it replaced), so the workspace row now takes the
+  base root's level without taking its counts. A hidden worktree is reported by
+  no row at all, deliberately. Next unfinished phase is Phase 8
+  (browser-level notification), which inherits two things: derive from the same
+  `pendingAttentionStateFor` predicate instead of adding a second
+  acknowledgement watermark, and settle whether hidden-worktree nav silence
+  should extend to an OS-level notification. Carry-forward evidence rule:
+  `npx playwright test` serves a prebuilt `frontend/dist`, so any
+  `frontend/src` mutation used as non-vacuity evidence must be rebuilt with
+  `npm run build` first (`260726-chore-e2e-playwright-serves-stale-frontend-dist`).
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the

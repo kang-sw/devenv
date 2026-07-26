@@ -1365,6 +1365,122 @@ Verification: browser acceptance asserting the counter split, no double count,
 a badge on a work root that is not selected, and that acknowledging the last
 pending tab clears the row badge without a separate action.
 
+### Result (4e4f1752) - 2026-07-26
+
+Landed across `28f9f533` (plan), `b8420dc9` (code and tests), `3981271c`
+(spec), `e2f27259` (review fix cycle 1), `4e4f1752` (review fix cycle 2).
+
+**Load-bearing decisions.**
+
+1. *The count iterates panes through `pendingAttentionStateFor`, never
+   `attentionByKey`.* This resolves Phase 6's forward finding, but not the way
+   that finding framed it. The decisive argument is relevance, not cost: an
+   `AgentAttentionEntry` carries no profile field, and this phase pins the
+   counter's carrier as the profile recorded on the pane, so a map-derived
+   count could neither tell an agent from a shell terminal nor count a freshly
+   spawned agent at all. Even a perfect daemon-side `attention.forget` would
+   not have unlocked map-derived counting. Counting through panes makes a dead
+   agent's surviving entry *structurally unreachable* rather than filtered.
+2. *The daemon-side leak stays open as debt, priced rather than dismissed.*
+   Phase 6's stated obstacle was re-verified rather than inherited:
+   `spawn_ipc_reader_task` still holds only an `Arc<TerminalSession>` with no
+   registry reach. `AttentionHub` *is* `Clone`, so the option is possible — it
+   costs threading a hub handle through session construction and
+   `boot_reconcile`'s adopt arm, inside the seam Phases 4 and 5 each found a
+   Critical in. Rejected for this phase, not declared closed.
+3. *The flash is level-driven off a data attribute*, following the existing
+   `activity-cue-breathe` precedent. An edge-triggered flash with its own timer
+   would BE a second acknowledgement watermark, which `## Constraints` pins
+   against.
+
+**Deviations from the plan.**
+
+- The agent segment LEADS the row text; the plan had it trailing. Forced by
+  measurement, not preference: the row measured `scrollWidth 313px` against
+  `clientWidth 225px`, and the agent segment was the clipped tail.
+- The reduced-motion block was extended beyond this phase's animations to
+  `activity-cue-breathe` and `git-spin`, because its own comment asserted a
+  general policy. That extension forced relocating the block to end-of-file:
+  `animation: none` ties on specificity with `.git-spinner` (0,1,0) and with
+  `.activity-ribbon-item[data-dirty="true"] .activity-ribbon-cue` (0,3,0), so
+  it wins on source order alone. At the block's original position the
+  `git-spin` entry would have been a silent no-op.
+- The `"no open surfaces"` branch is gated on `agents === 0`. Without the gate
+  the default display right after spawning an agent into a fresh root read
+  `"no open surfaces · 1 agent: 0 working, 0 ready"` — a line contradicting
+  itself, which two unit cases had pinned as intended.
+
+**Deviation from a PINNED rule, stated for the owner.** The aggregation rule
+above says a server row shows the highest-priority state among its work roots.
+A **hidden worktree** does not participate: `applyHiddenWorktrees` drops it from
+both the rendered child rows and `navAttentionWorkRootIds`, and no row stands in
+for it, so an agent waiting in a hidden worktree is reported nowhere in the nav.
+This is deliberate — the user asked not to see that root, and silence about its
+agents is part of what was asked for — and `App.tsx:7596` already carries a
+`CONTRACT:` comment requiring the two paths to mirror each other. The spec was
+scoped to match rather than left asserting an absolute the code does not meet.
+
+**The roll-up scope took three passes, and the middle one was wrong.** It
+started wide (every work root under a server), which review flagged as producing
+a flash the user could not trace to any root. Narrowing it introduced a worse
+defect in the opposite direction: the base root of a multi-root workspace is
+represented by the `workspace`-presentation row, which by design receives no
+counts, so an agent finishing a turn in the *primary* root of any repo with
+linked worktrees produced no nav signal at all — an under-flash, a silently
+missing badge, which is strictly worse than an unattributable one. The
+resolution passes the base root's counts to the workspace row and returns that
+root to `navAttentionWorkRootIds`: `data-row-attention` is emitted
+unconditionally while `showOpenSurfaceCounts` gates only the second line, so the
+workspace row takes the level without taking counts. The residual cost, recorded
+plainly: a toned workspace row reads as parent-scope to a user who does not know
+the rule, and carries no count text to disambiguate.
+
+**Verification.** Daemon lib 204 passed / 0 failed / 2 ignored, exit 0.
+`--test routes` 174 passed with only the 2 known pre-existing failures.
+`agent-attention-indicator.spec.ts` 3 passed. `agent-spawn-profile.spec.ts`
+1 passed. `dashboard-acceptance.spec.ts` failed only at the known site
+`:3779` with `:4020` skipping behind it. `npm run build`, the four unit suites,
+and `ws/spec_index.verify` all clean.
+
+**Mutations proven, each rebuilt before running.** Dropping the agents-only gate
+fails at `agent-attention-indicator.spec.ts:809`; a `padding-left` increase
+fails the geometry guard at `:727` by 83.09px; `agentCounts={undefined}` on the
+workspace row fails at `:949`; dropping the base root from
+`navAttentionWorkRootIds` fails at `:967`. The last two each isolate exactly one
+half of the roll-up fix and are unreachable from any assertion predating them.
+
+**An evidence trap this phase discovered the hard way.** `playwright.config.ts`
+declares no `webServer` and the harness serves a prebuilt `frontend/dist`, so a
+bare `npx playwright test` — the form this ticket's own verification notes
+prescribe — runs the browser against whatever bundle sits on disk. A `src/`
+mutation that is not followed by `npm run build` is invisible to the browser,
+and the resulting pass is indistinguishable in the terminal from a genuine one.
+Only `test:browser` chains a build. Consequence, recorded rather than papered
+over: the self-reported mutation observations from this phase's earlier cycles
+cannot be re-established as independent browser evidence after the fact. Their
+non-vacuity rests instead on the reviewers' static source tracing, which the
+trap cannot touch, and on the cycle-2 runs, which were rebuilt first. Captured
+as `260726-chore-e2e-playwright-serves-stale-frontend-dist` and as a mental-model
+entry.
+
+**Review.** Three partitions, two fix cycles. Cycle 1 raised 2 Important and 5
+Minor; cycle 2 raised 1 Important — introduced by cycle 1's own fix — and 3
+Minor. All resolved. Final state: correctness clean, fit clean, test clean. Four
+of the Minors across both cycles were the same defect class worth naming: a
+comment claiming a guarantee its code does not provide (the geometry guard does
+not pin segment order, the exact-text literals do; a cited line number that
+pointed at an unrelated rule; a `transform: none` justified by a cascade effect
+that cannot occur once `animation: none` applies).
+
+> Forward to Phase 8: the browser-level notification should derive from the same
+> `pendingAttentionStateFor` predicate rather than adding its own watermark, for
+> the reason recorded above — a second watermark is what the acknowledgement pin
+> exists to prevent, and a notification with independent state would disagree
+> with both the tab badge and the nav badge on exactly the flow the feature is
+> for. Note also that a hidden worktree is silent in the nav by design; whether
+> that silence should extend to an OS-level notification is a real product
+> question this phase did not settle.
+
 ### Phase 8: browser-level notification
 
 Depends on Phase 5. Independent of Phases 6-7. Owns the
