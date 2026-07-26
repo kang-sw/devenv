@@ -363,6 +363,30 @@ ticket `260725-feat-dashboard-pty-agent-attention-notification` Phase 7 fills
 that slot).
 
 
+#### Edition (b8420dc9) - 2026-07-26
+
+Amended by Phase 7 of the sibling ticket
+`260725-feat-dashboard-pty-agent-attention-notification`, which filled the
+agent-counter slot this phase deferred. Two pieces of the behaviour recorded
+above are now superseded:
+
+- **`formatOpenSurfaceCounts` gained a third argument** (the
+  `agents`/`working`/`ready` triple), so this phase's acceptance step in
+  `dashboard-acceptance.spec.ts` (:2862/:2914/:2927), which compares live row
+  text against that function's own output, now exercises its two-argument
+  form. The agent segment is appended only when `agents > 0`, so both
+  zero-agent strings stay byte-identical and those call sites remain correct
+  rather than merely compiling.
+- **The terminal count is no longer derived from `terminalPanes` wholesale.**
+  It is filtered to `pane.session.profileId == null`; agent terminals are
+  reported by the new per-root agent counts instead, so no pane is counted by
+  both this ticket's line and the agent counter.
+
+Unchanged by that phase: the reserved-height invariant, the
+`data-resource-open` de-emphasis, the workspace-row exclusion (Decision 4 —
+workspace rows get no agent aggregate either), and the signature-gated upward
+callback shape, which the agent count map reuses verbatim.
+
 ## Resolution (2026-07-25)
 
 Sole phase complete and verified at browser level (Playwright, evidence in `ws-dashboard/frontend/e2e/.artifacts/evidence.txt`), with non-vacuity proven by two source mutations. Spec addressed at `#260725-nav-row-open-surface-counts-and-open-state`; the CSS cascade and reserved-height invariants went to the `ws-web-dashboard` mental model instead, as implementation rationale. All seven review findings were dispositioned fix and landed. Two items intentionally leave this ticket rather than blocking it: the deferred agent counter, which the sibling ticket `260725-feat-dashboard-pty-agent-attention-notification` fills in its Phase 7, and the pre-existing `fitNow()` short-viewport shrink revealed (not caused) by the macOS socket-path prerequisite fix, filed as `260725-bug-dashboard-fitnow-short-viewport-shrink`.
