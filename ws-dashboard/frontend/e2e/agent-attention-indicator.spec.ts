@@ -996,3 +996,142 @@ test("base-root agent tone on a multi-root workspace", async ({ page }) => {
     await forceCloseTerminals(page, [agentId]);
   }
 });
+
+// Polls `document.title` at a fixed cadence for `durationMs`, returning every
+// distinct value observed. Used to prove the Phase 8 title cue TOGGLES (both
+// the flashed and the base string are observed at least once) rather than
+// merely changing once - a single `expect(...).not.toBe(base)` could pass
+// against a one-shot rewrite with no interval at all.
+async function pollDocumentTitles(
+  page: Page,
+  durationMs: number,
+): Promise<Set<string>> {
+  const observed = new Set<string>();
+  const deadline = Date.now() + durationMs;
+  while (Date.now() < deadline) {
+    observed.add(await page.title());
+    await page.waitForTimeout(100);
+  }
+  return observed;
+}
+
+// 260725 Phase 8 (browser-level notification), Tier 1 only per the ticket's
+// verification boundary - Tier 2 (`Notification` permission) is manual-only,
+// not automated here. A FOURTH `test()` in this same file, following the
+// Phase 7 precedent comment above `nav row agent counter` for reusing this
+// file's daemon/workRoot/token-read module-locals rather than standing up a
+// fifth daemon.
+//
+// What this gate proves, at browser level (tsc/build/curl cannot observe
+// `document.title`/`<link rel="icon">` writes):
+//   1. A turn-state callback POST flashes `document.title` away from the base
+//      title AND back to it at least once each while the tone is non-null -
+//      proving TOGGLING (an interval), not a single rewrite.
+//   2. The `<link rel="icon">` element's `href` (the SAME node `index.html`
+//      renders, not a duplicate) changes to a non-default `data:` value while
+//      the tone is non-null.
+//   3. Acknowledging the last pending tab (the existing Phase 6 mechanism -
+//      no new watermark) returns BOTH the title and the favicon href to their
+//      exact base values, proving Tier 1 tears itself down rather than
+//      leaving a badge/flash installed.
+test("browser-level title/favicon attention cue (Tier 1)", async ({
+  page,
+}) => {
+  await attachOwnerSession(page);
+  await openWorkRootMinimal(page, workRoot);
+  const workRootId = await resolveWorkRootId(page, workRoot);
+
+  let agentTerminalId = "";
+
+  try {
+    let token = "";
+
+    await test.step("spawn a hooked test-profile terminal and make its tab the active one", async () => {
+      agentTerminalId = await spawnTerminalInRoot(
+        page,
+        workRootId,
+        "dummy-echo-hooked",
+        "Browser Cue Agent",
+      );
+      token = readCallbackToken(agentTerminalId);
+
+      // Same restoration path every other test in this file uses: the direct
+      // POST above bypassed this tab's React state.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await selectWorkRootMinimal(page, workRoot);
+      await expect(terminalTab(page, agentTerminalId)).toHaveCount(1, {
+        timeout: 20_000,
+      });
+      await terminalTab(page, agentTerminalId).click();
+      await expect(
+        page.locator(`.terminal-pane[data-terminal-id="${agentTerminalId}"]`),
+      ).toHaveCount(1, { timeout: 20_000 });
+
+      // Preconditions: the page starts on its base title/favicon before any
+      // turn-state has been posted.
+      await expect.poll(() => page.title()).toBe("ws dashboard");
+      await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+        "href",
+        "/icon-192.png",
+      );
+    });
+
+    await test.step("a turn boundary flashes the title and favicon while the tone is non-null", async () => {
+      await postTurnState(agentTerminalId, token, "working");
+
+      // Wait for the underlying tone to have actually propagated (same
+      // mechanism the other tests in this file gate on) before polling the
+      // title, so the poll window below is not spent waiting on network/state
+      // propagation instead of observing the flash itself.
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "working",
+        { timeout: 20_000 },
+      );
+
+      // Poll across MULTIPLE flash-tick intervals (the cue ticks at ~1s) so a
+      // first-tick coincidence cannot be mistaken for a lack of toggling: both
+      // the flashed and the base title must each be observed at least once.
+      const observedTitles = await pollDocumentTitles(page, 2_500);
+      expect(
+        observedTitles.has("ws dashboard"),
+        `the base title must be observed at least once while flashing (observed: ${JSON.stringify([...observedTitles])})`,
+      ).toBe(true);
+      expect(
+        [...observedTitles].some((title) => title !== "ws dashboard"),
+        `a flashed (non-base) title must be observed at least once (observed: ${JSON.stringify([...observedTitles])})`,
+      ).toBe(true);
+
+      const faviconHref = await page
+        .locator('link[rel="icon"]')
+        .getAttribute("href");
+      expect(
+        faviconHref,
+        "the favicon href must change to a non-default data: URI while attention is pending",
+      ).toMatch(/^data:image\/svg\+xml/);
+    });
+
+    await test.step("acknowledging the last pending tab restores both the title and favicon to their base values", async () => {
+      await terminalTab(page, agentTerminalId).click();
+      await expect(terminalTab(page, agentTerminalId)).toHaveAttribute(
+        "data-attention-state",
+        "none",
+        { timeout: 20_000 },
+      );
+      await expect
+        .poll(() => page.title(), { timeout: 5_000 })
+        .toBe("ws dashboard");
+      await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+        "href",
+        "/icon-192.png",
+      );
+    });
+
+    await test.step("cleanup: close the terminal this gate spawned", async () => {
+      await closeTerminalById(page, agentTerminalId);
+      await expect(terminalTab(page, agentTerminalId)).toHaveCount(0);
+    });
+  } finally {
+    await forceCloseTerminals(page, [agentTerminalId]);
+  }
+});

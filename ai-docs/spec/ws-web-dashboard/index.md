@@ -984,6 +984,25 @@ construction time.
 > (`terminalPrefs.test.ts`) and the section-registry contract
 > (`settingsSections.test.ts`, `settingsStore.test.ts`) only.
 
+The second registered section, Notifications
+(`260725-feat-dashboard-pty-agent-attention-notification` Phase 8), persists a
+single opt-in boolean (`ws-dashboard.settings.notifications.v1`, `{ enabled:
+boolean }`) through the same namespaced preferences-store helper — no other
+notification state is cached client-side. Enabling the toggle also requests
+the browser's `Notification` permission, but ONLY from the checkbox's own
+`onChange` handler — a real user gesture — never from a mount-time effect,
+mirroring the pattern the codebase already avoids for `sw.js` registration
+(`main.tsx`). The section's copy states plainly that OS-level notification
+requires a secure context (`localhost` or a TLS origin): a plain-http LAN
+page lacks the whole `Notification` global, not merely a granted permission,
+so the section reads `window.isSecureContext` and `Notification.permission`
+live (both readable with no permission prompt of their own) and shows the
+current state — including an explicit "unavailable, insecure context"
+message — rather than only surprising the user after an unresponsive click.
+This preference is the sole gate an agent-turn-boundary `Notification` call
+elsewhere in the app checks before firing; it is not itself responsible for
+deciding *when* to notify.
+
 > [!note] Planned 🚧
 > A future hotkey-rebind editor section will register into this panel to
 > edit bindings from the hotkey binding registry directly, and is expected

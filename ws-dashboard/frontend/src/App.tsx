@@ -382,8 +382,20 @@ import {
 } from "./terminalPrefs";
 import {
   SETTINGS_SECTIONS,
+  SettingsNotificationContext,
   SettingsTerminalContext,
 } from "./settingsSections";
+import {
+  attentionTitleFor,
+  buildAttentionFaviconHref,
+  shouldFireAttentionNotification,
+  type AttentionTone,
+} from "./browserAttentionCue.js";
+import {
+  loadNotificationPrefs,
+  saveNotificationPrefs,
+  type NotificationPrefs,
+} from "./notificationPrefs.js";
 import {
   DetailItem,
   StateLine,
@@ -535,6 +547,11 @@ export function App() {
   const [terminalPrefs, setTerminalPrefs] = useState<TerminalStylePrefs>(() =>
     loadTerminalStylePrefs(),
   );
+  // Settings > Notifications section's persisted opt-in (260725 Phase 8). See
+  // `notificationPrefs.ts` - this is the ONLY persisted field; live
+  // `Notification.permission` is read where needed, never cached here.
+  const [notificationPrefs, setNotificationPrefs] =
+    useState<NotificationPrefs>(() => loadNotificationPrefs());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -2056,9 +2073,170 @@ export function App() {
     [terminalPrefs, handleTerminalPrefsChange],
   );
 
+  // Settings > Notifications section's single write path (260725 Phase 8),
+  // wired the same way as `handleTerminalPrefsChange`/
+  // `settingsTerminalContextValue` above: set the live state, persist, in
+  // that order, then a memoized context value so the Provider only changes
+  // when `enabled` actually changes.
+  const handleNotificationPrefsChange = useCallback((nextEnabled: boolean) => {
+    const next: NotificationPrefs = { enabled: nextEnabled };
+    setNotificationPrefs(next);
+    saveNotificationPrefs(next);
+  }, []);
+
+  const settingsNotificationContextValue = useMemo(
+    () => ({
+      enabled: notificationPrefs.enabled,
+      onChange: handleNotificationPrefsChange,
+    }),
+    [notificationPrefs.enabled, handleNotificationPrefsChange],
+  );
+
+  // 260725 Phase 8: the browser-level (title/favicon/OS notification) tone,
+  // flattened across EVERY connected server rather than the selected one.
+  // Built the same way `ServerRows` builds one server's root-key list
+  // (`aggregateNavAttentionTone` fed `navAttentionWorkRootIds`'s already
+  // hidden-worktree-filtered output), just unioned across
+  // `resourcesByServer`'s entries. Reusing these two functions - rather than a
+  // new predicate - is what keeps this tone unable to disagree with the nav
+  // tree: a hidden worktree's agent contributes to neither, because it never
+  // enters `navAttentionWorkRootIds`'s output in the first place (the
+  // `App.tsx` `CONTRACT:` comment above that function pins this same set for
+  // the nav tree). Reads `agentAttentionByRoot` from THIS component's own
+  // state (populated by `WorkbenchShell`'s `onAgentAttentionByRootChange`
+  // callback) rather than recomputing anything - this is the exact value
+  // `ResourceNavigation`/`ServerRows`/`WorkspaceRows` already render from, so
+  // the global tone structurally cannot disagree with the nav tree it is
+  // unioned from.
+  //
+  // DEVIATION from the plan's stated placement (Codebase Findings /
+  // Implementation Plan step 1 cited `App.tsx:4356-4379` as "the existing
+  // `agentAttentionByRoot` derivation"): that line span is the LOCAL
+  // `useMemo` inside `WorkbenchShell` that computes this value from
+  // `terminalPanes` and pushes it up via `onAgentAttentionByRootChange`, not
+  // an App()-level derivation - `WorkbenchShell` has no `resourcesByServer`/
+  // `workNavOrder`/`notificationPrefs` in scope, so this tone (and the two
+  // effects below) live in `App()` itself, against `App()`'s own
+  // `agentAttentionByRoot` STATE (declared near `resourcesByServer`), which is
+  // populated from that same WorkbenchShell computation and is what every
+  // other nav consumer already reads. Cosmetic relocation only - the actual
+  // required inputs (`resourcesByServer`, `workNavOrder.hiddenWorktreesByWorkspace`,
+  // `agentAttentionByRoot`, `aggregateNavAttentionTone`, `navAttentionWorkRootIds`)
+  // are unchanged and all satisfied here.
+  const globalAttentionTone = useMemo<AttentionTone>(() => {
+    const rootKeys: string[] = [];
+    for (const [serverId, resources] of Object.entries(resourcesByServer)) {
+      for (const workspace of resources.workspaces) {
+        const hiddenIds =
+          workNavOrder.hiddenWorktreesByWorkspace[
+            serverScopedIdentity(serverId, workspace.id)
+          ];
+        for (const rootId of navAttentionWorkRootIds(workspace, hiddenIds)) {
+          rootKeys.push(serverScopedIdentity(serverId, rootId));
+        }
+      }
+    }
+    return aggregateNavAttentionTone(agentAttentionByRoot, rootKeys);
+  }, [
+    resourcesByServer,
+    workNavOrder.hiddenWorktreesByWorkspace,
+    agentAttentionByRoot,
+  ]);
+
+  // Captured ONCE, at this component's first render, before this effect (the
+  // only `document.title`/favicon-href writer in the whole frontend - see the
+  // plan's Codebase Findings, confirmed via `grep -rn "document.title"
+  // frontend/src`) ever runs. Single-sourced from `index.html`'s own
+  // `<title>`/`<link rel="icon">` markup rather than a duplicated string
+  // literal, so the base title/icon can never drift from what `index.html`
+  // actually declares.
+  const baseDocumentTitleRef = useRef<string>(document.title);
+  const baseFaviconHrefRef = useRef<string>(
+    document.querySelector('link[rel="icon"]')?.getAttribute("href") ?? "",
+  );
+
+  // Tier 1 (default, zero-permission) cue: `document.title` flashing plus a
+  // favicon badge. Level-driven off `globalAttentionTone`, not an
+  // independently timed or persisted state (Phase 7's pinned rule this cue
+  // must extend, `## Constraints`) - the flash keeps running regardless of
+  // tab focus/visibility, stopping only when the tone itself returns to
+  // `null`.
+  //
+  // TIMER HYGIENE (hard requirement): the `setInterval` below is created only
+  // in the branch where `globalAttentionTone !== null`, and this effect's own
+  // cleanup - which always runs before the next invocation AND on unmount -
+  // is the only place that clears it. There is exactly one `setInterval` call
+  // in this effect, guarded by the same early return that skips the rest of
+  // the body, so no code path can create a second, orphaned interval: every
+  // tone change (including into `null`) tears down the previous run's
+  // interval before anything new is set up, and the `null` branch creates no
+  // interval at all. The dependency array is `[globalAttentionTone]` alone - a
+  // stable primitive (`"ready" | "working" | null`), so this effect does not
+  // re-run (and therefore does not recreate the interval) on unrelated App()
+  // re-renders; it only re-runs when the tone value itself changes.
+  useEffect(() => {
+    if (globalAttentionTone === null) {
+      return;
+    }
+    const faviconLink = document.querySelector<HTMLLinkElement>(
+      'link[rel="icon"]',
+    );
+    let flashOn = false;
+    const tick = () => {
+      flashOn = !flashOn;
+      document.title = attentionTitleFor(
+        baseDocumentTitleRef.current,
+        true,
+        flashOn,
+      );
+    };
+    tick();
+    if (faviconLink) {
+      faviconLink.href = buildAttentionFaviconHref(true);
+    }
+    const intervalId = window.setInterval(tick, 1_000);
+    return () => {
+      window.clearInterval(intervalId);
+      document.title = baseDocumentTitleRef.current;
+      if (faviconLink) {
+        faviconLink.href = baseFaviconHrefRef.current;
+      }
+    };
+  }, [globalAttentionTone]);
+
+  // Tier 2 (explicit opt-in) cue: a real OS `Notification`, fired only on the
+  // edge into `ready` (Implementation Plan step 3 - `working` is background
+  // progress, not an actionable interruption). `previousGlobalAttentionToneRef`
+  // is the ENTIRE state this needs - no second acknowledgement watermark, per
+  // the binding carry-forward from Phase 7's Result: it is driven by the exact
+  // same derived tone the tab/nav badges already read in the exact same
+  // render, so it cannot disagree with them. Never requests permission itself
+  // - that only ever happens from the Settings toggle's own click handler
+  // (`settingsSections.tsx`'s `NotificationSection`).
+  const previousGlobalAttentionToneRef = useRef<AttentionTone>(null);
+  useEffect(() => {
+    if (
+      shouldFireAttentionNotification(
+        previousGlobalAttentionToneRef.current,
+        globalAttentionTone,
+      ) &&
+      notificationPrefs.enabled &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      new Notification("ws dashboard", {
+        body: "An agent is ready for your input.",
+      });
+    }
+    previousGlobalAttentionToneRef.current = globalAttentionTone;
+  }, [globalAttentionTone, notificationPrefs.enabled]);
+
   return (
     <TerminalPrefsContext.Provider value={terminalPrefs}>
     <SettingsTerminalContext.Provider value={settingsTerminalContextValue}>
+    <SettingsNotificationContext.Provider
+      value={settingsNotificationContextValue}
+    >
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
         <aside
@@ -2197,6 +2375,7 @@ export function App() {
       </div>
       <WhichKeyOverlay leaderState={leaderUiState} />
     </main>
+    </SettingsNotificationContext.Provider>
     </SettingsTerminalContext.Provider>
     </TerminalPrefsContext.Provider>
   );
@@ -4377,6 +4556,7 @@ function WorkbenchShell({
   useEffect(() => {
     onAgentAttentionByRootChange(agentAttentionByRoot);
   }, [agentAttentionByRoot, onAgentAttentionByRootChange]);
+
   useEffect(() => {
     for (const rootKey of openWorkRootKeys) {
       const ref = openWorkRootRefs[rootKey];

@@ -1,5 +1,7 @@
 import {
+  NotificationSection,
   SETTINGS_SECTIONS,
+  SettingsNotificationContext,
   SettingsTerminalContext,
   TerminalStyleSection,
 } from "./settingsSections.js";
@@ -27,8 +29,8 @@ assertEqual(
 
 assertEqual(
   SETTINGS_SECTIONS.length,
-  1,
-  "Phase 1 registers exactly the Terminal section",
+  2,
+  "Phase 8 grows the registry to Terminal + Notifications",
 );
 
 const terminalDescriptor = SETTINGS_SECTIONS[0];
@@ -81,6 +83,46 @@ assertEqual(
   typeof SettingsTerminalContext,
   "object",
   "SettingsTerminalContext is a React context object",
+);
+
+// --- Notifications section registry (260725 Phase 8) ------------------------
+
+const notificationDescriptor = SETTINGS_SECTIONS[1];
+
+assertEqual(
+  notificationDescriptor.id,
+  "notifications",
+  "the Notifications descriptor's id is stable",
+);
+
+assertEqual(
+  notificationDescriptor.title,
+  "Notifications",
+  "the Notifications descriptor's title is stable",
+);
+
+assertEqual(
+  notificationDescriptor.Component === NotificationSection,
+  true,
+  "the registry Component is the stable module-scope NotificationSection reference",
+);
+
+assertEqual(
+  typeof notificationDescriptor.Component,
+  "function",
+  "the registry Component is a renderable function component",
+);
+
+assertEqual(
+  NotificationSection.length,
+  0,
+  "NotificationSection takes no props - it reads enabled/setter from context",
+);
+
+assertEqual(
+  typeof SettingsNotificationContext,
+  "object",
+  "SettingsNotificationContext is a React context object",
 );
 
 assertEqual(true, true, "settingsSections tests completed");

@@ -3898,6 +3898,18 @@ button {
   text-transform: uppercase;
 }
 
+.settings-notification-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-03);
+}
+
+.settings-field-note {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  margin: 0;
+}
+
 .linked-server-modal {
   height: auto;
   width: min(440px, calc(100vw - 32px));

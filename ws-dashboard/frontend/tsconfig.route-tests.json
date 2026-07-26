@@ -77,6 +77,8 @@
     "src/resourcePresentation.test.ts",
     "src/agentAttention.ts",
     "src/agentAttention.test.ts",
+    "src/browserAttentionCue.ts",
+    "src/browserAttentionCue.test.ts",
     "src/workbench/**/*.ts"
   ]
 }
