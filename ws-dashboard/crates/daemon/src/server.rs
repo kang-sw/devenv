@@ -105,14 +105,29 @@ where
     // In-app "shut down dashboard" trigger: an HTTP handler fires this Notify,
     // which the shutdown_task below selects on alongside the external signal.
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
+    // `epoch_source` and `git_spawn_stats` are shared with `watch_registry`
+    // below: a watcher-driven epoch bump must land through the exact same
+    // `Arc` `git_toolbar.rs`'s `AppState.epoch_source` reads, and the
+    // registry's own `git status`/walk spawns must count against the same
+    // `AppState.git_spawn_stats` diag totals as every other route (ticket
+    // step 8).
+    let epoch_source: Arc<dyn crate::git_state_cache::EpochSource> =
+        Arc::new(crate::git_state_cache::MutationEpochSource::default());
+    let git_spawn_stats = Arc::new(crate::git_exec::GitSpawnStats::default());
+    let watch_registry = crate::work_root_watch::WatchRegistry::new(
+        epoch_source.clone(),
+        git_spawn_stats.clone(),
+        crate::work_root_watch::WatchConfig::default(),
+    );
     let app = build_router(AppState {
         config,
         auth,
         opened_work_roots,
         git_probe_cache: crate::discovery::GitProbeCache::default(),
-        git_spawn_stats: Arc::new(crate::git_exec::GitSpawnStats::default()),
+        git_spawn_stats,
         git_state_cache: crate::git_state_cache::GitStateCache::default(),
-        epoch_source: Arc::new(crate::git_state_cache::MutationEpochSource::default()),
+        epoch_source,
+        watch_registry,
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         terminals,

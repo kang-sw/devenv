@@ -20,14 +20,6 @@
 //! `RepoEpochs`, debounce/coalescing, and `reconcile`'s decision table stay
 //! `cfg`-free and unit-testable on Linux/WSL.
 
-// NOTE: this module is built up checkpoint-by-checkpoint (Lead Disposition
-// D6); pieces land here before every call site is wired in later checkpoints.
-// `dead_code` is allowed for the duration of that build-out and removed once
-// the module is fully wired into `resources.rs`/`git_toolbar.rs`/`server.rs`
-// (the final checkpoint), so the crate-wide clippy warning count does not
-// grow permanently.
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs;
@@ -46,10 +38,10 @@ use crate::git_state_cache::EpochSource;
 /// `DiscoveredWorkRoot`. `git_dir == common_dir` for a primary root; a linked
 /// worktree's `git_dir` sits under `common_dir/worktrees/<name>`.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct WatchTargets {
-    pub(crate) worktree: PathBuf,
-    pub(crate) git_dir: PathBuf,
-    pub(crate) common_dir: PathBuf,
+pub struct WatchTargets {
+    pub worktree: PathBuf,
+    pub git_dir: PathBuf,
+    pub common_dir: PathBuf,
 }
 
 /// Per-repo watcher health, reported by `GET /api/dashboard/diag/git` (a
@@ -59,14 +51,14 @@ pub(crate) struct WatchTargets {
 /// undifferentiated "not working" for a watcher that structurally cannot
 /// fire (ticket step 9).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum WatchHealth {
+pub enum WatchHealth {
     Armed,
     Degraded(String),
     Unarmed,
 }
 
 impl WatchHealth {
-    pub(crate) fn label(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             WatchHealth::Armed => "armed",
             WatchHealth::Degraded(_) => "degraded",
@@ -74,7 +66,7 @@ impl WatchHealth {
         }
     }
 
-    pub(crate) fn reason(&self) -> Option<&str> {
+    pub fn reason(&self) -> Option<&str> {
         match self {
             WatchHealth::Degraded(reason) => Some(reason.as_str()),
             _ => None,
@@ -682,7 +674,7 @@ fn linux_process_budget() -> usize {
 /// TTL. `Force` skips the [`mount_allows_watching`] pre-arm gate (diagnostic
 /// escape hatch, ticket Constraints); `Auto` is the default.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum WatchMode {
+pub enum WatchMode {
     Off,
     Auto,
     Force,
@@ -692,11 +684,11 @@ pub(crate) enum WatchMode {
 /// later checkpoint reads them; this checkpoint just needs somewhere for the
 /// values to live so arming and the event pipeline are not hardcoded).
 #[derive(Clone, Debug)]
-pub(crate) struct WatchConfig {
-    pub(crate) mode: WatchMode,
-    pub(crate) debounce_ms: u64,
-    pub(crate) max_dirs: usize,
-    pub(crate) armed_ttl_ms: u64,
+pub struct WatchConfig {
+    pub mode: WatchMode,
+    pub debounce_ms: u64,
+    pub max_dirs: usize,
+    pub armed_ttl_ms: u64,
 }
 
 impl Default for WatchConfig {
@@ -825,7 +817,7 @@ struct RegistryInner {
 /// `reconcile` (a later checkpoint) drives via [`WatchRegistry::arm_now`]/
 /// [`WatchRegistry::disarm_now`].
 #[derive(Clone)]
-pub(crate) struct WatchRegistry {
+pub struct WatchRegistry {
     inner: Arc<RegistryInner>,
 }
 
@@ -837,7 +829,7 @@ impl WatchRegistry {
     /// the registry still builds and `arm_now`/`disarm_now` still run their
     /// synchronous halves inline - only the async event-consumption loop is
     /// skipped, which is exactly the piece those tests do not need.
-    pub(crate) fn new(
+    pub fn new(
         epoch_source: Arc<dyn EpochSource>,
         git_stats: Arc<GitSpawnStats>,
         config: WatchConfig,
@@ -880,7 +872,16 @@ impl WatchRegistry {
     /// selection (a later checkpoint) should observe for `key` right now.
     /// Unknown keys are `Unarmed` - the same fallback as a repo that has
     /// never been armed.
-    pub(crate) fn health_for(&self, key: &WatchKey) -> WatchHealth {
+    /// The TTL `git_toolbar.rs`'s TTL selection uses for an `Armed` repo
+    /// (ticket step 8's "120s armed / 2s degraded-or-unarmed" split). Reads
+    /// through to `WatchConfig::armed_ttl_ms` so a later checkpoint's
+    /// `WS_DASHBOARD_GIT_ARMED_TTL_MS` env override needs no change at this
+    /// call site - only at `WatchConfig`'s construction in `server.rs`.
+    pub fn armed_ttl_ms(&self) -> u64 {
+        self.inner.config.armed_ttl_ms
+    }
+
+    pub fn health_for(&self, key: &WatchKey) -> WatchHealth {
         let now = clock_ms();
         let state = self.inner.state.lock().expect("watch registry state lock poisoned");
         state
@@ -894,7 +895,7 @@ impl WatchRegistry {
     /// and (Linux) the directory walk on whatever thread calls this, so
     /// callers driving this from an async context should do so via
     /// `spawn_blocking` (checkpoint 6's `reconcile` does).
-    pub(crate) fn arm_now(&self, key: &WatchKey, targets: &WatchTargets) {
+    pub fn arm_now(&self, key: &WatchKey, targets: &WatchTargets) {
         do_arm(&self.inner, key, targets);
     }
 
@@ -902,7 +903,7 @@ impl WatchRegistry {
     /// directory no other repo still owns) and report [`WatchHealth::Unarmed`]
     /// from then on. Cheap - no `git` spawn, no filesystem walk - so, unlike
     /// `arm_now`, callers do not need to offload this to a blocking pool.
-    pub(crate) fn disarm_now(&self, key: &WatchKey) {
+    pub fn disarm_now(&self, key: &WatchKey) {
         do_disarm(&self.inner, key);
     }
 
@@ -936,7 +937,7 @@ impl WatchRegistry {
     /// inline only outside a Tokio runtime, e.g. a plain `#[test]`), so this
     /// method returns as soon as it has decided *what* to do, never after
     /// the `git status` spawn (and, on Linux, walk) an arm attempt costs.
-    pub(crate) fn reconcile(
+    pub fn reconcile(
         &self,
         entries: &[(WatchKey, Option<WatchTargets>, ws_dashboard_core::WorkRootAvailability)],
     ) {

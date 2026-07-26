@@ -104,6 +104,12 @@ pub struct AppState {
     /// replace the construction site in `server.rs` without touching a
     /// route.
     pub epoch_source: Arc<dyn EpochSource>,
+    /// Phase 4's FS-watch registry: arms/disarms per-repo `notify` watches
+    /// and drives `epoch_source` bumps off real filesystem events instead of
+    /// only mutating-route call sites. Shares the same `epoch_source` Arc as
+    /// the field above - a watcher-driven bump must be visible through the
+    /// exact instance `git_toolbar.rs` reads (ticket step 8).
+    pub watch_registry: crate::work_root_watch::WatchRegistry,
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,

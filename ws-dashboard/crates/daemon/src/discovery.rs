@@ -211,12 +211,6 @@ pub struct DashboardResourcesSync {
     /// checkpoint) disarms/no-ops those the same way it does an absent root.
     /// `resources::live_dashboard_resources_with_sync` feeds this straight
     /// into `WatchRegistry::reconcile`.
-    // `#[allow(dead_code)]`: not yet read anywhere - the reconcile call site
-    // lands in a later checkpoint (ticket step 7). Scoped to this one field
-    // (not the whole module, unlike `work_root_watch.rs`'s build-out) since
-    // `discovery.rs` is otherwise fully wired; remove once
-    // `resources::live_dashboard_resources_with_sync` consumes it.
-    #[allow(dead_code)]
     pub(crate) watch_reconcile_entries:
         Vec<(WatchKey, Option<crate::work_root_watch::WatchTargets>, WorkRootAvailability)>,
 }

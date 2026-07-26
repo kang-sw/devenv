@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
@@ -9,11 +9,25 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{WorkRootId, WorkRootKind};
 
-use crate::discovery::watch_key;
+use crate::discovery::{watch_key, WatchKey};
 use crate::git_exec::{capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats};
 use crate::git_state_cache::{git_cache_ttl_from_env, EpochSource, GitStateCache, RefState};
 use crate::router::AppState;
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
+use crate::work_root_watch::{WatchHealth, WatchRegistry};
+
+/// Ticket step 8's TTL split: an `Armed` repo's cache slot is trusted for
+/// the watcher's own armed TTL (real epochs, so staleness within the window
+/// is bounded by debounce latency, not blind polling) - `Degraded`/`Unarmed`
+/// fall back to the short poll-driven ceiling `git_cache_ttl_from_env`
+/// already used before Phase 4, since neither state has a live epoch signal
+/// to trust past that.
+fn ttl_for(watch_registry: &WatchRegistry, key: &WatchKey) -> Duration {
+    match watch_registry.health_for(key) {
+        WatchHealth::Armed => Duration::from_millis(watch_registry.armed_ttl_ms()),
+        WatchHealth::Degraded(_) | WatchHealth::Unarmed => git_cache_ttl_from_env(),
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +171,7 @@ pub async fn git_status(
             Ok(context) => Json(status_for_path(
                 &state_for_task.git_state_cache,
                 state_for_task.epoch_source.as_ref(),
+                &state_for_task.watch_registry,
                 &context.root_path,
                 &state_for_task.git_spawn_stats,
             ))
@@ -179,6 +194,7 @@ pub async fn git_branches(
             Ok(context) => Json(branches_for_path(
                 &state_for_task.git_state_cache,
                 state_for_task.epoch_source.as_ref(),
+                &state_for_task.watch_registry,
                 &context.root_path,
                 &state_for_task.git_spawn_stats,
             ))
@@ -201,6 +217,7 @@ pub async fn git_switch_branch(
         let stats: &GitSpawnStats = &state_for_task.git_spawn_stats;
         let cache = &state_for_task.git_state_cache;
         let epoch_source = state_for_task.epoch_source.as_ref();
+        let watch_registry = &state_for_task.watch_registry;
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
@@ -210,14 +227,14 @@ pub async fn git_switch_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch is unavailable",
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             );
         }
         if branch_checked_out_elsewhere(&context.root_path, stats, branch) {
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch is already checked out",
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             );
         }
         match run_git(
@@ -241,12 +258,12 @@ pub async fn git_switch_branch(
                 let key = watch_key(&context.root_path);
                 epoch_source.bump_refs(&key);
                 epoch_source.bump_worktree(&key);
-                Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
+                Json(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)).into_response()
             }
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch switch failed",
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             ),
         }
     })
@@ -265,6 +282,7 @@ pub async fn git_create_branch(
         let stats: &GitSpawnStats = &state_for_task.git_spawn_stats;
         let cache = &state_for_task.git_state_cache;
         let epoch_source = state_for_task.epoch_source.as_ref();
+        let watch_registry = &state_for_task.watch_registry;
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
@@ -273,7 +291,7 @@ pub async fn git_create_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "create without switch is unsupported",
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             );
         }
         let branch = request.branch_name.trim();
@@ -284,7 +302,7 @@ pub async fn git_create_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch cannot be created",
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             );
         }
         let mut args = vec!["switch", "-c", branch];
@@ -298,7 +316,7 @@ pub async fn git_create_branch(
                 return bounded_error(
                     StatusCode::BAD_REQUEST,
                     "base branch is unavailable",
-                    Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                    Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
                 );
             }
             args.push(base);
@@ -313,12 +331,12 @@ pub async fn git_create_branch(
                 let key = watch_key(&context.root_path);
                 epoch_source.bump_refs(&key);
                 epoch_source.bump_worktree(&key);
-                Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
+                Json(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)).into_response()
             }
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch create failed",
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             ),
         }
     })
@@ -389,6 +407,7 @@ async fn mutate_no_body(
         let stats: &GitSpawnStats = &state.git_spawn_stats;
         let cache = &state.git_state_cache;
         let epoch_source = state.epoch_source.as_ref();
+        let watch_registry = &state.watch_registry;
         let context = match resolve_git_context(&state, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
@@ -407,11 +426,11 @@ async fn mutate_no_body(
             epoch_source.bump_worktree(&key);
         }
         match outcome {
-            Ok(()) => Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response(),
+            Ok(()) => Json(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)).into_response(),
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 failure,
-                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, watch_registry, &context.root_path, stats)),
             ),
         }
     })
@@ -447,6 +466,7 @@ fn resolve_git_context(
 fn status_for_path(
     cache: &GitStateCache,
     epoch_source: &dyn EpochSource,
+    watch_registry: &WatchRegistry,
     root: &Path,
     stats: &GitSpawnStats,
 ) -> WorkRootGitStatus {
@@ -455,7 +475,7 @@ fn status_for_path(
     // concurrent mutation landing mid-`git`-spawn is caught as a miss on the
     // NEXT read rather than being silently blessed into this slot.
     let (worktree_epoch, refs_epoch) = epoch_source.epochs(&key);
-    let ttl = git_cache_ttl_from_env();
+    let ttl = ttl_for(watch_registry, &key);
     let changes = cache.worktree(&key, worktree_epoch, ttl, || changes_for_path(root, stats));
     let refs = cache.refs(&key, refs_epoch, ttl, || compute_ref_state(root, stats));
     WorkRootGitStatus {
@@ -480,6 +500,7 @@ fn status_for_path(
 fn branches_for_path(
     cache: &GitStateCache,
     epoch_source: &dyn EpochSource,
+    watch_registry: &WatchRegistry,
     root: &Path,
     stats: &GitSpawnStats,
 ) -> GitBranchList {
@@ -488,7 +509,7 @@ fn branches_for_path(
     // same `epochs()` call as `status_for_path` (D7) - `branches_for_path`
     // simply never calls `cache.worktree`.
     let (_worktree_epoch, refs_epoch) = epoch_source.epochs(&key);
-    let ttl = git_cache_ttl_from_env();
+    let ttl = ttl_for(watch_registry, &key);
     let refs = cache.refs(&key, refs_epoch, ttl, || compute_ref_state(root, stats));
     GitBranchList {
         current: refs.branch_name.clone(),
@@ -1042,14 +1063,30 @@ mod tests {
         fn bump_refs(&self, _key: &crate::discovery::WatchKey) {}
     }
 
+    /// `Off` so this test's `WatchRegistry` never attempts to arm - it exists
+    /// only to satisfy `status_for_path`/`branches_for_path`'s parameter,
+    /// not to exercise watch behavior (that lives in `work_root_watch.rs`'s
+    /// own tests and `tests/git_watch.rs`).
+    fn inert_watch_registry() -> WatchRegistry {
+        WatchRegistry::new(
+            std::sync::Arc::new(crate::git_state_cache::MutationEpochSource::default()),
+            std::sync::Arc::new(GitSpawnStats::default()),
+            crate::work_root_watch::WatchConfig {
+                mode: crate::work_root_watch::WatchMode::Off,
+                ..Default::default()
+            },
+        )
+    }
+
     #[test]
     fn status_for_path_samples_the_epoch_exactly_once() {
         let stats = GitSpawnStats::default();
         let dir = init_fixture_repo(&stats);
         let cache = GitStateCache::default();
         let epoch_source = CountingEpochSource::default();
+        let watch_registry = inert_watch_registry();
 
-        let _ = status_for_path(&cache, &epoch_source, &dir, &stats);
+        let _ = status_for_path(&cache, &epoch_source, &watch_registry, &dir, &stats);
 
         assert_eq!(
             epoch_source.calls.load(Ordering::Relaxed),
@@ -1068,8 +1105,9 @@ mod tests {
         let dir = init_fixture_repo(&stats);
         let cache = GitStateCache::default();
         let epoch_source = CountingEpochSource::default();
+        let watch_registry = inert_watch_registry();
 
-        let _ = branches_for_path(&cache, &epoch_source, &dir, &stats);
+        let _ = branches_for_path(&cache, &epoch_source, &watch_registry, &dir, &stats);
 
         assert_eq!(
             epoch_source.calls.load(Ordering::Relaxed),
