@@ -6,8 +6,8 @@ spec:
 related:
   260723-epic-ticket-write-reshape: refines its "verify = mechanical floor" boundary from intra-file to cross-file reference resolution, and adopts its must-not-forget action-time framing
   260724-bug-ws-git-commit-verify-fails-on-staged-rename: path-based emission gating is chosen specifically so this feature does not depend on staged-rename detection
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Ticket-graph advisories at verify: parent-board nudge and cross-reference integrity
