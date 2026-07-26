@@ -839,6 +839,16 @@ struct RepoRuntime {
     /// instead of queuing several.
     last_ignore_rederive_attempt_ms: Option<u64>,
     debounce: HashMap<EpochKind, Debouncer>,
+    /// Set by `WatchRegistry::disarm_and_suppress_arm`, cleared by
+    /// `WatchRegistry::resume_arm` (review finding 9: the Windows
+    /// disarm-before-remove race). `finish_arm` refuses to leave a repo
+    /// `Armed` while this is set - closing the race where
+    /// `resolve_worktree_remove`'s own `reconcile` call already dispatched a
+    /// `spawn_blocking` arm for this key before the removal route's disarm
+    /// call ran; that in-flight arm can otherwise land after the disarm and
+    /// re-register the directory handle the whole rule exists to release,
+    /// while `git worktree remove` is still running.
+    suppress_arm: bool,
 }
 
 impl RepoRuntime {
@@ -854,6 +864,7 @@ impl RepoRuntime {
             last_event_at_ms: None,
             ignore_stale: false,
             last_ignore_rederive_attempt_ms: None,
+            suppress_arm: false,
             debounce: HashMap::new(),
         }
     }
@@ -1011,6 +1022,40 @@ impl WatchRegistry {
     /// `arm_now`, callers do not need to offload this to a blocking pool.
     pub fn disarm_now(&self, key: &WatchKey) {
         do_disarm(&self.inner, key);
+    }
+
+    /// Windows disarm-before-remove (ticket Constraints), hardened against
+    /// review finding 9: like `disarm_now`, but also suppresses any arm
+    /// outcome for `key` until `resume_arm` is called. Plain `disarm_now`
+    /// alone is not enough here - the caller's own `resolve_worktree_remove`
+    /// (via `live_dashboard_resources`) already ran `reconcile` moments
+    /// earlier and may have dispatched a `spawn_blocking` arm for this exact
+    /// key before this method runs. That in-flight arm can complete and call
+    /// `finish_arm` AFTER this method's `do_disarm`, re-registering the
+    /// directory handle the disarm-before-remove rule exists to release,
+    /// while `git worktree remove` is still running. Stamping
+    /// `last_arm_attempt_ms` also blocks `reconcile`'s own flat rate-limit
+    /// guard from scheduling a brand-new arm attempt for the remainder of
+    /// the removal; `finish_arm` consults the suppression flag itself to
+    /// catch the in-flight case the timestamp alone cannot.
+    pub fn disarm_and_suppress_arm(&self, key: &WatchKey) {
+        do_disarm(&self.inner, key);
+        let now = clock_ms();
+        let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
+        if let Some(repo) = state.repos.get_mut(key) {
+            repo.last_arm_attempt_ms = Some(now);
+            repo.suppress_arm = true;
+        }
+    }
+
+    /// Clears the suppression `disarm_and_suppress_arm` set, once the
+    /// removal it was protecting has finished (success or failure alike) -
+    /// `reconcile` and any arm attempt may resume normally for this key.
+    pub fn resume_arm(&self, key: &WatchKey) {
+        let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
+        if let Some(repo) = state.repos.get_mut(key) {
+            repo.suppress_arm = false;
+        }
     }
 
     /// Ticket step 7: the one hook everything routes through - register/
@@ -1517,6 +1562,22 @@ fn finish_arm(
     if matches!(health, WatchHealth::Armed) {
         inner.epoch_source.bump_worktree(key);
         inner.epoch_source.bump_refs(key);
+
+        // Windows disarm-before-remove suppression (review finding 9): an
+        // arm dispatched before `disarm_and_suppress_arm` ran can still land
+        // here afterward. `registered_dirs`/`dir_index` were already synced
+        // to what this arm actually registered by `update_dir_index` above,
+        // so it is safe to immediately reverse it via a normal `do_disarm` -
+        // that correctly unwatches exactly what was just registered, closing
+        // the race instead of leaving a removal in progress raced by a stale
+        // in-flight arm re-registering the directory handle.
+        let suppressed = {
+            let state = inner.state.lock().expect("watch registry state lock poisoned");
+            state.repos.get(key).map(|repo| repo.suppress_arm).unwrap_or(false)
+        };
+        if suppressed {
+            do_disarm(inner, key);
+        }
     }
 }
 

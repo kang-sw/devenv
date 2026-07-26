@@ -557,13 +557,24 @@ pub async fn git_worktree_remove_submit(
     // inotify budget read, and mount-type resolution. `reconcile` re-arms the
     // surviving primary root on the next resources poll; the removed
     // worktree itself simply drops out of the next `entries` set.
-    state
-        .watch_registry
-        .disarm_now(&crate::discovery::watch_key(&context.target_path));
+    //
+    // `disarm_and_suppress_arm` (not plain `disarm_now`) - review finding 9:
+    // `resolve_worktree_remove` above already ran its own `reconcile` (via
+    // `live_dashboard_resources`), which may have dispatched a
+    // `spawn_blocking` arm for this exact key before this line runs. Plain
+    // `disarm_now` cannot stop that in-flight arm from completing and
+    // re-registering the directory handle after this disarm and while
+    // `git worktree remove` runs below. The suppression is cleared by
+    // `resume_arm` right after the removal command finishes, whether it
+    // succeeded or failed.
+    let target_watch_key = crate::discovery::watch_key(&context.target_path);
+    state.watch_registry.disarm_and_suppress_arm(&target_watch_key);
 
     let mut command =
         worktree_remove_command(&context.primary_root_path, &context.target_path, request.force);
-    let output = match command.output() {
+    let output = command.output();
+    state.watch_registry.resume_arm(&target_watch_key);
+    let output = match output {
         Ok(output) => output,
         Err(_) => {
             return bounded_error(StatusCode::INTERNAL_SERVER_ERROR, "git worktree remove failed")
