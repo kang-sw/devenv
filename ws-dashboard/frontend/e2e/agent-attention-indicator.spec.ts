@@ -1056,7 +1056,9 @@ test("browser-level title/favicon attention cue (Tier 1)", async ({
       token = readCallbackToken(agentTerminalId);
 
       // Same restoration path every other test in this file uses: the direct
-      // POST above bypassed this tab's React state.
+      // terminal-creation fetch inside `spawnTerminalInRoot` above (NOT
+      // `postTurnState`, which has not run yet - the first call is in the
+      // NEXT test.step) bypassed this tab's React state.
       await page.reload({ waitUntil: "domcontentloaded" });
       await selectWorkRootMinimal(page, workRoot);
       await expect(terminalTab(page, agentTerminalId)).toHaveCount(1, {
