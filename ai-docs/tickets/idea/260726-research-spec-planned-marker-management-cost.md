@@ -30,6 +30,20 @@ A second owner statement the same day, on the adjacent ticket: "지금의 스펙
 `260726-bug-sage-ready-enforcement-single-chokepoint`'s `contract-first-spec`
 from yes to no, making it the first concrete instance of the preference.
 
+**The same owner then supplied the strongest argument against their own
+position**, and it is recorded here with equal weight:
+
+> 하긴, 사실 티켓 사이의 충돌을 막으려면 애초에 spec 쪽에 자리를 잡아놔야 하는
+> 것도 맞네요.. 섣불리 없애자! 할 만한 아이템이 아닌 것도 맞는 것 같습니다.
+
+Restated: `🚧` is not only documentation of planned behavior, it is a **claim
+staked in shared territory**. Two in-flight `ready/` tickets touching the same
+spec area collide in the spec, in one place, at write time. This is a different
+argument from the spec-corpus-contradiction case below — that one is
+ticket-vs-existing-text, this one is ticket-vs-ticket — and it is the argument
+`## Spec Impact` answers worst (see Topic 3). Do not treat this research as
+leaning toward retirement.
+
 ## Why this is research, not a change ticket
 
 The question is whether a shipped mechanism should exist. Neither the cost side
@@ -57,6 +71,15 @@ recorded here so it is not re-derived:
   index under owner authorization). A ticket-local `## Spec Impact` cannot resolve
   a contradiction living in the spec corpus. Any proposal to retire `🚧` must say
   what happens to this case — it is the mechanism's best surviving argument.
+- **Concurrent-ticket collision has no other detection surface.** Owner-supplied,
+  above. A `🚧` entry makes two `ready/` tickets contending for the same spec area
+  collide at write time, in the spec, where both authors are already looking.
+  Nothing else in the system does this: `## Spec Impact` is per-ticket prose,
+  `tickets.verify` does not read ticket bodies, and
+  `260726-feat-verify-ticket-graph-advisories` explicitly excludes body reads. So
+  retiring `🚧` does not merely relocate this check — it removes it. Measure how
+  often the collision actually occurs before pricing it, but note that the
+  counterfactual is "undetected", not "detected elsewhere".
 - **Adoption is unmeasured.** How many `🚧` entries exist, how many have a live
   backing `ready/` ticket, and how many went stale after their ticket closed are
   all countable and none are counted.
@@ -79,11 +102,20 @@ the unsatisfiable-ordering fix priced above.
 
 ### 3. Is the `ready/` inventory scan actually equivalent?
 
-The owner's premise. Test it: is `## Spec Impact` currently written at a fidelity
-that would substitute for spec-vocabulary contract text? Several were written
-this session — they state direction and caller-visible change, not contract. If
-substitution requires raising `## Spec Impact`'s bar, that cost belongs in the
-comparison, and it interacts with `260723-feat-ready-spec-address-hard-gate`.
+The owner's premise. Test it on two axes, because they fail differently:
+
+- **Fidelity.** Is `## Spec Impact` written at a level that could substitute for
+  spec-vocabulary contract text? Several were written this session — they state
+  direction and caller-visible change, not contract. If substitution requires
+  raising the bar, that cost belongs in the comparison, and it interacts with
+  `260723-feat-ready-spec-address-hard-gate`.
+- **Locality.** This is the harder failure and the one the owner identified. A
+  scan is a *read* over N scattered per-ticket sections; the spec is a *write*
+  into one shared location. Only the second forces two conflicting authors to
+  meet. No amount of raising `## Spec Impact`'s fidelity fixes this, because the
+  defect is where the text lives, not how good it is. Any retirement proposal
+  must name what replaces this property — a real answer, not "reviewers will
+  notice".
 
 ### 4. What happens to the dependent tickets?
 

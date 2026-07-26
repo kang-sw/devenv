@@ -12,14 +12,16 @@ sage-review-completeness: blocked
 
 # The 🚧 marker prerequisite is stated as a filesystem invariant that no contract-first path can satisfy
 
-> **Do not implement before `260726-research-spec-planned-marker-management-cost`
-> resolves.** That research asks whether the `🚧` mechanism should exist at all.
-> This ticket assumes it does and makes its ordering satisfiable, so a retirement
-> verdict drops this ticket rather than unblocking it. The one finding that
-> survives either verdict is the inline commit-ownership defect
-> (`lead-write-spec` step 7 commits unconditionally while the contract-first
-> branch invokes it inline) — a real bug independent of `🚧`, to be re-homed
-> rather than dropped with the rest.
+> **Confirm `260726-research-spec-planned-marker-management-cost` before
+> implementing.** That research asks whether the `🚧` mechanism should exist at
+> all; this ticket assumes it does and makes its ordering satisfiable. As of
+> 2026-07-26 the keep side is the stronger one — the owner identified that `🚧` is
+> the only surface where two in-flight `ready/` tickets contending for the same
+> spec area collide, which no `## Spec Impact` scan reproduces — so this ticket is
+> likely to proceed as written. The gate is a direction check, not a hold for a
+> probable drop. The inline commit-ownership defect (`lead-write-spec` step 7
+> commits unconditionally while the contract-first branch invokes it inline) is a
+> real bug independent of `🚧` and survives either verdict.
 
 ## Background
 
