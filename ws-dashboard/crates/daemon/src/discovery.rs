@@ -601,8 +601,11 @@ impl WatchKey {
 }
 
 /// Derive a `GitStateCache`/`EpochSource` memo key for `path`, sharing
-/// `GitProbeKey`'s normalization chain (see `normalized_probe_key`).
-pub(crate) fn watch_key(path: &Path) -> WatchKey {
+/// `GitProbeKey`'s normalization chain (see `normalized_probe_key`). `pub`
+/// (D7): `tests/git_watch.rs` is an external test crate that needs to derive
+/// the exact same key production computes, to read epochs and drive
+/// `WatchRegistry::reconcile`/`arm_now` directly against a real fixture repo.
+pub fn watch_key(path: &Path) -> WatchKey {
     WatchKey(normalized_probe_key(path))
 }
 
