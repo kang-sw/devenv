@@ -5,8 +5,11 @@
 //! directly, so that:
 //!
 //! - every spawn is subject to a bounded wait with a hard kill on expiry
-//!   (`WS_DASHBOARD_GIT_TIMEOUT_MS`, default 10s) instead of the previous
-//!   unbounded `.output()` call,
+//!   (`WS_DASHBOARD_GIT_TIMEOUT_MS`, default 10s; `0` disables the bound and
+//!   waits indefinitely, matching `WS_DASHBOARD_GIT_PROBE_TTL_MS`'s "`0`
+//!   disables" reading) instead of the previous unbounded `.output()` call.
+//!   The env var is read and parsed once per process, so the budget cannot
+//!   silently change mid-run,
 //! - stdout/stderr are drained concurrently with the wait so a large-output
 //!   child can never deadlock against a full pipe buffer,
 //! - every spawn (successful, failed, or timed out) is counted in a shared
@@ -27,16 +30,41 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Result of a successful (zero-exit, non-timed-out) `capture` call.
 #[derive(Clone, Debug)]
 pub struct GitOutcome {
     pub status: ExitStatus,
+    /// Lossy (`from_utf8_lossy`) decode of the child's stdout, which is the
+    /// right default for human-facing text output. Call sites that turn stdout
+    /// into filesystem paths must use [`GitOutcome::stdout_strict`] instead.
     pub stdout: String,
     pub stderr: String,
     pub elapsed: Duration,
+    stdout_valid_utf8: bool,
+}
+
+impl GitOutcome {
+    /// Strict-UTF-8 view of stdout: `None` when the child's stdout was not
+    /// valid UTF-8. Preserves the pre-seam `String::from_utf8(..).ok()?`
+    /// semantics for the discovery probes, where a replacement-char-mangled
+    /// path is worse than no path at all.
+    pub fn stdout_strict(&self) -> Option<&str> {
+        self.stdout_valid_utf8.then_some(self.stdout.as_str())
+    }
+}
+
+/// Decode child output, reporting whether the bytes were valid UTF-8 so
+/// [`GitOutcome::stdout_strict`] can offer the strict view without re-scanning
+/// a lossy `String` (where a genuine U+FFFD is indistinguishable from a
+/// substituted one).
+fn decode_output(bytes: &[u8]) -> (String, bool) {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => (text.to_owned(), true),
+        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), false),
+    }
 }
 
 /// Why a `capture` call did not produce a [`GitOutcome`].
@@ -214,22 +242,72 @@ impl GitSpawnStats {
 
 const DEFAULT_GIT_TIMEOUT_MS: u64 = 10_000;
 
+/// Upper clamp for a configured budget. `Instant + Duration` panics on
+/// overflow and `WS_DASHBOARD_GIT_TIMEOUT_MS` accepts any `u64` millis, so an
+/// absurd value must degrade to "effectively never" instead of panicking the
+/// calling `spawn_blocking` thread.
+const MAX_GIT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// First poll interval of the bounded wait. Deliberately far below the fastest
+/// observed poll-path git run (`branch --show-current` ~1.4ms) so the common
+/// case returns essentially at child exit.
+const INITIAL_POLL_INTERVAL: Duration = Duration::from_micros(250);
+
+/// Ceiling for the poll interval, so a long-running `fetch` costs at most one
+/// wake-up per 5ms instead of a busy spin.
+const MAX_POLL_INTERVAL: Duration = Duration::from_millis(5);
+
+static GIT_TIMEOUT: OnceLock<Duration> = OnceLock::new();
+
 /// `WS_DASHBOARD_GIT_TIMEOUT_MS`-driven default budget for `capture`, default
-/// 10s. Mirrors `discovery.rs`'s `git_probe_ttl_from_env` shape.
+/// 10s, with `0` meaning "no timeout / wait indefinitely" (the same reading
+/// `WS_DASHBOARD_GIT_PROBE_TTL_MS` gives `0`). Read and parsed once per
+/// process, mirroring `discovery.rs`'s `git_probe_ttl_from_env`, which is read
+/// once into `GitProbeCache::default`.
 pub fn git_timeout_from_env() -> Duration {
-    let millis = env::var("WS_DASHBOARD_GIT_TIMEOUT_MS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_GIT_TIMEOUT_MS);
-    Duration::from_millis(millis)
+    *GIT_TIMEOUT.get_or_init(|| {
+        let millis = env::var("WS_DASHBOARD_GIT_TIMEOUT_MS")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .unwrap_or(DEFAULT_GIT_TIMEOUT_MS);
+        Duration::from_millis(millis)
+    })
 }
 
-/// Spawn `git -C <root> <args>`, bounded by `budget`.
+/// Deadline for a bounded wait started at `now`, or `None` for an unbounded
+/// wait (`budget` of zero, i.e. `WS_DASHBOARD_GIT_TIMEOUT_MS=0`).
+fn deadline_for(now: Instant, budget: Duration) -> Option<Instant> {
+    if budget.is_zero() {
+        return None;
+    }
+    Some(
+        now.checked_add(budget)
+            .or_else(|| now.checked_add(MAX_GIT_TIMEOUT))
+            .unwrap_or(now),
+    )
+}
+
+/// Geometric backoff for the `try_wait` poll loop.
+///
+/// A fixed quantum here is a latency bug, not a tuning choice: every
+/// poll-path git run measures 1.4-6.0ms, so a 10ms floor would add a full
+/// quantum to each of `status_for_path`'s 4-5 sequential spawns and turn
+/// `/git/status` from ~12-16ms into 40-50ms. The previous `.output()` returned
+/// at child exit and added nothing, and this seam is not allowed to change
+/// observable git behavior.
+fn next_poll_interval(previous: Duration) -> Duration {
+    previous.saturating_mul(2).min(MAX_POLL_INTERVAL)
+}
+
+/// Spawn `git -C <root> <args>`, bounded by `budget` (a zero `budget` means
+/// unbounded, see [`git_timeout_from_env`]).
 ///
 /// Drains stdout/stderr concurrently with the wait (one reader thread per
 /// pipe, reading to EOF) so a child that fills a pipe buffer (~64 KB) before
-/// exiting can never deadlock the wait loop. On expiry the child is killed
-/// and the reader threads are joined before returning `GitFailure::Timeout`.
+/// exiting can never deadlock the wait loop. On expiry the child is killed and
+/// reaped and the reader threads are *detached* (see the comment at the detach
+/// site) before returning `GitFailure::Timeout`, so the call never outlives
+/// `budget` by more than one kill-and-reap.
 ///
 /// Every call increments `stats.total` and the per-subcommand counter,
 /// regardless of outcome. `stats.timeouts`/`stats.failures` are incremented
@@ -301,21 +379,31 @@ fn capture_with_program(
         buf
     });
 
-    let deadline = Instant::now() + budget;
+    let deadline = deadline_for(Instant::now(), budget);
+    let mut poll_interval = INITIAL_POLL_INTERVAL;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) => {
-                if Instant::now() >= deadline {
-                    break None;
+                let mut sleep_for = poll_interval;
+                if let Some(deadline) = deadline {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        break None;
+                    }
+                    // Never overshoot the budget by up to a poll interval.
+                    sleep_for = sleep_for.min(deadline - now);
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(sleep_for);
+                poll_interval = next_poll_interval(poll_interval);
             }
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
+                // Detached, not joined, for the same reason as the timeout
+                // path below: a grandchild may still hold the pipes open.
+                drop(stdout_reader);
+                drop(stderr_reader);
                 stats.record_failure();
                 tracing::warn!(
                     subcommand = subcommand.as_str(),
@@ -328,13 +416,28 @@ fn capture_with_program(
     };
 
     let Some(status) = status else {
-        // Budget expired: kill, reap, and join the readers so the pipes'
-        // read ends (and the threads blocked on them) are cleaned up before
-        // returning.
+        // Budget expired. Kill and reap the DIRECT child only: `wait()`
+        // returns promptly even while a grandchild is still alive.
+        //
+        // DELIBERATE THREAD LEAK: the reader threads are detached, never
+        // joined, on this path. `read_to_end` returns only once EVERY write
+        // end of the pipe is closed, and `kill()` signals the direct child
+        // alone - so `fetch`/`push`/`pull` (which exec `ssh` and credential
+        // helpers with inherited stdout/stderr) and `switch` (post-checkout
+        // hooks) would keep a joining `capture` blocked long past `budget`,
+        // making the "bounded wait" unbounded for exactly the network
+        // operations the bound exists for. Each timeout therefore leaks two
+        // threads plus their two pipe read handles until the pipe finally
+        // closes on its own; the cost is bounded by timeout frequency, and
+        // the captured output is discarded on this path anyway.
+        //
+        // Rejected alternative: joining with a grace period. Any grace long
+        // enough to be useful can still push the total wait past `budget`,
+        // which is the defect this avoids.
         let _ = child.kill();
         let _ = child.wait();
-        let _ = stdout_reader.join();
-        let _ = stderr_reader.join();
+        drop(stdout_reader);
+        drop(stderr_reader);
         stats.record_timeout();
         let elapsed_ms = start.elapsed().as_millis() as u64;
         tracing::warn!(
@@ -348,8 +451,8 @@ fn capture_with_program(
     let stdout_bytes = stdout_reader.join().unwrap_or_default();
     let stderr_bytes = stderr_reader.join().unwrap_or_default();
     let elapsed = start.elapsed();
-    let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
-    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    let (stdout, stdout_valid_utf8) = decode_output(&stdout_bytes);
+    let (stderr, _) = decode_output(&stderr_bytes);
 
     if !status.success() {
         stats.record_failure();
@@ -371,6 +474,7 @@ fn capture_with_program(
         stdout,
         stderr,
         elapsed,
+        stdout_valid_utf8,
     })
 }
 
@@ -426,18 +530,25 @@ mod tests {
         count.load(Ordering::SeqCst)
     }
 
-    #[test]
-    fn capture_kills_and_reports_timeout_for_a_child_that_outlives_its_budget() {
+    /// Shared body of the kill-on-timeout pin. Both platform variants below
+    /// call it, so the assertion logic is compiled and checked everywhere and
+    /// only the choice of long-running program is platform-specific. This pin
+    /// is one of the phase's two load-bearing regression pins for the
+    /// drain/kill contract, and Windows is the production platform, so it must
+    /// not be unix-only.
+    fn assert_capture_kills_on_timeout(program: &str, args: &[&str]) {
         let stats = GitSpawnStats::default();
         let start = Instant::now();
-        // Spawned directly (not via `sh -c`) so the killed process has no
+        // Spawned directly (never via a shell) so the killed process has no
         // grandchild that could keep inheriting the stdout/stderr pipes open
-        // after the kill.
+        // after the kill. `capture` detaches its readers on the timeout path
+        // precisely because a grandchild CAN do that; this pin covers the
+        // direct-child case.
         let result = capture_with_program(
-            "sleep",
+            program,
             &stats,
             Path::new("."),
-            &["5"],
+            args,
             GitFailureExpectation::Unexpected,
             Duration::from_millis(200),
         );
@@ -448,7 +559,7 @@ mod tests {
         );
         assert!(
             start.elapsed() < Duration::from_secs(4),
-            "capture must kill the child instead of waiting out the full sleep"
+            "capture must kill the child instead of waiting out its full runtime"
         );
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.total, 1);
@@ -456,24 +567,108 @@ mod tests {
         assert_eq!(snapshot.failures, 1);
     }
 
-    #[test]
-    fn capture_survives_a_child_emitting_more_than_1mb_of_stdout() {
+    /// Shared body of the >1 MB-stdout survival pin. Asserts at least 1 MB
+    /// (not an exact byte count) so the same assertions can cover both
+    /// platforms' emitters, which may differ by a trailing newline.
+    fn assert_capture_survives_large_stdout(program: &str, args: &[&str]) {
         let stats = GitSpawnStats::default();
         let result = capture_with_program(
-            "sh",
+            program,
             &stats,
             Path::new("."),
-            &["-c", "head -c 2000000 /dev/zero"],
+            args,
             GitFailureExpectation::Unexpected,
-            Duration::from_secs(10),
+            Duration::from_secs(30),
         );
 
         let outcome = result.expect("a large-stdout child must succeed, not time out or deadlock");
-        assert_eq!(outcome.stdout.len(), 2_000_000);
+        assert!(
+            outcome.stdout.len() >= 1_000_000,
+            "expected >1MB of stdout, got {} bytes",
+            outcome.stdout.len()
+        );
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.timeouts, 0);
         assert_eq!(snapshot.failures, 0);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_kills_and_reports_timeout_for_a_child_that_outlives_its_budget() {
+        assert_capture_kills_on_timeout("sleep", &["5"]);
+    }
+
+    /// Windows counterpart: `ping` is in `System32`, needs no shell, and
+    /// `-n 6` against loopback runs ~5s without reading stdin.
+    #[cfg(windows)]
+    #[test]
+    fn capture_kills_and_reports_timeout_for_a_child_that_outlives_its_budget() {
+        assert_capture_kills_on_timeout("ping", &["-n", "6", "127.0.0.1"]);
+    }
+
+    /// The realistic timeout case the detach exists for: `fetch`/`push`/`pull`
+    /// exec transport and credential helpers that inherit stdout/stderr, so
+    /// killing the direct child does not close the pipes. Joining the readers
+    /// here would block for the grandchild's full lifetime (5s), blowing the
+    /// 200ms budget. Unix-only because provoking a grandchild needs a shell;
+    /// the fix it pins is platform-independent.
+    #[cfg(unix)]
+    #[test]
+    fn capture_times_out_within_budget_when_a_grandchild_still_holds_the_pipes() {
+        let stats = GitSpawnStats::default();
+        let start = Instant::now();
+        let result = capture_with_program(
+            "sh",
+            &stats,
+            Path::new("."),
+            &["-c", "sleep 5 & sleep 5"],
+            GitFailureExpectation::Unexpected,
+            Duration::from_millis(200),
+        );
+
+        assert!(
+            matches!(result, Err(GitFailure::Timeout)),
+            "expected Timeout, got {result:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "capture must not wait for a grandchild to release the pipes; took {:?}",
+            start.elapsed()
+        );
+        assert_eq!(stats.snapshot().timeouts, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_survives_a_child_emitting_more_than_1mb_of_stdout() {
+        assert_capture_survives_large_stdout("sh", &["-c", "head -c 2000000 /dev/zero"]);
+    }
+
+    /// Windows counterpart: `[Console]::Out.Write` bypasses PowerShell's
+    /// output formatting (which can wrap or pad), so this emits exactly
+    /// 2,000,000 ASCII bytes. `powershell.exe` parses standard MSVCRT argument
+    /// quoting, so the single quoted `-Command` argument survives `Command`'s
+    /// escaping (unlike `cmd /C`).
+    #[cfg(windows)]
+    #[test]
+    fn capture_survives_a_child_emitting_more_than_1mb_of_stdout() {
+        assert_capture_survives_large_stdout(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                "[Console]::Out.Write('x' * 2000000)",
+            ],
+        );
+    }
+
+    /// A shell-free-as-possible way to get a deterministic exit code 1, per
+    /// platform. Neither form contains a space inside a single argument, so
+    /// `Command`'s argument escaping is not a factor.
+    #[cfg(unix)]
+    const EXIT_ONE: (&str, &[&str]) = ("sh", &["-c", "exit 1"]);
+    #[cfg(windows)]
+    const EXIT_ONE: (&str, &[&str]) = ("cmd", &["/C", "exit", "1"]);
 
     #[test]
     fn expected_non_zero_exit_increments_failures_without_logging() {
@@ -481,10 +676,10 @@ mod tests {
 
         let events = count_events(|| {
             let result = capture_with_program(
-                "sh",
+                EXIT_ONE.0,
                 &stats,
                 Path::new("."),
-                &["-c", "exit 1"],
+                EXIT_ONE.1,
                 GitFailureExpectation::ExpectedNonZero,
                 Duration::from_secs(5),
             );
@@ -510,10 +705,10 @@ mod tests {
 
         let events = count_events(|| {
             let result = capture_with_program(
-                "sh",
+                EXIT_ONE.0,
                 &stats,
                 Path::new("."),
-                &["-c", "exit 1"],
+                EXIT_ONE.1,
                 GitFailureExpectation::Unexpected,
                 Duration::from_secs(5),
             );
@@ -527,11 +722,14 @@ mod tests {
         assert_eq!(stats.snapshot().failures, 1);
     }
 
+    /// Portable on purpose: `total` and `by_subcommand` are recorded before
+    /// the spawn is attempted, so this pin needs no real program on either
+    /// platform.
     #[test]
     fn by_subcommand_is_keyed_by_the_token_after_leading_dash_dash_flags() {
         let stats = GitSpawnStats::default();
         let _ = capture_with_program(
-            "sh",
+            "ws-dashboard-git-exec-no-such-program",
             &stats,
             Path::new("."),
             &["--no-optional-locks", "diff-index", "-M"],
@@ -555,6 +753,80 @@ mod tests {
         assert_eq!(
             GitSubcommand::from_args(&["--no-optional-locks", "status"]),
             GitSubcommand::Status
+        );
+    }
+
+    /// Pins the backoff *schedule*, not wall-clock latency (which would flake).
+    /// The first interval must stay well under the ~1.4ms fastest poll-path git
+    /// run, or every poll-path spawn pays a sleep it did not previously pay.
+    #[test]
+    fn poll_interval_doubles_from_a_sub_millisecond_start_and_caps_at_five_ms() {
+        let mut schedule = vec![INITIAL_POLL_INTERVAL];
+        for _ in 0..6 {
+            let previous = *schedule.last().expect("non-empty");
+            schedule.push(next_poll_interval(previous));
+        }
+
+        assert_eq!(
+            schedule,
+            vec![
+                Duration::from_micros(250),
+                Duration::from_micros(500),
+                Duration::from_micros(1_000),
+                Duration::from_micros(2_000),
+                Duration::from_micros(4_000),
+                Duration::from_millis(5),
+                Duration::from_millis(5),
+            ]
+        );
+        assert!(INITIAL_POLL_INTERVAL < Duration::from_millis(1));
+        assert_eq!(next_poll_interval(Duration::MAX), MAX_POLL_INTERVAL);
+    }
+
+    #[test]
+    fn zero_budget_waits_forever_and_an_absurd_budget_clamps_instead_of_panicking() {
+        let now = Instant::now();
+
+        assert_eq!(
+            deadline_for(now, Duration::ZERO),
+            None,
+            "WS_DASHBOARD_GIT_TIMEOUT_MS=0 must mean no timeout, matching WS_DASHBOARD_GIT_PROBE_TTL_MS"
+        );
+        assert_eq!(
+            deadline_for(now, Duration::from_millis(50)),
+            now.checked_add(Duration::from_millis(50))
+        );
+
+        let clamped = deadline_for(now, Duration::MAX).expect("a non-zero budget has a deadline");
+        assert!(clamped > now);
+        assert_eq!(
+            clamped,
+            now.checked_add(MAX_GIT_TIMEOUT)
+                .expect("a one-day deadline is representable")
+        );
+    }
+
+    #[test]
+    fn stdout_strict_rejects_invalid_utf8_while_stdout_stays_lossy() {
+        let (text, valid) = decode_output(b"refs/heads/main\n");
+        assert!(valid);
+        assert_eq!(text, "refs/heads/main\n");
+
+        let (lossy, valid) = decode_output(b"/tmp/\xffbroken");
+        assert!(!valid, "invalid UTF-8 must be reported, not silently mangled");
+        assert!(lossy.contains('\u{fffd}'));
+
+        let outcome = GitOutcome {
+            status: ExitStatus::default(),
+            stdout: lossy,
+            stderr: String::new(),
+            elapsed: Duration::ZERO,
+            stdout_valid_utf8: valid,
+        };
+        assert_eq!(
+            outcome.stdout_strict(),
+            None,
+            "path-consuming call sites must see None, as they did before the seam"
         );
     }
 }

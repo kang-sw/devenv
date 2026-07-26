@@ -499,6 +499,14 @@ pub(crate) fn changes_for_path(root: &Path, stats: &GitSpawnStats) -> GitChangeS
     // byte-identical to the prior command across modified, rename, and
     // mode-change cases. Mode-only changes surface as `0\t0\tpath`, summed
     // harmlessly below.
+    // ExpectedNonZero: `diff-index ... HEAD` exits 128 (`fatal: bad revision
+    // 'HEAD'`) on an unborn HEAD, which is a routine state on this 5s poll
+    // path - `GitDiscovery::probe` classifies a freshly-`git init`ed root as a
+    // primary root and `branch --show-current` succeeds there, so
+    // `status_for_path` reaches this call. Warning would emit one line per poll
+    // per such root, which is the noise the warn policy exists to prevent. Same
+    // precondition as the sibling `rev-parse --short HEAD` above, which is
+    // already ExpectedNonZero. Failure leaves the line totals at zero.
     if let Some(numstat) = git_text(
         stats,
         root,
@@ -510,7 +518,7 @@ pub(crate) fn changes_for_path(root: &Path, stats: &GitSpawnStats) -> GitChangeS
             "HEAD",
             "--",
         ],
-        GitFailureExpectation::Unexpected,
+        GitFailureExpectation::ExpectedNonZero,
     ) {
         for line in numstat.lines() {
             let mut parts = line.split('\t');

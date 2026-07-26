@@ -55,6 +55,24 @@ pub struct LocalDashboardResourcesProvider {
     git_stats: Arc<GitSpawnStats>,
 }
 
+// Hand-written rather than derived (which the non-comparable `GitSpawnStats`
+// blocks) so this type keeps the `Eq`/`PartialEq` surface it had before the
+// git_exec seam. `git_stats` is deliberately EXCLUDED from equality: the spawn
+// counters are ambient instrumentation, not part of a provider's identity -
+// two providers that would discover the same resources must stay equal
+// regardless of which counter handle they report into.
+impl PartialEq for LocalDashboardResourcesProvider {
+    fn eq(&self, other: &Self) -> bool {
+        self.server_id == other.server_id
+            && self.server_label == other.server_label
+            && self.candidates == other.candidates
+            && self.registry_activations == other.registry_activations
+            && self.git_probes == other.git_probes
+    }
+}
+
+impl Eq for LocalDashboardResourcesProvider {}
+
 impl LocalDashboardResourcesProvider {
     pub fn new(candidates: Vec<LocalWorkRootCandidate>) -> Self {
         Self::with_registry_activations(candidates, HashMap::new())
@@ -710,7 +728,11 @@ impl GitDiscovery {
         )
         .ok()?;
 
-        let stdout = outcome.stdout;
+        // Strict UTF-8, as before the git_exec seam: a repo whose paths are not
+        // valid UTF-8 must classify as "not a git root" rather than yield
+        // replacement-char-mangled `PathBuf`s that fail every later
+        // filesystem call.
+        let stdout = outcome.stdout_strict()?;
         let mut lines = stdout.lines();
         let worktree_dir = non_empty_path(lines.next()?)?;
         let common_dir = non_empty_path(lines.next()?)?;
@@ -760,8 +782,12 @@ fn probe_git_worktree_paths(path: &Path, git_stats: &GitSpawnStats) -> Vec<PathB
     ) else {
         return Vec::new();
     };
-    outcome
-        .stdout
+    // Strict UTF-8, as before the git_exec seam: non-UTF-8 worktree paths
+    // yield no linked worktrees rather than mangled ones.
+    let Some(stdout) = outcome.stdout_strict() else {
+        return Vec::new();
+    };
+    stdout
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
         .map(|path| normalize_candidate_path(Path::new(path)))

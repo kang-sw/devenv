@@ -591,6 +591,9 @@ async fn dashboard_build_info(State(state): State<AppState>) -> Response {
 /// unconverted in this phase (see the ticket's Phase 1 rewrite-target list).
 /// A follow-up ticket tracks converting those; until then this route
 /// undercounts total daemon-wide git spawns and must not be read as a total.
+/// CONTRACT: `failures` already INCLUDES `timeouts` (a timeout increments
+/// both), so `timeouts` is a subset breakdown, not a disjoint bucket - a
+/// consumer must never sum the two.
 async fn dashboard_diag_git(State(state): State<AppState>) -> Response {
     let snapshot = state.git_spawn_stats.snapshot();
     let by_subcommand: serde_json::Map<String, serde_json::Value> = snapshot
