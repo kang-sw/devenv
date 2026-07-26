@@ -738,7 +738,25 @@ struct RepoRuntime {
     /// one TTL window, so `git_toolbar.rs`'s TTL selection falls back to the
     /// short poll interval until this clears.
     rescan_degraded_until_ms: Option<u64>,
+    /// When the last arm attempt was *made* (not necessarily finished - see
+    /// `WatchRegistry::reconcile`, which stamps this before offloading the
+    /// actual work). The single timestamp both of `reconcile`'s rate-limit
+    /// guards read: `Unarmed` checks it against the flat
+    /// [`MIN_ARM_INTERVAL_MS`]; `Degraded` checks it against
+    /// `degraded_backoff_ms`. Deliberately never touched by `do_disarm` - a
+    /// disarm-driven transition back to `Unarmed` must not reset this, or
+    /// the flat-interval guard could not do the one job it exists for
+    /// (ticket step 7: bound a flapping-availability root's re-arm rate).
     last_arm_attempt_ms: Option<u64>,
+    /// Current backoff for a `Degraded` repo's next eligible retry
+    /// (`reconcile`'s exponential-backoff guard, ticket step 7: start 60 s,
+    /// double on each consecutive `Degraded` outcome, cap 15 min). Reset to
+    /// [`DEGRADED_BACKOFF_START_MS`] on every transition OUT of `Degraded`
+    /// (a successful arm, or the first degrade after `Unarmed`/`Armed`) so
+    /// the next time this repo degrades it starts a fresh cycle rather than
+    /// inheriting a stale, possibly-maxed-out backoff from an unrelated
+    /// earlier incident.
+    degraded_backoff_ms: u64,
     last_event_at_ms: Option<u64>,
     ignore_stale: bool,
     /// When the last ignore-set re-derivation was *scheduled* (not
@@ -760,6 +778,7 @@ impl RepoRuntime {
             registered_dirs: Vec::new(),
             rescan_degraded_until_ms: None,
             last_arm_attempt_ms: None,
+            degraded_backoff_ms: DEGRADED_BACKOFF_START_MS,
             last_event_at_ms: None,
             ignore_stale: false,
             last_ignore_rederive_attempt_ms: None,
@@ -885,6 +904,118 @@ impl WatchRegistry {
     /// `arm_now`, callers do not need to offload this to a blocking pool.
     pub(crate) fn disarm_now(&self, key: &WatchKey) {
         do_disarm(&self.inner, key);
+    }
+
+    /// Ticket step 7: the one hook everything routes through - register/
+    /// unregister, every availability transition, `remove_workspace`, and
+    /// `git_worktree_remove_submit` (a later checkpoint wires that last one
+    /// in) instead of six separate call-site hooks.
+    ///
+    /// `entries` is this reconcile cycle's *complete* discovered-root set
+    /// (owner candidates and linked worktrees alike), straight from
+    /// `discovery::DashboardResourcesSync::watch_reconcile_entries`.
+    ///
+    /// Semantics (ticket step 7):
+    /// - present + `Available` + `Unarmed`, rate-limit-eligible => arm.
+    /// - present + not `Available` (or `targets` is `None` - not a git root)
+    ///   => disarm + bump both, so the next poll recomputes and reports the
+    ///   degraded state.
+    /// - tracked by this registry but missing from `entries` entirely
+    ///   (`absent`) => disarm + drop the epoch counters
+    ///   ([`EpochSource::forget`]), rather than merely bumping - nothing will
+    ///   ever probe this key again.
+    ///
+    /// **The two rate-limit guards this must not get wrong (D8):** `Unarmed`
+    /// is gated by the flat [`MIN_ARM_INTERVAL_MS`] interval; `Degraded` is
+    /// gated by its own sticky exponential backoff
+    /// ([`RepoRuntime::degraded_backoff_ms`]) and is never treated as
+    /// arm-eligible merely for being "not Armed" - see
+    /// `RepoRuntime::last_arm_attempt_ms`'s doc comment for why both guards
+    /// are independently required. **Arming never runs inline on this call:**
+    /// an eligible arm is offloaded via `spawn_blocking` (falling back to
+    /// inline only outside a Tokio runtime, e.g. a plain `#[test]`), so this
+    /// method returns as soon as it has decided *what* to do, never after
+    /// the `git status` spawn (and, on Linux, walk) an arm attempt costs.
+    pub(crate) fn reconcile(
+        &self,
+        entries: &[(WatchKey, Option<WatchTargets>, ws_dashboard_core::WorkRootAvailability)],
+    ) {
+        let now = clock_ms();
+        let present: HashSet<&WatchKey> = entries.iter().map(|(key, _, _)| key).collect();
+
+        let absent: Vec<WatchKey> = {
+            let state = self.inner.state.lock().expect("watch registry state lock poisoned");
+            state.repos.keys().filter(|key| !present.contains(key)).cloned().collect()
+        };
+        for key in &absent {
+            do_disarm(&self.inner, key);
+            self.inner.epoch_source.forget(key);
+            let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
+            state.repos.remove(key);
+        }
+
+        for (key, targets, availability) in entries {
+            let Some(targets) = targets else {
+                do_disarm(&self.inner, key);
+                continue;
+            };
+            if *availability != ws_dashboard_core::WorkRootAvailability::Available {
+                do_disarm(&self.inner, key);
+                continue;
+            }
+            if self.inner.config.mode == WatchMode::Off {
+                continue;
+            }
+
+            let eligible = {
+                let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
+                let entry = state
+                    .repos
+                    .entry(key.clone())
+                    .or_insert_with(|| RepoRuntime::new(targets.clone()));
+                if !matches!(entry.registration_health, WatchHealth::Armed) {
+                    // Keeps an Unarmed/Degraded repo's remembered targets
+                    // current, so a re-arm after an outage picks up a
+                    // changed git_dir/common_dir without waiting for a
+                    // second reconcile tick (D1: kind change across an
+                    // outage). An already-Armed repo's targets are refreshed
+                    // only through a full disarm/re-arm cycle (`finish_arm`)
+                    // - touching this field for an Armed repo here would
+                    // desync it from `entry.armed`'s own frozen
+                    // git_dir/common_dir/ignore copy.
+                    entry.targets = targets.clone();
+                }
+                arm_eligible(
+                    &entry.registration_health,
+                    entry.last_arm_attempt_ms,
+                    entry.degraded_backoff_ms,
+                    now,
+                )
+            };
+            if !eligible {
+                continue;
+            }
+
+            // Stamp the attempt timestamp synchronously - this IS the value
+            // the rate-limit guards above read, so it must be visible before
+            // this method returns, not only after the offloaded arm work
+            // below finishes (which may be seconds later on a loaded host).
+            {
+                let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
+                if let Some(entry) = state.repos.get_mut(key) {
+                    entry.last_arm_attempt_ms = Some(now);
+                }
+            }
+
+            let inner = Arc::clone(&self.inner);
+            let key = key.clone();
+            let targets = targets.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn_blocking(move || do_arm(&inner, &key, &targets));
+            } else {
+                do_arm(&inner, &key, &targets);
+            }
+        }
     }
 }
 
@@ -1044,6 +1175,64 @@ fn handle_fs_event(inner: &Arc<RegistryInner>, event: Event) {
 /// re-derivation the first mark already scheduled.
 const IGNORE_REDERIVE_INTERVAL_MS: u64 = 30_000;
 
+/// `reconcile`'s flat rate-limit guard (ticket step 7): the minimum interval
+/// between arm attempts for an `Unarmed` repo, regardless of why it is
+/// `Unarmed`. This is the guard a flapping-availability root actually hits -
+/// see [`RepoRuntime::last_arm_attempt_ms`]'s doc comment for why the
+/// exponential backoff guard alone does not cover that path.
+const MIN_ARM_INTERVAL_MS: u64 = 30_000;
+
+/// `reconcile`'s exponential-backoff guard for a `Degraded` repo (ticket
+/// step 7): starting interval before the first retry.
+const DEGRADED_BACKOFF_START_MS: u64 = 60_000;
+
+/// Cap on [`DEGRADED_BACKOFF_START_MS`]'s doubling (ticket step 7: "cap
+/// 15 min").
+const DEGRADED_BACKOFF_CAP_MS: u64 = 900_000;
+
+/// Pure decision function backing `reconcile`'s two independent rate-limit
+/// guards (D8), factored out of `reconcile` itself specifically so it is
+/// unit-testable against an injected `now_ms` in zero wall-clock time -
+/// `reconcile`'s own `now` still comes from the real [`clock_ms`] in
+/// production, exactly like `Debouncer`'s injected-clock split.
+///
+/// `Armed` is never eligible (nothing to do). `Unarmed` is gated by the flat
+/// [`MIN_ARM_INTERVAL_MS`] - the guard the availability-flap path actually
+/// needs, since a disarm always yields `Unarmed`. `Degraded` is gated by its
+/// own `degraded_backoff_ms`, never by the flat interval - `Degraded` must
+/// not become arm-eligible just because [`MIN_ARM_INTERVAL_MS`] has passed;
+/// only its own (usually much longer) backoff governs it.
+fn arm_eligible(
+    health: &WatchHealth,
+    last_arm_attempt_ms: Option<u64>,
+    degraded_backoff_ms: u64,
+    now_ms: u64,
+) -> bool {
+    let interval_ms = match health {
+        WatchHealth::Armed => return false,
+        WatchHealth::Unarmed => MIN_ARM_INTERVAL_MS,
+        WatchHealth::Degraded(_) => degraded_backoff_ms,
+    };
+    last_arm_attempt_ms
+        .map(|last| now_ms.saturating_sub(last) >= interval_ms)
+        .unwrap_or(true)
+}
+
+/// Pure step of the exponential-backoff bookkeeping `finish_arm` and
+/// `set_degraded_after_disarm` both apply (D8): the next `degraded_backoff_ms`
+/// given whether the repo was already `Degraded` before this outcome, and
+/// whether this outcome is itself `Degraded`. Doubles (capped) only on a
+/// *consecutive* `Degraded` outcome; any other transition - a successful arm,
+/// or the first degrade coming from `Unarmed`/`Armed` - resets to the
+/// starting interval.
+fn next_degraded_backoff_ms(was_degraded: bool, new_health_is_degraded: bool, previous_backoff_ms: u64) -> u64 {
+    if new_health_is_degraded && was_degraded {
+        previous_backoff_ms.saturating_mul(2).min(DEGRADED_BACKOFF_CAP_MS)
+    } else {
+        DEGRADED_BACKOFF_START_MS
+    }
+}
+
 fn flush_debounce_windows(inner: &RegistryInner) {
     let now = clock_ms();
     let mut due: Vec<(WatchKey, EpochKind)> = Vec::new();
@@ -1152,6 +1341,18 @@ fn finish_arm(
             .entry(key.clone())
             .or_insert_with(|| RepoRuntime::new(targets.clone()));
         let old_dirs = std::mem::take(&mut entry.registered_dirs);
+        // Exponential-backoff bookkeeping (ticket step 7, D8's two rate-limit
+        // guards): double only on a *consecutive* Degraded outcome; any other
+        // transition (a successful arm, or the first degrade coming from
+        // Unarmed/Armed) resets to the starting interval, so a repo that
+        // degrades again later starts a fresh backoff cycle rather than
+        // inheriting a stale, possibly-maxed-out value.
+        let was_degraded = matches!(entry.registration_health, WatchHealth::Degraded(_));
+        entry.degraded_backoff_ms = next_degraded_backoff_ms(
+            was_degraded,
+            matches!(health, WatchHealth::Degraded(_)),
+            entry.degraded_backoff_ms,
+        );
         entry.targets = targets.clone();
         entry.registration_health = health.clone();
         entry.armed = armed_repo;
@@ -1187,6 +1388,27 @@ fn do_disarm(inner: &RegistryInner, key: &WatchKey) {
     // repo was still armed.
     inner.epoch_source.bump_worktree(key);
     inner.epoch_source.bump_refs(key);
+}
+
+/// Sets `key`'s health to `Degraded(reason)` and applies `finish_arm`'s same
+/// backoff bookkeeping (double only on a consecutive `Degraded`, reset
+/// otherwise), for the two call sites that disarm-and-degrade a repo without
+/// going through `finish_arm` itself: `register_incremental_directory`'s cap
+/// overflow and `rederive_ignore_set`'s Linux `TooLarge`/arm-error path.
+/// Skipping this bookkeeping at either site would let those repos bypass
+/// `reconcile`'s exponential-backoff guard entirely (D8) - they would always
+/// read as freshly-degraded (`degraded_backoff_ms` still at its default) and
+/// retry every 60 s forever instead of backing off.
+fn set_degraded_after_disarm(inner: &RegistryInner, key: &WatchKey, reason: String) {
+    let now = clock_ms();
+    let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+    let Some(repo) = state.repos.get_mut(key) else {
+        return;
+    };
+    let was_degraded = matches!(repo.registration_health, WatchHealth::Degraded(_));
+    repo.degraded_backoff_ms = next_degraded_backoff_ms(was_degraded, true, repo.degraded_backoff_ms);
+    repo.registration_health = WatchHealth::Degraded(reason);
+    repo.last_arm_attempt_ms = Some(now);
 }
 
 fn do_arm(inner: &RegistryInner, key: &WatchKey, targets: &WatchTargets) {
@@ -1330,10 +1552,7 @@ fn register_incremental_directory(inner: &RegistryInner, key: &WatchKey, dir: &P
 
     if over_cap {
         do_disarm(inner, key);
-        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
-        if let Some(repo) = state.repos.get_mut(key) {
-            repo.registration_health = WatchHealth::Degraded("watch set outgrew cap".to_owned());
-        }
+        set_degraded_after_disarm(inner, key, "watch set outgrew cap".to_owned());
         return;
     }
 
@@ -1395,10 +1614,7 @@ fn rederive_ignore_set(inner: &RegistryInner, key: &WatchKey) {
             Ok(new_dirs) => apply_rederive_success(inner, key, ignore, new_dirs),
             Err(_) => {
                 do_disarm(inner, key);
-                let mut state = inner.state.lock().expect("watch registry state lock poisoned");
-                if let Some(repo) = state.repos.get_mut(key) {
-                    repo.registration_health = WatchHealth::Degraded("watch set outgrew cap".to_owned());
-                }
+                set_degraded_after_disarm(inner, key, "watch set outgrew cap".to_owned());
             }
         }
     }
@@ -1897,5 +2113,174 @@ mod tests {
     #[test]
     fn linux_inotify_process_budget_is_bounded_by_the_8192_ceiling() {
         assert!(linux_inotify_process_budget() <= 8_192);
+    }
+
+    // --- reconcile: the two rate-limit guards, as SEPARATE tests (D8) -----
+    //
+    // Each test exercises `arm_eligible` (the pure decision function
+    // `reconcile` delegates to) with an injected `now_ms`, exactly like
+    // `Debouncer`'s tests above - the 30s/60s+ intervals run in zero
+    // wall-clock time. Written so each fails if *only its own* guard were
+    // removed: test 1 would start passing at any elapsed time if the flat
+    // interval were deleted from the `Unarmed` arm; test 2 would start
+    // passing at 30s (rather than needing the full 60s backoff) if
+    // `Degraded` fell back to the flat interval instead of its own backoff.
+
+    #[test]
+    fn reconcile_unarmed_arm_attempts_are_rate_limited_by_the_flat_30s_interval() {
+        // Never attempted before -> eligible immediately.
+        assert!(arm_eligible(&WatchHealth::Unarmed, None, DEGRADED_BACKOFF_START_MS, 0));
+        // 1ms short of the flat interval -> not yet eligible.
+        assert!(!arm_eligible(
+            &WatchHealth::Unarmed,
+            Some(0),
+            DEGRADED_BACKOFF_START_MS,
+            MIN_ARM_INTERVAL_MS - 1
+        ));
+        // Exactly at the flat interval -> eligible.
+        assert!(arm_eligible(
+            &WatchHealth::Unarmed,
+            Some(0),
+            DEGRADED_BACKOFF_START_MS,
+            MIN_ARM_INTERVAL_MS
+        ));
+    }
+
+    #[test]
+    fn reconcile_degraded_arm_attempts_are_rate_limited_by_their_own_backoff_not_the_flat_interval() {
+        let backoff = DEGRADED_BACKOFF_START_MS; // 60_000ms, double the flat 30_000ms interval.
+        // Past the flat 30s interval but short of the 60s backoff -> a
+        // `Degraded` repo must still NOT be eligible. This is the exact
+        // guard the ticket's Constraints warn a naive "not Armed => eligible"
+        // implementation would skip.
+        assert!(!arm_eligible(&WatchHealth::Degraded("x".to_owned()), Some(0), backoff, MIN_ARM_INTERVAL_MS));
+        // 1ms short of its own backoff -> still not eligible.
+        assert!(!arm_eligible(&WatchHealth::Degraded("x".to_owned()), Some(0), backoff, backoff - 1));
+        // At its own backoff -> eligible.
+        assert!(arm_eligible(&WatchHealth::Degraded("x".to_owned()), Some(0), backoff, backoff));
+        // A wider, already-doubled backoff is honored too, not clamped back
+        // to the starting interval.
+        let doubled = backoff * 2;
+        assert!(!arm_eligible(&WatchHealth::Degraded("x".to_owned()), Some(0), doubled, backoff));
+        assert!(arm_eligible(&WatchHealth::Degraded("x".to_owned()), Some(0), doubled, doubled));
+    }
+
+    #[test]
+    fn reconcile_armed_is_never_arm_eligible() {
+        assert!(!arm_eligible(&WatchHealth::Armed, None, DEGRADED_BACKOFF_START_MS, u64::MAX));
+    }
+
+    #[test]
+    fn degraded_backoff_doubles_only_on_consecutive_degraded_and_resets_otherwise() {
+        // First degrade (coming from Unarmed) starts at the base interval,
+        // not a doubled one.
+        let mut backoff = next_degraded_backoff_ms(false, true, DEGRADED_BACKOFF_START_MS);
+        assert_eq!(backoff, DEGRADED_BACKOFF_START_MS);
+        // Each consecutive Degraded outcome doubles it.
+        backoff = next_degraded_backoff_ms(true, true, backoff);
+        assert_eq!(backoff, DEGRADED_BACKOFF_START_MS * 2);
+        backoff = next_degraded_backoff_ms(true, true, backoff);
+        assert_eq!(backoff, DEGRADED_BACKOFF_START_MS * 4);
+        backoff = next_degraded_backoff_ms(true, true, backoff);
+        assert_eq!(backoff, DEGRADED_BACKOFF_START_MS * 8);
+        // ...capped at 15 minutes, not left to grow unbounded.
+        backoff = next_degraded_backoff_ms(true, true, backoff);
+        assert_eq!(backoff, DEGRADED_BACKOFF_CAP_MS);
+        backoff = next_degraded_backoff_ms(true, true, backoff);
+        assert_eq!(backoff, DEGRADED_BACKOFF_CAP_MS, "must stay capped, not overflow past it");
+        // A successful arm (health no longer Degraded) resets it, so the
+        // next time this repo degrades it starts a fresh cycle.
+        assert_eq!(next_degraded_backoff_ms(true, false, backoff), DEGRADED_BACKOFF_START_MS);
+    }
+
+    // --- reconcile: end-to-end decision table -----------------------------
+
+    fn init_git_repo_fixture() -> PathBuf {
+        let dir = temp_dir("reconcile-repo");
+        fs::create_dir_all(&dir).expect("create fixture worktree");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&dir)
+            .status()
+            .expect("spawn git init for the reconcile fixture");
+        assert!(status.success(), "git init must succeed for the reconcile fixture");
+        dir
+    }
+
+    #[test]
+    fn reconcile_arms_present_available_unarmed_disarms_on_unavailability_and_drops_on_absence() {
+        let dir = init_git_repo_fixture();
+        let git_dir = dir.join(".git");
+        let targets = WatchTargets {
+            worktree: dir.clone(),
+            git_dir: git_dir.clone(),
+            common_dir: git_dir,
+        };
+        let key = crate::discovery::watch_key(&dir);
+        let epoch_source: Arc<dyn EpochSource> =
+            Arc::new(crate::git_state_cache::MutationEpochSource::default());
+        let git_stats = Arc::new(GitSpawnStats::default());
+        let registry = WatchRegistry::new(epoch_source, git_stats, WatchConfig::default());
+
+        // present + Available + Unarmed => arm. No `#[tokio::test]` runtime
+        // in this test, so `reconcile`'s arm dispatch runs inline (the same
+        // fallback `WatchRegistry::new` itself uses), making this
+        // deterministic without polling.
+        registry.reconcile(&[(
+            key.clone(),
+            Some(targets.clone()),
+            ws_dashboard_core::WorkRootAvailability::Available,
+        )]);
+        assert_eq!(
+            registry.health_for(&key),
+            WatchHealth::Armed,
+            "a present, available, unarmed real git repo must arm on reconcile"
+        );
+
+        // present + not Available => disarm to Unarmed (bump both is
+        // covered by `do_disarm`'s own unit coverage via `finish_arm`'s
+        // shared post-arm/disarm rule doc comment - not re-asserted here).
+        registry.reconcile(&[(
+            key.clone(),
+            Some(targets.clone()),
+            ws_dashboard_core::WorkRootAvailability::Moved,
+        )]);
+        assert_eq!(
+            registry.health_for(&key),
+            WatchHealth::Unarmed,
+            "present but unavailable must disarm to Unarmed"
+        );
+
+        // Bypass the flat 30s rate-limit guard directly (it has its own
+        // dedicated tests above) so this test can immediately exercise
+        // re-arming after availability returns.
+        {
+            let mut state = registry.inner.state.lock().expect("state lock");
+            if let Some(repo) = state.repos.get_mut(&key) {
+                repo.last_arm_attempt_ms = None;
+            }
+        }
+        registry.reconcile(&[(
+            key.clone(),
+            Some(targets.clone()),
+            ws_dashboard_core::WorkRootAvailability::Available,
+        )]);
+        assert_eq!(
+            registry.health_for(&key),
+            WatchHealth::Armed,
+            "must re-arm once availability returns"
+        );
+
+        // absent from `entries` entirely => disarmed AND dropped from
+        // tracking outright (not merely left Unarmed), per the ticket's
+        // "drop epochs" wording - distinct from the not-Available branch,
+        // which leaves the repo tracked as Unarmed.
+        registry.reconcile(&[]);
+        assert!(
+            !registry.inner.state.lock().expect("state lock").repos.contains_key(&key),
+            "a repo absent from reconcile's entries must be dropped entirely"
+        );
+
+        remove_temp(&dir);
     }
 }

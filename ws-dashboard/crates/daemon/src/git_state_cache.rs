@@ -74,6 +74,18 @@ pub trait EpochSource: Send + Sync {
     /// See `bump_worktree`. `git_pull_ff_only` bumps both axes; the other
     /// mutating routes bump only this one.
     fn bump_refs(&self, key: &WatchKey);
+
+    /// Drop `key`'s counters entirely (Phase 4 `reconcile`'s "absent" case:
+    /// the root left the discovered set - `remove_workspace`, an unregistered
+    /// work root, or a worktree the daemon itself removed). Deliberately
+    /// distinct from `bump_worktree`/`bump_refs`: those exist so the *next*
+    /// read recomputes; this exists so a long-uptime daemon does not carry a
+    /// counter forever for a repo that will never be probed again. A no-op
+    /// default so existing single-purpose stubs (`git_toolbar.rs` test
+    /// doubles) do not need to implement bookkeeping they never exercise.
+    fn forget(&self, key: &WatchKey) {
+        let _ = key;
+    }
 }
 
 /// The ticket's Phase 3 stub names this source `StaticZero`, which reads as
@@ -117,6 +129,13 @@ impl EpochSource for MutationEpochSource {
             .lock()
             .expect("mutation epoch source lock poisoned");
         epochs.entry(key.clone()).or_insert((0, 0)).1 += 1;
+    }
+
+    fn forget(&self, key: &WatchKey) {
+        self.epochs
+            .lock()
+            .expect("mutation epoch source lock poisoned")
+            .remove(key);
     }
 }
 
