@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useState } from "react";
 import type { SettingsSectionDescriptor } from "./settingsStore.js";
 import {
   DEFAULT_TERMINAL_STYLE_PREFS,
@@ -128,6 +128,13 @@ function currentNotificationAvailability(): string {
 // plain-http LAN page lacks the whole API, not just permission.
 export function NotificationSection() {
   const { enabled, onChange } = useContext(SettingsNotificationContext);
+  // Forces a re-render once the permission prompt settles (review cycle 1,
+  // Minor 1). `currentNotificationAvailability()` below always reads the
+  // LIVE `Notification.permission` at render time - nothing is cached in
+  // this state, it exists only to schedule the re-render that would
+  // otherwise not happen until some unrelated state change, leaving the note
+  // stuck on "Current permission: default" right after the user answers.
+  const [, forceRerenderOnPermissionSettled] = useState(0);
   return (
     <div className="settings-field-group">
       <label className="settings-notification-toggle">
@@ -138,7 +145,24 @@ export function NotificationSection() {
             const next = event.target.checked;
             onChange(next);
             if (next && typeof Notification !== "undefined") {
-              void Notification.requestPermission();
+              Notification.requestPermission()
+                .then((permission) => {
+                  if (permission === "denied") {
+                    // Reconcile the persisted opt-in against a denied
+                    // permission (review cycle 1, Minor 2): otherwise the
+                    // box stays checked and `{ enabled: true }` stays
+                    // persisted for a tier that can never fire.
+                    onChange(false);
+                  }
+                  forceRerenderOnPermissionSettled((count) => count + 1);
+                })
+                .catch(() => {
+                  // No current browser rejects `requestPermission()` instead
+                  // of resolving "denied", but leaving the promise unhandled
+                  // would produce an unhandled rejection if one ever did
+                  // (review cycle 1, Minor 1).
+                  forceRerenderOnPermissionSettled((count) => count + 1);
+                });
             }
           }}
         />{" "}
