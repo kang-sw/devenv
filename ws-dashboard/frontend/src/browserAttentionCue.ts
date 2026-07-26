@@ -43,11 +43,24 @@ export function attentionTitleFor(
 // a pure function of one boolean, testable as a plain string comparison, and
 // it does not attempt to reproduce `icon-192.png` pixel-for-pixel (a simple
 // monochrome glyph with a badge dot is enough).
+//
+// Hex literals here are copied from `styles.css`'s semantic tokens, not
+// freehanded (review cycle 1, Important 3) - this module cannot read CSS
+// custom properties (that would break its DOM-free purity, a deliberate
+// plan decision), so the values are pinned as plain string literals instead.
+// If any of these tokens' hex values change in `styles.css`, update the
+// matching literal below in lockstep:
+//   - base circle fill   -> `--ws-color-panel-raised`   (#1c212b)
+//   - base circle stroke -> `--ws-color-border-strong`  (#596273)
+//   - badge dot fill     -> `--ws-color-state-warning`  (#f1c21b), the same
+//     token the nav-row "ready" glyph and flash overlay use
+//   - badge dot stroke   -> `--ws-color-panel-raised`   (#1c212b), so the
+//     badge separates cleanly from the base circle behind it
 const FAVICON_BASE_SVG =
-  '<circle cx="16" cy="16" r="13" fill="#3b4252" stroke="#c8ccd6" stroke-width="2"/>';
+  '<circle cx="16" cy="16" r="13" fill="#1c212b" stroke="#596273" stroke-width="2"/>';
 const FAVICON_BADGE_SVG =
-  '<circle cx="16" cy="16" r="13" fill="#3b4252" stroke="#c8ccd6" stroke-width="2"/>' +
-  '<circle cx="24" cy="8" r="7" fill="#e58e26" stroke="#1c1f26" stroke-width="1.5"/>';
+  '<circle cx="16" cy="16" r="13" fill="#1c212b" stroke="#596273" stroke-width="2"/>' +
+  '<circle cx="24" cy="8" r="7" fill="#f1c21b" stroke="#1c212b" stroke-width="1.5"/>';
 
 export function buildAttentionFaviconHref(active: boolean): string {
   const body = active ? FAVICON_BADGE_SVG : FAVICON_BASE_SVG;
