@@ -56,6 +56,24 @@ documented staleness window.
   hazard (the reference the UI/tests hold can become `Unknown` instead of
   merely `Unavailable`).
 
+## Contract consequence (added by the Phase 2 lead, cycle-1 review)
+
+The Phase 2 correctness review established that this prune is not only a testing
+nuisance — it makes the parent ticket's accepted Phase 2 delta ("an unavailable
+git work root returns 409 instead of 404") untrue in the steady state. Moving the
+git routes off `live_dashboard_resources` removed the *route's own* prune; the one
+that actually masks the answer lives here and still fires on the frontend's 5 s
+poll. So the observable sequence is 409 for less than one poll interval, then 404
+thereafter.
+
+The `ws-web-dashboard` spec now records both answers under
+`{#260726-dashboard-shared-git-probe-memo-and-per-root-git-context}` and carries an
+`Implementation Gap · 2026-07-26` callout pointing at this behavior, on the
+grounds that discarding a work root the user explicitly opened — on the strength
+of one failed availability read, with no affordance to recover it other than
+re-opening it by path — is a defect rather than a contract. Whatever this ticket
+decides, that callout and the spec paragraph are the two places to close out.
+
 ## Directions to explore (nothing decided here)
 
 - Confirm whether this pruning is intentional self-healing (verified elsewhere

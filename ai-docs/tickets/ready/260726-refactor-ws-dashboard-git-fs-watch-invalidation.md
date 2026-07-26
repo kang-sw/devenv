@@ -727,6 +727,106 @@ needs a dogfood pass, stated here rather than claimed as tested.
 
 Estimated diff ~+130/−50 production, ~+120 test, 5 files.
 
+### Result (3b66441d) - 2026-07-26
+
+Landed as planned in shape, but with a simpler mechanism than this phase
+specified. The plan's `## Lead Dispositions` (D1-D7, in
+`ai-docs/.plans/2026-07/26-1717-per-root-git-context.md`) are the authority for
+the deviations; the load-bearing ones are recorded here.
+
+**The separate identity cache was not built.** `GitDiscovery::probe` already runs
+`rev-parse --show-toplevel --path-format=absolute --git-common-dir --git-dir` as
+**one** memoized spawn, and `git_identity` was issuing **two** spawns for a strict
+subset of those flags. So the Activity identity is now derived from the existing
+shared `GitProbeCache` (`GitProbeCache::git_identity`), at zero additional spawns
+on a warm memo and one instead of two on a cold one. Consequences:
+
+- No `GitIdentityCache`, no `WS_DASHBOARD_GIT_IDENTITY_NEGATIVE_TTL_MS`, and no
+  duplicated single-flight locking. `None` is cached under the existing 30 s
+  probe TTL instead of a 3 s negative TTL. The tradeoff accepted: a plain
+  directory the user `git init`s reads as non-Git for up to 30 s — the same
+  latency the sidebar's own git/plain label already has, so the two surfaces now
+  agree rather than self-correcting 27 s apart.
+- `WatchKey`/`watch_key` was **not** added; the memo keys on the existing
+  `GitProbeKey`. Phase 3's `GitStateCache` is its first real consumer, so it is
+  deferred there rather than landing as dead code here.
+- `discover_work_root` and `DiscoveredWorkRoot` stayed private. Availability is
+  fully settled by `resolve_online_available_work_root`'s live `is_dir`/`read_dir`
+  check, so the only thing the toolbar still needed was the git-vs-plain answer
+  (`GitProbeCache::git_root_kind`).
+- `GitIdentity` moved from `work_root_activity.rs` into `discovery.rs`, and
+  `&GitProbeCache` is threaded as an explicit parameter alongside `git_stats`
+  rather than stored on `WorkRootActivityProjector`, which keeps that type's
+  `Eq`/`PartialEq` derive intact.
+
+**Claimed win #3 is not achieved end-to-end.** "An unavailable git work root
+returns 409 instead of 404" holds only until the next canonical resource refresh:
+`live_dashboard_resources_with_sync` unregisters every root in a workspace whose
+`active_work_root_count` is 0, so the frontend's 5 s poll makes the id genuinely
+unknown and the routes correctly answer 404 again. This phase removed the
+*route's own* prune, not the one that masks the answer. Filed as
+`260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots`; the
+spec entry states both answers rather than the unqualified 409, and carries an
+`Implementation Gap` callout because discarding an explicitly-opened work root on
+one failed read is a defect, not a contract.
+
+**Two staleness bounds this phase's rationale wrongly assumed.** Both were caught
+in cycle-1 review and both matter to Phase 4:
+
+- `discover_work_root`'s evict-on-non-`Available` does not fire for an in-place
+  `git init` (kind changes, availability does not).
+- Its eviction key is `discovered.path` while the warm memo key comes from
+  `canonical_or_normalized`; on Windows the warm key is `\\?\`-prefixed and the
+  eviction key (computed once the directory is gone, so `canonicalize` fails) is
+  not, so the evict is a no-op. Pre-existing (`18037cc3`); **Phase 4 cannot assume
+  reconcile-driven eviction works until that key derivation is fixed.**
+
+**Accepted new cost.** A git probe that fails to answer at all
+(`GitFailure::Timeout`/`Spawn`) is now memoized as "not a repository" for the full
+TTL, so one timed-out `rev-parse` empties the Activity pane for up to 30 s where
+it previously cost one 200 ms tick. Accepted because the pre-change alternative
+was re-spawning a 10 s-budget `git` every 200 ms per root — the storm this phase
+exists to remove. If the D2 escape hatch is ever built it must distinguish three
+cases, not two: repo / not-a-repo / no answer.
+
+**Verification.** `cargo test -p ws-dashboard-daemon --lib` 146 passed 0 failed;
+`--test routes` 169 passed 0 failed. Named pins executed:
+`git_toolbar_status_gates_and_reports_counts_without_paths` (extended with the
+moved-root 409 case), `work_root_activity_rejects_non_git_and_bare_repository_layout`,
+`zero_spawn_activity_snapshot_after_git_toolbar_warms_the_shared_discovery_memo`,
+`git_toolbar_status_adds_zero_spawns_after_resources_poll_warms_the_shared_discovery_memo`,
+`git_identity_matches_pre_change_raw_canonicalize_derivation_for_primary_and_linked_worktree`,
+`git_identity_returns_none_when_common_dir_is_not_named_dot_git`. The equivalence
+pin re-derives the pre-change result through unmemoized `Command::new("git")`
+rather than the production path, so it can actually fail.
+
+**Not verified, stated rather than claimed.**
+
+- The identity-equivalence pin runs only on Linux/WSL. The
+  `normalize_candidate_path`-then-canonicalize vs raw-canonicalize equivalence on
+  the Windows production host is argued (both derivations end in `canonicalize`,
+  and `normalize_candidate_path` is the identity for absolute inputs) but not
+  executed.
+- The `/api/dashboard/diag/git` delta acceptance numbers (~20/s with the Activity
+  pane open, ~0.67/s closed) were never measured on a running daemon. This is the
+  second phase in a row to close without that dogfood measurement.
+- The `frontend/e2e/` moved-root assertion is authored and typechecked but never
+  ran to completion: the serial suite aborts earlier on a pre-existing terminal
+  echo-timeout unrelated to this diff.
+- Zero-spawn sharing is pinned through a plain-directory root, where the route
+  short-circuits at the `NonGit` gate. For a git root the memo saves exactly one
+  probe out of the five spawns `/git/status` issues, which no test pins
+  numerically.
+
+**Review.** One cycle, three partitions. Correctness: 1 Important (the 409 claim
+above, resolved as documentation) + 6 minor. Fit: clean + 1 minor (D2's rationale,
+corrected in `88d36b0a`). Test: 2 Important — the resources leg of the shared-memo
+claim was untested (accepted, now pinned) and the bare-repo `None` case was
+reported missing (**rejected**: `tests/routes.rs:12213` already pins it through
+the new derivation, verified independently by the lead and the correctness
+reviewer). No second cycle: cycle-1 fixes were two tests, one comment, and two
+signature wraps, and the lead verified the substantive test itself.
+
 ### Phase 3: Result cache for `/git/status` and `/git/branches`, epoch stubbed
 
 ```rust
@@ -963,6 +1063,19 @@ fully testable without any I/O:
    computes the authoritative root set and availability every 5 s — but note the
    *arm path it triggers* does cost a spawn (`IgnoreSet::derive`) plus, on Linux, a
    walk, so do not restate "no extra git spawns" about reconcile as a whole.
+   **Prerequisite found in Phase 2's cycle-1 review, 2026-07-26.** Do not assume
+   the existing `GitProbeCache::evict` gives this reconcile a working eviction to
+   build on. `discover_work_root` evicts with `discovered.path`, while the warm
+   memo key comes from `GitProbeKey::for_path` → `canonical_or_normalized`; on
+   Windows the warm key is the `\\?\`-prefixed canonical form and the eviction key
+   (computed once the directory is gone, so `canonicalize` fails) is the plain
+   form, so the evict silently misses and the stale probe lives out the full TTL.
+   Same class wherever the registered path is a symlink. Pre-existing
+   (`18037cc3`), harmless while the root is missing because the probe is never
+   reached then — it bites when the root **reappears**, which is exactly the
+   transition this reconcile exists to handle. Fix the key derivation, or key
+   eviction off the same function the memo does, before relying on it.
+
    Semantics: present + `Available` + `Unarmed` ⇒ arm;
    present + not `Available` ⇒ disarm + bump both (so the next poll recomputes and
    reports the degraded state); absent ⇒ disarm + drop epochs. One code path

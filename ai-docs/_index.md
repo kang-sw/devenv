@@ -335,7 +335,30 @@ dropped tickets live in hidden archive dirs and git history.
   stay outside the seam and counters by design →
   `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` (todo; the
   budget, not the counting, is the open question, since `worktree add` can
-  legitimately outrun any poll-path budget).
+  legitimately outrun any poll-path budget). **Phase 2 landed 2026-07-26
+  (`3b66441d`, impl plan `ai-docs/.plans/2026-07/26-1717-per-root-git-context.md`,
+  dispositions D1-D7)** with a simpler mechanism than the phase specified: no
+  separate identity cache, no `WS_DASHBOARD_GIT_IDENTITY_NEGATIVE_TTL_MS`, and no
+  `WatchKey` (deferred to Phase 3, its first real consumer). `GitDiscovery::probe`
+  already answers `--show-toplevel`/`--git-common-dir` in **one** memoized spawn,
+  so the Activity identity is derived from the shared `GitProbeCache` instead of
+  re-asking in two; `None` rides the existing 30 s probe TTL, which makes the
+  Activity pane agree with the sidebar's git/plain label rather than
+  self-correcting 27 s earlier. Spec'd at
+  `#260726-dashboard-shared-git-probe-memo-and-per-root-git-context`. Three things
+  to carry forward: the accepted "unavailable ⇒ 409" delta is **only true for one
+  poll interval** — `live_dashboard_resources_with_sync` unregisters the root and
+  the id goes back to 404, filed as
+  `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots`;
+  **Phase 4 must not assume `GitProbeCache::evict` works**, because its key
+  (`discovered.path`) diverges from the warm memo key (`canonical_or_normalized`,
+  `\\?\`-prefixed on Windows) so the evict silently misses on the reappear
+  transition the reconcile exists to handle (pre-existing `18037cc3`, noted inline
+  in Phase 4); and a git probe that fails to answer is now memoized as "not a
+  repository" for the full TTL, emptying the Activity pane for up to 30 s after one
+  timeout. The diag delta acceptance number is **still unmeasured** — two phases
+  in a row have closed without it, so Phase 3 or 4 should take it rather than
+  inherit it again.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin
