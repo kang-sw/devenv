@@ -145,7 +145,15 @@ export function NotificationSection() {
             const next = event.target.checked;
             onChange(next);
             if (next && typeof Notification !== "undefined") {
-              Notification.requestPermission()
+              // `Promise.resolve(...)` wraps the call rather than chaining
+              // `.then` directly on its result (review cycle 2, correctness
+              // Minor): macOS Safari <= 15 implements only the legacy
+              // callback form of `requestPermission` and returns `undefined`,
+              // which would make a direct `.then` throw synchronously inside
+              // this handler - the same "the Notification API varies per
+              // browser" class already handled defensively one commit
+              // earlier around the `new Notification(...)` call itself.
+              Promise.resolve(Notification.requestPermission())
                 .then((permission) => {
                   if (permission === "denied") {
                     // Reconcile the persisted opt-in against a denied
