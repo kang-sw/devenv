@@ -1,9 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use ws_dashboard_core::{
     ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView, InteractionMode,
@@ -42,6 +45,7 @@ pub struct LocalDashboardResourcesProvider {
     server_label: String,
     candidates: Vec<LocalWorkRootCandidate>,
     registry_activations: HashMap<WorkRootId, WorkRootActivation>,
+    git_probes: GitProbeCache,
 }
 
 impl LocalDashboardResourcesProvider {
@@ -58,7 +62,16 @@ impl LocalDashboardResourcesProvider {
             server_label: "Local ws dashboard".to_owned(),
             candidates,
             registry_activations,
+            git_probes: GitProbeCache::default(),
         }
+    }
+
+    /// Share a caller-owned probe memo (the daemon's `AppState` cache) instead
+    /// of this provider's own private one, so the routes that all run full
+    /// discovery collapse onto a single set of `git` probes.
+    pub fn with_git_probe_cache(mut self, git_probes: GitProbeCache) -> Self {
+        self.git_probes = git_probes;
+        self
     }
 
     pub fn dashboard_resources_with_registry_sync(&self) -> DashboardResourcesSync {
@@ -67,10 +80,10 @@ impl LocalDashboardResourcesProvider {
         let mut pruned_work_root_ids = Vec::new();
 
         for candidate in &self.candidates {
-            let owner = discover_work_root(&candidate.path);
+            let owner = discover_work_root(&candidate.path, &self.git_probes);
             let workspace_key = owner.workspace_key.clone();
             let linked_paths = if owner.availability == WorkRootAvailability::Available {
-                git_worktree_paths(&candidate.path)
+                self.git_probes.worktree_paths(&candidate.path)
             } else {
                 Vec::new()
             };
@@ -86,7 +99,7 @@ impl LocalDashboardResourcesProvider {
                 {
                     continue;
                 }
-                let mut linked = discover_work_root(&linked_path);
+                let mut linked = discover_work_root(&linked_path, &self.git_probes);
                 linked.workspace_key = workspace_key.clone();
                 let linked_activation = self
                     .registry_activations
@@ -317,11 +330,16 @@ struct DiscoveredWorkRoot {
     error: Option<String>,
 }
 
-fn discover_work_root(path: &Path) -> DiscoveredWorkRoot {
+fn discover_work_root(path: &Path, git_probes: &GitProbeCache) -> DiscoveredWorkRoot {
     let normalized = normalize_candidate_path(path);
 
-    match fs::metadata(&normalized) {
-        Ok(metadata) if metadata.is_dir() => discover_existing_dir(normalized),
+    // CONTRACT: availability (`moved` / `missing` / `inaccessible`) is decided
+    // by the uncached `fs::metadata` below and `discover_existing_dir`'s
+    // uncached `fs::read_dir`. Only the `git` subprocess probes are memoized,
+    // so a workRoot whose directory disappears is still reported on the very
+    // next request.
+    let discovered = match fs::metadata(&normalized) {
+        Ok(metadata) if metadata.is_dir() => discover_existing_dir(normalized, git_probes),
         Ok(_) => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
@@ -354,10 +372,16 @@ fn discover_work_root(path: &Path) -> DiscoveredWorkRoot {
             WorkRootAvailability::Inaccessible,
             &format!("metadata failed: {error}"),
         ),
+    };
+    if discovered.availability != WorkRootAvailability::Available {
+        // Drop any memo this root left behind so a root that reappears
+        // re-probes `git` immediately instead of after the TTL.
+        git_probes.evict(&discovered.path);
     }
+    discovered
 }
 
-fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
+fn discover_existing_dir(path: PathBuf, git_probes: &GitProbeCache) -> DiscoveredWorkRoot {
     if let Err(error) = fs::read_dir(&path) {
         return discovered_unusable(
             path,
@@ -371,7 +395,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
         );
     }
 
-    match GitDiscovery::discover(&path) {
+    match git_probes.discover(&path) {
         Some(git) => DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
                 id: OpaqueId::from(format!(
@@ -425,6 +449,209 @@ fn discovered_unusable(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Git probe memoization
+//
+// Every route that only needs ONE workRoot's git context (git toolbar status
+// and branches, worktree add/remove, the canonical resources refresh) resolves
+// it by running full discovery over ALL registered roots, so the two `git`
+// probes below ran `2N + W` times per call, from several routes, several times
+// per second at idle - measured at ~9.6 `git` spawns/second on a dogfood
+// daemon, almost all of it re-answering identical questions.
+//
+// A short TTL memo with per-key single-flight collapses that to one spawn per
+// root per TTL. Only the subprocess probes are memoized: availability
+// detection stays on the uncached filesystem path (see `discover_work_root`),
+// and the registry side effects in `live_dashboard_resources_with_sync` still
+// run on every call.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_GIT_PROBE_TTL_MS: u64 = 30_000;
+
+/// Memo key for the `git` probes.
+///
+/// Deliberately NOT `local_work_root_id_for_path`: `WorkRootId` values are
+/// persisted and keyed by the frontend, so their derivation must not churn,
+/// while this key must aggressively collapse spellings of the same directory.
+/// The work-root registry observably holds mixed-separator paths (e.g.
+/// `D:/repo/.git\ws-worktree\jpeg`), and an un-normalized key would miss the
+/// memo for every such root and keep spawning `git`.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct GitProbeKey(String);
+
+impl GitProbeKey {
+    fn for_path(path: &Path) -> Self {
+        // The `\` -> `/` unification is unconditional: a Unix filename may
+        // legally contain a backslash, but this is only a memo key, and a
+        // Windows-authored registry entry for the same directory can reach a
+        // Unix build of this code through a linked-server registry file.
+        let mut key = canonical_or_normalized(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if cfg!(windows) {
+            key = key.to_lowercase();
+        }
+        Self(key)
+    }
+}
+
+struct CachedProbe<T> {
+    probed_at: Instant,
+    value: T,
+}
+
+/// TTL memo with per-key single-flight for one probe.
+struct ProbeSlots<T> {
+    slots: Mutex<HashMap<GitProbeKey, Arc<Mutex<Option<CachedProbe<T>>>>>>,
+}
+
+impl<T> Default for ProbeSlots<T> {
+    fn default() -> Self {
+        Self {
+            slots: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<T: Clone> ProbeSlots<T> {
+    fn get_or_probe(&self, key: &GitProbeKey, ttl: Duration, probe: impl FnOnce() -> T) -> T {
+        // Two-level lock: the map lock is released before the per-key lock is
+        // acquired, so the map is never held across a `git` spawn, while the
+        // per-key lock makes concurrent misses for the same key single-flight
+        // - three routes missing together produce one spawn, not three.
+        let slot = {
+            let mut slots = self.slots.lock().expect("git probe slot map lock poisoned");
+            slots.entry(key.clone()).or_default().clone()
+        };
+        let mut slot = slot.lock().expect("git probe slot lock poisoned");
+        if let Some(cached) = slot.as_ref() {
+            if cached.probed_at.elapsed() < ttl {
+                return cached.value.clone();
+            }
+        }
+        let value = probe();
+        *slot = Some(CachedProbe {
+            probed_at: Instant::now(),
+            value: value.clone(),
+        });
+        value
+    }
+
+    fn evict(&self, key: &GitProbeKey) {
+        self.slots
+            .lock()
+            .expect("git probe slot map lock poisoned")
+            .remove(key);
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.slots
+            .lock()
+            .expect("git probe slot map lock poisoned")
+            .len()
+    }
+
+    fn clear(&self) {
+        self.slots
+            .lock()
+            .expect("git probe slot map lock poisoned")
+            .clear();
+    }
+}
+
+/// Shared TTL memo for the two `git` discovery probes.
+///
+/// Cheap to clone (`Arc` handle); lives in `AppState` so every route shares
+/// one memo.
+#[derive(Clone)]
+pub struct GitProbeCache {
+    inner: Arc<GitProbeCacheState>,
+}
+
+struct GitProbeCacheState {
+    ttl: Duration,
+    discovery: ProbeSlots<Option<GitDiscovery>>,
+    worktree_paths: ProbeSlots<Vec<PathBuf>>,
+}
+
+impl Default for GitProbeCache {
+    fn default() -> Self {
+        Self::with_ttl(git_probe_ttl_from_env())
+    }
+}
+
+impl fmt::Debug for GitProbeCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GitProbeCache")
+            .field("ttl", &self.inner.ttl)
+            .finish_non_exhaustive()
+    }
+}
+
+// Identity comparison: two handles are equal exactly when they share one memo.
+// Keeps `LocalDashboardResourcesProvider`'s derived `Eq` meaningful without
+// making memo contents part of provider equality.
+impl PartialEq for GitProbeCache {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+impl Eq for GitProbeCache {}
+
+impl GitProbeCache {
+    pub fn with_ttl(ttl: Duration) -> Self {
+        Self {
+            inner: Arc::new(GitProbeCacheState {
+                ttl,
+                discovery: ProbeSlots::default(),
+                worktree_paths: ProbeSlots::default(),
+            }),
+        }
+    }
+
+    fn discover(&self, path: &Path) -> Option<GitDiscovery> {
+        self.inner
+            .discovery
+            .get_or_probe(&GitProbeKey::for_path(path), self.inner.ttl, || {
+                GitDiscovery::probe(path)
+            })
+    }
+
+    fn worktree_paths(&self, path: &Path) -> Vec<PathBuf> {
+        self.inner
+            .worktree_paths
+            .get_or_probe(&GitProbeKey::for_path(path), self.inner.ttl, || {
+                probe_git_worktree_paths(path)
+            })
+    }
+
+    /// Drop one root's memo so its next probe re-runs `git` immediately.
+    pub fn evict(&self, path: &Path) {
+        let key = GitProbeKey::for_path(path);
+        self.inner.discovery.evict(&key);
+        self.inner.worktree_paths.evict(&key);
+    }
+
+    /// Drop every memo. Used after this daemon itself mutates the worktree set
+    /// (`git worktree add` / `git worktree remove`), so the mutation response's
+    /// refreshed resources reflect the new state instead of a pre-mutation memo.
+    pub fn clear(&self) {
+        self.inner.discovery.clear();
+        self.inner.worktree_paths.clear();
+    }
+}
+
+fn git_probe_ttl_from_env() -> Duration {
+    let millis = env::var("WS_DASHBOARD_GIT_PROBE_TTL_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_GIT_PROBE_TTL_MS);
+    Duration::from_millis(millis)
+}
+
+#[derive(Clone)]
 struct GitDiscovery {
     common_dir: PathBuf,
     worktree_dir: PathBuf,
@@ -432,7 +659,8 @@ struct GitDiscovery {
 }
 
 impl GitDiscovery {
-    fn discover(path: &Path) -> Option<Self> {
+    /// Spawns `git`. Call through `GitProbeCache::discover`, never directly.
+    fn probe(path: &Path) -> Option<Self> {
         // Single `git rev-parse` invocation queries all three values at once
         // (one output line per query flag, in flag order) instead of
         // spawning three separate `git` processes per work root.
@@ -488,7 +716,8 @@ fn non_empty_path(line: &str) -> Option<PathBuf> {
     (!trimmed.is_empty()).then(|| normalize_candidate_path(Path::new(trimmed)))
 }
 
-fn git_worktree_paths(path: &Path) -> Vec<PathBuf> {
+/// Spawns `git`. Call through `GitProbeCache::worktree_paths`, never directly.
+fn probe_git_worktree_paths(path: &Path) -> Vec<PathBuf> {
     let output = match Command::new("git")
         .arg("-C")
         .arg(path)
@@ -629,7 +858,105 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn git_probe_memo_serves_cached_value_inside_ttl_and_reprobes_after_expiry() {
+        let slots: ProbeSlots<usize> = ProbeSlots::default();
+        let key = GitProbeKey::for_path(Path::new("/ws-dashboard/probe-ttl"));
+        let probes = AtomicUsize::new(0);
+        let probe = || probes.fetch_add(1, Ordering::SeqCst) + 1;
+        let ttl = Duration::from_millis(150);
+
+        assert_eq!(slots.get_or_probe(&key, ttl, probe), 1);
+        assert_eq!(slots.get_or_probe(&key, ttl, probe), 1);
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "a repeat inside the TTL must be served from the memo"
+        );
+
+        std::thread::sleep(ttl + Duration::from_millis(50));
+        assert_eq!(slots.get_or_probe(&key, ttl, probe), 2);
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            2,
+            "an expired entry must re-probe"
+        );
+    }
+
+    #[test]
+    fn git_probe_memo_single_flights_concurrent_misses_for_one_key() {
+        let slots: Arc<ProbeSlots<usize>> = Arc::new(ProbeSlots::default());
+        let key = GitProbeKey::for_path(Path::new("/ws-dashboard/probe-single-flight"));
+        let probes = Arc::new(AtomicUsize::new(0));
+        let ttl = Duration::from_secs(60);
+
+        // Mirrors /git/status, /git/branches and /api/dashboard/resources all
+        // missing the same root at the same instant.
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let slots = Arc::clone(&slots);
+                let key = key.clone();
+                let probes = Arc::clone(&probes);
+                std::thread::spawn(move || {
+                    slots.get_or_probe(&key, ttl, || {
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(100));
+                        7
+                    })
+                })
+            })
+            .collect();
+        for handle in handles {
+            assert_eq!(handle.join().expect("probe thread"), 7);
+        }
+
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "concurrent misses for one key must collapse into a single probe"
+        );
+    }
+
+    #[test]
+    fn git_probe_key_collapses_mixed_separator_spellings_of_one_path() {
+        // The work-root registry observably stores Windows worktree paths with
+        // mixed separators; both spellings name one directory and must land on
+        // one memo key, or that root keeps spawning `git` twice per pass.
+        let mixed = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git\\ws-worktree\\jpeg");
+        let unified = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git/ws-worktree/jpeg");
+
+        assert_eq!(GitProbeKey::for_path(mixed), GitProbeKey::for_path(unified));
+    }
+
+    #[test]
+    fn discover_work_root_reports_missing_immediately_and_evicts_the_probe_memo() {
+        let root = temp_path("probe-evict");
+        fs::create_dir_all(&root).expect("create root");
+        // A TTL far longer than the test: only the `git` probes are memoized,
+        // so availability must still flip the moment the directory goes away.
+        let probes = GitProbeCache::with_ttl(Duration::from_secs(600));
+
+        let available = discover_work_root(&root, &probes);
+        assert_eq!(available.availability, WorkRootAvailability::Available);
+        assert_eq!(probes.inner.discovery.len(), 1);
+
+        remove_temp(&root);
+        let gone = discover_work_root(&root, &probes);
+
+        assert_ne!(
+            gone.availability,
+            WorkRootAvailability::Available,
+            "availability detection must not be served from the probe memo"
+        );
+        assert_eq!(
+            probes.inner.discovery.len(),
+            0,
+            "an unavailable root must drop its memo so it re-probes on return"
+        );
+    }
 
     #[test]
     fn local_provider_maps_plain_directory_to_work_root_view() {
@@ -707,8 +1034,9 @@ mod tests {
         // `discovered_unusable` `workspace_key` must canonicalize before
         // hashing so the direct path and its symlink alias yield the same
         // bucket id.
-        let direct = discover_work_root(&target);
-        let via_alias = discover_work_root(&alias);
+        let probes = GitProbeCache::default();
+        let direct = discover_work_root(&target, &probes);
+        let via_alias = discover_work_root(&alias, &probes);
 
         fs::set_permissions(&target, fs::Permissions::from_mode(original))
             .expect("restore permissions");

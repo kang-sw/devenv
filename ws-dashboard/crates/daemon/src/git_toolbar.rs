@@ -329,7 +329,7 @@ fn resolve_git_context(
     state: &AppState,
     work_root_id: &WorkRootId,
 ) -> Result<GitContext, GitContextError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
     let root = resources
         .workspaces
         .iter()

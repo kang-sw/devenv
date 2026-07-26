@@ -109,6 +109,7 @@ where
         config,
         auth,
         opened_work_roots,
+        git_probe_cache: crate::discovery::GitProbeCache::default(),
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         terminals,

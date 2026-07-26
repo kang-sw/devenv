@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
+use crate::discovery::GitProbeCache;
 use crate::document_translation::{
     translate_document, translation_providers, DocumentTranslationService,
 };
@@ -80,6 +81,10 @@ pub struct AppState {
     pub config: ServeConfig,
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
+    /// Shared TTL memo for the `git` discovery probes. Must be shared across
+    /// routes (not rebuilt per request), so the concurrent status/branches/
+    /// resources refreshes collapse onto one `git` spawn per root per TTL.
+    pub git_probe_cache: GitProbeCache,
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,

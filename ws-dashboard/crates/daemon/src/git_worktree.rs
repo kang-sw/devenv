@@ -240,6 +240,10 @@ pub async fn git_worktree_add_submit(
     if !output.status.success() {
         return bounded_error(StatusCode::BAD_REQUEST, "git worktree add failed");
     }
+    // This daemon just changed the worktree set, so the memoized `git worktree
+    // list` answers are stale. Drop them before the refresh below so the
+    // response reports the created worktree instead of waiting out the TTL.
+    state.git_probe_cache.clear();
 
     let created_id = local_work_root_id_for_path(&resolved.target_path);
     let _persist_guard = state.registry_persist_lock.lock().await;
@@ -273,7 +277,7 @@ pub async fn git_worktree_add_submit(
         tracing::warn!(%error, "failed to persist added Git worktree");
         return bounded_error(StatusCode::INTERNAL_SERVER_ERROR, "persist workRoot failed");
     }
-    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
     let created_present = resources
         .workspaces
         .iter()
@@ -336,7 +340,7 @@ fn resolve_worktree_remove(
     state: &AppState,
     work_root_id: &WorkRootId,
 ) -> Result<WorktreeRemoveContext, GitWorkspaceError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
     let workspace = resources
         .workspaces
         .iter()
@@ -540,6 +544,9 @@ pub async fn git_worktree_remove_submit(
     if !output.status.success() {
         return bounded_error(StatusCode::BAD_REQUEST, "git worktree remove failed");
     }
+    // Same reason as the add path: the memoized `git worktree list` answers no
+    // longer describe this repository.
+    state.git_probe_cache.clear();
 
     // B-2 branch delete: plain `-d` only, and only when the non-mutating
     // merged check confirms it is safe. An unmerged branch is left intact and
@@ -593,7 +600,7 @@ pub async fn git_worktree_remove_submit(
     state.codex_sessions.remove_for_work_roots(&ids);
     state.claude_sessions.remove_for_work_roots(&ids);
 
-    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
     let removed = !resources
         .workspaces
         .iter()
@@ -751,7 +758,7 @@ fn resolve_workspace_git(
     state: &AppState,
     workspace_id: &WorkspaceId,
 ) -> Result<GitWorkspaceContext, GitWorkspaceError> {
-    let resources = live_dashboard_resources(&state.opened_work_roots);
+    let resources = live_dashboard_resources(&state.opened_work_roots, &state.git_probe_cache);
     let workspace = resources
         .workspaces
         .iter()

@@ -168,6 +168,7 @@ fn app_state_with_opened_and_store(
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
+        git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
@@ -191,6 +192,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
             ..ServeConfig::default_loopback()
         },
         auth: OwnerAuthState::new_ephemeral(),
+        git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -418,6 +420,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
     let expired_state = AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
+        git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -8217,6 +8220,7 @@ fn app_state_with_activity_cache_and_codex_home(
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
+        git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -13980,6 +13984,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
+        git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::new(Some(TranslationProviderConfig {
