@@ -115,6 +115,28 @@ per-ticket judge decision, coverage is the **square** of the adoption rate — a
 membership instead is linear. So the collision argument, taken seriously, is an
 argument against `🚧` as its implementation rather than for it.
 
+## Resolved 2026-07-26 — retire
+
+Owner verdict after the measurement and the footprint survey: the mechanism is not
+justifiable. Execution is
+`260726-refactor-retire-spec-planned-marker-mechanism`; this research ticket is
+closed out by that ticket landing, not by further investigation.
+
+The argument that settled it, and the only one immune to the adoption confound:
+**`## Spec Impact` is ticket-side and dies with its ticket, so staleness is
+structurally impossible; `🚧` is spec-side and outlives its ticket by default.**
+`lead-update-spec` §5 exists to reconcile markers and was simply never run — the
+one live marker is the proof.
+
+Consciously given up: contract-vocabulary forcing. No instance of its value exists
+in the corpus. If one is demonstrated, revisit this decision rather than work
+around it.
+
+Also surfaced during the footprint survey: retiring the mechanism deletes
+`lead-update-spec` §5, which is downstream's only marker-cleanup path, so existing
+downstream markers would leak silently. The compat note in the retirement ticket's
+Phase 1 exists for that, and must ship first.
+
 ## Resolution direction (owner, 2026-07-26)
 
 The question was reframed from "keep vs retire `🚧`" to **"where does each bundled

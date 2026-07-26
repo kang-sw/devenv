@@ -12,16 +12,22 @@ sage-review-completeness: blocked
 
 # The 🚧 marker prerequisite is stated as a filesystem invariant that no contract-first path can satisfy
 
-> **Confirm `260726-research-spec-planned-marker-management-cost` before
-> implementing.** That research asks whether the `🚧` mechanism should exist at
-> all; this ticket assumes it does and makes its ordering satisfiable. As of
-> 2026-07-26 the keep side is the stronger one — the owner identified that `🚧` is
-> the only surface where two in-flight `ready/` tickets contending for the same
-> spec area collide, which no `## Spec Impact` scan reproduces — so this ticket is
-> likely to proceed as written. The gate is a direction check, not a hold for a
-> probable drop. The inline commit-ownership defect (`lead-write-spec` step 7
-> commits unconditionally while the contract-first branch invokes it inline) is a
-> real bug independent of `🚧` and survives either verdict.
+> **Superseded — do not implement.** The research resolved against the mechanism:
+> `🚧` is being retired by
+> `260726-refactor-retire-spec-planned-marker-mechanism`, so this ticket's whole
+> premise (making the marker's ordering satisfiable) is moot. It is not dropped
+> yet only because the retirement's Phase 2 owns the drop and its
+> `## Resolution`. The surviving finding — `lead-write-spec` step 7 committing
+> unconditionally while the contract-first branch invokes it inline — is already
+> extracted to `260726-bug-inline-playbook-invocation-commit-ownership` and does
+> not depend on the retirement.
+>
+> The earlier note here said the keep side was stronger, on the grounds that `🚧`
+> was the only surface catching two `ready/` tickets contending for the same spec
+> area. That was overturned twice: the collision check moved to the design
+> reviewer (commit `2d1a731c`), and measurement showed the marker's coverage is
+> the square of a per-ticket judge decision, with exactly one stale instance
+> corpus-wide.
 
 ## Background
 
