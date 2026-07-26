@@ -2649,6 +2649,26 @@ button {
   background: var(--ws-color-action);
 }
 
+/* Agent turn-state indicator (260725 Phase 6). Rendered only while a
+   terminal tab has an unacknowledged non-idle attention entry; the tab's
+   own `data-attention-state` attribute is what browser acceptance asserts,
+   this dot is the human-visible half. */
+.workbench-tab-attention {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ws-color-text-tertiary);
+}
+
+.workbench-tab-attention[data-workbench-tab-attention="working"] {
+  background: var(--ws-color-state-info);
+}
+
+.workbench-tab-attention[data-workbench-tab-attention="ready"] {
+  background: var(--ws-color-state-warning);
+}
+
 /* Phase 1 icon-first nav/topbar polish overrides. */
 .open-work-root,
 .resource-list-region {

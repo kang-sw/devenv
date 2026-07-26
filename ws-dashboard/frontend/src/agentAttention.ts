@@ -59,6 +59,67 @@ export function shouldReplaceAttentionSourceOnError(readyState: number): boolean
   return readyState === ATTENTION_SOURCE_CLOSED_READY_STATE;
 }
 
+// Ack-watermark map for the tab-label indicator (260725 Phase 6), keyed by
+// the SAME `serverScopedIdentity(serverRoute, terminalId)` string
+// `attentionByKey` uses, valued by the last acknowledged
+// `AgentAttentionEntry.updatedAtMs`.
+//
+// CONTRACT: this mirrors `workRootActivity.ts`'s
+// `ActivityAcknowledgements`/`initializeActivityDirtyItems` PATTERN (an id ->
+// last-seen revision token map, "dirty" == "no ack, or ack token !== current
+// token") rather than adding an `attention` field to the durable session
+// model (`TerminalPaneState.session` / `TerminalSessionView` /
+// `TerminalRegistryEntry`), which the ticket forbids. `updatedAtMs` is the
+// revision token, playing `activityItemRevisionToken`'s role: acknowledging
+// a `ready` at T1 must NOT suppress a later `ready` at T2.
+export type AgentAttentionAcknowledgements = Record<string, number>;
+
+// The single derivation the tab indicator renders from. `null` means "show
+// nothing"; a state means "show that state's badge".
+//
+// Three independent suppressions, in order:
+//  1. Session liveness (plan step 2, the chosen stale-indicator fix): only a
+//     `"running"` session may show an indicator. The daemon keeps listing a
+//     dead-but-in-grace-window terminal for up to 30s
+//     (`terminal.rs::DAEMON_GRACE_WINDOW_MS`) and its `AttentionHub` entry
+//     survives past that until an unrelated `insert()` runs its retain step,
+//     so without this gate a terminal whose helper died mid-turn would keep
+//     a stale `ready` badge indefinitely. `status` flips off `"running"` on
+//     the very next `listTerminals` reconciliation after
+//     `apply_helper_status`/`mark_ipc_closed` fire, so this render-time gate
+//     closes the user-visible half of that gap with no daemon change.
+//  2. `"idle"` is the explicit "nothing to show" state in the pinned
+//     three-state vocabulary, never a badge.
+//  3. The ack watermark: an entry whose `updatedAtMs` the user has already
+//     acknowledged (by selecting that tab) is cleared until the NEXT state
+//     change bumps `updatedAtMs`.
+export function pendingAttentionStateFor(
+  entry: AgentAttentionEntry | undefined,
+  acknowledgedUpdatedAtMs: number | undefined,
+  sessionStatus: string,
+): AgentAttentionState | null {
+  if (sessionStatus !== "running" || !entry || entry.state === "idle") {
+    return null;
+  }
+  return acknowledgedUpdatedAtMs === entry.updatedAtMs ? null : entry.state;
+}
+
+// Records `entry.updatedAtMs` as acknowledged for `key`, returning the SAME
+// object identity when nothing changes so a repeated selection of an
+// already-acknowledged tab never re-renders (mirrors
+// `acknowledgeActivityItem`'s role, with the no-op guard this map's
+// setState-in-a-click-handler call site needs).
+export function acknowledgeAttentionEntry(
+  acknowledgements: AgentAttentionAcknowledgements,
+  key: string,
+  entry: AgentAttentionEntry | undefined,
+): AgentAttentionAcknowledgements {
+  if (!entry || acknowledgements[key] === entry.updatedAtMs) {
+    return acknowledgements;
+  }
+  return { ...acknowledgements, [key]: entry.updatedAtMs };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -154,6 +154,7 @@ import {
   workRootActivityPlacementState,
   initialWorkbenchGroups,
   buildWorkbenchEditorGroups,
+  terminalAttentionKey,
   type WorkbenchEditorGroupModel,
   type WorkbenchPaneOrder,
   type DockviewTabCloseRequest,
@@ -223,10 +224,12 @@ import {
   type TerminalSessionView,
 } from "./terminals";
 import {
+  acknowledgeAttentionEntry,
   attentionEventsEndpoint,
   parseAgentAttentionEntry,
   parseAgentAttentionSnapshot,
   shouldReplaceAttentionSourceOnError,
+  type AgentAttentionAcknowledgements,
   type AgentAttentionEntry,
 } from "./agentAttention";
 import {
@@ -484,6 +487,29 @@ export function App() {
   // renders nothing from it.
   const [attentionByKey, setAttentionByKey] = useState<
     Record<string, AgentAttentionEntry>
+  >({});
+  // Tab-click acknowledgement watermark for the Phase 6 indicator: same key
+  // space as `attentionByKey`, valued by the last acknowledged
+  // `updatedAtMs`. Deliberately NOT persisted and NOT merged into
+  // `attentionByKey` - it is browser-local, per-session UI state (the
+  // `ActivityConsole.tsx` precedent keeps its own ack map as plain
+  // component state too), and keeping it separate is what lets a NEW
+  // turn-state at a later `updatedAtMs` re-raise an indicator the user
+  // already dismissed once.
+  //
+  // DELIBERATELY NOT PRUNED (review cycle 1, Minor 1): unlike
+  // `attentionByKey`, entries here are never dropped when a terminal closes,
+  // a snapshot replaces a route's entries, or a route becomes ineligible.
+  // Pruning was considered and rejected, not overlooked. Daemon terminal ids
+  // are opaque and never reused (`opaque_terminal_id`), so a stale watermark
+  // cannot collide with a future terminal; and a watermark that SURVIVES a
+  // route disconnect/reconnect is what preserves "the user already
+  // acknowledged this" across the reconnect snapshot that re-delivers the
+  // same entry - pruning would re-raise an already-dismissed indicator. The
+  // cost is one number per agent terminal ever selected, for the page's
+  // lifetime.
+  const [attentionAcknowledgements, setAttentionAcknowledgements] = useState<
+    AgentAttentionAcknowledgements
   >({});
   const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2121,6 +2147,9 @@ export function App() {
             selectedServerId={selectedServerId}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
+            attentionByKey={attentionByKey}
+            attentionAcknowledgements={attentionAcknowledgements}
+            onAttentionAcknowledgementsChange={setAttentionAcknowledgements}
             workbenchGroupsByRoot={workbenchGroupsByRoot}
             paneOrderByRoot={paneOrderByRoot}
             openWorkRootKeys={openWorkRootKeys}
@@ -3696,6 +3725,9 @@ function WorkbenchShell({
   selectedServerId,
   selection,
   selectedEntity,
+  attentionByKey,
+  attentionAcknowledgements,
+  onAttentionAcknowledgementsChange,
   commandLog,
   loading,
   error,
@@ -3730,6 +3762,19 @@ function WorkbenchShell({
   selectedServerId: string;
   selection: WorkbenchSelection | null;
   selectedEntity: ResourceEntity | null;
+  // 260725 Phase 6 (tab-label indicator): the attention stream itself is
+  // owned by `App()` (it is selection-independent, one EventSource per
+  // eligible server), but the only surface that RENDERS it is the terminal
+  // tab, which lives under this shell - so both the live entries and the
+  // click-to-acknowledge watermark are threaded down as props rather than
+  // duplicating stream state here. The watermark setter follows this
+  // component's existing `on...Change: Dispatch<SetStateAction<...>>`
+  // idiom.
+  attentionByKey: Record<string, AgentAttentionEntry>;
+  attentionAcknowledgements: AgentAttentionAcknowledgements;
+  onAttentionAcknowledgementsChange: Dispatch<
+    SetStateAction<AgentAttentionAcknowledgements>
+  >;
   commandLog: CommandEntry[];
   loading: boolean;
   error: string | null;
@@ -4557,6 +4602,10 @@ function WorkbenchShell({
                 entry,
               );
           },
+        },
+        {
+          attentionByKey,
+          acknowledgements: attentionAcknowledgements,
         },
         Object.values(agentChatPanes),
         agentChatPaneOrderByGroup,
@@ -6321,6 +6370,35 @@ function WorkbenchShell({
     setActivePaneByGroupForSelected(result.activePaneByGroup);
   };
 
+  // Click-to-acknowledge (260725 Phase 6), mirroring `ActivityConsole.tsx`'s
+  // `acknowledgeSelected`: touching a terminal tab records that terminal's
+  // CURRENT attention revision (`updatedAtMs`) as seen, so the indicator
+  // clears now but re-raises on the next turn boundary.
+  //
+  // CONTRACT (review cycle 1, Critical): called from BOTH triggers - the
+  // Dockview active-panel change (`selectPane`, for a click that switches
+  // tabs) and `DockviewWorkbenchLayout`'s per-tab `onAcknowledgePane` (for a
+  // click on the tab that is ALREADY active, which emits no change event and
+  // is the feature's primary flow: the agent finishes in the tab the user
+  // left focused). Idempotent by construction - `acknowledgeAttentionEntry`
+  // returns the same object identity when the revision is already recorded -
+  // so a genuine tab switch running both paths costs nothing.
+  //
+  // `terminalPanes` is keyed by logical key, not pane id, so the pane is
+  // resolved by its `paneId` field rather than a map lookup.
+  const acknowledgePaneAttention = (paneId: string) => {
+    const terminalPane = Object.values(terminalPanes).find(
+      (candidate) => candidate.paneId === paneId,
+    );
+    if (!terminalPane) {
+      return;
+    }
+    const key = terminalAttentionKey(terminalPane);
+    onAttentionAcknowledgementsChange((current) =>
+      acknowledgeAttentionEntry(current, key, attentionByKey[key]),
+    );
+  };
+
   const selectPane = (groupId: string, paneId: string) => {
     const pane = editorGroups
       .flatMap((group) => group.panes)
@@ -6328,6 +6406,9 @@ function WorkbenchShell({
     setFocusedTerminalPaneId(
       pane?.kind === "persistentTerminal" ? paneId : null,
     );
+    if (pane?.kind === "persistentTerminal") {
+      acknowledgePaneAttention(paneId);
+    }
     setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(current, groupId, paneId),
     );
@@ -6524,6 +6605,7 @@ function WorkbenchShell({
                 workbenchLayoutRestoreRef.current[rootKey]?.groupSizeById
               }
               onMovePane={movePane}
+              onAcknowledgePane={acknowledgePaneAttention}
               onRequestClosePane={requestWorkbenchPaneClose}
               onSelectPane={selectPane}
               onLayoutSnapshot={(sizeByWorkbenchGroupId) => {

@@ -289,10 +289,23 @@ dropped tickets live in hidden archive dirs and git history.
   and its ticket stays open. Phase 5 is DONE (`79f21023`) — a broadcast hub
   with a per-terminal snapshot, a server-scoped SSE route pair, and one
   browser subscription per eligible server rather than one global one.
-  Nothing renders yet; the state is parked for Phase 6, which is the next
-  unfinished phase and inherits one known gap: the EventSource subscription
-  lifecycle is covered only as a pure predicate, not end to end, because this
-  repo has no jsdom harness.
+  Nothing rendered in that phase; the state was parked for Phase 6. Phase 6 is
+  now DONE (`0d712ccb`) and closes the end-to-end slice — the terminal tab
+  carries a badge fed from the stream, cleared by a revision-keyed ack
+  watermark with two triggers (pane activation AND a click on the
+  already-active tab, the second one load-bearing because the primary flow
+  raises the badge on a tab that never changes activation). The Phase 5 jsdom
+  gap is discharged incidentally: the new browser gate exercises the
+  EventSource subscription end to end. Verified against the real `claude` CLI,
+  not only synthesized POSTs — two real turns produced
+  `working`/`ready`/ack-`none`/`working`/`ready` on a non-focused tab, matching
+  the CLI's own transcript timestamps. Next unfinished phase is Phase 7, which
+  inherits one constraint: the nav row aggregates a COUNT, and Phase 6's
+  render-layer liveness gate does not generalize to one — the daemon still
+  holds attention entries for terminals whose helper died without a browser
+  `DELETE`, so Phase 7 must cross-reference live sessions or wire
+  `attention.forget` into the IPC-death path rather than counting
+  `attentionByKey` directly.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the

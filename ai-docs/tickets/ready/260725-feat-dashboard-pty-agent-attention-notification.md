@@ -1179,6 +1179,160 @@ invoke real vendor CLIs and should not start:
   phase Result. This is the only step that proves hook injection and the
   browser path work together.
 
+### Result (0d712ccb) - 2026-07-26
+
+Done. Commits: `ce8e5498` (survey plan), `d9129856` (hooked test-only spawn
+profile), `3b5f1193` (indicator + browser gate), `0d712ccb` (review fix).
+
+`DockviewWorkbenchTab` now renders an attention badge fed from Phase 5's
+`attentionByKey`, threaded as a presentational `attentionState` on the
+workbench pane types rather than added to `TerminalPaneState.session` /
+`TerminalSessionView` / `TerminalRegistryEntry` — the state stays derived and
+never enters the durable session model. Acknowledgement is a revision-keyed
+watermark reusing the `ActivityAcknowledgements` PATTERN, keyed by the same
+`serverScopedIdentity(serverRoute, terminalId)` string the stream writes, so a
+later turn boundary re-raises an acknowledged badge.
+
+Three decisions in this phase are load-bearing and were each verified rather
+than assumed:
+
+1. **The stale-indicator gap is closed at the render layer, not in the
+   daemon.** `pendingAttentionStateFor` returns `null` unless the session's
+   daemon-reported status is `running`. The daemon reclaims a dead terminal's
+   attention entry only lazily (nothing calls `attention.forget` on the IPC
+   death path; the entry is evicted when some unrelated terminal is next
+   created), so an entry outlives its session. The rejected alternative was a
+   daemon-side forget on IPC death: `spawn_ipc_reader_task` holds only an
+   `Arc<TerminalSession>` and not the registry, so it would mean threading
+   `AttentionHub` through a Phase 4/5 seam for a bug a render gate already
+   closes, and no path revives a non-`Running` session within one daemon
+   process. **See the forward note for Phase 7 — the render gate does not
+   generalize to an aggregate count.**
+2. **The panel-param diff predicate had to be extended.**
+   `shouldUpdateDockviewWorkbenchPanelParams`'s `persistentTerminal` branch
+   suppresses param refreshes for a *connected* terminal so xterm is not
+   disturbed mid-keystroke, so a new `attentionState` param would never have
+   repainted. The comparison was added ahead of that branch's socket-status
+   early return. It cannot blur or remount the emulator: `updateParameters`
+   routes to a `setState` on the same component instance, the xterm instance
+   lives in a mount-only effect, and `params.body` keeps a stable
+   `key={pane.paneId}`.
+3. **Acknowledgement needs two triggers, not one.** The plan's step 6 assumed
+   `selectPane` alone; review proved that unreachable for the feature's
+   primary flow (see Review outcome).
+
+**Deviations from the plan.** (a) The `dummy-echo-hooked` profile uses its own
+`sleep 180` rather than sharing `DUMMY_ECHO_ARGS`' `sleep 30`, because the new
+render-time liveness gate makes a dummy that exits mid-spec legitimately clear
+the badge, and 30s does not cover reload + reselect + three POSTs; 180s matches
+the Playwright per-test timeout, bounding an orphaned sleep. (b) The plan's
+Codebase Findings claimed no state-dir override was plumbed; that was checked
+against the wrong names. `WS_DASHBOARD_STATE_HOME` exists
+(`persistent_state.rs::default_state_file`), is inherited by the spawned
+daemon, and is already used by `agent-spawn-profile.spec.ts`; the new spec uses
+it and reads the callback token off disk with Node `fs`, keeping the token out
+of HTTP, URLs, and logs. (c) `WorkbenchShell` is a separate component from
+`App()`, so the two maps are threaded as props rather than read at the
+`buildEditorGroupsForRoot` site; the state still lives at `App()` level.
+
+**Verification (this machine, 2026-07-26).** `cargo test -p
+ws-dashboard-daemon --lib` → 204 passed, 0 failed, 2 ignored, exit 0 (Phase 5
+baseline was 201, net +3). `cargo test -p ws-dashboard-daemon --test routes` →
+174 passed, 2 failed — the same known pre-existing pair as Phase 5, no new
+failure. `cargo check -p ws-dashboard-daemon --tests` → exit 0. `npm run build`
+→ exit 0; `test:agent-attention`, `test:workbench`, `test:terminals`,
+`test:work-root-activity` → all exit 0. `npx playwright test
+agent-attention-indicator.spec.ts` → 1 passed; `agent-spawn-profile.spec.ts` →
+1 passed; `dashboard-acceptance.spec.ts` → 1 failed at SITE
+`dashboard-acceptance.spec.ts:3779` (the known unrelated fitNow short-viewport
+failure, tracked as `260725-bug-dashboard-fitnow-short-viewport-shrink`) with
+the `:4020` test skipped behind it by serial mode — no new failure site.
+
+Every new guard was proven non-vacuous by mutating production source and
+reading the failure site: weakening the param comparison to first-appearance
+only fails at `agent-attention-indicator.spec.ts:364`; deleting it fails at
+`:340`; disabling the `selectPane` ack fails at `:384`; dropping the
+`status === "running"` gate fails in `agentAttention.test.ts`; making the ack
+sticky instead of revision-keyed fails at `:401`; removing the new
+already-active-tab trigger fails at `:468` while all five earlier steps still
+pass. All reverted, tree clean.
+
+**Recorded manual run with the real `claude` CLI (2026-07-26).** Run against a
+scratch work root under a temp `WS_DASHBOARD_STATE_HOME`, driving the
+daemon-served build. Helper argv carried
+`--command claude --command-arg --settings --command-arg
+<state>/agent-profiles/<id>/settings.json` plus the 11 scrub markers, and the
+materialized `settings.json` carried both real hook commands. Complete
+transition log on the agent tab (epoch ms): `…027521 init:none` →
+`…038108 working` (turn 1 `UserPromptSubmit`) → `…039614 ready` (turn 1
+`Stop`) → `…047937 none` (click on the agent tab) → `…048496 working` (turn 2)
+→ `…050145 ready` (turn 2). The `ready` states were observed on a tab carrying
+`aria-selected="false"` — the plain terminal was active throughout each turn —
+and the acknowledged read showed `data-attention-state="none"` with the
+`[data-workbench-tab-attention]` span count at 0. The second turn re-raising
+the badge is what proves the watermark is revision-keyed against real vendor
+hooks rather than only against synthesized POSTs; a sticky ack would have left
+it at `none`. Corroborated at a layer the dashboard cannot influence: the CLI's
+own transcript records the two turns at `00:17:18`/`00:17:28`, matching
+`1785025038108` and `1785025048496` exactly. This discharges the phase's
+"recorded manual" requirement and, with it, the end-to-end slice.
+
+**Review outcome.** Partitioned into correctness, fit, and test; one Critical,
+three Minor.
+
+1. **Critical — acknowledgement was unreachable on the already-active tab**,
+   which is the feature's primary flow. The ack fired only from `selectPane`,
+   itself invoked only from Dockview's `onDidActivePanelChange` — a *change*
+   event that by construction never fires for a tab that is already active
+   (`doSetGroupActive` compares against the previous value; `openPanel`
+   early-returns on the active panel). An agent left running in the focused
+   tab while the owner is away from the browser therefore raised a badge that
+   clicking could never clear, permanently so with a single open pane. Fixed
+   in `0d712ccb` with a second, change-independent trigger: the tab's own
+   `onClick` calling a new `onAcknowledgePane` param handed over the layout's
+   stable `callbacksRef`. The ref indirection is required, not decorative —
+   a raw prop embedded in params would have frozen at first paint (params
+   refresh almost never for a connected terminal) and acknowledged a stale
+   revision. Both ack paths are idempotent through
+   `acknowledgeAttentionEntry`'s identity guard, and re-review confirmed the
+   widened trigger surface adds no spurious ack (close button calls
+   `stopPropagation`, middle-click raises `auxclick` not `click`, a completed
+   drag emits no `click`, non-terminal tabs miss the `terminalPanes` lookup).
+   The original spec did not catch this because every clear step selected the
+   other tab first; `:468` now covers it.
+2. **Minor, won't fix — `attentionAcknowledgements` is never pruned.**
+   Dropping keys alongside `attentionByKey` would discard the watermark when a
+   route goes ineligible, so the reconnect snapshot would re-raise an
+   already-dismissed badge. Terminal ids are opaque and never reused
+   (`opaque_terminal_id`), so a stale watermark cannot collide; the cost is one
+   number per agent terminal for the page's lifetime. Recorded in a code
+   comment at `App.tsx` rather than left silent, and the refusal was accepted
+   on re-review.
+3. **Minor, fixed — the new spec leaked terminals on a failing run.** The body
+   is now wrapped in `try/finally` with an unconditional authenticated
+   `DELETE` of both spawned terminals. Verified empirically: with a deliberate
+   failure injected, this spec's orphan count stayed flat at 5 (previously +2).
+   The underlying cause is pre-existing daemon behavior —
+   `run_with_shutdown_and_grace` never terminates live `TerminalSession`s on
+   shutdown — and is not introduced here.
+4. **Minor, fixed — an untrue comment.** The plan-specified
+   `data-attention-state` attribute name does not follow the
+   `data-workbench-*` prefix its siblings use; the name was kept (the spec
+   selects on it) and the comment rewritten to state the exception plainly
+   instead of claiming conformance.
+
+**Deferred / not done.** Phases 7 and 8.
+
+> Forward to Phase 7: the nav row aggregates a working-N/ready-M COUNT across
+> the daemon, and the render-layer liveness gate this phase relies on does not
+> generalize to it. That gate works only because a pane exists to check
+> `session.status` against; a count has no pane, and the daemon's attention map
+> still holds entries for terminals whose helper died without a browser
+> `DELETE`. Phase 7 must either cross-reference the live session list before
+> counting, or finally close the daemon-side gap by wiring `attention.forget`
+> into the IPC-death path — deriving the count straight from `attentionByKey`
+> will silently over-count dead agents.
+
 ### Phase 7: nav-row presentation
 
 Depends on Phase 5 and on `260725-feat-dashboard-nav-row-two-line-open-state`
