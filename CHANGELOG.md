@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.36.14 - 2026-07-26
+
+### Changed
+- **Ticket design review now reads the spec area a ticket targets, not only
+  `spec:` frontmatter.** A ticket that addresses specs through `## Spec Impact`
+  previously got no spec read at all, so the reviewer judged spec coherence
+  without opening the spec. The reviewer also lists `ready/` tickets and compares
+  their `## Spec Impact` sections for spec-territory conflicts, reporting one only
+  when two tickets would define the same behavior differently or one landing would
+  invalidate the contract the other states — shared spec files alone are not a
+  finding.
+- **Ticket conventions gain a `## Content` section**: record the judgment
+  implementation cannot re-derive — the choice among workable alternatives, why
+  the others lost, agreed interfaces, and what the ticket deliberately leaves
+  untouched — and point at code by the search that finds it rather than by
+  surveyed coordinates, since enumerated symbol and line lists drift silently
+  while the compiler and test suite re-derive them for free.
+- **Epic ticket bodies route implementation detail and deliberation out.** Two
+  operational rules in the Epic Tickets section: implementation detail moves to an
+  implementation child ticket, and deliberation that outgrows a settled decision
+  line moves to a `research` ticket. The epic body carries scope, cross-child
+  invariants, closure conditions, and settled decisions only.
+
+`0.36.13` was a dev-merge bump and was never tagged; this entry covers the whole
+`v0.36.12..v0.36.14` range.
+
 ## v0.36.12 - 2026-07-26
 
 ### Added
