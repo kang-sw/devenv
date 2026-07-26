@@ -64,7 +64,7 @@ history.
 | File | Use |
 |------|-----|
 | `agents-plugin/skills/lead-skill-authoring/SKILL.md` | Skill/agent/prompt/convention authoring rules |
-| `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need wsflow mirrors |
+| `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
 | `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
 | `ai-docs/ref/windows-dogfood.md` | Native-Windows source-build dogfood / Phase C cold-load acceptance procedure |
@@ -77,11 +77,28 @@ history.
 Before editing tickets/specs/mental models, read the matching convention through
 `ws/convention.read`. Before editing skill, agent, prompt, or convention text,
 read `agents-plugin/skills/lead-skill-authoring/SKILL.md`. Before editing full
-`agents-plugin/skills/lead-*` skills, plugin packaging, runtime contracts,
-launcher behavior, prompt guidance, or release validation that may affect
-wsflow, read `ai-docs/ref/wsflow-mirroring.md` and run
+`agents-plugin/skills/lead-*` skills, shared `agents-plugin/rsrc/` playbooks,
+plugin packaging, runtime contracts, launcher behavior, prompt guidance, or
+release validation that may affect wsflow, read
+`ai-docs/ref/wsflow-mirroring.md` and run
 `python3 -m unittest discover agents-plugin-wsflow/tests` when the derivative
 surface may drift.
+
+**Any canonical `agents-plugin/rsrc/` edit is incomplete until both regen
+commands run**, in order, from `agents-plugin-tool/`:
+
+```bash
+WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealManifest
+WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror
+```
+
+Both `-count=1` flags are mandatory (the regen entrypoints are env-gated test
+bodies with no changing input, so the test cache returns a green `ok` without
+writing). Never hand-edit `agents-plugin-wsflow/rsrc/` — it is a generated
+byte-identical mirror. The python package test above verifies the skill bundle
+and runtime contract; it does **not** catch rsrc mirror drift, so running only
+that command leaves the mirror stale. Omitting the second regen is the process
+gap recorded as `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`.
 
 ## Runtime Surfaces
 

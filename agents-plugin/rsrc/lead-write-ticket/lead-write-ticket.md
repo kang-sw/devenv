@@ -180,10 +180,10 @@ Do not trigger: mechanical status moves, already-confirmed ticket edits, or crea
 
 ### judge: ticket-shape
 
-Ticket split: only when board, ticket, and implementation-unit roles are mixed, or unrelated increments belong in separate actionable tickets.
+Ticket split: board, ticket, and implementation-unit roles are mixed; unrelated increments belong in separate actionable tickets; or related units share one interface contract but have no sequential dependency — those become sibling child tickets under an `epic` that owns the shared contract.
 Phase default: actionable tickets use one `Phase 1`.
 Phase unit: one reviewable implementation slice a future fresh session can finish, review, verify, and hand off cleanly.
-Phase split: add phases only when review, verification, rollback, or dependency boundaries differ.
+Phase split: add phases only for sequentially dependent units; differing review, verification, or rollback boundaries alone do not justify a phase split.
 
 ### judge: missing-spec-address
 
