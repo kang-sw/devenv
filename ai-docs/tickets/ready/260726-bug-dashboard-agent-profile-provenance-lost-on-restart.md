@@ -1,13 +1,15 @@
 ---
 title: Re-adopted agent terminals permanently lose profile provenance after a daemon restart
 related:
-  260725-feat-dashboard-pty-agent-attention-notification: found-during (Phase 2 adopt-arm CONTRACT); its Phase 7 nav counters are what the loss corrupts
+  260725-feat-dashboard-pty-agent-attention-notification: found-during (Phase 2 adopt-arm CONTRACT); its Phase 7 nav counters and its Phase 8 browser-level cue are both what the loss corrupts
   260725-bug-dashboard-terminal-registry-schema-evolution-orphans-helpers: relates - the helper-owned registry hazard this fix deliberately routes around rather than resolving
   260725-feat-dashboard-nav-row-two-line-open-state: owns the second nav line whose terminal count is over-reported by this bug
 spec:
   - 260725-ws-web-dashboard-terminal-spawn-profile
 related-mental-model:
   - ws-web-dashboard
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Re-adopted agent terminals permanently lose profile provenance after a daemon restart
@@ -65,15 +67,43 @@ claims were re-checked against source; five needed correction.
    consequence is live, not prospective. `App.tsx:4530-4533` already names
    this ticket stem as a known open gap in a source comment.
 
-5. **The blast radius is narrower than "the terminal loses its agent
-   identity".** Two agent surfaces are unaffected and must not be described as
-   broken: the per-tab attention indicator and the Phase 8 browser-level cue
-   are profile-independent, keying off `attentionByKey` through
-   `pendingAttentionStateFor` (`terminalWorkbenchPane.tsx:92-97`,
-   `agentAttention.ts:99`); and the callback token *is* recovered on adopt
+5. **The blast radius is WIDER than the nav-row counts.** Exactly two agent
+   surfaces survive adoption and must not be described as broken: the per-tab
+   attention indicator, which calls `pendingAttentionStateFor` off
+   `attentionByKey` with no profile lookup anywhere in its path
+   (`workbench/terminalWorkbenchPane.tsx:87-97`, `agentAttention.ts:99-105`);
+   and the callback token, which *is* recovered on adopt
    (`recover_callback_token`, `terminal.rs:416-438`), so hooks keep
-   authenticating and keep posting turn state after a restart. Only the
-   nav-row counts are wrong.
+   authenticating and keep posting turn state after a restart.
+
+   The Phase 8 browser-level cue is **not** in that list. Its chain is
+   profile-gated end to end: `globalAttentionTone` (`App.tsx:2142-2159`) is
+   `aggregateNavAttentionTone(agentAttentionByRoot, rootKeys)`;
+   `agentAttentionByRoot` (`App.tsx:4581-4591`, pushed up to `App()` via
+   `onAgentAttentionByRootChange`) is
+   `aggregateNavAttentionCounts(navAttentionPanesOf(terminalPanes), ...)`; and
+   that function's loop body opens with
+   `if (pane.profileId == null) { continue; }` (`agentAttention.ts:206-209`).
+   `globalAttentionTone` is the sole input to the flashing document title and
+   favicon badge (`App.tsx:2198-2226`) and to the desktop `Notification`
+   (`App.tsx:2238-2268`). So a re-adopted agent terminal produces **no
+   browser-level attention cue at all** - no title flash, no favicon badge, no
+   desktop notification - for the rest of its lifetime.
+
+   This reverses an earlier reading in this ticket, which called the Phase 8
+   cue profile-independent and instructed that it "must not be described as
+   broken". That instruction was wrong. It must not be carried into the
+   replacement CONTRACT block, the spec amendment, or any comment written
+   under the `## Constraints` sweep - doing so would reintroduce the exact
+   defect class that sweep exists to remove.
+
+   The severity ordering follows from this. A wrong nav count is
+   visible-and-wrong: the user sees a number and can distrust it. A missing
+   `ready` notification is a signal the user never learns was owed to them, on
+   the one surface Phase 8 shipped specifically to reach a user who is not
+   looking at the tab. The notification loss is the more serious half of the
+   impact, and the nav-row double error (correction 3) is the more legible
+   half.
 
 6. **The "sidecar file" candidate is not a new mechanism.** The daemon
    already owns a per-terminal sidecar lane under the state dir
@@ -107,6 +137,11 @@ Manual, against a real daemon:
    reports `"profileId": null`.
 6. In the browser, that same pane is now counted as a plain terminal and the
    root reports zero agents.
+7. Drive that terminal to a `ready` turn boundary. No document-title flash, no
+   favicon badge, and no desktop notification fires, because
+   `globalAttentionTone` stays `null` for a root whose only agent pane was
+   skipped by the `profileId == null` guard (correction 5). Before the
+   restart, the same turn boundary produces all three.
 
 Automated, and the shortest path to a failing assertion:
 `crates/daemon/tests/terminal_notify_callback_restart.rs` already builds this
@@ -178,13 +213,25 @@ outcome than reporting an id that no longer resolves.
 report `null` on the first restart after the upgrade. Accepted: the population
 is bounded by one restart and self-clears as those terminals are closed.
 
-**Verification stays at daemon level; no browser acceptance is added.** The
-frontend is unchanged by this fix, Phase 7's unit tests already pin the
-counter's behavior given a non-null `profileId`, and the acceptance harness
-serves a prebuilt `frontend/dist`
+**Verification stays at daemon level; no browser acceptance is added.**
+Re-examined against correction 5's wider blast radius - which now includes the
+browser-level cue - and it holds, for a reason that is stronger, not weaker,
+once the chain is written out. Every broken surface is a pure function of one
+daemon-supplied bit, `TerminalSessionView.profileId != null`, composed through
+functions that are already unit-tested at non-null `profileId`:
+`aggregateNavAttentionCounts` and `aggregateNavAttentionTone`
+(`frontend/src/agentAttention.test.ts`) and `attentionTitleFor` /
+`buildAttentionFaviconHref` / `shouldFireAttentionNotification`
+(`frontend/src/browserAttentionCue.test.ts`). The frontend is unchanged by
+this fix, so the only fact not already covered is the daemon one, and the
+restart harness assertion below is exactly that fact. Three further reasons
+specific to the cue: the acceptance harness serves a prebuilt `frontend/dist`
 (`260726-chore-e2e-playwright-serves-stale-frontend-dist`), so a browser run
-here would cost time without producing evidence the daemon test does not
-already produce.
+can silently test a stale bundle; a desktop `Notification` needs a granted OS
+permission and a stubbed constructor to observe at all; and the title flash is
+a 1s interval, which is a timing-sensitive assertion for a bug whose root
+cause is a single boolean upstream of it. A browser run would cost time
+without producing evidence the daemon test does not already produce.
 
 ### Rejected alternatives
 
@@ -243,8 +290,8 @@ callback token stays in `terminal-tokens/` and `callback.json`.
 
 ## Spec Impact
 
-Two existing entries in `ai-docs/spec/ws-web-dashboard/index.md` are addressed;
-no new spec entry is needed.
+Three existing entries in `ai-docs/spec/ws-web-dashboard/index.md` are
+addressed; exactly one takes text changes, and no new spec entry is needed.
 
 - `260725-ws-web-dashboard-terminal-spawn-profile` (index.md:2124) - **text
   changes.** It currently asserts the bug as intended behavior: "that
@@ -261,6 +308,16 @@ no new spec entry is needed.
   counts only and is never also included in the terminal count, so no open
   surface is counted twice." That sentence is currently false after a daemon
   restart; the fix restores conformance rather than changing the contract.
+- `260726-dashboard-browser-level-attention-cue` (index.md:2364) - **no text
+  change**, but named here because correction 5 makes it an affected surface.
+  It asserts "the cue cannot disagree with the tab or navigation badges,
+  because it is derived from the same per-terminal pending state rather than
+  tracking its own." After a daemon restart that is false for a re-adopted
+  agent: the tab indicator still shows its state while the cue and the nav
+  badge both go silent, because only the latter two pass through the
+  `profileId == null` guard. The fix restores conformance; the entry's text is
+  the contract this bug violates, so it must not be softened to describe the
+  violation.
 
 Contract-first spec: no. The behavior is a restoration of an already-specified
 contract plus an amendment to an entry that describes a limitation being
@@ -276,10 +333,15 @@ slice with no sequential dependency between them.
 **Completed behavior.** A terminal spawned with any resolved profile records
 that profile id in `<state_dir>/agent-profiles/<terminal_id>/profile.json`, and
 a session re-adopted by `boot_reconcile` reports that same profile id in
-`TerminalSessionView.profileId` instead of `null`. Consequently a work-root
+`TerminalSessionView.profileId` instead of `null`. Two consequences follow
+from that one bit, both already required by shipped spec entries: a work-root
 nav row that survives a daemon restart counts a re-adopted agent terminal in
-the agent segment only, as
-`260725-nav-row-open-surface-counts-and-open-state` already requires. Includes
+the agent segment only
+(`260725-nav-row-open-surface-counts-and-open-state`), and that terminal's
+turn boundaries reach the browser-level cue again - title flash, favicon
+badge, and the opt-in desktop notification - instead of being dropped by the
+`profileId == null` guard upstream of `globalAttentionTone`
+(`260726-dashboard-browser-level-attention-cue`, correction 5). Includes
 hoisting `mark_profile_pending` to cover the hookless-profile directory
 creation, the degrade rules above, the spec amendment, and the comment sweep
 named in `## Constraints`.
@@ -299,18 +361,64 @@ decision above).
   adopted-entry lookup to assert the adopted terminal reports
   `profileId: "claude"`. Non-vacuous by construction: that assertion fails on
   the current tree.
-- Cover the hookless branch at daemon lib level rather than through the
-  restart harness: a `boot_reconcile` test in the style of this file's
-  existing `boot_reconcile_drops_entry_*` tests, driving the real async path
-  against a pre-written sidecar, plus a spawn-side test that a resolved
-  profile with `hook_config: None` creates `profile.json`. Reason for the
-  split rather than spawning `dummy-echo` through the restart harness: that
+- Cover the hookless branch **spawn-side only**: a lib-level test that a
+  resolved profile with `hook_config: None` creates
+  `agent-profiles/<terminal_id>/profile.json`, and that
+  `mark_profile_pending` has run before that first byte is written. That is
+  the whole of the genuinely new hookless behavior - directory creation on a
+  path the pending mark did not previously cover - because
+  `reconcile_entry`'s adopt arm does not branch on hook config at all
+  (`terminal.rs:343-387`): it calls `recover_callback_token` unconditionally
+  and will read the new sidecar unconditionally, so a hookless entry and a
+  hooked entry take byte-identical control flow through adoption.
+  `dummy-echo` is deliberately not driven through the restart harness: that
   profile's process lives 30s, which is not a dependable budget for a
   two-process kill-and-rebind test - the parent ticket already paid for this
   once when Phase 6 needed a 180s variant. Adding a third test-only profile
   purely to reach the harness was rejected as disproportionate.
-- Keep the harness's GC-ordering regression assertion true for the hookless
-  directory as well: a directory created for a profile with no hook config
-  must also survive daemon #2's sweep.
+- **No adopt-side lib test for the hookless case, deliberately.** An earlier
+  draft of this boundary called for a `boot_reconcile` test "in the style of
+  this file's existing `boot_reconcile_drops_entry_*` tests, driving the real
+  async path against a pre-written sidecar". That instruction is not
+  executable as written and is dropped rather than left standing. Those two
+  tests (`terminal.rs:2547`, `:2600`) short-circuit on identity failure before
+  IPC is ever consulted - their own comments say so - and never reach the
+  `AdoptLive` arm this fix changes. Reaching that arm at lib level requires
+  both a live process whose pid *and* `start_time` match the entry
+  (`identity_status`, `terminal.rs:693-699`) *and* a bound `IpcListener` at
+  `entry.socket_path` answering `connect_and_handshake`
+  (`terminal.rs:715-740`) with a `Handshake` frame and
+  `TerminalStatus::Running`. No such scaffold exists anywhere in the crate:
+  `insert_fake_live_session_for_test` and `mark_profile_pending_for_test`
+  (`terminal.rs:3114-3153`) both bypass reconciliation entirely, and
+  `terminal_helper_ipc.rs`'s tests use `tokio::io::duplex`, not sockets. The
+  cost is a fake-helper harness this ticket has not budgeted; the value is
+  low, because the adopt arm is hook-config-blind (previous bullet) and the
+  restart-harness assertion above already drives the real `AdoptLive` path
+  end to end against a real helper. If a future phase builds that scaffold for
+  its own reasons, adding this case to it is cheap - but it is not a
+  precondition for this fix.
+- **No new GC-ordering assertion for the hookless directory either**, for the
+  same reason plus one more: it cannot be added where the earlier draft asked
+  for it. The harness's ordering guard lives in
+  `terminal_notify_callback_restart.rs`, which spawns `claude`; producing a
+  hookless directory there means driving `dummy-echo` through the harness,
+  which the bullet above rules out. It is also unnecessary:
+  `sweep_agent_profiles_blocking` (`agent_profile_gc.rs:70-110`) keys purely
+  on directory name versus `live_terminal_ids()` and reads nothing inside the
+  directory, so a hookless directory is indistinguishable from a hooked one to
+  the sweep. What actually has to hold is that the id is marked pending before
+  the directory exists, which the spawn-side test above asserts directly and
+  which `sweep_agent_profiles_never_touches_a_directory_whose_terminal_is_pending_but_not_yet_live`
+  (`agent_profile_gc.rs:246`) already pins from the sweep's side. The existing
+  harness ordering assertion stays as-is and must keep passing.
+- Confirm the comment sweep named in `## Constraints` actually landed: the
+  adopt-arm CONTRACT block (`terminal.rs:357-382`) and
+  `recover_callback_token`'s contrast with it (`terminal.rs:403-408`) no
+  longer assert that profile provenance is permanently lost or has no
+  self-correcting signal, and the frontend known-gap note naming this stem
+  (`App.tsx:4530-4533`) is gone. A repository search for this ticket's stem
+  under `crates/daemon/src` and `frontend/src` returns no hits describing the
+  bug as live behavior.
 - Confirm the degrade paths: no `state_dir` and a failed sidecar write both
   leave spawn succeeding and adoption reporting `null`, exactly as today.
