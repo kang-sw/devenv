@@ -654,6 +654,10 @@ fully testable without any I/O:
      `{HEAD,packed-refs,FETCH_HEAD,ORIG_HEAD}` or `refs/**` or `worktrees/**` ⇒
      `Refs`; `index` ⇒ `Worktree`.
 
+   `classify` returns only a classification — it never spawns git and never
+   mutates the ignore set. The stale-marking case is handled by the pipeline in
+   step 5.
+
    **This ordering is deliberate and load-bearing on Windows.** Recursive
    registration delivers events for gitignored trees (see Constraints), so a
    `cargo build` sends every `target/` write through this function — measured
@@ -694,13 +698,50 @@ fully testable without any I/O:
      for the whole 120 s TTL even though it was computed during a window in which
      no events were observed — as are any changes landing during arming itself.
 5. **Event pipeline.** `notify` callback (own thread) → `mpsc::unbounded_send` →
-   one long-lived tokio task: coalesce 100 ms trailing / 500 ms max
-   (`WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS` default 100, max window fixed at 5×
-   the trailing value), map each path through `classify`, bump the union of
-   `EpochKind`s per repo once.
+   one long-lived tokio task that maps each path through `classify` and bumps the
+   resulting `EpochKind`s.
+
+   **No git command runs on this path.** A bump is an `AtomicU64` increment marking
+   a cache slot for recomputation; git runs only when a route is served, i.e. on the
+   frontend's existing poll. So an event burst of any size costs N atomic
+   increments and **zero** spawns, and the effective minimum interval between git
+   invocations is the poll cadence (5 s per root) with no additional throttle
+   needed. The floor is the status quo: a file changing continuously means every
+   poll recomputes, which is exactly today's behavior.
+
+   **Coalescing is leading + trailing, at most two bumps per kind per window** —
+   `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS` default 100, window closing 100 ms after
+   the last event and capped at 5× that from the first:
+   - **Leading:** the first event of a kind bumps immediately, so a single save is
+     visible to a poll landing 10 ms later. Latency ~0.
+   - **Trailing:** if any further event of that kind arrived after the leading
+     bump, bump once more when the window closes.
+
+   Both halves are required and the reasoning belongs here because either alone is
+   wrong. Trailing-only delays the bump past a poll that lands during the window,
+   serving stale state for a further TTL. Leading-only is worse — it is a
+   **correctness hole**: the leading bump is computed and stored by a poll at
+   t+10 ms, subsequent writes in the window are suppressed, and the slot then reads
+   as valid for the whole TTL despite being out of date. Leading+trailing costs one
+   extra atomic increment and closes that.
+
    `event.need_rescan()` (inotify `IN_Q_OVERFLOW`, `ReadDirectoryChangesW`
    buffer overflow) ⇒ bump both epochs for every repo on that watcher and set
    `Degraded{"rescan required"}` for one TTL window.
+   **`.gitignore` / `.git/info/exclude` changes must not re-derive the ignore set
+   inline.** `IgnoreSet::derive` is a git spawn, and on Linux a changed ignore set
+   also changes the registration set, so re-derivation there means a re-walk plus a
+   register/unregister delta. Deriving per event would reintroduce exactly the
+   spawn storm this ticket exists to remove — a tool that rewrites a `.gitignore`
+   in a loop would drive one spawn per write. Instead: bump `Worktree` immediately
+   (cheap, and the correct signal), mark the set stale, and schedule re-derivation
+   on the watcher task **at most once per 30 s per repo**, coalescing all staleness
+   marks in that interval into one. A stale ignore set costs efficiency, not
+   correctness: until it refreshes, events from a newly-ignored directory still
+   produce spurious `Worktree` bumps and therefore extra recomputes, while
+   `git status` itself reads the ignore rules fresh on every invocation and stays
+   accurate throughout. That asymmetry is what makes a long re-derive interval
+   safe.
 6. **Linux only — new directories register incrementally, re-checking the cap.**
    A `Create` event whose path is a directory, is not ignored, and is not under
    `git_dir`/`common_dir` ⇒ register it and increment the count; if that would
@@ -781,7 +822,14 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   `HEAD`/`refs/` inclusion, `index.lock` suppression, ignore-set membership, and
   linked-worktree `git_dir` — including one case pinning that a path under an
   ignored directory is rejected **without** consulting the git-specific checks, so
-  the branch order from Phase 4 step 1 cannot silently regress. Debounce coalescing with an injected clock.
+  the branch order from Phase 4 step 1 cannot silently regress. Debounce coalescing
+  with an injected clock, asserting the leading+trailing shape specifically: one
+  event ⇒ exactly **one** bump (leading only — no trailing bump when nothing
+  followed it); two events inside one window ⇒ exactly **two**; a thousand events
+  inside one window ⇒ still exactly two. Plus the `.gitignore` rule: N staleness
+  marks inside the 30 s interval schedule exactly **one** re-derivation while
+  `Worktree` bumps on each of them, and re-derivation never runs on the event
+  thread.
   `watch_key` normalization against the real mixed-separator string from
   `opened-workroots.json` and its all-forward-slash twin. `IgnoreSet` parsing of
   a fixed `-z` byte string, **plus an argv assertion that the constructed command
@@ -797,7 +845,11 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   repo — arm, `fs::write` an untracked file, poll the `worktree` epoch until
   bumped or 5 s deadline, assert `refs` did **not** bump; `git switch -c` ⇒
   `refs` bumped; `git worktree add` ⇒ `refs` bumped; a file under a gitignored
-  `target/` ⇒ **no** bump. Availability lifecycle: rename the root away ⇒
+  `target/` ⇒ **no** bump. **Burst containment, asserted against Phase 1's spawn
+  counter:** write 1,000 tracked files without serving a request, then assert the
+  spawn total is **unchanged** and one subsequent `/git/status` costs the normal
+  fixed number — the direct pin that an event burst never drives git from the
+  event path. Availability lifecycle: rename the root away ⇒
   reconcile disarms and bumps ⇒ status reports unavailable ⇒ rename back ⇒
   re-arms. Windows: worktree-remove while armed does not fail with a sharing
   violation (existing worktree-remove pins are the reference). All
