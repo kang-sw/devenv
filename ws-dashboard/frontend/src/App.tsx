@@ -2096,18 +2096,31 @@ export function App() {
   // flattened across EVERY connected server rather than the selected one.
   // Built the same way `ServerRows` builds one server's root-key list
   // (`aggregateNavAttentionTone` fed `navAttentionWorkRootIds`'s already
-  // hidden-worktree-filtered output), just unioned across
-  // `resourcesByServer`'s entries. Reusing these two functions - rather than a
-  // new predicate - is what keeps this tone unable to disagree with the nav
-  // tree: a hidden worktree's agent contributes to neither, because it never
-  // enters `navAttentionWorkRootIds`'s output in the first place (the
-  // `App.tsx` `CONTRACT:` comment above that function pins this same set for
-  // the nav tree). Reads `agentAttentionByRoot` from THIS component's own
-  // state (populated by `WorkbenchShell`'s `onAgentAttentionByRootChange`
-  // callback) rather than recomputing anything - this is the exact value
+  // hidden-worktree-filtered output), just unioned across every server.
+  // Reusing these two functions - rather than a new predicate - is what keeps
+  // this tone unable to disagree with the nav tree: a hidden worktree's agent
+  // contributes to neither, because it never enters
+  // `navAttentionWorkRootIds`'s output in the first place (the `App.tsx`
+  // `CONTRACT:` comment above that function pins this same set for the nav
+  // tree). Reads `agentAttentionByRoot` from THIS component's own state
+  // (populated by `WorkbenchShell`'s `onAgentAttentionByRootChange` callback)
+  // rather than recomputing anything - this is the exact value
   // `ResourceNavigation`/`ServerRows`/`WorkspaceRows` already render from, so
   // the global tone structurally cannot disagree with the nav tree it is
   // unioned from.
+  //
+  // Server enumeration (review cycle 1, Minor 3): iterates `serverConnections`
+  // and looks up `resourcesByServer[server.id]` per server, exactly as
+  // `ServerRows`'s caller does (`:3255-3261`), rather than
+  // `Object.entries(resourcesByServer)`. `mergeResourcesByServer`'s contract
+  // is "only ever accumulates" (`:694`), and there is no remove/unlink-server
+  // call site today, so the two enumerations agree in practice either way -
+  // but keying off `resourcesByServer` directly would let a server that
+  // disappears from `serversView` out-of-band keep contributing roots to the
+  // global tone with no nav row rendering anything to attribute it to, the
+  // exact failure Phase 7's Result already had to fix once for the nav.
+  // Deriving from `serverConnections` closes this structurally instead of
+  // relying on the current absence of a remove path.
   //
   // DEVIATION from the plan's stated placement (Codebase Findings /
   // Implementation Plan step 1 cited `App.tsx:4356-4379` as "the existing
@@ -2125,19 +2138,24 @@ export function App() {
   // are unchanged and all satisfied here.
   const globalAttentionTone = useMemo<AttentionTone>(() => {
     const rootKeys: string[] = [];
-    for (const [serverId, resources] of Object.entries(resourcesByServer)) {
+    for (const server of serverConnections) {
+      const resources = resourcesByServer[server.id];
+      if (!resources) {
+        continue;
+      }
       for (const workspace of resources.workspaces) {
         const hiddenIds =
           workNavOrder.hiddenWorktreesByWorkspace[
-            serverScopedIdentity(serverId, workspace.id)
+            serverScopedIdentity(server.id, workspace.id)
           ];
         for (const rootId of navAttentionWorkRootIds(workspace, hiddenIds)) {
-          rootKeys.push(serverScopedIdentity(serverId, rootId));
+          rootKeys.push(serverScopedIdentity(server.id, rootId));
         }
       }
     }
     return aggregateNavAttentionTone(agentAttentionByRoot, rootKeys);
   }, [
+    serverConnections,
     resourcesByServer,
     workNavOrder.hiddenWorktreesByWorkspace,
     agentAttentionByRoot,
@@ -2224,9 +2242,24 @@ export function App() {
       typeof Notification !== "undefined" &&
       Notification.permission === "granted"
     ) {
-      new Notification("ws dashboard", {
-        body: "An agent is ready for your input.",
-      });
+      try {
+        new Notification("ws dashboard", {
+          body: "An agent is ready for your input.",
+        });
+      } catch {
+        // Android Chrome (and possibly other mobile browsers) can report
+        // `Notification.permission === "granted"` while still throwing
+        // `TypeError: Illegal constructor` here, because those browsers
+        // require `ServiceWorkerRegistration.showNotification` instead of
+        // the plain constructor - and service-worker push is explicitly out
+        // of scope for this ticket. There is no ErrorBoundary anywhere in
+        // this app (`main.tsx` mounts a plain `createRoot`), so an
+        // uncaught throw from this effect would blank the whole dashboard
+        // and re-blank it on every subsequent `ready` edge. Swallowing here
+        // confines the failure to the one tier that cannot work on that
+        // platform anyway - do NOT remove this catch as "dead code", it is
+        // load-bearing for exactly that browser class.
+      }
     }
     previousGlobalAttentionToneRef.current = globalAttentionTone;
   }, [globalAttentionTone, notificationPrefs.enabled]);
