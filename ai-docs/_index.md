@@ -153,6 +153,11 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
+| `260726-bug-dashboard-agent-profile-provenance-lost-on-restart` | ready | Re-adopted agent terminals permanently lose profile provenance (spawn-source badge, notification routing) after a daemon restart |
+| `260726-bug-dashboard-restored-tab-close-inert-until-activated` | ready | Terminal tab close button is inert on a reload-restored tab until the tab is clicked once |
+| `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry` | ready | `terminal-notify`'s deliberate silence has no expiry, no failure counter, and no reader anywhere |
+| `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` | ready | hop-1 default-spawn env-clear regression guard is fragile and platform-partial |
+| `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: automate the reachable gate and fix the insecure-context permission guard left undischarged by Phase 8 |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-bug-implement-merge-target-discovery` | todo | Investigate safer merge-target discovery for nested implement branches |
@@ -261,9 +266,14 @@ dropped tickets live in hidden archive dirs and git history.
   One thread stays open and is NOT discharged by the close: the OS notification
   permission tier is manual-by-design and has never been driven by a human
   (`260726-chore-dashboard-verify-notification-permission-tier-manually`).
-  Priced debt left behind: the daemon-side `attention.forget` leak, and the
-  unenforced rebuild-before-Playwright rule
-  (`260726-chore-e2e-playwright-serves-stale-frontend-dist`).
+  Priced debt left behind: the daemon-side `attention.forget` leak. The
+  rebuild-before-Playwright hazard is discharged
+  (`260726-chore-e2e-playwright-serves-stale-frontend-dist`, `.done/`,
+  `951b0f27`): Playwright `globalSetup` now builds the frontend unconditionally
+  on every invocation path, skipping only under `WS_DASHBOARD_STATIC_DIR` or
+  external daemon mode and announcing the skip. The daemon-binary half of the
+  same hazard is deliberately still open: `cargo build -p ws-dashboard-daemon`
+  lives only in `test:browser`.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the

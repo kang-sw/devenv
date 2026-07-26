@@ -9,6 +9,7 @@ related-mental-model:
   - ws-web-dashboard
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # The e2e build step lives only in the test:browser npm script, so a direct npx playwright test bypasses it and serves a stale bundle
@@ -292,3 +293,62 @@ the original failure, re-run:
 6. Record the measured `globalSetup` build overhead on a warm tree in the
    Result, so a future reader can re-check the ~2.4 s premise this decision
    rests on rather than inheriting it as folklore.
+
+### Result (951b0f27) - 2026-07-27
+
+`playwright.config.ts` now declares `globalSetup: "./e2e/globalSetup.ts"`. The
+new `e2e/globalSetup.ts` builds the production frontend before any test starts,
+resolving the frontend directory from `fileURLToPath(import.meta.url)`, and
+rejects on a non-zero build exit so the run stops instead of serving the
+previous bundle. It reads the two skip conditions through `daemonHarness.ts`'s
+exported `parseDaemonHarnessConfig` rather than re-deriving them, and each skip
+announces which condition fired without echoing the `WS_DASHBOARD_STATIC_DIR`
+value or the external base/pairing URL. The spec sentence and the mental-model
+Traps entry were updated as planned; the Traps entry was updated in place, not
+deleted, because it still governs both skip paths.
+
+Deviation: the spawn is `spawn("npm run build", { shell: true })` as a single
+string rather than the planned argv array. The argv form emits Node's DEP0190
+warning into every gate run. Spawning `npm.cmd` directly without a shell is not
+an alternative - Node blocks direct `.cmd` spawns since the CVE-2024-27980 fix,
+which would break Windows in exactly the way the Constraints entry warns about.
+
+Verification - all six steps executed, not deferred:
+
+1-3. Mutated `src/App.tsx`'s `className="app-shell"`, breaking
+   `agent-spawn-profile.spec.ts:127`'s `.app-shell` visibility assertion. With
+   `globalSetup` commented out and no manual build, `npx playwright test
+   e2e/agent-spawn-profile.spec.ts` reported `1 passed (2.4s)` - the false pass
+   reproduced verbatim. With `globalSetup` restored, the identical command built
+   and then failed at `agent-spawn-profile.spec.ts:127`, the mutated site, not
+   at any pre-existing failure site. The flip is the phase's load-bearing
+   evidence and it held. Review cross-checked it independently against the
+   built-bundle hash triple (`index-CPUzOQLT.js` -> `index-BJ98nBrv.js` ->
+   `index-CPUzOQLT.js`, CSS chunk byte-identical throughout).
+4. Mutation reverted; same command returned to `1 passed (4.9s)`.
+5. `WS_DASHBOARD_STATIC_DIR` run: skip line emitted, no build output, and
+   `dist/index.html` plus `dist/assets/index-*.js` mtimes byte-identical before
+   and after. `WS_DASHBOARD_DAEMON_MODE=external` run: skip line emitted, then
+   the predicted red from `startDaemon`'s own "external daemon mode requires
+   ..." error - evidence is the skip line, not the run color.
+6. Measured warm-tree `globalSetup` overhead: **2.40 s / 2.44 s / 2.41 s**
+   (idle warm tree, warm immediately after a `src` edit, warm after reverting
+   it). `vite build` self-reports 190-206 ms; the remainder is `tsc -b`. The
+   ~2.4 s premise this decision rests on is confirmed.
+
+Beyond the six steps: a planted `src/` type error made the run end inside
+`globalSetup` with zero tests executed and no fallback to the old bundle; and
+launching Playwright from the repo root with `--config` built the correct
+directory, exercising the `import.meta.url` derivation rather than
+`process.cwd()`.
+
+Unresolved, deliberately deferred: the daemon binary keeps the original shape of
+this hazard - `cargo build -p ws-dashboard-daemon` still lives only in
+`test:browser`, so a bare `npx playwright test` can still serve a stale daemon
+even though it can no longer serve a stale bundle.
+
+Review minors accepted without change: `globalSetup` has no build timeout (a
+wedged `tsc`/`vite` hangs the run, visible live through `stdio: "inherit"`, and
+equally possible before this change), and a malformed harness env now aborts at
+setup instead of in `beforeAll` with a message carrying no `[e2e globalSetup]`
+prefix.
