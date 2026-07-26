@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.36.12 - 2026-07-26
+
+### Added
+- **ws-cli / wsflow-cli MCP-independent CLI fallback surface.** New `tools` and
+  `call` subcommands on the `ws-mcp` runtime, `bin/ws-cli` and `bin/wsflow-cli`
+  shims (with `.cmd` companions), and a self-contained `mcp-server-repair` skill
+  (`/ws:mcp-server-repair`, `/wsflow:mcp-server-repair`) that keeps work moving
+  through the CLI when the MCP server drops, plus a one-line repair pointer on the
+  lead front doors.
+- **`lead-goal-fan-out-step`** entry skill for batch-parallel worktree fan-out of
+  mutually independent ready tickets, mirrored into the wsflow package, with
+  goal-step transclusion wiring.
+- **`session.note` MCP tool** for lead-to-child session annotations.
+- `lead-goal-step` selection now prefers a ticket already in progress before
+  untouched ones.
+
+### Changed
+- **`tickets.sage_stamp` is stage-only**: it records the sage posture without
+  staging or committing, so it no longer swallows concurrent ticket edits or
+  pollutes the next commit; callers commit the stamp explicitly.
+- **Retired the `_index.md` Ticket Focus section** and its writer/reader/cleaner
+  machinery from specs, shipped playbooks, and bootstrap.
+
+### Fixed
+- **Launcher no longer drops the MCP server with a -32000 error on local dev
+  patch bumps.** Under an active `.local-devenv-runtime` marker the runtime
+  version gate is relaxed from exact-patch to same-minor match, so a source build
+  that runs ahead of the installed snapshot is accepted; released/downloaded
+  runtimes keep the strict exact-match gate.
+- **`git.commit`** no longer runs the commit-gate verifier against the vanished
+  side of a staged ticket rename/deletion, and its `ai_context` handling stops
+  pre-filtering blank entries while reporting an accurate empty/all-blank/absent
+  diagnostic.
+
 ## v0.36.1 - 2026-07-24
 
 ### Fixed
