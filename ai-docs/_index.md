@@ -358,7 +358,35 @@ dropped tickets live in hidden archive dirs and git history.
   repository" for the full TTL, emptying the Activity pane for up to 30 s after one
   timeout. The diag delta acceptance number is **still unmeasured** — two phases
   in a row have closed without it, so Phase 3 or 4 should take it rather than
-  inherit it again.
+  inherit it again. **Phase 3 landed 2026-07-26 (`b8e4f89b`, impl plan
+  `ai-docs/.plans/2026-07/26-1830-git-state-cache.md`, dispositions D1-D8)**:
+  `GitStateCache` with two independently-revalidated slots per `WatchKey`
+  (`worktree`, `refs`) and `MutationEpochSource` (real per-key counters,
+  correcting the ticket's `StaticZero` label — a literal always-zero source
+  cannot be told apart from "never bumped"). Measured cold-cache payoff for
+  one concurrent `/git/status` + `/git/branches` pair: 7 → 6 spawns
+  (no-upstream) / 10 → 8 (upstream-tracked); no TTL-driven win is claimed,
+  since every steady-state 5 s poll tick still misses the 2 s TTL by design —
+  the win is de-duplicating the union refs fill plus single-flight burst
+  coalescing on a concurrent miss. One review cycle (3 partitions, 8
+  Important findings total, all fixed): switch/create branch was TTL-delaying
+  the *worktree* axis (a `.gitignore` difference between branches can flip
+  tracked/untracked status even on a tree-neutral switch); a failed
+  `pull --ff-only` was not invalidating refs despite its embedded fetch
+  having already mutated `refs/remotes/*` before the ff-only merge aborted;
+  `git worktree add`/`remove` cleared `GitProbeCache` but not the new
+  `GitStateCache`, so a dashboard-driven worktree change could leave
+  `/git/branches` stale; the TTL env var was read per-request instead of once
+  per process; and three tests (the D2 single-flight payoff, the D7
+  epoch-sample-before-probe pin, and the `current_branch_counts` reuse path)
+  passed under implementations that violated the property each claimed to
+  pin. Carry-forward to Phase 4: `WatchKey` is keyed per worktree path but
+  `refs/heads`/`worktree list` are repository-wide, so a mutation in one
+  linked worktree can leave a sibling's cached refs stale for up to the TTL
+  (bounded, self-healing) — Phase 4 already widens `DiscoveredWorkRoot` with
+  `git_dir`/`common_dir`, which is where the refs axis should be re-keyed by
+  common dir instead. The diag delta acceptance number is **still unmeasured
+  after three phases**; Phase 4 should take it.
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin

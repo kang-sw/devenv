@@ -15,6 +15,7 @@ use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::discovery::GitProbeCache;
 use crate::git_exec::GitSpawnStats;
+use crate::git_state_cache::{EpochSource, GitStateCache};
 use crate::document_translation::{
     translate_document, translation_providers, DocumentTranslationService,
 };
@@ -91,6 +92,18 @@ pub struct AppState {
     /// request) so `GET /api/dashboard/diag/git` reports the daemon's whole
     /// spawn history, not a per-request-scoped count.
     pub git_spawn_stats: Arc<GitSpawnStats>,
+    /// Result cache for `/git/status`/`/git/branches`, keyed by `WatchKey`.
+    /// Shared across routes (not rebuilt per request), so the two routes'
+    /// concurrent per-poll-tick fetch collapses onto one refs computation
+    /// (Phase 3 Lead Dispositions D1/D2).
+    pub git_state_cache: GitStateCache,
+    /// Per-key mutation-epoch counters gating `git_state_cache`'s TTL. Shared
+    /// across routes for the same reason. `Arc<dyn EpochSource>` (not a
+    /// generic `AppState<E>`, which would infect `build_router` and every
+    /// `State<AppState>` extractor) so Phase 4's FS-event-driven source can
+    /// replace the construction site in `server.rs` without touching a
+    /// route.
+    pub epoch_source: Arc<dyn EpochSource>,
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,

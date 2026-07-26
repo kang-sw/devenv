@@ -525,18 +525,49 @@ struct GitProbeKey(String);
 
 impl GitProbeKey {
     fn for_path(path: &Path) -> Self {
-        // The `\` -> `/` unification is unconditional: a Unix filename may
-        // legally contain a backslash, but this is only a memo key, and a
-        // Windows-authored registry entry for the same directory can reach a
-        // Unix build of this code through a linked-server registry file.
-        let mut key = canonical_or_normalized(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        if cfg!(windows) {
-            key = key.to_lowercase();
-        }
-        Self(key)
+        Self(normalized_probe_key(path))
     }
+}
+
+/// Shared normalization chain for `GitProbeKey` and `WatchKey` (Phase 3's
+/// `git_state_cache` memo key): canonicalize-or-normalize, then unify `\` ->
+/// `/`, then lowercase on Windows. Factored into one function so the two
+/// independently-motivated key types (see `GitProbeKey`'s doc comment above
+/// and `WatchKey`'s below) cannot drift into two hand-maintained copies of
+/// this chain.
+///
+/// The `\` -> `/` unification is unconditional: a Unix filename may legally
+/// contain a backslash, but this is only a memo key, and a Windows-authored
+/// registry entry for the same directory can reach a Unix build of this code
+/// through a linked-server registry file.
+fn normalized_probe_key(path: &Path) -> String {
+    let mut key = canonical_or_normalized(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if cfg!(windows) {
+        key = key.to_lowercase();
+    }
+    key
+}
+
+/// Memo key for `GitStateCache`/`EpochSource` (Phase 3's result cache for
+/// `/git/status` and `/git/branches`).
+///
+/// Deliberately a separate type from `GitProbeKey` above (same rationale:
+/// aggressively collapse spellings of the same directory rather than
+/// preserving `WorkRootId`'s frozen, un-normalized-for-this-purpose
+/// derivation) and from `WorkRootId` itself. Kept `pub` rather than
+/// `pub(crate)`: it appears in `EpochSource`'s trait method signatures, and
+/// `EpochSource` is `pub` because it is named directly in
+/// `AppState::epoch_source`, itself a `pub` field on a `pub` struct
+/// constructed directly by `tests/routes.rs`.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct WatchKey(String);
+
+/// Derive a `GitStateCache`/`EpochSource` memo key for `path`, sharing
+/// `GitProbeKey`'s normalization chain (see `normalized_probe_key`).
+pub(crate) fn watch_key(path: &Path) -> WatchKey {
+    WatchKey(normalized_probe_key(path))
 }
 
 struct CachedProbe<T> {
@@ -1043,6 +1074,21 @@ mod tests {
         let unified = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git/ws-worktree/jpeg");
 
         assert_eq!(GitProbeKey::for_path(mixed), GitProbeKey::for_path(unified));
+    }
+
+    // R11 (Phase 3 review adjudication): `watch_key` has no test of its own -
+    // the sibling test above only exercises `GitProbeKey`'s use of the
+    // shared `normalized_probe_key` chain. If `WatchKey` ever stopped routing
+    // through that shared chain, two spellings of one root would get two
+    // `GitStateCache` slots and two `MutationEpochSource` counters, and every
+    // other test would stay green (the `git_state_cache.rs` unit tests use
+    // `watch_key` only as an opaque handle).
+    #[test]
+    fn watch_key_collapses_mixed_separator_spellings_of_one_path() {
+        let mixed = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git\\ws-worktree\\jpeg");
+        let unified = Path::new("D:/Workspace/Repos/InspectTGV_AIDriven/.git/ws-worktree/jpeg");
+
+        assert_eq!(watch_key(mixed), watch_key(unified));
     }
 
     #[test]

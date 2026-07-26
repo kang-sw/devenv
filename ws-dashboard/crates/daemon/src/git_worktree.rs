@@ -244,6 +244,11 @@ pub async fn git_worktree_add_submit(
     // list` answers are stale. Drop them before the refresh below so the
     // response reports the created worktree instead of waiting out the TTL.
     state.git_probe_cache.clear();
+    // R3 (Phase 3 review adjudication): the git-toolbar routes' own
+    // `GitStateCache` also memoizes `worktree list --porcelain`
+    // (`checked_out`) and `refs/heads` (`branch_list`); neither is bumped by
+    // an `EpochSource` from here, so it needs the same clear.
+    state.git_state_cache.clear();
 
     let created_id = local_work_root_id_for_path(&resolved.target_path);
     let _persist_guard = state.registry_persist_lock.lock().await;
@@ -547,6 +552,10 @@ pub async fn git_worktree_remove_submit(
     // Same reason as the add path: the memoized `git worktree list` answers no
     // longer describe this repository.
     state.git_probe_cache.clear();
+    // See the add path: `GitStateCache`'s `worktree list --porcelain`/
+    // `refs/heads` memo needs the same clear (R3, Phase 3 review
+    // adjudication). `worktree remove` also runs `git branch -d` below.
+    state.git_state_cache.clear();
 
     // B-2 branch delete: plain `-d` only, and only when the non-mutating
     // merged check confirms it is safe. An unmerged branch is left intact and

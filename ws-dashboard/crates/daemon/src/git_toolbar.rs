@@ -9,7 +9,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{WorkRootId, WorkRootKind};
 
+use crate::discovery::watch_key;
 use crate::git_exec::{capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats};
+use crate::git_state_cache::{git_cache_ttl_from_env, EpochSource, GitStateCache, RefState};
 use crate::router::AppState;
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
@@ -153,6 +155,8 @@ pub async fn git_status(
     tokio::task::spawn_blocking(
         move || match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => Json(status_for_path(
+                &state_for_task.git_state_cache,
+                state_for_task.epoch_source.as_ref(),
                 &context.root_path,
                 &state_for_task.git_spawn_stats,
             ))
@@ -173,6 +177,8 @@ pub async fn git_branches(
     tokio::task::spawn_blocking(
         move || match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => Json(branches_for_path(
+                &state_for_task.git_state_cache,
+                state_for_task.epoch_source.as_ref(),
                 &context.root_path,
                 &state_for_task.git_spawn_stats,
             ))
@@ -193,6 +199,8 @@ pub async fn git_switch_branch(
     let state_for_task = state.clone();
     tokio::task::spawn_blocking(move || {
         let stats: &GitSpawnStats = &state_for_task.git_spawn_stats;
+        let cache = &state_for_task.git_state_cache;
+        let epoch_source = state_for_task.epoch_source.as_ref();
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
@@ -202,14 +210,14 @@ pub async fn git_switch_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch is unavailable",
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             );
         }
         if branch_checked_out_elsewhere(&context.root_path, stats, branch) {
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch is already checked out",
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             );
         }
         match run_git(
@@ -218,11 +226,27 @@ pub async fn git_switch_branch(
             &["switch", branch],
             GitFailureExpectation::Unexpected,
         ) {
-            Ok(()) => Json(status_for_path(&context.root_path, stats)).into_response(),
+            Ok(()) => {
+                // A user-initiated switch is never TTL-delayed: bump BOTH
+                // axes before the now-cache-aware status read below, not just
+                // refs. `git switch` can change working-tree contents even
+                // when it succeeds tree-neutrally on its own args - e.g. a
+                // `.gitignore` difference between branches flips
+                // untracked/status output for files whose content never
+                // changed - so a refs-only bump can leave the worktree slot
+                // serving pre-switch `changes` for the rest of the TTL
+                // (Phase 3 review adjudication R1, overriding plan step 5:
+                // the plan's own rationale here claimed mutating routes are
+                // never TTL-delayed, which refs-only made false).
+                let key = watch_key(&context.root_path);
+                epoch_source.bump_refs(&key);
+                epoch_source.bump_worktree(&key);
+                Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
+            }
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch switch failed",
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             ),
         }
     })
@@ -239,6 +263,8 @@ pub async fn git_create_branch(
     let state_for_task = state.clone();
     tokio::task::spawn_blocking(move || {
         let stats: &GitSpawnStats = &state_for_task.git_spawn_stats;
+        let cache = &state_for_task.git_state_cache;
+        let epoch_source = state_for_task.epoch_source.as_ref();
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
@@ -247,7 +273,7 @@ pub async fn git_create_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "create without switch is unsupported",
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             );
         }
         let branch = request.branch_name.trim();
@@ -258,7 +284,7 @@ pub async fn git_create_branch(
             return bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch cannot be created",
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             );
         }
         let mut args = vec!["switch", "-c", branch];
@@ -272,17 +298,27 @@ pub async fn git_create_branch(
                 return bounded_error(
                     StatusCode::BAD_REQUEST,
                     "base branch is unavailable",
-                    Some(status_for_path(&context.root_path, stats)),
+                    Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
                 );
             }
             args.push(base);
         }
         match run_git(stats, &context.root_path, &args, GitFailureExpectation::Unexpected) {
-            Ok(()) => Json(status_for_path(&context.root_path, stats)).into_response(),
+            Ok(()) => {
+                // See git_switch_branch: never TTL-delay a user-initiated
+                // mutation, on either axis. `switch -c <new> <base>` (when a
+                // base was given) checks out a different tree entirely, and
+                // even the no-base form is subject to the same
+                // .gitignore-flips-untracked-output case as a plain switch.
+                let key = watch_key(&context.root_path);
+                epoch_source.bump_refs(&key);
+                epoch_source.bump_worktree(&key);
+                Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response()
+            }
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 "branch create failed",
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             ),
         }
     })
@@ -299,6 +335,7 @@ pub async fn git_fetch(
         WorkRootId::from(work_root_id),
         &["fetch"],
         "fetch failed",
+        EpochBump::RefsOnly,
     )
     .await
 }
@@ -312,6 +349,7 @@ pub async fn git_push(
         WorkRootId::from(work_root_id),
         &["push"],
         "push failed",
+        EpochBump::RefsOnly,
     )
     .await
 }
@@ -325,8 +363,19 @@ pub async fn git_pull_ff_only(
         WorkRootId::from(work_root_id),
         &["pull", "--ff-only"],
         "pull --ff-only failed",
+        EpochBump::RefsAndWorktree,
     )
     .await
+}
+
+/// Which cache axes a `mutate_no_body` mutation invalidates. `fetch`/`push`
+/// only move refs (branch tips, sync counts); `pull --ff-only` also changes
+/// the working tree, so it must additionally invalidate the worktree slot
+/// (`changes_for_path`'s modified/untracked counts).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EpochBump {
+    RefsOnly,
+    RefsAndWorktree,
 }
 
 async fn mutate_no_body(
@@ -334,19 +383,35 @@ async fn mutate_no_body(
     work_root_id: WorkRootId,
     args: &'static [&'static str],
     failure: &'static str,
+    epoch_bump: EpochBump,
 ) -> Response {
     tokio::task::spawn_blocking(move || {
         let stats: &GitSpawnStats = &state.git_spawn_stats;
+        let cache = &state.git_state_cache;
+        let epoch_source = state.epoch_source.as_ref();
         let context = match resolve_git_context(&state, &work_root_id) {
             Ok(context) => context,
             Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
-        match run_git(stats, &context.root_path, args, GitFailureExpectation::Unexpected) {
-            Ok(()) => Json(status_for_path(&context.root_path, stats)).into_response(),
+        let key = watch_key(&context.root_path);
+        let outcome = run_git(stats, &context.root_path, args, GitFailureExpectation::Unexpected);
+        // R2 (Phase 3 review adjudication): bump BEFORE matching on the
+        // result, not only in the Ok(()) arm. A command that ran at all may
+        // have already mutated refs even on a non-zero exit - e.g.
+        // `pull --ff-only`'s embedded `fetch` advances `refs/remotes/*`
+        // before the ff-only merge itself aborts - so the error response's
+        // own embedded status, and every read for the rest of the TTL, must
+        // see the post-attempt state, not a pre-attempt cached one.
+        epoch_source.bump_refs(&key);
+        if epoch_bump == EpochBump::RefsAndWorktree {
+            epoch_source.bump_worktree(&key);
+        }
+        match outcome {
+            Ok(()) => Json(status_for_path(cache, epoch_source, &context.root_path, stats)).into_response(),
             Err(_) => bounded_error(
                 StatusCode::BAD_REQUEST,
                 failure,
-                Some(status_for_path(&context.root_path, stats)),
+                Some(status_for_path(cache, epoch_source, &context.root_path, stats)),
             ),
         }
     })
@@ -379,7 +444,68 @@ fn resolve_git_context(
     }
 }
 
-fn status_for_path(root: &Path, stats: &GitSpawnStats) -> WorkRootGitStatus {
+fn status_for_path(
+    cache: &GitStateCache,
+    epoch_source: &dyn EpochSource,
+    root: &Path,
+    stats: &GitSpawnStats,
+) -> WorkRootGitStatus {
+    let key = watch_key(root);
+    // D7: sample both epochs once, before either fill closure runs, so a
+    // concurrent mutation landing mid-`git`-spawn is caught as a miss on the
+    // NEXT read rather than being silently blessed into this slot.
+    let (worktree_epoch, refs_epoch) = epoch_source.epochs(&key);
+    let ttl = git_cache_ttl_from_env();
+    let changes = cache.worktree(&key, worktree_epoch, ttl, || changes_for_path(root, stats));
+    let refs = cache.refs(&key, refs_epoch, ttl, || compute_ref_state(root, stats));
+    WorkRootGitStatus {
+        available: true,
+        reason: None,
+        branch: Some(GitStatusBranch {
+            name: refs.branch_name.clone(),
+            detached_oid: refs.detached_oid.clone(),
+            upstream: refs.upstream.clone(),
+        }),
+        changes,
+        sync: refs.sync.clone(),
+        operations: Some(GitOperationAvailability {
+            can_fetch: true,
+            can_push: refs.sync.upstream.is_some() && refs.sync.ahead > 0,
+            can_pull_ff_only: refs.sync.upstream.is_some() && refs.sync.behind > 0,
+        }),
+        refreshed_at_ms: now_ms(),
+    }
+}
+
+fn branches_for_path(
+    cache: &GitStateCache,
+    epoch_source: &dyn EpochSource,
+    root: &Path,
+    stats: &GitSpawnStats,
+) -> GitBranchList {
+    let key = watch_key(root);
+    // Only the refs epoch matters here, but it is still sampled through the
+    // same `epochs()` call as `status_for_path` (D7) - `branches_for_path`
+    // simply never calls `cache.worktree`.
+    let (_worktree_epoch, refs_epoch) = epoch_source.epochs(&key);
+    let ttl = git_cache_ttl_from_env();
+    let refs = cache.refs(&key, refs_epoch, ttl, || compute_ref_state(root, stats));
+    GitBranchList {
+        current: refs.branch_name.clone(),
+        detached_oid: refs.detached_oid.clone(),
+        branches: refs.branch_list.clone(),
+    }
+}
+
+/// The refs-slot fill closure for `GitStateCache::refs`: the union of what
+/// `status_for_path` and `branches_for_path` used to each compute
+/// independently (Phase 3 D1). Folds the former inline branch-name/
+/// detached-oid/upstream/sync computation together with the former inline
+/// branch-list/checked-out computation into one function, so the two routes'
+/// concurrent per-tick `Promise.all` fetch collapses onto one refs
+/// computation instead of two (D2, backed by `GitStateCache::refs`'s
+/// per-key single-flight lock).
+fn compute_ref_state(root: &Path, stats: &GitSpawnStats) -> RefState {
     let branch_name = git_text(
         stats,
         root,
@@ -410,43 +536,17 @@ fn status_for_path(root: &Path, stats: &GitSpawnStats) -> WorkRootGitStatus {
         // Fails routinely for every branch with no upstream configured.
         GitFailureExpectation::ExpectedNonZero,
     );
-    let sync = sync_for_path(root, stats, upstream.clone());
-    WorkRootGitStatus {
-        available: true,
-        reason: None,
-        branch: Some(GitStatusBranch {
-            name: (!branch_name.is_empty()).then_some(branch_name),
-            detached_oid,
-            upstream: upstream.clone(),
-        }),
-        changes: changes_for_path(root, stats),
-        sync: sync.clone(),
-        operations: Some(GitOperationAvailability {
-            can_fetch: true,
-            can_push: sync.upstream.is_some() && sync.ahead > 0,
-            can_pull_ff_only: sync.upstream.is_some() && sync.behind > 0,
-        }),
-        refreshed_at_ms: now_ms(),
-    }
-}
-
-fn branches_for_path(root: &Path, stats: &GitSpawnStats) -> GitBranchList {
-    let current = git_text(
-        stats,
-        root,
-        &["branch", "--show-current"],
-        GitFailureExpectation::Unexpected,
-    )
-    .unwrap_or_default();
-    let detached_oid = if current.is_empty() {
-        git_text(
-            stats,
-            root,
-            &["rev-parse", "--short", "HEAD"],
-            GitFailureExpectation::ExpectedNonZero,
-        )
-    } else {
-        None
+    // Computed as raw `Option<(ahead, behind)>` (not through `sync_for_path`,
+    // which defaults a failed/absent lookup to `(0, 0)`) so the exact
+    // "no data" vs "zero" distinction can be reused below for the current
+    // branch's `branch_list` entry without changing its null-vs-0 shape.
+    let current_branch_counts = upstream
+        .as_deref()
+        .and_then(|upstream| rev_counts(root, stats, "HEAD", upstream));
+    let sync = GitSyncSummary {
+        ahead: current_branch_counts.map(|pair| pair.0).unwrap_or(0),
+        behind: current_branch_counts.map(|pair| pair.1).unwrap_or(0),
+        upstream: upstream.clone(),
     };
     let checked_out = checked_out_branches(root, stats);
     let output = git_text(
@@ -460,32 +560,50 @@ fn branches_for_path(root: &Path, stats: &GitSpawnStats) -> GitBranchList {
         GitFailureExpectation::Unexpected,
     )
     .unwrap_or_default();
-    let mut branches = Vec::new();
+    let mut branch_list = Vec::new();
     for line in output.lines() {
         let (name, upstream_raw) = line.split_once('\0').unwrap_or((line, ""));
         let name = name.trim();
         if name.is_empty() {
             continue;
         }
-        let upstream = (!upstream_raw.trim().is_empty()).then(|| upstream_raw.trim().to_owned());
-        let sync = sync_for_branch(root, stats, name, upstream.clone());
+        let branch_upstream =
+            (!upstream_raw.trim().is_empty()).then(|| upstream_raw.trim().to_owned());
+        let is_current = name == branch_name;
+        // D1's whole point: `current_branch_counts` above already answered
+        // "ahead/behind vs upstream" for the checked-out branch via one
+        // `rev-list` call - reuse it here (guarded by the upstream string
+        // actually matching, so a `for-each-ref`/`@{upstream}` disagreement
+        // falls back to a fresh, independently-correct spawn) instead of
+        // re-running the exact same comparison a second time through
+        // `sync_for_branch`. This is the specific duplicate (current-branch
+        // `rev-list --left-right --count`, once from the old
+        // `status_for_path` and once from the old `branches_for_path`) the
+        // union refs slot exists to collapse.
+        let branch_sync = if is_current && branch_upstream == upstream {
+            current_branch_counts
+        } else {
+            sync_for_branch(root, stats, name, branch_upstream.clone())
+        };
         let is_checked_out = checked_out.contains(name);
-        branches.push(GitBranchEntry {
+        branch_list.push(GitBranchEntry {
             name: name.to_owned(),
-            current: name == current,
+            current: is_current,
             checked_out: is_checked_out,
-            upstream,
-            ahead: sync.map(|pair| pair.0),
-            behind: sync.map(|pair| pair.1),
-            disabled_reason: (is_checked_out && name != current)
+            upstream: branch_upstream,
+            ahead: branch_sync.map(|pair| pair.0),
+            behind: branch_sync.map(|pair| pair.1),
+            disabled_reason: (is_checked_out && !is_current)
                 .then(|| "Already checked out".to_owned()),
         });
     }
-    branches.sort_by(|left, right| left.name.cmp(&right.name));
-    GitBranchList {
-        current: (!current.is_empty()).then_some(current),
+    branch_list.sort_by(|left, right| left.name.cmp(&right.name));
+    RefState {
+        branch_name: (!branch_name.is_empty()).then_some(branch_name),
         detached_oid,
-        branches,
+        upstream,
+        sync,
+        branch_list,
     }
 }
 
@@ -565,18 +683,6 @@ pub(crate) fn changes_for_path(root: &Path, stats: &GitSpawnStats) -> GitChangeS
         summary.untracked_files = untracked.len() as u64;
     }
     summary
-}
-
-fn sync_for_path(root: &Path, stats: &GitSpawnStats, upstream: Option<String>) -> GitSyncSummary {
-    let (ahead, behind) = upstream
-        .as_deref()
-        .and_then(|upstream| rev_counts(root, stats, "HEAD", upstream))
-        .unwrap_or((0, 0));
-    GitSyncSummary {
-        ahead,
-        behind,
-        upstream,
-    }
 }
 
 fn sync_for_branch(
@@ -907,6 +1013,71 @@ mod tests {
         );
 
         fs::remove_file(&lock_path).ok();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// R6 (Phase 3 review adjudication): D7's real requirement -
+    /// `epoch_source.epochs(&key)` must run exactly once, before either fill
+    /// closure - lives here in `status_for_path`/`branches_for_path`, not in
+    /// `GitStateCache`, which holds no `EpochSource` and so is structurally
+    /// incapable of pinning it. A refactor that samples the refs epoch AFTER
+    /// `cache.worktree`'s fill (e.g. `cache.refs(&key,
+    /// epoch_source.epochs(&key).1, ...)`) would leave the whole existing
+    /// suite green; this spy catches exactly that by counting calls. One
+    /// call proves the epoch cannot have been re-sampled between the two
+    /// fills - the cheapest form that still discriminates the violation.
+    #[derive(Default)]
+    struct CountingEpochSource {
+        calls: AtomicU64,
+    }
+
+    impl EpochSource for CountingEpochSource {
+        fn epochs(&self, _key: &crate::discovery::WatchKey) -> (u64, u64) {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            (0, 0)
+        }
+
+        fn bump_worktree(&self, _key: &crate::discovery::WatchKey) {}
+
+        fn bump_refs(&self, _key: &crate::discovery::WatchKey) {}
+    }
+
+    #[test]
+    fn status_for_path_samples_the_epoch_exactly_once() {
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
+        let cache = GitStateCache::default();
+        let epoch_source = CountingEpochSource::default();
+
+        let _ = status_for_path(&cache, &epoch_source, &dir, &stats);
+
+        assert_eq!(
+            epoch_source.calls.load(Ordering::Relaxed),
+            1,
+            "status_for_path must sample epochs() exactly once, before either the \
+             worktree or refs fill runs (D7) - re-sampling between the two fills \
+             would leave this at 2"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn branches_for_path_samples_the_epoch_exactly_once() {
+        let stats = GitSpawnStats::default();
+        let dir = init_fixture_repo(&stats);
+        let cache = GitStateCache::default();
+        let epoch_source = CountingEpochSource::default();
+
+        let _ = branches_for_path(&cache, &epoch_source, &dir, &stats);
+
+        assert_eq!(
+            epoch_source.calls.load(Ordering::Relaxed),
+            1,
+            "branches_for_path must sample epochs() exactly once, before the refs \
+             fill runs"
+        );
+
         fs::remove_dir_all(&dir).ok();
     }
 }
