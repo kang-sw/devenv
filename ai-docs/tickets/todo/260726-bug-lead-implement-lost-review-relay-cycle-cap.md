@@ -15,7 +15,7 @@ related:
 spec:
   - 260612-reviewer-allocation-tier-default
   - 260619-stateless-implement-review-continuity
-sage-review-design: required
+sage-review-design: blocked
 sage-review-completeness: required
 ---
 
@@ -313,3 +313,18 @@ spawn with no prior conversation.
 - Reintroducing the retired `.old/spec/260505` text wholesale.
 - Blocking the dashboard FS-watch ticket. That work continues; this ticket only
   records why its Phase 1 review loop ran to the cap without anything noticing.
+
+## Blocked (2026-07-26)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Open scope question is explicitly unresolved and self-declared blocking | critical | missing |
+| 2 | Cycle-counting semantics are ambiguous by a full round | important | autonomous |
+| 3 | Phase 2 directs render variables into a surface that is never rendered | important | autonomous |
+| 4 | wsflow rsrc tree is generated; ticket directs a hand-edit and omits regeneration | important | autonomous |
+| 5 | Adjudicate todo placement contradicts the ordered-runbook contract it relies on | important | autonomous |
+| 6 | Phase 1's premise about the untouched fallback branch is false | minor | autonomous |
+| 7 | Proposed playbook line fails the invariant checklist the ticket mandates | minor | autonomous |
+| 8 | Spec anchor says lead adjudication; Phase 2 makes it a delegate, with no spec update named | minor | autonomous |
