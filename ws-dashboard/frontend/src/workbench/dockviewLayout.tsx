@@ -168,6 +168,16 @@ export function DockviewWorkbenchLayout({
   const acknowledgePane = useCallback((paneId: string) => {
     callbacksRef.current.onAcknowledgePane?.(paneId);
   }, []);
+  // Same contract as `acknowledgePane` above, for the close affordance
+  // (260726 Phase 1, D1). Handing the RAW `onRequestClosePane` prop to
+  // `syncDockviewWorkbench` froze whichever closure happened to be current
+  // the last time `shouldUpdateDockviewWorkbenchPanelParams` allowed a param
+  // push into the tab - and for a connected terminal that predicate
+  // deliberately almost never allows one, so a restored tab could keep
+  // calling into a stale `App()` render's state for the rest of the session.
+  const closePane = useCallback((request: DockviewTabCloseRequest) => {
+    callbacksRef.current.onRequestClosePane?.(request);
+  }, []);
   const initialGroupSizeByIdRef = useRef(initialGroupSizeById);
   initialGroupSizeByIdRef.current = initialGroupSizeById;
   // Applying a restored split size is a one-shot best-effort action per
@@ -199,7 +209,7 @@ export function DockviewWorkbenchLayout({
         apiRef.current,
         groups,
         activePaneByGroup,
-        callbacksRef.current.onRequestClosePane,
+        closePane,
         acknowledgePane,
       );
       const initialSizeById = initialGroupSizeByIdRef.current;
@@ -226,7 +236,7 @@ export function DockviewWorkbenchLayout({
         syncingRef.current = false;
       });
     }
-  }, [acknowledgePane, activePaneByGroup, groups]);
+  }, [acknowledgePane, activePaneByGroup, closePane, groups]);
 
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {

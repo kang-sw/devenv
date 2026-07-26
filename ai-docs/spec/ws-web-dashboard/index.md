@@ -1169,6 +1169,14 @@ editor previews, diagnostics, and resource views close immediately and use the
 same deterministic focus handoff as ordinary tab close. Opened workRoots do
 not show mock or default panes when no live or user-opened surface exists.
 
+Tab lifecycle affordances stay live independently of Dockview parameter
+refresh timing and independently of whether the tab has ever been the active
+pane. A tab restored by a page refresh and never activated responds to its
+close and acknowledge affordances on the first interaction, with no preceding
+tab-body click required. A tab's attention indicator must not change the tab's
+close-affordance geometry when it appears or clears, because the indicator can
+clear during the same pointer gesture that presses the close affordance.
+
 ### WorkRoot Activity Projection {#260517-ws-dashboard-workroot-activity-projection}
 
 The dashboard exposes a workRoot-owned runtime activity projection for opened
@@ -1731,7 +1739,13 @@ Workbench tab polish evidence is browser-level Playwright evidence against the
 daemon-served frontend. It covers hover-only close affordances, terminal and
 agent close confirmation popover cancel/confirm paths, immediate close for
 reversible panes, pinned/opened badge or chip presentation, preview-to-pinned
-file behavior, and default spawned-daemon agent close coverage. The
+file behavior, and default spawned-daemon agent close coverage. The covered
+close paths include a refresh-restored tab that has never been activated: the
+gate closes such a tab on its first close-affordance click, both while it
+carries a pending attention indicator and while it carries none, and asserts
+that the close affordance does not move between the press and the release of
+that click. Evidence that clicks the tab body before the close affordance does
+not satisfy this clause. The
 implementation workflow also runs a post-implementation frontend-design
 verification and autonomous tweak pass before ordinary implementation review,
 then reruns the relevant browser evidence.

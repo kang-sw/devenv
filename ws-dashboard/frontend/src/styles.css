@@ -1659,6 +1659,7 @@ button {
 
 .dockview-workbench-tab {
   display: flex;
+  position: relative;
   min-width: 0;
   height: 100%;
   align-items: center;
@@ -2658,13 +2659,29 @@ button {
 /* Agent turn-state indicator (260725 Phase 6). Rendered only while a
    terminal tab has an unacknowledged non-idle attention entry; the tab's
    own `data-attention-state` attribute is what browser acceptance asserts,
-   this dot is the human-visible half. */
+   this dot is the human-visible half.
+
+   OUT OF FLOW (260726 Phase 1, F1): the dot must contribute ZERO width to
+   the tab, because it appears and clears MID-GESTURE. Dockview activates a
+   tab on native `pointerdown`, which acknowledges the terminal and unmounts
+   this element - so while it was a `flex: 0 0 auto` sibling it collapsed
+   7px + one 4px flex gap and slid the close button 11px left between the
+   user's press and release. The measured shift was exactly -11.0px, and the
+   release then landed outside the button, so the first `×` click on a
+   badged tab was silently swallowed. Anchored to `.dockview-workbench-tab`
+   (`position: relative`) as a corner badge on the leading icon: 8px tab
+   padding + 11px icon - 4px overlap = 15px from the tab's left edge. The
+   ring is the tab-strip background, so the dot reads as a separate mark
+   rather than as part of the icon glyph. */
 .workbench-tab-attention {
+  position: absolute;
+  top: calc(50% + 1px);
+  left: 15px;
   width: 7px;
   height: 7px;
-  flex: 0 0 auto;
   border-radius: 50%;
   background: var(--ws-color-text-tertiary);
+  box-shadow: 0 0 0 1px var(--ws-color-surface-context-raised);
 }
 
 .workbench-tab-attention[data-workbench-tab-attention="working"] {

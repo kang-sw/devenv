@@ -446,6 +446,112 @@ function workspaceRow(page: Page, rootPath: string) {
     .first();
 }
 
+// 260726 Phase 1. Spawns a terminal via the daemon route directly (so it is
+// never clicked in the browser), optionally posts a turn-state BEFORE the
+// reload so the restored tab carries a pending attention badge, then reloads
+// + reselects the root - the exact "never-activated, reload-restored" shape
+// the defect was reported in.
+//
+// The two preconditions below are load-bearing, not decoration: if the
+// restored tab were already Dockview-active, its `×` click would never cross
+// the activation path that produced the defect, and the assertions using this
+// helper would pass for the wrong reason. Both were measured to hold before
+// being pinned here (`aria-selected="false"` for a reload-restored tab, and
+// a pre-reload turn-state surviving the reload unacknowledged).
+async function spawnRestoredNeverActivatedTerminal(
+  page: Page,
+  workRootId: string,
+  rootPath: string,
+  title: string,
+  attention: "working" | "ready" | null,
+): Promise<string> {
+  const terminalId = await spawnTerminalInRoot(
+    page,
+    workRootId,
+    attention ? "dummy-echo-hooked" : null,
+    title,
+  );
+  if (attention) {
+    const token = readCallbackToken(terminalId);
+    await postTurnState(terminalId, token, attention);
+  }
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await selectWorkRootMinimal(page, rootPath);
+  await expect(terminalTab(page, terminalId)).toHaveCount(1, {
+    timeout: 20_000,
+  });
+  await expect(terminalTab(page, terminalId)).toHaveAttribute(
+    "aria-selected",
+    "false",
+  );
+  await expect(terminalTab(page, terminalId)).toHaveAttribute(
+    "data-attention-state",
+    attention ?? "none",
+  );
+  return terminalId;
+}
+
+// 260726 Phase 1, PRIMARY assertion shape. Drives the close gesture by hand
+// (move/down/settle/up) instead of `Locator.click()`, because
+// `Locator.click()` re-resolves and re-aims between press and release and so
+// is structurally blind to the defect: dockview activates a tab on NATIVE
+// `pointerdown`, that activation acknowledges the terminal, and the badge
+// unmounting mid-gesture used to slide the close button 11px left - measured
+// as `shiftPx=-11.0` against unfixed source - so the user's release landed
+// outside the button and the click was swallowed.
+//
+// Ordering is deliberate (asserted after the gesture, geometry first): the
+// geometry invariant is the root cause, so a regression fails at that line
+// with the exact pixel delta rather than at a downstream "popover missing".
+// The badge's post-click `data-attention-state` is deliberately NOT pinned -
+// no spec states what `×` does to the badge, and pinning it would freeze an
+// unowned behavior.
+async function closeNeverActivatedTerminalByFirstClick(
+  page: Page,
+  terminalId: string,
+) {
+  const tab = terminalTab(page, terminalId);
+  await tab.hover();
+  const closeButton = tab.locator('[data-command-id="workbench.tab.close"]');
+  const beforeBox = await closeButton.boundingBox();
+  expect(
+    beforeBox,
+    "the close affordance must be hoverable on a never-activated restored tab",
+  ).not.toBeNull();
+  const box = beforeBox!;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  // Two animation frames: enough for React's discrete-event flush triggered
+  // by dockview's native `pointerdown` activation to commit, which is when
+  // the badge used to unmount.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const duringBox = await closeButton.boundingBox();
+  // The pointer never moves between press and release - that is the whole
+  // point. If the button moved, this release misses it.
+  await page.mouse.up();
+
+  expect(
+    duringBox?.x ?? null,
+    "the close affordance must not move between pointerdown and mouseup (the attention indicator must contribute no tab-layout width)",
+  ).toBe(box.x);
+
+  const popover = page.locator('[data-workbench-close-popover="cursor-near"]');
+  await expect(
+    popover,
+    "the FIRST x click on a never-activated restored tab must open the close confirmation",
+  ).toBeVisible();
+  await popover
+    .locator('[data-command-id="workbench.tab.close.confirm"]')
+    .click();
+  await expect(popover).toHaveCount(0);
+}
+
 test("agent attention indicator", async ({ page }) => {
   await pairOwner(page);
   await openWorkRootMinimal(page, workRoot);
@@ -1135,5 +1241,62 @@ test("browser-level title/favicon attention cue (Tier 1)", async ({
     });
   } finally {
     await forceCloseTerminals(page, [agentTerminalId]);
+  }
+});
+
+// 260726 Phase 1 regression gate. A FIFTH `test()` in this file, following the
+// same precedent the Phase 7/Phase 8 tests above set for reusing this file's
+// daemon/workRoot/token module-locals rather than standing up another daemon.
+//
+// Why this test exists and why it is non-vacuous: every OTHER close in this
+// file (and the `cleanup` step at :985-994 in particular, which says so in its
+// own comment) clicks the tab body first. That click activates the pane and
+// clears any badge BEFORE the `×` is pressed, which is precisely the state the
+// defect does not occur in - so those closes proved nothing about the reported
+// flow. Neither assertion below may click the tab body first.
+//
+//   PRIMARY/BINDING - a reload-restored tab that was never clicked and carries
+//   a pending attention badge closes on its FIRST `×` click, with the close
+//   affordance holding still across the whole press/release. This is the only
+//   configuration the original defect was observed in.
+//
+//   SECONDARY (ticket D2) - the same tab shape with no badge at all also
+//   closes on its first `×` click, so the fix is not badge-conditional.
+test("restored, never-activated terminal tab closes on its first x click", async ({
+  page,
+}) => {
+  await attachOwnerSession(page);
+  await openWorkRootMinimal(page, workRoot);
+  const workRootId = await resolveWorkRootId(page, workRoot);
+  let badgedId = "";
+  let plainId = "";
+  try {
+    await test.step("PRIMARY/BINDING: badged, never-activated tab closes on first x click", async () => {
+      badgedId = await spawnRestoredNeverActivatedTerminal(
+        page,
+        workRootId,
+        workRoot,
+        "Restored Badged Close",
+        "ready",
+      );
+      await closeNeverActivatedTerminalByFirstClick(page, badgedId);
+      await expect(terminalTab(page, badgedId)).toHaveCount(0);
+    });
+
+    await test.step("SECONDARY (D2): no-attention, never-activated tab also closes on first x click", async () => {
+      plainId = await spawnRestoredNeverActivatedTerminal(
+        page,
+        workRootId,
+        workRoot,
+        "Restored Plain Close",
+        null,
+      );
+      await closeTerminalById(page, plainId);
+      await expect(terminalTab(page, plainId)).toHaveCount(0);
+    });
+  } finally {
+    // Unconditional: the daemon does not terminate live sessions on shutdown,
+    // so an assertion failure above must never leak a `terminal-helper`.
+    await forceCloseTerminals(page, [badgedId, plainId]);
   }
 });
