@@ -1,6 +1,7 @@
 import {
   DEFAULT_NOTIFICATION_PREFS,
   loadNotificationPrefs,
+  parseNotificationPrefs,
   saveNotificationPrefs,
   type NotificationPrefs,
 } from "./notificationPrefs.js";
@@ -29,12 +30,59 @@ assertDeepEqual(
   "the default notification prefs start disabled",
 );
 
-// --- Persistence round trip, and parseNotificationPrefs's defensive checks --
+// --- parseNotificationPrefs's own defensive checks, asserted directly ------
+//
+// Cycle 2 correction (test Important): a round trip through
+// loadNotificationPrefs cannot discriminate a correctly rejecting parser
+// from a permissive `Boolean(record.enabled)`-style coercion for these two
+// inputs, because `DEFAULT_NOTIFICATION_PREFS.enabled` is `false` -
+// `Boolean(undefined)` (missing `enabled`) and a thrown-and-swallowed
+// property access (a non-object `raw`, caught by `loadNamespacedPrefs`'s own
+// unrelated try/catch) both land on the exact same default value a correct
+// rejection would produce. Asserting `parseNotificationPrefs`'s own return
+// value directly - the same reason `terminalPrefs.ts` exports
+// `parseTerminalFontSizeInput` for its own edge cases - closes that gap.
+
+assertEqual(
+  parseNotificationPrefs({}),
+  null,
+  "a payload missing the enabled field is rejected (returns null)",
+);
+
+assertEqual(
+  parseNotificationPrefs(null),
+  null,
+  "a null value is rejected (returns null)",
+);
+
+assertEqual(
+  parseNotificationPrefs("not an object"),
+  null,
+  "a non-object (string) value is rejected (returns null)",
+);
+
+assertEqual(
+  parseNotificationPrefs({ enabled: "yes" }),
+  null,
+  "a non-boolean enabled field is rejected (returns null)",
+);
+
+assertDeepEqual(
+  parseNotificationPrefs({ enabled: true }),
+  { enabled: true },
+  "a valid payload parses through unchanged",
+);
+
+// --- Persistence round trip --------------------------------------------------
 //
 // Mirrors terminalPrefs.test.ts's coverage of the parallel
 // parseTerminalStylePrefs (review cycle 1, Important 2): this is the one
 // piece of domain logic unique to notificationPrefs.ts, and it was
-// previously exercised by no test at all.
+// previously exercised by no test at all. The malformed-payload cases below
+// pin `loadNotificationPrefs`'s end-to-end fallback behavior (still real,
+// still worth asserting) - they are not the proof of
+// `parseNotificationPrefs`'s own rejection contract; the direct assertions
+// above are.
 
 {
   const fakeStorage = new Map<string, string>();

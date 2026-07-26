@@ -22,7 +22,16 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
 const notificationPrefsStorageKey = "ws-dashboard.settings.notifications.v1";
 const notificationPrefsVersion = 1;
 
-function parseNotificationPrefs(raw: unknown): NotificationPrefs | null {
+// Exported (review cycle 2, test Important) so its edge cases can be
+// asserted directly against its own return value, the same reason
+// `terminalPrefs.ts` exports `parseTerminalFontSizeInput`. A round trip
+// through `loadNotificationPrefs` cannot discriminate a correctly rejecting
+// parser from a permissive one here: `DEFAULT_NOTIFICATION_PREFS.enabled` is
+// `false`, so `Boolean(undefined)` (missing `enabled`) and a caught
+// exception from a non-object `raw` (swallowed by `loadNamespacedPrefs`'s own
+// unrelated try/catch) both land on the exact same default value a correct
+// rejection would produce.
+export function parseNotificationPrefs(raw: unknown): NotificationPrefs | null {
   if (typeof raw !== "object" || raw === null) {
     return null;
   }
