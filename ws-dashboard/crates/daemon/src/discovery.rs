@@ -667,7 +667,11 @@ impl GitProbeCache {
     /// gate (`git_toolbar::resolve_git_context`). Reuses the same memoized
     /// probe as `discover_work_root`/`git_identity`, so a warm memo costs zero
     /// additional spawns (Phase 2 Lead Disposition D4).
-    pub(crate) fn git_root_kind(&self, path: &Path, git_stats: &GitSpawnStats) -> Option<WorkRootKind> {
+    pub(crate) fn git_root_kind(
+        &self,
+        path: &Path,
+        git_stats: &GitSpawnStats,
+    ) -> Option<WorkRootKind> {
         self.discover(path, git_stats).map(|git| git.kind)
     }
 
@@ -676,7 +680,11 @@ impl GitProbeCache {
     /// memo (Phase 2 Lead Disposition D1). Preserves every bail-out the
     /// deleted `work_root_activity::git_identity` had: a total function that
     /// returns `None` for a bare repository or a non-Git directory.
-    pub(crate) fn git_identity(&self, path: &Path, git_stats: &GitSpawnStats) -> Option<GitIdentity> {
+    pub(crate) fn git_identity(
+        &self,
+        path: &Path,
+        git_stats: &GitSpawnStats,
+    ) -> Option<GitIdentity> {
         let git = self.discover(path, git_stats)?;
         let worktree_root = git.worktree_dir.canonicalize().ok()?;
         let common_dir = git.common_dir.canonicalize().ok()?;
@@ -1558,6 +1566,41 @@ mod tests {
         );
 
         remove_temp(&root);
+    }
+
+    // Cycle 1 test-review FIX 2 (accepted in narrowed form): pin
+    // `GitProbeCache::git_identity`'s `common_dir.file_name() != Some(".git")`
+    // bail-out. `git init --separate-git-dir=<dir>` is portable (works on the
+    // Windows production host, unlike renaming `.git` after the fact) and
+    // produces a work tree whose `--git-common-dir` resolves to a directory
+    // that is not literally named `.git`. The identity derivation must still
+    // be a total function and return `None` for this shape, not panic or
+    // misclassify it as a normal primary root.
+    #[test]
+    fn git_identity_returns_none_when_common_dir_is_not_named_dot_git() {
+        if !git_available() {
+            return;
+        }
+
+        let base = temp_path("git-identity-non-dot-git-common-dir");
+        let work_tree = base.join("work");
+        let separate_git_dir = base.join("gitstore");
+        fs::create_dir_all(&work_tree).expect("create work tree");
+        let separate_git_dir_arg = format!(
+            "--separate-git-dir={}",
+            separate_git_dir.to_str().expect("separate git dir path")
+        );
+        git(&work_tree, &["init", &separate_git_dir_arg]);
+
+        let probes = GitProbeCache::default();
+        let stats = GitSpawnStats::default();
+
+        assert!(
+            probes.git_identity(&work_tree, &stats).is_none(),
+            "a common dir not literally named `.git` must resolve to None, not a misclassified identity"
+        );
+
+        remove_temp(&base);
     }
 
     fn raw_git_stdout(path: &Path, args: &[&str]) -> String {

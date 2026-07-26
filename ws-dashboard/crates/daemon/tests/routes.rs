@@ -7897,6 +7897,86 @@ async fn zero_spawn_activity_snapshot_after_git_toolbar_warms_the_shared_discove
     remove_static_fixture(&base);
 }
 
+// Cycle 1 test-review FIX 1 (accepted): D1's "memo is genuinely shared with
+// the 5s resources poll" rationale is a three-way claim (toolbar / Activity /
+// `/api/dashboard/resources`). The zero-spawn test above only pins the
+// toolbar<->Activity leg. This test pins the third leg: warming the shared
+// discovery memo through `GET /api/dashboard/resources` (the steady-state
+// 5s poll) must make a following `/git/status` call for the same root add
+// zero further spawns, as a delta against a `/api/dashboard/diag/git`
+// baseline read taken after the resources warm-up - never an absolute
+// count.
+//
+// A plain-directory root is used (not a git root): `resolve_git_context`'s
+// `git_root_kind` gate is the *only* thing `/git/status` does before
+// answering for a `NonGit` root - it returns 400 before ever reaching
+// `status_for_path`, which always spawns its own `branch`/`rev-parse`/status
+// calls independent of the discovery memo, on every call, warm or not (see
+// `dashboard_diag_git_reports_spawn_counters_that_increase_after_git_toolbar_calls`
+// above). So a plain-directory root is the one case where "adds ZERO spawns"
+// is literally, not just approximately, true - proving the memo-sharing
+// claim without conflating it with `status_for_path`'s always-live status
+// computation, which Phase 3's `GitStateCache` (not this phase) will address.
+#[tokio::test]
+async fn git_toolbar_status_adds_zero_spawns_after_resources_poll_warms_the_shared_discovery_memo(
+) {
+    if skip_without_git(
+        "git_toolbar_status_adds_zero_spawns_after_resources_poll_warms_the_shared_discovery_memo",
+    ) {
+        return;
+    }
+    let base = temp_fixture_path("resources-poll-warms-git-toolbar-memo");
+    let plain = base.join("plain");
+    fs::create_dir_all(&plain).expect("create plain directory");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let plain_id = open_work_root_for_test(app.clone(), cookie.as_str(), &plain).await;
+
+    // Steady-state poll: the frontend's 5s `/api/dashboard/resources` tick,
+    // which discovers the opened root's git-vs-plain kind through the same
+    // shared `AppState.git_probe_cache` the git-toolbar route reads.
+    dashboard_resources_json(app.clone(), cookie.as_str()).await;
+
+    let before = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let before_total = before["totalSpawns"].as_u64().expect("before totalSpawns");
+    assert!(
+        before_total > 0,
+        "the resources poll must have already spawned git to discover the opened root's kind"
+    );
+
+    git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{plain_id}/git/status"),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    let after = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let after_total = after["totalSpawns"].as_u64().expect("after totalSpawns");
+    assert_eq!(
+        after_total, before_total,
+        "a /git/status call for a root already warmed by the resources poll must add zero git spawns: before={before_total} after={after_total}"
+    );
+
+    remove_static_fixture(&base);
+}
+
 #[tokio::test]
 async fn git_toolbar_branches_switch_and_create_revalidate_state() {
     if skip_without_git("git_toolbar_branches_switch_and_create_revalidate_state") {

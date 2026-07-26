@@ -355,9 +355,11 @@ struct ActivityEventPollStream {
     next_cursor: u64,
     // Owned so the poll loop below (which runs for the SSE connection's
     // whole lifetime, well past the handler's own stack frame) can keep
-    // calling `watch_snapshot` with the daemon's shared counters instead of
-    // a per-poll throwaway instance.
+    // calling `watch_snapshot` with the daemon's shared git-probe memo
+    // instead of a per-poll throwaway instance.
     git_probes: GitProbeCache,
+    // Owned for the same reason as `git_probes` above: the poll loop needs
+    // the daemon's shared spawn counters, not a per-poll throwaway instance.
     git_stats: Arc<GitSpawnStats>,
 }
 
