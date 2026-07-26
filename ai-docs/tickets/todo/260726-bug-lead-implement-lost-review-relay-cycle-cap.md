@@ -172,15 +172,16 @@ correctness while requiring fixes to stay inside the plan. Its Process step 3
 supplies an escape — escalate for a plan update — but escalating only moves the
 question, it does not answer it, and the reviewer cannot amend the plan. The
 adjudicator is the party that decides whether the plan should absorb the finding
-or the finding should be deferred. See Phase 3 for why this makes the trigger
+or the finding should be deferred. See Phase 2 for why this makes the trigger
 two-armed.
 
 **Capacity escalation is mechanical and lead-side, not an adjudicator verdict.**
-A finding relayed twice with no won't-fix offered and still non-clean indicates
-the implementer cannot fix it, not that a defense is contested — so it never
-produces a `[maintained]` and never reaches the adjudicator. Handle it as a plain
-routing condition on the next relay: dispatch a distinct `implementer-elevated`
-delegate (Phase 4) rather than elevating `implementer-relay`'s tier. This keeps
+A finding relayed once with no won't-fix offered and still non-clean at the next
+review indicates the implementer cannot fix it, not that a defense is contested —
+so it never produces a `[maintained]` and never reaches the adjudicator. Handle it
+as a plain routing condition on the next relay: dispatch a distinct
+`implementer-elevated` delegate (Phase 3) rather than elevating
+`implementer-relay`'s tier. This keeps
 the adjudicator's job single-purpose. Rejected: widening the adjudicator's input to
 "all unresolved findings after cycle 2" and adding a `[capacity]` verdict, which
 dilutes judging-a-defense into judging-everything.
@@ -250,10 +251,11 @@ matches an already-relayed finding is itself an escalation signal, independent o
 cycle count — and the observed run suggests the condition is the load-bearing
 half, with the count catching it only incidentally.
 
-Scoped into this ticket as Phase 2, alongside capacity elevation: both are
-lead-side conditions expressed as text in the same generated Instruction, and
-neither needs a delegate. Sequencing them before the adjudicator is deliberate —
-if Phase 3 never lands, Phases 1 and 2 still close the observed defect.
+Scoped into this ticket as Phase 3, alongside the capacity count: they are two
+detectors for one signal — the approach is failing rather than the patch — and
+both route to the same elevated delegate. Keeping them apart would have given the
+root-cause detector its own phase with no destination, which is this ticket's own
+defect class.
 
 ## Constraints
 
@@ -272,7 +274,10 @@ if Phase 3 never lands, Phases 1 and 2 still close the observed defect.
   `TestWsflowRsrcMirrorUpToDate`; never hand-edit it. After any
   `agents-plugin/rsrc/` change, regenerate in this order — first
   `WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealManifest`
-  (required only when a file is added or removed), then
+  (required after **any** content edit, not only when a file is added or removed —
+  `TestShippedManifestUpToDate` fails on changed content; the separate
+  `WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest`
+  entry point covers the shipped manifest), then
   `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`.
   `-count=1` is mandatory. See `ai-docs/ref/wsflow-mirroring.md`; the missed-regen
   failure mode has its own ticket
@@ -315,41 +320,28 @@ Rejected alternative: stating the numbers in the playbook. They are
 Doctrine, and putting a `single`-vs-`partitioned` branch in shared prose is the
 thing this ticket is trying to stop.
 
+**Spec amendment, required in this phase.**
+`#260612-reviewer-allocation-tier-default` is wrong on two counts, not merely
+under-described. It says "relay cap", which is the unit this ticket rejects — the
+cap counts reviews, and calling it a relay cap is exactly the off-by-one-round
+ambiguity `## Decisions` pins down. It also says "caller escalation at cycle 3",
+which contradicts the decision that the final cycle completes the run. Leaving
+either in place would make Phase 1 close a divergence by opening a fresh one.
+
 Verification boundary: a `partitioned:` verdict's review todo Instruction names a
 3-review-cycle slice budget and the completes-not-halts behavior; a `single`
 verdict's names 2; the fallback branch names 3; a `lead-only` verdict's names
-neither; `lead-implement.md` is byte-identical to its pre-phase state in both
-copies.
+neither; the spec anchor states the cap in review cycles and no longer says the
+run halts at cycle 3; `lead-implement.md` is byte-identical to its pre-phase state
+in both copies.
 
-### Phase 2: Root-cause escalation
+### Phase 2: Adjudicator delegate
 
-Depends on Phase 1 — the condition qualifies the budget it establishes. Text
-only, no new delegate, appended to the same `partitioned:`/fallback review
-Instruction.
+Depends on Phase 1 — the adjudicator spends the budget Phase 1 establishes, and
+its override ships as one of that budget's relays.
 
-Relaying a finding whose root cause matches an already-relayed finding is itself
-an escalation signal, independent of cycle count. This is the lead-side
-counterpart to `impl-playbook`'s repetition check, which cannot fire across
-stateless fresh-spawn relays. The observed run argues this condition is the
-load-bearing half and the count only the backstop.
-
-Capacity elevation is deliberately **not** in this phase. A condition whose
-dispatch target does not exist is inert text, and stating one would repeat this
-ticket's own defect class; it moves to Phase 4 with the delegate that answers it.
-
-Spec: this adds a stopping condition `#260612-reviewer-allocation-tier-default`
-does not describe. Amend the anchor with this phase.
-
-Verification boundary: the `partitioned:` and fallback Instructions state the
-root-cause condition and distinguish it from the numeric budget; `single` and
-`lead-only` state neither; no `{{` appears in any generated Instruction.
-
-### Phase 3: Adjudicator delegate
-
-Depends on Phase 2 — the adjudicator resolves the disputes its condition
-surfaces.
-
-**New rsrc delegate** modeled on `ticket-reviewer-design`, `tier: large`,
+**New rsrc delegate `review-adjudicator`** modeled on `ticket-reviewer-design`,
+`tier: large`,
 carrying the aperture constraint, the read table, and the three-verdict output
 contract from `## Decisions`. Inputs are file paths only. Adding an rsrc file
 requires the manifest regeneration named in `## Constraints` before the mirror
@@ -370,6 +362,15 @@ finding escalates rather than refusing, producing no won't-fix and no
 role. The second arm is therefore an implementer plan-update escalation, which
 routes to the adjudicator for the same accept/override/out-of-scope judgment.
 
+That second arm needs a token to fire on. `implementer-relay`'s Output contract
+offers `[fixed]`/`[won't fix]`/`[deferred]` and nothing else, so a Process-step-3
+escalation currently surfaces only as free-text under "Deviations or blockers" —
+undetectable by a lead following an Instruction. This phase adds
+`[escalate: <reason>]` to that contract. Scope note: this is the one
+`implementer-relay` edit the ticket makes, and it is additive to an output
+vocabulary rather than a new rule, so it does not reopen Phase 1's decision to
+leave the playbook layer alone.
+
 **Spec update, required.** `#260612-reviewer-allocation-tier-default` currently
 reads "3 cycles for partitioned with lead adjudication at cycle 2". This phase
 makes the adjudicator a delegate and introduces a verdict vocabulary the spec
@@ -379,14 +380,15 @@ one.
 
 Verification boundary: a partitioned verdict's Instruction carries the
 adjudication clause and a single/lead-only verdict's does not; the rendered
-adjudicator prompt states the do-not-re-review-the-diff constraint and the three
-verdicts; the delegate prompt is self-contained under a fresh spawn with no prior
-conversation; the spec anchor no longer says "lead adjudication"; manifest and
-wsflow mirror tests pass without hand-edits.
+`review-adjudicator` prompt states the do-not-re-review-the-diff constraint and
+the three verdicts; the delegate prompt is self-contained under a fresh spawn with
+no prior conversation; `implementer-relay`'s Output contract lists
+`[escalate: <reason>]`; the spec anchor no longer says "lead adjudication";
+manifest and wsflow mirror tests pass without hand-edits.
 
-### Phase 4: Elevated implementer delegate and capacity escalation
+### Phase 3: Elevated implementer delegate and capacity escalation
 
-Depends on Phase 3 — same trigger surface, same regeneration pass, same
+Depends on Phase 2 — same trigger surface, same regeneration pass, same
 delegate-prompt shape, and the pair only reads coherently once both last-resort
 roles exist. Sequenced last because it is the one arm the observed run does not
 evidence directly.
@@ -416,12 +418,43 @@ executes the same failed approach more competently. What distinguishes it:
   so three cycles of evidence survive the handoff.
 
 **Capacity condition**, added to the `partitioned:`/fallback review Instruction:
-a finding relayed twice with no won't-fix offered and still non-clean routes the
-next relay to `implementer-elevated` instead of `implementer-relay`. No won't-fix
-means no defense is contested, so this is a capacity signal rather than an
-adjudication one — it is the third arm alongside Phase 3's two, and together they
-cover the three failure classes this ticket separates: wrong finding and scope
-deadlock to the adjudicator, failed approach here.
+a finding **relayed once** with no won't-fix offered and still non-clean at the
+next review routes the following relay to `implementer-elevated` instead of
+`implementer-relay`. No won't-fix means no defense is contested, so this is a
+capacity signal rather than an adjudication one — it is the third arm alongside
+Phase 2's two, and together they cover the three failure classes this ticket
+separates: wrong finding and scope deadlock to the adjudicator, failed approach
+here.
+
+Once, not twice. A 3-review budget affords exactly 2 relays, so a
+relayed-twice-and-still-failing state is first observable at the cycle-3 review —
+the terminal cycle, after which the run completes and no relay follows. The
+elevated implementer would then be permanently unreachable, which is the same
+never-fires defect class this ticket exists to close. Firing after one failed
+relay spends the second relay on the elevated delegate, which is the only slot
+where it can act.
+
+**Root-cause matching** rides the same route. A finding relayed again whose root
+cause matches an already-relayed finding is an escalation signal independent of
+the count: it is the lead-side counterpart to `impl-playbook`'s repetition check,
+which cannot fire across stateless fresh-spawn relays. It is folded in here rather
+than kept as its own phase because it is a second detector for one signal — the
+approach is failing, not the patch — and routes to the same delegate. The observed
+run argues this detector is the load-bearing half and the count only the backstop.
+
+**Precedence when both fire.** A relay can carry an adjudicator override list and
+a capacity signal at once. The combined relay goes to `implementer-elevated`
+carrying the override list; the elevated delegate subsumes the relay delegate's
+job, so two relays are never dispatched for one cycle.
+
+**Dispatch surface.** `lead-implement.md`'s **Review relay dispatch** template
+hard-codes `implementer-relay` and its seven inputs, and the delegate dispatch
+task-input mapping alongside it; both must gain the conditional target, together
+with their pinned assertions in `playbook_tools_test.go`. This is not a reversal
+of Phase 1's decision to leave the playbook alone: the playbook's own Doctrine
+keeps *reusable templates* while sending rules to the todo layer, and a dispatch
+template that names a delegate the lead cannot otherwise reach is template
+material, not an invariant.
 
 Spec: amend `#260612-reviewer-allocation-tier-default` for the new delegate and
 its dispatch condition.
@@ -429,11 +462,14 @@ its dispatch condition.
 Verification boundary: `playbook.render(name: "implementer-elevated")` returns
 `recommended-tier: large` with no caller override; its prompt differs from
 `implementer-relay` in inputs, posture, and output contract rather than only in
-front-matter; the capacity condition appears in the `partitioned:` and fallback
-Instructions and nowhere else; manifest and wsflow mirror tests pass without
-hand-edits. The behavior is verified by dispatching, not by reading Instruction
-text — a named tier that no dispatch path honors passes a text-only check, which
-is how the original cap was lost.
+front-matter; the capacity condition and the root-cause condition both appear in
+the `partitioned:` and fallback Instructions and nowhere else, with the root-cause
+condition distinguished from the numeric budget; no `{{` appears in any generated
+Instruction; a walkthrough of a 3-cycle slice reaches `implementer-elevated`
+within the budget rather than one relay past it; manifest and wsflow mirror tests
+pass without hand-edits. The behavior is verified by dispatching, not by reading
+Instruction text — a named tier that no dispatch path honors passes a text-only
+check, which is how the original cap was lost.
 
 ## Non-Goals
 
