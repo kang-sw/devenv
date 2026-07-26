@@ -298,19 +298,23 @@ dropped tickets live in hidden archive dirs and git history.
   `260724-idea-dashboard-daemon-side-git-poll-response-timeout`; 2 per-root
   `resolve_git_context` reusing the existing `resolve_online_available_work_root`
   gate, plus the `git_identity` memo that is the real measurable win; 3 result
-  cache with `EpochSource` stubbed; 4 the `notify` watcher — **one strategy on
-  every platform**: gitignore-aware walk → per-directory `NonRecursive` → counted
-  against a per-repo cap (default 1024) → arm all or degrade wholly. Recursive
-  registration is a Non-Goal (owner 2026-07-26): it cannot satisfy "never register
-  a watch we did not count" on Linux, where `notify` emulates recursion with
-  uncountable internal per-directory watches. The Phase 5 heading is retained only
-  as history — it was split off, then dropped, then absorbed here. Two verified
-  facts drove this: pruned directory counts are **~200/repo, not the ~2,400
-  previously assumed** (so per-directory registration is affordable on Windows
-  too, and the uniform path gets the production registration code tested on the
-  Linux dev host), and **`git status -uno --ignored=matching` returns zero `!!`
-  entries** — the ticket's original command would have silently produced an empty
-  ignore set; use `-unormal`. Decided against git SSE push (the problem is CPU,
+  cache with `EpochSource` stubbed; 4 the `notify` watcher, which **arms on every
+  platform** — that is what it absorbed from the former Phase 5. Governing
+  invariant (owner 2026-07-26): *never register a watch we did not count.*
+  Registration is therefore platform-split, and deliberately so: **recursive on
+  Windows/macOS** (count is 1 per target by construction — one kernel handle / one
+  FSEvents stream, no walk, no cap; the ignore set only filters events), and
+  **gitignore-aware walk → per-directory `NonRecursive` → counted against a cap
+  (default 1024) → arm all or degrade wholly on Linux**, because there is no kernel
+  subtree primitive and `notify`'s emulation registers descriptors we cannot count.
+  Recursive-on-Linux is a Non-Goal. The Phase 5 heading is retained only as
+  history — split off, dropped, inverted to uniform-per-directory, then corrected
+  back to the split; the ticket records all four states. Two verified facts:
+  pruned directory counts are **~200/repo, not the ~2,400 previously assumed**
+  (which is what makes the Linux cap a safety valve rather than a live limit), and
+  **`git status -uno --ignored=matching` returns zero `!!` entries** on git 2.43.0
+  — the ticket's original command would have silently produced an empty ignore set
+  on every repo; use `-unormal`. Decided against git SSE push (the problem is CPU,
   not latency, and FS events are lossy hints). Plan at
   `ai-docs/.plans/2026-07/26-1315-git-fs-watch-invalidation.md`. Spec addressing
   via `## Spec Impact` (`#260524-ws-dashboard-git-aware-workroot-toolbar`,

@@ -185,49 +185,48 @@ reading of this host's actual `max_user_watches` (see Constraints).
   `FETCH_HEAD`, all of which are in the watch set. FS-watch invalidation is
   therefore exact parity with today. Automatic `git fetch` would be a new
   feature (network I/O, credential prompts) and is a Non-Goal.
-- **One registration strategy on all platforms: gitignore-aware walk +
-  per-directory `NonRecursive` + counted cap** (owner, 2026-07-26). Recursive
-  registration is removed from the design entirely, not kept as a
-  platform-specific fast path.
+- **Registration is platform-split, and the split is the cheap answer rather than
+  a compromise.** `RecursiveMode::Recursive` on Windows/macOS; gitignore-aware
+  walk + per-directory `NonRecursive` + counted cap on Linux. Both satisfy the
+  counting invariant in Constraints — Windows because the count is 1 by
+  construction, Linux because we perform the walk ourselves.
 
-  The initial objection was that Windows gives subtree watching for **one** kernel
-  handle (`bWatchSubtree=TRUE`) while per-directory registration would cost
-  hundreds, so recursive-on-Windows looked like a free win worth a `cfg` seam.
-  The measurement above retires that objection: after pruning it is ~200
-  directories per repo, ~1,800 across 9 roots — a real but acceptable cost, not
-  the multi-thousand-handle blowup that was feared.
+  This was briefly decided the other way (uniform per-directory everywhere,
+  recursive deleted) and reversed the same day, so the reasoning is written down to
+  keep it from oscillating again.
 
-  What the uniform path buys, none of which the split path could:
-  - **The count is unconditionally known**, so the cap is enforceable everywhere
-    rather than being a Linux-only mechanism guarding a Linux-only risk.
-  - **One code path, no `cfg` gate on arming.** The registration logic that runs
-    in production on Windows is the same logic the Linux/WSL dev host executes
-    under test — the split design could never test the Windows path anywhere.
-  - The walk is needed on Linux regardless, so the incremental cost of using it
-    everywhere is close to zero.
+  The case for unifying was testability: with one path, the registration code
+  running in production on Windows would be exercised by every `cargo test` on the
+  Linux dev host. **That argument does not survive inspection.** The only
+  Windows-exclusive code under the split is three `watcher.watch(target,
+  RecursiveMode::Recursive)` calls. Everything with real failure modes —
+  `classify`, `IgnoreSet` derivation, debounce/coalescing, epoch bookkeeping, the
+  `reconcile` decision table — is shared, `cfg`-free, and tested on Linux either
+  way; and `plan_watch_set` is Linux-only code running on the Linux dev host, so it
+  is covered too. The split forfeits coverage of three trivial lines.
 
-  **The create-before-register race is harmless here, which is why this trade is
-  acceptable.** Per-directory watching classically misses files written into a
-  directory created moments earlier. Under epoch semantics that does not matter:
-  the `mkdir` itself is an event in a watched parent, it bumps the epoch, the
-  frontend recomputes, and `git status` observes the new file. Only systems
-  needing per-file event fidelity are hurt, and this one needs exactly
-  "something under X changed."
+  What unifying would have cost on the only production host:
+  - ~200 open directory handles per repo instead of **1** (~1,800 across 9 roots).
+  - A several-hundred-`read_dir` walk on every arm, where recursive needs none.
+  - An **incremental-registration state machine** for directories created after
+    arming, which the kernel handles for free under `bWatchSubtree=TRUE`. This is
+    exactly the long-lived per-directory bookkeeping that can leak handles over
+    days of uptime — the concern behind
+    `260726-refactor-ws-dashboard-long-uptime-leak-hardening` — imported into
+    Windows to buy nothing.
+  - Cap-enforcement logic live in the production path instead of dormant.
+  - Sharing-violation exposure on worktree removal across ~200 handles, not 1.
 
-  Two Windows costs must be **measured** in Phase 4 rather than assumed — `notify`
-  is not yet a dependency, so neither was verifiable while writing this:
-  - **Per-watch buffer footprint.** `ReadDirectoryChangesW` needs an overlapped
-    buffer per watch. If that is ~16 KB, 1,800 watches is ~29 MB and acceptable;
-    if it is materially larger, revisit. Report actual RSS delta on arm.
-  - **Sharing-violation exposure on worktree removal** rises from 1 open
-    directory handle per repo to ~200. The existing
-    `git_worktree_remove_submit` reconcile hook must **disarm before** the
-    removal runs, and the existing worktree-remove test pins are the reference.
+  Trading that for three lines of coverage is a bad trade, and the gitignore event
+  noise recursive registration accepts (see Constraints) is not a reason to pay it.
 
-  Also verify at implementation time how `notify`'s macOS backend handles
-  `NonRecursive`: FSEvents is a subtree-stream mechanism, so N non-recursive
-  watches may become N streams. macOS is not a deployment target here, so treat a
-  finding there as a documented inefficiency rather than a blocker.
+  **The create-before-register race is harmless under epoch semantics**, which is
+  what makes the Linux per-directory path acceptable. Per-directory watching
+  classically misses files written into a directory created moments earlier. Here
+  the `mkdir` is itself an event in an already-watched parent, so the epoch bumps,
+  the frontend recomputes, and `git status` observes the new file. Only
+  per-file-fidelity systems are hurt, and this one needs exactly "something under
+  X changed."
 - **`notify` v8 with `default-features = false`** (avoids the
   `crossbeam-channel` pull-in); forward the callback into a
   `tokio::sync::mpsc`. Rejected `notify-debouncer-full`: it maintains a file-ID
@@ -239,17 +238,25 @@ reading of this host's actual `max_user_watches` (see Constraints).
 
 ## Constraints
 
-- **Never register a watch we did not count.** This is the load-bearing
-  invariant of the watcher (owner, 2026-07-26), and it is what removes recursive
-  registration from the design. `RecursiveMode::Recursive` violates it on Linux:
-  there is no kernel subtree primitive, so `notify` walks the tree and registers
-  per-directory *internally*, meaning the process consumes an unbounded number of
-  inotify descriptors that we cannot count, cap, or report. Exhausting them
-  degrades unrelated applications on the host (editors, other watchers) and we
-  would not even detect it. Therefore: **walk the tree ourselves with the ignore
-  set applied and register `RecursiveMode::NonRecursive` per surviving directory,
-  on every platform**, so the count is always known before a single watch is
-  registered. See Decisions for why this is uniform rather than platform-split.
+- **Never register a watch we did not count.** This is the load-bearing invariant
+  of the watcher (owner, 2026-07-26). It is a constraint on *counting*, not a
+  mandate for per-directory registration — and the two platforms satisfy it
+  differently:
+  - **Windows/macOS: satisfied structurally.** `ReadDirectoryChangesW` with
+    `bWatchSubtree=TRUE` is one kernel handle for the whole tree; FSEvents is one
+    stream. The count is 1 per target by construction, so there is nothing to walk
+    and nothing to cap.
+  - **Linux: violated by `RecursiveMode::Recursive`.** There is no kernel subtree
+    primitive, so `notify` walks the tree and registers per-directory
+    *internally* — the process consumes inotify descriptors we cannot count, cap,
+    or report, and exhausting them degrades unrelated applications on the host
+    (editors, other watchers) without us detecting it. So on Linux we walk the
+    tree ourselves with the ignore set applied and register
+    `RecursiveMode::NonRecursive` per surviving directory, making the count known
+    before a single watch is registered.
+
+  See Decisions for why this stays platform-split rather than being unified onto
+  the per-directory path.
 - **Measured directory counts (2026-07-26, this WSL2 host).** Gitignore pruning
   is a 15-19× reduction and lands at ~200 directories per repo:
 
@@ -262,11 +269,19 @@ reading of this host's actual `max_user_watches` (see Constraints).
 
   This supersedes the earlier "~9,800 → ~2,400" figure, which came from the
   Windows-side repos and does not describe these. At ~200/repo, 9 work roots cost
-  ~1,800 descriptors — comfortably inside even mainline's 8,192 default
+  ~1,800 descriptors on Linux — comfortably inside even mainline's 8,192 default
   `max_user_watches` (this host reports **524,288**, checked 2026-07-26). The cap
   is therefore a safety valve against an unmeasured monorepo, not a limit the
   normal case approaches. **Still read the host's real limit at runtime and never
-  assume it.**
+  assume it.** These counts apply to Linux only; Windows/macOS register one watch
+  per target regardless of tree size.
+- **The ignore set is needed on both platforms, but for different jobs.** On Linux
+  it decides *what to register*; on Windows/macOS it only *filters events*, since
+  the kernel already delivers the whole subtree. Recursive registration therefore
+  does deliver events for `target/` and `node_modules/` — those are discarded in
+  `classify`, costing some string comparisons during a build, which the debounce
+  window collapses into at most one epoch bump. That cost does not justify
+  per-directory registration.
 - **Foreign-mount filesystems arm successfully and then never fire, so detect
   them before arming and fall back to polling.** The concrete case is WSL2
   `/mnt/*` (DrvFs / 9P), which does not deliver inotify events for changes made
@@ -287,35 +302,38 @@ reading of this host's actual `max_user_watches` (see Constraints).
   anti-pattern in the first place, so this check is a guard against a
   misconfiguration, not support for it. The live daemon runs natively on Windows
   and is unaffected; this belongs to WSL-side developer daemons.
-- **The cap is checked before registering anything, and an over-cap repo is left
-  entirely `Degraded` — never partially armed.** Partial arming is the worst
-  outcome available: it reports `Armed`, consumes descriptors, and still misses
-  changes in the unregistered part of the tree. Two limits apply:
+- **Linux only — the cap is checked before registering anything, and an over-cap
+  repo is left entirely `Degraded`, never partially armed.** Partial arming is the
+  worst outcome available: it reports `Armed`, consumes descriptors, and still
+  misses changes in the unregistered part of the tree. Two limits apply:
   - **Per repo:** `WS_DASHBOARD_GIT_WATCH_MAX_DIRS`, default **1024**. Chosen
     against the measured ~200 (5× headroom) and deliberately well under
-    mainline's 8,192 so a single pathological repo cannot consume the host's
-    budget. Over cap ⇒ `Degraded{"watch set too large: N dirs"}` on the 2 s TTL,
-    which is exactly today's behavior — the fallback is never worse than the
-    status quo, so a tight cap is safe by construction.
-  - **Process-wide:** on Linux additionally cap the sum at
-    `min(max_user_watches * 60 / 100, 8192)`, read from
-    `/proc/sys/fs/inotify/max_user_watches` at startup. Windows has no
-    equivalent global limit; the per-repo cap plus the measured RSS figure is the
-    control there.
-- **Arm in a deterministic order (sort by `WatchKey`)** so the same registry
-  produces the same armed/degraded split across restarts when the process-wide
-  budget cannot cover every repo. Never order by size, recency, or selection: a
-  heuristic that re-arms a different repo each boot makes a degraded repo look
-  intermittent, which is far harder to diagnose than a consistently degraded one.
-  Already-armed repos keep their registrations across a reconcile; the budget is
-  consulted only for repos being newly armed.
-- **Exclude `git_dir` / `common_dir` from *registration*, not merely from
-  `classify`.** These are different operations and only the first saves
+    mainline's 8,192 so one pathological repo cannot consume the host's budget.
+    Over cap ⇒ `Degraded{"watch set too large: N dirs"}` on the 2 s TTL, which is
+    exactly today's behavior — the fallback is never worse than the status quo, so
+    a tight cap is safe by construction.
+  - **Process-wide:** cap the sum at `min(max_user_watches * 60 / 100, 8192)`,
+    read from `/proc/sys/fs/inotify/max_user_watches` at startup.
+
+  Neither limit exists on Windows/macOS, where each target costs one watch and no
+  walk runs.
+- **Linux only — arm in a deterministic order (sort by `WatchKey`)** so the same
+  registry produces the same armed/degraded split across restarts when the
+  process-wide budget cannot cover every repo. Never order by size, recency, or
+  selection: a heuristic that re-arms a different repo each boot makes a degraded
+  repo look intermittent, which is far harder to diagnose than a consistently
+  degraded one. Already-armed repos keep their registrations across a reconcile;
+  the budget is consulted only for repos being newly armed.
+- **Linux only — exclude `git_dir` / `common_dir` from *registration*, not merely
+  from `classify`.** These are different operations and only the first saves
   descriptors. `git status --ignored=matching` never reports `.git`, so nothing
   else prunes the 256-way `objects/` fanout, `objects/pack`, or `.git/modules`.
   The watched git-internal paths (`common_dir` top level, `refs/**`,
-  `worktrees/**`) are registered explicitly and separately, and they too are
-  `NonRecursive` and counted.
+  `worktrees/**`) are registered explicitly and separately, `NonRecursive` and
+  counted. On Windows/macOS the recursive worktree registration already covers an
+  in-tree `.git`, and those events are dropped in `classify` instead — which is
+  why `classify` must keep its `objects|lfs|modules` exclusions regardless of
+  platform.
 - The daemon must **never fail to boot** because a watcher could not start:
   `watcher: Option<...>`, init failure ⇒ all repos `Unarmed`, warn once, 2 s
   TTL.
@@ -573,27 +591,28 @@ rather than a new one.
 
 Estimated diff ~+270/−95 production, ~+160 test, 4 files.
 
-### Phase 4: The `notify` watcher — real epochs, one strategy on every platform
+### Phase 4: The `notify` watcher — real epochs on every platform
 
-New `crates/daemon/src/work_root_watch.rs`. **Single registration strategy:
-gitignore-aware walk → per-directory `NonRecursive` → counted against a cap →
-arm all or degrade wholly.** No recursive registration, no `WatchStrategy` enum,
-no `cfg` gate on arming. This absorbs what an earlier revision split off as
-Phase 5; see Decisions for the measurement that made the uniform path the cheaper
-choice and Constraints for the counting invariant it rests on.
+New `crates/daemon/src/work_root_watch.rs`. **Every platform arms under `auto`**,
+which is what this phase absorbed from the former Phase 5 — Linux is no longer
+held back on the polling TTL. Registration is platform-split per Decisions:
 
-Every target arms under `auto`, including Linux, because the walk makes the
-descriptor count known before anything is registered — which was the sole reason
-Linux had been held back.
+- **Windows/macOS:** one `RecursiveMode::Recursive` registration per target. One
+  kernel handle / one FSEvents stream, no walk, no cap. The ignore set is used only
+  to filter incoming events.
+- **Linux:** gitignore-aware walk → per-directory `NonRecursive` → counted against
+  the cap → arm all or degrade wholly. Required because there is no kernel subtree
+  primitive and `notify`'s emulation would register descriptors we cannot count.
 
-**What is and is not `cfg`-gated.** Nothing about arming is. The only
-platform-conditional code is the process-wide inotify budget
-(`/proc/sys/fs/inotify/max_user_watches`, `#[cfg(target_os = "linux")]`, absent
-elsewhere) and the mount-type resolution behind the filesystem allowlist. Keep
-`classify`, `IgnoreSet` derivation/parsing, `RepoEpochs`, debounce/coalescing, the
-walk-and-count itself, and the `reconcile` decision table `cfg`-free and pure:
-that is where the correctness risk lives, and it must stay unit-testable on the
-Linux/WSL dev host where development actually happens.
+**What is `cfg`-gated — keep this list short.** Only the registration backend
+(recursive vs. walk-and-register), the process-wide inotify budget
+(`#[cfg(target_os = "linux")]`), and mount-type resolution for the filesystem
+allowlist. Keep `classify`, `IgnoreSet` derivation/parsing, `RepoEpochs`,
+debounce/coalescing, and the `reconcile` decision table `cfg`-free and pure: that
+is where the correctness risk lives and it must stay unit-testable on the
+Linux/WSL dev host. `plan_watch_set` is Linux-only but needs no `cfg` on its logic
+— it is a pure function over a path and an ignore set, and it is exercised on the
+dev host as a matter of course.
 
 Implement in this order, because the first step is the correctness core and is
 fully testable without any I/O:
@@ -608,32 +627,33 @@ fully testable without any I/O:
    ignore set stale; else under `worktree` ⇒ `Worktree`.
 2. **`IgnoreSet::derive(worktree)`** — one `git_exec::capture` with **`-unormal`**
    (see Constraints: `-uno` returns nothing), parse `!!` entries from `-z` output.
-   Entries arrive as collapsed directory prefixes, which is the form the walk
-   consumes directly.
+   Entries arrive as collapsed directory prefixes, which suits both the Linux walk
+   and event filtering.
 3. **`plan_watch_set(worktree, git_dir, common_dir, &IgnoreSet) ->
-   Result<Vec<PathBuf>, TooLarge>`** — the walk, and a pure-enough function to
-   test against a fixture tree. Descend from `worktree`, prune any directory in
-   the ignore set and prune `git_dir` / `common_dir` from **registration** (not
-   merely from `classify` — see Constraints), then append the git-internal targets
-   explicitly (`common_dir` top level, `refs/**`, `worktrees/**`). Count as it
-   goes and bail with `TooLarge { found }` the moment the per-repo cap is
-   exceeded, so a pathological monorepo costs a partial walk rather than a full
-   one.
-4. **Arming — all-or-nothing, per-directory `NonRecursive`.** Register every
-   planned directory; on any registration error unregister what was already added
-   and report `Degraded`, because a half-armed repo reports `Armed` while missing
-   changes. Two pre-arm gates before touching `notify`:
-   - **Cap check** from step 3 ⇒ `Degraded{"watch set too large: N dirs"}`.
-   - **Filesystem allowlist** (from Constraints): resolve the target's mount type
-     and degrade on anything outside the known-local set, because foreign mounts
-     (WSL2 `/mnt` DrvFs/9P, NFS, CIFS, SSHFS/FUSE) arm successfully and then never
-     fire. This is the guard that keeps the diag route from reporting `Armed` for
-     a watcher that structurally cannot work.
-
-   Bump both epochs **on arm**, not only on disarm: a slot filled while `Unarmed`
-   carries epoch 0, and without a bump it stays valid for the whole 120 s TTL even
-   though it was computed during a window in which no events were observed — as
-   are any changes landing during the walk itself.
+   Result<Vec<PathBuf>, TooLarge>`** — the Linux walk, written as a pure function
+   over a fixture tree. Descend from `worktree`, prune any directory in the ignore
+   set and prune `git_dir` / `common_dir` from **registration** (not merely from
+   `classify` — see Constraints), then append the git-internal targets explicitly
+   (`common_dir` top level, `refs/**`, `worktrees/**`). Count as it goes and bail
+   with `TooLarge { found }` the moment the per-repo cap is crossed, so a
+   pathological monorepo costs a partial walk rather than a full one.
+4. **Arming.** Both paths share one pre-arm gate and one post-arm rule.
+   - **Windows/macOS:** `watch(target, RecursiveMode::Recursive)` for the worktree
+     plus, for a linked worktree, `git_dir` and `common_dir` when they sit outside
+     it. Three calls, no walk, no cap.
+   - **Linux:** register every path from step 3 `NonRecursive`, all-or-nothing —
+     on any registration error, unregister what was already added and report
+     `Degraded`, because a half-armed repo reports `Armed` while missing changes.
+     Cap breach from step 3 ⇒ `Degraded{"watch set too large: N dirs"}`.
+   - **Shared pre-arm gate — filesystem allowlist** (from Constraints): resolve the
+     target's mount type and degrade on anything outside the known-local set,
+     because foreign mounts (WSL2 `/mnt` DrvFs/9P, NFS, CIFS, SSHFS/FUSE) arm
+     successfully and then never fire. This is the guard that keeps the diag route
+     from reporting `Armed` for a watcher that structurally cannot work.
+   - **Shared post-arm rule:** bump both epochs **on arm**, not only on disarm. A
+     slot filled while `Unarmed` carries epoch 0, and without a bump it stays valid
+     for the whole 120 s TTL even though it was computed during a window in which
+     no events were observed — as are any changes landing during arming itself.
 5. **Event pipeline.** `notify` callback (own thread) → `mpsc::unbounded_send` →
    one long-lived tokio task: coalesce 100 ms trailing / 500 ms max
    (`WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS` default 100, max window fixed at 5×
@@ -642,15 +662,17 @@ fully testable without any I/O:
    `event.need_rescan()` (inotify `IN_Q_OVERFLOW`, `ReadDirectoryChangesW`
    buffer overflow) ⇒ bump both epochs for every repo on that watcher and set
    `Degraded{"rescan required"}` for one TTL window.
-6. **New directories register incrementally, re-checking the cap.** A `Create`
-   event whose path is a directory, is not ignored, and is not under
+6. **Linux only — new directories register incrementally, re-checking the cap.**
+   A `Create` event whose path is a directory, is not ignored, and is not under
    `git_dir`/`common_dir` ⇒ register it and increment the count; if that would
    exceed the per-repo cap, disarm the repo wholly and report
    `Degraded{"watch set outgrew cap"}` rather than continuing half-covered.
+   Windows/macOS need none of this — the kernel covers new subdirectories under a
+   recursive registration, which is a large part of why recursive is kept there.
    The classic per-directory race — a directory created and populated before its
-   registration lands — needs no mitigation here: the `mkdir` itself is an event
-   in an already-watched parent, so the epoch bumps and the next recompute sees
-   the contents. Do not add a rescan for it (see Decisions).
+   registration lands — needs no mitigation: the `mkdir` itself is an event in an
+   already-watched parent, so the epoch bumps and the next recompute sees the
+   contents. Do not add a rescan for it (see Decisions).
 7. **Reconcile through exactly one hook.**
    `registry.reconcile(&[(WatchKey, Option<WatchTargets>, WorkRootAvailability)])`
    — where `WatchTargets { worktree: PathBuf, git_dir: PathBuf, common_dir:
@@ -660,8 +682,8 @@ fully testable without any I/O:
    `sync_discovered_roots`, using the widened `DiscoveredWorkRoot` fields. Reading
    those fields costs **no extra git spawns** because that call site already
    computes the authoritative root set and availability every 5 s — but note the
-   *arm path it triggers* does cost a spawn (`IgnoreSet::derive`) plus a walk, so
-   do not restate "no extra git spawns" about reconcile as a whole.
+   *arm path it triggers* does cost a spawn (`IgnoreSet::derive`) plus, on Linux, a
+   walk, so do not restate "no extra git spawns" about reconcile as a whole.
    Semantics: present + `Available` + `Unarmed` ⇒ arm;
    present + not `Available` ⇒ disarm + bump both (so the next poll recomputes and
    reports the degraded state); absent ⇒ disarm + drop epochs. One code path
@@ -672,28 +694,28 @@ fully testable without any I/O:
    - **`Degraded` is sticky, and re-arm is backed off.** The arm condition is
      `Unarmed`, never "not armed" — `Degraded` must not re-enter it, or a repo
      that failed to arm gets re-armed every reconcile, i.e. every 5 s, each
-     attempt costing one `IgnoreSet::derive` spawn plus a walk. That is a spawn
+     attempt costing one `IgnoreSet::derive` spawn (plus a walk on Linux). That is a spawn
      storm of exactly the shape this ticket exists to remove. Retry a `Degraded`
      repo on an exponential backoff (start 60 s, cap 15 min) or on an explicit
      availability transition, never on the reconcile cadence.
    - **Arming never runs inline on the resources route.** `reconcile` computes the
      desired delta and hands arm/disarm work to the watcher task over the same
      channel the event pipeline uses. Arming inline would put an
-     `IgnoreSet::derive` spawn and a several-hundred-`read_dir` walk on the 5 s
-     poll handler — reintroducing the latency this ticket removes.
+     `IgnoreSet::derive` spawn and, on Linux, a several-hundred-`read_dir` walk on
+     the 5 s poll handler — reintroducing the latency this ticket removes.
 8. **Wire the real `EpochSource`** into `GitStateCache`; select TTL from
    `WatchHealth` (120 000 ms armed, 2 000 ms degraded/unarmed;
    `WS_DASHBOARD_GIT_CACHE_TTL_MS` overrides the degraded value).
 9. **Config:** `WS_DASHBOARD_GIT_WATCH=off|auto|force`,
-   `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS`, `WS_DASHBOARD_GIT_WATCH_MAX_DIRS`
-   (default 1024). Semantics, stated because the plan left `force` undefined:
+   `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS`, and `WS_DASHBOARD_GIT_WATCH_MAX_DIRS`
+   (default 1024, Linux-only effect). Semantics, stated because the plan left
+   `force` undefined:
    - `off` ⇒ never arm anything, every repo `Unarmed` on the 2 s TTL. The
      rollback switch.
-   - `auto` (**default**, every platform) ⇒ walk, count, and arm when the repo is
-     under cap and on an allowlisted filesystem; degrade otherwise. Confirmed as
-     the shipping default (owner, 2026-07-26) rather than a dark rollout: the
-     rollback switch already exists, and shipping dark on Windows would produce no
-     events to observe, so it buys no information.
+   - `auto` (**default**, every platform) ⇒ arm when the pre-arm gates allow;
+     degrade otherwise. Confirmed as the shipping default (owner, 2026-07-26)
+     rather than a dark rollout: the rollback switch already exists, and shipping
+     dark on Windows would produce no events to observe, so it buys no information.
    - `force` ⇒ arm even where `auto` would pre-emptively degrade, i.e. **on a
      filesystem outside the allowlist**. Logs the override once per repo. It
      exists to diagnose a suspected-wrong allowlist on a real machine, not as a
@@ -702,12 +724,14 @@ fully testable without any I/O:
      them.
 
    Extend `/api/dashboard/diag/git` with `{ repos: [{ health, worktreeEpoch,
-   refsEpoch, lastEventMs, registeredDirs }] }`. `Degraded { reason }` must
+   refsEpoch, lastEventMs, registeredWatches }] }`. `Degraded { reason }` must
    distinguish over-cap from foreign-filesystem from arm-error, because
    reporting `Armed` — or an undifferentiated `Degraded` — for a watcher that
    structurally cannot fire is the failure mode this route exists to catch.
-   `registeredDirs` is the number the cap is enforced against and the figure to
-   compare with the measurements in Constraints.
+   `registeredWatches` is the count the Linux cap is enforced against (compare
+   with the measurements in Constraints) and is the number of recursive
+   registrations, normally 1-3, on Windows/macOS — so a large value there would
+   itself signal that the wrong path ran.
 
 Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
 `common_dir`, which `GitDiscovery::probe` already computes and discards.
@@ -723,7 +747,8 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   contains `-unormal` and not `-uno`** — the measured failure in Constraints is
   silent, so it needs a pin rather than a comment. Reconcile decision table:
   `Degraded` does not re-arm on the reconcile cadence, and arming bumps both
-  epochs. `plan_watch_set` against a fixture tree: ignored dirs pruned,
+  epochs. `plan_watch_set` against a fixture tree — Linux-only production code but
+  a pure function, so it unit-tests anywhere: ignored dirs pruned,
   `git_dir`/`common_dir` absent from the returned list while the explicit
   git-internal targets are present, and `TooLarge` returned as soon as the cap is
   crossed rather than after a full walk.
@@ -736,31 +761,33 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   re-arms. Windows: worktree-remove while armed does not fail with a sharing
   violation (existing worktree-remove pins are the reference). All
   deadline-polling, never fixed sleeps. **These run armed on every platform,
-  including the Linux/WSL dev host, with no `force` needed** — that is the direct
-  payoff of the uniform strategy, and it means the registration code executing in
-  production on Windows is exercised by every local `cargo test`. Use a local path
-  (not `/mnt`) so the allowlist does not degrade the fixture. Add:
-  `WS_DASHBOARD_GIT_WATCH_MAX_DIRS=1` ⇒ `Degraded`, **zero** registrations, and
-  the 2 s TTL still serving correct status; a directory created after arming gets
-  registered and a write inside it bumps; and `mkdir sub && write sub/f` in one
-  step still bumps (the race is covered by the parent's event, per Decisions).
+  including the Linux/WSL dev host** — every shared behavior above is asserted
+  identically on both registration paths, so the split costs no coverage of
+  anything but the three `watch(.., Recursive)` calls themselves. Use a local path
+  (not `/mnt`) so the allowlist does not degrade the fixture. Linux-only additions,
+  `#[cfg(target_os = "linux")]`: `WS_DASHBOARD_GIT_WATCH_MAX_DIRS=1` ⇒ `Degraded`,
+  **zero** registrations, and the 2 s TTL still serving correct status; a directory
+  created after arming gets registered and a write inside it bumps; and
+  `mkdir sub && write sub/f` in one step still bumps (the race is covered by the
+  parent's event, per Decisions). On Windows the last two must hold *without* any
+  incremental-registration code, so assert them there too — that is the property
+  recursive mode is being kept for.
 - *Live-only — state as not covered by tests, do not pretend otherwise:*
   sustained spawns/s and CPU% on the Windows dogfood daemon over ≥10 min with the
-  browser open, Activity pane both closed and open; **daemon RSS delta on arm
-  across all 9 roots, which is the unverified `ReadDirectoryChangesW` per-watch
-  buffer cost from Decisions and the one number that could still invalidate the
-  uniform strategy on Windows**; real descriptor consumption on WSL
+  browser open, Activity pane both closed and open; daemon RSS and handle-count
+  delta on arm across all 9 roots (expected to be small now that Windows registers
+  ~3 watches per repo rather than ~200 — a large delta would mean the Linux path
+  ran); real descriptor consumption on WSL
   (`find /proc/*/fd -lname anon_inode:inotify | wc -l`) against
-  `registeredDirs`; buffer-overflow/rescan handling under a real `cargo build`
-  storm; and end-to-end perceived freshness, which per the `ws-web-dashboard`
-  Domain Rules needs a browser-level assertion in `frontend/e2e/` for the toolbar
-  chip updating after an external edit.
+  `registeredWatches`; buffer-overflow/rescan handling under a real `cargo build`
+  storm, which is where recursive registration's acceptance of gitignored-tree
+  events actually gets stressed; and end-to-end perceived freshness, which per the
+  `ws-web-dashboard` Domain Rules needs a browser-level assertion in
+  `frontend/e2e/` for the toolbar chip updating after an external edit.
 
-Estimated diff ~+520/−70 production, ~+260 test, 9 files. Larger than the earlier
-split-strategy estimate for Phase 4 alone because the walk, cap, and incremental
-registration formerly scoped as Phase 5 are now in scope here — but smaller than
-the old Phase 4 + Phase 5 sum, since there is only one registration path to write
-and test.
+Estimated diff ~+480/−70 production, ~+240 test, 9 files — the walk, cap, and
+incremental registration formerly scoped as Phase 5 are in scope here, but only on
+the Linux path.
 
 ### Phase 5: Linux `PerDirectory` arming with a counted descriptor budget [absorbed into Phase 4]
 
@@ -768,23 +795,29 @@ and test.
 ticket conventions so the history of the decision is legible. There is nothing to
 implement here; Phase 4 is the whole watcher.
 
-History, because this heading changed meaning twice in one day and the commit log
-alone will not make that clear:
+History, because this heading changed meaning three times in one day and the commit
+log alone will not make that clear:
 
-1. Originally a separate phase: Linux would walk and register per-directory under
-   a `DirBudget` while Windows/macOS used one recursive registration, split off
-   from Phase 4 to give the risky half its own revert boundary.
-2. Then **dropped** by the owner, on the grounds that `git status` is already fast
-   on Linux and per-directory state invites handle-accounting bugs — leaving Linux
-   permanently on the 2 s polling TTL.
-3. Then **absorbed** by the owner, who inverted the conclusion: rather than drop
-   the walk, make it mandatory on *every* platform and delete recursive
-   registration instead, since the walk is what makes the descriptor count
-   knowable and the cap enforceable. That removed the platform split the drop was
-   working around, so the phase has no distinct content left.
+1. Originally a separate phase: Linux would walk and register per-directory under a
+   `DirBudget` while Windows/macOS used one recursive registration, split off from
+   Phase 4 to give the risky half its own revert boundary.
+2. Then **dropped**, on the grounds that `git status` is already fast on Linux and
+   per-directory state invites handle-accounting bugs — leaving Linux permanently on
+   the 2 s polling TTL.
+3. Then **inverted**: rather than drop the walk, make it mandatory on *every*
+   platform and delete recursive registration, since the walk is what makes the
+   descriptor count knowable and the cap enforceable.
+4. Then **corrected to the current design**, because step 3 over-generalized. The
+   counting invariant is a constraint on counting, and Windows already satisfies it
+   with a count of 1; forcing the walk there bought coverage of three trivial lines
+   in exchange for ~200 handles per repo, a per-arm walk, and an
+   incremental-registration state machine the kernel provides for free. So:
+   recursive on Windows/macOS, walk-and-count on Linux — and Linux **does** arm
+   under `auto`, which is the durable win from steps 2-3. The phase has no distinct
+   content left because its Linux mechanism now sits inside Phase 4.
 
-The measurement that justified step 3 is in Constraints (~200 pruned directories
-per repo, not the ~2,400 previously assumed), and the reasoning is in Decisions.
+The measurements behind steps 3-4 are in Constraints (~200 pruned directories per
+repo, not the ~2,400 previously assumed), and the reasoning is in Decisions.
 
 **Rollback ladder, each rung independent:** `WS_DASHBOARD_GIT_WATCH=off`
 disables Phase 4; `WS_DASHBOARD_GIT_CACHE_TTL_MS=0` disables Phase 3;
@@ -793,14 +826,15 @@ Phase 2 is a self-contained rewrite of one function.
 
 ## Non-Goals
 
-- **Recursive watch registration, on any platform** (owner, 2026-07-26). Not
-  merely unused — deliberately absent, including as a per-platform fast path and
-  including behind an env var. It cannot satisfy the counting invariant in
-  Constraints on Linux, and keeping it only for Windows would leave the
-  production registration path untestable on the dev host. The
-  `260726-refactor-ws-dashboard-long-uptime-leak-hardening` concern about
-  per-directory state is real and is answered by the cap plus the all-or-nothing
-  arm rule, not by avoiding the walk.
+- **Recursive registration on Linux**, including behind an env var. It cannot
+  satisfy the counting invariant in Constraints there: `notify` emulates recursion
+  with per-directory watches we cannot count, cap, or report, so exhausting the
+  host's descriptors would be both possible and undetectable. Recursive
+  registration remains the *chosen* strategy on Windows/macOS, where the count is 1
+  — see Decisions for why that asymmetry is the cheap answer rather than a
+  compromise. The `260726-refactor-ws-dashboard-long-uptime-leak-hardening` concern
+  about per-directory bookkeeping is real, and it is confined to the Linux path plus
+  answered there by the cap and the all-or-nothing arm rule.
 - **SSE push for git state** (the plan's own Phase 5, unrelated to this ticket's
   Phase 5 heading). Deferred and unscheduled; revisit only if latency becomes an
   actual complaint, and not until Phase 4 has run in dogfood for a week. Shape is

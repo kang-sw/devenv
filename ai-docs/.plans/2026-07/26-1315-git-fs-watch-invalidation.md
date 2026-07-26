@@ -312,7 +312,7 @@ struct ArmedRepo { targets: WatchTargets, ignore: IgnoreSet, registered_dirs: BT
 struct WatchTargets { worktree: PathBuf, git_dir: PathBuf, common_dir: PathBuf }
 pub struct RepoEpochs { worktree: AtomicU64, refs: AtomicU64 }
 enum EpochKind { Worktree, Refs, Both }
-enum WatchStrategy { RecursiveSubtree, PerDirectory }  // SUPERSEDED: no strategy enum; see ticket
+enum WatchStrategy { RecursiveSubtree, PerDirectory }  // still the shape: recursive on Windows/macOS, per-directory on Linux
 pub enum WatchHealth { Armed, Degraded { reason: &'static str }, Unarmed }
 struct IgnoreSet { dirs: BTreeSet<PathBuf> }   // CORRECTED: `--ignored=matching -unormal -z` (`-uno` returns nothing)
 struct DirBudget { limit: usize, used: usize }
