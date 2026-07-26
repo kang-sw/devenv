@@ -4,7 +4,8 @@ related:
   260726-refactor-retire-spec-planned-marker-mechanism: extracted from the ticket that retirement drops; this defect survives that decision
   260726-bug-spec-planned-marker-ready-ticket-cycle: where this was found, as the blocking sage finding; dropped by the retirement
   260723-feat-ticket-write-verify-commit-gate: established ws/git.commit as the ticket-write chokepoint this defect routes around
-sage-review-design: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # A playbook invoked inline by another playbook commits on its own, splitting one logical unit across commits
@@ -18,8 +19,10 @@ is a real defect independent of the `🚧` question that ticket was about.
 `lead-write-spec` step 7 is an unconditional commit:
 
 ```text
-7. **Commit** - call `{{.McpNamespace}}/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`
+7. **Commit** - call `{{.McpNamespace}}/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
 ```
+
+Note the trailing clause: the step already commits **two** paths, not one.
 
 `lead-write-ticket`'s Spec-address Check invokes `lead-write-spec` **inline** —
 not as a separate user-facing invocation. So a single logical unit of work
@@ -47,6 +50,21 @@ caller's side, where the callee never reads it.
 - **Not scoped to `lead-write-spec`.** It is the known instance, but the fix is a
   general rule, so the phase surveys which other playbooks are invoked inline and
   commit unconditionally rather than patching one call site.
+- **This ticket lands before `260726-refactor-retire-spec-planned-marker-mechanism`.**
+  That ticket's step 2.4 removes the contract-first branch at
+  `lead-write-ticket.md:106` — this ticket's *only known inline caller*. If the
+  retirement lands first, the survey finds zero instances and the bullet about
+  updating the Spec-address Check has no target, so the general rule would be
+  written with its motivating case already deleted. Landing this first is also
+  cheap: the fix is small and independent of the marker question. If the
+  retirement does land first anyway, this ticket must **re-run the survey** rather
+  than assume its instance survives.
+- **The handoff shape is part of the fix, not an afterthought.**
+  `lead-write-spec` step 3d also writes `ai-docs/_index.md`, and step 7 already
+  commits it conditionally — so "returns its changed paths" is a *set*, while the
+  current Output handoff template reports a single `Path:` line. Transferring
+  ownership without widening the handoff would make the caller's commit silently
+  drop the index update.
 
 ## Constraints
 
@@ -80,15 +98,30 @@ caller's side, where the callee never reads it.
 
 ### Phase 1: Transfer commit ownership to the outermost invocation
 
-- Survey which playbooks are invoked inline by another playbook and end in an
-  unconditional commit. `lead-write-spec` step 7 is the known instance; establish
-  whether it is the only one before choosing a mechanism.
-- Make the invoked playbook's commit conditional on invocation mode, returning
-  changed paths to the caller otherwise, with a fail-safe default: if invocation
-  mode is unknown, behave as today (commit), so a caller that fails to signal
-  produces the current behavior rather than silently dropping the commit.
-- State the ownership rule in shared guidance both caller and callee reach, and
-  update `lead-write-ticket`'s Spec-address Check to stage the returned paths
+- **Survey, with a stated boundary.** Corpus: `agents-plugin/rsrc/**/*.md`.
+  "Invoked inline" means a playbook that calls `playbook.print` on another
+  playbook and *continues its own procedure* afterward, as opposed to handing off
+  and ending. Record the result in this phase's `### Result`. If the survey finds
+  only `lead-write-spec`, proceed; if it finds several with differing commit
+  shapes, stop and re-plan rather than generalizing a mechanism inside this phase.
+- **Make the commit conditional on invocation mode.** Leading candidate:
+  `playbook.print` already takes a `context` object ("Optional caller-supplied
+  substitution values for variables declared in the playbook's frontmatter"), so
+  the caller sets a variable the callee's step 7 branches on. This gives the
+  fail-safe for free — an unset variable renders as direct mode, i.e. commit as
+  today — so a caller that forgets to signal reproduces the current behavior
+  rather than silently dropping a commit. The survey may override this choice.
+- **Widen the Output handoff to carry a path set.** The current template reports
+  a single `Path:` line; inline mode must enumerate every changed path, including
+  `ai-docs/_index.md` when step 3d touched it.
+- **State the ownership rule in the callee's own text.** That is the diagnosed
+  defect — the rule exists only caller-side, where the callee never reads it — so
+  the requirement is specifically that `lead-write-spec`'s own Invariants (or
+  step 7 itself) carry it. Not `agents-plugin/rsrc/subagent-rules.md`: its header
+  states "delegates do not read this file directly" and it scopes to spawning
+  general-purpose workers, not playbook-to-playbook invocation. A shared
+  auto-include is acceptable *in addition*, if the survey finds multiple callees.
+  Then update `lead-write-ticket`'s Spec-address Check to stage the returned paths
   into its own commit.
 - Regenerate both rsrc artifacts (`WSRSRC_REGEN=1`, `WS_REGEN_WSFLOW_RSRC=1`).
 
@@ -98,7 +131,12 @@ validation, and amending across a validated boundary hides what was checked);
 leaving it and documenting the two-commit result as intended (the caller's own
 Commit step already contradicts that).
 
-Verification boundary: `lead-write-ticket` running its spec-address branch
-produces exactly one commit containing both the ticket and the spec change; a
-direct `lead-write-spec` invocation still produces its own commit; an invocation
-with no mode signal commits as it does today.
+Verification boundary:
+
+1. `lead-write-ticket` running its spec-address branch produces exactly one commit
+   containing the ticket, the spec file, and `ai-docs/_index.md` when the listing
+   changed — no path silently dropped.
+2. A direct `lead-write-spec` invocation still produces its own commit.
+3. An invocation with no mode signal commits as it does today (fail-safe).
+4. The survey result and its corpus are recorded in `### Result`.
+5. `lead-write-spec`'s own text states the ownership rule.
