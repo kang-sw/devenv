@@ -1,5 +1,10 @@
 ---
 title: Make implement review fixes follow implementation owner
+related:
+  260726-bug-lead-implement-lost-review-relay-cycle-cap: owns the cycle cap and the
+    cycle-2 adjudication step this ticket's Phase 1 wrongly assumed were already
+    live; it also adds a non-implementation-owner adjudicator to the fix loop, so
+    the ownership rule written here must accommodate an overriding third party
 spec:
   - 260505-implementation-workflow-skills
 related-mental-model:
@@ -48,8 +53,11 @@ Preserve these behavior constraints:
 - Correctness, security, contract, and regression findings cannot be silently
   rejected.
 - Review path files remain the relay artifact.
-- Re-review and cycle caps stay equivalent unless the implementation finds a
-  documented reason to change them.
+- Re-review behavior stays equivalent unless the implementation finds a
+  documented reason to change it. Cycle caps are **not** equivalent to restate
+  from: they are absent from the live playbook and generated todos, and
+  `260726-bug-lead-implement-lost-review-relay-cycle-cap` owns restoring them.
+  Take the cap and adjudication semantics from that ticket, not from this one.
 
 Check `agents-plugin-wsflow/` for mirroring impact. If wsflow behavior is
 already intentionally different through `lead-edit`, document that no wsflow
