@@ -1061,7 +1061,26 @@ impl WatchRegistry {
             state.repos.remove(key);
         }
 
-        for (key, targets, availability) in entries {
+        // Deterministic arm order (review finding 7, Constraints: "arm in a
+        // deterministic order"): sort by `WatchKey` before deciding anything,
+        // so the same registry produces the same armed/degraded split across
+        // restarts and across runs, rather than depending on
+        // `DashboardResourcesSync`'s discovery-order iteration.
+        let mut sorted_entries: Vec<&(WatchKey, Option<WatchTargets>, ws_dashboard_core::WorkRootAvailability)> =
+            entries.iter().collect();
+        sorted_entries.sort_by(|(left, _, _), (right, _, _)| left.as_str().cmp(right.as_str()));
+
+        // Eligible arms are collected here rather than dispatched one
+        // `spawn_blocking` task per key: on Linux, `linux_plan_and_apply`
+        // reserves the process-wide inotify budget by reading `dir_index`'s
+        // current length, so N independently-scheduled concurrent tasks race
+        // each other for that budget in whatever order the executor happens
+        // to run them - not the sorted decision order above. Arming them one
+        // at a time, in order, inside a single offloaded task keeps the
+        // budget check itself deterministic too (review finding 7).
+        let mut to_arm: Vec<(WatchKey, WatchTargets)> = Vec::new();
+
+        for (key, targets, availability) in sorted_entries {
             let Some(targets) = targets else {
                 do_disarm(&self.inner, key);
                 continue;
@@ -1074,6 +1093,12 @@ impl WatchRegistry {
                 continue;
             }
 
+            // Eligibility read and the `last_arm_attempt_ms` stamp both
+            // happen inside this ONE critical section (review finding 4):
+            // two concurrent `reconcile` calls (reachable from a resources
+            // refresh racing a `git_worktree.rs` call site) must not both
+            // observe `eligible == true` before either stamps the attempt
+            // timestamp, or both would offload a full arm for the same key.
             let eligible = {
                 let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
                 let entry = state
@@ -1092,35 +1117,42 @@ impl WatchRegistry {
                     // git_dir/common_dir/ignore copy.
                     entry.targets = targets.clone();
                 }
-                arm_eligible(
+                let eligible = arm_eligible(
                     &entry.registration_health,
                     entry.last_arm_attempt_ms,
                     entry.degraded_backoff_ms,
                     now,
-                )
+                );
+                if eligible {
+                    // Stamp the attempt timestamp synchronously, in the same
+                    // critical section as the read above - this IS the value
+                    // the rate-limit guards read, so it must become visible
+                    // atomically with the eligibility decision, not only
+                    // after the offloaded arm work below finishes (which may
+                    // be seconds later on a loaded host).
+                    entry.last_arm_attempt_ms = Some(now);
+                }
+                eligible
             };
             if !eligible {
                 continue;
             }
 
-            // Stamp the attempt timestamp synchronously - this IS the value
-            // the rate-limit guards above read, so it must be visible before
-            // this method returns, not only after the offloaded arm work
-            // below finishes (which may be seconds later on a loaded host).
-            {
-                let mut state = self.inner.state.lock().expect("watch registry state lock poisoned");
-                if let Some(entry) = state.repos.get_mut(key) {
-                    entry.last_arm_attempt_ms = Some(now);
-                }
-            }
+            to_arm.push((key.clone(), targets.clone()));
+        }
 
+        if !to_arm.is_empty() {
             let inner = Arc::clone(&self.inner);
-            let key = key.clone();
-            let targets = targets.clone();
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn_blocking(move || do_arm(&inner, &key, &targets));
+                handle.spawn_blocking(move || {
+                    for (key, targets) in to_arm {
+                        do_arm(&inner, &key, &targets);
+                    }
+                });
             } else {
-                do_arm(&inner, &key, &targets);
+                for (key, targets) in to_arm {
+                    do_arm(&inner, &key, &targets);
+                }
             }
         }
     }
