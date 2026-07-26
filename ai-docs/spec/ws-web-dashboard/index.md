@@ -1040,14 +1040,17 @@ including the compact single-work-root form — and not to workspace rows, which
 carry neither.
 
 A row whose agents are working or waiting also carries an attention level,
-with waiting outranking working. Every open work root is reported by exactly
-one row for this purpose: its own row where it has one, and otherwise the row
-that stands for it — a workspace's base root has no row of its own, so its
-agents raise the level on the workspace row, which takes the level without
-taking the second line or any counts. A server row carries the highest such
-level among the roots reported beneath it, while carrying no counts of its
-own, so no root's agents go unreported and no level appears that no row below
-would account for. That level is presented as an animated overlay layered over the row rather than as
+with waiting outranking working. Every open work root the nav shows is
+reported by exactly one row for this purpose: its own row where it has one,
+and otherwise the row that stands for it — a workspace's base root has no row
+of its own, so its agents raise the level on the workspace row, which takes
+the level without taking the second line or any counts. A hidden worktree is
+the deliberate exception: it is reported by no row at all, neither its own nor
+any row standing above it, because the user asked not to see that root and
+silence about its agents is part of what was asked for. A server row carries
+the highest such level among the roots reported beneath it, while carrying no
+counts of its own, so no shown root's agents go unreported and no level
+appears that no row below would account for. That level is presented as an animated overlay layered over the row rather than as
 a change to the row's own background, so it never competes with the row's
 open-state, hover, selection, or error appearance, and it is suppressed to a
 static tint for viewers who ask for reduced motion. The level is derived, not
