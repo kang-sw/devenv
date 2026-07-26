@@ -620,12 +620,34 @@ async fn dashboard_diag_git(State(state): State<AppState>) -> Response {
         .into_iter()
         .map(|(subcommand, count)| (subcommand.as_str().to_owned(), serde_json::json!(count)))
         .collect();
+    // Ticket step 9: `repos[]` reports the watcher's live per-repo state -
+    // `Degraded { reason }` must distinguish over-cap from foreign-filesystem
+    // from arm-error (see `WatchHealth::reason`), because reporting `Armed`,
+    // or an undifferentiated `Degraded`, for a watcher that structurally
+    // cannot fire is the failure mode this route exists to catch.
+    let repos: Vec<serde_json::Value> = state
+        .watch_registry
+        .diag_snapshot()
+        .into_iter()
+        .map(|entry| {
+            serde_json::json!({
+                "key": entry.key,
+                "health": entry.health.label(),
+                "reason": entry.health.reason(),
+                "worktreeEpoch": entry.worktree_epoch,
+                "refsEpoch": entry.refs_epoch,
+                "lastEventMs": entry.last_event_at_ms,
+                "registeredWatches": entry.registered_watches,
+            })
+        })
+        .collect();
     axum::Json(serde_json::json!({
         "totalSpawns": snapshot.total,
         "timeouts": snapshot.timeouts,
         "failures": snapshot.failures,
         "bySubcommand": by_subcommand,
         "uptimeMs": snapshot.uptime_ms,
+        "repos": repos,
     }))
     .into_response()
 }

@@ -117,7 +117,7 @@ where
     let watch_registry = crate::work_root_watch::WatchRegistry::new(
         epoch_source.clone(),
         git_spawn_stats.clone(),
-        crate::work_root_watch::WatchConfig::default(),
+        crate::work_root_watch::WatchConfig::from_env(),
     );
     let app = build_router(AppState {
         config,

@@ -591,6 +591,15 @@ fn normalized_probe_key(path: &Path) -> String {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct WatchKey(String);
 
+impl WatchKey {
+    /// The normalized key string, for `GET /api/dashboard/diag/git`'s
+    /// `repos[].key` (ticket step 9) - the only reason a caller outside this
+    /// module needs the inner value rather than just equality/hashing.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Derive a `GitStateCache`/`EpochSource` memo key for `path`, sharing
 /// `GitProbeKey`'s normalization chain (see `normalized_probe_key`).
 pub(crate) fn watch_key(path: &Path) -> WatchKey {

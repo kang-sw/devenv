@@ -21,6 +21,7 @@
 //! `cfg`-free and unit-testable on Linux/WSL.
 
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,6 +73,22 @@ impl WatchHealth {
             _ => None,
         }
     }
+}
+
+/// One `GET /api/dashboard/diag/git` `repos[]` row (ticket step 9). `key` is
+/// not one of the ticket's literal five field names, but is added anyway -
+/// a diagnostics endpoint reporting `{ health, worktreeEpoch, ... }` for an
+/// unnamed set of "repos" plural, with no way to tell entries apart, would
+/// not actually be usable for the "distinguish over-cap from
+/// foreign-filesystem from arm-error" job the route exists to do.
+#[derive(Clone, Debug)]
+pub struct WatchDiagEntry {
+    pub key: String,
+    pub health: WatchHealth,
+    pub worktree_epoch: u64,
+    pub refs_epoch: u64,
+    pub last_event_at_ms: Option<u64>,
+    pub registered_watches: usize,
 }
 
 /// Which cache axis an observed filesystem event invalidates. Mirrors
@@ -680,9 +697,8 @@ pub enum WatchMode {
     Force,
 }
 
-/// Tunables threaded through from the `WS_DASHBOARD_GIT_WATCH*` env vars (a
-/// later checkpoint reads them; this checkpoint just needs somewhere for the
-/// values to live so arming and the event pipeline are not hardcoded).
+/// Tunables threaded through from the `WS_DASHBOARD_GIT_WATCH*` env vars,
+/// via [`WatchConfig::from_env`] (ticket step 9).
 #[derive(Clone, Debug)]
 pub struct WatchConfig {
     pub mode: WatchMode,
@@ -699,6 +715,61 @@ impl Default for WatchConfig {
             max_dirs: 1024,
             armed_ttl_ms: 120_000,
         }
+    }
+}
+
+static WATCH_CONFIG_FROM_ENV: OnceLock<WatchConfig> = OnceLock::new();
+
+impl WatchConfig {
+    /// Reads `WS_DASHBOARD_GIT_WATCH` (`off`|`auto`|`force`),
+    /// `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS`, `WS_DASHBOARD_GIT_WATCH_MAX_DIRS`,
+    /// and `WS_DASHBOARD_GIT_ARMED_TTL_MS` once per process and caches the
+    /// result in a `OnceLock` (ticket step 9), matching
+    /// `git_state_cache::git_cache_ttl_from_env`'s cached-read-once idiom
+    /// exactly. An absent or malformed value for any one field falls back to
+    /// [`WatchConfig::default`]'s value for that field only - the same
+    /// per-field fallback discipline every other env-tunable in this daemon
+    /// uses, so one typo'd knob cannot silently reset the other three.
+    pub fn from_env() -> Self {
+        WATCH_CONFIG_FROM_ENV
+            .get_or_init(|| {
+                let default = WatchConfig::default();
+                let mode = env::var("WS_DASHBOARD_GIT_WATCH")
+                    .ok()
+                    .and_then(|raw| parse_watch_mode(&raw))
+                    .unwrap_or(default.mode);
+                let debounce_ms = env::var("WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS")
+                    .ok()
+                    .and_then(|raw| raw.trim().parse::<u64>().ok())
+                    .unwrap_or(default.debounce_ms);
+                let max_dirs = env::var("WS_DASHBOARD_GIT_WATCH_MAX_DIRS")
+                    .ok()
+                    .and_then(|raw| raw.trim().parse::<usize>().ok())
+                    .unwrap_or(default.max_dirs);
+                let armed_ttl_ms = env::var("WS_DASHBOARD_GIT_ARMED_TTL_MS")
+                    .ok()
+                    .and_then(|raw| raw.trim().parse::<u64>().ok())
+                    .unwrap_or(default.armed_ttl_ms);
+                WatchConfig { mode, debounce_ms, max_dirs, armed_ttl_ms }
+            })
+            .clone()
+    }
+}
+
+/// `WS_DASHBOARD_GIT_WATCH`'s three recognized values (case-insensitive,
+/// trimmed), split out of [`WatchConfig::from_env`] as a pure function so it
+/// is directly unit-testable - the surrounding `OnceLock`/`env::var` glue is
+/// deliberately left untested, matching
+/// `git_state_cache::git_cache_ttl_from_env`'s and
+/// `git_exec::git_timeout_from_env`'s existing precedent (neither has a
+/// dedicated test - process-wide env state and a process-wide cache make
+/// that fragile under parallel `cargo test` execution).
+fn parse_watch_mode(raw: &str) -> Option<WatchMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "off" => Some(WatchMode::Off),
+        "auto" => Some(WatchMode::Auto),
+        "force" => Some(WatchMode::Force),
+        _ => None,
     }
 }
 
@@ -889,6 +960,32 @@ impl WatchRegistry {
             .get(key)
             .map(|repo| repo.effective_health(now))
             .unwrap_or(WatchHealth::Unarmed)
+    }
+
+    /// One entry per repo this registry currently tracks (ticket step 9):
+    /// `GET /api/dashboard/diag/git`'s `repos` array reads straight from
+    /// this. `registered_watches` is the exact count the Linux cap
+    /// (`WatchConfig::max_dirs`) is enforced against, and the number of
+    /// recursive registrations (normally 1-3) on Windows/macOS - a large
+    /// value there signals the wrong backend ran.
+    pub fn diag_snapshot(&self) -> Vec<WatchDiagEntry> {
+        let now = clock_ms();
+        let state = self.inner.state.lock().expect("watch registry state lock poisoned");
+        state
+            .repos
+            .iter()
+            .map(|(key, repo)| {
+                let (worktree_epoch, refs_epoch) = self.inner.epoch_source.epochs(key);
+                WatchDiagEntry {
+                    key: key.as_str().to_owned(),
+                    health: repo.effective_health(now),
+                    worktree_epoch,
+                    refs_epoch,
+                    last_event_at_ms: repo.last_event_at_ms,
+                    registered_watches: repo.registered_dirs.len(),
+                }
+            })
+            .collect()
     }
 
     /// Arm (or re-arm) `key` against `targets`. Runs the `git status` spawn
@@ -1418,16 +1515,30 @@ fn do_arm(inner: &RegistryInner, key: &WatchKey, targets: &WatchTargets) {
         return;
     }
     let forced = inner.config.mode == WatchMode::Force;
-    if !forced && !mount_allows_watching(&targets.worktree) {
-        finish_arm(
-            inner,
-            key,
-            targets,
-            WatchHealth::Degraded("filesystem does not deliver events".to_owned()),
-            Vec::new(),
-            IgnoreSet::empty(),
+    let mount_allows = mount_allows_watching(&targets.worktree);
+    if !mount_allows {
+        if !forced {
+            finish_arm(
+                inner,
+                key,
+                targets,
+                WatchHealth::Degraded("filesystem does not deliver events".to_owned()),
+                Vec::new(),
+                IgnoreSet::empty(),
+            );
+            return;
+        }
+        // Ticket step 9: `force` is a diagnose-a-suspected-wrong-allowlist
+        // escape hatch, not a supported production mode - log every time it
+        // actually overrides the gate (bounded by the same 30s/backoff
+        // rate limit as any other arm attempt, so this cannot spam) so an
+        // operator who forgot to unset it notices in the logs, not only by
+        // reading `diag/git`.
+        tracing::warn!(
+            worktree = %targets.worktree.display(),
+            "WS_DASHBOARD_GIT_WATCH=force is arming a repo on a filesystem \
+             the mount allowlist would otherwise reject"
         );
-        return;
     }
 
     let ignore = IgnoreSet::derive(&targets.worktree, &inner.git_stats);
@@ -2280,6 +2391,66 @@ mod tests {
         assert!(
             !registry.inner.state.lock().expect("state lock").repos.contains_key(&key),
             "a repo absent from reconcile's entries must be dropped entirely"
+        );
+
+        remove_temp(&dir);
+    }
+
+    // --- checkpoint 8: config knobs + diag snapshot ------------------------
+
+    #[test]
+    fn parse_watch_mode_accepts_case_insensitive_trimmed_values_and_rejects_the_rest() {
+        for (raw, expected) in [
+            ("off", Some(WatchMode::Off)),
+            ("OFF", Some(WatchMode::Off)),
+            ("  Off  ", Some(WatchMode::Off)),
+            ("auto", Some(WatchMode::Auto)),
+            ("Auto", Some(WatchMode::Auto)),
+            ("force", Some(WatchMode::Force)),
+            ("FORCE", Some(WatchMode::Force)),
+            ("", None),
+            ("offline", None),
+            ("automatic", None),
+        ] {
+            assert_eq!(
+                parse_watch_mode(raw),
+                expected,
+                "parse_watch_mode({raw:?}) must equal {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn diag_snapshot_reports_health_epochs_and_registered_watch_count_for_an_armed_repo() {
+        let dir = init_git_repo_fixture();
+        let git_dir = dir.join(".git");
+        let targets = WatchTargets {
+            worktree: dir.clone(),
+            git_dir: git_dir.clone(),
+            common_dir: git_dir,
+        };
+        let key = crate::discovery::watch_key(&dir);
+        let epoch_source: Arc<dyn EpochSource> =
+            Arc::new(crate::git_state_cache::MutationEpochSource::default());
+        let git_stats = Arc::new(GitSpawnStats::default());
+        let registry = WatchRegistry::new(epoch_source, git_stats, WatchConfig::default());
+
+        registry.arm_now(&key, &targets);
+        assert_eq!(registry.health_for(&key), WatchHealth::Armed);
+
+        let snapshot = registry.diag_snapshot();
+        assert_eq!(snapshot.len(), 1, "exactly one tracked repo after one arm_now");
+        let entry = &snapshot[0];
+        assert_eq!(entry.key, key.as_str());
+        assert_eq!(entry.health, WatchHealth::Armed);
+        assert_eq!(
+            entry.worktree_epoch, 1,
+            "arming bumps both epochs once (finish_arm's shared post-arm rule)"
+        );
+        assert_eq!(entry.refs_epoch, 1);
+        assert!(
+            entry.registered_watches > 0,
+            "an Armed repo must report at least one registered directory/target"
         );
 
         remove_temp(&dir);
