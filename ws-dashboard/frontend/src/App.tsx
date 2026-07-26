@@ -2109,18 +2109,21 @@ export function App() {
   // the global tone structurally cannot disagree with the nav tree it is
   // unioned from.
   //
-  // Server enumeration (review cycle 1, Minor 3): iterates `serverConnections`
-  // and looks up `resourcesByServer[server.id]` per server, exactly as
-  // `ServerRows`'s caller does (`:3255-3261`), rather than
-  // `Object.entries(resourcesByServer)`. `mergeResourcesByServer`'s contract
-  // is "only ever accumulates" (`:694`), and there is no remove/unlink-server
-  // call site today, so the two enumerations agree in practice either way -
-  // but keying off `resourcesByServer` directly would let a server that
-  // disappears from `serversView` out-of-band keep contributing roots to the
-  // global tone with no nav row rendering anything to attribute it to, the
-  // exact failure Phase 7's Result already had to fix once for the nav.
-  // Deriving from `serverConnections` closes this structurally instead of
-  // relying on the current absence of a remove path.
+  // Server enumeration (review cycle 1, Minor 3; comment corrected in cycle
+  // 2, fit Important 1): iterates `serverConnections` and looks up
+  // `resourcesByServer[server.id]` per server, exactly as `ServerRows`'s
+  // caller does (`:3255-3261`), rather than `Object.entries(resourcesByServer)`.
+  // The "Off" gesture (260714 Phase 2, `:1572-1578`) IS an existing, already-
+  // handled removal path - it clears `resourcesByServer` and
+  // `lastNonNullResourcesByServerRef` together via `removeResourcesByServer`
+  // (`resourceModel.ts:215`), so a grep for a remove call site will find it.
+  // The gap this closes is narrower: a server vanishing from `serversView`
+  // WITHOUT going through that explicit deallocation gesture (e.g. the
+  // server list refreshing to a shorter set out-of-band) would, keyed off
+  // `resourcesByServer` directly, keep contributing roots to the global tone
+  // with no nav row rendering anything to attribute it to - the exact
+  // failure Phase 7's Result already had to fix once for the nav. Deriving
+  // from `serverConnections` closes that structurally.
   //
   // DEVIATION from the plan's stated placement (Codebase Findings /
   // Implementation Plan step 1 cited `App.tsx:4356-4379` as "the existing
