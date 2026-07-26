@@ -564,8 +564,15 @@ fn linux_mount_fstype(path: &Path) -> Option<String> {
         let Some((left, right)) = line.split_once(" - ") else {
             continue;
         };
-        let mount_point = left.split_whitespace().nth(4)?;
-        let fstype = right.split_whitespace().next()?;
+        // `continue`, never `?` (review finding 10): one unparsable line
+        // must skip only that line, not degrade every repo's mount-type
+        // resolution by returning `None` for the whole function.
+        let Some(mount_point) = left.split_whitespace().nth(4) else {
+            continue;
+        };
+        let Some(fstype) = right.split_whitespace().next() else {
+            continue;
+        };
         if resolved.starts_with(mount_point) {
             let len = mount_point.len();
             if best.as_ref().map(|(best_len, _)| len > *best_len).unwrap_or(true) {
