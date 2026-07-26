@@ -393,6 +393,20 @@ async fn agent_terminal_survives_restart_with_correct_gc_ordering_and_rewritten_
         "the terminal must be adopted and listed by daemon #2: {listed:?}"
     );
 
+    // PROVENANCE SURVIVAL ASSERTION
+    // (260726-bug-dashboard-agent-profile-provenance-lost-on-restart): the
+    // adopted session must report the profile it was spawned with, recovered
+    // from `agent-profiles/<terminal_id>/profile.json` by `recover_profile_id`
+    // - before that fix the adopt arm passed a literal `None` here and this
+    // assertion failed. Everything downstream of it in the browser is a pure
+    // function of this one bit: the work-root nav row's agent-vs-terminal
+    // split, and the browser-level attention cue (title flash, favicon badge,
+    // desktop notification), which is gated end to end on `profileId != null`.
+    assert_eq!(
+        adopted.expect("adopted entry")["profileId"], "claude",
+        "the adopted terminal must report its spawn profile after a restart: {listed:?}"
+    );
+
     // ORDERING REGRESSION ASSERTION (mandatory experiment 1): if the GC
     // sweep ran BEFORE `boot_reconcile` (this test's own regression guard),
     // it would see zero live terminal ids and delete this about-to-be-

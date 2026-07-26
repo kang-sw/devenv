@@ -4,6 +4,7 @@ pub mod agent_env_profile;
 pub mod agent_hook_config;
 pub mod agent_profile_gc;
 pub mod agent_profile_registry;
+pub mod agent_profile_store;
 pub mod agent_token_store;
 pub mod agent_turn_state;
 pub mod auth;

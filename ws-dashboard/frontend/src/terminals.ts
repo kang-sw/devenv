@@ -17,9 +17,13 @@ export type TerminalSessionView = {
   createdAtMs: number;
   cwdHint: string | null;
   // Which registry profile (e.g. "claude") produced this session, `null`
-  // for the unchanged default-shell path and for any adopted (post-daemon-
-  // restart) session - mirrors the daemon's `TerminalSessionView.profileId`
-  // (260725 Phase 2, browser spawn profile).
+  // for the unchanged default-shell path - mirrors the daemon's
+  // `TerminalSessionView.profileId` (260725 Phase 2, browser spawn profile).
+  // An adopted (post-daemon-restart) session reports its spawn profile like
+  // any other; the daemon restores it from a per-terminal sidecar during boot
+  // reconciliation (260726-bug-dashboard-agent-profile-provenance-lost-on-restart),
+  // and reads back `null` only for a terminal spawned before that sidecar
+  // existed or a daemon with no resolvable state directory.
   profileId: string | null;
 };
 
@@ -105,10 +109,13 @@ export type TerminalRestoreIntent = {
   // `restoredTerminalIntentRoots`). Without this, an agent terminal that
   // vanished under a daemon restart came back as a plain default-shell
   // spawn under its unchanged "Terminal" title, with nothing to tell the
-  // user the wrong process is now running - a worse symptom than
-  // `reconcile_entry`'s own profile-provenance loss
-  // (`idea/260726-bug-dashboard-agent-profile-provenance-lost-on-restart`),
-  // which only loses metadata rather than spawning the wrong process. An
+  // user the wrong process is now running. This path is unrelated to
+  // `reconcile_entry`'s profile provenance, which is no longer lost on
+  // adoption
+  // (`260726-bug-dashboard-agent-profile-provenance-lost-on-restart`) and in
+  // any case never reaches this code: a restore intent only fires when
+  // `listTerminals` returns ZERO sessions, whereas an adopted session is
+  // returned. An
   // opaque profile id is already judged safe to carry in a loggable command
   // payload by this same phase (`commands.ts`'s `terminal.create.agent`).
   profileId?: string | null;

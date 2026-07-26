@@ -16530,3 +16530,132 @@ async fn linked_server_attention_events_are_scoped_per_server_not_globally_share
     remove_static_fixture(&remote_root);
     remove_static_fixture(&state_file_root);
 }
+
+// CONTRACT (260726-bug-dashboard-agent-profile-provenance-lost-on-restart,
+// hookless spawn-side coverage): `dummy-echo` is the registered profile with
+// `hook_config: None` (`agent_profile_registry.rs`'s
+// `dummy_echo_profile_has_no_hook_config`). Before this fix, a hookless
+// profile created NO `agent-profiles/<terminal_id>/` directory at all -
+// everything under that path lived inside `spawn`'s `hook_config.is_some()`
+// branch - so this is the genuinely new behavior the widened
+// `profile_id.is_some()` gate introduces, and the reason the pending mark had
+// to be hoisted out of that branch.
+//
+// The two negative assertions are as load-bearing as the positive one: a
+// hookless profile must still mint no callback token and no `callback.json`,
+// because merging provenance into the credential lane is exactly what the
+// ticket's settled design rejects.
+#[tokio::test]
+async fn spawning_a_hookless_profile_writes_the_provenance_sidecar_and_no_credential() {
+    let root = temp_fixture_path("hookless-profile-sidecar");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_with_profile_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "dummy-echo",
+    )
+    .await;
+
+    let profile_dir = state_dir.join("agent-profiles").join(&terminal_id);
+    let sidecar = profile_dir.join("profile.json");
+    let raw = fs::read_to_string(&sidecar)
+        .unwrap_or_else(|error| panic!("hookless spawn must write {sidecar:?}: {error}"));
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("profile sidecar JSON");
+    assert_eq!(parsed["profileId"], "dummy-echo");
+
+    assert!(
+        !profile_dir.join("callback.json").exists(),
+        "a hookless profile must never get a callback target: {profile_dir:?}"
+    );
+    assert!(
+        !state_dir
+            .join("terminal-tokens")
+            .join(format!("{terminal_id}.json"))
+            .exists(),
+        "a hookless profile must never get a callback token minted for it"
+    );
+
+    close_terminal_for_test(app, cookie.as_str(), &terminal_id).await;
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// A default-shell spawn (no `profileId` in the request) must take no new
+// branch at all - the ticket's "unchanged byte for byte from a request that
+// names no profile" contract. Guards the widened gate against being widened
+// one step too far, to "always write a sidecar".
+#[tokio::test]
+async fn spawning_without_a_profile_writes_no_provenance_sidecar() {
+    let root = temp_fixture_path("no-profile-no-sidecar");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24 }).to_string(),
+                ))
+                .expect("create default-shell terminal request"),
+        )
+        .await
+        .expect("create default-shell terminal response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
+    assert!(value["profileId"].is_null());
+    let terminal_id = value["terminalId"].as_str().expect("terminal id").to_owned();
+
+    assert!(
+        !state_dir
+            .join("agent-profiles")
+            .join(&terminal_id)
+            .exists(),
+        "a request that names no profile must create no agent-profiles directory"
+    );
+
+    close_terminal_for_test(app, cookie.as_str(), &terminal_id).await;
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// Test hygiene only: the helper is a real detached OS process (see
+// `ws-web-dashboard/terminal.md`'s "Leaving a test-created terminal
+// unclosed" note), so the tests above close their terminal through the real
+// DELETE route rather than leaving a `dummy-echo` shell running for its full
+// sleep.
+async fn close_terminal_for_test(app: axum::Router, cookie: &str, terminal_id: &str) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("close terminal request"),
+        )
+        .await
+        .expect("close terminal response");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
