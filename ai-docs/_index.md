@@ -287,18 +287,25 @@ dropped tickets live in hidden archive dirs and git history.
 - `260726-refactor-ws-dashboard-git-fs-watch-invalidation` (ready, refactor) —
   owner-directed 2026-07-26: replace interval-driven git polling with
   FS-watch-driven epoch invalidation behind cheap cached endpoints, keeping
-  polling as a hard TTL ceiling (15 s armed / 2 s degraded) so a missed event
-  self-heals with no resync protocol. Measured driver: 9.6 git spawns/s
-  (~830k/day) at 12.0% of a core, cut to 2.1/s and 5.7% by the already-landed
-  probe-memo hotfix (`18037cc3`) — which is only amortizing the fan-out behind a
-  30 s TTL, not removing it. Five phases: 1 git-exec seam (timeout, concurrent
-  pipe drain, explicit spawn stats, warn only on unexpected failure) which also
-  closes `260724-idea-dashboard-daemon-side-git-poll-response-timeout`; 2 per-root
+  polling as a hard TTL ceiling (**120 s armed** / 2 s degraded) so a missed event
+  self-heals with no resync protocol — the armed ceiling is only the
+  missed-event safety net, since real changes land within one tick via the epoch
+  bump. Measured driver: 9.6 git spawns/s (~830k/day) at 12.0% of a core, cut to
+  2.1/s and 5.7% by the already-landed probe-memo hotfix (`18037cc3`) — which is
+  only amortizing the fan-out behind a 30 s TTL, not removing it. **Four phases
+  in scope:** 1 git-exec seam (timeout, concurrent pipe drain, explicit spawn
+  stats, warn only on unexpected failure) which also closes
+  `260724-idea-dashboard-daemon-side-git-poll-response-timeout`; 2 per-root
   `resolve_git_context` reusing the existing `resolve_online_available_work_root`
   gate, plus the `git_identity` memo that is the real measurable win; 3 result
-  cache with `EpochSource` stubbed; 4 the `notify` watcher on recursive-subtree
-  platforms (Windows/macOS, dogfoodable immediately); 5 Linux `PerDirectory` with
-  a counted descriptor budget. Decided against git SSE push (the problem is CPU,
+  cache with `EpochSource` stubbed; 4 the `notify` watcher, `cfg`-gated to
+  recursive-subtree platforms with the pure core (classify/epoch/debounce/
+  reconcile) compiled and unit-tested everywhere. Phase 5 (budgeted Linux
+  `PerDirectory`) is `[dropped]` — owner 2026-07-26: `git status` is already fast
+  on Linux and per-directory descriptor accounting is the same failure class
+  `260726-refactor-ws-dashboard-long-uptime-leak-hardening` exists for, so Linux
+  stays `Unarmed` on the 2 s TTL and `WS_DASHBOARD_GIT_WATCH=force` arms it only
+  for tests/diagnosis. Decided against git SSE push (the problem is CPU,
   not latency, and FS events are lossy hints). Plan at
   `ai-docs/.plans/2026-07/26-1315-git-fs-watch-invalidation.md`. Spec addressing
   via `## Spec Impact` (`#260524-ws-dashboard-git-aware-workroot-toolbar`,

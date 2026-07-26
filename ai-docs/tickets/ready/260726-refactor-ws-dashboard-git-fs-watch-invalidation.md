@@ -27,7 +27,6 @@ plans:
   phase-2: 2026-07/26-1315-git-fs-watch-invalidation
   phase-3: 2026-07/26-1315-git-fs-watch-invalidation
   phase-4: 2026-07/26-1315-git-fs-watch-invalidation
-  phase-5: 2026-07/26-1315-git-fs-watch-invalidation
 related-mental-model:
   - ws-web-dashboard
 sage-review-completeness: completed
@@ -107,7 +106,8 @@ two fields plus the worktree path are exactly what Phase 4's
 The phase numbering in this ticket is therefore **not** the plan file's
 numbering. Mapping: plan Phase 0 → Phase 1, plan Phase 1 → Phase 2, plan
 Phase 2 → already landed, plan Phase 3 → Phase 3, plan Phase 4 → **split into
-Phase 4 (recursive-subtree platforms) and Phase 5 (Linux `PerDirectory`)**, plan
+Phase 4 (recursive-subtree platforms, in scope) and Phase 5 (Linux
+`PerDirectory`, dropped by the owner — see Non-Goals)**, plan
 Phase 5 (SSE push) → Non-Goals. Where the plan and this ticket disagree, the
 ticket wins: several plan claims were corrected by the design review and by a
 reading of this host's actual `max_user_watches` (see Constraints).
@@ -143,9 +143,19 @@ reading of this host's actual `max_user_watches` (see Constraints).
   ignore set → watch everything (correct, just noisier).
 - **Polling is never deleted.** Phase 3's cache miss falls through to the same
   `changes_for_path` / `branches_for_path` calls that run today. The watcher
-  only changes the TTL: 15 000 ms armed, 2 000 ms degraded/unarmed. Even with
+  only changes the TTL: 120 000 ms armed, 2 000 ms degraded/unarmed. Even with
   the watcher completely broken the daemon is strictly better than today,
   because the Phase 2 fan-out removal is unconditional.
+- **The armed TTL is 120 s, not the 15 s the plan proposed** (owner, 2026-07-26).
+  This value is *only* the missed-event safety net: every real change still lands
+  within one frontend tick via the epoch bump, so the ceiling governs how stale
+  state may get when the watcher silently fails, not normal freshness. The owner
+  judged 1-2 minutes acceptable for that case, and stretching it is close to pure
+  win — at the frontend's 5 s cadence a 15 s ceiling leaves 2 of every 3 ticks
+  free, while 120 s leaves **23 of 24**, which is the difference between roughly
+  a 3× and a 24× reduction in recomputes for the selected root. The degraded /
+  unarmed TTL stays at 2 s precisely because that is the real polling path and
+  must not inherit the safety-net number.
 - **`WorkRootId` derivation stays frozen.** Caches and the watcher get a
   separate `WatchKey` (canonicalize → normalize → `\` ⇒ `/` → lowercase on
   Windows). `opened-workroots.json` stores mixed separators
@@ -210,32 +220,29 @@ reading of this host's actual `max_user_watches` (see Constraints).
   anti-pattern in the first place, so this check is a guard against a
   misconfiguration, not support for it. The live daemon runs natively on Windows
   and is unaffected; this belongs to WSL-side developer daemons.
-- Over-budget repos must be **left entirely unarmed** (`Degraded`), never
-  partially armed. Enforce a process budget of
-  `min(max_user_watches * 60 / 100, WS_DASHBOARD_GIT_WATCH_MAX_DIRS)` (default
-  cap 6000). Exhausting inotify descriptors would degrade unrelated
-  applications on the host (editors, other watchers).
-- The budget is **process-wide and shared across repos**, so arming order
-  decides which repo gets it when the set does not all fit. Arm in the
-  reconcile pass's own iteration order over the authoritative root set, and
-  make that order deterministic (sort by `WatchKey`) so the same registry
-  produces the same armed/degraded split across restarts. Do **not** reorder by
-  size, recency, or selection: a heuristic that silently re-arms a different
-  repo each boot makes a degraded repo look intermittent. Already-armed repos
-  keep their registrations across a reconcile; the budget is only consulted for
-  repos being newly armed.
-- **The budget must count every descriptor the process actually consumes**, or
-  the "never degrade unrelated applications" rule is unenforceable. Two sources
-  escape a naive count. (a) `git status --ignored=matching` never reports `.git`,
-  so the walk must **exclude `git_dir` / `common_dir` from registration**, not
-  merely ignore their events in `classify` — those are different operations, and
-  registering them burns descriptors on the 256-way `objects/` fanout,
-  `objects/pack`, and `.git/modules`. (b) On Linux,
-  `RecursiveMode::Recursive` makes `notify` walk and register per-directory
-  *internally*, so any recursive target's descriptors are invisible to
-  `DirBudget` and to the `registeredDirs` figure in the diag route. Therefore on
-  Linux use `NonRecursive` for **every** target including `refs/**` and
-  `worktrees/**`, walking them ourselves so each descriptor is counted.
+- **Descriptor budgeting is out of shipping scope** now that budgeted Linux
+  arming is a Non-Goal: `auto` never arms on Linux, so the process consumes one
+  handle per tree on Windows/macOS and nothing on Linux. The analysis below is
+  kept because it constrains `WS_DASHBOARD_GIT_WATCH=force` on Linux and would
+  govern any reopening of the dropped Phase 5.
+  - Over-budget repos must be left **entirely** unarmed (`Degraded`), never
+    partially armed, and the budget must be read from the host's real
+    `max_user_watches` rather than assumed.
+  - The budget is process-wide and shared, so arming order decides which repo
+    gets it. Arm in a deterministic order (sort by `WatchKey`) so the same
+    registry produces the same armed/degraded split across restarts; never
+    reorder by size, recency, or selection, because a heuristic that re-arms a
+    different repo each boot makes a degraded repo look intermittent.
+  - Any budget must count **every** descriptor actually consumed. Two sources
+    escape a naive count. (a) `git status --ignored=matching` never reports
+    `.git`, so a walk must exclude `git_dir` / `common_dir` from *registration*,
+    not merely ignore their events in `classify` — different operations, and
+    registering them burns descriptors on the 256-way `objects/` fanout,
+    `objects/pack`, and `.git/modules`. (b) `RecursiveMode::Recursive` makes
+    `notify` walk and register per-directory *internally* on Linux, so those
+    descriptors are invisible to any counter. **This is precisely why `force` on
+    Linux is unbudgeted and test-only:** it uses notify's internal recursion and
+    therefore cannot honour a budget at all.
 - The daemon must **never fail to boot** because a watcher could not start:
   `watcher: Option<...>`, init failure ⇒ all repos `Unarmed`, warn once, 2 s
   TTL.
@@ -280,7 +287,7 @@ Expected caller-visible change:
 
 - Git status/branch freshness becomes **change-triggered with a TTL ceiling**
   rather than "refreshed on every poll tick". The contract to document is the
-  ceiling (15 s armed / 2 s degraded), not the mechanism, plus the guarantee
+  ceiling (120 s armed / 2 s degraded), not the mechanism, plus the guarantee
   that user-initiated mutations (branch switch/create, fetch/push/pull) are
   never TTL-delayed because they bump the epoch directly.
 - A new owner-authed diagnostics route `GET /api/dashboard/diag/git` reporting
@@ -304,8 +311,8 @@ Phases 1 and 2 are independently shippable and independently valuable. Phase 3
 depends on Phase 1 (its spawn counter is what makes "the second call added zero
 spawns" assertable at all). Phase 4 depends on Phase 3 (it swaps the stubbed
 `EpochSource` for the real one) and on the `DiscoveredWorkRoot` widening
-described under Already Landed. Phase 5 depends on Phase 4 and only affects
-Linux/WSL hosts.
+described under Already Landed. **Phase 4 is the last in-scope phase**; Phase 5
+is retained as `[dropped]`, so the shippable ticket is Phases 1-4.
 
 ### Phase 1: Git exec seam — bounded wait, kill on timeout, stderr logging, spawn counters
 
@@ -495,18 +502,40 @@ Estimated diff ~+270/−95 production, ~+160 test, 4 files.
 
 ### Phase 4: The `notify` watcher — real epochs on the recursive-subtree platforms
 
-New `crates/daemon/src/work_root_watch.rs`, **Windows/macOS `RecursiveSubtree`
-only**. Linux `PerDirectory` arming, `DirBudget`, and budget-degradation are
-Phase 5.
+New `crates/daemon/src/work_root_watch.rs`, **`RecursiveSubtree` arming only**.
+Budgeted Linux `PerDirectory` arming is a Non-Goal (owner, 2026-07-26 — see
+Non-Goals for the reasoning); Phase 5 below is retained as `[dropped]` so its
+analysis stays recoverable.
 
-Rationale for the split: the original single phase bundled ~550 lines in which
-roughly half was the Linux path plus budget/degrade handling the Windows path
-does not need — and that same half is where a bug both silently breaks
-invalidation *and* can degrade unrelated applications on the host. Phases 1-3 are
-deliberately structured for independent shippability, and collapsing that
-exactly where the risk concentrates is the wrong place to stop. Split this way,
-Phase 4 is dogfoodable on the live Windows daemon immediately and Phase 5 has a
-real revert boundary rather than only a kill switch. On Linux, Phase 4 alone
+Rationale: the original single phase bundled ~550 lines in which roughly half was
+the Linux descriptor-budget path — and that same half is where a bug both
+silently breaks invalidation *and* can degrade unrelated applications on the
+host. Phases 1-3 are deliberately structured for independent shippability, so
+collapsing that exactly where the risk concentrates was the wrong place to stop.
+Dropping it outright is the owner's stronger version of the same judgment.
+
+**Platform gating.** Split the module so the platform-independent core compiles
+and unit-tests everywhere and only the arming backend is gated:
+
+- Always compiled, `cfg`-free, pure: `classify`, `IgnoreSet` derivation and
+  parsing, `RepoEpochs`, debounce/coalescing, and the `reconcile` decision table.
+  This is where the correctness risk actually lives, and it stays testable on the
+  Linux/WSL dev host — do **not** hide it behind `#[cfg(windows)]`, or the highest
+  test-value-per-line code in the phase becomes unrunnable where development
+  happens.
+- `cfg`-gated: the `notify` registration backend. `#[cfg(any(windows,
+  target_os = "macos"))]` arms recursively; every other target returns
+  `Unarmed` under `auto`, i.e. the 2 s polling TTL — which is Phase 3's behavior
+  and already better than today.
+- **`WS_DASHBOARD_GIT_WATCH=force` enables recursive arming on Linux too**, which
+  is what makes the integration tests in `git_watch.rs` runnable on the dev host
+  instead of Windows-only. `notify`'s own internal recursion handles Linux
+  registration; with `DirBudget` gone there is no descriptor accounting to
+  invalidate, so recursion is acceptable here — but it is deliberately not the
+  `auto` default, because unbudgeted recursive inotify on a host at the mainline
+  8,192 limit is exactly the exhaustion risk the dropped phase existed to bound.
+  This gives `force` a concrete purpose rather than the vague "override a
+  suspected-bad heuristic" it had. On Linux, Phase 4 alone
 leaves every repo `Unarmed` on the 2 s TTL — i.e. Phase 3's behavior, which is
 already better than today.
 
@@ -523,15 +552,20 @@ fully testable without any I/O:
    ignore set stale; else under `worktree` ⇒ `Worktree`.
 2. **`IgnoreSet::derive(worktree)`** — one `git_exec::capture`, parse `!!`
    entries from `-z` output.
-3. **Arming — `RecursiveSubtree` only in this phase.** One
-   `RecursiveMode::Recursive` registration per target, event paths filtered
-   against the `IgnoreSet`. Cheap: one kernel handle per tree on Windows, one
-   FSEvents stream on macOS. Bump both epochs **on arm**, not only on disarm: a
-   slot filled while `Unarmed` carries epoch 0, and without a bump it stays valid
-   for the whole 15 s TTL even though it was computed during a window in which no
-   events were being observed — as are any changes landing during the arming walk
-   itself. `WatchStrategy::PerDirectory` is declared in the enum but returns
-   `Unarmed` until Phase 5, so Linux is explicitly on the polling path here.
+3. **Arming — `RecursiveSubtree` only.** One `RecursiveMode::Recursive`
+   registration per target, event paths filtered against the `IgnoreSet`. Cheap:
+   one kernel handle per tree on Windows, one FSEvents stream on macOS. Bump both
+   epochs **on arm**, not only on disarm: a slot filled while `Unarmed` carries
+   epoch 0, and without a bump it stays valid for the whole 120 s TTL even though
+   it was computed during a window in which no events were being observed — as are
+   any changes landing during the arming walk itself. Non-gated targets return
+   `Unarmed` under `auto` per the platform gating above.
+   **Pre-arm filesystem check (from Constraints):** resolve the target's mount
+   filesystem type and degrade on anything outside the known-local allowlist
+   (DrvFs/9P, NFS, CIFS, SSHFS/FUSE), because those arm successfully and then
+   never fire. This check lives here, not in the dropped Phase 5 — it applies to
+   any platform that arms, and it is the guard that keeps the diag route from
+   reporting `Armed` for a watcher that cannot work.
 4. **Event pipeline.** `notify` callback (own thread) → `mpsc::unbounded_send` →
    one long-lived tokio task: coalesce 100 ms trailing / 500 ms max
    (`WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS` default 100, max window fixed at 5×
@@ -571,18 +605,29 @@ fully testable without any I/O:
      `IgnoreSet::derive` spawn and a multi-thousand-`read_dir` walk on the 5 s
      poll handler — reintroducing the latency this ticket removes.
 6. **Wire the real `EpochSource`** into `GitStateCache`; select TTL from
-   `WatchHealth` (15 000 ms armed, 2 000 ms degraded/unarmed).
+   `WatchHealth` (120 000 ms armed, 2 000 ms degraded/unarmed;
+   `WS_DASHBOARD_GIT_CACHE_TTL_MS` overrides the degraded value).
 7. **Config:** `WS_DASHBOARD_GIT_WATCH=off|auto|force` and
    `WS_DASHBOARD_GIT_WATCH_DEBOUNCE_MS`. Semantics, stated because the plan left
-   `force` undefined: `off` ⇒ never arm anything, every repo `Unarmed` on the 2 s
-   TTL (the rollback switch); `auto` (default) ⇒ arm where the platform strategy
-   and the pre-arm filesystem check allow, degrade silently otherwise;
-   `force` ⇒ attempt to arm even where `auto` would pre-emptively degrade
-   (the WSL `/mnt` filesystem check, and in Phase 5 the descriptor budget),
-   logging the override once per repo. `force` exists to make a suspected-bad
-   heuristic testable on a real host, not as a supported production mode.
+   `force` undefined:
+   - `off` ⇒ never arm anything, every repo `Unarmed` on the 2 s TTL. The
+     rollback switch.
+   - `auto` (**default**) ⇒ arm on the gated platforms where the pre-arm
+     filesystem check allows; degrade otherwise. Confirmed as the shipping
+     default (owner, 2026-07-26) rather than a dark rollout: the rollback switch
+     already exists, and shipping dark on Windows would produce no events to
+     observe, so it buys no information.
+   - `force` ⇒ arm even where `auto` would pre-emptively degrade — a non-gated
+     platform (Linux, recursively) or a filesystem outside the allowlist. Logs
+     the override once per repo. Its purpose is making the integration tests
+     runnable on the Linux/WSL dev host and diagnosing a suspected-wrong
+     allowlist on a real machine; it is not a supported production mode.
+
    Extend `/api/dashboard/diag/git` with `{ repos: [{ health, worktreeEpoch,
-   refsEpoch, lastEventMs }] }`.
+   refsEpoch, lastEventMs }] }`. `health` must distinguish "degraded because this
+   platform is not gated" from "degraded because the filesystem is foreign" —
+   `Degraded { reason }` carries the string, and reporting `Armed` for something
+   that will never fire is the failure mode to avoid.
 
 Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
 `common_dir`, which `GitDiscovery::probe` already computes and discards.
@@ -604,9 +649,11 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
   reconcile disarms and bumps ⇒ status reports unavailable ⇒ rename back ⇒
   re-arms. Windows: worktree-remove while armed does not fail with a sharing
   violation (existing worktree-remove pins are the reference). All
-  deadline-polling, never fixed sleeps. **These tests only run armed on
-  Windows/macOS** — gate them so a Linux CI run asserts the `Unarmed` fallback
-  instead of silently passing a no-op.
+  deadline-polling, never fixed sleeps. **Run these under
+  `WS_DASHBOARD_GIT_WATCH=force` so they exercise real arming on the Linux/WSL
+  dev host** (against a local ext4 path, not `/mnt`); add one test that asserts
+  `auto` yields `Unarmed` on a non-gated platform, so the gating itself is pinned
+  rather than assumed.
 - *Live-only — state as not covered by tests, do not pretend otherwise:*
   sustained spawns/s and CPU% on the Windows dogfood daemon over ≥10 min with the
   browser open, Activity pane both closed and open; buffer-overflow/rescan
@@ -616,11 +663,16 @@ Also widen `DiscoveredWorkRoot` (`discovery.rs:324-331`) with `git_dir` /
 
 Estimated diff ~+430/−70 production, ~+200 test, 9 files.
 
-### Phase 5: Linux `PerDirectory` arming with a counted descriptor budget
+### Phase 5: Linux `PerDirectory` arming with a counted descriptor budget [dropped]
 
-Adds `WatchStrategy::PerDirectory`, `DirBudget`, and budget-driven degradation so
-Linux/WSL daemons can arm instead of falling back to the 2 s TTL. Depends on
-Phase 4 (it fills in the strategy Phase 4 declared and stubbed).
+**Dropped by the owner on 2026-07-26 before any implementation** — see Non-Goals
+for the reasoning. Retained unrenumbered per ticket conventions so the analysis
+stays recoverable if a Linux deployment ever needs it. Do not implement without
+reopening the decision.
+
+Would have added `WatchStrategy::PerDirectory`, `DirBudget`, and budget-driven
+degradation so Linux/WSL daemons could arm instead of falling back to the 2 s
+TTL.
 
 - Walk the worktree ourselves with the `IgnoreSet` applied and register
   `RecursiveMode::NonRecursive` per surviving directory, so every descriptor is
@@ -640,32 +692,34 @@ Phase 4 (it fills in the strategy Phase 4 declared and stubbed).
 - A directory created inside a watched tree registers that directory and
   re-checks the budget. The known inotify race — a directory created and
   populated before registration — is exactly what the TTL fallback covers.
-- Pre-arm filesystem check from Constraints: resolve the target's mount
-  filesystem type and degrade on anything outside the known-local allowlist
-  (DrvFs/9P, NFS, CIFS, FUSE), because those arm successfully and never fire.
 - Expose `registeredDirs` per repo in `/api/dashboard/diag/git`.
 
-**Verification boundary.** Unit: `DirBudget` arithmetic and the over-budget
-degrade decision; the registration-exclusion set (a `git_dir` path is never a
-registration candidate even though `classify` would also ignore its events).
-Integration `#[cfg(unix)]`: `WS_DASHBOARD_GIT_WATCH_MAX_DIRS=1` ⇒ `Degraded` +
-short TTL and **zero** registrations, not partial arming; the armed happy path
-reuses Phase 4's `git_watch.rs` assertions with the strategy forced to
-`PerDirectory`. Live-only: real descriptor consumption on WSL
-(`find /proc/*/fd -lname anon_inode:inotify | wc -l`) against the actual repos,
-and confirmation that a `/mnt`-hosted root degrades rather than silently
-reporting `Armed`.
+Would have needed: `DirBudget` arithmetic unit tests, the registration-exclusion
+set, a `#[cfg(unix)]` `WS_DASHBOARD_GIT_WATCH_MAX_DIRS=1` ⇒ `Degraded`-with-zero-
+registrations test, and live descriptor-consumption measurement on WSL. Estimated
+~+290/−10 production, ~+120 test, 3 files.
 
-Estimated diff ~+290/−10 production, ~+120 test, 3 files.
+The pre-arm filesystem check originally scoped here **moved into Phase 4**, since
+it applies to any platform that arms.
 
 **Rollback ladder, each rung independent:** `WS_DASHBOARD_GIT_WATCH=off`
-disables Phases 4-5; reverting Phase 5 alone leaves Linux `Unarmed` and Windows
-armed; `WS_DASHBOARD_GIT_CACHE_TTL_MS=0` disables Phase 3;
+disables Phase 4; `WS_DASHBOARD_GIT_CACHE_TTL_MS=0` disables Phase 3;
 `WS_DASHBOARD_GIT_PROBE_TTL_MS=0` disables the landed probe memo; reverting
 Phase 2 is a self-contained rewrite of one function.
 
 ## Non-Goals
 
+- **Budgeted Linux `PerDirectory` arming** (owner, 2026-07-26). This ticket's
+  Phase 5, dropped before implementation and retained there as `[dropped]`.
+  Reasoning: `git status` is already fairly fast on Linux, so the poll path it
+  would replace is not the expensive case; and making the watcher stateful on
+  Linux trades a cheap, stateless cost for a harder failure class — per-directory
+  descriptor and handle accounting that has to stay correct across arm, disarm,
+  re-arm, and long uptime. That is the same failure class
+  `260726-refactor-ws-dashboard-long-uptime-leak-hardening` exists for, and it is
+  a worse trade than leaving Linux on the 2 s TTL. Linux daemons therefore run
+  `Unarmed` under `auto` and keep Phases 1-3's unconditional wins;
+  `WS_DASHBOARD_GIT_WATCH=force` still arms recursively for tests and diagnosis.
 - **SSE push for git state** (the plan's own Phase 5, unrelated to this ticket's
   Phase 5). Deferred and unscheduled; revisit only if latency becomes an actual
   complaint, and not until Phase 4 has run in dogfood for a week. Shape is
