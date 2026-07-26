@@ -28,18 +28,163 @@
 // grow permanently.
 #![allow(dead_code)]
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
+use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+
+use crate::discovery::WatchKey;
 use crate::git_exec::{capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats};
+use crate::git_state_cache::EpochSource;
+
+/// The three filesystem paths `reconcile` (a later checkpoint) hands to the
+/// watcher for one repo, populated straight from the widened
+/// `DiscoveredWorkRoot`. `git_dir == common_dir` for a primary root; a linked
+/// worktree's `git_dir` sits under `common_dir/worktrees/<name>`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WatchTargets {
+    pub(crate) worktree: PathBuf,
+    pub(crate) git_dir: PathBuf,
+    pub(crate) common_dir: PathBuf,
+}
+
+/// Per-repo watcher health, reported by `GET /api/dashboard/diag/git` (a
+/// later checkpoint) and consulted by `git_toolbar.rs`'s TTL selection.
+/// `Degraded` carries a reason so the diag route can distinguish over-cap
+/// from foreign-filesystem from arm-error, rather than reporting an
+/// undifferentiated "not working" for a watcher that structurally cannot
+/// fire (ticket step 9).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum WatchHealth {
+    Armed,
+    Degraded(String),
+    Unarmed,
+}
+
+impl WatchHealth {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            WatchHealth::Armed => "armed",
+            WatchHealth::Degraded(_) => "degraded",
+            WatchHealth::Unarmed => "unarmed",
+        }
+    }
+
+    pub(crate) fn reason(&self) -> Option<&str> {
+        match self {
+            WatchHealth::Degraded(reason) => Some(reason.as_str()),
+            _ => None,
+        }
+    }
+}
 
 /// Which cache axis an observed filesystem event invalidates. Mirrors
 /// `git_state_cache`'s two independently revalidated slots.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum EpochKind {
     Worktree,
     Refs,
+}
+
+/// Step 5's leading+trailing coalescing, at most two bumps per kind per
+/// window (ticket Phase 4 step 5). Takes every timestamp as an explicit
+/// caller-supplied `now_ms` parameter (an injected clock, per the ticket's
+/// Verification boundary) rather than reading a wall clock itself, so the
+/// unit tests below run in zero wall-clock time and the production event
+/// loop can drive it from `tokio::time::Instant` millis without this type
+/// depending on tokio.
+///
+/// - **Leading:** the first event of a window bumps immediately
+///   ([`DebounceEvent::BumpNow`]) - a single save is visible to a poll
+///   landing moments later.
+/// - **Trailing:** if any further event arrived after the leading bump,
+///   [`Debouncer::poll_close`] reports one more bump when the window closes.
+///   Both halves are required: trailing-only delays the bump past a poll
+///   that lands mid-window; leading-only is a correctness hole (later writes
+///   in the window are silently suppressed and the slot reads valid for a
+///   full TTL despite being stale).
+/// - The window is capped at `window_ms * 5` measured from the FIRST event,
+///   so a continuous stream of writes still closes and reopens periodically
+///   instead of suppressing every bump forever.
+pub(crate) struct Debouncer {
+    window_ms: u64,
+    cap_ms: u64,
+    open: Option<DebounceWindow>,
+}
+
+struct DebounceWindow {
+    opened_at_ms: u64,
+    last_event_at_ms: u64,
+    event_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DebounceEvent {
+    /// Leading edge of a new window: bump the epoch now.
+    BumpNow,
+    /// Inside an already-open window: no bump yet: `poll_close` will decide
+    /// whether a trailing bump is due once the window closes.
+    Deferred,
+}
+
+impl Debouncer {
+    pub(crate) fn new(window_ms: u64) -> Self {
+        Self {
+            window_ms,
+            cap_ms: window_ms.saturating_mul(5),
+            open: None,
+        }
+    }
+
+    /// Record an event arriving at `now_ms`.
+    pub(crate) fn record_event(&mut self, now_ms: u64) -> DebounceEvent {
+        match &mut self.open {
+            None => {
+                self.open = Some(DebounceWindow {
+                    opened_at_ms: now_ms,
+                    last_event_at_ms: now_ms,
+                    event_count: 1,
+                });
+                DebounceEvent::BumpNow
+            }
+            Some(window) => {
+                window.last_event_at_ms = now_ms;
+                window.event_count += 1;
+                DebounceEvent::Deferred
+            }
+        }
+    }
+
+    /// Caller-driven poll (the production event loop calls this on a short
+    /// periodic tick for every repo/kind with an open window): at `now_ms`,
+    /// should the open window close? Returns `true` exactly once per window,
+    /// and only when a second-or-later event arrived after the leading bump
+    /// - a window whose only event was the leading one closes silently.
+    pub(crate) fn poll_close(&mut self, now_ms: u64) -> bool {
+        let should_close = match &self.open {
+            None => false,
+            Some(window) => {
+                now_ms.saturating_sub(window.last_event_at_ms) >= self.window_ms
+                    || now_ms.saturating_sub(window.opened_at_ms) >= self.cap_ms
+            }
+        };
+        if !should_close {
+            return false;
+        }
+        self.open
+            .take()
+            .map(|window| window.event_count > 1)
+            .unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
 }
 
 /// The gitignore-derived ignore set for one repo's worktree (step 2,
@@ -370,6 +515,733 @@ fn is_lock_file(rel: &Path) -> bool {
     rel.extension() == Some(OsStr::new("lock"))
 }
 
+// ---------------------------------------------------------------------------
+// Pre-arm gate: filesystem allowlist (ticket Constraints, shared across
+// platforms). A watcher armed on a foreign mount (WSL2 `/mnt/*`, NFS, CIFS,
+// SSHFS/FUSE) succeeds and then silently never fires, which is worse than
+// never arming - the diag route would claim `Armed` for a watcher that
+// structurally cannot work. Resolution is the one piece of this rule that is
+// genuinely platform-specific (D5); the allow/degrade decision itself is not.
+// ---------------------------------------------------------------------------
+
+/// Resolve `path`'s mount filesystem type and decide whether it is known to
+/// deliver filesystem events. Allowlist, not blocklist, per the ticket
+/// Constraints: an over-conservative miss just degrades one repo to polling,
+/// while a missed blocklist entry silently mis-arms it.
+#[cfg(target_os = "linux")]
+pub(crate) fn mount_allows_watching(path: &Path) -> bool {
+    const ALLOWED: &[&str] = &[
+        "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "zfs", "overlay", "tmpfs",
+    ];
+    match linux_mount_fstype(path) {
+        Some(fstype) => ALLOWED.contains(&fstype.as_str()),
+        None => false,
+    }
+}
+
+/// Parses `/proc/self/mountinfo`, returning the filesystem type of the
+/// longest matching mount point for `path` (i.e. the mount that actually
+/// owns it, not an ancestor mount it happens to sit under).
+#[cfg(target_os = "linux")]
+fn linux_mount_fstype(path: &Path) -> Option<String> {
+    let contents = fs::read_to_string("/proc/self/mountinfo").ok()?;
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut best: Option<(usize, String)> = None;
+    for line in contents.lines() {
+        // Format: `<id> <parent> <major:minor> <root> <mount point> <options> \
+        // <optional fields...> - <fstype> <source> <super options>`. The `-`
+        // separator is the only reliable anchor before the fixed 3-field
+        // tail.
+        let Some((left, right)) = line.split_once(" - ") else {
+            continue;
+        };
+        let mount_point = left.split_whitespace().nth(4)?;
+        let fstype = right.split_whitespace().next()?;
+        if resolved.starts_with(mount_point) {
+            let len = mount_point.len();
+            if best.as_ref().map(|(best_len, _)| len > *best_len).unwrap_or(true) {
+                best = Some((len, fstype.to_owned()));
+            }
+        }
+    }
+    best.map(|(_, fstype)| fstype)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn mount_allows_watching(path: &Path) -> bool {
+    const ALLOWED: &[&str] = &["apfs", "hfs"];
+    match macos_mount_fstype(path) {
+        Some(fstype) => ALLOWED.contains(&fstype.as_str()),
+        None => false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_mount_fstype(path: &Path) -> Option<String> {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let c_path = CString::new(resolved.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `buf` is a valid, correctly-sized, zero-initialized `statfs`
+    // for this platform; `statfs` fully populates it on success (return 0)
+    // and we only read `f_fstypename` afterward.
+    unsafe {
+        let mut buf: MaybeUninit<libc::statfs> = MaybeUninit::zeroed();
+        if libc::statfs(c_path.as_ptr(), buf.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let buf = buf.assume_init();
+        let name = std::ffi::CStr::from_ptr(buf.f_fstypename.as_ptr());
+        Some(name.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn mount_allows_watching(path: &Path) -> bool {
+    use std::path::Component;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetDriveTypeW, DRIVE_FIXED, DRIVE_RAMDISK,
+    };
+
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // Reject any UNC path outright: `\\server\share\...` has no drive-letter
+    // root for GetDriveType to answer about, and a mapped network drive vs. a
+    // raw UNC path are the identical silent-and-armed hazard.
+    let Some(Component::Prefix(prefix)) = resolved.components().next() else {
+        return false;
+    };
+    let drive_root = match prefix.kind() {
+        std::path::Prefix::Disk(letter) | std::path::Prefix::VerbatimDisk(letter) => {
+            format!("{}:\\", letter as char)
+        }
+        _ => return false,
+    };
+    let mut wide: Vec<u16> = drive_root.encode_utf16().collect();
+    wide.push(0);
+    // SAFETY: `wide` is a valid null-terminated UTF-16 string.
+    let drive_type = unsafe { GetDriveTypeW(wide.as_ptr()) };
+    matches!(drive_type, DRIVE_FIXED | DRIVE_RAMDISK)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) fn mount_allows_watching(_path: &Path) -> bool {
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Linux-only: process-wide inotify budget (ticket Constraints - "read both
+// inotify limits, not just the watch count").
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_inotify_process_budget() -> usize {
+    let max_user_watches = linux_read_proc_sys_u64("/proc/sys/fs/inotify/max_user_watches")
+        .unwrap_or(8_192);
+    let max_user_instances = linux_read_proc_sys_u64("/proc/sys/fs/inotify/max_user_instances")
+        .unwrap_or(128);
+    if max_user_instances < 2 {
+        tracing::warn!(
+            max_user_instances,
+            "host's inotify max_user_instances is unusually low; the shared \
+             watcher still needs only one instance, but this is worth knowing \
+             if that changes"
+        );
+    }
+    ((max_user_watches as usize).saturating_mul(60) / 100).min(8_192)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_read_proc_sys_u64(path: &str) -> Option<u64> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_process_budget() -> usize {
+    0
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_budget() -> usize {
+    linux_inotify_process_budget()
+}
+
+// ---------------------------------------------------------------------------
+// Step 4 & 6: arming (platform-split registration) and the event pipeline.
+// Everything below this point is orchestration around the pure functions
+// above; the decision logic itself (`classify`, `IgnoreSet`, `Debouncer`) has
+// already run by the time any of this touches a lock. No `#[cfg(...)]`
+// appears past the two backend fns (`do_arm_linux`/`do_arm_recursive`) and
+// `owned_registered_dirs`' platform split (D5) - registry bookkeeping,
+// health computation, and the event loop are shared.
+// ---------------------------------------------------------------------------
+
+/// How aggressively the watcher arms. `Off` never touches `notify`; every
+/// repo reports [`WatchHealth::Unarmed`] and callers fall back to the short
+/// TTL. `Force` skips the [`mount_allows_watching`] pre-arm gate (diagnostic
+/// escape hatch, ticket Constraints); `Auto` is the default.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WatchMode {
+    Off,
+    Auto,
+    Force,
+}
+
+/// Tunables threaded through from the `WS_DASHBOARD_GIT_WATCH*` env vars (a
+/// later checkpoint reads them; this checkpoint just needs somewhere for the
+/// values to live so arming and the event pipeline are not hardcoded).
+#[derive(Clone, Debug)]
+pub(crate) struct WatchConfig {
+    pub(crate) mode: WatchMode,
+    pub(crate) debounce_ms: u64,
+    pub(crate) max_dirs: usize,
+    pub(crate) armed_ttl_ms: u64,
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self {
+            mode: WatchMode::Auto,
+            debounce_ms: 100,
+            max_dirs: 1024,
+            armed_ttl_ms: 120_000,
+        }
+    }
+}
+
+/// Monotonic millisecond clock shared by the debounce windows and the
+/// rescan-degraded self-heal timer. Process-relative (not wall-clock) so a
+/// system clock adjustment cannot stall or fast-forward a debounce window;
+/// unlike [`Debouncer`] itself (which takes `now_ms` as an explicit
+/// parameter for zero-wall-clock-time unit tests), this is the one place
+/// production code actually samples time, and it stays out of the pure
+/// functions above by design.
+fn clock_ms() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    let start = *START.get_or_init(Instant::now);
+    start.elapsed().as_millis() as u64
+}
+
+/// One repo's live bookkeeping: the registration state ([`WatchHealth`] plus,
+/// when armed, the [`ArmedRepo`] classify needs and the exact directories
+/// registered with the OS watcher), the debounce windows per axis, and the
+/// rate-limit/staleness timers checkpoint 6 (`reconcile`) will read.
+struct RepoRuntime {
+    targets: WatchTargets,
+    registration_health: WatchHealth,
+    armed: Option<ArmedRepo>,
+    registered_dirs: Vec<PathBuf>,
+    /// Set by a `notify` "need_rescan" event (step 5): the OS watcher itself
+    /// reports it may have dropped events (e.g. an inotify queue overflow).
+    /// Registration stays intact - only the *reported* health degrades, for
+    /// one TTL window, so `git_toolbar.rs`'s TTL selection falls back to the
+    /// short poll interval until this clears.
+    rescan_degraded_until_ms: Option<u64>,
+    last_arm_attempt_ms: Option<u64>,
+    last_event_at_ms: Option<u64>,
+    ignore_stale: bool,
+    debounce: HashMap<EpochKind, Debouncer>,
+}
+
+impl RepoRuntime {
+    fn new(targets: WatchTargets) -> Self {
+        Self {
+            targets,
+            registration_health: WatchHealth::Unarmed,
+            armed: None,
+            registered_dirs: Vec::new(),
+            rescan_degraded_until_ms: None,
+            last_arm_attempt_ms: None,
+            last_event_at_ms: None,
+            ignore_stale: false,
+            debounce: HashMap::new(),
+        }
+    }
+
+    /// The health a caller should observe right now: the registration state,
+    /// unless a rescan-degraded window is still open, in which case that
+    /// takes precedence regardless of what the underlying registration says.
+    fn effective_health(&self, now_ms: u64) -> WatchHealth {
+        if let Some(until) = self.rescan_degraded_until_ms {
+            if now_ms < until {
+                return WatchHealth::Degraded("rescan required".to_owned());
+            }
+        }
+        self.registration_health.clone()
+    }
+}
+
+#[derive(Default)]
+struct RegistryState {
+    repos: HashMap<WatchKey, RepoRuntime>,
+    /// Exact registered directory -> owning repos. A shared `common_dir`
+    /// (primary root + its linked worktrees) is registered once; one write
+    /// event under it fans out to every owner (ticket Constraints / Lead
+    /// Disposition D2). Kept as its own map (not derived from `repos` on
+    /// every event) because the event pipeline's hot path is "which repos
+    /// own this path", not "what does this repo own".
+    dir_index: HashMap<PathBuf, HashSet<WatchKey>>,
+}
+
+struct RegistryInner {
+    epoch_source: Arc<dyn EpochSource>,
+    git_stats: Arc<GitSpawnStats>,
+    watcher: Mutex<Option<RecommendedWatcher>>,
+    state: Mutex<RegistryState>,
+    config: WatchConfig,
+    linux_process_budget: usize,
+}
+
+/// The one shared handle everything routes through: one `notify` watcher
+/// instance, one background event-loop task, and the per-repo bookkeeping
+/// `reconcile` (a later checkpoint) drives via [`WatchRegistry::arm_now`]/
+/// [`WatchRegistry::disarm_now`].
+#[derive(Clone)]
+pub(crate) struct WatchRegistry {
+    inner: Arc<RegistryInner>,
+}
+
+impl WatchRegistry {
+    /// Constructs the shared `notify` watcher and, if called from inside a
+    /// Tokio runtime, spawns the background event-loop task. Outside a
+    /// runtime (a plain `cargo test -p ws-dashboard-daemon --lib` unit test
+    /// constructing a `WatchRegistry` directly, with no `#[tokio::test]`)
+    /// the registry still builds and `arm_now`/`disarm_now` still run their
+    /// synchronous halves inline - only the async event-consumption loop is
+    /// skipped, which is exactly the piece those tests do not need.
+    pub(crate) fn new(
+        epoch_source: Arc<dyn EpochSource>,
+        git_stats: Arc<GitSpawnStats>,
+        config: WatchConfig,
+    ) -> Self {
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<notify::Result<Event>>();
+        let watcher = notify::recommended_watcher(move |res| {
+            // The `notify` callback fires on its own internal thread; this
+            // send is the only work it does, so a slow consumer never stalls
+            // the OS-level watch delivery.
+            let _ = event_tx.send(res);
+        })
+        .map_err(|error| {
+            tracing::warn!(%error, "failed to construct filesystem watcher; every repo will report Degraded and fall back to poll-driven TTL");
+        })
+        .ok();
+
+        let inner = Arc::new(RegistryInner {
+            epoch_source,
+            git_stats,
+            watcher: Mutex::new(watcher),
+            state: Mutex::new(RegistryState::default()),
+            config,
+            linux_process_budget: linux_process_budget(),
+        });
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(run_event_loop(inner.clone(), event_rx));
+        } else {
+            tracing::debug!(
+                "WatchRegistry constructed outside a Tokio runtime; the \
+                 background event-consumption loop was not started (expected \
+                 in a plain #[test], not in production)"
+            );
+        }
+
+        Self { inner }
+    }
+
+    /// The health `reconcile` (later checkpoint) and `git_toolbar.rs`'s TTL
+    /// selection (a later checkpoint) should observe for `key` right now.
+    /// Unknown keys are `Unarmed` - the same fallback as a repo that has
+    /// never been armed.
+    pub(crate) fn health_for(&self, key: &WatchKey) -> WatchHealth {
+        let now = clock_ms();
+        let state = self.inner.state.lock().expect("watch registry state lock poisoned");
+        state
+            .repos
+            .get(key)
+            .map(|repo| repo.effective_health(now))
+            .unwrap_or(WatchHealth::Unarmed)
+    }
+
+    /// Arm (or re-arm) `key` against `targets`. Runs the `git status` spawn
+    /// and (Linux) the directory walk on whatever thread calls this, so
+    /// callers driving this from an async context should do so via
+    /// `spawn_blocking` (checkpoint 6's `reconcile` does).
+    pub(crate) fn arm_now(&self, key: &WatchKey, targets: &WatchTargets) {
+        do_arm(&self.inner, key, targets);
+    }
+
+    /// Disarm `key`: drop its OS-level registration (unregistering any
+    /// directory no other repo still owns) and report [`WatchHealth::Unarmed`]
+    /// from then on. Cheap - no `git` spawn, no filesystem walk - so, unlike
+    /// `arm_now`, callers do not need to offload this to a blocking pool.
+    pub(crate) fn disarm_now(&self, key: &WatchKey) {
+        do_disarm(&self.inner, key);
+    }
+}
+
+async fn run_event_loop(
+    inner: Arc<RegistryInner>,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<notify::Result<Event>>,
+) {
+    // Ticks the open debounce windows closed independently of new events
+    // arriving - a repo whose last write landed just inside a window still
+    // needs its trailing bump even if nothing else ever touches it again.
+    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(20));
+    loop {
+        tokio::select! {
+            received = events.recv() => {
+                match received {
+                    Some(Ok(event)) => handle_fs_event(&inner, event),
+                    Some(Err(error)) => {
+                        tracing::warn!(%error, "filesystem watcher reported an error");
+                    }
+                    None => break,
+                }
+            }
+            _ = ticker.tick() => {
+                flush_debounce_windows(&inner);
+            }
+        }
+    }
+}
+
+/// Step 5: an event owns a set of repos (via [`owners_for_path`]), each path
+/// is classified against that repo's [`ArmedRepo`], and a classified event
+/// feeds that repo/kind's [`Debouncer`]. A `need_rescan` event (the OS
+/// watcher itself reporting possibly-dropped events) skips classification
+/// entirely and degrades every currently-armed repo for one TTL window
+/// instead - there is no path to classify against.
+fn handle_fs_event(inner: &RegistryInner, event: Event) {
+    let now = clock_ms();
+    if event.need_rescan() {
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        let until = now.saturating_add(inner.config.armed_ttl_ms);
+        let keys: Vec<WatchKey> = state
+            .repos
+            .iter()
+            .filter(|(_, repo)| matches!(repo.registration_health, WatchHealth::Armed))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &keys {
+            if let Some(repo) = state.repos.get_mut(key) {
+                repo.rescan_degraded_until_ms = Some(until);
+                repo.last_event_at_ms = Some(now);
+            }
+        }
+        drop(state);
+        for key in &keys {
+            inner.epoch_source.bump_worktree(key);
+            inner.epoch_source.bump_refs(key);
+        }
+        return;
+    }
+
+    for path in &event.paths {
+        let owners = {
+            let state = inner.state.lock().expect("watch registry state lock poisoned");
+            owners_for_path(&state.dir_index, path)
+        };
+        if owners.is_empty() {
+            continue;
+        }
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        for owner in &owners {
+            let Some(repo) = state.repos.get_mut(owner) else {
+                continue;
+            };
+            repo.last_event_at_ms = Some(now);
+            let Some(armed) = repo.armed.as_ref() else {
+                continue;
+            };
+            if is_ignore_rule_file(path, armed) {
+                repo.ignore_stale = true;
+                let debouncer = repo
+                    .debounce
+                    .entry(EpochKind::Worktree)
+                    .or_insert_with(|| Debouncer::new(inner.config.debounce_ms));
+                if debouncer.record_event(now) == DebounceEvent::BumpNow {
+                    inner.epoch_source.bump_worktree(owner);
+                }
+                continue;
+            }
+            let Some(kind) = classify(path, armed) else {
+                continue;
+            };
+            let debouncer = repo
+                .debounce
+                .entry(kind)
+                .or_insert_with(|| Debouncer::new(inner.config.debounce_ms));
+            if debouncer.record_event(now) == DebounceEvent::BumpNow {
+                match kind {
+                    EpochKind::Worktree => inner.epoch_source.bump_worktree(owner),
+                    EpochKind::Refs => inner.epoch_source.bump_refs(owner),
+                }
+            }
+        }
+    }
+}
+
+fn flush_debounce_windows(inner: &RegistryInner) {
+    let now = clock_ms();
+    let mut due: Vec<(WatchKey, EpochKind)> = Vec::new();
+    {
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        for (key, repo) in state.repos.iter_mut() {
+            for (kind, debouncer) in repo.debounce.iter_mut() {
+                if debouncer.poll_close(now) {
+                    due.push((key.clone(), *kind));
+                }
+            }
+        }
+    }
+    for (key, kind) in due {
+        match kind {
+            EpochKind::Worktree => inner.epoch_source.bump_worktree(&key),
+            EpochKind::Refs => inner.epoch_source.bump_refs(&key),
+        }
+    }
+}
+
+/// Which repos own `path`: every `dir_index` entry whose registered
+/// directory is an ancestor of (or equal to) `path`. On Linux this is
+/// normally a single directory match per event (the walk registers
+/// individual directories `NonRecursive`, so an event's parent is exactly
+/// one registered entry) but a shared `common_dir` target still yields
+/// several owners for one event, which is the fanout D2 requires. On
+/// Windows/macOS (recursive roots), this is the only way to attribute a deep
+/// event at all - the registered entry is the worktree/git-dir root, several
+/// path components above the event itself.
+fn owners_for_path(dir_index: &HashMap<PathBuf, HashSet<WatchKey>>, path: &Path) -> HashSet<WatchKey> {
+    let mut owners = HashSet::new();
+    for (target, keys) in dir_index {
+        if path.starts_with(target) {
+            owners.extend(keys.iter().cloned());
+        }
+    }
+    owners
+}
+
+/// Replace `key`'s previously-registered directories with `new_dirs` in
+/// `dir_index`, unregistering (via the shared `notify` watcher) any
+/// directory no repo owns afterward. Shared by `finish_arm` (re-arm) and
+/// `do_disarm` (`new_dirs` is empty) so the dedup/fanout bookkeeping has one
+/// implementation regardless of which direction triggered it.
+fn update_dir_index(inner: &RegistryInner, key: &WatchKey, old_dirs: &[PathBuf], new_dirs: &[PathBuf]) {
+    let new_set: HashSet<&PathBuf> = new_dirs.iter().collect();
+    let mut to_unwatch = Vec::new();
+    {
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        for dir in old_dirs {
+            if new_set.contains(dir) {
+                continue;
+            }
+            if let Some(owners) = state.dir_index.get_mut(dir) {
+                owners.remove(key);
+                if owners.is_empty() {
+                    state.dir_index.remove(dir);
+                    to_unwatch.push(dir.clone());
+                }
+            }
+        }
+        for dir in new_dirs {
+            state.dir_index.entry(dir.clone()).or_default().insert(key.clone());
+        }
+    }
+    if !to_unwatch.is_empty() {
+        let mut watcher_guard = inner.watcher.lock().expect("watcher lock poisoned");
+        if let Some(watcher) = watcher_guard.as_mut() {
+            for dir in &to_unwatch {
+                if let Err(error) = watcher.unwatch(dir) {
+                    tracing::debug!(?dir, %error, "unwatch failed (already gone is fine)");
+                }
+            }
+        }
+    }
+}
+
+/// Finish an arm attempt: record the outcome in `state.repos`, reconcile
+/// `dir_index`, and - on a successful transition to [`WatchHealth::Armed`] -
+/// bump both epochs. That last part is the shared post-arm rule (ticket
+/// Constraints): a slot filled while `Unarmed` carries epoch 0, and without
+/// this bump it stays valid for the whole armed TTL even though it was
+/// computed during a window with no watcher running, including whatever
+/// changed *during* arming itself (the `git status` spawn and, on Linux, the
+/// directory walk both take real wall-clock time against a live worktree).
+fn finish_arm(
+    inner: &RegistryInner,
+    key: &WatchKey,
+    targets: &WatchTargets,
+    health: WatchHealth,
+    registered_dirs: Vec<PathBuf>,
+    ignore: IgnoreSet,
+) {
+    let now = clock_ms();
+    let armed_repo = matches!(health, WatchHealth::Armed).then(|| ArmedRepo {
+        git_dir: targets.git_dir.clone(),
+        common_dir: targets.common_dir.clone(),
+        ignore,
+    });
+
+    let old_dirs = {
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        let entry = state
+            .repos
+            .entry(key.clone())
+            .or_insert_with(|| RepoRuntime::new(targets.clone()));
+        let old_dirs = std::mem::take(&mut entry.registered_dirs);
+        entry.targets = targets.clone();
+        entry.registration_health = health.clone();
+        entry.armed = armed_repo;
+        entry.registered_dirs = registered_dirs.clone();
+        entry.last_arm_attempt_ms = Some(now);
+        entry.rescan_degraded_until_ms = None;
+        entry.ignore_stale = false;
+        old_dirs
+    };
+    update_dir_index(inner, key, &old_dirs, &registered_dirs);
+
+    if matches!(health, WatchHealth::Armed) {
+        inner.epoch_source.bump_worktree(key);
+        inner.epoch_source.bump_refs(key);
+    }
+}
+
+fn do_disarm(inner: &RegistryInner, key: &WatchKey) {
+    let old_dirs = {
+        let mut state = inner.state.lock().expect("watch registry state lock poisoned");
+        let Some(repo) = state.repos.get_mut(key) else {
+            return;
+        };
+        repo.registration_health = WatchHealth::Unarmed;
+        repo.armed = None;
+        repo.rescan_degraded_until_ms = None;
+        repo.debounce.clear();
+        std::mem::take(&mut repo.registered_dirs)
+    };
+    update_dir_index(inner, key, &old_dirs, &[]);
+    // Shared post-arm/disarm rule (see `finish_arm`'s doc comment): the next
+    // poll must recompute rather than serve a slot stamped valid while this
+    // repo was still armed.
+    inner.epoch_source.bump_worktree(key);
+    inner.epoch_source.bump_refs(key);
+}
+
+fn do_arm(inner: &RegistryInner, key: &WatchKey, targets: &WatchTargets) {
+    if inner.config.mode == WatchMode::Off {
+        finish_arm(inner, key, targets, WatchHealth::Unarmed, Vec::new(), IgnoreSet::empty());
+        return;
+    }
+    let forced = inner.config.mode == WatchMode::Force;
+    if !forced && !mount_allows_watching(&targets.worktree) {
+        finish_arm(
+            inner,
+            key,
+            targets,
+            WatchHealth::Degraded("filesystem does not deliver events".to_owned()),
+            Vec::new(),
+            IgnoreSet::empty(),
+        );
+        return;
+    }
+
+    let ignore = IgnoreSet::derive(&targets.worktree, &inner.git_stats);
+
+    #[cfg(target_os = "linux")]
+    let outcome = do_arm_linux(inner, targets, &ignore);
+    #[cfg(not(target_os = "linux"))]
+    let outcome = do_arm_recursive(inner, targets);
+
+    match outcome {
+        Ok(dirs) => finish_arm(inner, key, targets, WatchHealth::Armed, dirs, ignore),
+        Err(reason) => finish_arm(inner, key, targets, WatchHealth::Degraded(reason), Vec::new(), ignore),
+    }
+}
+
+/// Linux backend: the gitignore-aware walk ([`plan_watch_set`]) plus a
+/// per-directory `NonRecursive` registration, all-or-nothing - a partial
+/// registration would leave a repo reporting `Armed` while silently missing
+/// events under whichever directory failed, which is the exact
+/// worse-than-`Unarmed` failure mode the pre-arm mount gate exists to avoid
+/// for the whole-filesystem case.
+#[cfg(target_os = "linux")]
+fn do_arm_linux(inner: &RegistryInner, targets: &WatchTargets, ignore: &IgnoreSet) -> Result<Vec<PathBuf>, String> {
+    let dirs = plan_watch_set(
+        &targets.worktree,
+        &targets.git_dir,
+        &targets.common_dir,
+        ignore,
+        inner.config.max_dirs,
+    )
+    .map_err(|TooLarge { found }| format!("watch set too large: {found} dirs"))?;
+
+    let existing: HashSet<PathBuf> = {
+        let state = inner.state.lock().expect("watch registry state lock poisoned");
+        state.dir_index.keys().cloned().collect()
+    };
+    let new_dir_count = dirs.iter().filter(|dir| !existing.contains(*dir)).count();
+    {
+        let state = inner.state.lock().expect("watch registry state lock poisoned");
+        let used = state.dir_index.len();
+        if used + new_dir_count > inner.linux_process_budget {
+            return Err("process-wide inotify budget exhausted".to_owned());
+        }
+    }
+
+    let mut watcher_guard = inner.watcher.lock().expect("watcher lock poisoned");
+    let Some(watcher) = watcher_guard.as_mut() else {
+        return Err("watcher unavailable".to_owned());
+    };
+    let mut newly_registered: Vec<PathBuf> = Vec::new();
+    for dir in &dirs {
+        if existing.contains(dir) {
+            continue;
+        }
+        if let Err(error) = watcher.watch(dir.as_path(), RecursiveMode::NonRecursive) {
+            tracing::warn!(?dir, %error, "failed to register inotify watch; unwinding this arm attempt");
+            for registered in &newly_registered {
+                let _ = watcher.unwatch(registered);
+            }
+            return Err(format!("arm error: {error}"));
+        }
+        newly_registered.push(dir.clone());
+    }
+    Ok(dirs)
+}
+
+/// Windows/macOS backend: one kernel-level recursive watch per target (at
+/// most three: worktree, `git_dir`, `common_dir` - deduplicated when they
+/// coincide, as for a primary root where `git_dir == common_dir`), no walk,
+/// no cap (Lead Disposition, ticket Decisions: recursive registration has no
+/// analogue to inotify's per-process watch-count ceiling).
+#[cfg(not(target_os = "linux"))]
+fn do_arm_recursive(inner: &RegistryInner, targets: &WatchTargets) -> Result<Vec<PathBuf>, String> {
+    let mut roots = vec![targets.worktree.clone()];
+    if !roots.contains(&targets.git_dir) {
+        roots.push(targets.git_dir.clone());
+    }
+    if !roots.contains(&targets.common_dir) {
+        roots.push(targets.common_dir.clone());
+    }
+
+    let mut watcher_guard = inner.watcher.lock().expect("watcher lock poisoned");
+    let Some(watcher) = watcher_guard.as_mut() else {
+        return Err("watcher unavailable".to_owned());
+    };
+    let mut registered = Vec::new();
+    for root in &roots {
+        if let Err(error) = watcher.watch(root, RecursiveMode::Recursive) {
+            tracing::warn!(?root, %error, "failed to register recursive watch; unwinding this arm attempt");
+            for done in &registered {
+                let _ = watcher.unwatch(done);
+            }
+            return Err(format!("arm error: {error}"));
+        }
+        registered.push(root.clone());
+    }
+    Ok(registered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -682,5 +1554,121 @@ mod tests {
         assert!(error.found > 3);
 
         remove_temp(&base);
+    }
+
+    // --- Debouncer -------------------------------------------------------
+
+    #[test]
+    fn debounce_single_event_bumps_leading_only_no_trailing_bump() {
+        let mut debouncer = Debouncer::new(100);
+        assert_eq!(debouncer.record_event(0), DebounceEvent::BumpNow);
+        // Window closes (100ms since the only event); no further event
+        // arrived, so no trailing bump.
+        assert!(!debouncer.poll_close(100));
+        assert!(!debouncer.is_open(), "the window must actually close");
+    }
+
+    #[test]
+    fn debounce_two_events_in_one_window_bump_exactly_twice() {
+        let mut debouncer = Debouncer::new(100);
+        assert_eq!(debouncer.record_event(0), DebounceEvent::BumpNow);
+        assert_eq!(debouncer.record_event(50), DebounceEvent::Deferred);
+        // Not yet due: last event at 50, only 40ms have passed.
+        assert!(!debouncer.poll_close(90));
+        assert!(debouncer.poll_close(150), "trailing bump must fire once the window closes");
+    }
+
+    #[test]
+    fn debounce_a_thousand_events_in_one_window_still_bump_exactly_twice() {
+        let mut debouncer = Debouncer::new(100);
+        assert_eq!(debouncer.record_event(0), DebounceEvent::BumpNow);
+        for tick in 1..1000u64 {
+            assert_eq!(debouncer.record_event(tick % 90), DebounceEvent::Deferred);
+        }
+        assert!(debouncer.poll_close(1200));
+    }
+
+    #[test]
+    fn debounce_window_reopens_after_closing() {
+        let mut debouncer = Debouncer::new(100);
+        assert_eq!(debouncer.record_event(0), DebounceEvent::BumpNow);
+        assert!(!debouncer.poll_close(100));
+        // A new event after the window closed opens a fresh window and
+        // bumps leading again.
+        assert_eq!(debouncer.record_event(500), DebounceEvent::BumpNow);
+    }
+
+    #[test]
+    fn debounce_continuous_events_still_close_at_the_five_x_cap() {
+        // A never-ending stream of events (each one within window_ms of the
+        // last) must not suppress every bump forever - the cap bounds it.
+        let mut debouncer = Debouncer::new(100);
+        assert_eq!(debouncer.record_event(0), DebounceEvent::BumpNow);
+        let mut now = 0u64;
+        while now < 480 {
+            now += 30;
+            assert_eq!(debouncer.record_event(now), DebounceEvent::Deferred);
+            assert!(
+                !debouncer.poll_close(now),
+                "must not close yet at t={now} (window keeps re-extending, cap not hit)"
+            );
+        }
+        // At t=500 the cap (5 * 100ms = 500ms from the first event at t=0)
+        // is crossed even though the last event was recent.
+        assert!(debouncer.poll_close(500), "the 5x cap must force a close");
+    }
+
+    // --- mount allowlist (Linux) -----------------------------------------
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mount_allows_watching_allows_the_process_temp_dir() {
+        // TMPDIR-backed test fixtures are local VFS (tmpfs or the disk
+        // filesystem backing /tmp) and must not be excluded by the
+        // allowlist, per the ticket Constraints - otherwise Phase 4's own
+        // integration tier would fail on any host whose temp dir is not on a
+        // disk filesystem.
+        let dir = std::env::temp_dir();
+        assert!(
+            mount_allows_watching(&dir),
+            "the process temp dir ({dir:?}) must be on an allowlisted local filesystem"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mount_allows_watching_rejects_wsl2_drvfs_mnt_when_present() {
+        // The concrete case the ticket's Constraints call out: `/mnt/*`
+        // (drvfs/9p) is this project's own dogfood WSL2 topology and must
+        // never report as watch-allowed. Skip on a host with no `/mnt/c`
+        // rather than asserting a specific mount exists.
+        let probe = Path::new("/mnt/c");
+        if !probe.exists() {
+            return;
+        }
+        assert!(
+            !mount_allows_watching(probe),
+            "/mnt/c (drvfs/9p) must be rejected by the allowlist"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mount_allows_watching_rejects_an_unresolvable_path_under_a_foreign_mount() {
+        // A path that does not exist yet, under a foreign mount, must still
+        // resolve to that mount's (rejected) fstype via the raw-path
+        // fallback rather than defaulting to the (locally allowlisted) root
+        // filesystem.
+        let probe = Path::new("/mnt/c/this-does-not-exist-ws-dashboard-fixture");
+        if !Path::new("/mnt/c").exists() {
+            return;
+        }
+        assert!(!mount_allows_watching(probe));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_inotify_process_budget_is_bounded_by_the_8192_ceiling() {
+        assert!(linux_inotify_process_budget() <= 8_192);
     }
 }
