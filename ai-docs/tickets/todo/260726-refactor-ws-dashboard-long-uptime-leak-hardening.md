@@ -122,6 +122,40 @@ within the timeout instead of blocking indefinitely; blocking-pool threads do no
 accumulate under repeated stalled polls; a credential-required fetch fails fast
 rather than hanging.
 
+**Scope update (2026-07-26, from `260726-refactor-ws-dashboard-git-fs-watch-invalidation`
+Phase 1, commit `0c48065a`).** The bounded-timeout half of this phase is
+delivered: `git_exec::capture` now wraps every toolbar/discovery/Activity git
+invocation with a deadline, kills the child on expiry, and drains both pipes
+concurrently. `WS_DASHBOARD_GIT_TIMEOUT_MS` sets the budget (default 10 000;
+`0` restores unbounded waiting). What remains of this phase as originally written
+is `GIT_TERMINAL_PROMPT=0` / non-interactive credential handling and the optional
+single-flight, plus the two items below that the seam introduced or left standing.
+
+Two additions this phase should now own:
+
+- **Detached reader threads on timeout.** When the budget expires, `capture`
+  kills and reaps the direct child but does **not** join its two reader threads,
+  because a descendant that inherited the pipes keeps them open and joining
+  would be unbounded again. Each timeout therefore detaches two threads plus
+  two pipe read handles, which end only when the pipe finally closes. Bounded by
+  timeout frequency in normal operation — but an immortal descendant (an ssh
+  master with `ControlPersist`, `git-credential-cache--daemon`) makes the leak
+  permanent, which is exactly this ticket's failure mode. `GIT_TERMINAL_PROMPT=0`
+  and non-interactive credential handling reduce how often those descendants
+  exist at all, so the two items are related, not merely adjacent.
+- **`kill()`/`wait()` are themselves unbounded against an unkillable child.** A
+  git process wedged in uninterruptible I/O — a disconnected 9p/NFS/CIFS mount,
+  which is a live risk for a daemon that runs under WSL and over network shares —
+  does not die on kill, so the reaping call blocks. The seam's bound therefore
+  means "bounded except an unkillable child". Deciding whether that case needs
+  its own detection (rather than a deeper timeout, which cannot help) belongs
+  here.
+
+Verification boundary for the additions: after N induced timeouts against a
+descendant-holding child, thread and file-descriptor counts return to baseline
+once the descendant exits; an unkillable-child case is either detected and
+reported or explicitly documented as out of reach.
+
 ### Phase 3: Bounded-map + half-open cleanup (DocumentWriteLocks, WS heartbeat, reqwest timeout)
 
 Add eviction to `DocumentWriteLocks.locks` (e.g. drop the entry when its `Arc`

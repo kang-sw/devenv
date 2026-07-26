@@ -319,7 +319,23 @@ dropped tickets live in hidden archive dirs and git history.
   `ai-docs/.plans/2026-07/26-1315-git-fs-watch-invalidation.md`. Spec addressing
   via `## Spec Impact` (`#260524-ws-dashboard-git-aware-workroot-toolbar`,
   Contract-first: no). Sage combined = passed (design concern, all findings
-  applied).
+  applied). **Phase 1 landed 2026-07-26 (`0c48065a`, impl plan
+  `ai-docs/.plans/2026-07/26-1511-git-exec-seam.md`)** — the git-exec seam ships
+  with `GET /api/dashboard/diag/git` and `WS_DASHBOARD_GIT_TIMEOUT_MS` (default
+  10 000; `0` = unbounded), spec'd at
+  `#260726-dashboard-git-invocation-budget-and-spawn-diagnostics`. Two facts to
+  carry into Phase 2: the phase's own acceptance number (spawns/s from two diag
+  reads 60 s apart on the Windows dogfood host) was **never measured** — the
+  sandbox is Linux, so whichever phase needs it must take it; and the `#[cfg(windows)]`
+  test counterparts were written but never executed on Windows. The seam's bound
+  means "bounded except a child wedged in uninterruptible I/O"; that residue plus
+  the per-timeout detached reader threads are forwarded to
+  `260726-refactor-ws-dashboard-long-uptime-leak-hardening` Phase 2, whose
+  bounded-timeout half is now delivered. `git_worktree.rs`'s 8 direct git spawns
+  stay outside the seam and counters by design →
+  `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` (todo; the
+  budget, not the counting, is the open question, since `worktree add` can
+  legitimately outrun any poll-path budget).
 
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin

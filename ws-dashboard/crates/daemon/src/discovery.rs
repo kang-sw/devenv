@@ -4,7 +4,6 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -14,6 +13,9 @@ use ws_dashboard_core::{
     WorkRootId, WorkRootKind, WorkRootStatus, WorkRootView, WorkspaceView,
 };
 
+use crate::git_exec::{
+    capture, git_timeout_from_env, GitFailureExpectation, GitSpawnStats,
+};
 use crate::resources::DashboardResourcesProvider;
 use crate::work_root_files::{RegisteredWorkRoot, WorkRootProvenance};
 
@@ -39,14 +41,37 @@ impl LocalWorkRootCandidate {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct LocalDashboardResourcesProvider {
     server_id: OpaqueId,
     server_label: String,
     candidates: Vec<LocalWorkRootCandidate>,
     registry_activations: HashMap<WorkRootId, WorkRootActivation>,
     git_probes: GitProbeCache,
+    /// Shared spawn counters (the daemon's `AppState` counters when set via
+    /// `with_git_spawn_stats`, otherwise a private throwaway instance). `Arc`
+    /// so this cheap-to-clone builder-style struct can hold it without a
+    /// lifetime parameter, mirroring `git_probes`.
+    git_stats: Arc<GitSpawnStats>,
 }
+
+// Hand-written rather than derived (which the non-comparable `GitSpawnStats`
+// blocks) so this type keeps the `Eq`/`PartialEq` surface it had before the
+// git_exec seam. `git_stats` is deliberately EXCLUDED from equality: the spawn
+// counters are ambient instrumentation, not part of a provider's identity -
+// two providers that would discover the same resources must stay equal
+// regardless of which counter handle they report into.
+impl PartialEq for LocalDashboardResourcesProvider {
+    fn eq(&self, other: &Self) -> bool {
+        self.server_id == other.server_id
+            && self.server_label == other.server_label
+            && self.candidates == other.candidates
+            && self.registry_activations == other.registry_activations
+            && self.git_probes == other.git_probes
+    }
+}
+
+impl Eq for LocalDashboardResourcesProvider {}
 
 impl LocalDashboardResourcesProvider {
     pub fn new(candidates: Vec<LocalWorkRootCandidate>) -> Self {
@@ -63,6 +88,7 @@ impl LocalDashboardResourcesProvider {
             candidates,
             registry_activations,
             git_probes: GitProbeCache::default(),
+            git_stats: Arc::new(GitSpawnStats::default()),
         }
     }
 
@@ -74,16 +100,23 @@ impl LocalDashboardResourcesProvider {
         self
     }
 
+    /// Share a caller-owned spawn-counter handle (the daemon's `AppState`
+    /// counters) instead of this provider's own private, discarded instance.
+    pub fn with_git_spawn_stats(mut self, git_stats: Arc<GitSpawnStats>) -> Self {
+        self.git_stats = git_stats;
+        self
+    }
+
     pub fn dashboard_resources_with_registry_sync(&self) -> DashboardResourcesSync {
         let mut workspaces = BTreeMap::<WorkspaceKey, WorkspaceBuilder>::new();
         let mut discovered_registry_roots = Vec::new();
         let mut pruned_work_root_ids = Vec::new();
 
         for candidate in &self.candidates {
-            let owner = discover_work_root(&candidate.path, &self.git_probes);
+            let owner = discover_work_root(&candidate.path, &self.git_probes, &self.git_stats);
             let workspace_key = owner.workspace_key.clone();
             let linked_paths = if owner.availability == WorkRootAvailability::Available {
-                self.git_probes.worktree_paths(&candidate.path)
+                self.git_probes.worktree_paths(&candidate.path, &self.git_stats)
             } else {
                 Vec::new()
             };
@@ -99,7 +132,8 @@ impl LocalDashboardResourcesProvider {
                 {
                     continue;
                 }
-                let mut linked = discover_work_root(&linked_path, &self.git_probes);
+                let mut linked =
+                    discover_work_root(&linked_path, &self.git_probes, &self.git_stats);
                 linked.workspace_key = workspace_key.clone();
                 let linked_activation = self
                     .registry_activations
@@ -330,7 +364,11 @@ struct DiscoveredWorkRoot {
     error: Option<String>,
 }
 
-fn discover_work_root(path: &Path, git_probes: &GitProbeCache) -> DiscoveredWorkRoot {
+fn discover_work_root(
+    path: &Path,
+    git_probes: &GitProbeCache,
+    git_stats: &GitSpawnStats,
+) -> DiscoveredWorkRoot {
     let normalized = normalize_candidate_path(path);
 
     // CONTRACT: availability (`moved` / `missing` / `inaccessible`) is decided
@@ -339,7 +377,9 @@ fn discover_work_root(path: &Path, git_probes: &GitProbeCache) -> DiscoveredWork
     // so a workRoot whose directory disappears is still reported on the very
     // next request.
     let discovered = match fs::metadata(&normalized) {
-        Ok(metadata) if metadata.is_dir() => discover_existing_dir(normalized, git_probes),
+        Ok(metadata) if metadata.is_dir() => {
+            discover_existing_dir(normalized, git_probes, git_stats)
+        }
         Ok(_) => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
@@ -381,7 +421,11 @@ fn discover_work_root(path: &Path, git_probes: &GitProbeCache) -> DiscoveredWork
     discovered
 }
 
-fn discover_existing_dir(path: PathBuf, git_probes: &GitProbeCache) -> DiscoveredWorkRoot {
+fn discover_existing_dir(
+    path: PathBuf,
+    git_probes: &GitProbeCache,
+    git_stats: &GitSpawnStats,
+) -> DiscoveredWorkRoot {
     if let Err(error) = fs::read_dir(&path) {
         return discovered_unusable(
             path,
@@ -395,7 +439,7 @@ fn discover_existing_dir(path: PathBuf, git_probes: &GitProbeCache) -> Discovere
         );
     }
 
-    match git_probes.discover(&path) {
+    match git_probes.discover(&path, git_stats) {
         Some(git) => DiscoveredWorkRoot {
             workspace_key: WorkspaceKey {
                 id: OpaqueId::from(format!(
@@ -590,8 +634,8 @@ impl fmt::Debug for GitProbeCache {
 }
 
 // Identity comparison: two handles are equal exactly when they share one memo.
-// Keeps `LocalDashboardResourcesProvider`'s derived `Eq` meaningful without
-// making memo contents part of provider equality.
+// Keeps `LocalDashboardResourcesProvider`'s hand-written `Eq` meaningful
+// without making memo contents part of provider equality.
 impl PartialEq for GitProbeCache {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
@@ -611,19 +655,19 @@ impl GitProbeCache {
         }
     }
 
-    fn discover(&self, path: &Path) -> Option<GitDiscovery> {
+    fn discover(&self, path: &Path, git_stats: &GitSpawnStats) -> Option<GitDiscovery> {
         self.inner
             .discovery
             .get_or_probe(&GitProbeKey::for_path(path), self.inner.ttl, || {
-                GitDiscovery::probe(path)
+                GitDiscovery::probe(path, git_stats)
             })
     }
 
-    fn worktree_paths(&self, path: &Path) -> Vec<PathBuf> {
+    fn worktree_paths(&self, path: &Path, git_stats: &GitSpawnStats) -> Vec<PathBuf> {
         self.inner
             .worktree_paths
             .get_or_probe(&GitProbeKey::for_path(path), self.inner.ttl, || {
-                probe_git_worktree_paths(path)
+                probe_git_worktree_paths(path, git_stats)
             })
     }
 
@@ -660,28 +704,36 @@ struct GitDiscovery {
 
 impl GitDiscovery {
     /// Spawns `git`. Call through `GitProbeCache::discover`, never directly.
-    fn probe(path: &Path) -> Option<Self> {
+    fn probe(path: &Path, git_stats: &GitSpawnStats) -> Option<Self> {
         // Single `git rev-parse` invocation queries all three values at once
         // (one output line per query flag, in flag order) instead of
         // spawning three separate `git` processes per work root.
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(path)
-            .args([
+        //
+        // ExpectedNonZero: this is the check that answers "is this root a
+        // git repo at all", and it exits non-zero routinely for a
+        // plain-directory root - warning here would produce a continuous
+        // stream at one warning per root per probe-TTL expiry.
+        let outcome = capture(
+            git_stats,
+            path,
+            &[
                 "rev-parse",
                 "--show-toplevel",
                 "--path-format=absolute",
                 "--git-common-dir",
                 "--git-dir",
-            ])
-            .output()
-            .ok()?;
+            ],
+            GitFailureExpectation::ExpectedNonZero,
+            git_timeout_from_env(),
+        )
+        .ok()?;
 
-        if !output.status.success() {
-            return None;
-        }
-
-        let stdout = String::from_utf8(output.stdout).ok()?;
+        // Strict UTF-8, as before the git_exec seam: a repo whose paths are not
+        // valid UTF-8 must classify as "not a git root" rather than yield
+        // replacement-char-mangled `PathBuf`s that fail every later
+        // filesystem call. `stdout_strict` also rejects a truncated collection,
+        // so a short read never parses as a complete three-line answer.
+        let stdout = outcome.stdout_strict()?;
         let mut lines = stdout.lines();
         let worktree_dir = non_empty_path(lines.next()?)?;
         let common_dir = non_empty_path(lines.next()?)?;
@@ -717,20 +769,29 @@ fn non_empty_path(line: &str) -> Option<PathBuf> {
 }
 
 /// Spawns `git`. Call through `GitProbeCache::worktree_paths`, never directly.
-fn probe_git_worktree_paths(path: &Path) -> Vec<PathBuf> {
-    let output = match Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["worktree", "list", "--porcelain"])
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
-        _ => return Vec::new(),
-    };
-    let Ok(raw) = String::from_utf8(output.stdout) else {
+fn probe_git_worktree_paths(path: &Path, git_stats: &GitSpawnStats) -> Vec<PathBuf> {
+    // Runs only after the root is already known to be a repo (called from
+    // `dashboard_resources_with_registry_sync` only once `discover_work_root`
+    // reported it `Available`), so a non-zero exit here is genuinely
+    // surprising.
+    let Ok(outcome) = capture(
+        git_stats,
+        path,
+        &["worktree", "list", "--porcelain"],
+        GitFailureExpectation::Unexpected,
+        git_timeout_from_env(),
+    ) else {
         return Vec::new();
     };
-    raw.lines()
+    // Strict UTF-8, as before the git_exec seam: non-UTF-8 worktree paths
+    // yield no linked worktrees rather than mangled ones. `stdout_strict` also
+    // rejects a truncated collection, so a short read never looks like a repo
+    // with fewer worktrees than it has.
+    let Some(stdout) = outcome.stdout_strict() else {
+        return Vec::new();
+    };
+    stdout
+        .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
         .map(|path| normalize_candidate_path(Path::new(path)))
         .collect()
@@ -858,6 +919,13 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
+    // Test-fixture-only helpers (`git_available`/`git`, below) spawn `git`
+    // directly rather than through `git_exec::capture`, mirroring the
+    // fixture-setup pattern used elsewhere in this crate (e.g.
+    // `tests/routes.rs`'s own `run_git`/`init_git_repo`) - these seed repo
+    // state for a test, they are not part of the production spawn-counting
+    // seam.
+    use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -938,13 +1006,14 @@ mod tests {
         // A TTL far longer than the test: only the `git` probes are memoized,
         // so availability must still flip the moment the directory goes away.
         let probes = GitProbeCache::with_ttl(Duration::from_secs(600));
+        let stats = GitSpawnStats::default();
 
-        let available = discover_work_root(&root, &probes);
+        let available = discover_work_root(&root, &probes, &stats);
         assert_eq!(available.availability, WorkRootAvailability::Available);
         assert_eq!(probes.inner.discovery.len(), 1);
 
         remove_temp(&root);
-        let gone = discover_work_root(&root, &probes);
+        let gone = discover_work_root(&root, &probes, &stats);
 
         assert_ne!(
             gone.availability,
@@ -1035,8 +1104,9 @@ mod tests {
         // hashing so the direct path and its symlink alias yield the same
         // bucket id.
         let probes = GitProbeCache::default();
-        let direct = discover_work_root(&target, &probes);
-        let via_alias = discover_work_root(&alias, &probes);
+        let stats = GitSpawnStats::default();
+        let direct = discover_work_root(&target, &probes, &stats);
+        let via_alias = discover_work_root(&alias, &probes, &stats);
 
         fs::set_permissions(&target, fs::Permissions::from_mode(original))
             .expect("restore permissions");

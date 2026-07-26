@@ -727,6 +727,52 @@ are suppressed, stale poll results do not overwrite newer open or activation
 resource views, and refresh failures keep the last known resource tree visible.
 Filesystem watchers, if added later, act only as refresh hints.
 
+## Git Invocation Budget And Spawn Diagnostics {#260726-dashboard-git-invocation-budget-and-spawn-diagnostics}
+
+Every Git invocation the daemon makes for toolbar state, resource discovery, and
+Activity projection runs under a wall-clock budget. On expiry the child is
+terminated and the call reports failure, so a wedged or slow Git invocation
+surfaces as a bounded error instead of an indefinitely pending request.
+`WS_DASHBOARD_GIT_TIMEOUT_MS` sets the budget (default `10000`); `0` disables
+bounding entirely and restores unbounded waiting. The sibling
+`WS_DASHBOARD_GIT_PROBE_TTL_MS` (default `30000`, `0` disables) memoizes
+discovery probes and is unrelated to the budget.
+
+The bound covers waiting, not termination itself: a child wedged in
+uninterruptible I/O — for example against a disconnected network mount — cannot
+be terminated or reaped, so the budget bounds every case except an unkillable
+child.
+
+A Git invocation that finishes while its output remains incomplete still reports
+its real exit status, because the command's success or failure is independent of
+whether the daemon could read all of its output. Output can remain incomplete
+when a descendant process the command started keeps the inherited output
+channels open. Callers that only need the exit status — branch switch, branch
+create, fetch, push, pull — succeed normally in that case. Callers that parse
+output instead treat incomplete output as a failure, so a partial read is never
+consumed as a complete answer.
+
+Routinely non-zero Git exits are not reported as daemon faults: a branch with no
+configured upstream, an unborn `HEAD`, a directory that is not a repository, and
+a branch-existence check for a branch that does not exist are all expected
+answers rather than errors. Unexpected failures, spawn failures, and budget
+expiries are logged with the subcommand, exit code, bounded stderr, and elapsed
+time; host paths are not exposed.
+
+`GET /api/dashboard/diag/git` is owner-authenticated and reports cumulative
+counters for the current daemon process:
+
+```json
+{ "totalSpawns": 0, "timeouts": 0, "failures": 0, "bySubcommand": {}, "uptimeMs": 0 }
+```
+
+`failures` already includes `timeouts`, so a consumer must not add them. The
+counters cover Git invocations that go through the shared execution path — the
+toolbar, discovery, and Activity projection paths above — and do not include the
+worktree add and remove flows, which invoke Git directly. Two reads taken a
+known interval apart yield the daemon's Git invocation rate, which is the
+intended use.
+
 ## Worktree Removal Confirmation And Hide UX {#260722-ws-dashboard-worktree-removal-hide-ux}
 
 Removing a linked worktree always opens a real confirmation modal — never a

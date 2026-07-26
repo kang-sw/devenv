@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::discovery::GitProbeCache;
+use crate::git_exec::GitSpawnStats;
 use crate::document_translation::{
     translate_document, translation_providers, DocumentTranslationService,
 };
@@ -85,6 +86,11 @@ pub struct AppState {
     /// routes (not rebuilt per request), so the concurrent status/branches/
     /// resources refreshes collapse onto one `git` spawn per root per TTL.
     pub git_probe_cache: GitProbeCache,
+    /// Shared counters for every `git` spawn routed through
+    /// `git_exec::capture`. Must be shared across routes (not rebuilt per
+    /// request) so `GET /api/dashboard/diag/git` reports the daemon's whole
+    /// spawn history, not a per-request-scoped count.
+    pub git_spawn_stats: Arc<GitSpawnStats>,
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
@@ -112,6 +118,7 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/build-info", get(dashboard_build_info))
+        .route("/api/dashboard/diag/git", get(dashboard_diag_git))
         .route("/api/dashboard/shutdown", post(dashboard_shutdown))
         .route("/api/dashboard/resources", get(dashboard_resources))
         .route("/api/dashboard/servers", get(dashboard_servers))
@@ -572,6 +579,34 @@ async fn dashboard_build_info(State(state): State<AppState>) -> Response {
         "version": env!("CARGO_PKG_VERSION"),
         "daemonBuildUnixSecs": daemon_build,
         "frontendBuildUnixSecs": frontend_build,
+    }))
+    .into_response()
+}
+
+/// Reports the daemon's cumulative `git` spawn counters, broken down by
+/// subcommand. CONTRACT: these counters cover only spawns routed through
+/// `git_exec::capture` - i.e. the git-toolbar poll path and the discovery
+/// probes - and do NOT include `git_worktree.rs`'s direct
+/// `Command::new("git")` sites (worktree add/remove), which remain
+/// unconverted in this phase (see the ticket's Phase 1 rewrite-target list).
+/// A follow-up ticket tracks converting those; until then this route
+/// undercounts total daemon-wide git spawns and must not be read as a total.
+/// CONTRACT: `failures` already INCLUDES `timeouts` (a timeout increments
+/// both), so `timeouts` is a subset breakdown, not a disjoint bucket - a
+/// consumer must never sum the two.
+async fn dashboard_diag_git(State(state): State<AppState>) -> Response {
+    let snapshot = state.git_spawn_stats.snapshot();
+    let by_subcommand: serde_json::Map<String, serde_json::Value> = snapshot
+        .by_subcommand
+        .into_iter()
+        .map(|(subcommand, count)| (subcommand.as_str().to_owned(), serde_json::json!(count)))
+        .collect();
+    axum::Json(serde_json::json!({
+        "totalSpawns": snapshot.total,
+        "timeouts": snapshot.timeouts,
+        "failures": snapshot.failures,
+        "bySubcommand": by_subcommand,
+        "uptimeMs": snapshot.uptime_ms,
     }))
     .into_response()
 }

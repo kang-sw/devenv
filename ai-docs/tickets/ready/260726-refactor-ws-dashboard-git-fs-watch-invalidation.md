@@ -537,6 +537,98 @@ route-contract test changes.
 
 Estimated diff ~+260/−70 across 7 files.
 
+### Result (0c48065a) - 2026-07-26
+
+Landed as `272a2912` (seam) plus three review-fix commits `4aa86b10`,
+`5c6b4f2b`, `0c48065a`. Actual size ~+1,500/−200 across 11 files, roughly six
+times the estimate — the estimate counted the seam and forgot that threading an
+explicit `&GitSpawnStats` touches every intermediate signature between a route
+handler and a git call.
+
+Behavioral delta beyond the plan:
+
+- **`GitOutcome` gained `output_truncated`, and stdout access is now
+  accessor-only for parsing callers.** `stdout_strict()` returns `None` on
+  truncation or invalid UTF-8; `stdout_text()` returns `None` on truncation. A git
+  command that exits while a descendant still holds the inherited pipes reports
+  its **real exit status** — a zero-exit `push` succeeds, a non-zero `fetch` still
+  returns `Status(code)` — while parsing callers refuse the short read. Reached
+  after a wrong first decision, recorded below.
+- **`WS_DASHBOARD_GIT_TIMEOUT_MS=0` means unbounded**, matching the
+  `0`-disables convention of the sibling `WS_DASHBOARD_GIT_PROBE_TTL_MS` rather
+  than the "kill everything immediately" the first implementation gave it.
+- **`GitDiscovery::probe` is `ExpectedNonZero`**, not `Unexpected` as the plan
+  said: its `rev-parse` batch exits non-zero by design for a plain-directory
+  root, so `Unexpected` would emit one warning per root per probe-TTL expiry —
+  the noise this phase exists to remove. `changes_for_path`'s `diff-index … HEAD`
+  moved for the same reason (exit 128 on an unborn HEAD, on the 5 s poll path).
+  `probe_git_worktree_paths` stayed `Unexpected`; it runs only after the root is
+  known to be a repo.
+- **`open_work_root` was an uncounted path** the plan's call-site enumeration
+  missed: `root_picker.rs` built `LocalDashboardResourcesProvider::new` without
+  the stats handle, so a live production route's discovery probes landed in a
+  discarded counter. Threaded. The post-fix sweep confirms the only remaining
+  discarded counter outside `#[cfg(test)]` is `resolve_work_root_agents_dir`'s,
+  which has zero `src/` callers and carries a comment saying so.
+- **Deadline is bounded on every exit path, not just expiry.** Output collection
+  uses `mpsc::recv_timeout` against one shared absolute deadline plus a 50 ms
+  post-exit grace, so the `try_wait → Ok(Some(status))` path cannot block either.
+- Poll-quantum backoff (250 µs → ×2 → 5 ms cap) instead of a fixed 10 ms sleep,
+  which measured 10.7 ms median per spawn against a 1.2-1.9 ms `.output()`
+  baseline.
+
+Verification: 142 lib tests (14 in `git_exec`), 167 `tests/routes.rs` tests —
+the route count is unchanged from baseline, which is this phase's own tripwire for
+"no observable git behavior changed". Clippy warning set byte-identical to
+baseline. All three ticket-named unit pins exist and were checked for vacuity by
+review: the >1 MB pin uses 2 MB so it genuinely fails against an undrained
+implementation, and the no-logging pin uses a real `tracing::Subscriber` event
+counter with a positive-control sibling.
+
+**Deviations from the plan, and one lead error.** The plan's recommendation to
+give `resolve_work_root_agents_dir` a throwaway counter was kept but its stated
+rationale replaced: it holds because that function has zero production callers,
+not because "nothing user-facing reads its counters" — a reason that would also
+license hiding the hot Activity path. More seriously, the lead's cycle-2
+disposition told the implementer to report `Timeout` when a child exited but its
+output could not be collected, on the reasoning that truncated-but-successful
+output is more dangerous. That was wrong in a way that mattered: the callers that
+provoke descendants (`run_git` → switch/fetch/push/pull) discard stdout, while the
+callers that parse stdout do not spawn descendants, so the rule fired only where
+it was useless and turned a **successful push into `400 "push failed"`** under a
+common `ssh ControlPersist` configuration. Reversed in cycle 3 by splitting the
+concern instead of choosing a side.
+
+**Unresolved and deferred.**
+
+- Live Windows dogfood verification — two `/api/dashboard/diag/git` reads 60 s
+  apart — was **not** performed; the sandbox is Linux/WSL2. The acceptance number
+  for Phases 2 and 4 therefore does not exist yet, and one of them will need it.
+- The `#[cfg(windows)]` counterparts for the kill-on-timeout and >1 MB pins were
+  written but never executed. Windows is the production host, so first run there
+  may find them wrong.
+- Each timeout deliberately detaches two reader threads and two pipe handles,
+  permanent if the descendant is immortal. Forwarded to
+  `260726-refactor-ws-dashboard-long-uptime-leak-hardening` Phase 2, which also
+  now owns the observation that `kill()`/`wait()` are unbounded against a child
+  wedged in uninterruptible I/O — so "bounded on every path" means "bounded except
+  an unkillable child".
+- `git_worktree.rs`'s 8 direct `Command::new("git")` sites stay outside the seam
+  and the counters by design. Filed as
+  `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam`; the budget,
+  not the counting, is the open design question there.
+- `WorkRootActivityProjector::project` is dead public surface that now carries a
+  `git_stats` parameter. Left alone deliberately — deleting public surface is its
+  own decision.
+- The review loop ran to its 3-cycle cap. Each cycle produced a genuinely new,
+  genuinely valid Critical/Important finding in the same function, which is the
+  divergence case the cap exists to convert into an owner decision. Nothing in the
+  live playbook surfaced the cap; filed as
+  `260726-bug-lead-implement-lost-review-relay-cycle-cap`.
+
+Closes `260724-idea-dashboard-daemon-side-git-poll-response-timeout` for the poll
+path only; the worktree flows named above remain unbounded.
+
 ### Phase 2: Resolve git routes against one work root, not all of them
 
 - Rewrite `resolve_git_context` (`git_toolbar.rs:328-356`) to resolve a single

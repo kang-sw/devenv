@@ -169,6 +169,7 @@ fn app_state_with_opened_and_store(
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
+        git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
@@ -193,6 +194,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         },
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
+        git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -421,6 +423,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
+        git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -7736,6 +7739,63 @@ async fn git_toolbar_status_gates_and_reports_counts_without_paths() {
 }
 
 #[tokio::test]
+async fn dashboard_diag_git_reports_spawn_counters_that_increase_after_git_toolbar_calls() {
+    if skip_without_git("dashboard_diag_git_reports_spawn_counters_that_increase_after_git_toolbar_calls")
+    {
+        return;
+    }
+    let base = temp_fixture_path("diag-git-spawn-counters");
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "one\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+
+    let before = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    assert!(before["totalSpawns"].is_number());
+    assert!(before["timeouts"].is_number());
+    assert!(before["failures"].is_number());
+    assert!(before["bySubcommand"].is_object());
+    assert!(before["uptimeMs"].is_number());
+    let before_total = before["totalSpawns"].as_u64().expect("before totalSpawns");
+
+    let status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(status["available"], true);
+
+    let after = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/diag/git",
+        StatusCode::OK,
+    )
+    .await;
+    let after_total = after["totalSpawns"].as_u64().expect("after totalSpawns");
+    assert!(
+        after_total > before_total,
+        "expected totalSpawns to increase after a /git/status call: before={before_total} after={after_total}"
+    );
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
 async fn git_toolbar_branches_switch_and_create_revalidate_state() {
     if skip_without_git("git_toolbar_branches_switch_and_create_revalidate_state") {
         return;
@@ -8221,6 +8281,7 @@ fn app_state_with_activity_cache_and_codex_home(
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
+        git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
@@ -13985,6 +14046,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         git_probe_cache: ws_dashboard_daemon::discovery::GitProbeCache::default(),
+        git_spawn_stats: std::sync::Arc::new(ws_dashboard_daemon::git_exec::GitSpawnStats::default()),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::new(Some(TranslationProviderConfig {
