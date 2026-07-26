@@ -2,6 +2,7 @@
 title: Lead-write-ticket attempts ready move before the sage gate
 related:
   260622-feat-sage-review-ticket-gate: introduced the ready-landing sage gate and tickets.move posture checks
+dropped: 2026-07-26
 ---
 
 # bug: lead-write-ticket attempts ready move before the sage gate
@@ -36,3 +37,21 @@ requesting that posture write.
   atomic so failed promotion cannot leave frontmatter mutations?
 - Add an integration test that executes the rendered playbook order against a
   todo feature requiring both design and completeness review.
+
+
+## Resolution (2026-07-26)
+
+Absorbed by `260726-bug-sage-ready-enforcement-single-chokepoint`, which carries
+this ticket's evidence (the move-before-gate ordering and the partial-mutation
+observation) forward.
+
+Dropped rather than rewritten because the concept changed fundamentally: this
+ticket framed the defect as a *sequencing* bug inside `lead-write-ticket`, while
+the absorbing ticket treats it as *duplicated enforcement* — sage posture checked
+both at the mutation primitives and at the `tickets.verify` / `ws/git.commit`
+guardrail — and resolves it by collapsing onto the commit gate. Per ticket
+conventions, a fundamentally changed concept gets a new stem.
+
+Partially addressed in the interim: `260713-bug-tickets-move-error-mutates-frontmatter`
+(done) added the loud partial-mutation notice this ticket asked for. The absorbing
+ticket notes that de-blocking may make that notice dead code.

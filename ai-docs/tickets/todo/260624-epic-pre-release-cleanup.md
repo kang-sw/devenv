@@ -9,6 +9,7 @@ related:
   260622-bug-bump-version-script-edits-legacy-launcher: item 5
   260622-bug-wsflow-launcher-coldload-divergence: item 6
   260624-feat-prefer-mercenary-hide-option: item 7
+  260726-chore-mcp-repair-pointer-mid-procedure-skills: item 8
 ---
 
 # Pre-release cleanup — epic merge gate items before main
@@ -66,6 +67,14 @@ wsflow launcher, keeping wsflow text non-ws-aware.
 **Work:** Extend `prefer_mercenary` to accept `on | off | hide`. `hide` removes
 `ws.mercenary.*` from `filteredTools()` (discovery) and `toolAllowed()` (call-gate),
 mirroring the exec permanent-hide pattern. Default remains `off`.
+
+### 8. `260726-chore-mcp-repair-pointer-mid-procedure-skills`
+**Type:** chore / skill text  
+**Work:** `adbf5ec3` added `mcp-server-repair` pointers to front-door skills only
+(`lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-revive`).
+`lead-write-ticket` and `lead-write-spec` still dead-end at "stop and report that
+blocker" with no repair route named. Extend the existing pointer wording to skills
+reached after routing, and mirror into `agents-plugin-wsflow/skills/`.
 
 ## Dropped from workset
 

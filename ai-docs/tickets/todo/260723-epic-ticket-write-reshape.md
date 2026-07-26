@@ -54,6 +54,7 @@ Deliverables (child tickets):
 - `260723-feat-ticket-system-concept-doc` - single session-loaded concept doc; playbook references not re-glosses
 - `260723-feat-ready-spec-address-hard-gate` - promote ready spec-address from soft-warn to hard; **blocked on** the collocator child (idea/)
 - `260723-research-spec-collocator-subagent` - fresh-subagent mechanism that detects spec impact so the lead need not re-dig specs (idea/)
+- `260726-bug-sage-ready-enforcement-single-chokepoint` - collapse duplicated ready-sage enforcement onto the verify/commit gate; revises the seed-classification decision above (todo/)
 
 ## Cross-Child Decisions
 
@@ -73,8 +74,19 @@ Deliverables (child tickets):
   verify() can mechanically enforce stays in verify; the doc must not dissolve a
   guardrail into soft prose (per 260702's guardrail-vs-restatement caution).
 - **Existing hard/soft choices are the seed classification.** ready→sage is
-  already hard (`tickets_mutate.go`); close→phases-resolved is already soft
-  (`UnresolvedPhases`). The reshape makes this the explicit design axis.
+  hard; close→phases-resolved is soft (`UnresolvedPhases`). The reshape makes
+  this the explicit design axis.
+  **Revised 2026-07-26:** the axis stands, but ready→sage's *enforcement
+  location* moves. It was originally hard at the mutation primitives
+  (`tickets_mutate.go`), duplicating the hard `ready-sage-posture` guardrail
+  already in `tickets.verify`. That duplication made the `ready/` landing path
+  unsatisfiable (the playbook commits before its Sage Review Gate runs) and
+  pushed agents toward frontmatter tampering. Per this epic's own "verify =
+  mechanical floor" decision, verify/`git.commit` becomes the single hard
+  chokepoint and the mutation primitives warn loudly instead. Owned by
+  `260726-bug-sage-ready-enforcement-single-chokepoint`. Consequence accepted by
+  the owner: `ready/`'s guarantee narrows from filesystem-enforced to
+  commit-enforced.
 
 ## Completion Criteria
 
