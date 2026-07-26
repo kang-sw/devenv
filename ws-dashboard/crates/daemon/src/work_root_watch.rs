@@ -610,9 +610,11 @@ fn macos_mount_fstype(path: &Path) -> Option<String> {
 #[cfg(windows)]
 pub(crate) fn mount_allows_watching(path: &Path) -> bool {
     use std::path::Component;
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetDriveTypeW, DRIVE_FIXED, DRIVE_RAMDISK,
-    };
+    // `GetDriveTypeW` lives under `Storage::FileSystem`, but its `DRIVE_*`
+    // return-value constants live under `System::WindowsProgramming` in
+    // windows-sys - two different modules, both needed here.
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows_sys::Win32::System::WindowsProgramming::{DRIVE_FIXED, DRIVE_RAMDISK};
 
     let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     // Reject any UNC path outright: `\\server\share\...` has no drive-letter
@@ -1783,7 +1785,12 @@ fn do_arm_recursive(inner: &RegistryInner, targets: &WatchTargets) -> Result<Vec
     let Some(watcher) = watcher_guard.as_mut() else {
         return Err("watcher unavailable".to_owned());
     };
-    let mut registered = Vec::new();
+    // Explicit `Vec<PathBuf>` annotation: `watcher.unwatch(done)` below takes
+    // `&Path`, and without a fixed element type up front rustc's inference
+    // can settle on the unsized `Vec<Path>` from that call site alone (the
+    // same pattern hit and fixed this way in the Linux incremental-planner
+    // predecessor of this function).
+    let mut registered: Vec<PathBuf> = Vec::new();
     for root in &roots {
         if let Err(error) = watcher.watch(root, RecursiveMode::Recursive) {
             tracing::warn!(?root, %error, "failed to register recursive watch; unwinding this arm attempt");
