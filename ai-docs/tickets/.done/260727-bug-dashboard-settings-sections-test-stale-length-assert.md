@@ -1,5 +1,6 @@
 ---
 title: "settingsSections.test.ts asserts a stale SETTINGS_SECTIONS length of 1"
+completed: 2026-07-27
 ---
 
 # settingsSections.test.ts asserts a stale SETTINGS_SECTIONS length of 1
@@ -28,3 +29,8 @@ Update `settingsSections.test.ts`'s registry-contract assertions to expect 2
 entries (or assert `terminal` and `advanced` are both present without a
 brittle exact-count check, if a future section is expected to land soon).
 Confirm `npm run test:settings` passes clean afterward.
+
+
+## Resolution (2026-07-27)
+
+Fixed as a same-turn garbage-collection hotfix: `settingsSections.test.ts`'s registry assertion updated from a hardcoded length of 1 to 2, plus an added id check for the `advanced` descriptor. `npm run test:settings` passes clean.
