@@ -62,7 +62,7 @@ Optional sections — add between ` + "`## Background`" + ` and ` + "`## Phases`
 - ` + "`## Decisions`" + ` — design choices with rationale and rejected alternatives.
 - ` + "`## Constraints`" + ` — non-obvious boundaries (performance, compatibility, etc.).
 - ` + "`## Prior Art`" + ` — existing patterns or components to reuse.
-- ` + "`## Spec Impact`" + ` — ready-only spec addressing when no existing stem yet covers the behavior; include target spec area, expected caller-visible change, and ` + "`Contract-first spec: yes|no`" + `.`
+- ` + "`## Spec Impact`" + ` — ready-only spec addressing when no existing stem yet covers the behavior; include target spec area and expected caller-visible change.`
 
 // ticketBodyResearch is the Body block for research (lines 125–139).
 const ticketBodyResearch = `
