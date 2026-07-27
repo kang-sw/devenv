@@ -192,6 +192,15 @@ export function TerminalPaneBody({
       ),
       fontSize: liveRef.current.terminalPrefs.fontSize,
       theme: { background: liveRef.current.terminalPrefs.themeBackground },
+      // LigaturesAddon's activate() calls the proposed/experimental
+      // `registerCharacterJoiner` API, which xterm.js guards behind this
+      // flag and throws without it - a throw the ligature-loading try/catch
+      // below silently swallows with no console output, making ligatures
+      // permanently inert whenever this is unset. Harmless to set
+      // unconditionally (it only relaxes an API guard) rather than gating on
+      // `terminalPrefs.ligaturesEnabled`, which isn't computed until after
+      // this constructor call.
+      allowProposedApi: true,
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -238,7 +247,11 @@ export function TerminalPaneBody({
         const ligaturesAddon = new LigaturesAddon();
         terminal.loadAddon(ligaturesAddon);
         ligaturesAddonRef.current = ligaturesAddon;
-      } catch {
+      } catch (error) {
+        // Logged rather than silently swallowed: a prior silent failure here
+        // (missing `allowProposedApi`, see the Terminal constructor above)
+        // made ligatures look inert with zero observable signal anywhere.
+        console.error("Failed to activate terminal ligatures addon", error);
         ligaturesAddonRef.current = null;
       }
     }
