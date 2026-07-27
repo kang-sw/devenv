@@ -2460,6 +2460,133 @@ func TestServeStdioTicketsCloseUnresolvedPhaseStatesSoftWarnNextInstruction(t *t
 	}
 }
 
+// TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse is a C5
+// dispatch-level test: a todo/ -> ready/ move at the shipped default
+// (sage_review: auto -> required, never skipped) with an unresolved posture
+// must succeed and carry the ready-sage-posture warning text in the actual
+// tools/call response text, not just in wsdoc.TicketMutateResult.Tip.
+func TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-ready-unresolved-warn"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Unresolved\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902608, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "ready",
+	})
+	if !strings.Contains(moveResp, "sage-review-design is unreviewed") {
+		t.Fatalf("tickets.move to ready response missing unresolved-posture warning: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
+		t.Fatalf("tickets.move to ready response missing consequence statement: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "ws/tickets.sage_gate") {
+		t.Fatalf("tickets.move to ready response missing resolving-call pointer: %s", moveResp)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "ready", stem+".md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("moved ticket should exist at ready/: matches=%v err=%v", matches, err)
+	}
+}
+
+// TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse is the
+// dispatch-level counterpart of the wsdoc-level
+// TestTicketsMoveUpwardNonReadyBlockedRejectsMove. C5 gave the ready-landing
+// *warning* paths dispatch-level coverage but left the non-ready *hard
+// rejection* (blockedUpwardMoveError) asserted only inside wsdoc, so a
+// dispatch-case edit that downgraded it to a soft Tip, swallowed it, or ran it
+// after atomicGitMove would pass every test. This asserts the rejection
+// actually reaches the tools/call response text and that the ticket does not
+// move.
+func TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-nonready-blocked-dispatch"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Blocked\nsage-review-design: blocked\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902610, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "sage-review-design: blocked") {
+		t.Fatalf("tickets.move idea->todo blocked response missing the rejection text: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "address blocked review before promoting") {
+		t.Fatalf("tickets.move idea->todo blocked response missing the action-oriented rejection: %s", moveResp)
+	}
+	// It must be a hard error, not a soft tip on a successful move.
+	if strings.Contains(moveResp, "moved") || strings.Contains(moveResp, "tip: ") {
+		t.Fatalf("blocked non-ready move must not report success: %s", moveResp)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); err == nil {
+		t.Fatalf("ticket moved to todo/ despite blocked rejection")
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "idea", stem+".md")); err != nil {
+		t.Fatalf("ticket should remain at idea/: %v", err)
+	}
+}
+
+// TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse is
+// the tickets.create_empty counterpart of the above (C5): creating directly
+// at ready/ under the shipped default posture must succeed and surface the
+// same warning shape in the dispatch response.
+func TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902609, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
+		"stem":          "feat-ready-create-unresolved-warn",
+		"initial_state": "ready",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/ready/") {
+		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
+	}
+	if !strings.Contains(createResp, "sage-review-design is unreviewed") {
+		t.Fatalf("tickets.create_empty ready response missing unresolved-posture warning: %s", createResp)
+	}
+	if !strings.Contains(createResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
+		t.Fatalf("tickets.create_empty ready response missing consequence statement: %s", createResp)
+	}
+	if !strings.Contains(createResp, "ws/tickets.sage_gate") {
+		t.Fatalf("tickets.create_empty ready response missing resolving-call pointer: %s", createResp)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "ready", "*-feat-ready-create-unresolved-warn.md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("created ticket should exist at ready/: matches=%v err=%v", matches, err)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read created ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review-design: required") || !strings.Contains(body, "sage-review-completeness: required") {
+		t.Fatalf("created ticket missing both stamped required fields (C4 parity with tickets.move):\n%s", body)
+	}
+}
+
 func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -2559,47 +2686,6 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 	body := string(raw)
 	if !strings.Contains(body, "sage-review-design: recommended") {
 		t.Fatalf("moved ticket missing recommended posture (explicit project-scope override should win over builtin default):\n%s", body)
-	}
-}
-
-// TestServeStdioTicketsMoveBlockedSurfacesPartialMutationNotice reproduces
-// the 2026-07-13 scenario from
-// 260713-bug-tickets-move-error-mutates-frontmatter at the MCP tool-response
-// layer: a legacy-schema ticket (single sage-review: field) blocked on
-// promotion to ready. TicketsMove self-heals (migrates) the frontmatter
-// before the block, so the tool response text must carry an explicit
-// partial-mutation notice alongside the error, not the bare error alone.
-func TestServeStdioTicketsMoveBlockedSurfacesPartialMutationNotice(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-
-	stem := "260101-feat-sage-move-blocked-partial"
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
-		"---\ntitle: Sage\nsage-review: pending\n---\n\nBody.\n")
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 902604, root, nil))
-
-	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
-		"stem": stem,
-		"to":   "ready",
-	})
-	if !strings.Contains(moveResp, "sage-review-design") {
-		t.Fatalf("tickets.move blocked response missing the underlying error: %s", moveResp)
-	}
-	if !strings.Contains(moveResp, "partial-mutation:") {
-		t.Fatalf("tickets.move blocked response missing partial-mutation notice: %s", moveResp)
-	}
-
-	raw, err := os.ReadFile(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md"))
-	if err != nil {
-		t.Fatalf("read ticket after blocked move: %v", err)
-	}
-	if !strings.Contains(string(raw), "sage-review-design:") {
-		t.Fatalf("ticket missing self-healed sage-review-design field after blocked move:\n%s", string(raw))
 	}
 }
 

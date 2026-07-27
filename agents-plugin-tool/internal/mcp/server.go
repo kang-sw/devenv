@@ -1330,12 +1330,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			SageReview: resolved.Value,
 		})
 		if err != nil {
-			if result.PartialMutationNotice != "" {
-				return toolErrorTextResponse(req.ID, err.Error()+
-					"\npartial-mutation: frontmatter was written before this call blocked; "+
-					result.PartialMutationNotice+
-					" a retry will not find an unchanged file.")
-			}
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
@@ -1394,19 +1388,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		commitHash := ""
-		if result.CommitTitle != "" {
-			commitRes, commitErr := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
-				Paths:     result.CommitPaths,
-				Title:     result.CommitTitle,
-				AIContext: result.AIContext,
-			})
-			if commitErr != nil {
-				return toolTextResponse(req.ID, "", commitErr)
-			}
-			commitHash = commitRes.Hash
-		}
-		return toolTextResponse(req.ID, formatSageGate(result, commitHash), nil)
+		// The ask-decline path (recommended posture + answer=="no") writes and
+		// persists the "skipped" posture inside wsdoc.SageGate itself and
+		// stops there. This case proposes no commit at all — not an automatic
+		// one, and not a suggested one: per 260725's tickets.sage_stamp
+		// precedent ({#260720-wsdoc-commit-boundary}), a separate
+		// canonically-titled commit for a posture flip swallows the ticket's
+		// co-located real edits under a message that describes only the flip.
+		// The write rides the caller's own next ordinary ws/git.commit, the
+		// same guarded chokepoint every other ticket commit uses.
+		return toolTextResponse(req.ID, formatSageGate(result), nil)
 	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2787,7 +2778,7 @@ func formatTicketVerify(result wsdoc.VerifyResult) string {
 	return b.String()
 }
 
-func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
+func formatSageGate(result wsdoc.SageGateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "action: %s\n", result.Action)
 	if result.AskPrompt != "" {
@@ -2799,23 +2790,56 @@ func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
 	if result.Mode != "" {
 		fmt.Fprintf(&b, "mode: %s\n", result.Mode)
 	}
-	if commitHash != "" {
-		fmt.Fprintf(&b, "commit: %s (%s)\n", commitHash, result.CommitTitle)
+	if result.Advisory != "" {
+		fmt.Fprintf(&b, "advisory: %s\n", capitalizeFirst(result.Advisory))
 	}
 	b.WriteString(sageGateNextInstruction(result))
 	return b.String()
 }
 
+// capitalizeFirst upper-cases only the first byte, matching the capitalized-
+// sentence convention formatSageGate's sibling fields use. It intentionally
+// leaves the shared sageReviewNonWaivableAdvisory constant itself lowercase
+// (tickets_mutate.go) so its other embedding — mid-sentence inside
+// readySagePostureWarning's Tip-channel text — stays grammatically correct;
+// only this display site capitalizes.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// sageGatePostureUncommittedNote is the single sentence every gate action
+// carries about the posture write. Sharing one sentence is the point: the
+// prior code said three different things about one condition ("skip" handed over
+// a ready-to-paste commit call, "run" appended the same call, "ask" said
+// nothing).
+const sageGatePostureUncommittedNote = " Any sage-review posture this call wrote is left uncommitted; it rides your next ordinary commit of the ticket path, so do not commit it separately."
+
+// sageGateNextInstruction names no commit title and hands the caller no
+// ws/git.commit call. Any posture this gate wrote (a config-fallback resolve, or
+// an ask-decline's "skipped") is left in the working tree for the caller's next
+// ordinary commit of the ticket path, so the posture lands in one commit with
+// the ticket's real edits and real ## AI Context instead of a separate
+// canonically-titled commit that would swallow them (260725,
+// {#260720-wsdoc-commit-boundary}).
 func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	switch result.Action {
 	case "skip":
-		return "next_instruction: Sage review gate resolved with no review required; proceed to handoff."
+		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
 	case "stop_blocked":
-		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker."
+		// stop_blocked carries the note too: sageGateCombined can persist a
+		// design posture (design recommended + answer "yes") before the
+		// completeness stage hits its blocked branch, so this action is not
+		// guaranteed to be write-free. The note's hedged "Any sage-review
+		// posture this call wrote" stays true on the branches that wrote
+		// nothing, which is why it can be attached unconditionally.
+		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker." + sageGatePostureUncommittedNote
 	case "ask":
-		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no."
+		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
-		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
+		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + sageGatePostureUncommittedNote
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
