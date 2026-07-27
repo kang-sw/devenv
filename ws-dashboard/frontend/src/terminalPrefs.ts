@@ -11,6 +11,20 @@ export const TERMINAL_FONT_FALLBACK_STACK =
   '"FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, ' +
   'Menlo, Consolas, "Liberation Mono", monospace';
 
+// Autocomplete suggestions for the font-family override input: the named
+// (non-generic) entries from `TERMINAL_FONT_FALLBACK_STACK`, in the same
+// order, so a user who wants one of the built-in fallback fonts explicitly
+// (e.g. to reorder it ahead of MesloLGS NF for ligature support) doesn't
+// have to type the full family name from memory. Keep in sync with the
+// fallback stack's named entries if that ever changes.
+export const TERMINAL_FONT_SUGGESTIONS = [
+  "MesloLGS NF",
+  "JetBrainsMono Nerd Font",
+  "CaskaydiaCove Nerd Font",
+  "FiraCode Nerd Font",
+  "Hack Nerd Font",
+];
+
 export type TerminalStylePrefs = {
   readonly fontFamilyOverride: string;
   readonly fontSize: number;

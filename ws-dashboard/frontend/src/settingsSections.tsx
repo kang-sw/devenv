@@ -3,6 +3,7 @@ import type { SettingsSectionDescriptor } from "./settingsStore.js";
 import {
   DEFAULT_TERMINAL_STYLE_PREFS,
   parseTerminalFontSizeInput,
+  TERMINAL_FONT_SUGGESTIONS,
   type TerminalStylePrefs,
 } from "./terminalPrefs.js";
 import {
@@ -44,6 +45,7 @@ export function TerminalStyleSection() {
         <span className="settings-field-label">Font family</span>
         <input
           className="root-picker-input"
+          list="terminal-font-suggestions"
           placeholder="System default (Nerd Font stack)"
           spellCheck={false}
           type="text"
@@ -52,6 +54,11 @@ export function TerminalStyleSection() {
             onChange({ ...prefs, fontFamilyOverride: event.target.value })
           }
         />
+        <datalist id="terminal-font-suggestions">
+          {TERMINAL_FONT_SUGGESTIONS.map((font) => (
+            <option key={font} value={font} />
+          ))}
+        </datalist>
       </label>
       <label className="settings-field">
         <span className="settings-field-label">Font size</span>
