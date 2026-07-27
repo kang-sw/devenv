@@ -568,10 +568,38 @@ export function TerminalPaneBody({
       refocusActiveTerminal();
     }, 100);
 
+    // A previously-downloaded custom webfont (e.g. Fira Code) doesn't
+    // survive a page reload in `document.fonts` state, so `App.tsx`'s own
+    // mount effect independently re-fetches it via `reregisterDownloadedFonts`
+    // (see `downloadableFonts.ts`), racing with this effect. If the
+    // `fontFamily` read above resolves to such a font before its bytes are
+    // registered, the browser silently substitutes the fallback for the
+    // initial glyph measurement/paint, and the GPU renderer caches that
+    // measurement - nothing else re-triggers a re-measure once the real font
+    // lands. A one-shot `document.fonts.ready` read here would be unreliable:
+    // React fires child mount effects (this one) before parent mount effects
+    // (App.tsx's), so at this point `reregisterDownloadedFonts` may not have
+    // even started its network fetch yet, and `.ready` could resolve before
+    // that fetch registers a pending load. Listening for `loadingdone`
+    // instead catches every load batch that completes for the life of this
+    // mount, regardless of when it started relative to this effect.
+    const onFontsLoadingDone = () => {
+      if (terminalRef.current !== terminal) {
+        // Pane unmounted/remounted since this listener was registered.
+        return;
+      }
+      terminal.options.fontFamily = buildEffectiveTerminalFontFamily(
+        liveRef.current.terminalPrefs.fontFamilyOverride,
+      );
+      fitNowRef.current?.();
+    };
+    document.fonts.addEventListener("loadingdone", onFontsLoadingDone);
+
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", scheduleResizeForward);
       window.clearInterval(focusWatchdog);
+      document.fonts.removeEventListener("loadingdone", onFontsLoadingDone);
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
       }
