@@ -88,6 +88,62 @@ func TestFormatSpecFindDropsAdvisoriesForTruncatedDocuments(t *testing.T) {
 	}
 }
 
+// Phase 2 of 260726-refactor-retire-spec-planned-marker-mechanism deleted two
+// render points: formatSpecs' "  marker: " line and formatSpecStatus' trailing
+// " # <marker context>" suffix on a location. Both feeding values are still
+// populated on every call, because SpecsFind match scoring reads them, so each
+// retired output is exactly one restored statement away. Each negative
+// assertion is paired with a check that its feeding value is non-empty, so the
+// guard cannot pass vacuously if population ever stops.
+func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
+	root := legacyMarkerRenderRoot(t)
+
+	list, err := wsdoc.SpecsList(root)
+	if err != nil {
+		t.Fatalf("SpecsList returned error: %v", err)
+	}
+	fedList := false
+	for _, spec := range list {
+		if len(spec.MarkerContexts) > 0 {
+			fedList = true
+		}
+	}
+	if !fedList {
+		t.Fatal("fixture no longer populates SpecInfo.MarkerContexts; the marker-line assertion would pass vacuously")
+	}
+	// "legacy-marker: " is Phase 1's retained advisory and must survive; only a
+	// bare "marker: " label is the retired render, at any indentation.
+	for _, line := range strings.Split(formatSpecs(list), "\n") {
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "marker: ") {
+			t.Fatalf("formatSpecs re-emitted the retired marker line: %q", line)
+		}
+	}
+
+	status, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: "260101-anchor"})
+	if err != nil {
+		t.Fatalf("SpecsStatus returned error: %v", err)
+	}
+	fedStatus := false
+	for _, loc := range status.Locations {
+		if loc.MarkerContext != "" {
+			fedStatus = true
+		}
+	}
+	if !fedStatus {
+		t.Fatal("fixture no longer populates SpecAnchorInfo.MarkerContext; the suffix assertion would pass vacuously")
+	}
+	// Scoped to location lines so an anchor or a "#"-bearing path elsewhere in
+	// the render cannot make this brittle.
+	for _, line := range strings.Split(formatSpecStatus(status), "\n") {
+		if !strings.HasPrefix(line, "  - line ") {
+			continue
+		}
+		if strings.Contains(line, " # ") {
+			t.Fatalf("formatSpecStatus re-emitted the retired marker-context suffix: %q", line)
+		}
+	}
+}
+
 func TestFormatSpecSurfacesOmitAdvisoryWhenNoMarker(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/spec/clean.md", "---\ntitle: Clean\n---\n# Clean\n\n## Clean {#260101-clean}\n\nDeterministic workspace root pruning is implemented.\n")
