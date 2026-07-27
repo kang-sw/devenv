@@ -726,7 +726,19 @@ uphold the refusal, override it, or record it as a scope deferral carried into
 the final report. Overriding a maintained refusal ships the fix as the next relay
 and spends that cycle; overriding a mid-relay escalation returns the verdict
 inside the current slot and spends nothing. The single-reviewer budget has no
-adjudication slot. The initial review is cycle 1, so
+adjudication slot. A relay routes to the `implementer-elevated` delegate —
+declared `tier: large`, and rendered with the relay inputs plus the prior cycles'
+fix commits and dispositions — instead of `implementer-relay` when a finding the
+implementer reported fixed is returned unresolved or still non-clean by the next
+review, or when a newly surfaced finding shares a root cause with an
+already-relayed one. The first condition fires after one such failed relay rather
+than two, because the budget's last relay is the only slot the elevated delegate
+can still act in, and a finding carrying a settled disposition (won't-fix,
+deferred, out-of-scope, or an open escalation) is a decision rather than a failed
+fix attempt and never triggers it. When an adjudicator override and either
+elevated-routing condition apply to the same relay, the lead dispatches
+`implementer-elevated` once carrying the override list, never two relays for one
+cycle. The initial review is cycle 1, so
 the budget permits one fewer relay than its cycle count. The last budgeted cycle
 completes the run rather than halting it: the lead stops relaying, proceeds to
 closeout, and carries unresolved findings with their dispositions into the
