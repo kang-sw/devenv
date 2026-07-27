@@ -87,3 +87,27 @@ Two things this adds to the open questions above:
 - Recurrence across two phases of one ticket suggests the cost is not rare
   enough to absorb: the visible price here was seven wasted verification
   attempts plus one round of investigating failures that did not exist.
+
+Phase 2, cycle 2 (range `4722ceea..59d6a025`, three concurrent partitions):
+
+- Third consecutive review cycle, across two phases of the same ticket. The
+  contaminating work was again legitimate mutation testing by the test
+  partition, which left the tree clean at the end.
+- The **fit partition** started on a clean tree, then observed
+  `M agents-plugin-tool/internal/mcp/server.go` with the `  marker: ` render
+  re-inserted at `:2536`, and later
+  `M agents-plugin-tool/internal/wsdoc/spec_discovery.go`. It responded by
+  **restating every claim it made about Go source against `HEAD`** via
+  `git show` / `git grep HEAD` instead of against the working file, and said so
+  explicitly in its findings.
+- The **correctness partition** independently reported the same contamination
+  and had one measurement run start clean and finish with a mutation present,
+  invalidating it; it re-derived that conclusion statically.
+
+What this adds beyond the cycle-1 evidence: cycle 1's cost was **retries** —
+seven attempts to find a clean verification window. Cycle 2's cost is a
+**changed method**. A reviewer abandoned working-tree verification altogether
+and re-derived its conclusions from `HEAD`, which is a strictly weaker position:
+it cannot run anything, so every claim that would normally be measured becomes a
+static reading. The hazard is no longer only taxing review throughput; it is
+selecting which verification techniques reviewers are able to use.
