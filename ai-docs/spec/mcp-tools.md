@@ -876,28 +876,54 @@ the resolved `sage_review` config: `skipped` for `off`, empty, or unset;
 `recommended` for `ask`; and `required` for `auto` (see the Sage Review Gate
 section below for the two-field, per-category contract). A move
 into `todo/` may leave `recommended` or `required` as the visible unresolved
-posture on the fields the ticket's category requires. A move into `ready/`
-requires each required field to hold a resolved terminal posture (`completed`
-or `skipped`); `recommended`, `required`, and `blocked` on any required field
-stop with an action-oriented message naming that field. When both stages apply,
-`sage-review-design` is checked before `sage-review-completeness`, so a ticket
-that reaches `ready/` without a terminal design posture is always blocked on
-the design field first, regardless of entry path. A move into `ready/` for a
-non-`epic`/`research`/`workset` ticket with no detected spec addressing (no
+posture on the fields the ticket's category requires.
+
+A move into `ready/` does **not** require a resolved terminal posture. It
+succeeds whatever the posture is and returns a warning on the same tip channel,
+because `tickets.verify` / `ws/git.commit`
+(`#260723-git-commit-ticket-verify-gate`) is the single hard enforcement point
+for ready sage posture. The warning names the first non-terminal required field
+— `sage-review-design` is examined before `sage-review-completeness`, so a
+ticket that reaches `ready/` without a terminal design posture is always named
+on the design field first, regardless of entry path — states the commit-time
+consequence (`ws/git.commit` will fail on guardrail `ready-sage-posture` until
+it resolves), and names a reachable resolving call. There are two variants,
+distinguished because they imply different next actions:
+
+- **Unreviewed** (`recommended` or `required`): review has not run yet. Resolve
+  with `ws/tickets.sage_gate(stem, landing: "ready")`.
+- **`blocked`**: a prior review already found unresolved issues. `sage_gate`
+  cannot clear this state — it returns `stop_blocked` before any resolution — so
+  the warning instead directs the caller to address the blocker, re-run the
+  review, and record a non-block verdict through
+  `ws/tickets.sage_stamp(stem, stage, verdicts)`.
+
+Both variants also carry the shared non-waivable statement and review-scope
+line described under the sage gate tools below
+(`#260720-sage-gate-record-tools`).
+
+One sage rejection is still hard at `tickets.move`: an upward move whose
+destination is **not** `ready/` (for example `idea/` → `todo/`) fails when a
+required stage holds `blocked`, design checked before completeness.
+`tickets.verify`'s `ready-sage-posture` guardrail runs only for
+`status == "ready"`, so a non-`ready` landing has no downstream chokepoint to
+relocate enforcement to.
+
+A move into `ready/` for a non-`epic`/`research`/`workset` ticket with no
+detected spec addressing (no
 confirmed `spec:`/`spec-remove:` frontmatter entry and no `## Spec Impact`
 section) additionally returns a soft, non-blocking tip noting that the ready
 gate is normally enforced by `lead-write-ticket`; the move still succeeds. The
 move stages atomically and never commits.
 
-The blocking sage-review validation above runs after a self-healing
-frontmatter write: a legacy single `sage-review:` field, or an unresolved
-posture on a required field, is migrated/stamped to the resolved two-field
-form before the block is evaluated. When that write happens on a call that
-then blocks or errors, the tool response is not a bare error — it appends an
-explicit `partial-mutation:` notice line stating that frontmatter was written
-before the call blocked and that a retry will not find an unchanged file, so
-a retrying caller cannot mistake a blocked move for a fully unresolved,
-unchanged ticket.
+The posture reported above is computed after a self-healing frontmatter write:
+a legacy single `sage-review:` field, or an unresolved posture on a required
+field, is migrated/stamped to the resolved two-field form, and both required
+fields are persisted in a single write. The response carries no
+`partial-mutation:` notice. The one remaining rejection path (a blocked
+non-`ready` upward move) can still run after that write, but the write is
+idempotent — the ticket is left in the migrated two-field form and a retry
+behaves identically — so a rejected move needs no special retry handling.
 {#260620-ticket-move-tool}
 
 `tickets.create_empty` (renamed from `tickets.create`, 260723 Phase 2) creates
@@ -905,20 +931,29 @@ a dated ticket stub at a caller-specified initial state (`idea`, `todo`, or
 `ready`). It auto-prefixes today's date to form the full ticket stem, writes a
 minimal frontmatter stub (`title: ""` placeholder; resolved
 `sage-review-design:` posture for `todo/+` states when the ticket's category
-requires design review), and returns the created path and a caller-facing tip
-that names the posture. The attention-salient rename and the tool's own
-return prose both state the caveat this name exists to enforce: it yields
-only a valid empty skeleton + initial posture, not a full mutation
-orchestrator — `tickets.template` remains the separate tool that supplies the
-body skeleton. It does not stamp `sage-review-completeness` at creation time,
-even for `state: "ready"` — completeness is evaluated only at ready-promotion
-time via `tickets.move`, which has a "from" state to validate against.
-Creating directly at `ready/` for a category requiring design review still
-enforces the never-skippable design invariant: if the freshly resolved design
-posture is not terminal (`completed` or `skipped`), the call is rejected with
-an action-oriented error instead of silently stamping a non-terminal posture
-and succeeding. Terminal states (`done`, `dropped`) and an empty stem are
-rejected with errors. The tool is not idempotent: a duplicate path returns an
+requires design review, plus a resolved `sage-review-completeness:` posture for
+`ready` when the category requires completeness review), and returns the
+created path and a caller-facing tip that names the posture or, at a `ready`
+landing with an unresolved posture, the warning below. The attention-salient
+rename and the tool's own return prose both state the caveat this name exists
+to enforce: it yields only a valid empty skeleton + initial posture, not a full
+mutation orchestrator — `tickets.template` remains the separate tool that supplies the
+body skeleton. Creating directly at `ready/` stamps both fields the ticket's
+category requires, so a ready-landing create and a ready-landing
+`tickets.move` leave the same posture shape on the file.
+
+Creating directly at `ready/` is not rejected on sage posture. Like
+`tickets.move`, it succeeds and returns the same ready-landing warning
+(`#260620-ticket-move-tool`) when a required stage resolves to a non-terminal
+posture, computed over both required stages so the warning names exactly what
+`tickets.verify` will fail on. `tickets.verify` / `ws/git.commit` remains the
+single hard enforcement point for the never-skippable design invariant: the
+stub is created with its non-terminal posture visible, and the commit that
+would land it fails on guardrail `ready-sage-posture` until review resolves.
+A fresh ticket has no prior posture, so `create_empty` never produces the
+`blocked` warning variant.
+
+Terminal states (`done`, `dropped`) and an empty stem are rejected with errors. The tool is not idempotent: a duplicate path returns an
 error. The `idea/` tip directs the caller to promote through `todo/` so the
 resolved posture can be stamped. {#260622-create-ticket-tool}
 
@@ -969,9 +1004,12 @@ judgment and does not attempt the append-only phase-Result convention, which is 
 diff-level property a single-file snapshot cannot see. It is callable standalone
 for mid-edit red-green feedback, and the identical check runs as the `git.commit`
 ticket-verify gate (`#260723-git-commit-ticket-verify-gate`), so a standalone
-call and the commit gate return the same verdict for identical input. A residual
-mutation-tool check that enforces one of these rules (the ready-move sage-posture
-check) shares the same underlying predicate rather than duplicating it.
+call and the commit gate return the same verdict for identical input. The
+ready-landing sage-posture rule has no second enforcement point: the mutation
+tools (`tickets.move`, `tickets.create_empty`) evaluate the same underlying
+predicate only to build a soft, non-blocking warning, so `tickets.verify` —
+through the `git.commit` gate — is where a non-terminal ready posture is
+actually refused.
 
 Beyond those intra-file checks, verify also runs a cross-file ticket-graph pass
 over the whole board and returns its results as **advisories** — a carrier
@@ -1024,9 +1062,12 @@ the only difference the identical-verdict guarantee above permits.
 Capability range: `>=0.35.1-dev <0.36.0`. {#260723-tickets-verify-tool}
 
 The Sage Review Gate is split into two sequential, non-looping stage gates
-keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
-ticket: a design-sketch review at `todo/` landing (tolerant of missing detail;
-catches wrong direction) and a completeness review at `ready/` promotion
+keyed to ticket lifecycle, both running before `lead-write-ticket` commits a
+ticket — the gate leaves the posture it writes uncommitted and the playbook's
+single following commit step carries that posture together with the ticket
+edits already held on the file: a design-sketch review at `todo/` landing
+(tolerant of missing detail; catches wrong direction) and a completeness
+review at `ready/` promotion
 (checks implementation-readiness, undecided user-policy points, and capture
 gaps). Frontmatter carries two independent stage-scoped fields —
 `sage-review-design:` and `sage-review-completeness:` — each using the same
@@ -1046,9 +1087,12 @@ spec-address-gate exemption.
 Hard invariant: design review is never skippable regardless of entry path. A
 ticket that reaches `ready/` without ever passing `todo/` design review must
 still pass design review before or as part of completeness review. Concretely:
-`tickets.move`'s promotion validation checks `sage-review-design` before
-`sage-review-completeness` and blocks on the design field first if it is not
-terminal; the `lead-write-ticket` playbook, when landing at `ready/`, checks
+`tickets.verify` / `ws/git.commit`'s `ready-sage-posture` guardrail — the single
+hard enforcement point — checks `sage-review-design` before
+`sage-review-completeness` and fails on the design field first if it is not
+terminal, and `tickets.move`/`tickets.create_empty` warn (without blocking) on
+the same field ordering at mutation time; the `lead-write-ticket` playbook, when
+landing at `ready/`, checks
 `sage-review-design` before dispatching the completeness reviewer and runs
 `ticket-reviewer-design` inline first if the design field is not yet terminal.
 This covers `idea/` → `ready/` direct promotion and tickets authored directly
@@ -1093,17 +1137,44 @@ in place.
 `tickets.sage_gate` and `tickets.sage_stamp` are the two root-aware tools the
 `lead-write-ticket` playbook calls to run the gate above; both require
 `session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
-decision for a ticket and returns `{ action, ask_prompt?, reviewers?, mode? }`
-where `action` is one of `skip`, `stop_blocked`, `ask`, or `run`. It owns
-posture resolution, the legacy single-field `sage-review:` migration, the
+decision for a ticket and returns
+`{ action, ask_prompt?, reviewers?, mode?, advisory? }` where `action` is one of
+`skip`, `stop_blocked`, `ask`, or `run`. It owns posture resolution, the
+legacy single-field `sage-review:` migration, the
 `sage_review` config fallback, the category×stage matrix, and
 standalone-versus-combined mode selection. For `ask` it returns the exact
 question to relay; the caller re-invokes with `answer` (`yes`/`no`), and each
 still-pending `recommended` stage is asked separately (design first) so one
-answer never resolves another stage. A declined `ask` persists the resolved
-posture and commits; a config-fallback resolution only persists the resolved
-posture — it never commits. The tool never spawns reviewers — for `run` it
-names the reviewer(s) to dispatch and leaves spawning to the lead.
+answer never resolves another stage. A declined `ask` persists `skipped` for
+that stage; a config-fallback resolution likewise persists the resolved
+posture. The tool never spawns reviewers — for `run` it names the reviewer(s)
+to dispatch and leaves spawning to the lead.
+
+`tickets.sage_gate` **commits nothing and returns no commit metadata**. This is
+a caller-visible contract change: the ask-decline path previously produced a
+standalone `chore(sage): skip <stage> review` commit, and the result previously
+carried commit title/paths/`ai_context`. Both are gone, mirroring what 260725
+did to `tickets.sage_stamp` and for the same reason — a canonically-titled
+commit over a ticket file swallows the co-located real edits under a message
+that describes only the posture flip. Every recognized gate action instead
+states that any posture the call wrote is left uncommitted, rides the caller's
+next ordinary commit of the ticket path, and must not be committed separately.
+The note is worded to stay true on the branches that wrote nothing, so it is
+attached unconditionally rather than only on the writing branches.
+
+Ordinary gate results also carry an `advisory`: the non-waivable statement and
+the review-scope line. It says sage review is not waivable per ticket (pointing
+at `ws/config.show` for the `sage_review` config that governs it), that design
+review checks coherence, right-problem framing, and executability, that
+completeness review checks structure, fields, and clarity, and that neither
+judges whether the underlying research itself is settled. It rides every `run`
+result — `required`'s direct run and a `recommended` stage's accepted run alike
+— and every `recommended` `ask` prompt, so it reaches the path an agent actually
+takes: posture `required` never asks, so a decline-only placement would be dead
+text. `skip` and `stop_blocked` carry no advisory. The identical text rides the
+ready-landing warnings from `tickets.move` and `tickets.create_empty`, from a
+single shared source so the surfaces cannot drift.
+
 `tickets.sage_stamp(stem, stage, verdicts)` (renamed from
 `tickets.sage_record`, 260723 Phase 2) aggregates the supplied stage verdicts
 into the final posture, writes the frontmatter field(s), and renders any
@@ -1232,7 +1303,11 @@ sentence `Then git commit --amend --no-edit.`, which the standalone
 `tickets.verify` output omits because nothing has been committed there.
 {#260727-git-commit-verify-advisories}
 The gate is non-overridable: there is no flag that lets a hard-failing
-ticket commit through. A commit that stages no ticket files is unaffected.
+ticket commit through. A commit that stages no ticket files is unaffected. For
+the `ready-sage-posture` guardrail specifically, this gate is the **sole** hard
+enforcement point — the ticket mutation tools only warn
+(`#260620-ticket-move-tool`), so an unreviewed ticket can sit in `ready/` in the
+working tree, but it cannot be committed there.
 Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}
 
 The verify step excludes index-delete-side paths from the staged path set it
