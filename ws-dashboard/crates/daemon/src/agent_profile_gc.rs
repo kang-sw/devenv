@@ -23,11 +23,34 @@
 // status - a config may legitimately outlive an agent that exited inside a
 // surviving terminal (grace window, or simply a shell that outlived its
 // agent child).
+//
+// CONTRACT (260726 Phase 1 - the second pass is deliberately independent):
+// this sweep also READS each LIVE terminal's `notify-failures.json` so the
+// daemon can warn once about a `terminal-notify` hook whose delivery has
+// stayed broken (the hook process itself is permanently silent on stdio by
+// design - see `terminal_notify.rs`'s module CONTRACT). That read applies
+// ONLY to the directories this sweep already SKIPS, and its results never
+// feed back into which directories get reclaimed. The orphan-reclaim loop
+// below and its iteration order are unchanged by that addition, because a
+// different regression test depends on them
+// (`terminal_notify_callback_restart.rs`'s adopt-before-sweep ordering
+// test).
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::Duration;
 
+use crate::notify_failure::{NotifyFailureRecord, NotifyFailureWatch};
 use crate::terminal::TerminalRegistry;
+
+/// One live terminal directory as observed by a single blocking sweep pass:
+/// its id, its failure record (if any), and its `callback.json` mtime.
+///
+/// CONTRACT: OWNED values, not borrows. The blocking sweep body runs inside
+/// `spawn_blocking` and cannot lend anything back across that boundary, so
+/// it returns what the async side needs rather than holding a reference to
+/// it.
+type LiveProfileObservation = (String, Option<NotifyFailureRecord>, Option<u64>);
 
 /// Pure candidate-selection, unit-testable without touching a filesystem:
 /// given the directory names currently under `agent-profiles/` and the set
@@ -57,38 +80,90 @@ fn is_sane_directory_name(name: &str) -> bool {
 /// bounded `fs::read_dir` pass (implicitly capped by `MAX_TERMINAL_SESSIONS`
 /// live sessions plus whatever accumulated since the last sweep), no
 /// recursion, no unbounded per-tick work.
-pub async fn sweep_agent_profiles(state_dir: &Path, registry: &TerminalRegistry) {
+///
+/// `watch` carries the warn-once bookkeeping for the delivery-failure
+/// escalation across ticks; it is an explicit `&mut` parameter (never a
+/// module static) so the sweep task in `server.rs` owns it and dies with it.
+/// `grace` is the escalation's policy window, supplied by that same call
+/// site: it is the caller's sweep period, and keeping it a parameter is what
+/// stops this module from having to reach back up into `server.rs` for a
+/// constant.
+pub async fn sweep_agent_profiles(
+    state_dir: &Path,
+    registry: &TerminalRegistry,
+    watch: &mut NotifyFailureWatch,
+    grace: Duration,
+) {
     let live_ids = registry.live_terminal_ids();
+    let live_ids_for_blocking = live_ids.clone();
     let state_dir = state_dir.to_path_buf();
-    if let Err(error) =
-        tokio::task::spawn_blocking(move || sweep_agent_profiles_blocking(&state_dir, &live_ids)).await
+    let observations = match tokio::task::spawn_blocking(move || {
+        sweep_agent_profiles_blocking(&state_dir, &live_ids_for_blocking)
+    })
+    .await
     {
-        tracing::warn!(%error, "agent-profiles GC sweep task panicked");
+        Ok(observations) => observations,
+        Err(error) => {
+            tracing::warn!(%error, "agent-profiles GC sweep task panicked");
+            Vec::new()
+        }
+    };
+
+    let now = now_ms();
+    let grace_ms = grace.as_millis() as u64;
+    for (terminal_id, record, callback_mtime_ms) in &observations {
+        if !watch.should_warn(terminal_id, record.as_ref(), *callback_mtime_ms, now, grace_ms) {
+            continue;
+        }
+        // `should_warn` only returns true on the `count > 0` path, so the
+        // record is present here by construction.
+        let Some(record) = record.as_ref() else { continue };
+        tracing::warn!(
+            terminal_id = %terminal_id,
+            count = record.count,
+            last_error = %record.last_error,
+            "terminal-notify delivery has been failing for this terminal and has not self-healed"
+        );
     }
+    watch.retain_live(&live_ids);
 }
 
-fn sweep_agent_profiles_blocking(state_dir: &Path, live_ids: &HashSet<String>) {
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn sweep_agent_profiles_blocking(
+    state_dir: &Path,
+    live_ids: &HashSet<String>,
+) -> Vec<LiveProfileObservation> {
     let profile_root = state_dir.join("agent-profiles");
     let read_dir = match std::fs::read_dir(&profile_root) {
         Ok(read_dir) => read_dir,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(error) => {
             tracing::warn!(
                 %error,
                 path = %profile_root.display(),
                 "agent-profiles GC sweep: directory unreadable"
             );
-            return;
+            return Vec::new();
         }
     };
 
-    let names = read_dir.filter_map(|entry| {
-        let entry = entry.ok()?;
-        let is_dir = entry.file_type().ok()?.is_dir();
-        is_dir.then(|| entry.file_name().to_string_lossy().into_owned())
-    });
+    // Materialized rather than left lazy: the orphan-reclaim loop below and
+    // the live-directory observation pass after it each walk this list once.
+    let names: Vec<String> = read_dir
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let is_dir = entry.file_type().ok()?.is_dir();
+            is_dir.then(|| entry.file_name().to_string_lossy().into_owned())
+        })
+        .collect();
 
-    for orphaned in orphaned_profile_ids(names, live_ids) {
+    for orphaned in orphaned_profile_ids(names.iter().cloned(), live_ids) {
         let dir = profile_root.join(&orphaned);
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => {
@@ -107,6 +182,25 @@ fn sweep_agent_profiles_blocking(state_dir: &Path, live_ids: &HashSet<String>) {
             }
         }
     }
+
+    // Second, INDEPENDENT pass (260726 Phase 1): observe only the live
+    // directories the reclaim loop above deliberately skipped. Nothing here
+    // deletes, and nothing here can influence what the loop above already
+    // decided - see this module's CONTRACT.
+    names
+        .into_iter()
+        .filter(|name| is_sane_directory_name(name) && live_ids.contains(name))
+        .map(|terminal_id| {
+            let dir = profile_root.join(&terminal_id);
+            let record = crate::notify_failure::read_record(&dir);
+            let callback_mtime_ms = std::fs::metadata(crate::agent_callback::callback_path(&dir))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|since_epoch| since_epoch.as_millis() as u64);
+            (terminal_id, record, callback_mtime_ms)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -114,6 +208,11 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
+
+    // The window the production call sites pass (`server.rs`), referenced
+    // rather than re-typed as a literal so these tests cannot keep exercising
+    // an old window after the constant moves.
+    use crate::server::AGENT_PROFILE_GC_SWEEP_PERIOD;
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -183,7 +282,13 @@ mod tests {
             "http://127.0.0.1:0".to_owned(),
         );
 
-        sweep_agent_profiles(&state_dir, &registry).await;
+        sweep_agent_profiles(
+            &state_dir,
+            &registry,
+            &mut NotifyFailureWatch::default(),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
+        )
+        .await;
 
         assert!(!orphan_dir.exists(), "orphaned profile directory must be reclaimed");
         assert!(
@@ -213,7 +318,13 @@ mod tests {
         );
         crate::terminal::insert_fake_live_session_for_test(&registry, "term_live").await;
 
-        sweep_agent_profiles(&state_dir, &registry).await;
+        sweep_agent_profiles(
+            &state_dir,
+            &registry,
+            &mut NotifyFailureWatch::default(),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
+        )
+        .await;
 
         assert!(
             live_dir.exists(),
@@ -266,7 +377,13 @@ mod tests {
         // to tens or hundreds of milliseconds.
         crate::terminal::mark_profile_pending_for_test(&registry, "term_pending");
 
-        sweep_agent_profiles(&state_dir, &registry).await;
+        sweep_agent_profiles(
+            &state_dir,
+            &registry,
+            &mut NotifyFailureWatch::default(),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
+        )
+        .await;
 
         assert!(
             pending_dir.exists(),
@@ -292,7 +409,13 @@ mod tests {
             "http://127.0.0.1:0".to_owned(),
         );
 
-        sweep_agent_profiles(&state_dir, &registry).await;
+        sweep_agent_profiles(
+            &state_dir,
+            &registry,
+            &mut NotifyFailureWatch::default(),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
+        )
+        .await;
 
         let _ = std::fs::remove_dir_all(&state_dir);
     }

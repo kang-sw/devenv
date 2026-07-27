@@ -33,7 +33,13 @@ pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
 // `agent-profiles/` directory sitting around for up to this long between
 // sweeps is harmless; the important guarantee is ordering relative to
 // `boot_reconcile`, not sweep frequency).
-const AGENT_PROFILE_GC_SWEEP_PERIOD: Duration = Duration::from_secs(300);
+// `pub(crate)` only so `agent_profile_gc`'s TESTS can pass the same window the
+// production wiring below passes (a duplicated `Duration::from_secs(300)`
+// literal there would silently keep testing the old window if this constant
+// ever moves). The sweep itself still takes the window as a parameter and
+// never reaches back up into this module for it - see
+// `sweep_agent_profiles`' own doc comment.
+pub(crate) const AGENT_PROFILE_GC_SWEEP_PERIOD: Duration = Duration::from_secs(300);
 
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     run_with_shutdown(config, shutdown_signal())
@@ -156,10 +162,27 @@ where
     // tracked and `.abort()`-ed in both `select!` arms). Track the
     // `JoinHandle` and abort it alongside `shutdown_task` so it participates
     // in the same graceful-shutdown path instead of leaking.
+    // CONTRACT (260726 Phase 1): both the sweep PERIOD and the
+    // delivery-failure escalation's GRACE WINDOW are supplied from this one
+    // call site, out of the same constant. The escalation rule deliberately
+    // does not reach up here for it: `agent_profile_gc`/`notify_failure` are
+    // leaf modules, and having them import a constant from this top-level
+    // wiring module would invert the layering just to name a number. Passing
+    // it down also lets the rule's unit tests choose their own window.
     let gc_sweep_task = state_dir.map(|state_dir| {
         let sweep_registry = terminals.clone();
         tokio::spawn(async move {
-            crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
+            // Owned by THIS task (never a module static), so the warn-once
+            // set dies with the task on the `.abort()` shutdown path below.
+            let mut notify_failure_watch =
+                crate::notify_failure::NotifyFailureWatch::default();
+            crate::agent_profile_gc::sweep_agent_profiles(
+                &state_dir,
+                &sweep_registry,
+                &mut notify_failure_watch,
+                AGENT_PROFILE_GC_SWEEP_PERIOD,
+            )
+            .await;
             let mut interval = tokio::time::interval(AGENT_PROFILE_GC_SWEEP_PERIOD);
             // The first tick fires immediately; the sweep above already
             // covered "run once immediately at boot", so this first tick is
@@ -167,7 +190,13 @@ where
             interval.tick().await;
             loop {
                 interval.tick().await;
-                crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
+                crate::agent_profile_gc::sweep_agent_profiles(
+                    &state_dir,
+                    &sweep_registry,
+                    &mut notify_failure_watch,
+                    AGENT_PROFILE_GC_SWEEP_PERIOD,
+                )
+                .await;
             }
         })
     });

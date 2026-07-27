@@ -52,9 +52,46 @@ use crate::cli::TerminalNotifyArgs;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(750);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
+// CONTRACT (260726 Phase 1): both arms touch the failure record beside the
+// callback file, and the `Err` arm hands the SAME `error` binding to
+// `record_failure` and `log_failure` - the record's `lastError` being
+// verbatim identical to the log line's error text is structural here, not
+// merely documented. The record is keyed by `args.callback.parent()` (a path
+// sibling), never by the parsed `terminalId`, because the failure this
+// mechanism most needs to report is an unreadable/unparseable callback file,
+// from which no terminal id can be recovered. Neither call can print, fail,
+// or change this process's exit status - see the module CONTRACT above and
+// `notify_failure`'s own.
 pub async fn run_terminal_notify(args: TerminalNotifyArgs) -> anyhow::Result<()> {
-    if let Err(error) = deliver(&args).await {
-        log_failure(&args, &error);
+    // DECISION (kept deliberately, do not "fix" it back): this stamp is taken
+    // when the attempt STARTS, not when it fails, so the record's
+    // `lastFailureAtMs` precedes the real failure by the delivery duration (up
+    // to `REQUEST_TIMEOUT`) and by a little more than `log_failure`'s own later
+    // `now_ms()`. The earlier stamp is the SAFER direction for the daemon's
+    // escalation rule: a boot-reconcile adopt rewriting `callback.json` while
+    // this hook is in flight now leaves `callback.json`'s mtime NEWER than the
+    // recorded failure, so `should_warn`'s condition 3 correctly suppresses a
+    // failure against a target that has since been repaired. Consequence worth
+    // knowing: the ticket's "Residual false positive, accepted and named"
+    // paragraph describes the opposite (attempt-end) stamp and no longer
+    // describes this implementation - the mirrored risk it leaves is a genuine
+    // failure suppressed by a rewrite landing inside the microsecond window
+    // between this call and `resolve_callback_target`'s read, which is
+    // negligible in width.
+    let now = now_ms();
+    let profile_dir = args.callback.parent().map(|dir| dir.to_path_buf());
+    match deliver(&args).await {
+        Ok(()) => {
+            if let Some(profile_dir) = profile_dir.as_deref() {
+                crate::notify_failure::clear_record(profile_dir);
+            }
+        }
+        Err(error) => {
+            if let Some(profile_dir) = profile_dir.as_deref() {
+                crate::notify_failure::record_failure(profile_dir, &error, now);
+            }
+            log_failure(&args, &error);
+        }
     }
     Ok(())
 }
@@ -63,10 +100,15 @@ async fn deliver(args: &TerminalNotifyArgs) -> Result<(), String> {
     let target = agent_callback::resolve_callback_target(&args.callback)
         .map_err(|error| format!("resolving callback target: {error}"))?;
 
+    // The file resolved, but carries no credential - the shape a bare
+    // `bound-base-url.json` has, not a per-terminal `callback.json`. (This
+    // message used to blame "Phase 4 has not populated this callback target
+    // yet"; 260725 Phase 4 shipped, so that text would now misdirect anyone
+    // reading a log line containing it.)
     let (Some(terminal_id), Some(token)) = (target.terminal_id, target.token) else {
         return Err(format!(
-            "callback file at {} has no terminalId/token - Phase 4 has not populated this \
-             callback target yet",
+            "callback file at {} has no terminalId/token - expected a per-terminal callback \
+             target, not a base-url-only file",
             args.callback.display()
         ));
     };

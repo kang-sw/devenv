@@ -4,6 +4,7 @@ related:
   260725-feat-dashboard-pty-agent-attention-notification: parent feature, now closed in .done/ with all 8 phases landed; this ticket fixes an observability gap that survived that ticket's completion rather than a deferred item of it
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # terminal-notify's deliberate silence has no expiry, no failure counter, and no reader anywhere
@@ -580,3 +581,90 @@ a separate concern.
   repeat. Heed the restart warning under that step: a daemon restart repairs the
   callback target and legitimately suppresses the warning, so it cannot be used
   to shorten this wait.
+
+### Result (91b7a6ba) - 2026-07-27
+
+Landed as planned: a new leaf module `crates/daemon/src/notify_failure.rs` owning
+`NotifyFailureRecord`, its writer/clearer, and `NotifyFailureWatch::should_warn`
+as a pure rule; the read side added to the existing sweep as the planned second
+independent pass, leaving the orphan-reclaim loop and its iteration order
+byte-identical. The sweep became
+`sweep_agent_profiles(state_dir, registry, watch, grace)` with
+`sweep_agent_profiles_blocking` now returning
+`Vec<(String, Option<NotifyFailureRecord>, Option<u64>)>`.
+
+**Deviation — the grace window is a parameter, not a read of `server`.** The
+phase plan had `should_warn` reach for `crate::server::AGENT_PROFILE_GC_SWEEP_PERIOD`
+directly. That was overridden before implementation: it required promoting the
+constant to `pub(crate)` and created an upward dependency from a leaf module onto
+`server`. The rule instead takes `grace_ms` as an explicit argument supplied by
+the sweep call site, so `notify_failure.rs` references `server` nowhere.
+
+**CLI reproduction, before and after.** Before the fix, five runs: all exit `0`,
+all captured logs `0` bytes, and no `notify-failures.json` written anywhere —
+total silence, which is the defect. After the fix, the same five failing runs
+advanced the record `count: 1` through `count: 5`; `lastError` was
+byte-identical to the corresponding log line; the file landed at mode `0600`;
+and the record was deleted on the first successful delivery.
+
+Unit/integration coverage: 24 tests over the new module and the amended sweep,
+all passing.
+
+**Command discovery — the daemon suite needs `--no-fail-fast`.**
+`cargo test -p ws-dashboard-daemon` aborts after the `routes` target fails and
+never reaches the later integration targets, so this phase's own regression
+guard is invisible to the bare command that the verification boundary names.
+`--no-fail-fast` is required to see it. Confirmed independently by two agents.
+The known pre-existing failure sites are unchanged:
+`crates/daemon/tests/routes.rs:1066` and `:1383`.
+
+**Gap — the end-to-end reproduction was not run.** Everything else in the
+verification boundary was executed, but the final manual bullet (the ~10 minute
+wait across two sweep periods, needing a live Claude agent and a browser) was
+not. The escalation rule is therefore proven as pure logic and at the CLI writer
+level only; nobody has yet watched the warning appear in a real `daemon.log`.
+This is a stated gap, not a silent omission.
+
+**Follow-up captured.**
+`260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` (`idea/`) — a
+pre-existing `clippy::never_loop` error at `agent_attention.rs:178` makes
+`cargo clippy -p ws-dashboard-daemon --all-targets` fail regardless of the change
+under test, so the lint gate carries no signal for this phase or any other.
+
+#### Edition (02a6cd2e) - 2026-07-27
+
+Follow-up pass over the review of `91b7a6ba`. Three partitioned reviewers: Fit
+clean; Test clean with 3 minor notes plus mutation-testing of three prioritized
+assertions; Correctness 1 Important + 5 Minor.
+
+**The Important finding was real, and its proposed fix was not.** Keying the
+warn-once flag by terminal id alone swallows a second distinct breakage that
+follows a self-heal no sweep ever sampled — exactly the drop rule `## Decisions`
+asks for, defeated because the intervening count-`0` observation never happens.
+The reviewer proposed discriminating on the count alone ("drop the flag when a
+later count is lower"). That rule was temporarily substituted and the suite
+re-run: 1 failed / 23 passed, the failure being
+`should_warn_rewarns_when_a_self_heal_no_sweep_ever_observed_restarted_the_count_at_one`
+— a delete-and-recreate reset restarts at `count == 1`, which is not lower than
+a previously observed `1`. The shipped discriminator is instead "the timestamp
+advanced while the count did not", and the flag is keyed by the
+`(count, lastFailureAtMs)` pair observed at warn time. The discriminator was
+proven by that substitution, not argued.
+
+Smaller changes in the same pass: `clear_record` gained the `is_dir()` guard its
+writing counterpart already had; the GC tests now point at
+`AGENT_PROFILE_GC_SWEEP_PERIOD` instead of duplicating the 300 s literal (this,
+and only this, is why the constant became `pub(crate)` — the escalation rule
+still takes the window as a parameter); and two deliberate choices were recorded
+in source comments.
+
+**Recorded divergence from this ticket's text.** `lastFailureAtMs` stamps
+attempt-start rather than failure time. That is the safer direction, but not for
+the reason a quick read suggests: an attempt-start stamp is always *earlier*, so
+it biases the supersede gate toward firing, not away from it. That is the wanted
+bias — an adopt rewrite landing while a hook is still in flight now satisfies
+`mtime > lastFailureAtMs` and correctly silences that failure instead of raising
+a warning about a breakage already repaired. It does mean the
+`## Decisions` paragraph "Residual false positive, accepted and
+named" no longer describes the implementation it was written against. Known and
+accepted; the plan text above is frozen and is not edited to match.

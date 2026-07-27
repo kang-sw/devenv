@@ -2359,6 +2359,64 @@ stream ([Activity Console Read Model](#260521-ws-dashboard-activity-console-read
 [Activity Console Watch Stream](#260521-ws-dashboard-activity-console-watch-stream)):
 it carries no Activity Console item data and does not affect that projection.
 
+## Turn-State Hook Delivery Failure Visibility {#260727-dashboard-terminal-notify-failure-visibility}
+
+The turn-state transitions the
+[Terminal Attention Event Stream](#260726-dashboard-terminal-attention-event-stream)
+carries originate outside the daemon: the agent CLI's own hook runner fires the
+`ws-dashboard terminal-notify` command at every turn boundary, and that command
+POSTs the new state back to the daemon. That hook process is **permanently
+silent**: whatever happens — the callback file is missing, unreadable, or
+carries no credential; the daemon's port has moved; the token is stale; the
+POST is refused or rejected — it prints nothing to stdout or stderr and always
+exits `0`. The silence is deliberate and load-bearing, because a non-zero exit
+or any stderr output makes the agent CLI surface a hook-error line and a
+persistent error indicator inside the owner's live session on *every* turn
+boundary, for as long as the breakage lasts. This spec entry describes what an
+operator can observe instead.
+
+Two artifacts carry that observability, both written by the hook process itself:
+
+- **A rotated failure log.** Every failed delivery appends one line naming the
+  turn state, the callback path, and the error text to
+  `logs/terminal-notify.log.<date>` under the daemon's state directory, subject
+  to the same daily rotation and retention policy as the daemon's own log.
+- **A per-terminal failure record.** Beside the terminal's `callback.json`, the
+  hook process maintains `notify-failures.json` carrying the consecutive
+  failure count, the timestamp of the most recent failure, and that failure's
+  error text (the same text the log line carries, capped in length). A
+  successful delivery deletes the record, so its presence always means "the
+  most recent delivery attempt failed". The record is keyed by the callback
+  file's own location rather than by a terminal id parsed out of that file,
+  because an unparseable callback file is itself one of the failure modes it
+  must report. The hook process never creates the profile directory to write
+  it: once a terminal's directory has been reclaimed, a late hook fire records
+  nothing rather than resurrecting it.
+
+Failing to write either artifact is itself swallowed silently. Observability
+never comes at the cost of the stdio silence above.
+
+The daemon reads the record for every live terminal on the same periodic sweep
+that reclaims orphaned agent profile directories, and emits **one** warning to
+its own log per terminal when a failure looks genuinely stuck rather than
+transient — that is, when a record exists, its most recent failure is at least
+one full sweep period old, and the terminal's `callback.json` has not been
+rewritten since that failure (a rewrite means the target may have just been
+re-pointed, so the next hook fire settles it; an unreadable or absent
+`callback.json` is *not* treated as a repair). The warning names the terminal,
+the failure count, and the last error. It does not repeat on later sweeps while
+the same failure persists; the terminal becomes eligible to warn again once its
+record is observed cleared (a delivery succeeded) or once its id leaves and
+re-enters the live terminal set. Reading these records never influences which
+directories that sweep reclaims.
+
+Two non-goals are explicit. Attention state has no wall-clock expiry — a
+`ready` badge is not aged out because deliveries stopped arriving, since
+"stopped arriving" is indistinguishable from "the agent is idle". And there is
+no user-facing "hook delivery is broken" affordance in the browser; the
+audience for this signal is the operator reading `daemon.log`, not the owner
+watching a terminal tab.
+
 ## Terminal Tab Attention Indicator {#260726-dashboard-terminal-tab-attention-indicator}
 
 A workbench terminal tab label carries a state affordance driven by the
@@ -2373,8 +2431,14 @@ status is live. The daemon reclaims a dead terminal's attention entry lazily,
 so an entry can outlive the session it describes; gating the render on live
 status is what keeps a retired or exited pane from showing a badge for a turn
 that ended with the process. This is a presentation gate, not a daemon
-guarantee, and it is deliberately the only defense — see
-[Terminal Pane](#260516-ws-web-dashboard-terminal-pane) for retirement.
+guarantee, and it remains the only defense the badge itself has: nothing else
+ever clears a stale badge, and this gate only applies once the session is dead,
+so a badge stranded on a **live** session by a failed turn-state delivery stays
+stranded indefinitely. What
+[Turn-State Hook Delivery Failure Visibility](#260727-dashboard-terminal-notify-failure-visibility)
+adds is a signal for the *operator* in the daemon's log, not a defense for the
+badge — see [Terminal Pane](#260516-ws-web-dashboard-terminal-pane) for
+retirement.
 
 Acknowledgement clears the badge and is **revision-keyed, not sticky**:
 acknowledging records the acknowledged transition's own revision against the
