@@ -35,6 +35,8 @@
     "src/workNavOrder.test.ts",
     "src/keydownSuppression.ts",
     "src/keydownSuppression.test.ts",
+    "src/terminalRefocusGuard.ts",
+    "src/terminalRefocusGuard.test.ts",
     "src/hotkeys.ts",
     "src/hotkeys.test.ts",
     "src/fetchWithTimeout.ts",

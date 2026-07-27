@@ -2147,8 +2147,11 @@ composition-in-progress keystrokes are not forwarded as raw bytes by fallback
 browser handlers, and shell editing controls such as `ctrl-u` and `ctrl-w`
 produce their native shell-visible effects through the live terminal path.
 Focused terminal panes keep browser focus on the xterm input target across
-ordinary input, Enter, shell output, and committed text input unless the owner
-interacts outside the terminal surface.
+ordinary input, Enter, shell output, active IME composition, and committed
+text input unless the owner interacts outside the terminal surface. Refocus
+attempts triggered by input sends, output arrival, or the periodic focus
+watchdog are suppressed while IME composition is in progress, so they cannot
+interrupt an uncommitted composition and corrupt the composed text.
 {#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}
 
 ## Terminal Shell Selection Portability {#260516-ws-web-dashboard-terminal-shell-selection-portability}

@@ -139,8 +139,55 @@ Verification:
   does not simulate real OS/browser IME composition timing — but the guard
   logic itself is no longer untested.
 
+### Result (cc33309b) - 2026-07-27
+
+Implemented as planned: `composingRef = useRef(false)` promoted to
+component-level (`terminalPaneBody.tsx`), `refocusActiveTerminal` rewritten to
+build a `RefocusGuardState` at `setTimeout(0)` fire time and delegate to the
+new `shouldRefocusTerminal` predicate (`terminalRefocusGuard.ts`), covering
+all three call sites (`sendInputBytes`, `focusWatchdog`, WS `"output"`
+handler) through that one choke point; `clearComposing` now fires a
+trailing-edge `refocusActiveTerminal()` after clearing the ref;
+`keydownFallback` reads `composingRef.current` instead of the old effect-local
+variable. `terminalRefocusGuard.test.ts` added alongside the predicate,
+following the `keydownSuppression.ts` pattern.
+
+Partitioned review (fit/test: clean; correctness: non-clean, 1 important + 2
+minor) caught a real regression risk in the first pass: `composingRef` had no
+reset path outside `compositionend`, so a dropped `compositionend` (pane
+hidden/re-parented, alt-tab) would latch composing state true forever and
+permanently disable both the watchdog and `keydownFallback` for that pane.
+Fixed in a follow-up commit: `focusWatchdog` now clears `composingRef` when
+focus has genuinely left the container, restoring its unconditional-safety-net
+property; also restored a cheap composing/keepFocus short-circuit ahead of the
+layout-triggering `offsetParent` read (perf, no forced reflow per output
+chunk on an inactive pane). One narrow minor finding (the `active` gate
+folded into `sendInputBytes` is a practical no-op) was accepted without a code
+change. Re-review confirmed clean with 2 minor remaining (no new
+critical/important findings).
+
+Deviation from `## Spec Impact` below: doc-pre-pass's mental-model-updater
+flagged that `{#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}`
+listed focus-stability cases without naming in-progress IME composition, even
+though this fix exists specifically to preserve it during composition. Judged
+as a small clarity edit rather than a new-behavior entry (the underlying
+behavior is not new) and applied directly — see
+`ai-docs/spec/ws-web-dashboard/index.md`.
+
+Verification: `npm run test:terminal-refocus` (new predicate unit test),
+`npm run build` (type-checks the `.tsx` edit), and
+`npm run test:keydown-suppression` (neighboring pattern regression check) all
+passed at each checkpoint. The end-to-end IME race itself stays
+manual/dogfood-verified per the ticket — not yet exercised on the Windows
+dogfood clone as of this Result (pending a frontend-only redeploy).
+
 ## Spec Impact
 
 No spec change: this restores an unintended focus-stealing side effect to the
 documented non-stealing behavior; the terminal WS/IPC wire contract and
 retention/replay semantics are untouched. Contract-first spec: no.
+
+(Superseded in part by the Result above: a small clarifying edit to
+`{#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}` was made
+during doc-pre-pass — not a new-behavior spec entry, but this section's "no
+spec change" framing did not anticipate even a clarity-only touch.)
