@@ -2495,7 +2495,14 @@ func formatGitCommit(result wsgit.CommitResult) string {
 	if len(result.Advisories) > 0 {
 		b.WriteString("advisories:\n")
 		for _, advisory := range result.Advisories {
-			fmt.Fprintf(&b, "  %s\n", advisory)
+			// Each advisory may itself be multi-line (Phase 2 grows
+			// multi-line blocks, e.g. a "## Parent Board" section, into this
+			// channel); indent every line consistently rather than only the
+			// first, so a multi-line advisory does not lose its indentation
+			// on line 2+.
+			for _, line := range strings.Split(advisory, "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
 		}
 	}
 	return b.String()

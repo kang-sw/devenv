@@ -762,6 +762,39 @@ func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
 	}
 }
 
+// TestCommitVetoDiscardsAdvisoriesAlongsideError pins the intended-but-until-
+// now-implicit behavior at Commit's verifier call site: a Verifier that
+// returns both advisories and a non-nil error must still veto the commit,
+// and the advisories it returned must not leak into the (zero-value)
+// CommitResult — a vetoed commit has nothing to advise on.
+func TestCommitVetoDiscardsAdvisoriesAlongsideError(t *testing.T) {
+	root := t.TempDir()
+	ticketPath := "ai-docs/tickets/todo/not-a-valid-stem.md"
+	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Bad\n---\n\nBody.\n")
+
+	runner := &sequenceRunner{outs: [][]byte{
+		{}, // pre-status
+		{}, // add
+		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
+	}}
+	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
+		return []string{"WARN [unresolved-phases] should never surface: commit is vetoed"}, verifyErr
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{ticketPath},
+		Title:     "test: veto discards advisories",
+		AIContext: []string{"User intent: prove a veto's advisories never leak into CommitResult."},
+	})
+	if !errors.Is(err, verifyErr) {
+		t.Fatalf("Commit error = %v, want %v", err, verifyErr)
+	}
+	if len(result.Advisories) != 0 {
+		t.Fatalf("result.Advisories = %#v, want empty — a vetoed commit must discard advisories returned alongside its error", result.Advisories)
+	}
+}
+
 // TestCommitProceedsWhenVerifierNilDefaultsToNoOp asserts the DI seam's
 // backward-compat default: a Client built without a Verifier (the zero
 // value, as every pre-existing Client{Runner: ...} test literal in this file
@@ -920,6 +953,9 @@ func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
 	}
 	if verifierCalled {
 		t.Fatalf("Verifier was invoked for an outright deletion with no remaining paths to verify")
+	}
+	if len(result.Advisories) != 0 {
+		t.Fatalf("result.Advisories = %#v, want empty when the Verifier is skipped entirely", result.Advisories)
 	}
 }
 

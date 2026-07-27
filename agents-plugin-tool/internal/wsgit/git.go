@@ -40,11 +40,14 @@ func (ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]by
 // import here (see {#260720-wsdoc-commit-boundary} in
 // ai-docs/mental-model/mcp-runtime.md); a caller that needs ticket
 // verification wires wsdoc.TicketVerify in through an adapter that produces
-// this plain-error shape, mirroring how Runner keeps wsgit free of an
+// this two-return-value shape, mirroring how Runner keeps wsgit free of an
 // os/exec-specific dependency at the type level. The first return value
-// carries non-blocking advisory text lines (order-preserving, no
-// path/guardrail attribution baked into the type) that Client.Commit threads
-// into CommitResult.Advisories without affecting the commit outcome.
+// carries non-blocking advisory text lines (pre-formatted, text-mode,
+// order-preserving, no path/guardrail attribution baked into the type) that
+// Client.Commit threads into CommitResult.Advisories without affecting the
+// commit outcome. The second return value is the veto: a non-nil error stops
+// Client.Commit before the commit lands, and in that case the advisories
+// returned alongside it are discarded — a veto has nothing to advise on.
 type Verifier func(root string, paths []string) ([]string, error)
 
 type Client struct {
@@ -494,11 +497,14 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	// rather than a wsdoc.TicketVerify change.
 	var advisories []string
 	if verifyPaths := filterIndexDeleteSidePaths(status, opts.Paths); len(verifyPaths) > 0 {
-		var err error
-		advisories, err = c.verifier()(root, verifyPaths)
+		verifyAdvisories, err := c.verifier()(root, verifyPaths)
 		if err != nil {
+			// A veto (non-nil error) stops Commit here and returns the zero
+			// CommitResult, so verifyAdvisories is intentionally discarded:
+			// a vetoed commit has nothing to advise on.
 			return CommitResult{}, err
 		}
+		advisories = verifyAdvisories
 	}
 	ticketChanges := detectTicketChanges(ctx, runner, root)
 	if len(opts.UpdatedTickets) == 0 {
