@@ -8,6 +8,7 @@ related:
   260626-bug-sage-review-config-setter-missing: the `sage_review` config knob this ticket names as the only legitimate escape still has no setter
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # Sage ready-gate enforcement is duplicated across mutation primitives and the commit gate
@@ -214,3 +215,70 @@ Verification boundary — all of the following, at the shipped default
    the review-scope line, and the resolving call on its ordinary `run` result.
 5. A `todo/` → `ready/` promotion completes end-to-end through the renumbered
    rendered playbook with no hand edit.
+
+### Result (e4df433c) - 2026-07-27
+
+`tickets.move` and `tickets.create_empty` no longer reject a `ready/` landing on
+sage posture; they persist the resolved posture, succeed, and return a warning on
+the existing `Tip` channel. `tickets.verify` / `ws/git.commit` is untouched and is
+now the single hard enforcement point. `tickets.sage_gate` gained an `Advisory`
+carrying the non-waivable statement and the review-scope line on every `run`/`ask`
+result. `lead-write-ticket` runs the Sage Review Gate at step 5 and Commit at
+step 6.
+
+Five things the phase decided that the ticket did not anticipate:
+
+- **`tickets.sage_gate` lost its commit behavior entirely.** The reorder put the
+  gate before the ticket was committed, so the ask-decline path's canonical
+  `chore(sage): skip design review` commit began sweeping the whole authored
+  ticket — through a nil-`Verifier` client that also bypassed the guardrail this
+  ticket designates as the chokepoint. The first fix moved the caller but kept the
+  payload and re-emitted it as `pending_commit_*` lines with a ready-to-paste
+  `ws/git.commit(...)`, which reproduced both defects one hop out. The second fix
+  deleted `CommitTitle`/`CommitPaths`/`AIContext` from `SageGateResult` and
+  `mergeGateCommit` outright, following `260725`'s `tickets.sage_stamp` precedent
+  literally. This is a caller-visible contract change, recorded in
+  `{#260720-sage-gate-record-tools}`.
+- **One rejection survives on purpose.** De-blocking removed the blocked check for
+  *all* upward moves, but `tickets_verify.go` runs the guardrail only for
+  `status == "ready"`, so outside a ready landing the removal moved enforcement to
+  nowhere rather than to the chokepoint. A non-`ready` upward move with a blocked
+  required stage hard-rejects again through `blockedUpwardMoveError`.
+- **The two warning variants name different tools.** `sage_gate` returns
+  `stop_blocked` before any resolution logic and cannot clear a blocked posture;
+  only `sage_stamp` with a non-`block` verdict can. Sharing one instruction clause
+  would have reproduced the "escape no tool can perform" the `## Decisions` forbid.
+- **`create_empty(ready)` now stamps both required fields**, so the two ready
+  landing entry points produce the same posture shape. Before, create stamped only
+  design while `git.commit` failed on `sage-review-completeness: unset`.
+- **A `block` verdict at a `ready/` landing became newly reachable** once the move
+  stopped rejecting, and dead-ended with the ticket half-promoted. Step 5.3 now
+  demotes and reports instead of falling through to step 6.
+
+`260713` partial-mutation notice, disposed per `## Prior Art`: **deleted**. Its
+sole producer was the posture-rejection return in `TicketsMove`, which is gone.
+The underlying condition still exists — `prepareSageReviewForUpwardMove` persists
+the self-healing write and `atomicGitMove` can then still fail, leaving the file
+mutated — but that path returned an empty notice before this change too, so
+deletion is not a regression. The `blockedUpwardMoveError` rejection also mutates
+the file before returning; that write ordering predates this phase.
+
+`260723`'s revised seed-classification bullet was confirmed read-only against
+shipped behavior; it already matches and needed no edit.
+
+Three partitioned review cycles, the full budget. Cycle 1 returned 1 Critical
+(the renumber made steps 5 and 6 both commit, so step 6 failed with `no staged
+changes` — the ticket's own verification item 5) and 5 Important. Cycle 2 returned
+a new Critical because the cycle-1 `sage_gate` fix relocated its defect rather than
+removing it; that cycle was relayed with an elevated root-cause posture. Cycle 3
+was clean on fit and traced the two priority paths live against a real MCP server
+build rather than by inference.
+
+Carried forward unresolved, budget spent rather than dismissed:
+
+- The regression guards for the deleted commit directive match exact strings, not
+  the behavior class, so a reworded commit instruction would pass. Reported by the
+  test partition and mutation-demonstrated. Captured as
+  `260727-bug-string-match-guards-miss-reworded-directives`.
+- `blocked`-at-`ready` has `wsdoc`-level coverage but no MCP-dispatch-level test,
+  unlike its unreviewed sibling.
