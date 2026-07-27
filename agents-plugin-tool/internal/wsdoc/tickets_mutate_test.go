@@ -427,6 +427,45 @@ func TestTicketsMoveUpwardToTodoExemptCategoriesStampNoSageReviewField(t *testin
 	}
 }
 
+// TestTicketsMoveUpwardNonReadyExemptCategoryBlockedFieldIgnored covers the
+// one combination the C3 hard-block path had no direct test for: an exempt
+// category (research/workset) carrying a stray `sage-review-design: blocked`
+// field, moved idea/ -> todo/. prepareSageReviewForUpwardMove zeroes each
+// stage whose *Required flag is false before blockedUpwardMoveError sees the
+// postures, so the stray field is read and discarded and the move must
+// succeed. Without this test, making blockedUpwardMoveError inspect raw
+// frontmatter instead of the zeroed postures would hard-block a category that
+// has no sage review at all, and nothing would fail.
+func TestTicketsMoveUpwardNonReadyExemptCategoryBlockedFieldIgnored(t *testing.T) {
+	for _, category := range []string{"research", "workset"} {
+		t.Run(category, func(t *testing.T) {
+			root := t.TempDir()
+			stem := "260101-" + category + "-stray-blocked"
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+				"---\ntitle: Stray\nsage-review-design: blocked\n---\n\nBody.\n")
+			runner := &mockGitRunner{}
+
+			result, err := TicketsMove(root, runner, TicketMoveOptions{
+				TicketStem: stem,
+				To:         "todo",
+				SageReview: "auto",
+			})
+			if err != nil {
+				t.Fatalf("exempt category with stray blocked field must still move: %v", err)
+			}
+			if len(runner.calls) == 0 {
+				t.Fatal("git was never called, so no move happened")
+			}
+			if result.Tip != "" {
+				t.Fatalf("Tip = %q, want empty for exempt category", result.Tip)
+			}
+			if _, statErr := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); statErr != nil {
+				t.Fatalf("ticket should have landed at todo/: %v", statErr)
+			}
+		})
+	}
+}
+
 // TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture asserts the
 // de-blocked mutation-time path: a ready/ landing with a non-terminal
 // required sage-review stage now succeeds (ws/git.commit's

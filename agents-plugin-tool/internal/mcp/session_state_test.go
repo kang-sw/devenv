@@ -2498,6 +2498,51 @@ func TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse(t *testing
 	}
 }
 
+// TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse is the
+// dispatch-level counterpart of the wsdoc-level
+// TestTicketsMoveUpwardNonReadyBlockedRejectsMove. C5 gave the ready-landing
+// *warning* paths dispatch-level coverage but left the non-ready *hard
+// rejection* (blockedUpwardMoveError) asserted only inside wsdoc, so a
+// dispatch-case edit that downgraded it to a soft Tip, swallowed it, or ran it
+// after atomicGitMove would pass every test. This asserts the rejection
+// actually reaches the tools/call response text and that the ticket does not
+// move.
+func TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-nonready-blocked-dispatch"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Blocked\nsage-review-design: blocked\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902610, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "sage-review-design: blocked") {
+		t.Fatalf("tickets.move idea->todo blocked response missing the rejection text: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "address blocked review before promoting") {
+		t.Fatalf("tickets.move idea->todo blocked response missing the action-oriented rejection: %s", moveResp)
+	}
+	// It must be a hard error, not a soft tip on a successful move.
+	if strings.Contains(moveResp, "moved") || strings.Contains(moveResp, "tip: ") {
+		t.Fatalf("blocked non-ready move must not report success: %s", moveResp)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); err == nil {
+		t.Fatalf("ticket moved to todo/ despite blocked rejection")
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "idea", stem+".md")); err != nil {
+		t.Fatalf("ticket should remain at idea/: %v", err)
+	}
+}
+
 // TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse is
 // the tickets.create_empty counterpart of the above (C5): creating directly
 // at ready/ under the shipped default posture must succeed and surface the

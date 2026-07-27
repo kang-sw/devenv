@@ -901,7 +901,9 @@ func TestValidateRealTree(t *testing.T) {
 // requested paths" bug the reorder fixed, and no other test in this repo
 // asserts on the semantic step order (only mechanical regen/mirror
 // byte-consistency). Content-level, not presence-only: it fails on a
-// re-inversion, not merely a missing heading.
+// re-inversion, not merely a missing heading, and it additionally fails if a
+// commit instruction reappears anywhere inside the gate section or if the
+// section stops overriding the stamping tools' own commit direction.
 func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-write-ticket", "lead-write-ticket.md")
 	raw, err := os.ReadFile(path)
@@ -922,6 +924,30 @@ func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
 	}
 	if gateIdx > commitIdx {
 		t.Fatalf("Sage Review Gate (offset %d) must precede Commit (offset %d) in ## On: invoke; re-inversion detected", gateIdx, commitIdx)
+	}
+
+	// Order alone is not the whole contract. The defect this reorder fixed was
+	// a second commit performed inside the gate section; a future edit could
+	// keep the headings in the right order and still reintroduce a commit
+	// instruction there, reproducing "no staged changes in requested paths" at
+	// step 6. Pin the gate section's content too.
+	section := text[gateIdx:commitIdx]
+	for _, forbidden := range []string{"git.commit", "chore(sage)"} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("the Sage Review Gate section must not instruct a commit (found %q); step 6 owns the single commit:\n%s", forbidden, section)
+		}
+	}
+	// And it must positively state that the stamping tools' own commit
+	// direction does not apply here, so the step-5/step-6 conflict that made
+	// the fix depend on the agent preferring the later line cannot come back.
+	for _, required := range []string{
+		"leave it uncommitted",
+		"does not apply inside this procedure",
+		"step 6 performs the single commit",
+	} {
+		if !strings.Contains(section, required) {
+			t.Fatalf("the Sage Review Gate section must state %q:\n%s", required, section)
+		}
 	}
 }
 

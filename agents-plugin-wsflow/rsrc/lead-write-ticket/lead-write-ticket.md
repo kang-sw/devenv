@@ -61,8 +61,7 @@ Movement
 ### 5. Sage Review Gate
 
 1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
-2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)` and follow its returned next_instruction.
-3. `tickets.sage_stamp` writes the posture but does not commit; leave it uncommitted so step 6 carries it together with any other uncommitted edits already held on the ticket, under real `## AI Context`.
+2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)`. Both stamping tools write the sage-review posture into the ticket file and leave it uncommitted; any commit direction either tool returns does not apply inside this procedure. Commit nothing in this step — step 6 performs the single commit that carries the posture together with the ticket edits already held on the file, under real `## AI Context`.
 
 ### 6. Commit
 

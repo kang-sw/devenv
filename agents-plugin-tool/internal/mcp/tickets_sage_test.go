@@ -46,22 +46,18 @@ func TestParseSageVerdicts(t *testing.T) {
 }
 
 func TestFormatSageGateRoundTrip(t *testing.T) {
-	// run action with a pending decline commit (combined-mode: completeness
-	// declined, design still runs). The MCP dispatch layer no longer commits
-	// this itself (C2 fix); formatSageGate must surface it as a pending
-	// commit for the caller's own ws/git.commit, not as a claimed commit.
+	// A combined-mode run (the state a completeness decline lands in: design
+	// still runs). formatSageGate must render only the gate decision — no
+	// commit title, no commit paths, no ws/git.commit call handed to the
+	// caller. The posture write rides the caller's own next ordinary commit.
 	out := formatSageGate(wsdoc.SageGateResult{
-		Action:      "run",
-		Reviewers:   []string{"design", "completeness"},
-		Mode:        "combined",
-		CommitTitle: "chore(sage): skip completeness review",
-		CommitPaths: []string{"ai-docs/tickets/ready/260101-feat-x.md"},
+		Action:    "run",
+		Reviewers: []string{"design", "completeness"},
+		Mode:      "combined",
 	})
 	for _, want := range []string{
 		"action: run", "reviewers: design, completeness", "mode: combined",
-		"pending_commit_title: chore(sage): skip completeness review",
-		"pending_commit_paths: ai-docs/tickets/ready/260101-feat-x.md",
-		"next_instruction:", "stage=combined", "ws/git.commit",
+		"next_instruction:", "stage=combined",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("formatSageGate missing %q in:\n%s", want, out)
@@ -75,6 +71,24 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 	askOut := formatSageGate(wsdoc.SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?"})
 	if !strings.Contains(askOut, "ask_prompt: Run design review for this ticket?") || !strings.Contains(askOut, "answer=yes|no") {
 		t.Fatalf("formatSageGate ask output:\n%s", askOut)
+	}
+
+	// D1/D3/D4: no gate action may propose a commit for the posture flip, and
+	// all three non-terminal actions must describe the uncommitted write the
+	// same way. A regression that reintroduces a canonical title, a
+	// pending_commit_* key family, or a ready-to-paste ws/git.commit call on
+	// any branch fails here.
+	skipOut := formatSageGate(wsdoc.SageGateResult{Action: "skip"})
+	for name, text := range map[string]string{"skip": skipOut, "ask": askOut, "run": out} {
+		if strings.Contains(text, "ws/git.commit") || strings.Contains(text, "git.commit(") {
+			t.Fatalf("formatSageGate %s must not hand the caller a commit call:\n%s", name, text)
+		}
+		if strings.Contains(text, "pending_commit") || strings.Contains(text, "chore(sage)") {
+			t.Fatalf("formatSageGate %s must not carry commit metadata:\n%s", name, text)
+		}
+		if !strings.Contains(text, sageGatePostureUncommittedNote) {
+			t.Fatalf("formatSageGate %s missing the shared uncommitted-posture note:\n%s", name, text)
+		}
 	}
 
 	// The advisory line renders as a capitalized sentence (C9), matching its
@@ -159,10 +173,12 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 
 // TestServeStdioSageGateDeclineDoesNotAutoCommit is the C2 regression test:
 // the ask-decline path (recommended posture + answer=="no") must write and
-// persist the "skipped" posture but leave it uncommitted for the caller's
-// own ws/git.commit, instead of the dispatch layer auto-committing it
-// through a nil-Verifier wsgit.NewClient() (which bypassed the
-// ready-sage-posture guardrail chokepoint).
+// persist the "skipped" posture, then stop. It must neither commit it (the
+// original defect: a nil-Verifier wsgit.NewClient() commit bypassing the
+// ready-sage-posture guardrail chokepoint) nor propose a separate commit for
+// it (the cycle-1 relocation of the same defect: a canonically-titled
+// ws/git.commit call handed to the caller, whose `-A` staging sweeps the whole
+// uncommitted ticket into a commit describing only the posture flip).
 func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -184,11 +200,17 @@ func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
 		"landing": "todo",
 		"answer":  "no",
 	})
-	if !strings.Contains(resp, "pending_commit_title: chore(sage): skip design review") {
-		t.Fatalf("sage_gate decline response missing pending commit metadata:\n%s", resp)
+	if !strings.Contains(resp, "action: skip") {
+		t.Fatalf("sage_gate decline response should resolve to skip:\n%s", resp)
 	}
-	if !strings.Contains(resp, "ws/git.commit") {
-		t.Fatalf("sage_gate decline response must route the caller to ws/git.commit:\n%s", resp)
+	// The decline proposes no commit of its own — not an automatic one and not
+	// a suggested one. A canonical "chore(sage): skip ... review" title over a
+	// ticket file swallows the co-located real edits (260725,
+	// {#260720-wsdoc-commit-boundary}), so the whole payload is gone.
+	for _, forbidden := range []string{"pending_commit", "chore(sage)", "ws/git.commit", "git.commit("} {
+		if strings.Contains(resp, forbidden) {
+			t.Fatalf("sage_gate decline response must not carry %q:\n%s", forbidden, resp)
+		}
 	}
 	if strings.Contains(resp, "commit: ") {
 		t.Fatalf("sage_gate decline response must not claim a commit happened:\n%s", resp)
