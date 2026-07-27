@@ -58,16 +58,16 @@ Movement
 1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
 2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check**.
 
-### 5. Commit
-
-1. If no file changed because a requested move was refused, skip commit.
-2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
-
-### 6. Sage Review Gate
+### 5. Sage Review Gate
 
 1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
 2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)` and follow its returned next_instruction.
 3. `tickets.sage_stamp` writes the posture but does not commit: commit it with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`, carrying the posture change together with any other uncommitted edits already held on the ticket, under real `## AI Context`.
+
+### 6. Commit
+
+1. If no file changed because a requested move was refused, skip commit.
+2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
 ### 7. Handoff
 
