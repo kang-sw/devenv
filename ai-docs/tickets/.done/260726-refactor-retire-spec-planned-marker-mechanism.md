@@ -8,6 +8,7 @@ related:
   260726-feat-verify-ticket-graph-advisories: supplies the advisory-not-blocking reversibility principle, and its mechanical-floor scope is what the ticket-body-read carve-out is measured against
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-28
 ---
 
 # Retire the 🚧 planned-marker mechanism; pending spec contracts live in the ticket
