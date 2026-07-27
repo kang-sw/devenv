@@ -34,15 +34,6 @@ type TicketMutateResult struct {
 	OldPath string
 	NewPath string
 	Tip     string
-
-	// PartialMutationNotice is populated only on the TicketsMove error
-	// return path where prepareSageReviewForUpwardMove already persisted a
-	// self-healing frontmatter write (legacy sage-review migration or
-	// posture normalization) before the move itself blocked or failed. A
-	// caller that sees a non-empty error AND a non-empty
-	// PartialMutationNotice must not treat the file as unchanged: a retry
-	// will not find the pre-call frontmatter.
-	PartialMutationNotice string
 }
 
 // statusDirs maps a status token to its tickets-relative directory name.
@@ -132,10 +123,22 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		return TicketMutateResult{}, fmt.Errorf("ticket is closed (%s); reopen is out of scope", curStatus)
 	}
 
+	var readySageWarning string
 	if isUpwardMove(curStatus, to) {
-		postures, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), stem, opts.SageReview, to)
+		postures, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), stem, opts.SageReview)
 		if err != nil {
-			return TicketMutateResult{PartialMutationNotice: sageReviewPostureTip(postures)}, err
+			return TicketMutateResult{}, err
+		}
+		if to == "ready" {
+			// Recompute the ready-landing problem set from the postures
+			// prepareSageReviewForUpwardMove already resolved and persisted,
+			// rather than have that function build the warning itself — it
+			// no longer needs to know the destination status at all (see its
+			// doc comment). readyPostureProblems stays the single pure
+			// implementation of "which stage(s) are non-terminal", shared
+			// with tickets_verify.go's hard guardrail.
+			designRequired, completenessRequired := sageReviewStageRequirement(stem)
+			readySageWarning = readySagePostureWarning(readyPostureProblems(designRequired, postures.Design, completenessRequired, postures.Completeness))
 		}
 	}
 
@@ -157,6 +160,12 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	if to == "ready" {
 		if warning := readyGateWarning(filepath.Join(root, filepath.FromSlash(newPath)), stem); warning != "" {
 			result.Tip = appendTip(result.Tip, warning)
+		}
+		// Soft warning only: ws/tickets.verify / ws/git.commit's
+		// ready-sage-posture guardrail is the sole HARD enforcement point
+		// (single chokepoint) — this call never blocks the move itself.
+		if readySageWarning != "" {
+			result.Tip = appendTip(result.Tip, readySageWarning)
 		}
 	}
 	return result, nil
@@ -328,17 +337,28 @@ func sageReviewBlockedError(field string) error {
 	return fmt.Errorf("%s: blocked; address blocked review before promoting", field)
 }
 
-// prepareSageReviewForUpwardMove resolves and validates up to two
-// frontmatter fields (sage-review-design, sage-review-completeness) for an
-// upward move, gated by which stages the ticket's category requires. For
-// to == "ready", design is checked before completeness so a ticket that
-// reaches ready without ever passing design review is always blocked here
-// first, regardless of entry path (idea->ready direct, or a ticket authored
-// directly at ready) — this is the hard, never-skippable design-review
-// invariant; there is no Go-side auto-run, only an actionable error that
-// directs the caller (the lead-write-ticket playbook) to run design review
-// first.
-func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview, to string) (sageReviewPostures, error) {
+// sageReviewNonWaivableAdvisory is the shared non-waivable statement +
+// review-scope line surfaced everywhere a sage-review posture reaches an
+// agent on its ordinary path: the ready-landing mutation-time warning
+// (tickets.move, tickets.create_empty — see readySagePostureWarning) and
+// tickets.sage_gate's `required` -> run result and `recommended` -> ask
+// prompt (tickets_sage.go). Kept as a single constant so the two surfaces
+// cannot drift in wording.
+const sageReviewNonWaivableAdvisory = "sage review is not waivable per ticket (see ws/config.show for the sage_review config); " +
+	"design review checks coherence, right-problem framing, and executability; completeness review checks structure, " +
+	"fields, and clarity — neither judges whether the underlying research itself is settled."
+
+// prepareSageReviewForUpwardMove resolves and persists up to two frontmatter
+// fields (sage-review-design, sage-review-completeness) for an upward move,
+// gated by which stages the ticket's category requires. It no longer blocks
+// on posture: ws/git.commit's ready-sage-posture guardrail (tickets_verify.go)
+// is the single HARD enforcement point for the ready-landing invariant; a
+// caller landing at ready with a non-terminal or blocked posture gets a soft
+// warning instead (built by the caller via readyPostureProblems +
+// readySagePostureWarning, since this function no longer needs to know the
+// destination status). The only error this function can still return is a
+// genuine I/O failure from the persisted-write below.
+func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview string) (sageReviewPostures, error) {
 	designRequired, completenessRequired := sageReviewStageRequirement(stem)
 	fm := frontmatter(ticketAbsPath)
 	design, completeness := effectiveSageReviewPostures(fm)
@@ -351,12 +371,15 @@ func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview, to string) 
 		completeness = resolved
 	}
 
-	// Always (re)persist the effective value for each required field. This
-	// is a no-op write when the new field already held that value, and is
-	// the self-healing migration write for a ticket that only had the
-	// legacy single sage-review: field (see effectiveSageReviewPostures) —
-	// the migration replaces the read-time inference with a persisted
-	// value on first touch, without a separate bulk-rewrite script.
+	// Always (re)persist the effective value for each required field in a
+	// single writeFrontmatterField call. This is a no-op write when the new
+	// field already held that value, and is the self-healing migration write
+	// for a ticket that only had the legacy single sage-review: field (see
+	// effectiveSageReviewPostures) — the migration replaces the read-time
+	// inference with a persisted value on first touch, without a separate
+	// bulk-rewrite script. Both fields land in the same os.WriteFile call
+	// (writeFrontmatterField builds the full new content in memory before
+	// writing once), so there is no partial-write window between them.
 	writes := map[string]string{}
 	if designRequired {
 		writes["sage-review-design"] = design
@@ -376,31 +399,7 @@ func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview, to string) 
 		completeness = ""
 	}
 
-	result := sageReviewPostures{Design: design, Completeness: completeness}
-
-	if designRequired && design == "blocked" {
-		return result, sageReviewBlockedError("sage-review-design")
-	}
-	if completenessRequired && completeness == "blocked" {
-		return result, sageReviewBlockedError("sage-review-completeness")
-	}
-	if to != "ready" {
-		return result, nil
-	}
-
-	// design is reported before completeness (readyPostureProblems preserves
-	// that order), matching the earlier inline switch's early-return order.
-	// design/completeness are guaranteed non-empty here for any required
-	// stage (the defaulting above already resolved "" and "pending"), so the
-	// posture=="" ("unset") branch below is unreachable from this call site.
-	if problems := readyPostureProblems(designRequired, design, completenessRequired, completeness); len(problems) > 0 {
-		first := problems[0]
-		if first.Blocked {
-			return result, sageReviewBlockedError(first.Field)
-		}
-		return result, sageReviewStageError(first.Field, first.Posture)
-	}
-	return result, nil
+	return sageReviewPostures{Design: design, Completeness: completeness}, nil
 }
 
 // readyPostureProblem describes one required sage-review stage that is not
@@ -420,10 +419,11 @@ type readyPostureProblem struct {
 // unrequired stage's empty value, so a hand-authored ready/ ticket that
 // never went through TicketsMove's resolved-posture stamping is still
 // caught. Pure: no I/O, no writes. This is the single implementation of the
-// ready-landing terminal-posture rule, shared by
-// prepareSageReviewForUpwardMove's ready-promotion check (which wraps the
-// result in its own sageReviewStageError/sageReviewBlockedError types) and
-// TicketVerify's ready-sage-posture guardrail.
+// ready-landing terminal-posture rule, shared by TicketsMove's ready-landing
+// warning builder (readySagePostureWarning, below — the soft mutation-time
+// path) and TicketVerify's ready-sage-posture guardrail (which wraps the
+// result in sageReviewStageError/sageReviewBlockedError for the hard FAIL
+// text — the sole HARD enforcement point).
 func readyPostureProblems(designRequired bool, design string, completenessRequired bool, completeness string) []readyPostureProblem {
 	var problems []readyPostureProblem
 	for _, stage := range []struct {
@@ -448,6 +448,37 @@ func readyPostureProblems(designRequired bool, design string, completenessRequir
 		}
 	}
 	return problems
+}
+
+// readySagePostureWarning builds the soft, mutation-time advisory for a
+// ready-landing move/create that leaves a required sage-review stage in a
+// non-terminal posture. Unlike sageReviewStageError/sageReviewBlockedError
+// (which build tickets.verify's HARD FAIL text — the sole enforcement
+// point), this text never blocks the caller; it states the consequence
+// (ws/git.commit will still fail on guardrail ready-sage-posture) and the
+// reachable escape (ws/tickets.sage_gate). Only the first problem is
+// reported, matching readyPostureProblems' design-before-completeness order
+// and the historical single-field error precedent. The "unreviewed" and
+// "blocked" variants are deliberately distinct sentences (per ticket
+// decision): unreviewed means review has not run yet; blocked means a prior
+// review already found unresolved issues — the two imply different next
+// actions for the caller.
+func readySagePostureWarning(problems []readyPostureProblem) string {
+	if len(problems) == 0 {
+		return ""
+	}
+	first := problems[0]
+	var state string
+	if first.Blocked {
+		state = "blocked (a prior review found unresolved issues)"
+	} else {
+		state = "unreviewed (posture " + first.Posture + "; review has not run yet)"
+	}
+	return fmt.Sprintf(
+		"%s is %s; ws/git.commit will fail on guardrail ready-sage-posture until this resolves. "+
+			"Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it; %s",
+		first.Field, state, sageReviewNonWaivableAdvisory,
+	)
 }
 
 // currentSageReviewPostures returns the effective per-stage posture for a

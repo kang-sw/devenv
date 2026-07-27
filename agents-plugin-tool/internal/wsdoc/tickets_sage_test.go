@@ -147,6 +147,71 @@ func TestSageGateTodoPostures(t *testing.T) {
 	}
 }
 
+// TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory covers
+// verification item 4: the non-waivable statement + review-scope line must
+// ride the ordinary path an agent actually reaches — posture `required`'s
+// `run` result, and posture `recommended`'s `ask` prompt — not only an
+// answer=="no" decline path (which `required` never reaches, since
+// `required` never asks). Also confirms the advisory reaches the combined
+// (both-stages) mode, not just the standalone path.
+func TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory(t *testing.T) {
+	stem := "260101-feat-sample"
+
+	t.Run("required-run-standalone", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "run" {
+			t.Fatalf("action = %q, want run", res.Action)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want the non-waivable statement on the ordinary required->run path")
+		}
+		if !strings.Contains(res.Advisory, "not waivable") {
+			t.Fatalf("Advisory = %q, want the non-waivable statement", res.Advisory)
+		}
+		if !strings.Contains(res.Advisory, "coherence") || !strings.Contains(res.Advisory, "structure, fields, and clarity") {
+			t.Fatalf("Advisory = %q, want the design-vs-completeness review-scope line", res.Advisory)
+		}
+	})
+
+	t.Run("recommended-ask-standalone", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "recommended"})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "ask")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "ask" {
+			t.Fatalf("action = %q, want ask", res.Action)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want it kept on the recommended ask prompt too (per ticket decision)")
+		}
+	})
+
+	t.Run("required-run-combined", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{
+			"sage-review-design":       "required",
+			"sage-review-completeness": "required",
+		})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "run" || res.Mode != "combined" {
+			t.Fatalf("action/mode = %q/%q, want run/combined", res.Action, res.Mode)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want it carried into combined mode too, not just the standalone path")
+		}
+	})
+}
+
 func TestSageGateCategoryMatrix(t *testing.T) {
 	for _, stem := range []string{"260101-research-topic", "260101-workset-board"} {
 		root := t.TempDir()

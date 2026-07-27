@@ -390,78 +390,85 @@ func TestTicketsMoveUpwardToTodoExemptCategoriesStampNoSageReviewField(t *testin
 	}
 }
 
-func TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture(t *testing.T) {
+// TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture asserts the
+// de-blocked mutation-time path: a ready/ landing with a non-terminal
+// required sage-review stage now succeeds (ws/git.commit's
+// ready-sage-posture guardrail is the sole HARD enforcement point) and
+// carries the "unreviewed" warning variant naming the first non-terminal
+// field, mirroring readyPostureProblems' design-before-completeness order.
+func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		body    string
-		config  string
-		want    map[string]string
-		wantErr string
+		name     string
+		body     string
+		config   string
+		want     map[string]string
+		wantWarn string
 	}{
 		{
-			name:    "legacy-pending-ask",
-			body:    "sage-review: pending\n",
-			config:  "ask",
-			want:    map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "recommended"},
-			wantErr: "sage-review-design: recommended; run sage review or skip recommended review",
+			name:     "legacy-pending-ask",
+			body:     "sage-review: pending\n",
+			config:   "ask",
+			want:     map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "recommended"},
+			wantWarn: "sage-review-design is unreviewed (posture recommended; review has not run yet)",
 		},
 		{
-			name:    "legacy-pending-auto",
-			body:    "sage-review: pending\n",
-			config:  "auto",
-			want:    map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"},
-			wantErr: "sage-review-design: required; run sage review",
+			name:     "legacy-pending-auto",
+			body:     "sage-review: pending\n",
+			config:   "auto",
+			want:     map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"},
+			wantWarn: "sage-review-design is unreviewed (posture required; review has not run yet)",
 		},
 		{
-			name:    "design-recommended",
-			body:    "sage-review-design: recommended\n",
-			config:  "off",
-			want:    map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "skipped"},
-			wantErr: "sage-review-design: recommended; run sage review or skip recommended review",
+			name:     "design-recommended",
+			body:     "sage-review-design: recommended\n",
+			config:   "off",
+			want:     map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "skipped"},
+			wantWarn: "sage-review-design is unreviewed (posture recommended; review has not run yet)",
 		},
 		{
-			name:    "design-required",
-			body:    "sage-review-design: required\n",
-			config:  "off",
-			want:    map[string]string{"sage-review-design": "required", "sage-review-completeness": "skipped"},
-			wantErr: "sage-review-design: required; run sage review",
+			name:     "design-required",
+			body:     "sage-review-design: required\n",
+			config:   "off",
+			want:     map[string]string{"sage-review-design": "required", "sage-review-completeness": "skipped"},
+			wantWarn: "sage-review-design is unreviewed (posture required; review has not run yet)",
 		},
 		{
-			name:    "design-blocked",
-			body:    "sage-review-design: blocked\n",
-			config:  "auto",
-			want:    map[string]string{"sage-review-design": "blocked"},
-			wantErr: "sage-review-design: blocked; address blocked review",
+			name:     "design-blocked",
+			body:     "sage-review-design: blocked\n",
+			config:   "auto",
+			want:     map[string]string{"sage-review-design": "blocked"},
+			wantWarn: "sage-review-design is blocked (a prior review found unresolved issues)",
 		},
 		{
-			name:    "design-terminal-completeness-recommended",
-			body:    "sage-review-design: completed\nsage-review-completeness: recommended\n",
-			config:  "off",
-			want:    map[string]string{"sage-review-design": "completed", "sage-review-completeness": "recommended"},
-			wantErr: "sage-review-completeness: recommended; run sage review or skip recommended review",
+			name:     "design-terminal-completeness-recommended",
+			body:     "sage-review-design: completed\nsage-review-completeness: recommended\n",
+			config:   "off",
+			want:     map[string]string{"sage-review-design": "completed", "sage-review-completeness": "recommended"},
+			wantWarn: "sage-review-completeness is unreviewed (posture recommended; review has not run yet)",
 		},
 		{
-			name:    "design-terminal-completeness-blocked",
-			body:    "sage-review-design: skipped\nsage-review-completeness: blocked\n",
-			config:  "off",
-			want:    map[string]string{"sage-review-completeness": "blocked"},
-			wantErr: "sage-review-completeness: blocked; address blocked review",
+			name:     "design-terminal-completeness-blocked",
+			body:     "sage-review-design: skipped\nsage-review-completeness: blocked\n",
+			config:   "off",
+			want:     map[string]string{"sage-review-completeness": "blocked"},
+			wantWarn: "sage-review-completeness is blocked (a prior review found unresolved issues)",
 		},
 		{
-			// Hard invariant: design not-terminal blocks even when
-			// completeness is already terminal.
-			name:    "design-recommended-completeness-completed",
-			body:    "sage-review-design: recommended\nsage-review-completeness: completed\n",
-			config:  "off",
-			want:    map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "completed"},
-			wantErr: "sage-review-design: recommended; run sage review or skip recommended review",
+			// Hard invariant preserved even as a warning: design not-terminal
+			// is still reported first even when completeness is already
+			// terminal.
+			name:     "design-recommended-completeness-completed",
+			body:     "sage-review-design: recommended\nsage-review-completeness: completed\n",
+			config:   "off",
+			want:     map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "completed"},
+			wantWarn: "sage-review-design is unreviewed (posture recommended; review has not run yet)",
 		},
 		{
-			name:    "absent-auto",
-			body:    "",
-			config:  "auto",
-			want:    map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"},
-			wantErr: "sage-review-design: required; run sage review",
+			name:     "absent-auto",
+			body:     "",
+			config:   "auto",
+			want:     map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"},
+			wantWarn: "sage-review-design is unreviewed (posture required; review has not run yet)",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -469,83 +476,49 @@ func TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture(t *testing.T)
 			stem := "260101-feat-sage-" + tc.name
 			body := "---\ntitle: Sage\n" + tc.body + "---\n\nBody.\n"
 			oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
-			oldAbs := filepath.Join(root, oldRel)
 			mustWrite(t, root, oldRel, body)
 			runner := &mockGitRunner{}
 
-			if _, err := TicketsMove(root, runner, TicketMoveOptions{
+			result, err := TicketsMove(root, runner, TicketMoveOptions{
 				TicketStem: stem,
 				To:         "ready",
 				SageReview: tc.config,
-			}); err == nil {
-				t.Fatalf("TicketsMove promoted unresolved sage-review state %q", tc.body)
-			} else if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			})
+			if err != nil {
+				t.Fatalf("TicketsMove: %v", err)
 			}
-			after := readFileString(t, oldAbs)
+			if !strings.Contains(result.Tip, tc.wantWarn) {
+				t.Fatalf("Tip = %q, want it to contain %q", result.Tip, tc.wantWarn)
+			}
+			after := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath)))
 			for field, want := range tc.want {
 				wantLine := field + ": " + want
 				if !strings.Contains(after, wantLine) {
 					t.Fatalf("ticket missing %s after validation:\n%s", wantLine, after)
 				}
 			}
-			if len(runner.calls) != 0 {
-				t.Fatalf("git called on guard failure: %#v", runner.calls)
+			if len(runner.calls) == 0 {
+				t.Fatalf("git was not called; the move must still succeed (soft warning only, not a block)")
 			}
 		})
 	}
 }
 
-// TestTicketsMoveUpwardToReadyFromIdeaBlocksUnresolvedSageReviewPosture is a
+// TestTicketsMoveUpwardToReadyFromIdeaWarnsOnUnresolvedSageReviewPosture is a
 // variant of the "absent-auto" case in
-// TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture, but places
+// TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture, but places
 // the ticket fixture under idea/ instead of todo/ before promoting straight
 // to ready. The ticket's stated hard invariant names "idea->ready" as an
 // entry path that must never skip design review; this makes that coverage
 // self-evident rather than relying on an implicit "curStatus is irrelevant"
-// argument about prepareSageReviewForUpwardMove.
-func TestTicketsMoveUpwardToReadyFromIdeaBlocksUnresolvedSageReviewPosture(t *testing.T) {
+// argument about prepareSageReviewForUpwardMove. The move still succeeds
+// (single chokepoint moved to ws/git.commit); the design-unreviewed warning
+// still fires.
+func TestTicketsMoveUpwardToReadyFromIdeaWarnsOnUnresolvedSageReviewPosture(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-sage-from-idea"
 	oldRel := filepath.Join("ai-docs", "tickets", "idea", stem+".md")
-	oldAbs := filepath.Join(root, oldRel)
 	mustWrite(t, root, oldRel, "---\ntitle: Sage\n---\n\nBody.\n")
-	runner := &mockGitRunner{}
-
-	if _, err := TicketsMove(root, runner, TicketMoveOptions{
-		TicketStem: stem,
-		To:         "ready",
-		SageReview: "auto",
-	}); err == nil {
-		t.Fatal("TicketsMove idea->ready promoted unresolved sage-review state")
-	} else if !strings.Contains(err.Error(), "sage-review-design: required; run sage review") {
-		t.Fatalf("error = %v, want design-required message", err)
-	}
-	after := readFileString(t, oldAbs)
-	for _, wantLine := range []string{"sage-review-design: required", "sage-review-completeness: required"} {
-		if !strings.Contains(after, wantLine) {
-			t.Fatalf("ticket missing %s after validation:\n%s", wantLine, after)
-		}
-	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("git called on guard failure: %#v", runner.calls)
-	}
-}
-
-// TestTicketsMoveBlockedReturnsPartialMutationNotice reproduces the
-// 2026-07-13 scenario from 260713-bug-tickets-move-error-mutates-frontmatter:
-// a legacy-schema ticket (single sage-review: field) blocked on promotion to
-// ready. prepareSageReviewForUpwardMove self-heals the frontmatter (migrates
-// the legacy field into sage-review-design/sage-review-completeness) before
-// it returns the blocking error, so the returned TicketMutateResult must
-// surface a non-empty PartialMutationNotice alongside the error — a retrying
-// caller must not mistake this for an unchanged file.
-func TestTicketsMoveBlockedReturnsPartialMutationNotice(t *testing.T) {
-	root := t.TempDir()
-	stem := "260101-feat-sage-legacy-partial"
-	oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
-	oldAbs := filepath.Join(root, oldRel)
-	mustWrite(t, root, oldRel, "---\ntitle: Sage\nsage-review: pending\n---\n\nBody.\n")
 	runner := &mockGitRunner{}
 
 	result, err := TicketsMove(root, runner, TicketMoveOptions{
@@ -553,29 +526,20 @@ func TestTicketsMoveBlockedReturnsPartialMutationNotice(t *testing.T) {
 		To:         "ready",
 		SageReview: "auto",
 	})
-	if err == nil {
-		t.Fatal("TicketsMove promoted unresolved legacy sage-review state")
+	if err != nil {
+		t.Fatalf("TicketsMove idea->ready: %v", err)
 	}
-	if !strings.Contains(err.Error(), "sage-review-design: required; run sage review") {
-		t.Fatalf("error = %v, want design-required message", err)
+	if !strings.Contains(result.Tip, "sage-review-design is unreviewed (posture required; review has not run yet)") {
+		t.Fatalf("Tip = %q, want design-required warning", result.Tip)
 	}
-	if result.PartialMutationNotice == "" {
-		t.Fatalf("PartialMutationNotice = %q, want non-empty notice since frontmatter was self-healed before the block", result.PartialMutationNotice)
-	}
-	if !strings.Contains(result.PartialMutationNotice, "design required") {
-		t.Fatalf("PartialMutationNotice = %q, want it to mention the persisted design posture", result.PartialMutationNotice)
-	}
-
-	// Confirm the notice isn't a no-op: the frontmatter file itself was
-	// self-healed (migrated from the legacy single field) before the block.
-	after := readFileString(t, oldAbs)
+	after := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath)))
 	for _, wantLine := range []string{"sage-review-design: required", "sage-review-completeness: required"} {
 		if !strings.Contains(after, wantLine) {
-			t.Fatalf("ticket missing %s after self-healing migration write:\n%s", wantLine, after)
+			t.Fatalf("ticket missing %s after validation:\n%s", wantLine, after)
 		}
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("git called on guard failure: %#v", runner.calls)
+	if len(runner.calls) == 0 {
+		t.Fatalf("git was not called; the move must still succeed (soft warning only, not a block)")
 	}
 }
 
@@ -599,30 +563,32 @@ func TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign(t *testing.T) {
 	}
 }
 
-// TestTicketsMoveUpwardToReadyEpicBlocksOnUnresolvedDesign complements
+// TestTicketsMoveUpwardToReadyEpicWarnsOnUnresolvedDesign complements
 // TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign: that test only covers the
 // terminal/ignore-completeness case (design completed, completeness
-// blocked, promotion succeeds). This asserts the epic-specific gate actually
-// blocks when sage-review-design itself is non-terminal, not just that it
-// ignores completeness once design is resolved.
-func TestTicketsMoveUpwardToReadyEpicBlocksOnUnresolvedDesign(t *testing.T) {
+// blocked, promotion succeeds). This asserts the epic-specific gate still
+// surfaces the warning when sage-review-design itself is non-terminal (the
+// move itself now always succeeds; ws/git.commit is the sole hard gate).
+func TestTicketsMoveUpwardToReadyEpicWarnsOnUnresolvedDesign(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-epic-unresolved"
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
 		"---\ntitle: Epic\nsage-review-design: recommended\n---\n\nBody.\n")
 	runner := &mockGitRunner{}
 
-	if _, err := TicketsMove(root, runner, TicketMoveOptions{
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
 		SageReview: "auto",
-	}); err == nil {
-		t.Fatal("TicketsMove epic ready promotion with unresolved design: expected error, got nil")
-	} else if !strings.Contains(err.Error(), "sage-review-design: recommended; run sage review or skip recommended review") {
-		t.Fatalf("error = %v, want design-recommended message", err)
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove epic ready promotion with unresolved design: %v", err)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("git called on guard failure: %#v", runner.calls)
+	if !strings.Contains(result.Tip, "sage-review-design is unreviewed (posture recommended; review has not run yet)") {
+		t.Fatalf("Tip = %q, want design-recommended warning", result.Tip)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatalf("git was not called; the move must still succeed (soft warning only, not a block)")
 	}
 }
 
@@ -675,21 +641,31 @@ func TestTicketsMoveUpwardToReadyLegacyCompletedMigratesToBothFieldsTerminal(t *
 	}
 }
 
-func TestTicketsMoveUpwardToReadyLegacyBlockedStillBlocks(t *testing.T) {
+// TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly asserts the
+// `blocked` variant of the mutation-time warning: it de-blocks the move too
+// (per ticket decision) but must read as a genuinely distinct message from
+// the "unreviewed" variant ("a prior review found unresolved issues" vs.
+// "review has not run"), since the two imply different next actions.
+func TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-legacy-blocked"
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
 		"---\ntitle: Legacy\nsage-review: blocked\n---\n\nBody.\n")
 	runner := &mockGitRunner{}
 
-	if _, err := TicketsMove(root, runner, TicketMoveOptions{
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
 		TicketStem: stem,
 		To:         "ready",
 		SageReview: "auto",
-	}); err == nil {
-		t.Fatal("TicketsMove promoted legacy-blocked ticket")
-	} else if !strings.Contains(err.Error(), "blocked; address blocked review") {
-		t.Fatalf("error = %v, want blocked message", err)
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove legacy-blocked promotion: %v", err)
+	}
+	if !strings.Contains(result.Tip, "sage-review-design is blocked (a prior review found unresolved issues)") {
+		t.Fatalf("Tip = %q, want the blocked-variant warning", result.Tip)
+	}
+	if strings.Contains(result.Tip, "review has not run yet") {
+		t.Fatalf("Tip = %q, blocked warning must not reuse the unreviewed variant's wording", result.Tip)
 	}
 }
 

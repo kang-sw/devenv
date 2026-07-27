@@ -40,6 +40,14 @@ type SageGateResult struct {
 	Reviewers []string // populated when Action == "run"; subset of {"design","completeness"}
 	Mode      string   // "standalone" | "combined"; populated when Action == "run"
 
+	// Advisory carries the non-waivable statement + review-scope line
+	// (sageReviewNonWaivableAdvisory, tickets_mutate.go) on the ordinary
+	// path an agent actually reaches: a required stage's "run" result and a
+	// recommended stage's "ask" prompt, per ticket decision — not only on an
+	// answer=="no" decline path, which posture "required" never reaches
+	// (required never asks).
+	Advisory string
+
 	// Commit metadata is populated only on the ask-decline path (recommended
 	// posture + Answer=="no"), where the legacy prose persisted `skipped` and
 	// committed a small standalone commit. Empty CommitTitle means no commit.
@@ -84,6 +92,10 @@ type SageRecordResult struct {
 type stageOutcome struct {
 	action    string // "run" | "ask" | "stop_blocked" | "skip"
 	askPrompt string
+	// advisory carries sageReviewNonWaivableAdvisory when action=="run" via
+	// posture "required" or action=="ask" via posture "recommended" — the
+	// two ordinary-path cases named by the ticket decision.
+	advisory string
 	// commit* set only when action=="skip" via an ask-decline.
 	commitTitle string
 	commitPaths []string
@@ -200,10 +212,10 @@ func resolveStage(ticketAbs, ticketRel, reviewer, field, posture, resolvedConfig
 				aiContext:   []string{"user declined " + reviewer + " review in ask mode"},
 			}, nil
 		default:
-			return stageOutcome{action: "ask", askPrompt: "Run " + reviewer + " review for this ticket?"}, nil
+			return stageOutcome{action: "ask", askPrompt: "Run " + reviewer + " review for this ticket?", advisory: sageReviewNonWaivableAdvisory}, nil
 		}
 	case "required":
-		return stageOutcome{action: "run"}, nil
+		return stageOutcome{action: "run", advisory: sageReviewNonWaivableAdvisory}, nil
 	default:
 		// Unknown/unexpected posture value: treat as a no-op skip rather than
 		// inventing behavior; the caller (lead) can inspect the frontmatter.
@@ -223,9 +235,9 @@ func sageGateStandalone(ticketAbs, ticketRel, reviewer, field, posture, resolved
 func gateResultFromStage(out stageOutcome, reviewer, mode string) SageGateResult {
 	switch out.action {
 	case "run":
-		return SageGateResult{Action: "run", Reviewers: []string{reviewer}, Mode: mode}
+		return SageGateResult{Action: "run", Reviewers: []string{reviewer}, Mode: mode, Advisory: out.advisory}
 	case "ask":
-		return SageGateResult{Action: "ask", AskPrompt: out.askPrompt}
+		return SageGateResult{Action: "ask", AskPrompt: out.askPrompt, Advisory: out.advisory}
 	case "stop_blocked":
 		return SageGateResult{Action: "stop_blocked"}
 	default: // skip
@@ -264,7 +276,7 @@ func sageGateCombined(ticketAbs, ticketRel, design, completeness, resolvedConfig
 	if dp == "recommended" {
 		switch answer {
 		case "":
-			return SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?"}, nil
+			return SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?", Advisory: sageReviewNonWaivableAdvisory}, nil
 		case "no":
 			if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "skipped"}); err != nil {
 				return SageGateResult{}, err
@@ -305,26 +317,26 @@ func sageGateCombined(ticketAbs, ticketRel, design, completeness, resolvedConfig
 		// (standalone) rather than always-combined. This state cannot arise under
 		// the never-skippable-design invariant in normal flow; the standalone
 		// path is the more correct outcome for the anomaly.
-		return SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone"}, nil
+		return SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone", Advisory: sageReviewNonWaivableAdvisory}, nil
 	case "recommended":
 		switch answer {
 		case "":
-			return SageGateResult{Action: "ask", AskPrompt: "Run completeness review for this ticket?"}, nil
+			return SageGateResult{Action: "ask", AskPrompt: "Run completeness review for this ticket?", Advisory: sageReviewNonWaivableAdvisory}, nil
 		case "no":
 			if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-completeness": "skipped"}); err != nil {
 				return SageGateResult{}, err
 			}
-			res := SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone"}
+			res := SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone", Advisory: sageReviewNonWaivableAdvisory}
 			return mergeGateCommit(res, stageOutcome{
 				commitTitle: "chore(sage): skip completeness review",
 				commitPaths: []string{ticketRel},
 				aiContext:   []string{"user declined completeness review in ask mode"},
 			}), nil
 		default: // yes
-			return SageGateResult{Action: "run", Reviewers: []string{"design", "completeness"}, Mode: "combined"}, nil
+			return SageGateResult{Action: "run", Reviewers: []string{"design", "completeness"}, Mode: "combined", Advisory: sageReviewNonWaivableAdvisory}, nil
 		}
 	default: // required
-		return SageGateResult{Action: "run", Reviewers: []string{"design", "completeness"}, Mode: "combined"}, nil
+		return SageGateResult{Action: "run", Reviewers: []string{"design", "completeness"}, Mode: "combined", Advisory: sageReviewNonWaivableAdvisory}, nil
 	}
 }
 
