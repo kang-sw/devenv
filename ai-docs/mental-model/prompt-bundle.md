@@ -76,7 +76,7 @@ related:
   uniform entry shims, not another procedure corpus.
   {#260513-wsflow-agentless-runtime-mode}
 - `playbook.print` / `playbook.render` pass `rsrcRoot` and `worktreeRoot` as explicit call-site parameters, not process-global lookups; argument parsing uses named JSON keys. These seams are now active: `root_override` rebinds both the auto-include resolution root and the child-key binding root; `session_key` triggers render-minted child-key minting for lead callers when the playbook role is delegate-eligible (Phase 2c, implemented). `playbook.print` always passes empty `mintRoot` and ignores `preferMercenary`; only `playbook.render` mints child keys. {#260609-playbook-tools}
-- `delegates:true` controls only the generic continuation tip appended to rendered output; child-key minting and recommended tier follow `role:` and `tier:` metadata. The `implementer` and `implementer-relay` playbooks use `role: implementer` with `delegates:false`, so they still receive delegate credentials and model guidance while avoiding a nested-delegation cue in direct-execution prompts. {#260609-playbook-tools}
+- `delegates:true` controls only the generic continuation tip appended to rendered output; child-key minting and recommended tier follow `role:` and `tier:` metadata. The `implementer`, `implementer-relay`, and `implementer-elevated` playbooks use `role: implementer` with `delegates:false`, so they still receive delegate credentials and model guidance while avoiding a nested-delegation cue in direct-execution prompts. {#260609-playbook-tools}
 
 ## Extension Points & Change Recipes
 
@@ -93,6 +93,7 @@ related:
 - Treating playbook-local include fragments as standalone playbook variants; `Validate` skips non-variant local fragments, and `Load` resolves them only through the parent playbook's `includes:` list.
 - Registering an existing agent after prompt edits and expecting it to update while a call is active; active registrations cannot be reset.
 - Forgetting to regenerate `manifest.json` after adding/editing an rsrc file; `wsrsrc.Load` fails loudly on a hash/listing mismatch.
+- Editing the disposition-token vocabulary (`[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, `[escalate: <reason>]`) in only one of `implementer-relay`/`implementer-elevated`; both files stay internally consistent while the lead parses two contradictory vocabularies off the same relay path. `TestRenderedImplementerDelegatesShareOneDispositionVocabulary` (`agents-plugin-tool/internal/mcp/playbook_tools_test.go`) guards this cross-file by extracting the Process-step and Output-bullet enumeration sites rather than counting whole bodies — `implementer-elevated` legitimately uses `[escalate: <reason>]` a third time as a Process approach choice, which a whole-body count would flag as drift.
 
 ## Technical Debt
 
