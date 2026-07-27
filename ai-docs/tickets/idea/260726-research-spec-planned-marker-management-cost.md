@@ -227,7 +227,7 @@ named in topic 4 was dropped, not unblocked, exactly as topic 4 predicted.
 Two corrections to the evidence recorded above, so a future reader does not
 follow it into a wrong place:
 
-- **`lead-write-spec` step 7 is now step 6.** The `## Owner Statement` bullet
+- **`lead-write-spec` step 7 is now step 6.** The `## Standing evidence` bullet
   citing "step 7 commits unconditionally" was accurate when written. Phase 2
   deleted the former step 6 (an accuracy check that had become a verbatim
   restatement of Invariants line 14 once its `🚧` clause was removed) and

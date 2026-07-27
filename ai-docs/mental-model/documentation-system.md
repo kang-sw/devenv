@@ -76,5 +76,5 @@ related:
 
 ## Technical Debt
 
-- `markerContext` treats `planned` and legacy `wip` prose broadly, so it matches unrelated text. It surfaces nothing to a caller — both render points are deleted and both struct fields carry `json:"-"` — but it cannot simply be tightened: its output still feeds `specs.find` match scoring, so narrowing it changes discovery ranking. Code that needs a precise marker predicate reimplements detection (`legacyMarkerLines`) rather than reusing it.
+- `markerContext` treats `planned` and legacy `wip` prose broadly, so it matches unrelated text. Its value reaches no rendered or serialized output — both render points are deleted and both struct fields carry `json:"-"` — but it cannot simply be tightened: its output still feeds `specs.find` match scoring, so narrowing it changes discovery ranking, which is caller-observable as result order. Code that needs a precise marker predicate reimplements detection (`legacyMarkerLines`) rather than reusing it.
 - Project-tree spec feature stats are compatibility output, not the active spec index. `specStats` reads `features:` frontmatter, which no spec file in this corpus declares, so it is structurally dead here and is not a usable hook for anything that must detect spec *body* content.
