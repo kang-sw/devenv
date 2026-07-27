@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry` | ready | `terminal-notify`'s deliberate silence has no expiry, no failure counter, and no reader anywhere |
 | `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` | ready | hop-1 default-spawn env-clear regression guard is fragile and platform-partial |
 | `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: automate the reachable gate and fix the insecure-context permission guard left undischarged by Phase 8 |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
@@ -259,6 +258,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-refactor-dashboard-agent-gui-physical-module-isolation` | idea | Tier 2 wire-out: physically extract the suspended agent-GUI modules (FE+BE) from the live dashboard build; needs sage design gating before `ready` |
 | `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
 | `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` | idea | Deferred sibling of `260726`: tab-strip scroll on activation may swallow the close click on an overflowing workbench tab strip; verified in dockview source, never reproduced in a browser |
+| `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` | idea | A vestigial loop in the attention SSE stream keeps `cargo clippy -p ws-dashboard-daemon --all-targets` permanently red, so clippy cannot gate any phase |
 
 ## Ticket Focus
 
@@ -293,9 +293,29 @@ dropped tickets live in hidden archive dirs and git history.
   but has never been reproduced in a browser. That is tracked separately at
   `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` (`idea/`; not
   promoted to `ready` because it lacks a reproduction).
-  After this closure, `ready/` holds three tickets, all `260726`-dated:
-  `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry`,
-  `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile`, and
+
+- `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry` — CLOSED
+  (`.done/`, 2026-07-27). Single phase, `91b7a6ba` plus remediation `02a6cd2e`.
+  `terminal-notify` now writes a per-terminal `notify-failures.json` record on
+  every failed delivery and clears it on success; the existing
+  `sweep_agent_profiles` pass reads it and emits one `tracing::warn!` per
+  terminal for a failure that survived a grace window and was not superseded by
+  a callback-target rewrite. The `terminal_notify.rs` stdio-silence CONTRACT is
+  intact and guarded by a CLI test. Deliberately NOT fixed, and stated in the
+  ticket: the stranded `working` badge on a live session stays stranded — the
+  only new signal is operator-facing, in `daemon.log`. Two things the closure
+  does not discharge: the end-to-end manual reproduction (a ~10 minute
+  two-sweep-period wait with a live agent and a browser) was never run, so the
+  escalation rule is proven as pure logic and at the CLI writer level only; and
+  `cargo clippy -p ws-dashboard-daemon --all-targets` is still red for an
+  unrelated pre-existing reason, tracked at
+  `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` (`idea/`).
+  Also learned here and worth not re-deriving: `cargo test -p
+  ws-dashboard-daemon` aborts at the failing `routes` target and never reaches
+  the later integration targets, so `--no-fail-fast` is required for the daemon
+  suite to carry any signal.
+  After this closure, `ready/` holds two tickets, both `260726`-dated:
+  `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` and
   `260726-chore-dashboard-verify-notification-permission-tier-manually`.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
