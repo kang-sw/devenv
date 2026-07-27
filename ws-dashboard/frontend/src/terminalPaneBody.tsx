@@ -23,6 +23,7 @@ import {
   terminalVisualRestoreScrollbackLines,
   type TerminalVisualRestoreEntry,
 } from "./workbench/terminalVisualRestore.js";
+import { shouldRefocusTerminal } from "./terminalRefocusGuard.js";
 
 export type TerminalPaneActions = {
   onSendData: (pane: TerminalPaneState, data: string) => void;
@@ -141,6 +142,13 @@ export function TerminalPaneBody({
   const unicodeAddonRef = useRef<Unicode11Addon | null>(null);
   const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
+  // Set by the compositionstart/compositionend listeners below (mount
+  // effect) and read at fire time by `refocusActiveTerminal`'s deferred
+  // callback, `keydownFallback`, and the guard's `composing` field. A
+  // component-level ref (not an effect-local variable) so it stays visible
+  // to `refocusActiveTerminal`, which is defined outside every effect
+  // (260727 Phase 1 - IME composition focus-steal fix).
+  const composingRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Optimistic default matches current always-connect behavior for the
   // common case of a newly mounted, actually-visible pane; a pane mounted
@@ -157,9 +165,22 @@ export function TerminalPaneBody({
   liveRef.current = { pane, actions, terminalPrefs };
 
   const terminalId = pane.session.terminalId;
+  // Single choke point for all three refocus call sites (sendInputBytes,
+  // focusWatchdog, the WS "output" handler). The guard state is built
+  // inside the deferred callback - read at fire time, not at call time - so
+  // a composition that starts after the timeout was scheduled but before it
+  // fires is still caught (260727 Phase 1: gate on active IME composition
+  // to stop refocus from stealing focus mid-composition and corrupting
+  // input).
   const refocusActiveTerminal = () => {
     window.setTimeout(() => {
-      if (keepTerminalFocusRef.current && containerRef.current?.offsetParent) {
+      const shouldRefocus = shouldRefocusTerminal({
+        composing: composingRef.current,
+        keepFocus: keepTerminalFocusRef.current,
+        visible: Boolean(containerRef.current?.offsetParent),
+        active: liveRef.current.actions.isActivePane(liveRef.current.pane),
+      });
+      if (shouldRefocus) {
         terminalRef.current?.focus();
         containerRef.current
           ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
@@ -311,12 +332,15 @@ export function TerminalPaneBody({
     };
 
     const inputDisposable = terminal.onData(sendInputBytes);
-    let composingInput = false;
     const markComposing = () => {
-      composingInput = true;
+      composingRef.current = true;
     };
     const clearComposing = () => {
-      composingInput = false;
+      composingRef.current = false;
+      // Trailing edge: restore focus immediately once composition finishes,
+      // rather than waiting on the next per-keystroke/per-chunk call site or
+      // the 100ms watchdog.
+      refocusActiveTerminal();
     };
     const markFocusedTerminal = () => {
       keepTerminalFocusRef.current = true;
@@ -353,7 +377,7 @@ export function TerminalPaneBody({
       if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
         return;
       }
-      if (event.isComposing || event.key === "Process" || composingInput) {
+      if (event.isComposing || event.key === "Process" || composingRef.current) {
         return;
       }
       const isMetaLineStart = event.metaKey && event.key.toLowerCase() === "a";
