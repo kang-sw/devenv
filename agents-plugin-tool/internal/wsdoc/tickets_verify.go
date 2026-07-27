@@ -78,7 +78,13 @@ func TicketVerify(root string, paths []string) (VerifyResult, error) {
 		if !ok {
 			continue
 		}
-		verified = append(verified, verifiedTicket{Path: path, Status: status, Stem: stem})
+		// Canonical board-relative form, matching TicketInfo.Path, so the graph
+		// pass can identify the exact verified file rather than only its stem.
+		verified = append(verified, verifiedTicket{
+			Path:   "ai-docs/tickets/" + status + "/" + stem + ".md",
+			Status: status,
+			Stem:   stem,
+		})
 		verifyTicketFile(root, path, status, stem, &result)
 	}
 	// A whole-board graph load or spec-anchor scan can fail on a malformed file

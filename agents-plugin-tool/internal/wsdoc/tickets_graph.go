@@ -57,9 +57,23 @@ type verifiedTicket struct {
 // pass: the ancestor walk needs each ancestor's frontmatter and child set,
 // which is the same input the integrity checks resolve against.
 type ticketGraph struct {
-	byStem      map[string]TicketInfo // whole board, including .done/.dropped
+	byStem      map[string]TicketInfo // one entry per stem; the most-open copy wins
+	byPath      map[string]TicketInfo // every scanned file, keyed by board-relative path
 	children    map[string][]string   // parent stem -> child stems
 	specAnchors map[string]bool       // {#YYMMDD-slug} anchors under ai-docs/spec/
+}
+
+// verifiedInfo resolves the graph entry for a verified path. It prefers the
+// exact file over byStem's most-open pick, because the integrity checks take
+// the verified ticket's own frontmatter as subject: on a duplicate-stem board
+// byStem may hold a different copy, whose frontmatter is not what was verified.
+// byStem's most-open preference is a board-half concern and stays there.
+func (g *ticketGraph) verifiedInfo(ticket verifiedTicket) (TicketInfo, bool) {
+	if info, ok := g.byPath[ticket.Path]; ok {
+		return info, true
+	}
+	info, ok := g.byStem[ticket.Stem]
+	return info, ok
 }
 
 func loadTicketGraph(root string) (*ticketGraph, error) {
@@ -73,8 +87,12 @@ func loadTicketGraph(root string) (*ticketGraph, error) {
 	}
 	graph := &ticketGraph{
 		byStem:      make(map[string]TicketInfo, len(tickets)),
+		byPath:      make(map[string]TicketInfo, len(tickets)),
 		children:    map[string][]string{},
 		specAnchors: map[string]bool{},
+	}
+	for _, ticket := range tickets {
+		graph.byPath[ticket.Path] = ticket
 	}
 	for _, ticket := range tickets {
 		// scanTickets is sorted by ticketStatusRank, so first-wins keeps the
@@ -139,16 +157,15 @@ func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvi
 	var integrity []VerifyAdvisory
 	var ancestors []boardAncestor
 	index := map[string]int{}
-	chainTruncated := false
 
 	for _, ticket := range verified {
-		info, ok := graph.byStem[ticket.Stem]
+		info, ok := graph.verifiedInfo(ticket)
 		if !ok {
 			// The path shape passed but no ticket file backs it (a bad status
 			// directory, say). The intra-file guardrails already report that.
 			continue
 		}
-		chain, cycle, truncated := walkAncestors(graph, ticket.Stem)
+		chain, cycle := walkAncestors(graph, ticket.Stem)
 		// The cap is applied per verified ticket, not across the call, so one
 		// ticket's advisories can never crowd out another's.
 		integrity = append(integrity, capIntegrityAdvisories(integrityAdvisories(graph, info, cycle))...)
@@ -168,13 +185,10 @@ func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvi
 			index[stem] = len(ancestors)
 			ancestors = append(ancestors, boardAncestor{stem: stem, depth: depth + 1, gated: gated})
 		}
-		if truncated {
-			chainTruncated = true
-		}
 	}
 
 	var out []VerifyAdvisory
-	if block := renderBoardBlock(graph, ancestors, verifiedStems, chainTruncated); block != "" {
+	if block := renderBoardBlock(graph, ancestors, verifiedStems); block != "" {
 		out = append(out, VerifyAdvisory{Kind: AdvisoryKindBoard, Text: block})
 	}
 	return append(out, integrity...), nil
@@ -182,39 +196,48 @@ func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvi
 
 // walkAncestors follows `parent:` upward at unbounded depth. On a cycle it
 // returns the full revisiting path (starting at stem) and an empty chain, so
-// the caller can report the cycle without having to reconstruct it.
-//
-// truncated reports that the walk stopped at an ancestor whose `parent:` does
-// not resolve. That edge belongs to an ancestor, and the integrity checks by
-// design never inspect ancestors, so nothing else in the output would mention
-// it — which is why the caller must not then claim the chain simply ended.
-func walkAncestors(graph *ticketGraph, stem string) (chain []string, cycle []string, truncated bool) {
+// the caller can report the cycle without having to reconstruct it. An
+// unresolvable parent ends the walk; whether that end may be announced as
+// "No further ancestors." is decided per ancestor by chainEndsAt.
+func walkAncestors(graph *ticketGraph, stem string) (chain []string, cycle []string) {
 	seen := map[string]bool{stem: true}
 	path := []string{stem}
 	current := stem
 	for {
 		info, ok := graph.byStem[current]
 		if !ok {
-			return chain, nil, false
+			return chain, nil
 		}
 		parent := strings.TrimSpace(info.Parent)
 		if parent == "" {
-			return chain, nil, false
+			return chain, nil
 		}
 		if seen[parent] {
-			return nil, append(path, parent), false
+			return nil, append(path, parent)
 		}
 		if _, ok := graph.byStem[parent]; !ok {
-			// The verified ticket's own unresolvable parent is already a FIX:
-			// advisory; only an ancestor's is silent, so only that one has to
-			// suppress the closing claim.
-			return chain, nil, current != stem
+			return chain, nil
 		}
 		seen[parent] = true
 		path = append(path, parent)
 		chain = append(chain, parent)
 		current = parent
 	}
+}
+
+// chainEndsAt reports whether this ancestor genuinely terminates its chain,
+// which is a property of the ancestor's own frontmatter rather than of the
+// verify call. An ancestor carrying a `parent:` that does not resolve ends the
+// walk without ending the chain, and because the integrity checks by design
+// never inspect ancestors, nothing else in the output would mention that
+// dangling edge — so the closing claim must be withheld for that chain alone.
+func chainEndsAt(graph *ticketGraph, info TicketInfo) bool {
+	parent := strings.TrimSpace(info.Parent)
+	if parent == "" {
+		return true
+	}
+	_, resolved := graph.byStem[parent]
+	return resolved
 }
 
 // integrityAdvisories takes the verified ticket's own frontmatter as subject
@@ -297,7 +320,7 @@ func capIntegrityAdvisories(items []VerifyAdvisory) []VerifyAdvisory {
 // renderBoardBlock emits a single advisory holding every ancestor entry, or ""
 // when nothing rendered — a verified ticket with no parent (most tickets)
 // produces no section at all rather than an empty one.
-func renderBoardBlock(graph *ticketGraph, ancestors []boardAncestor, verifiedStems map[string]bool, chainTruncated bool) string {
+func renderBoardBlock(graph *ticketGraph, ancestors []boardAncestor, verifiedStems map[string]bool) string {
 	// closableAbove accumulates in emission order, so an epic child that
 	// already rendered as a nearer ancestor carrying an ACTION line can be
 	// cross-referenced from a farther ancestor's row.
@@ -316,14 +339,7 @@ func renderBoardBlock(graph *ticketGraph, ancestors []boardAncestor, verifiedSte
 	if len(blocks) == 0 {
 		return ""
 	}
-	block := "## Parent Board\n\n" + strings.Join(blocks, "\n\n")
-	if chainTruncated {
-		// The walk was cut by an ancestor's dangling parent: edge, so the
-		// chain is not known to have ended; saying it did would assert
-		// something the pass never established.
-		return block
-	}
-	return block + "\n\n  No further ancestors."
+	return "## Parent Board\n\n" + strings.Join(blocks, "\n\n")
 }
 
 // renderAncestor returns the ancestor's block and whether it carried an ACTION
@@ -395,6 +411,12 @@ func renderAncestor(graph *ticketGraph, ancestor boardAncestor, verifiedStems, c
 	}
 	if action != "" {
 		b.WriteString("\n\n" + wrapText("  ACTION: ", "    ", action))
+	}
+	// The closing claim rides the ancestor that terminates its own chain, so a
+	// second verified ticket's truncated chain cannot suppress it here (and a
+	// truncated chain cannot borrow it).
+	if chainEndsAt(graph, info) {
+		b.WriteString("\n\n  No further ancestors.")
 	}
 	return b.String(), action != ""
 }

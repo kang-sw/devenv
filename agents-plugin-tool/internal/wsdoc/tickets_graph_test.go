@@ -331,6 +331,42 @@ func TestTicketGraphDeduplicatesAncestorsAcrossPaths(t *testing.T) {
 	}
 }
 
+// TestTicketGraphGatingIsOredAcrossDeduplicatedOccurrences pins the one board
+// rule the rest of the suite leaves dead: when several verified tickets share
+// an ancestor, the sibling listing must render if *any* of them sits under a
+// closed status directory, whichever order the paths arrive in. Deduplication
+// keeps the first occurrence's depth label, so it is only the gated flag that
+// has to be ORed rather than overwritten.
+func TestTicketGraphGatingIsOredAcrossDeduplicatedOccurrences(t *testing.T) {
+	build := func(t *testing.T) (*graphFixture, string, string) {
+		t.Helper()
+		f := newGraphFixture(t)
+		f.ticket("todo", "260726-epic-mixed-gating")
+		parent := "parent: 260726-epic-mixed-gating"
+		openPath := f.ticket("todo", "260726-feat-open-sibling", parent)
+		closedPath := f.ticket(".done", "260726-feat-closed-sibling", parent)
+		f.ticket("todo", "260726-feat-other-sibling", parent)
+		return f, openPath, closedPath
+	}
+
+	const header = "Parent [1]: 260726-epic-mixed-gating [todo] - 2 of 3 child tickets still open"
+
+	t.Run("ungated path first", func(t *testing.T) {
+		f, openPath, closedPath := build(t)
+		requireContains(t, boardAdvisoryText(t, f.verify(openPath, closedPath)), header)
+	})
+
+	t.Run("gated path first", func(t *testing.T) {
+		f, openPath, closedPath := build(t)
+		requireContains(t, boardAdvisoryText(t, f.verify(closedPath, openPath)), header)
+	})
+
+	t.Run("ungated path alone stays silent", func(t *testing.T) {
+		f, openPath, _ := build(t)
+		requireNoAdvisories(t, f.verify(openPath))
+	})
+}
+
 func TestTicketGraphNoParentEmitsNoBoardAtAll(t *testing.T) {
 	f := newGraphFixture(t)
 	standalone := f.ticket("todo", "260726-feat-standalone")
@@ -414,6 +450,61 @@ func TestTicketGraphIntegrityCapIsPerVerifiedTicket(t *testing.T) {
 	}
 }
 
+// TestTicketGraphIntegritySubjectIsTheVerifiedFileNotTheStem pins the subject
+// set against the duplicate-stem guard. byStem keeps the most-open copy for the
+// board half, but the integrity checks must read the frontmatter of the file
+// actually verified — otherwise a dangling related: on the verified copy goes
+// unreported because a different copy of the same stem is clean.
+func TestTicketGraphIntegritySubjectIsTheVerifiedFileNotTheStem(t *testing.T) {
+	dangling := []string{"related:", "  260726-nope-on-this-copy: dangling"}
+
+	t.Run("dangling on the closed copy", func(t *testing.T) {
+		f := newGraphFixture(t)
+		f.ticket("todo", "260726-feat-two-copies")
+		closed := f.ticket(".done", "260726-feat-two-copies", dangling...)
+
+		advisory := onlyAdvisory(t, f.verify(closed), AdvisoryKindFix)
+		requireContainsFlat(t, advisory.Text, "related: `260726-nope-on-this-copy` resolves to no ticket stem")
+	})
+
+	t.Run("dangling on the open copy", func(t *testing.T) {
+		f := newGraphFixture(t)
+		open := f.ticket("todo", "260726-feat-two-copies", dangling...)
+		f.ticket(".done", "260726-feat-two-copies")
+
+		advisory := onlyAdvisory(t, f.verify(open), AdvisoryKindFix)
+		requireContainsFlat(t, advisory.Text, "related: `260726-nope-on-this-copy` resolves to no ticket stem")
+	})
+}
+
+// TestTicketGraphIntegrityCapRepeatsPerVerifiedTicket is the combined shape:
+// two tickets that each overflow the cap must each get their own five plus
+// their own overflow line. This is the assertion that would have caught the
+// per-call cap directly.
+func TestTicketGraphIntegrityCapRepeatsPerVerifiedTicket(t *testing.T) {
+	f := newGraphFixture(t)
+	related := []string{"related:"}
+	for _, suffix := range []string{"a", "b", "c", "d", "e", "f"} {
+		related = append(related, "  260726-nope-"+suffix+": x")
+	}
+	first := f.ticket("todo", "260726-feat-overflow-one", related...)
+	second := f.ticket("todo", "260726-feat-overflow-two", related...)
+
+	result := f.verify(first, second)
+	if len(result.Advisories) != 12 {
+		t.Fatalf("Advisories = %v, want 5 capped plus 1 overflow for each of two tickets", advisoryKinds(result.Advisories))
+	}
+	overflows := 0
+	for _, advisory := range result.Advisories {
+		if advisory.Text == "... +1 more" {
+			overflows++
+		}
+	}
+	if overflows != 2 {
+		t.Fatalf("overflow lines = %d, want one per verified ticket:\n%#v", overflows, result.Advisories)
+	}
+}
+
 // TestTicketGraphIgnoresDuplicateStemAcrossStatusDirs covers an abnormal board
 // (git mv is atomic, so this should not occur): the same stem in two status
 // directories must not duplicate its row, inflate the child count, or let a
@@ -455,6 +546,39 @@ func TestTicketGraphOmitsChainEndClaimWhenAncestorParentDangles(t *testing.T) {
 		if advisory.Kind == AdvisoryKindFix {
 			t.Fatalf("an ancestor's frontmatter was checked: %#v", advisory)
 		}
+	}
+}
+
+// TestTicketGraphChainEndClaimIsPerChain pins that one verified ticket's
+// truncated chain cannot suppress the closing claim on another's chain that
+// demonstrably ended. The two chains are independent, so the line must track
+// the ancestor that terminates its own chain rather than the verify call.
+func TestTicketGraphChainEndClaimIsPerChain(t *testing.T) {
+	f := newGraphFixture(t)
+	// Chain A ends cleanly.
+	f.ticket("todo", "260726-epic-complete-top")
+	completeChild := f.ticket(".done", "260726-feat-under-complete", "parent: 260726-epic-complete-top")
+	// Chain B is cut by an ancestor whose parent: does not resolve.
+	f.ticket("todo", "260726-epic-cut-mid", "parent: 260726-epic-never-existed")
+	cutChild := f.ticket(".done", "260726-feat-under-cut", "parent: 260726-epic-cut-mid")
+
+	alone := boardAdvisoryText(t, f.verify(completeChild))
+	if got := strings.Count(alone, "No further ancestors."); got != 1 {
+		t.Fatalf("a complete chain verified alone claimed the end %d times, want 1:\n%s", got, alone)
+	}
+
+	together := boardAdvisoryText(t, f.verify(completeChild, cutChild))
+	if got := strings.Count(together, "No further ancestors."); got != 1 {
+		t.Fatalf("chain-end claims = %d, want exactly one (the complete chain keeps it, the cut chain does not):\n%s", got, together)
+	}
+	completeAt := strings.Index(together, "260726-epic-complete-top")
+	cutAt := strings.Index(together, "260726-epic-cut-mid")
+	claimAt := strings.Index(together, "No further ancestors.")
+	if completeAt < 0 || cutAt < 0 {
+		t.Fatalf("both ancestors must render:\n%s", together)
+	}
+	if !(completeAt < claimAt && claimAt < cutAt) {
+		t.Fatalf("the chain-end claim must sit with the complete chain, not the cut one:\n%s", together)
 	}
 }
 
@@ -680,12 +804,15 @@ func TestTicketGraphRelatedSpecAnchorEmitsNothing(t *testing.T) {
 	requireNoAdvisories(t, f.verify(ticket))
 }
 
-// TestTicketGraphEpicWithoutChildrenEmitsNothing gives the childless epic a
-// parent of its own, so the graph pass genuinely has work to do and the test
-// discriminates on childlessness rather than duplicating the no-parent case:
-// an epic's absence of children is not a defect (a pre-decomposition epic is
-// correctly scoped), so no check may fire on it. The closed sibling proves the
-// fixture is live rather than inert.
+// TestTicketGraphEpicWithoutChildrenEmitsNothing guards a regression, not a
+// branch. Childlessness is structurally unreachable by this pass: a verified
+// ticket's own children are never rendered, only its ancestors are, so adding
+// children to this epic changes nothing. What the test actually asserts is
+// that verifying an epic on an ungated todo/ path stays silent, which is what
+// a future "childless epic -> advisory" check would break. The epic is given a
+// parent so the pass genuinely runs rather than returning on an empty chain
+// (which would make this a duplicate of the no-parent case), and the closed
+// sibling is a positive control proving the fixture is live rather than inert.
 func TestTicketGraphEpicWithoutChildrenEmitsNothing(t *testing.T) {
 	f := newGraphFixture(t)
 	f.ticket("todo", "260726-epic-umbrella")
