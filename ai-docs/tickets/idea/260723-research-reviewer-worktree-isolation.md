@@ -54,3 +54,36 @@ tip against the working tree.
 - **Generality.** Does the same hazard apply to any parallel-agent stage that
   shares one working tree (e.g. concurrent implementers)? The reshape toward
   fresh/isolated subagents (`260605` pivot) may already point at the answer.
+
+## Recurrence evidence — 260726-refactor-retire-spec-planned-marker-mechanism
+
+The hazard recurred across **both phases** of the same ticket, which raises it
+from a one-off to a reproducible property of partitioned review in one checkout.
+
+Phase 2, cycle 1 (range `d8d03fdb..4722ceea`, three concurrent partitions):
+
+- The **test partition** ran seven mutation-test iterations, each applying an
+  uncommitted single-hunk edit and reverting it by hand. This is legitimate work
+  for that partition and it left the tree clean at the end.
+- The **correctness partition**, running concurrently in the same checkout,
+  observed those mutations appear and disappear under it in
+  `internal/wsdoc/spec_discovery.go`, `internal/wsdoc/legacy_marker.go`,
+  `internal/mcp/server.go`, and `internal/wsdoc/tickets_template.go`. Its first
+  targeted `go test -run …` runs reported failures caused by the injected
+  mutations rather than by the diff under review.
+- It needed **7 attempts** to obtain a single verification window with
+  `git status --porcelain` verified empty immediately before *and* immediately
+  after the run.
+- One mutation (an unused `fence` local in `legacy_marker.go`) was a **build
+  break**, so during that window a sibling partition's targeted runs could not
+  compile at all — a failure mode with no relation to the reviewed diff.
+
+Two things this adds to the open questions above:
+
+- The contaminating agent was **not** misbehaving. Mutation testing is the test
+  partition's assigned method, and it restored every edit. Read-only reviewer
+  profiles would therefore not fix this case; only per-agent isolation or
+  serialization would.
+- Recurrence across two phases of one ticket suggests the cost is not rare
+  enough to absorb: the visible price here was seven wasted verification
+  attempts plus one round of investigating failures that did not exist.
