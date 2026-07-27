@@ -7,6 +7,7 @@ sources:
 related:
   workflow-skills: "planning skills enforce spec and ticket conventions before implementation."
   mcp-runtime: "MCP and CLI adapters render wsdoc discovery results; wsdoc owns matching and metadata."
+  git-workflow-tools: "verifyAdapter/formatGitCommit render VerifyResult.Advisories on the commit path; wsdoc owns the graph pass and the Kind carrier."
 ---
 
 # Documentation System
@@ -37,11 +38,17 @@ related:
 - Query evidence is body-line-only: metadata can raise a document score, but it must not create synthetic line evidence. This prevents text output from pointing callers at non-existent line zero hits. {#260519-tolerant-documentation-lookup-query-evidence}
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
 - `ai-docs/ref/` documents are operational runbooks or stable references; caller-visible behavior belongs in specs, modification coupling belongs in mental models, and code-derived inventories belong in source or runtime discovery. {#260524-reference-document-ownership}
+- `TicketVerify`'s cross-file ticket-graph pass (`internal/wsdoc/tickets_graph.go`) loads the whole board once — `scanTickets` with `IncludeDone`/`IncludeDropped` plus `scanSpecs` anchors — and reuses that one load for both the `parent:` ancestor walk and four non-blocking integrity checks (unresolvable `parent:`, unresolvable `related:`, `parent:` cycles, non-epic `parent:`). A load failure degrades to silence: advisories are dropped and the ordinary verdict returns, because `TicketVerify`'s error return stays reserved for caller-input shape errors, never for a whole-board scan failure unrelated to the commit being verified. {#260727-tickets-verify-graph-advisories}
+- The graph pass keeps two distinct lookups on purpose: `ticketGraph.byStem` (most-open copy wins when a stem is duplicated across status directories) drives the board's child-count/closure logic, while each verified ticket's own integrity-check subject resolves through `byPath`/`verifiedInfo` instead. Resolving the subject through `byStem` would, on a duplicate-stem board, check a different file's frontmatter than the one actually verified — this collapsed once already and is the most likely reintroduced regression if the two lookups get merged for "simplicity."
+- The board block's "No further ancestors." claim is derived per-ancestor from that ancestor's own frontmatter (`chainEndsAt`: does *this* ancestor's `parent:` resolve or is it absent), not from a call-scoped truncation flag. Ancestors are deduplicated across a multi-ticket verify call, so a call-scoped flag would let one ticket's truncated `parent:` chain suppress the claim on another ticket's genuinely complete chain.
+- Integrity advisories cap at 5 per **verified ticket** (`graphIntegrityCap`), not per call: `VerifyAdvisory` carries no subject attribution, so a per-call cap could drop one ticket's advisories entirely on a multi-ticket commit with nothing naming which ticket lost them.
+- `relatedEntries` (tickets.go) normalises `related:` frontmatter from three legal shapes — nested map, list, bare string — into the `map[string]string` `TicketInfo.Related` advertises; list items run through `cleanScalar` to strip trailing comments. Before this the list form silently resolved to `nil` on a bare type assertion, which would have made the graph pass's dangling-`related:` check silently blind to that frontmatter shape.
 
 ## Coupling
 
 - `references.trace` composes ticket, spec, and mental-model discovery. Changes to any parser change trace completeness. {#260505-documentation-reference-tracing}
 - A project reading map points to specs, mental-model docs, references, or lookup guidance; those target documents remain the owners for behavioral and implementation facts.
+- `VerifyResult.Advisories` (`VerifyAdvisory{Kind, Text}`) crosses into `git-workflow-tools`: `verifyAdapter`/`formatGitCommit` render the identical advisory set the standalone `tickets.verify` tool renders, appending the amend-recipe sentence only to `Kind == AdvisoryKindFix` entries. `Kind`, not the rendered text, drives that decision. {#260723-tickets-verify-tool}
 - Ticket/spec linking has two directions: ticket `spec:` frontmatter and spec body/frontmatter ticket refs. Both matter to trace output.
 - Mental-model/spec linking is one-way from mental-model text to spec stems; when a spec stem is renamed, mental-model references must change in the same commit.
 - `ProjectTree` still has compatibility behavior around old `features:` frontmatter; active spec truth is body anchors and markers.
