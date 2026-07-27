@@ -569,7 +569,28 @@ const implementReviewFinalCycleClause = "After the last budgeted cycle returns, 
 // the review-cycle budgets that still have a relay left to ship an override into. It
 // is appended to the partitioned and fallback branches only: the 2-cycle single branch
 // has no remaining relay, and lead-only never relays at all.
-const implementReviewAdjudicationClause = "When a re-review answers [maintained] on a contested won't-fix, or the implementer answers [escalate: <reason>] mid-relay, adjudicate before the next review; skip this step when neither answer appeared. Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract; supply every one, passing an empty string for the authority inputs the target kind does not use. Then dispatch the rendered prompt and parse its one verdict line per dispute. Adjudication runs inside the current relay slot and consumes no review cycle. On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one; on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run. An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report. An [out-of-scope: <reason>] leaves the relay list, costs no relay, and is carried into the final report as unresolved by decision with its stated reason. Adjudicate at most once per relay slot: a second escalation in the same slot is not re-adjudicated and reaches the next review as-is."
+//
+// One rule per sentence behind a leading token label. The unbroken-paragraph form this
+// replaced was skipped under attention pressure (`lead-skill-authoring` reader model),
+// and the clause now carries enough rules that the labels are the only index into them.
+const implementReviewAdjudicationClause = "Trigger: When a re-review answers [maintained] on a contested won't-fix, or the implementer answers [escalate: <reason>] mid-relay, adjudicate before the next review; skip this step when neither answer appeared. Dispatch: Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract; supply every one, passing an empty string for the authority inputs the target kind does not use, then dispatch the rendered prompt and parse its one verdict line per dispute. Cost: Adjudication runs inside the current relay slot and consumes no review cycle. Override: On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one; on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run. Accept: An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report. Out-of-scope: An [out-of-scope: <reason>] leaves the relay list, costs no relay, and is carried into the final report as unresolved by decision with its stated reason. Bound: Adjudicate at most once per relay slot: a second escalation in the same slot is not re-adjudicated and reaches the next review as-is."
+
+// implementReviewElevatedRelayClause states which relays go to the elevated implementer
+// instead of the standard relay. Split from the adjudication clause by concern: that one
+// settles whether a contested finding is real, this one settles who receives a finding
+// whose reality is not in dispute but whose fix did not hold.
+//
+// Capacity fires after exactly one failed relay, not two. A 3-cycle budget affords 2
+// relays, so a relayed-twice-and-still-failing state is first observable at the cycle-3
+// review, after which no relay follows — firing there would make the delegate
+// unreachable. The condition is stated positively (a [fixed] finding a re-review returns
+// [unresolved]) so settled dispositions, which are decisions rather than failures of
+// capacity, do not trip it.
+//
+// Root-cause is worded on newly surfaced findings, not recurrences: recurrence of the
+// same finding is already the capacity condition, and the motivating run surfaced three
+// distinct findings sharing one root cause.
+const implementReviewElevatedRelayClause = "Capacity: A finding the implementer reported [fixed] that the next review returns [unresolved] or still reports non-clean routes the next relay to `implementer-elevated` instead of `implementer-relay`, after one such failed relay rather than two, because the last relay is the only slot left to act in. Excluded: A finding carrying [won't fix], [deferred], [out-of-scope], or an open [escalate: <reason>] is a settled decision, not a failed fix attempt, and never triggers the capacity condition. Root-cause: A newly surfaced finding whose root cause matches an already-relayed finding routes the next relay to `implementer-elevated` too, independent of the cycle count and without waiting for the same finding to recur. Elevated inputs: Render `implementer-elevated` with the relay's declared inputs plus PriorFixCommits and PriorDispositions, so it can read what the prior attempts changed. Precedence: When an adjudicator override and a capacity or root-cause signal apply to the same relay, dispatch `implementer-elevated` once carrying the override list; never dispatch two relays for one cycle."
 
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
@@ -579,12 +600,12 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFinalCycleClause, implementReviewAdjudicationClause)
+		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]; the exclusion targets reviewer-invented churn, not unresolved carryover. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFinalCycleClause, implementReviewAdjudicationClause, implementReviewElevatedRelayClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
 		return "Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. Relay only new non-clean Critical/Important findings. Budget 2 review cycles for this implementation slice: the initial review is cycle 1, so relay at most once. " + implementReviewFinalCycleClause + " With no adjudication slot at this budget, an implementer [escalate: <reason>] here is your own accept-or-defer call rather than a delegate dispatch."
 	}
-	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. " + implementReviewFinalCycleClause + " " + implementReviewAdjudicationClause
+	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]; the exclusion targets reviewer-invented churn, not unresolved carryover. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. " + implementReviewFinalCycleClause + " " + implementReviewAdjudicationClause + " " + implementReviewElevatedRelayClause
 }
 
 func implementDocPrePassInstruction(verdict implementTodoVerdict) string {

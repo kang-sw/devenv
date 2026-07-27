@@ -18,6 +18,7 @@ spec:
   - 260619-stateless-implement-review-continuity
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # The review-relay cycle cap is live in spec but absent from the playbook
@@ -685,6 +686,73 @@ within the budget rather than one relay past it; manifest and wsflow mirror test
 pass without hand-edits. The behavior is verified by dispatching, not by reading
 Instruction text — a named tier that no dispatch path honors passes a text-only
 check, which is how the original cap was lost.
+
+### Result (4f7dba53) - 2026-07-27
+
+Done. The ticket's three failure classes now each have a distinct route: a wrong
+finding or a scope deadlock goes to the adjudicator, a failing approach goes to
+the elevated implementer.
+
+- New rsrc delegate `implementer-elevated` (`role: implementer`, `tier: large`).
+  `role: implementer` is load-bearing for a second reason beyond child-key
+  minting: that value also gates whether the `prefer_mercenary` guidance block is
+  appended, so a drop-in replacement declared `delegate` would have rendered
+  normally, minted a key, and silently lost that guidance on the same dispatch
+  path. The prompt differs on all three required axes — it consumes the prior
+  cycles' fix commits and dispositions rather than only declaring them, inverts
+  the posture toward naming a root cause before editing, and carries an attempt
+  record written whatever the disposition so a failed cycle's evidence survives
+  the handoff.
+- Both routing conditions live in a new `implementReviewElevatedRelayClause`,
+  split off from the adjudication clause by concern. Capacity fires after one
+  failed relay, not two — at two it would first be observable at the terminal
+  review, after which no relay follows, making the delegate permanently
+  unreachable. Root-cause is worded on a newly surfaced finding sharing a cause
+  with an already-relayed one; a recurrence wording would not have fired in the
+  run that motivates it, which produced three distinct findings sharing one
+  cause.
+- The signal now flows structurally: the Re-review prompt asks
+  `[resolved]`/`[unresolved: <reason>]` per `[fixed]` item, so the capacity
+  condition reads a token instead of the lead diffing prose against its own
+  disposition record.
+- The "only for genuinely new" phrasing was restated at every site, including
+  spec anchor `{#260619-stateless-implement-review-continuity}`, which a reviewer
+  caught still forbidding the exact carryover relay the same change requires.
+  Dedup itself is unweakened — the rewrite enumerates what "settled" covers, so
+  the two anchors now state one exclusion set.
+
+Deviations, both lead-directed: the adjudication clause was restructured with
+leading token labels rather than left as an eight-sentence paragraph, honouring
+Phase 2's forward note before this phase doubled it; and Phase 2's second forward
+note was closed here rather than deferred — `review-adjudicator` was backfilled
+into `lead-implement.md`'s task input mapping and step 4 now describes its
+per-dispute verdict-line return, since this phase was already editing that exact
+mapping and no other phase owned the gap.
+
+Review: two partitioned cycles, stopped one cycle under budget with two
+consecutive clean rounds. Cycle 1 returned 2 Important, both about the second
+spec anchor and about the disposition vocabulary now living at four sites with a
+guard covering two. One Critical was rejected: a reviewer flagged the
+`review-adjudicator` backfill as a plan violation, correctly against the only
+authority it had, because the lead omitted the deviation notice from that one
+reviewer's prompt. That omission is captured as
+`260727-bug-review-findings-file-rewritten-on-disposition`, along with the more
+serious thing it exposed — the reviewer withdrew the finding by rewriting its own
+findings file, leaving no trace of the disposition in the review record.
+
+The duplication between `implementer-relay` and `implementer-elevated` (51 of 81
+non-empty lines) was not refactored onto a shared `includes:` base. Restructuring
+two shipped playbooks at the end of the ticket's last phase was not worth the
+collateral risk; the hazard is closed instead by a cross-file guard asserting all
+four enumeration sites agree, verified to catch every enumeration-layer drift
+class including the one no per-file assertion can see. The refactor is captured as
+`260727-refactor-implementer-delegate-shared-base`, which also records that the
+guard makes the duplication safe and therefore invisible.
+
+Verification: both regen commands in order with `-count=1`, idempotent on a second
+run; `go build ./...` and `go test ./... -count=1` green on all 12 packages; the
+new dispatch-based coverage exercises `renderPlaybook` with `preferMercenary=true`,
+a path nothing in the repo previously called.
 
 ## Non-Goals
 

@@ -83,6 +83,20 @@ func shippedImplementerRelayContext() map[string]string {
 	}
 }
 
+func shippedImplementerElevatedContext() map[string]string {
+	return map[string]string{
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"ReviewCycle":        "3",
+		"CommitRange":        "abc123..def456",
+		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"DispositionNotes":   "C1 was reported [fixed] at cycle 2 and returned [unresolved: the guard still misses the empty range].",
+		"PriorFixCommits":    "abc123 (cycle 1 fix), def456 (cycle 2 fix)",
+		"PriorDispositions":  "cycle 1: C1 [fixed]; cycle 2: C1 [fixed], T2 [deferred: fixture rename waits for Phase 3].",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerElevatedDeclaredContext",
+		"ResultExpectations": "Report per-finding dispositions, the attempt record, fix commits, updated range, verification, and blockers.",
+	}
+}
+
 func shippedReviewAdjudicatorContext() map[string]string {
 	return map[string]string{
 		"PlanPath":         "ai-docs/.plans/plan.md",
@@ -1283,6 +1297,252 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 }
 
+// TestRenderPlaybookShippedImplementerElevatedDeclaredContext verifies the elevated
+// implementer by dispatching it, not by reading its text: the declared `tier: large`
+// must actually reach the caller through renderPlaybook, and `role: implementer` must
+// actually mint a delegate-scoped child key. A declared tier no dispatch path honors is
+// how the original review-relay cap was lost, so this test asserts the render contract
+// rather than the frontmatter file.
+//
+// It also pins the three axes on which this delegate must differ in kind from
+// `implementer-relay`, since a tier-only copy would be near-duplicate prose: prior-cycle
+// inputs, root-cause posture, and an attempt record that survives a failed cycle.
+func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", shippedImplementerElevatedContext(), wsconfig.Options{CacheHome: cacheHome}, worktreeRoot, "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "large" {
+		t.Fatalf("implementer-elevated recommended tier = %q, want large", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Your ws session_key",
+		// Every declared input substitutes.
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Review cycle: 3",
+		"Current commit range: abc123..def456",
+		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"Lead disposition notes: C1 was reported [fixed] at cycle 2 and returned [unresolved: the guard still misses the empty range].",
+		"Prior cycles' fix commits: abc123 (cycle 1 fix), def456 (cycle 2 fix)",
+		"Prior cycles' per-finding dispositions: cycle 1: C1 [fixed]; cycle 2: C1 [fixed], T2 [deferred: fixture rename waits for Phase 3].",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerElevatedDeclaredContext",
+		"Result expectations: Report per-finding dispositions, the attempt record, fix commits, updated range, verification, and blockers.",
+		// Axis 1 — inputs: the prior fix commits are read, not merely listed.
+		"Read the plan, every non-clean review path, and the prior fix commits' diffs directly.",
+		// Axis 2 — posture: symptom-vs-cause, a different in-plan approach, escalation.
+		"Name each relayed finding's root cause before editing; every finding here survived a prior fix or shares a root cause with one.",
+		"Propose and apply a different in-plan approach when the prior attempt treated a symptom rather than the cause.",
+		"Escalate for a plan update when the cause-addressing fix falls outside the plan; do not shrink the fix to fit the plan instead.",
+		"Decide per finding whether the prior attempt addressed the cause or a symptom, and name the cause this cycle targets.",
+		// Axis 3 — output: the attempt record is written even when this cycle also fails.
+		"Report the approach you attempted and its outcome for every relayed finding, including each finding this cycle failed to resolve.",
+		"Attempt record — one line per relayed finding, written whatever the disposition:",
+		"when this cycle's attempt also failed — what failed this time and the evidence that showed it",
+		// Lead-side parity: the same four disposition tokens as implementer-relay.
+		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
+		"- `[escalate: <reason>]` — needs a plan update or ticket material; the lead decides the plan-scope question before the next review.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer-elevated render missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "{{.") {
+		t.Fatalf("implementer-elevated render left an unsubstituted variable placeholder:\n%s", body)
+	}
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("implementer-elevated render must not include delegation continuity tip:\n%s", body)
+	}
+	key := extractSplicedKey(t, body)
+	entry, ok := s.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("minted key %q not found in registry", key)
+	}
+	if entry.scope != roleDelegate {
+		t.Fatalf("implementer-elevated minted key scope = %q, want %q", entry.scope, roleDelegate)
+	}
+}
+
+// fixCycleDispositionTokens is the disposition vocabulary the lead parses back from
+// every fix-cycle relay, whichever implementer delegate served it.
+func fixCycleDispositionTokens() []string {
+	return []string{
+		"`[fixed]`",
+		"`[won't fix: <reason>]`",
+		"`[deferred: <reason>]`",
+		"`[escalate: <reason>]`",
+	}
+}
+
+// extractDispositionEnumerations returns a fix-cycle delegate's two vocabulary
+// enumeration sites: the Process-step sentence that lists every token, and the Output
+// bullet block that defines each one.
+//
+// The Process step number is stripped so the relay's step 4 and the elevated
+// delegate's step 6 compare equal — the guard is about the token set, not its position.
+// Sites that merely *use* one token (the elevated delegate's Process step 4 names
+// `[escalate: <reason>]` as an approach choice) are deliberately excluded: they are not
+// enumerations, and counting them would make a whole-body token count disagree between
+// the two files for a legitimate reason.
+func extractDispositionEnumerations(t *testing.T, name, body string) (string, []string) {
+	t.Helper()
+	processLine := ""
+	bullets := []string{}
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.Contains(trimmed, "decide `[fixed]`"):
+			if processLine != "" {
+				t.Fatalf("%s enumerates the disposition vocabulary in more than one Process step; the drift guard assumes exactly one:\n%s", name, body)
+			}
+			if idx := strings.Index(trimmed, "For every relayed"); idx >= 0 {
+				trimmed = trimmed[idx:]
+			}
+			processLine = trimmed
+		case strings.HasPrefix(trimmed, "- `["):
+			bullets = append(bullets, trimmed)
+		}
+	}
+	if processLine == "" {
+		t.Fatalf("%s has no Process step enumerating the disposition vocabulary:\n%s", name, body)
+	}
+	if len(bullets) == 0 {
+		t.Fatalf("%s has no Output bullet block enumerating the disposition vocabulary:\n%s", name, body)
+	}
+	return processLine, bullets
+}
+
+// TestRenderedImplementerDelegatesShareOneDispositionVocabulary extends Phase 2's
+// two-site anti-drift count to all four sites the vocabulary now lives at:
+// `implementer-relay` Process 4 and Output, `implementer-elevated` Process 6 and Output.
+//
+// The two delegates are near-duplicates by construction and either can serve a relay,
+// so the lead parses one token set back from both. A token added, reworded, or dropped
+// at one site and not the others would hand the lead contradictory vocabularies on the
+// same relay path — the exact drift class that produced this ticket, and a class the
+// per-file count assertion cannot see because it never compares the files.
+func TestRenderedImplementerDelegatesShareOneDispositionVocabulary(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	render := func(name string, ctx map[string]string) string {
+		t.Helper()
+		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+		if err != nil {
+			t.Fatalf("%s renderPlaybook: %v", name, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s read rendered playbook: %v", name, err)
+		}
+		return string(data)
+	}
+
+	relayProcess, relayBullets := extractDispositionEnumerations(t, "implementer-relay", render("implementer-relay", shippedImplementerRelayContext()))
+	elevatedProcess, elevatedBullets := extractDispositionEnumerations(t, "implementer-elevated", render("implementer-elevated", shippedImplementerElevatedContext()))
+
+	// Both enumeration sites carry every token exactly once, in both delegates. Catches
+	// a token dropped from one site, or duplicated within one.
+	for _, delegate := range []struct {
+		name    string
+		process string
+		bullets []string
+	}{
+		{name: "implementer-relay", process: relayProcess, bullets: relayBullets},
+		{name: "implementer-elevated", process: elevatedProcess, bullets: elevatedBullets},
+	} {
+		bulletBlock := strings.Join(delegate.bullets, "\n")
+		for _, token := range fixCycleDispositionTokens() {
+			if got := strings.Count(delegate.process, token); got != 1 {
+				t.Fatalf("%s Process enumeration names %s %d time(s), want 1:\n%s", delegate.name, token, got, delegate.process)
+			}
+			if got := strings.Count(bulletBlock, token); got != 1 {
+				t.Fatalf("%s Output enumeration defines %s %d time(s), want 1:\n%s", delegate.name, token, got, bulletBlock)
+			}
+		}
+		if len(delegate.bullets) != len(fixCycleDispositionTokens()) {
+			t.Fatalf("%s Output enumerates %d disposition bullets, want %d — a token was added or removed without updating fixCycleDispositionTokens:\n%s",
+				delegate.name, len(delegate.bullets), len(fixCycleDispositionTokens()), bulletBlock)
+		}
+	}
+
+	// Cross-file identity: a one-file edit fails here even when both files stay
+	// internally consistent.
+	if relayProcess != elevatedProcess {
+		t.Fatalf("implementer-relay and implementer-elevated disagree on the Process disposition enumeration:\n relay: %s\n elevated: %s", relayProcess, elevatedProcess)
+	}
+	relayBlock := strings.Join(relayBullets, "\n")
+	elevatedBlock := strings.Join(elevatedBullets, "\n")
+	if relayBlock != elevatedBlock {
+		t.Fatalf("implementer-relay and implementer-elevated disagree on the Output disposition enumeration:\n relay:\n%s\n elevated:\n%s", relayBlock, elevatedBlock)
+	}
+}
+
+// TestRenderPlaybookPreferMercenaryAppendsGuidanceForImplementerRoles is the first test
+// to exercise renderPlaybook with preferMercenary=true. The guidance block is appended
+// only for role in {implementer, reviewer}, so a drop-in implementer replacement declared
+// `role: delegate` would silently lose it on the same dispatch path implementer-relay
+// uses — invisible without this assertion.
+func TestRenderPlaybookPreferMercenaryAppendsGuidanceForImplementerRoles(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	guidance := mercenaryGuidanceBlock()
+	for _, tc := range []struct {
+		name string
+		ctx  map[string]string
+	}{
+		{name: "implementer-relay", ctx: shippedImplementerRelayContext()},
+		{name: "implementer-elevated", ctx: shippedImplementerElevatedContext()},
+	} {
+		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, tc.name, tc.ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", true, "", nil)
+		if err != nil {
+			t.Fatalf("%s renderPlaybook(preferMercenary): %v", tc.name, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s read rendered playbook: %v", tc.name, err)
+		}
+		if !strings.Contains(string(data), guidance) {
+			t.Fatalf("%s prefer_mercenary render missing the mercenary guidance block:\n%s", tc.name, data)
+		}
+
+		plainPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, tc.name, tc.ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+		if err != nil {
+			t.Fatalf("%s renderPlaybook(plain): %v", tc.name, err)
+		}
+		plainData, err := os.ReadFile(plainPath)
+		if err != nil {
+			t.Fatalf("%s read plain rendered playbook: %v", tc.name, err)
+		}
+		if strings.Contains(string(plainData), guidance) {
+			t.Fatalf("%s render without prefer_mercenary must not carry the guidance block:\n%s", tc.name, plainData)
+		}
+	}
+}
+
 // TestRenderPlaybookShippedReviewAdjudicatorDeclaredContext pins the adjudicator
 // delegate's render contract: every declared input substitutes, a lead render mints
 // the child session key (role: delegate), the frontmatter tier reaches the caller,
@@ -1610,6 +1870,31 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("full ws implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	// The elevated relay mints two new input names; a typo in either reaches the
+	// delegate as a silently empty prior-cycle record unless renderPlaybook rejects it.
+	elevatedTypoCtx := shippedImplementerElevatedContext()
+	delete(elevatedTypoCtx, "PriorFixCommits")
+	elevatedTypoCtx["PriorFixCommit"] = "abc123"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", elevatedTypoCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted a misspelled PriorFixCommits for implementer-elevated")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) || undeclared.Name != "PriorFixCommit" {
+			t.Fatalf("full ws implementer-elevated PriorFixCommit error = %T %v, want ErrUndeclaredVar PriorFixCommit", err, err)
+		}
+	}
+
+	elevatedCtx := shippedImplementerElevatedContext()
+	elevatedCtx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-elevated", elevatedCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer-elevated")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer-elevated renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -2190,6 +2475,18 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
 		"Rendered review relay prompt: <prompt-path>",
+		// The conditional elevated target on the same relay template. Without it the
+		// review Instruction names a delegate the dispatch surface cannot reach.
+		"`implementer-elevated` gets **Review relay dispatch** when the review Instruction's capacity or root-cause condition fires for that relay",
+		"When the review Instruction's capacity or root-cause condition fired for this\nrelay, render `implementer-elevated` in place of `implementer-relay`, with those\nsame declared inputs plus PriorFixCommits and PriorDispositions.",
+		// The symmetric re-review ask. Without it a [fixed] item that did not land
+		// carries no token, so the capacity condition would have to be inferred from
+		// prose — and an inferred routing condition does not fire.
+		"For each [fixed], respond [resolved] or [unresolved: <short reason>].",
+		// Backfilled adjudicator entries: the mapping enumerated every other delegate,
+		// and the completion step did not describe the per-dispute verdict-line return.
+		"`review-adjudicator` gets the plan path, review paths, implementer disposition record, commit range under review, review cycle, and the authority inputs for the target kind",
+		"`review-adjudicator` returns one verdict line per dispute instead of a completion report; collect those lines and act on each verdict.",
 		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
 		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
