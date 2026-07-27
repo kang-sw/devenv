@@ -994,11 +994,14 @@ the browser's `Notification` permission, but ONLY from the checkbox's own
 mirroring the pattern the codebase already avoids for `sw.js` registration
 (`main.tsx`). The section's copy states plainly that OS-level notification
 requires a secure context (`localhost` or a TLS origin): a plain-http LAN
-page lacks the whole `Notification` global, not merely a granted permission,
-so the section reads `window.isSecureContext` and `Notification.permission`
-live (both readable with no permission prompt of their own) and shows the
-current state — including an explicit "unavailable, insecure context"
-message — rather than only surprising the user after an unresponsive click.
+page's `Notification` API is un-permissioned and ungrantable there, not
+absent — the global itself may still be defined — so the section reads
+`window.isSecureContext` before `typeof Notification`, and (both readable with
+no permission prompt of their own) shows the current state, including an
+explicit "unavailable - this page is not a secure context" message, rather
+than only surprising the user after an unresponsive click. On an insecure
+context the checkbox itself is also disabled, since no click there can ever
+change the permission.
 If the owner grants the permission, the section reflects that as soon as the
 prompt settles rather than at the next unrelated repaint. If the owner denies
 it, the toggle does not stay on: an enabled preference guarding a tier the
@@ -2473,9 +2476,15 @@ while an agent works.
 
 The cue has two tiers, and the zero-permission one is the default rather than
 a fallback. The dashboard is routinely reached over plain http on a LAN, where
-the page is not a secure context and the browser's `Notification` API is
-absent entirely — not merely un-permissioned. Tier 1 therefore uses only what
-any page may do unasked: it alternates `document.title` between the page's own
+the page is not a secure context. The browser's `Notification` API is
+un-permissioned and ungrantable there, not absent entirely: on Chromium the
+global itself is still defined, and `window.isSecureContext` is the property
+that distinguishes this case from a granted or denied secure context, and a
+browser that genuinely omits the global on that same insecure origin (Safari
+and Firefox may) reaches the identical ungrantable outcome for the identical
+reason: the origin, not the missing global. Tier 2 cannot work on this class
+of origin either way. Tier 1 therefore uses only what any page may do unasked:
+it alternates `document.title` between the page's own
 title and an attention-labelled variant, and swaps the favicon for a badged
 one. Tier 2 is a real OS notification, and it is opt-in through the
 [Dashboard Settings Panel](#260722-ws-dashboard-settings-panel).

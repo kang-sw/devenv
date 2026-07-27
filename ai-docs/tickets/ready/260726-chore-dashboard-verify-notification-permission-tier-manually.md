@@ -17,12 +17,38 @@ directly and did not survive. See Background.
 
 ## Status (2026-07-27)
 
-Not blocked; partially landed. Phase 1 is done (`87259c93`, see its `### Result`).
-Phase 2 has not been started and is still fully autonomously advanceable - it is
-the next target here. The six steps of `## Human verification residue` are
-undischarged and need a person at a browser; no agent may mark them observed.
-The ticket therefore stays open in `ready/` and is not closable until a human
-records those steps per the rule in `## Done when`.
+Both phases are landed - Phase 1 at `87259c93`, Phase 2 at `2da1731d`; see
+their `### Result` sections for the evidence, which should not be re-derived.
+No automatable work remains anywhere in this ticket.
+
+Everything still outstanding is the six numbered steps of
+`## Human verification residue`, and every one of them needs a person in front
+of a browser: steps 1-5 to watch a native permission prompt fire on the click
+and an OS banner actually paint, step 6 to open the section on a real
+plain-http LAN origin. No agent may mark them observed, infer them from a green
+Playwright run, or record an `#### Edition` on their behalf - that rule is in
+`## Done when`, and it is the rule this ticket exists to enforce. So the ticket
+stays in `ready/` and stays un-closable, but it is no longer an implementation
+target for any agent pass. See `## Blocked` immediately below.
+
+## Blocked (2026-07-27)
+
+Blocked on human observation. Not on a decision, not on a dependency, not on a
+review verdict - there is simply nothing left that an agent is permitted to do.
+
+Both phases have landed. The only remaining work is the six steps of
+`## Human verification residue`: a person watching a native browser permission
+prompt appear on the click, an OS notification banner actually paint, and the
+settings section as it renders on a real plain-http LAN origin. `## Done when`
+explicitly forbids any agent from recording those steps, from inferring them
+from a green Playwright run, or from writing an `#### Edition` on their behalf.
+
+An automated selection pass should therefore SKIP this ticket rather than
+dispatch it: there is no phase to advance, no finding left to record, and a
+dispatch here can only produce a no-op or an invented one. Unblocking is one
+person with a browser for a few minutes, writing what they saw as an
+`#### Edition` on `260725-feat-dashboard-pty-agent-attention-notification`'s
+Phase 8 Result, per `## Done when`. Once that exists, this ticket closes.
 
 ## Background
 
@@ -476,6 +502,135 @@ Verification boundary for this phase: unit assertions for all four availability
 states including both insecure variants; `npm run build`; if the control's
 disabled state changes, one browser assertion for it - and per the constraint
 above, rebuild before running it.
+
+### Result (2da1731d) - 2026-07-27
+
+The planned shape held; nothing in Decisions or the phase plan needed revising.
+The two review fixes `b0ee16a8` and `e05875aa` are folded into this Result
+rather than carried as separate `#### Edition` sections - they landed before
+this Result was written, so they are fixes to a phase still under review, not
+follow-up implementation on a completed one. The spec correction `b805623c` is
+part of the same landing.
+
+`notificationAvailability(isSecureContext, hasNotificationGlobal, permission)`
+is now an exported pure function in `settingsSections.tsx`, with
+`currentNotificationAvailability()` reduced to a thin wrapper that supplies the
+live globals - the `parseNotificationPrefs`/`loadNotificationPrefs` idiom from
+`notificationPrefs.ts`. The four states it separates:
+
+| `isSecureContext` | `hasNotificationGlobal` | returns | branch |
+|---|---|---|---|
+| false | false | `"unavailable - this page is not a secure context"` | 1st |
+| false | true | `"unavailable - this page is not a secure context"` | 1st - the Chromium LAN case, which previously fell through to `"denied"`; this is the entire defect |
+| true | false | `"unavailable in this browser"` | 2nd |
+| true | true | `permission` verbatim | fallthrough |
+
+**This is the reorder the plan required and not the swap it forbade, and the
+row that proves it is the third, not the second.** Row 2 is the defect being
+fixed; row 3 is the one that keeps `!hasNotificationGlobal` alive, because it
+answers a state the secure-context check structurally cannot claim: a SECURE
+context whose browser omits the API entirely (iOS Safari < 16.4 over HTTPS,
+embedded webviews). A swap - which is what deleting that branch amounts to -
+loses row 3, and mutation B below fails exactly there. Both stale
+justifications for the original order were corrected in the same pass: the
+function header comment and the `CONTRACT` block above `NotificationSection`.
+
+**Non-vacuity: five mutations A-E, each the FIRST failure at ITS OWN site.**
+Mutation A - revert the reorder to global-first - reproduces the shipped defect
+verbatim, which is the single mutation that proves this fix is a fix rather
+than a rearrangement. The test reviewer independently reproduced three of them
+without being shown the implementer's numbers, and landed on the same
+assertions:
+
+| Mutation | Suite | Failure |
+|---|---|---|
+| A: revert the reorder to global-first | `npm run test:settings` | at the "insecure context, global present (Chromium-shaped)" assertion - `expected unavailable - this page is not a secure context, got granted` |
+| B: delete the `!hasNotificationGlobal` branch | `npm run test:settings` | at "secure context, no global" - `expected unavailable in this browser, got default` |
+| browser: `disabled={insecureContext}` -> `disabled={false}` | `npx playwright test e2e/dashboard-acceptance.spec.ts` | at the new step's own site, `toBeDisabled()` - `Expected: disabled, Received: enabled`, at `:1074` |
+
+**The `Object.defineProperty(window, "isSecureContext", ...)` fake is proven
+to work, not assumed to.** The technique has no prior use in this repo and the
+plan named that novelty explicitly, so "the assertion passed" on its own could
+not distinguish a working override from a weak assertion. What settles it is a
+fact the assertion cannot fake: Playwright serves this suite over
+`http://127.0.0.1`, which IS a secure context by spec. Without a working
+own-property shadow the control renders enabled, and `toBeDisabled()` could
+not pass at all. A pass here is only reachable through an override that took
+effect. The browser evidence is one new `test.step` in
+`dashboard-acceptance.spec.ts`, "insecure context disables the Notifications
+toggle", asserting `toBeDisabled()` and `toContainText("not a secure
+context")`; the unit evidence is four assertions in `settingsSections.test.ts`,
+one per state above.
+
+**The disabled-control question is settled as DISABLE**, on this ticket's own
+stated recommendation, under goal-run posture with the owner away. The
+checkbox now carries `disabled={insecureContext}`, and the field note gains
+" The toggle above is disabled here." on an insecure context. Because that is
+caller-visible, `#260722-ws-dashboard-settings-panel` now carries the sentence
+that covers it - "On an insecure context the checkbox itself is also disabled,
+since no click there can ever change the permission" - discharging this
+phase's hard requirement not to land a caller-visible change no spec sentence
+describes. Nothing already green depended on the old behavior: grep confirmed
+no existing test asserted the control enabled, and Phase 1's four tests all run
+against localhost.
+
+**Scope held.** Zero changes to `App.tsx` or `browserAttentionCue.ts` - the
+deferred scope (Tier 1, the edge detector, the `new Notification(...)` call
+site and its load-bearing `catch`) is untouched, verified by their absence
+from the diff rather than by intent. Phase 1's artifacts are likewise absent
+from it.
+
+**Verification.** `npm run test:settings` exit 0. `npm run build` exit 0.
+`ws/spec_index.verify` -> `Spec index: ok`, run after the final spec edit.
+Final `npx playwright test e2e/dashboard-acceptance.spec.ts` at `f314ba41`:
+1 failed, 1 did not run. The sole failure is the known pre-existing site, now
+`e2e/dashboard-acceptance.spec.ts:3827` (`Expected 120, Received 47`), and the
+"did not run" serial cascade is now `:4068`. Both moved by exactly this diff's
+net line delta from the Phase 1 baseline, which is why neither is a new
+failure site: `:3779` +45 for Phase 2's inserted step -> `:3824`, +3 for the
+`try`/`finally` -> `:3827`. Stdout showed the `building the production
+frontend` line and no skip line.
+
+**The full `npm run test:browser` suite was NOT re-run at the tip.** Stated
+plainly, because it is the number a reader would otherwise assume: the last
+whole-suite figure in this ticket is Phase 1's, and Phase 2's Playwright
+evidence is the acceptance file alone.
+
+**Review.** Three partitioned reviewers. Fit: clean. Test: clean, having
+independently reproduced the three mutations above. Correctness: clean with 6
+Minor, no Critical and no Important. Dispositions, all by the lead:
+
+1. The header comment and one spec clause attributed the undefined-global
+   branch to "a browser that genuinely omits the global (Safari and Firefox
+   may)" - but those browsers omit it on INSECURE origins, where the code
+   returns from branch 1 and never reaches branch 2. FIXED in `b0ee16a8`. This
+   ticket exists because a comment asserted something false about this exact
+   function, so a freshly-written false comment about the fix would have been
+   the worst available outcome.
+2. The spec quoted the message as `"unavailable, insecure context"` while the
+   code emits `"unavailable - this page is not a secure context"`. A
+   pre-existing paraphrase; FIXED in `b0ee16a8` because it sat inside a
+   sentence being corrected for factual accuracy in the same pass.
+3. The e2e `isSecureContext` restore ran only on the happy path, so a failed
+   assertion would leave ~2800 further lines of the same serial test running
+   under a faked insecure context. FIXED in `e05875aa` with `try`/`finally`.
+4. In the secure-context-with-no-global state the checkbox stays enabled, a
+   click persists `{ enabled: true }`, and the handler's own `typeof` guard
+   then skips `requestPermission()`, so nothing reconciles it back off - the
+   same "control that lies about its own effect" shape the spec condemns. NOT
+   FIXED here: this phase's recorded decision was scoped to insecure origins,
+   and widening it is caller-visible. CAPTURED as
+   `260727-bug-dashboard-notification-toggle-enabled-without-api` (`idea/`,
+   commit `f314ba41`).
+5. `currentNotificationAvailability()`'s `"default"` placeholder argument is
+   never read when `hasNotificationGlobal` is false. WON'T FIX - inert.
+6. `!window.isSecureContext` treats `undefined` as insecure, which would
+   affect a browser predating `isSecureContext` (Chrome < 47, Safari < 11.1).
+   WON'T FIX - the reviewer's own words: noted for completeness only.
+
+**Follow-up captured:**
+`260727-bug-dashboard-notification-toggle-enabled-without-api` (`idea/`), from
+disposition 4 above.
 
 ## Human verification residue
 

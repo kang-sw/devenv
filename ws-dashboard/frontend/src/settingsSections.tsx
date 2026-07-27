@@ -102,17 +102,43 @@ export const SettingsNotificationContext =
 // with no permission prompt of their own, so the section can show the actual
 // limitation up front (ticket text: "Settings copy stating plainly that
 // OS-level notification requires localhost or TLS") rather than only
-// surprising the user after a click does nothing. Checked in this order
-// because a plain-http LAN page lacks the whole `Notification` global, not
-// merely a granted permission - `window.isSecureContext` alone would not
-// distinguish "insecure" from "secure but denied".
-function currentNotificationAvailability(): string {
-  if (typeof Notification === "undefined") {
-    return window.isSecureContext
-      ? "unavailable in this browser"
-      : "unavailable - this page is not a secure context";
+// surprising the user after a click does nothing.
+//
+// Exported so all four (isSecureContext, hasNotificationGlobal, permission)
+// states are assertable directly from `settingsSections.test.ts`, with no DOM
+// and no real browser - the cheap substitute for a plain-http LAN browser
+// gate. Follows the `parseNotificationPrefs`/`loadNotificationPrefs` idiom in
+// `notificationPrefs.ts`: an exported pure core plus a thin wrapper that
+// supplies the live values.
+//
+// Order is load-bearing. On Chromium a plain-http LAN page still HAS the
+// `Notification` global defined, so `window.isSecureContext` - not
+// `typeof Notification` - is what distinguishes "insecure" from "secure but
+// denied". Checking `hasNotificationGlobal` second keeps the undefined-global
+// branch reachable for the case it actually covers: a SECURE context whose
+// browser lacks the API entirely (iOS Safari < 16.4 over HTTPS, embedded
+// webviews) - this is a reorder, never a swap.
+export function notificationAvailability(
+  isSecureContext: boolean,
+  hasNotificationGlobal: boolean,
+  permission: NotificationPermission,
+): string {
+  if (!isSecureContext) {
+    return "unavailable - this page is not a secure context";
   }
-  return Notification.permission;
+  if (!hasNotificationGlobal) {
+    return "unavailable in this browser";
+  }
+  return permission;
+}
+
+function currentNotificationAvailability(): string {
+  const hasNotificationGlobal = typeof Notification !== "undefined";
+  return notificationAvailability(
+    window.isSecureContext,
+    hasNotificationGlobal,
+    hasNotificationGlobal ? Notification.permission : "default",
+  );
 }
 
 // Notifications settings section. Takes NO props, same reasoning as
@@ -123,11 +149,17 @@ function currentNotificationAvailability(): string {
 // called ONLY from this checkbox's own `onChange` handler below - a real user
 // gesture - never from a mount-time effect (contrast case: `main.tsx`'s `sw.js`
 // registration, the one existing "act automatically on page load" precedent
-// this section must NOT mirror). Guarded on `typeof Notification ===
-// "undefined"` rather than `window.isSecureContext` alone, because a
-// plain-http LAN page lacks the whole API, not just permission.
+// this section must NOT mirror). Availability is decided by
+// `window.isSecureContext` FIRST and `typeof Notification` second: on a
+// plain-http LAN page Chromium still defines the global, so only the
+// secure-context flag separates "insecure" from "secure but denied". On an
+// insecure context the checkbox is disabled outright - no click there can ever
+// change the permission, and a disabled `<input>` never fires `onChange`, so
+// the `requestPermission()` path below becomes naturally unreachable without
+// an extra guard inside the handler.
 export function NotificationSection() {
   const { enabled, onChange } = useContext(SettingsNotificationContext);
+  const insecureContext = !window.isSecureContext;
   // Forces a re-render once the permission prompt settles (review cycle 1,
   // Minor 1). `currentNotificationAvailability()` below always reads the
   // LIVE `Notification.permission` at render time - nothing is cached in
@@ -141,6 +173,7 @@ export function NotificationSection() {
         <input
           type="checkbox"
           checked={enabled}
+          disabled={insecureContext}
           onChange={(event) => {
             const next = event.target.checked;
             onChange(next);
@@ -180,6 +213,7 @@ export function NotificationSection() {
         OS-level notifications require a secure context (localhost or a TLS
         origin) - a plain-http LAN page cannot request or show them. Current
         permission: {currentNotificationAvailability()}.
+        {insecureContext ? " The toggle above is disabled here." : ""}
       </p>
     </div>
   );

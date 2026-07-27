@@ -153,7 +153,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: automate the reachable gate and fix the insecure-context permission guard left undischarged by Phase 8 |
+| `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: both phases landed (browser gate + insecure-context guard fix); now carries a `## Blocked` note — only the human-only permission-prompt / OS-banner residue remains, so a selection pass should skip it |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-bug-implement-merge-target-discovery` | todo | Investigate safer merge-target discovery for nested implement branches |
@@ -256,6 +256,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-idea-ws-git-commit-rename-and-payload-rejections` | idea | `ws/git.commit` cannot commit a staged ticket rename and rejects large `ai_context` payloads with a misleading error |
 | `260725-refactor-dashboard-agent-gui-physical-module-isolation` | idea | Tier 2 wire-out: physically extract the suspended agent-GUI modules (FE+BE) from the live dashboard build; needs sage design gating before `ready` |
 | `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
+| `260727-bug-dashboard-notification-toggle-enabled-without-api` | idea | Notifications toggle stays enabled and never reconciles in a SECURE context whose browser has no `Notification` global; deferred sibling of `260726` Phase 2, whose disable decision was scoped to insecure origins only |
 | `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` | idea | Deferred sibling of `260726`: tab-strip scroll on activation may swallow the close click on an overflowing workbench tab strip; verified in dockview source, never reproduced in a browser |
 | `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` | idea | A vestigial loop in the attention SSE stream keeps `cargo clippy -p ws-dashboard-daemon --all-targets` permanently red, so clippy cannot gate any phase |
 | `260727-chore-dashboard-e2e-helper-modules-never-type-checked` | idea | `tsconfig.e2e-tests.json` includes only `daemonHarness.*`, so shared e2e helper modules and every `*.spec.ts` are type-checked by no script in `package.json` |
@@ -332,25 +333,39 @@ dropped tickets live in hidden archive dirs and git history.
   wrong) — the Result records the corrections.
 
 - `260726-chore-dashboard-verify-notification-permission-tier-manually`
-  (`ready/`) — still the ONLY ticket in `ready/`, and still the next goal-run
-  target. PHASE 1 IS LANDED (`87259c93`, review fix `4acbdc98`): the Tier 2
-  browser gate now exists as a sibling `e2e/agent-attention-notification.spec.ts`
-  under `channel: "chromium"`, 4 tests, all 7 assertions proven non-vacuous by
-  per-assertion mutation runs recorded in the ticket's Phase 1 Result — do not
-  re-derive them. PHASE 2 IS THE NEXT AUTONOMOUS TARGET: reorder
-  `currentNotificationAvailability()` to consult `isSecureContext` first, extract
-  it as a pure function for unit coverage, settle whether the checkbox is offered
-  at all on an insecure origin, and amend both spec anchors that carry the false
-  "the `Notification` global is absent on a non-secure context" claim. What will
-  finally block closure is neither phase but the `## Human verification residue`
-  steps 1-6: a person must watch a native permission prompt and an OS banner. No
-  agent may mark them observed or infer them from a green Playwright run, so this
-  ticket stays open in `ready/` after Phase 2 lands. Also recorded in the Phase 1
-  Result and worth not re-deriving: this ticket's own Constraints text claiming
-  only `npm run test:browser` chains the frontend build is FALSE (Playwright
+  (`ready/`) — still the ONLY ticket in `ready/`, but no longer a goal-run
+  target: it now carries a `## Blocked (2026-07-27)` note and a selection pass
+  should SKIP it. BOTH PHASES ARE LANDED. Phase 1 (`87259c93`, review fix
+  `4acbdc98`): the Tier 2 browser gate exists as a sibling
+  `e2e/agent-attention-notification.spec.ts` under `channel: "chromium"`, 4
+  tests, all 7 assertions proven non-vacuous by per-assertion mutation runs.
+  Phase 2 (`2da1731d`, spec `b805623c`, review fixes `b0ee16a8` and `e05875aa`):
+  `currentNotificationAvailability()` now reads `isSecureContext` before
+  `typeof Notification`, the decision is extracted as the exported pure
+  `notificationAvailability(...)` with a unit assertion per state, the checkbox
+  is disabled on an insecure origin (caller-visible, so a spec sentence in
+  `#260722-ws-dashboard-settings-panel` now states it), and both spec anchors
+  carrying the false "the `Notification` global is absent on a non-secure
+  context" claim are corrected. Both Results hold the mutation evidence — do not
+  re-derive it. WHAT REMAINS IS HUMAN-ONLY: the six `## Human verification
+  residue` steps need a person watching a native permission prompt and an OS
+  banner, and `## Done when` forbids any agent from recording them, inferring
+  them from a green Playwright run, or writing an `#### Edition` on their
+  behalf. So no further agent pass can move this ticket; it stays in `ready/`
+  until a human records those steps as an `#### Edition` on
+  `260725-feat-dashboard-pty-agent-attention-notification`'s Phase 8 Result.
+  Deferred out of Phase 2 rather than fixed in it:
+  `260727-bug-dashboard-notification-toggle-enabled-without-api` (`idea/`) — the
+  same toggle stays enabled and unreconciled in a SECURE context whose browser
+  lacks the `Notification` global, which Phase 2's insecure-origin-scoped
+  decision deliberately did not cover. Also recorded in the Phase 1 Result and
+  worth not re-deriving: this ticket's own Constraints text claiming only
+  `npm run test:browser` chains the frontend build is FALSE (Playwright
   `globalSetup` builds unconditionally on every invocation path); the
   `ws-web-dashboard` mental-model entry on the same subject was checked and is
-  correct, so the staleness is the ticket's alone.
+  correct, so the staleness is the ticket's alone. One number not in evidence
+  and not to be assumed: the full `npm run test:browser` suite was NOT re-run at
+  Phase 2's tip.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
