@@ -1,9 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
+import {
+  readCallbackToken as readCallbackTokenFrom,
+  postTurnState as postTurnStateTo,
+} from "./agentTurnState.js";
 import {
   terminalCloseEndpoint,
   workRootTerminalsEndpoint,
@@ -290,50 +294,23 @@ async function currentTerminalPaneId(page: Page): Promise<string | null> {
   return ids[0] ?? null;
 }
 
-// Reads the daemon-written per-terminal callback token straight off disk.
-// Never over HTTP (there is no route that serves it, by design), never
-// logged, never echoed into an assertion message. Path construction mirrors
-// `agent_token_store.rs::token_store_path`.
+// Both helper bodies (and the comments that carry their token-handling and
+// route-authorization rationale) now live in `./agentTurnState.js`, shared with
+// `agent-attention-notification.spec.ts`. These two binders supply this file's
+// module-local `stateHome` / `daemon.baseUrl`, so every existing call site below
+// is unchanged by the extraction. They must stay FUNCTIONS rather than
+// module-initialization-time partial applications: both module-locals are only
+// assigned in `beforeAll`, so the bound values have to be read lazily, per call.
 function readCallbackToken(terminalId: string): string {
-  const tokenPath = path.join(
-    stateHome,
-    "terminal-tokens",
-    `${terminalId}.json`,
-  );
-  const parsed = JSON.parse(readFileSync(tokenPath, "utf8")) as {
-    token?: string;
-  };
-  expect(
-    typeof parsed.token === "string" && parsed.token.length > 0,
-    "the hooked test profile must have made spawn mint a callback token",
-  ).toBe(true);
-  return parsed.token as string;
+  return readCallbackTokenFrom(stateHome, terminalId);
 }
 
-// Drives the Phase 4 callback route the way a vendor hook would: from
-// OUTSIDE the browser, with no owner session cookie (that route is
-// registered outside `require_owner_auth` and is authorized by the
-// per-terminal token alone).
 async function postTurnState(
   terminalId: string,
   token: string,
   state: "working" | "ready" | "idle",
 ) {
-  const response = await fetch(
-    new URL(
-      `/api/dashboard/terminals/${terminalId}/turn-state`,
-      daemon.baseUrl,
-    ),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, state }),
-    },
-  );
-  expect(
-    response.status,
-    `turn-state POST for state '${state}' must be accepted`,
-  ).toBe(204);
+  await postTurnStateTo(daemon.baseUrl, terminalId, token, state);
 }
 
 async function closeTerminalById(page: Page, terminalId: string) {
