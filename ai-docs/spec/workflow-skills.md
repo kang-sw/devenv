@@ -761,9 +761,14 @@ dispositions, a findings output path, and the updated diff; the reviewer writes
 full findings, reports the severity verdict, reviews the current diff per its
 charter, and is not asked to classify regression-vs-preexisting. The lead
 enforces convergence by dedup against the durable disposition record — a settled
-finding is not re-relayed, only genuinely new Critical/Important findings are —
-layered over the review-cycle budget as the backstop for the pathological case
-of a reviewer inventing new findings each cycle.
+finding is not re-relayed, while genuinely new Critical/Important findings and
+findings reported fixed that a re-review returns unresolved are — layered over
+the review-cycle budget as the backstop for the pathological case of a reviewer
+inventing new findings each cycle. Unresolved carryover is not a settled
+disposition: dedup bars re-litigating a decision the record already carries
+(won't-fix, deferred, out-of-scope, or an open escalation), and the budget
+separately bounds reviewer-invented churn, so neither rule suppresses the relay
+of a fix that did not hold.
 Delegated review-fix relay is file-first: the lead renders the
 `implementer-relay` playbook with declared inputs for plan path, review cycle,
 current commit range, non-clean review paths, disposition notes, verification

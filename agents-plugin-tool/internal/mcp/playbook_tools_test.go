@@ -1375,6 +1375,126 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 	}
 }
 
+// fixCycleDispositionTokens is the disposition vocabulary the lead parses back from
+// every fix-cycle relay, whichever implementer delegate served it.
+func fixCycleDispositionTokens() []string {
+	return []string{
+		"`[fixed]`",
+		"`[won't fix: <reason>]`",
+		"`[deferred: <reason>]`",
+		"`[escalate: <reason>]`",
+	}
+}
+
+// extractDispositionEnumerations returns a fix-cycle delegate's two vocabulary
+// enumeration sites: the Process-step sentence that lists every token, and the Output
+// bullet block that defines each one.
+//
+// The Process step number is stripped so the relay's step 4 and the elevated
+// delegate's step 6 compare equal — the guard is about the token set, not its position.
+// Sites that merely *use* one token (the elevated delegate's Process step 4 names
+// `[escalate: <reason>]` as an approach choice) are deliberately excluded: they are not
+// enumerations, and counting them would make a whole-body token count disagree between
+// the two files for a legitimate reason.
+func extractDispositionEnumerations(t *testing.T, name, body string) (string, []string) {
+	t.Helper()
+	processLine := ""
+	bullets := []string{}
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.Contains(trimmed, "decide `[fixed]`"):
+			if processLine != "" {
+				t.Fatalf("%s enumerates the disposition vocabulary in more than one Process step; the drift guard assumes exactly one:\n%s", name, body)
+			}
+			if idx := strings.Index(trimmed, "For every relayed"); idx >= 0 {
+				trimmed = trimmed[idx:]
+			}
+			processLine = trimmed
+		case strings.HasPrefix(trimmed, "- `["):
+			bullets = append(bullets, trimmed)
+		}
+	}
+	if processLine == "" {
+		t.Fatalf("%s has no Process step enumerating the disposition vocabulary:\n%s", name, body)
+	}
+	if len(bullets) == 0 {
+		t.Fatalf("%s has no Output bullet block enumerating the disposition vocabulary:\n%s", name, body)
+	}
+	return processLine, bullets
+}
+
+// TestRenderedImplementerDelegatesShareOneDispositionVocabulary extends Phase 2's
+// two-site anti-drift count to all four sites the vocabulary now lives at:
+// `implementer-relay` Process 4 and Output, `implementer-elevated` Process 6 and Output.
+//
+// The two delegates are near-duplicates by construction and either can serve a relay,
+// so the lead parses one token set back from both. A token added, reworded, or dropped
+// at one site and not the others would hand the lead contradictory vocabularies on the
+// same relay path — the exact drift class that produced this ticket, and a class the
+// per-file count assertion cannot see because it never compares the files.
+func TestRenderedImplementerDelegatesShareOneDispositionVocabulary(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	render := func(name string, ctx map[string]string) string {
+		t.Helper()
+		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+		if err != nil {
+			t.Fatalf("%s renderPlaybook: %v", name, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s read rendered playbook: %v", name, err)
+		}
+		return string(data)
+	}
+
+	relayProcess, relayBullets := extractDispositionEnumerations(t, "implementer-relay", render("implementer-relay", shippedImplementerRelayContext()))
+	elevatedProcess, elevatedBullets := extractDispositionEnumerations(t, "implementer-elevated", render("implementer-elevated", shippedImplementerElevatedContext()))
+
+	// Both enumeration sites carry every token exactly once, in both delegates. Catches
+	// a token dropped from one site, or duplicated within one.
+	for _, delegate := range []struct {
+		name    string
+		process string
+		bullets []string
+	}{
+		{name: "implementer-relay", process: relayProcess, bullets: relayBullets},
+		{name: "implementer-elevated", process: elevatedProcess, bullets: elevatedBullets},
+	} {
+		bulletBlock := strings.Join(delegate.bullets, "\n")
+		for _, token := range fixCycleDispositionTokens() {
+			if got := strings.Count(delegate.process, token); got != 1 {
+				t.Fatalf("%s Process enumeration names %s %d time(s), want 1:\n%s", delegate.name, token, got, delegate.process)
+			}
+			if got := strings.Count(bulletBlock, token); got != 1 {
+				t.Fatalf("%s Output enumeration defines %s %d time(s), want 1:\n%s", delegate.name, token, got, bulletBlock)
+			}
+		}
+		if len(delegate.bullets) != len(fixCycleDispositionTokens()) {
+			t.Fatalf("%s Output enumerates %d disposition bullets, want %d — a token was added or removed without updating fixCycleDispositionTokens:\n%s",
+				delegate.name, len(delegate.bullets), len(fixCycleDispositionTokens()), bulletBlock)
+		}
+	}
+
+	// Cross-file identity: a one-file edit fails here even when both files stay
+	// internally consistent.
+	if relayProcess != elevatedProcess {
+		t.Fatalf("implementer-relay and implementer-elevated disagree on the Process disposition enumeration:\n relay: %s\n elevated: %s", relayProcess, elevatedProcess)
+	}
+	relayBlock := strings.Join(relayBullets, "\n")
+	elevatedBlock := strings.Join(elevatedBullets, "\n")
+	if relayBlock != elevatedBlock {
+		t.Fatalf("implementer-relay and implementer-elevated disagree on the Output disposition enumeration:\n relay:\n%s\n elevated:\n%s", relayBlock, elevatedBlock)
+	}
+}
+
 // TestRenderPlaybookPreferMercenaryAppendsGuidanceForImplementerRoles is the first test
 // to exercise renderPlaybook with preferMercenary=true. The guidance block is appended
 // only for role in {implementer, reviewer}, so a drop-in implementer replacement declared
