@@ -3707,6 +3707,45 @@ button {
   text-transform: uppercase;
 }
 
+/* Downloadable-fonts row list under the Terminal section's Font family
+   field: one clickable row per catalog entry, doubling as both the
+   download/retry trigger (idle/error) and the apply-to-prefs action
+   (done). */
+.settings-downloadable-fonts {
+  display: grid;
+  gap: var(--ws-space-02);
+}
+
+.settings-downloadable-font-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-04);
+  padding: var(--ws-space-02) var(--ws-space-04);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  cursor: pointer;
+}
+
+.settings-downloadable-font-row:hover {
+  background: var(--ws-color-panel-hover);
+}
+
+.settings-downloadable-font-row:disabled {
+  cursor: default;
+}
+
+.settings-downloadable-font-label {
+  min-width: 0;
+}
+
+.settings-downloadable-font-icon {
+  flex: 0 0 auto;
+}
+
 /* Advanced settings section: build provenance + danger zone. */
 .settings-advanced {
   display: grid;

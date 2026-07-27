@@ -359,6 +359,7 @@ import {
   TerminalPrefsContext,
   type TerminalStylePrefs,
 } from "./terminalPrefs";
+import { reregisterDownloadedFonts } from "./downloadableFonts";
 import {
   SETTINGS_SECTIONS,
   SettingsTerminalContext,
@@ -479,6 +480,14 @@ export function App() {
   const [terminalPrefs, setTerminalPrefs] = useState<TerminalStylePrefs>(() =>
     loadTerminalStylePrefs(),
   );
+  // One-time boot reconciliation: `document.fonts` state doesn't survive a
+  // page reload, so any downloadable webfont the owner previously fetched
+  // (see `downloadableFonts.ts`) needs re-registering here so a terminal
+  // opened later in the session can actually use it. Best-effort/fire-and-
+  // forget - failures are swallowed inside `reregisterDownloadedFonts` itself.
+  useEffect(() => {
+    void reregisterDownloadedFonts();
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);

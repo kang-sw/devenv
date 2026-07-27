@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { AlertTriangle, Check, Download, RefreshCw } from "lucide-react";
 import type { SettingsSectionDescriptor } from "./settingsStore.js";
 import {
   DEFAULT_TERMINAL_STYLE_PREFS,
@@ -12,6 +13,15 @@ import {
   type DaemonBuildInfo,
 } from "./resourceRefresh.js";
 import { killAllTerminals } from "./terminals.js";
+import {
+  DOWNLOADABLE_FONTS,
+  downloadFont,
+  FontDownloadError,
+  loadDownloadedFontIds,
+  saveDownloadedFontIds,
+  type DownloadableFontEntry,
+  type FontDownloadReason,
+} from "./downloadableFonts.js";
 
 // Settings-scoped Terminal context. Unlike the read-only `TerminalPrefsContext`
 // in `App.tsx` (consumed by every open `TerminalPaneBody` to live-restyle its
@@ -33,12 +43,70 @@ export const SettingsTerminalContext =
     onChange: () => {},
   });
 
+// Per-entry download state for the downloadable-fonts row list below the
+// Font family field: `"idle"` (not yet fetched), `"loading"` (fetch in
+// flight), `"done"` (registered and ready to apply), or `{ error }` (the last
+// attempt failed, with the reason for the tooltip).
+type DownloadableFontStatus =
+  | "idle"
+  | "loading"
+  | "done"
+  | { error: FontDownloadReason };
+
+function downloadErrorTitle(reason: FontDownloadReason): string {
+  return reason === "network"
+    ? "Could not reach the font source"
+    : "Font file failed to load";
+}
+
 // Terminal-style settings section. Takes NO props: it reads the live prefs and
 // its write path from `SettingsTerminalContext`, so the settings shell can
 // render it generically as a bare `SettingsSectionDescriptor.Component` with no
 // Terminal-typed props threaded through the shell.
 export function TerminalStyleSection() {
   const { prefs, onChange } = useContext(SettingsTerminalContext);
+  const [fontStatus, setFontStatus] = useState<
+    Record<string, DownloadableFontStatus>
+  >(() => {
+    const downloadedIds = new Set(loadDownloadedFontIds());
+    const initial: Record<string, DownloadableFontStatus> = {};
+    for (const entry of DOWNLOADABLE_FONTS) {
+      initial[entry.id] = downloadedIds.has(entry.id) ? "done" : "idle";
+    }
+    return initial;
+  });
+
+  const handleDownloadableFontClick = (entry: DownloadableFontEntry) => {
+    const status = fontStatus[entry.id] ?? "idle";
+    if (status === "loading") {
+      return;
+    }
+    if (status === "done") {
+      onChange({ ...prefs, fontFamilyOverride: entry.googleFontsFamily });
+      return;
+    }
+    setFontStatus((prev) => ({ ...prev, [entry.id]: "loading" }));
+    downloadFont(entry)
+      .then(() => {
+        setFontStatus((prev) => {
+          const next: Record<string, DownloadableFontStatus> = {
+            ...prev,
+            [entry.id]: "done",
+          };
+          const doneIds = DOWNLOADABLE_FONTS.filter(
+            (candidate) => next[candidate.id] === "done",
+          ).map((candidate) => candidate.id);
+          saveDownloadedFontIds(doneIds);
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        const reason: FontDownloadReason =
+          error instanceof FontDownloadError ? error.reason : "load-failed";
+        setFontStatus((prev) => ({ ...prev, [entry.id]: { error: reason } }));
+      });
+  };
+
   return (
     <div className="settings-field-group">
       <label className="settings-field">
@@ -60,6 +128,50 @@ export function TerminalStyleSection() {
           ))}
         </datalist>
       </label>
+      <div className="settings-field">
+        <span className="settings-field-label">Downloadable fonts</span>
+        <div className="settings-downloadable-fonts">
+          {DOWNLOADABLE_FONTS.map((entry) => {
+            const status = fontStatus[entry.id] ?? "idle";
+            const errored = typeof status === "object";
+            return (
+              <button
+                key={entry.id}
+                className="settings-downloadable-font-row"
+                disabled={status === "loading"}
+                title={errored ? downloadErrorTitle(status.error) : undefined}
+                type="button"
+                onClick={() => handleDownloadableFontClick(entry)}
+              >
+                <span className="settings-downloadable-font-label">
+                  {entry.label}
+                </span>
+                {status === "idle" ? (
+                  <Download
+                    className="settings-downloadable-font-icon"
+                    size={13}
+                  />
+                ) : status === "loading" ? (
+                  <RefreshCw
+                    className="settings-downloadable-font-icon git-spinner"
+                    size={13}
+                  />
+                ) : status === "done" ? (
+                  <Check
+                    className="settings-downloadable-font-icon"
+                    size={13}
+                  />
+                ) : (
+                  <AlertTriangle
+                    className="settings-downloadable-font-icon"
+                    size={13}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <label className="settings-field">
         <span className="settings-field-label">Font size</span>
         <input
