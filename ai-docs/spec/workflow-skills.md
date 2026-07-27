@@ -308,21 +308,20 @@ to the nearest unresolved parent when the user delegates lower-level detail.
 
 `lead-write-spec` writes or updates behavioral spec entries for caller-visible
 behavior. It reads spec conventions, generates stable spec stems, writes
-implemented entries according to the current behavior, verifies the spec
-index, and commits the spec update.
+implemented entries according to the current behavior, verifies the spec index,
+and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
-accepted backlog and `ready/` as the spec-addressed implementation-ready status. The
-spec-address gate runs only when a non-`epic`, non-`research`, non-`workset`
-action creates or moves a ticket into `ready/`; `todo/` tickets may carry
-optional `spec:` links as recovery hints. For `ready/` creation or promotion,
-`lead-write-ticket` accepts
-confirmed `spec:` or `spec-remove:` stems, or a ticket-local `## Spec Impact`
-section naming the target spec area and the expected caller-visible change. It
-never invokes `lead-write-spec` — spec addressing runs through `spec:`,
-`spec-remove:`, or `## Spec Impact` — and stops when no
-stem or `## Spec Impact` can address the work, or the
-behavior is too underspecified to spec.
+accepted backlog and `ready/` as the spec-addressed implementation-ready
+status. The spec-address gate runs only when a non-`epic`, non-`research`,
+non-`workset` action creates or moves a ticket into `ready/`; `todo/` tickets
+may carry optional `spec:` links as recovery hints. For `ready/` creation or
+promotion, `lead-write-ticket` accepts confirmed `spec:` or `spec-remove:`
+stems, or a ticket-local `## Spec Impact` section naming the target spec area
+and the expected caller-visible change. It never invokes `lead-write-spec`;
+spec addressing runs through `spec:`, `spec-remove:`, or `## Spec Impact`. It
+stops when no stem or `## Spec Impact` can address the work, or the behavior is
+too underspecified to spec.
 
 Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
 writes mechanism decisions, rejected alternatives, future-scope hints, Result
@@ -854,8 +853,8 @@ also qualify for auto-delete once its structural guardrails pass.
 {#260707-implement-branch-cleanup-naming-gate}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
-adds or updates spec entries,
-handles removed spec stems, verifies the spec index, and commits the spec pass.
+adds or updates spec entries, handles removed spec stems, verifies the spec
+index, and commits the spec pass.
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 

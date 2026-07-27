@@ -7,12 +7,15 @@ import (
 	"testing"
 )
 
-// The "no match" rows are the six real `🚧` lines of
-// ai-docs/spec/documentation-system.md, verbatim. Two of them embed the literal
-// marker shapes (`## 🚧 Feature Name {#…}` and `> [!note] Planned 🚧`) inside
-// inline code mid-line, so a "contains the shape anywhere" predicate — and the
-// bare-emoji predicate — both report this prose file as marker-carrying. Only a
-// line-start shape match keeps it clean.
+// The "no match" rows are the six `🚧` lines ai-docs/spec/documentation-system.md
+// carried until 33820249 removed them. ai-docs/spec/ now holds zero markers, so
+// these are retained synthetic prose fixtures, not samples of live repo text.
+// They still discriminate: two embed the literal marker shapes
+// (`## 🚧 Feature Name {#…}` and `> [!note] Planned 🚧`) inside inline code
+// mid-line, so a "contains the shape anywhere" predicate — and the bare-emoji
+// predicate — both report such prose as marker-carrying. Only a line-start shape
+// match keeps it clean, which is what a downstream project still holding marker
+// prose needs.
 func TestLegacyMarkerLinesMatchShapesNotProse(t *testing.T) {
 	cases := []struct {
 		name string

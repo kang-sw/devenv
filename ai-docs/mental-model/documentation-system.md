@@ -53,7 +53,7 @@ related:
 - `VerifyResult.Advisories` (`VerifyAdvisory{Kind, Text}`) crosses into `git-workflow-tools`: `verifyAdapter`/`formatGitCommit` render the identical advisory set the standalone `tickets.verify` tool renders, appending the amend-recipe sentence only to `Kind == AdvisoryKindFix` entries. `Kind`, not the rendered text, drives that decision. {#260723-tickets-verify-tool}
 - Ticket/spec linking has two directions: ticket `spec:` frontmatter and spec body/frontmatter ticket refs. Both matter to trace output.
 - Mental-model/spec linking is one-way from mental-model text to spec stems; when a spec stem is renamed, mental-model references must change in the same commit.
-- `ProjectTree` still has compatibility behavior around old `features:` frontmatter; active spec truth is body anchors and markers.
+- `ProjectTree` still has compatibility behavior around old `features:` frontmatter; active spec truth is body anchors.
 
 ## Extension Points & Change Recipes
 
@@ -76,5 +76,5 @@ related:
 
 ## Technical Debt
 
-- `markerContext` treats `planned` and legacy `wip` prose broadly, which can surface false-positive marker metadata. It cannot simply be tightened: its output also feeds `specs.find` match scoring, so narrowing it changes discovery ranking. Code that needs a precise marker predicate reimplements detection (`legacyMarkerLines`) rather than reusing it.
+- `markerContext` treats `planned` and legacy `wip` prose broadly, so it matches unrelated text. It surfaces nothing to a caller — both render points are deleted and both struct fields carry `json:"-"` — but it cannot simply be tightened: its output still feeds `specs.find` match scoring, so narrowing it changes discovery ranking. Code that needs a precise marker predicate reimplements detection (`legacyMarkerLines`) rather than reusing it.
 - Project-tree spec feature stats are compatibility output, not the active spec index. `specStats` reads `features:` frontmatter, which no spec file in this corpus declares, so it is structurally dead here and is not a usable hook for anything that must detect spec *body* content.

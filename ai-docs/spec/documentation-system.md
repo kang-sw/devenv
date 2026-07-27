@@ -232,22 +232,21 @@ without loading the full documentation corpus into context.
 
 `lead-write-spec` creates or updates spec entries for caller-visible behavior.
 It reads spec conventions, chooses a file layout, generates stems, writes
-implemented entries, verifies duplicate anchors,
-performs accuracy checks, and commits the spec update.
+implemented entries, verifies duplicate anchors, performs accuracy checks, and
+commits the spec update.
 
 `lead-update-spec` audits commit ranges for caller-visible behavior changes. It
 adds missing implemented entries, handles removed spec stems, verifies
-duplicate anchors, and commits all
-spec changes together.
+duplicate anchors, and commits all spec changes together.
 
 `lead-write-ticket` creates or updates tickets. It applies the spec-address gate
-when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads ticket
-conventions, verifies existing stems or ticket-local `## Spec Impact`, never
-invokes `lead-write-spec` — spec addressing runs through `spec:`, `spec-remove:`,
-or `## Spec Impact` — preserves stable
-ticket stems, and commits ticket changes. Creating or promoting accepted backlog into
-`todo/` preserves intent without requiring immediate spec linkage; optional
-`todo/` `spec:` links are recovery hints and promotion candidates.
+when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads
+ticket conventions, verifies existing stems or ticket-local `## Spec Impact`,
+preserves stable ticket stems, and commits ticket changes. It never invokes
+`lead-write-spec`; spec addressing runs through `spec:`, `spec-remove:`, or
+`## Spec Impact`. Creating or promoting accepted backlog into `todo/` preserves
+intent without requiring immediate spec linkage; optional `todo/` `spec:` links
+are recovery hints and promotion candidates.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 
