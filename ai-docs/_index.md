@@ -28,6 +28,26 @@ history.
 - No branch-specific spec or mental-model freeze is active.
 - Keep `.codex` untracked unless the user explicitly asks to stage it.
 
+## Dashboard Test Hygiene
+
+Run the daemon suite with `--no-fail-fast`; without it `cargo test -p
+ws-dashboard-daemon` aborts at the failing `routes` target and never reaches the
+later integration targets. Terminal-creating tests strand a detached
+`terminal-helper` per terminal by design, so sweep after every run:
+
+```sh
+pgrep -f "ws-dashboard/target/debug/ws-dashboard terminal-helper" > /tmp/leaked.pids
+xargs kill -TERM < /tmp/leaked.pids
+find /private/tmp -maxdepth 1 -name 'ws-dash*' -type d -exec rm -rf {} +
+```
+
+`/tmp` is a symlink `find` will not descend, so the `/tmp` spelling reports
+success having swept nothing; never sweep by the name `claude`, which matches
+the session running the sweep. Leaked helpers sit idle — they are process-table
+and `/tmp` pressure, never load, so a slow or flaky run is not evidence of them.
+Cause, cost, and fix options:
+`260723-bug-dashboard-terminal-detached-helper-leaks-in-tests`.
+
 ## Plugin Topology
 
 - `./install.sh update` handles first-time install and settings patching on a
@@ -312,10 +332,8 @@ dropped tickets live in hidden archive dirs and git history.
   `cargo clippy -p ws-dashboard-daemon --all-targets` is still red for an
   unrelated pre-existing reason, tracked at
   `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` (`idea/`).
-  Also learned here and worth not re-deriving: `cargo test -p
-  ws-dashboard-daemon` aborts at the failing `routes` target and never reaches
-  the later integration targets, so `--no-fail-fast` is required for the daemon
-  suite to carry any signal.
+  The daemon suite's `--no-fail-fast` requirement was learned here; it is stated
+  once, under `## Dashboard Test Hygiene`.
 
 - `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` — CLOSED
   (`.done/`, 2026-07-27). Single phase, one commit `28aaf8b6`, no remediation
