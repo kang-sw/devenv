@@ -254,7 +254,7 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
 		"the initial review is cycle 1, so relay at most twice",
 		"stop relaying and continue to the remaining todos",
-		"carrying each unresolved finding with its disposition into the completion report",
+		"carrying each unresolved finding with its disposition into the final report",
 		"the budget ends relaying, not the run",
 	} {
 		if !strings.Contains(review, want) {
@@ -281,7 +281,7 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
 		"the initial review is cycle 1, so relay at most twice",
 		"stop relaying and continue to the remaining todos",
-		"carrying each unresolved finding with its disposition into the completion report",
+		"carrying each unresolved finding with its disposition into the final report",
 		"the budget ends relaying, not the run",
 	} {
 		if !strings.Contains(review, want) {
@@ -1896,7 +1896,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 		"Budget 2 review cycles for this implementation slice",
 		"the initial review is cycle 1, so relay at most once",
 		"stop relaying and continue to the remaining todos",
-		"carrying each unresolved finding with its disposition into the completion report",
+		"carrying each unresolved finding with its disposition into the final report",
 		"the budget ends relaying, not the run",
 	} {
 		if !strings.Contains(review, want) {
@@ -1939,6 +1939,12 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	review := readTodoInstruction(t, server, 4, key, "review")
 	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
 		t.Fatalf("lead-only review todo instruction not focused: %q", review)
+	}
+	for _, forbidden := range []string{"review cycles for this implementation slice", "the budget ends relaying, not the run"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked review-budget wording %q: %q\n"+
+				"lead-only dispatches no reviewers and never relays, so it must name neither a review-cycle budget nor the final-cycle behavior", forbidden, review)
+		}
 	}
 	complete := readTodoInstruction(t, server, 5, key, "complete")
 	for _, want := range []string{"retained branch", "commit range", "documentation not touched", "no-merge completion", "Do not push"} {

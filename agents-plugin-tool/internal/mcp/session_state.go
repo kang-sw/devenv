@@ -563,7 +563,7 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 // implementReviewFinalCycleClause states what the last budgeted review cycle does.
 // The budget ends relaying only; the run continues through the remaining todos so an
 // autonomous goal run is never stranded at the cap.
-const implementReviewFinalCycleClause = "After the last budgeted cycle returns, stop relaying and continue to the remaining todos, carrying each unresolved finding with its disposition into the completion report; the budget ends relaying, not the run."
+const implementReviewFinalCycleClause = "After the last budgeted cycle returns, stop relaying and continue to the remaining todos, carrying each unresolved finding with its disposition into the final report; the budget ends relaying, not the run."
 
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
