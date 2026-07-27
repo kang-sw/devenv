@@ -4052,7 +4052,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "specs.list",
-			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, ticket refs, and marker metadata.",
+			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, and ticket refs.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
