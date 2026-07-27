@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -88,13 +89,50 @@ func TestFormatSpecFindDropsAdvisoriesForTruncatedDocuments(t *testing.T) {
 	}
 }
 
-// Phase 2 of 260726-refactor-retire-spec-planned-marker-mechanism deleted two
-// render points: formatSpecs' "  marker: " line and formatSpecStatus' trailing
-// " # <marker context>" suffix on a location. Both feeding values are still
-// populated on every call, because SpecsFind match scoring reads them, so each
-// retired output is exactly one restored statement away. Each negative
-// assertion is paired with a check that its feeding value is non-empty, so the
-// guard cannot pass vacuously if population ever stops.
+// jsonObjectKeys collects every object key anywhere in a decoded JSON value, at
+// any nesting depth. Keys are compared for equality rather than scanned as
+// substrings: the two retired fields are "marker_context" and
+// "marker_contexts", and a substring test for the former also matches the
+// latter, so one would silently stand in for the other.
+func jsonObjectKeys(value any, out map[string]bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			out[key] = true
+			jsonObjectKeys(child, out)
+		}
+	case []any:
+		for _, child := range typed {
+			jsonObjectKeys(child, out)
+		}
+	}
+}
+
+// marshalledKeys serializes a tool result exactly as toolJSONResponse does and
+// returns every key the wire payload carries.
+func marshalledKeys(t *testing.T, value any) map[string]bool {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	keys := map[string]bool{}
+	jsonObjectKeys(decoded, keys)
+	return keys
+}
+
+// Phase 2 of 260726-refactor-retire-spec-planned-marker-mechanism retired three
+// outputs: formatSpecs' "  marker: " line, formatSpecStatus' trailing
+// " # <marker context>" suffix on a location, and the JSON serialization of
+// SpecInfo.MarkerContexts / SpecAnchorInfo.MarkerContext, silenced by `json:"-"`.
+// Both feeding values are still populated on every call, because SpecsFind match
+// scoring reads them, so each retired output is exactly one restored statement or
+// tag away. Each negative assertion is paired with a check that its feeding value
+// is non-empty, so the guard cannot pass vacuously if population ever stops.
 func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
 	root := legacyMarkerRenderRoot(t)
 
@@ -114,9 +152,21 @@ func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
 	// "legacy-marker: " is Phase 1's retained advisory and must survive; only a
 	// bare "marker: " label is the retired render, at any indentation.
 	for _, line := range strings.Split(formatSpecs(list), "\n") {
-		if strings.HasPrefix(strings.TrimLeft(line, " "), "marker: ") {
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "marker: ") {
 			t.Fatalf("formatSpecs re-emitted the retired marker line: %q", line)
 		}
+	}
+	// specs.list and specs.find at format=json hand this value straight to
+	// toolJSONResponse, so the struct tags are the wire contract. They are the
+	// whole contract for every JSON path, not only the specs.* handlers:
+	// references.trace embeds []SpecInfo as well, and SpecAnchorStatus nests both
+	// leaf structs, so only the leaf tags keep those payloads silent too.
+	listKeys := marshalledKeys(t, list)
+	if listKeys["marker_contexts"] {
+		t.Fatal(`serialized specs.list result carries the retired "marker_contexts" key`)
+	}
+	if listKeys["marker_context"] {
+		t.Fatal(`serialized specs.list result carries the retired "marker_context" key under anchors[]`)
 	}
 
 	status, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: "260101-anchor"})
@@ -141,6 +191,13 @@ func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
 		if strings.Contains(line, " # ") {
 			t.Fatalf("formatSpecStatus re-emitted the retired marker-context suffix: %q", line)
 		}
+	}
+	statusKeys := marshalledKeys(t, status)
+	if statusKeys["marker_context"] {
+		t.Fatal(`serialized specs.status result carries the retired "marker_context" key under locations[]`)
+	}
+	if statusKeys["marker_contexts"] {
+		t.Fatal(`serialized specs.status result carries the retired "marker_contexts" key under files[]`)
 	}
 }
 
