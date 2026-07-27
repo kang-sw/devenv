@@ -111,3 +111,28 @@ and re-derived its conclusions from `HEAD`, which is a strictly weaker position:
 it cannot run anything, so every claim that would normally be measured becomes a
 static reading. The hazard is no longer only taxing review throughput; it is
 selecting which verification techniques reviewers are able to use.
+
+Phase 2, cycle 3 (range `59d6a025..4cf3aa77`, three concurrent partitions):
+
+- **Fourth consecutive cycle.** The fit partition hit it again — the tree was
+  clean at start, then showed
+  `M agents-plugin-wsflow/skills/lead-bootstrap/WORKFLOW.md`, a sibling's
+  mutation proof — and again fell back to stating every claim against `HEAD`
+  via `git show` / `git grep HEAD`. Same weaker position as cycle 2.
+- **Two partitions independently invented the same workaround, and it works.**
+  The correctness and test partitions avoided the hazard entirely by exporting
+  the commit under review with `git archive HEAD | tar -x -C /tmp/<dir>` and
+  running every build, test, mutation, and regen inside that export, touching
+  the shared checkout only for read-only `git show`/`grep` and for driving a
+  `HEAD`-built binary. Neither wrote anything to the shared checkout. Both
+  reported full mutation tables that cycle 2's `HEAD`-only fallback could not
+  have produced.
+
+Why this matters more than a fourth recurrence count: the export technique
+restores the capability cycle 2 recorded as lost. A reviewer working in a
+`/tmp` export can still *run* things, so mutation proof stays available under
+concurrency. Two independent agents converging on it in one cycle suggests it
+belongs in the reviewer prompt frame as standing method rather than being
+rediscovered per cycle — which is a cheaper answer than per-agent worktrees and
+does not require serializing partitions. That does not settle the open questions
+above; it changes what the fallback costs.

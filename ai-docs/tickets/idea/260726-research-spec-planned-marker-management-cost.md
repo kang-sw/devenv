@@ -224,7 +224,7 @@ This ticket's question was decided in the direction it was asking about: the
 ticket this one's `## Non-Scope` anticipated is that ticket, and the dependent
 named in topic 4 was dropped, not unblocked, exactly as topic 4 predicted.
 
-Two corrections to the evidence recorded above, so a future reader does not
+Three corrections to the evidence recorded above, so a future reader does not
 follow it into a wrong place:
 
 - **`lead-write-spec` step 7 is now step 6.** The `## Standing evidence` bullet
@@ -233,6 +233,14 @@ follow it into a wrong place:
   restatement of Invariants line 14 once its `🚧` clause was removed) and
   renumbered, so step 7 now names `**Output Handoff**`. The commit-ownership
   argument the bullet makes is unaffected; only the number moved.
+- **`lead-update-spec` §5 no longer exists.** Two sentences above cite it as a
+  live section — "§5 exists to reconcile markers and was simply never run" and
+  "retiring the mechanism deletes `lead-update-spec` §5, which is downstream's
+  only marker-cleanup path". Phase 2 deleted §5 and renumbered §6→§5 and §7→§6,
+  so the file's current `### 5. Handle removals` is a removals step, not the
+  marker-reconciliation step a reader following those sentences would expect to
+  find there. Both sentences are dated analysis of why the mechanism was
+  retired and are left as written; only the section number is stale.
 - **The inline commit-ownership defect outlived the verdict, as this ticket's
   `## Non-Scope` required.** It is live in
   `260726-bug-inline-playbook-invocation-commit-ownership`, still in `ready/`

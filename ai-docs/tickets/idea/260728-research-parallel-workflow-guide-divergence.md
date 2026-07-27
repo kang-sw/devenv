@@ -38,6 +38,15 @@ shipped copies carved out, passed the full Go suite and the wsflow Python bundle
 A `lead-forge-spec` verification pass run against this repo would then read the
 uncarved rule and delete the very callouts the carve-out protects.
 
+The same measurement was then run on the repository's *other* hand-maintained
+parallel pair, with the same result. In that phase's cycle-3 review, reverting
+the marker-form correction in
+`agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md` alone — leaving
+the full-ws copy corrected — also passed the full Go suite and the wsflow Python
+bundle. `c5ceb879` and `f6162411` each edited that pair by hand in that same
+range. So the hole is measured on two independent pairs, not one, and the
+`WORKFLOW.md` trio is the instance that happened to be looked at first.
+
 ## The targeted guard is not a solution
 
 `TestWorkflowGuidesKeepImplementationGapException`
@@ -62,10 +71,12 @@ paragraph.
   is it a distinct artifact that merely quotes them? A generator answers the
   first reading; a divergence test answers the second. The `ws`/`wsflow` tooling
   word is the only known intentional difference, which argues for the first.
-- Does the same problem exist for the two `AGENTS.template.md`? They are also
-  hand-maintained and also share most content, but there
-  `test_wsflow_skill_bundle.py:229-230` *requires* the two lineages to differ,
-  so any mechanism here must not converge them.
+- The two `AGENTS.template.md` copies have the same hole, measured (above), so
+  any answer here should cover both pairs or say why it does not. That pair is
+  the harder case: `test_wsflow_skill_bundle.py:229-230` *requires* the two
+  lineages to differ, so a naive equality guard cannot be added at all without a
+  declared substitution table — the constraint is part of the problem, not an
+  obstacle to routing around.
 - Would a generator break the version-lineage design? The two templates carry
   independent version histories (`v0045` vs `v0006`) precisely so downstream
   projects on each lineage apply their own upgrade chain.
