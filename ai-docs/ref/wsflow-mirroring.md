@@ -46,6 +46,7 @@ Included:
 - `lead-forge-spec`
 - `lead-forge-mental-model`
 - `lead-review`
+- `lead-tune`
 - `lead-prefer-subagent`
 - `lead-goal-step`
 - `lead-goal-fan-out-step`
