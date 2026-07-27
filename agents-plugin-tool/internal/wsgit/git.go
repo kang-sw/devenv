@@ -41,8 +41,11 @@ func (ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]by
 // ai-docs/mental-model/mcp-runtime.md); a caller that needs ticket
 // verification wires wsdoc.TicketVerify in through an adapter that produces
 // this plain-error shape, mirroring how Runner keeps wsgit free of an
-// os/exec-specific dependency at the type level.
-type Verifier func(root string, paths []string) error
+// os/exec-specific dependency at the type level. The first return value
+// carries non-blocking advisory text lines (order-preserving, no
+// path/guardrail attribution baked into the type) that Client.Commit threads
+// into CommitResult.Advisories without affecting the commit outcome.
+type Verifier func(root string, paths []string) ([]string, error)
 
 type Client struct {
 	Runner   Runner
@@ -60,7 +63,7 @@ func (c Client) runner() Runner {
 
 func (c Client) verifier() Verifier {
 	if c.Verifier == nil {
-		return func(string, []string) error { return nil }
+		return func(string, []string) ([]string, error) { return nil, nil }
 	}
 	return c.Verifier
 }
@@ -436,6 +439,10 @@ type CommitResult struct {
 	Paths         []string       `json:"paths"`
 	Title         string         `json:"title"`
 	TicketChanges []TicketChange `json:"ticket_changes,omitempty"`
+	// Advisories carries non-blocking verifier text lines. Text-mode only;
+	// see {#260626-git-commit-todo-reinjection} precedent — never serialized
+	// to JSON.
+	Advisories []string `json:"-"`
 }
 
 type TicketChange struct {
@@ -485,8 +492,11 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	// unrelated-path guard for the delete-side path itself. See
 	// {#260720-wsdoc-commit-boundary} for why this stays a wsgit-side filter
 	// rather than a wsdoc.TicketVerify change.
+	var advisories []string
 	if verifyPaths := filterIndexDeleteSidePaths(status, opts.Paths); len(verifyPaths) > 0 {
-		if err := c.verifier()(root, verifyPaths); err != nil {
+		var err error
+		advisories, err = c.verifier()(root, verifyPaths)
+		if err != nil {
 			return CommitResult{}, err
 		}
 	}
@@ -502,7 +512,7 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	if err != nil {
 		return CommitResult{}, err
 	}
-	return CommitResult{Hash: strings.TrimSpace(string(hashOut)), Paths: opts.Paths, Title: opts.Title, TicketChanges: ticketChanges}, nil
+	return CommitResult{Hash: strings.TrimSpace(string(hashOut)), Paths: opts.Paths, Title: opts.Title, TicketChanges: ticketChanges, Advisories: advisories}, nil
 }
 
 func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {

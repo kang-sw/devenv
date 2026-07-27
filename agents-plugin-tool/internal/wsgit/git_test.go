@@ -734,14 +734,14 @@ func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
 	}}
 	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
-	client := Client{Runner: runner, Verifier: func(gotRoot string, gotPaths []string) error {
+	client := Client{Runner: runner, Verifier: func(gotRoot string, gotPaths []string) ([]string, error) {
 		if gotRoot != root {
 			t.Fatalf("verifier root = %q, want %q", gotRoot, root)
 		}
 		if len(gotPaths) != 1 || gotPaths[0] != ticketPath {
 			t.Fatalf("verifier paths = %#v, want [%q]", gotPaths, ticketPath)
 		}
-		return verifyErr
+		return nil, verifyErr
 	}}
 
 	_, err := client.Commit(context.Background(), root, CommitOptions{
@@ -818,12 +818,12 @@ func TestCommitPromotionVerifierSeesOnlyDestinationPath(t *testing.T) {
 		[]byte("abc123\n"), // rev-parse HEAD
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(gotRoot string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(gotRoot string, paths []string) ([]string, error) {
 		gotPaths = paths
 		if gotRoot != root {
 			t.Fatalf("verifier root = %q, want %q", gotRoot, root)
 		}
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -861,9 +861,9 @@ func TestCommitCloseVerifierSeesOnlyDestinationPath(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) ([]string, error) {
 		gotPaths = paths
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -902,9 +902,9 @@ func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	verifierCalled := false
-	client := Client{Runner: runner, Verifier: func(string, []string) error {
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
 		verifierCalled = true
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -952,9 +952,9 @@ func TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt(t *testi
 		[]byte("abc123\n"),
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) ([]string, error) {
 		gotPaths = paths
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -991,9 +991,9 @@ func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
 		[]byte(postStatus),
 	}}
 	verifierCalled := false
-	client := Client{Runner: runner, Verifier: func(string, []string) error {
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
 		verifierCalled = true
-		return nil
+		return nil, nil
 	}}
 
 	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
@@ -1028,9 +1028,9 @@ func TestCommitIndexOnlyPathStillRefusesUnrelatedStagedRename(t *testing.T) {
 		[]byte(postStatus),
 	}}
 	verifierCalled := false
-	client := Client{Runner: runner, Verifier: func(string, []string) error {
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
 		verifierCalled = true
-		return nil
+		return nil, nil
 	}}
 
 	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
@@ -1062,9 +1062,9 @@ func TestCommitContentOnlyEditLeavesVerifierPathsUnmodified(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) ([]string, error) {
 		gotPaths = paths
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
