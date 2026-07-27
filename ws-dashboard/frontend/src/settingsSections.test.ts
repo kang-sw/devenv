@@ -1,5 +1,6 @@
 import {
   NotificationSection,
+  notificationAvailability,
   SETTINGS_SECTIONS,
   SettingsNotificationContext,
   SettingsTerminalContext,
@@ -123,6 +124,40 @@ assertEqual(
   typeof SettingsNotificationContext,
   "object",
   "SettingsNotificationContext is a React context object",
+);
+
+// --- Notification availability, all four states -----------------------------
+//
+// The guard used to test `typeof Notification` first and only consult
+// `window.isSecureContext` inside that branch. Measured in Chromium, a
+// plain-http LAN page - the dashboard's routine access mode - still defines the
+// `Notification` global, so that ordering made the insecure-context copy
+// unreachable and reported a bare "denied" instead. These four assertions pin
+// the corrected ordering AND keep the undefined-global branch alive; the second
+// one is the state the defect got wrong.
+
+assertEqual(
+  notificationAvailability(false, false, "default"),
+  "unavailable - this page is not a secure context",
+  "insecure context, no global (Safari/Firefox-shaped): reports insecure, not browser-unsupported",
+);
+
+assertEqual(
+  notificationAvailability(false, true, "granted"),
+  "unavailable - this page is not a secure context",
+  "insecure context, global present (Chromium-shaped): reports insecure, NOT the raw permission - this is the ticket's core fix",
+);
+
+assertEqual(
+  notificationAvailability(true, false, "default"),
+  "unavailable in this browser",
+  "secure context, no global: reports browser-unsupported",
+);
+
+assertEqual(
+  notificationAvailability(true, true, "denied"),
+  "denied",
+  "secure context, global present: passes the live permission through verbatim",
 );
 
 assertEqual(true, true, "settingsSections tests completed");

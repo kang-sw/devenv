@@ -1048,6 +1048,51 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- Insecure-context Notifications guard (260726 Phase 2: the shipped guard -
+  // --- tested `typeof Notification` first, so on a plain-http LAN page - where -
+  // --- Chromium still defines the global - the insecure copy was unreachable, --
+  // --- the note read "denied", and the checkbox was still offered) ------------
+  await test.step("insecure context disables the Notifications toggle", async () => {
+    // Own-property shadowing of the `isSecureContext` prototype getter. Playwright
+    // serves this page over http://127.0.0.1, which IS a secure context by spec,
+    // so the insecure branch is otherwise unreachable without a real LAN origin.
+    await page.evaluate(() => {
+      Object.defineProperty(window, "isSecureContext", {
+        configurable: true,
+        value: false,
+      });
+    });
+    await page.locator('[data-command-id="settings.open"]').click();
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await expect(dialog).toBeVisible();
+    await dialog
+      .locator(".settings-section-nav-button", { hasText: "Notifications" })
+      .click();
+    const checkbox = dialog.locator(
+      '.settings-notification-toggle input[type="checkbox"]',
+    );
+    await expect(checkbox).toBeDisabled();
+    await expect(dialog.locator(".settings-field-note")).toContainText(
+      "not a secure context",
+    );
+
+    await dialog.locator('[data-command-id="settings.close"]').click();
+    await expect(
+      page.locator('[role="dialog"][aria-label="Settings"]'),
+    ).toHaveCount(0);
+    // Restore: every later step of this giant serial test shares this same
+    // document, and must not silently run under a faked insecure context.
+    await page.evaluate(() => {
+      Object.defineProperty(window, "isSecureContext", {
+        configurable: true,
+        value: true,
+      });
+    });
+    note(
+      "notifications settings: a faked insecure context disables the OS-notification checkbox and states the insecure-context reason in the note",
+    );
+  });
+
   // --- Add-server modal open/validate/cancel (260722 blocker-2: previously ----
   // --- human-smoke only, no automated coverage) ------------------------------
   await test.step("add-server modal opens, validates, and cancels", async () => {
