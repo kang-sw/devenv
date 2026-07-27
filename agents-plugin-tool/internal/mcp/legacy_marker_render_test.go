@@ -89,16 +89,33 @@ func TestFormatSpecFindDropsAdvisoriesForTruncatedDocuments(t *testing.T) {
 	}
 }
 
+// normalizeJSONKey folds a wire key to the one form both a snake_case json tag
+// and Go's tagless field-name fallback share. Separators are dropped rather
+// than inserted, which keeps "marker_context" and "marker_contexts" distinct:
+// they normalize to "markercontext" and "markercontexts", still compared for
+// equality, so neither can stand in for the other.
+func normalizeJSONKey(key string) string {
+	return strings.ToLower(strings.ReplaceAll(key, "_", ""))
+}
+
 // jsonObjectKeys collects every object key anywhere in a decoded JSON value, at
 // any nesting depth. Keys are compared for equality rather than scanned as
 // substrings: the two retired fields are "marker_context" and
 // "marker_contexts", and a substring test for the former also matches the
 // latter, so one would silently stand in for the other.
+//
+// Keys are normalized by normalizeJSONKey so the guard also covers deletion of
+// the `json:"-"` tag with no replacement, not only its reversion to the
+// historical snake_case tag. Go falls back to the Go field name when no tag is
+// present, so a bare deletion puts the retired data back on the wire as
+// "MarkerContexts"/"MarkerContext" - a shape a case-exact comparison misses
+// entirely. Lowercasing alone is not enough: "MarkerContexts" lowercases to
+// "markercontexts", which is not "marker_contexts". Measured, not assumed.
 func jsonObjectKeys(value any, out map[string]bool) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			out[key] = true
+			out[normalizeJSONKey(key)] = true
 			jsonObjectKeys(child, out)
 		}
 	case []any:
@@ -162,10 +179,10 @@ func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
 	// references.trace embeds []SpecInfo as well, and SpecAnchorStatus nests both
 	// leaf structs, so only the leaf tags keep those payloads silent too.
 	listKeys := marshalledKeys(t, list)
-	if listKeys["marker_contexts"] {
+	if listKeys["markercontexts"] {
 		t.Fatal(`serialized specs.list result carries the retired "marker_contexts" key`)
 	}
-	if listKeys["marker_context"] {
+	if listKeys["markercontext"] {
 		t.Fatal(`serialized specs.list result carries the retired "marker_context" key under anchors[]`)
 	}
 
@@ -193,10 +210,10 @@ func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
 		}
 	}
 	statusKeys := marshalledKeys(t, status)
-	if statusKeys["marker_context"] {
+	if statusKeys["markercontext"] {
 		t.Fatal(`serialized specs.status result carries the retired "marker_context" key under locations[]`)
 	}
-	if statusKeys["marker_contexts"] {
+	if statusKeys["markercontexts"] {
 		t.Fatal(`serialized specs.status result carries the retired "marker_contexts" key under files[]`)
 	}
 }

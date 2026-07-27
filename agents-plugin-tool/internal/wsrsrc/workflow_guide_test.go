@@ -19,21 +19,35 @@ func workflowGuides() []string {
 	}
 }
 
-// implementedOnlyRule is the sentence that makes a spec verification pass
-// destructive. It is matched as a substring so a reword elsewhere in the bullet
-// does not break the lookup.
-const implementedOnlyRule = "spec entries describe implemented behavior only"
+// implementedOnlyRuleTokens anchor the bullet that makes a spec verification
+// pass destructive. Two tokens rather than one byte-exact sentence: the rule
+// reads "spec entries describe implemented behavior only" today, but "only
+// implemented behavior" is the same correct document, and the bullet is
+// hard-wrapped, so any reflow can drop a newline into the middle of a longer
+// needle. Both tokens are required and the match must be unique, so a loosened
+// anchor cannot silently land on a neighbouring bullet and leave the exception
+// check asserting against the wrong text.
+var implementedOnlyRuleTokens = []string{"spec entries", "implemented behavior"}
 
-// markdownBulletContaining returns the one top-level bullet whose text contains
-// needle, continuation lines included. Bullets are split on "\n- ", so indented
-// continuation lines stay with their own bullet.
-func markdownBulletContaining(text, needle string) (string, bool) {
+// normalizedBullets splits markdown into top-level bullets, lowercased with
+// whitespace runs collapsed so a hard wrap inside a phrase does not hide it.
+// Bullets are split on "\n- ", so indented continuation lines stay with their
+// own bullet.
+func normalizedBullets(text string) []string {
+	var out []string
 	for _, bullet := range strings.Split(text, "\n- ") {
-		if strings.Contains(bullet, needle) {
-			return bullet, true
+		out = append(out, strings.Join(strings.Fields(strings.ToLower(bullet)), " "))
+	}
+	return out
+}
+
+func containsAllTokens(text string, tokens []string) bool {
+	for _, token := range tokens {
+		if !strings.Contains(text, token) {
+			return false
 		}
 	}
-	return "", false
+	return true
 }
 
 // TestWorkflowGuidesKeepImplementationGapException pins the one sentence the
@@ -45,24 +59,38 @@ func markdownBulletContaining(text, needle string) (string, bool) {
 // either suite notices.
 //
 // Asserted on substance - the same bullet names the exception - rather than on
-// byte-exact text, so ordinary rewording does not break it. This guard covers
-// exactly this one sentence and says nothing about the rest of the shared
-// content; see 260728-research-parallel-workflow-guide-divergence.
+// byte-exact text, and case-insensitively, so ordinary rewording does not break
+// it. This guard covers exactly this one sentence and says nothing about the
+// rest of the shared content; see 260728-research-parallel-workflow-guide-divergence.
+//
+// Every copy is checked in one pass: a simultaneous loss in two of the three
+// must not report only the first, or the operator fixes one file and reruns
+// into a second red.
 func TestWorkflowGuidesKeepImplementationGapException(t *testing.T) {
 	for _, path := range workflowGuides() {
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+			t.Errorf("read %s: %v", path, err)
+			continue
 		}
-		bullet, ok := markdownBulletContaining(string(raw), implementedOnlyRule)
-		if !ok {
-			t.Fatalf("%s: no bullet states the implemented-behavior-only rule (%q)", path, implementedOnlyRule)
+		var matched []string
+		for _, bullet := range normalizedBullets(string(raw)) {
+			if containsAllTokens(bullet, implementedOnlyRuleTokens) {
+				matched = append(matched, bullet)
+			}
 		}
-		if !strings.Contains(bullet, "Implementation Gap") {
-			t.Fatalf("%s: the implemented-behavior-only rule does not name the Implementation Gap Callout as its exception: %q", path, bullet)
+		if len(matched) != 1 {
+			t.Errorf("%s: want exactly one bullet stating the implemented-behavior-only rule (all of %q), got %d",
+				path, implementedOnlyRuleTokens, len(matched))
+			continue
+		}
+		bullet := matched[0]
+		if !strings.Contains(bullet, "implementation gap") {
+			t.Errorf("%s: the implemented-behavior-only rule does not name the Implementation Gap Callout as its exception: %q", path, bullet)
+			continue
 		}
 		if !strings.Contains(bullet, "exception") {
-			t.Fatalf("%s: the implemented-behavior-only rule names Implementation Gap but not as an exception: %q", path, bullet)
+			t.Errorf("%s: the implemented-behavior-only rule names Implementation Gap but not as an exception: %q", path, bullet)
 		}
 	}
 }
