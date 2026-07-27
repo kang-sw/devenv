@@ -29,15 +29,19 @@ export type TerminalStylePrefs = {
   readonly fontFamilyOverride: string;
   readonly fontSize: number;
   readonly themeBackground: string;
+  readonly gpuAcceleration: boolean;
+  readonly ligaturesEnabled: boolean;
 };
 
 // Reproduces today's exact hardcoded terminal look when nothing is persisted
 // yet: empty override (fallback stack unchanged), fontSize 12, background
-// "#0b0d10".
+// "#0b0d10", GPU-accelerated renderer on, ligatures off.
 export const DEFAULT_TERMINAL_STYLE_PREFS: TerminalStylePrefs = {
   fontFamilyOverride: "",
   fontSize: 12,
   themeBackground: "#0b0d10",
+  gpuAcceleration: true,
+  ligaturesEnabled: false,
 };
 
 // Live fan-out for terminal-style prefs: open terminal panes subscribe via
@@ -74,6 +78,18 @@ function parseTerminalStylePrefs(raw: unknown): TerminalStylePrefs | null {
     fontFamilyOverride: record.fontFamilyOverride,
     fontSize: record.fontSize,
     themeBackground: record.themeBackground,
+    // Additive/backward-compatible: existing v1 users without these fields
+    // yet fall back to defaults instead of invalidating the whole parse
+    // (which would wipe fontFamilyOverride/fontSize/themeBackground via
+    // loadNamespacedPrefs's version-mismatch fallback-to-defaults path).
+    gpuAcceleration:
+      typeof record.gpuAcceleration === "boolean"
+        ? record.gpuAcceleration
+        : DEFAULT_TERMINAL_STYLE_PREFS.gpuAcceleration,
+    ligaturesEnabled:
+      typeof record.ligaturesEnabled === "boolean"
+        ? record.ligaturesEnabled
+        : DEFAULT_TERMINAL_STYLE_PREFS.ligaturesEnabled,
   };
 }
 

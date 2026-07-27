@@ -109,6 +109,39 @@ export function TerminalStyleSection() {
 
   return (
     <div className="settings-field-group">
+      <label className="settings-field settings-field-checkbox">
+        <input
+          type="checkbox"
+          checked={prefs.ligaturesEnabled}
+          onChange={(event) =>
+            onChange({ ...prefs, ligaturesEnabled: event.target.checked })
+          }
+        />
+        <span className="settings-field-label">
+          Font ligatures (experimental)
+        </span>
+      </label>
+      <label
+        className="settings-field settings-field-checkbox"
+        title={
+          prefs.ligaturesEnabled
+            ? "Disabled while font ligatures are enabled — GPU renderers can't render ligature glyphs"
+            : undefined
+        }
+      >
+        <input
+          type="checkbox"
+          checked={prefs.gpuAcceleration && !prefs.ligaturesEnabled}
+          disabled={prefs.ligaturesEnabled}
+          onChange={(event) =>
+            onChange({ ...prefs, gpuAcceleration: event.target.checked })
+          }
+        />
+        <span className="settings-field-label">GPU acceleration</span>
+      </label>
+      <span className="settings-advanced-muted">
+        Applies to newly opened terminal panes.
+      </span>
       <label className="settings-field">
         <span className="settings-field-label">Font family</span>
         <input

@@ -206,6 +206,24 @@ export function TerminalPaneBody({
     terminal.open(container);
     terminalRef.current = terminal;
 
+    // Renderer/addon selection happens once here, at construction time, and
+    // is not live-swapped later - `terminalPrefs.gpuAcceleration` /
+    // `.ligaturesEnabled` only take effect for terminals constructed after a
+    // settings change (matches the "Applies to newly opened terminal panes"
+    // settings-UI note).
+    const useLigatures = liveRef.current.terminalPrefs.ligaturesEnabled;
+    // WebGL/Canvas renderers draw glyphs via `CanvasRenderingContext2D`/GL
+    // texture atlases, which have no mechanism to honor
+    // `font-feature-settings`/`calt` ligature substitution - only xterm's
+    // built-in DOM renderer (real text nodes, CSS cascade) can shape
+    // ligatures. This is an architectural limitation of the GPU renderers,
+    // not a bug (matches microsoft/vscode#274296; VS Code documents
+    // disabling GPU acceleration as the official workaround for the same
+    // limitation). So ligatures force the DOM renderer by skipping the GPU
+    // renderer addons entirely, at the cost of DOM-renderer performance.
+    const useGpuRenderer =
+      liveRef.current.terminalPrefs.gpuAcceleration && !useLigatures;
+
     // Activate programming-ligature shaping (`->`, `=>`, `!=`, etc.) right
     // after open() and before the GPU renderer chain below, so a WebGL
     // texture atlas - if one loads - already reflects ligatures at
@@ -220,12 +238,14 @@ export function TerminalPaneBody({
     // only way ligatures ever render in this environment. Wrapped in
     // try/catch so a construction/activation failure leaves the terminal
     // working unchanged with no ligatures.
-    try {
-      const ligaturesAddon = new LigaturesAddon();
-      terminal.loadAddon(ligaturesAddon);
-      ligaturesAddonRef.current = ligaturesAddon;
-    } catch {
-      ligaturesAddonRef.current = null;
+    if (useLigatures) {
+      try {
+        const ligaturesAddon = new LigaturesAddon();
+        terminal.loadAddon(ligaturesAddon);
+        ligaturesAddonRef.current = ligaturesAddon;
+      } catch {
+        ligaturesAddonRef.current = null;
+      }
     }
 
     // Attach a GPU renderer AFTER open() so a canvas/WebGL context exists;
@@ -235,34 +255,39 @@ export function TerminalPaneBody({
     // the built-in DOM renderer, so an environment without GPU acceleration -
     // or one that loses its GL context at runtime - still renders output
     // unchanged. This only swaps the render backend; the output/data path is
-    // untouched.
-    const loadCanvasRenderer = () => {
-      try {
-        const canvasAddon = new CanvasAddon();
-        terminal.loadAddon(canvasAddon);
-        rendererAddonRef.current = canvasAddon;
-      } catch {
-        // No 2D canvas renderer either; leave the DOM renderer in place.
-        rendererAddonRef.current = null;
-      }
-    };
-    try {
-      const webglAddon = new WebglAddon();
-      // A lost GPU context would otherwise blank the terminal permanently;
-      // dispose the WebGL addon and drop to the canvas renderer so output
-      // keeps rendering.
-      webglAddon.onContextLoss(() => {
-        webglAddon.dispose();
-        if (rendererAddonRef.current === webglAddon) {
+    // untouched. Skipped entirely when GPU acceleration is off (either by
+    // preference or because ligatures forced it off above) - the DOM
+    // renderer stays active, which is required for ligature glyphs to
+    // render at all.
+    if (useGpuRenderer) {
+      const loadCanvasRenderer = () => {
+        try {
+          const canvasAddon = new CanvasAddon();
+          terminal.loadAddon(canvasAddon);
+          rendererAddonRef.current = canvasAddon;
+        } catch {
+          // No 2D canvas renderer either; leave the DOM renderer in place.
           rendererAddonRef.current = null;
         }
+      };
+      try {
+        const webglAddon = new WebglAddon();
+        // A lost GPU context would otherwise blank the terminal permanently;
+        // dispose the WebGL addon and drop to the canvas renderer so output
+        // keeps rendering.
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose();
+          if (rendererAddonRef.current === webglAddon) {
+            rendererAddonRef.current = null;
+          }
+          loadCanvasRenderer();
+        });
+        terminal.loadAddon(webglAddon);
+        rendererAddonRef.current = webglAddon;
+      } catch {
+        // WebGL unavailable in this environment; try 2D canvas, then DOM.
         loadCanvasRenderer();
-      });
-      terminal.loadAddon(webglAddon);
-      rendererAddonRef.current = webglAddon;
-    } catch {
-      // WebGL unavailable in this environment; try 2D canvas, then DOM.
-      loadCanvasRenderer();
+      }
     }
 
     // Swap xterm's default (Unicode v6) character-width tables for the v11

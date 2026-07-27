@@ -3707,6 +3707,21 @@ button {
   text-transform: uppercase;
 }
 
+/* Checkbox settings rows (e.g. Terminal section's "Font ligatures" / "GPU
+   acceleration"): inline checkbox + label instead of the stacked
+   label-above-input layout used by `.settings-field`. */
+.settings-field-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ws-space-03);
+}
+
+.settings-field-checkbox .settings-field-label {
+  text-transform: none;
+  font-weight: 500;
+}
+
 /* Downloadable-fonts row list under the Terminal section's Font family
    field: one clickable row per catalog entry, doubling as both the
    download/retry trigger (idle/error) and the apply-to-prefs action
