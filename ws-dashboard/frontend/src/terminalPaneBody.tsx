@@ -522,7 +522,26 @@ export function TerminalPaneBody({
       // the fit-relevant *measured* signal, unlike `offsetParent`, which
       // stays non-null (pane visible) throughout this collapse.
       const proposed = fitAddon.proposeDimensions();
-      if (!proposed || proposed.rows <= 1) {
+      if (!proposed || proposed.rows <= 1 || proposed.cols <= 1) {
+        return;
+      }
+      // A workRoot switch's Dockview relayout (see the `paneVisible` effect
+      // below) can transiently propose a size collapsed on BOTH axes at
+      // once, well below the terminal's last-good size, before Dockview's
+      // own layout engine settles - confirmed empirically
+      // (`proposeDimensions()` briefly returning e.g. 10x3 immediately
+      // after a root switch, corrected roughly one frame later). A
+      // deliberate user resize essentially never shrinks both axes to
+      // under a quarter of their prior size in a single measurement, so
+      // treat that specific pattern as a transient mismeasurement and skip
+      // rather than apply it - the next ResizeObserver/visibility-triggered
+      // fit picks up the real size once layout has settled.
+      if (
+        terminal.cols > 4 &&
+        terminal.rows > 4 &&
+        proposed.cols < terminal.cols / 4 &&
+        proposed.rows < terminal.rows / 4
+      ) {
         return;
       }
       try {
@@ -759,48 +778,71 @@ export function TerminalPaneBody({
     // next incidental ResizeObserver callback, and forward the size only if
     // it actually changed, reusing the existing fitNow/forwardSize
     // closures.
-    const beforeFit = terminalRef.current
-      ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
-      : null;
-    fitNowRef.current?.();
-    if (
-      beforeFit &&
-      terminalRef.current &&
-      (terminalRef.current.cols !== beforeFit.columns ||
-        terminalRef.current.rows !== beforeFit.rows)
-    ) {
-      forwardSizeRef.current?.();
-    } else if (
-      beforeFit &&
-      terminalRef.current &&
-      terminalRef.current.buffer.active.type === "alternate"
-    ) {
-      // Size didn't actually change while hidden (the common case - e.g.
-      // switching dashboard tabs without resizing the browser window), so a
-      // same-size resize would be silently dropped both by the frontend
-      // dedupe (`lastForwardedSizeRef` in forwardSize) and by the kernel
-      // (Linux only emits SIGWINCH when ws_row/ws_col actually differ). A
-      // full-screen TUI app (htop/vim/tmux) that under-repainted while its
-      // alt-screen scrollback was replayed client-side would then stay
-      // visually stale with no redraw trigger. Force two genuinely
-      // different sizes through - a one-row shrink then restore - so each
-      // one forwards and triggers a real SIGWINCH, guaranteeing a full
-      // redraw.
-      //
-      // Gated to the alternate screen buffer only: a normal-buffer session
-      // (plain shell, no full-screen app) never had the under-repaint
-      // symptom in the first place, and resize-driven reflow of a normal
-      // buffer's real scrollback can jump the viewport to the top - a
-      // regression with no corresponding benefit there.
-      const terminal = terminalRef.current;
-      const shrunkRows = Math.max(1, terminal.rows - 1);
-      if (shrunkRows !== terminal.rows) {
-        terminal.resize(terminal.cols, shrunkRows);
-        forwardSizeRef.current?.();
-        terminal.resize(beforeFit.columns, beforeFit.rows);
-        forwardSizeRef.current?.();
-      }
-    }
+    //
+    // A workRoot switch toggles `display:none` on Dockview's entire
+    // per-root layout subtree, which forces Dockview's own internal layout
+    // engine through a real hide -> show cycle that needs its own tick(s)
+    // to settle real group/panel sizes - unlike an intra-root tab switch,
+    // which never hides that Dockview instance at all. Reading the
+    // container's box on the very same tick this effect runs can therefore
+    // observe a genuinely-but-transiently tiny measurement (confirmed
+    // empirically: proposeDimensions briefly returning single-digit
+    // columns immediately after a root switch, then the correct size ~one
+    // frame later), which fitNow's degenerate guard does not catch since
+    // it only rejects `rows <= 1`. Deferring through two rAFs lets both
+    // Dockview's relayout and the browser's own layout/paint settle first.
+    let rafA = 0;
+    let rafB = 0;
+    rafA = window.requestAnimationFrame(() => {
+      rafB = window.requestAnimationFrame(() => {
+        const beforeFit = terminalRef.current
+          ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
+          : null;
+        fitNowRef.current?.();
+        if (
+          beforeFit &&
+          terminalRef.current &&
+          (terminalRef.current.cols !== beforeFit.columns ||
+            terminalRef.current.rows !== beforeFit.rows)
+        ) {
+          forwardSizeRef.current?.();
+        } else if (
+          beforeFit &&
+          terminalRef.current &&
+          terminalRef.current.buffer.active.type === "alternate"
+        ) {
+          // Size didn't actually change while hidden (the common case - e.g.
+          // switching dashboard tabs without resizing the browser window), so a
+          // same-size resize would be silently dropped both by the frontend
+          // dedupe (`lastForwardedSizeRef` in forwardSize) and by the kernel
+          // (Linux only emits SIGWINCH when ws_row/ws_col actually differ). A
+          // full-screen TUI app (htop/vim/tmux) that under-repainted while its
+          // alt-screen scrollback was replayed client-side would then stay
+          // visually stale with no redraw trigger. Force two genuinely
+          // different sizes through - a one-row shrink then restore - so each
+          // one forwards and triggers a real SIGWINCH, guaranteeing a full
+          // redraw.
+          //
+          // Gated to the alternate screen buffer only: a normal-buffer session
+          // (plain shell, no full-screen app) never had the under-repaint
+          // symptom in the first place, and resize-driven reflow of a normal
+          // buffer's real scrollback can jump the viewport to the top - a
+          // regression with no corresponding benefit there.
+          const terminal = terminalRef.current;
+          const shrunkRows = Math.max(1, terminal.rows - 1);
+          if (shrunkRows !== terminal.rows) {
+            terminal.resize(terminal.cols, shrunkRows);
+            forwardSizeRef.current?.();
+            terminal.resize(beforeFit.columns, beforeFit.rows);
+            forwardSizeRef.current?.();
+          }
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      window.cancelAnimationFrame(rafB);
+    };
   }, [paneVisible]);
 
   // Effect B - socket lifecycle only (260714 Phase 2 Prong 2). Deps
@@ -1035,19 +1077,37 @@ export function TerminalPaneBody({
   // cheap no-ops when the size already matches (fit) or was already
   // forwarded (`lastForwardedSizeRef` dedupe), so calling them here in
   // addition to Effect A's own later correction is harmless.
+  //
+  // The fit/forward half is deferred through two rAFs (same reasoning as
+  // Effect A below): reading the container's box on the very same tick a
+  // root switch happens can observe Dockview's own relayout mid-flight, not
+  // yet settled. The focus half stays on an immediate `setTimeout(0)` -
+  // unlike the size measurement, grabbing focus has no correctness
+  // dependency on layout being settled, and delaying it would reintroduce
+  // perceptible input lag.
   const shouldAutoFocus = actions.shouldAutoFocus(pane);
   useEffect(() => {
     if (!shouldAutoFocus) {
       return;
     }
     window.setTimeout(() => {
-      fitNowRef.current?.();
-      forwardSizeRef.current?.();
       terminalRef.current?.focus();
       containerRef.current
         ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
         ?.focus();
     }, 0);
+    let rafA = 0;
+    let rafB = 0;
+    rafA = window.requestAnimationFrame(() => {
+      rafB = window.requestAnimationFrame(() => {
+        fitNowRef.current?.();
+        forwardSizeRef.current?.();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      window.cancelAnimationFrame(rafB);
+    };
   }, [shouldAutoFocus]);
 
   // Gated on `pane.session.status` (the parent-owned session view), which
