@@ -2303,6 +2303,175 @@ pub(crate) fn browser_pty_term(env: impl Fn(&str) -> Option<String>) -> String {
 mod terminal_portability_skeleton_tests {
     use super::*;
 
+    // ---------------------------------------------------------------
+    // Source-scan helpers (260727 Phase 1, Invariants 1-3 below): these
+    // count textual call sites in this file's own compiled-out source, not
+    // runtime behavior. They exist because `std::process::Command`'s
+    // `env_clear()` and `self.tokens`'s access pattern both have a real
+    // observability gap that no runtime assertion can close: see
+    // `ai-docs/mental-model/ws-web-dashboard/terminal.md:64` for the
+    // concrete `env_clear()`/`get_envs()` case (an empty iterator either
+    // way), and `token_for`'s own CONTRACT above for the symmetric
+    // `self.tokens` argument - an extra reader of that map is runtime-
+    // indistinguishable from `token_for` reading it once more. A
+    // VALUE-level test - like `helper_env_plan`'s own assertion in
+    // `helper_spawn_default_no_command_matches_existing_arg_shape` - cannot
+    // see "a second call site was written somewhere else in this file";
+    // these scans are the SECONDARY guard for exactly that residual, never
+    // a replacement for a behavioral proof.
+    // ---------------------------------------------------------------
+
+    /// This file's own source (`include_str!` of itself, resolved relative
+    /// to this file with no `CARGO_MANIFEST_DIR`/`file!()` plumbing needed -
+    /// same self-referential pattern `events.rs`/`mock.rs` use for their own
+    /// sibling fixtures) with every `#[cfg(test)]`-gated span excised and
+    /// every comment-only line then dropped.
+    ///
+    /// Excise rule: walk lines; a line that is EXACTLY `#[cfg(test)]` at
+    /// column 0 drops itself and every following line up to and including
+    /// the next line that is EXACTLY `}` at column 0 - the shape all of
+    /// this file's `#[cfg(test)]` markers use (this module, plus the
+    /// test-only fixture functions below it). Comment-stripping (any line
+    /// whose trimmed form starts with `//`) runs AFTER excision, on the
+    /// surviving lines only.
+    ///
+    /// ASSUMPTION: every column-0 `#[cfg(test)]` in this file annotates a
+    /// braced item. A future `#[cfg(test)]` on a non-braced item (e.g.
+    /// `#[cfg(test)] use ...;` or a bare `const`) has no column-0 `}` of its
+    /// own, so this rule would skip forward to the NEXT unrelated column-0
+    /// `}` and over-excise real production code in between. Symptom: the
+    /// scan counts below drop unexpectedly (never silently pass) because
+    /// the excised span swallowed a counted call site - recognizable
+    /// immediately as a scan-helper bug, not a production regression, if
+    /// this comment is read first.
+    fn production_text() -> String {
+        const SOURCE: &str = include_str!("terminal.rs");
+        let mut lines = SOURCE.lines();
+        let mut kept = Vec::new();
+        while let Some(line) = lines.next() {
+            if line == "#[cfg(test)]" {
+                for gated in lines.by_ref() {
+                    if gated == "}" {
+                        break;
+                    }
+                }
+                continue;
+            }
+            kept.push(line);
+        }
+        kept.retain(|line| !line.trim_start().starts_with("//"));
+        kept.join("\n")
+    }
+
+    /// `text` with every whitespace character removed. Callers must only
+    /// ever apply this to the OUTPUT of `production_text()` - flattening the
+    /// raw, comment-bearing source FIRST would collapse a backticked
+    /// identifier inside a CONTRACT comment (e.g. `` `self.tokens` ``)
+    /// against a real field access and inflate a scan's count. Comment-strip
+    /// first, flatten second - never the reverse.
+    fn flattened(text: &str) -> String {
+        text.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    // Invariant 1 (260727 Phase 1): the PRIMARY guard for hop 1's env
+    // decision is the VALUE-level `helper_env_plan` assertion in
+    // `helper_spawn_default_no_command_matches_existing_arg_shape` above -
+    // this scan is the SECONDARY guard for the one residual a value
+    // assertion cannot see: an `env_clear()` written directly into
+    // `build_helper_command` outside its single plan-application arm (see
+    // that function's own CONTRACT). Comment-stripped but deliberately NOT
+    // flattened - `.env_clear(` never spans a line break in this file today.
+    #[test]
+    fn terminal_rs_has_exactly_one_production_env_clear() {
+        let count = production_text().matches(".env_clear(").count();
+        assert_eq!(
+            count, 1,
+            "expected exactly one production `.env_clear(` call site (in \
+             `build_helper_command`'s `HelperEnvPlan::ClearAndSet` arm); \
+             found {count} - if this moved, update `build_helper_command`'s \
+             CONTRACT and this count together"
+        );
+    }
+
+    // Invariant 2, structural half (260727 Phase 1): counts *methods that
+    // take the `sessions` write lock* - a DIFFERENT count from the existing
+    // CONTRACT comment on `insert` above, which numbers its own eviction
+    // retain the "FIFTH session-removal path" (that phrasing counts
+    // session-REMOVAL paths, not write-lock call sites; do not conflate the
+    // two when grepping "FIFTH" - they are different numberings for
+    // different questions). Today's four sites and each one's discharge
+    // status: `insert_unchecked` (adds only, owes nothing to tokens or
+    // attention), `insert`'s own eviction `retain` (discharges attention
+    // only - the callback-token half of that same gap is deferred debt,
+    // tracked separately from this phase), `remove` and
+    // `remove_for_work_roots` (both discharge token AND attention in full).
+    // Phase 2 adds `drain_all`, moving this count to 5 (with its own
+    // "discharges neither" line); Phase 3 rewrites that line to "discharges
+    // both" once its fix lands - neither change belongs to this phase.
+    #[test]
+    fn sessions_write_lock_sites_are_enumerated() {
+        let count = flattened(&production_text())
+            .matches("self.sessions.write()")
+            .count();
+        assert_eq!(
+            count, 4,
+            "expected exactly 4 textual occurrences of `self.sessions.write()` \
+             (one per write-lock call site: insert_unchecked, insert, remove, \
+             remove_for_work_roots); found {count} - if a write-lock call site \
+             was added, removed, or its discharge behavior changed, update both \
+             the enumerating CONTRACT comment above and this expected count \
+             together"
+        );
+    }
+
+    // Invariant 3 (260727 Phase 1): `self.tokens` access is confined to
+    // three choke points - `token_for` (the ONLY reader, per its own
+    // CONTRACT above), and `remember_token`/`forget_token` (the two
+    // writers). No behavioral check exists for this because an extra reader
+    // is runtime-indistinguishable from `token_for` reading the map once
+    // more (the same observability gap named in this module's own doc
+    // comment for `env_clear`); this scan is the only guard.
+    #[test]
+    fn tokens_map_access_is_confined_to_its_choke_points() {
+        // All three counts are computed and checked up front, and every
+        // mismatch is collected before the single `assert!` below - never
+        // three independent `assert_eq!` calls, which would short-circuit on
+        // the first mismatch and hide whichever of these three logically
+        // dependent counts moved alongside it (see the 260727 Phase 1
+        // mutation log in the Phase 1 plan Result for an observed instance).
+        let text = flattened(&production_text());
+        let total = text.matches(".tokens").count();
+        let reads = text.matches("self.tokens.read()").count();
+        let writes = text.matches("self.tokens.write()").count();
+
+        let mut mismatches = Vec::new();
+        if total != 3 {
+            mismatches.push(format!(
+                "`.tokens` appeared {total} times, expected 3 (one read in \
+                 `token_for`, two writes in `remember_token`/`forget_token`)"
+            ));
+        }
+        if reads != 1 {
+            mismatches.push(format!(
+                "`self.tokens.read()` appeared {reads} times, expected 1 \
+                 (`token_for`, the ONLY reader per its own CONTRACT)"
+            ));
+        }
+        if writes != 2 {
+            mismatches.push(format!(
+                "`self.tokens.write()` appeared {writes} times, expected 2 \
+                 (`remember_token`, `forget_token`)"
+            ));
+        }
+        assert!(
+            mismatches.is_empty(),
+            "self.tokens access moved off its enumerated choke points - if \
+             this is legitimate, update this test's enumerating doc comment \
+             and the expected counts together:\n{}",
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn terminal_shell_selection_contract_targets() {
         // CONTRACT: Fill executable assertions for SHELL, PowerShell, COMSPEC, Unix
@@ -3287,6 +3456,124 @@ mod terminal_portability_skeleton_tests {
         );
     }
 
+    // CONTRACT (260725 Phase 4, callback-token counterpart to the
+    // `*_forgets_the_attention_entry` trio above): `remove`/
+    // `remove_for_work_roots` must forget a closed terminal's callback token
+    // at the same two choke points they already forget its attention entry
+    // at - see each method's own CONTRACT. Built via the token-bearing
+    // `insert_fake_live_session_with_token_for_test`, NOT the shared
+    // `insert_fake_live_session_for_test` used above: that shared helper
+    // hard-codes `callback_token: None`, which `remember_token` no-ops on,
+    // so a token test built on it would pass its post-removal assertion
+    // vacuously. Constructed via `TerminalRegistry::new` with an explicit
+    // temp `state_dir`, NOT `TerminalRegistry::default()`: `Default`
+    // resolves the real `default_state_dir()`, and `forget_token`'s
+    // best-effort `agent_token_store::delete_token` would then create/delete
+    // a real file under the developer's actual `terminal-tokens/` on every
+    // `cargo test` run and pass silently (mirrors
+    // `spawn_marks_the_profile_pending_before_writing_the_first_sidecar_byte`'s
+    // temp-dir shape below).
+    #[tokio::test]
+    async fn remove_forgets_the_callback_token() {
+        let unique = format!("{}-{}", std::process::id(), now_ms());
+        let base =
+            std::env::temp_dir().join(format!("ws-dashboard-callback-token-remove-{unique}"));
+        let state_dir = base.join("state");
+        let registry_dir = base.join("terminals");
+        std::fs::create_dir_all(&state_dir).expect("create temp state dir fixture");
+
+        let registry = TerminalRegistry::new(
+            default_helper_binary(),
+            registry_dir,
+            DEFAULT_CONNECT_TIMEOUT,
+            Some(state_dir.clone()),
+            String::new(),
+        );
+        let terminal_id = "term_forget_token_on_remove";
+        let token = "fake-callback-token-remove";
+        insert_fake_live_session_with_token_for_test(&registry, terminal_id, token).await;
+        crate::agent_token_store::write_token(&state_dir, terminal_id, token)
+            .expect("write fake on-disk token file");
+
+        // Non-vacuity guard: without this pre-removal assertion, a helper
+        // that silently never seeded a token (e.g. a fixture regression)
+        // would still pass the post-removal `is_none()` check for free.
+        assert_eq!(
+            registry.token_for(terminal_id),
+            Some(token.to_owned()),
+            "token must resolve before removal or this test proves nothing"
+        );
+        assert!(
+            crate::agent_token_store::token_store_path(&state_dir, terminal_id).exists(),
+            "on-disk token file must exist before removal or this test proves nothing"
+        );
+
+        registry.remove(terminal_id);
+
+        assert!(
+            registry.token_for(terminal_id).is_none(),
+            "remove must forget the in-memory callback token, not just the session"
+        );
+        assert!(
+            !crate::agent_token_store::token_store_path(&state_dir, terminal_id).exists(),
+            "remove must best-effort delete the on-disk token file"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn remove_for_work_roots_forgets_the_callback_token() {
+        let unique = format!("{}-{}", std::process::id(), now_ms());
+        let base = std::env::temp_dir().join(format!(
+            "ws-dashboard-callback-token-remove-for-work-roots-{unique}"
+        ));
+        let state_dir = base.join("state");
+        let registry_dir = base.join("terminals");
+        std::fs::create_dir_all(&state_dir).expect("create temp state dir fixture");
+
+        let registry = TerminalRegistry::new(
+            default_helper_binary(),
+            registry_dir,
+            DEFAULT_CONNECT_TIMEOUT,
+            Some(state_dir.clone()),
+            String::new(),
+        );
+        let terminal_id = "term_forget_token_on_workroot_removal";
+        let token = "fake-callback-token-workroot-removal";
+        insert_fake_live_session_with_token_for_test(&registry, terminal_id, token).await;
+        crate::agent_token_store::write_token(&state_dir, terminal_id, token)
+            .expect("write fake on-disk token file");
+
+        assert_eq!(
+            registry.token_for(terminal_id),
+            Some(token.to_owned()),
+            "token must resolve before removal or this test proves nothing"
+        );
+        assert!(
+            crate::agent_token_store::token_store_path(&state_dir, terminal_id).exists(),
+            "on-disk token file must exist before removal or this test proves nothing"
+        );
+
+        // Same `work_root_id` `insert_fake_live_session_with_token_for_test`
+        // inserts under ("fake-work-root", mirroring
+        // `insert_fake_live_session_for_test`'s own hard-coded value).
+        let work_root_ids = BTreeSet::from([WorkRootId::from("fake-work-root".to_owned())]);
+        registry.remove_for_work_roots(&work_root_ids);
+
+        assert!(
+            registry.token_for(terminal_id).is_none(),
+            "remove_for_work_roots must forget the in-memory callback token, not just the \
+             session"
+        );
+        assert!(
+            !crate::agent_token_store::token_store_path(&state_dir, terminal_id).exists(),
+            "remove_for_work_roots must best-effort delete the on-disk token file"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn attention_handle_returned_by_app_state_construction_shares_the_registrys_own_hub() {
         // CONTRACT: proves the `attention()` accessor hands out a clone of
@@ -3522,6 +3809,49 @@ pub(crate) async fn insert_fake_live_session_for_test(registry: &TerminalRegistr
         created_at_ms: now_ms(),
         profile_id: None,
         callback_token: None,
+        pid: std::process::id(),
+        start_time: 0,
+        write_half: Arc::new(AsyncMutex::new(write_half)),
+        inner: Mutex::new(TerminalSessionInner {
+            status: TerminalStatus::Running,
+            columns: default_columns(),
+            rows: default_rows(),
+            output: VecDeque::new(),
+            next_sequence: 1,
+            grace_until_ms: None,
+        }),
+        output_signal: watch::channel(0).0,
+    });
+    registry.insert_unchecked(session);
+}
+
+// CONTRACT (260727 Phase 1, token-bearing sibling): identical to
+// `insert_fake_live_session_for_test` above except `callback_token` is
+// `Some(token)` instead of hard-coded `None`. That hard-coded `None` is
+// exactly why the shared helper above cannot seed a token
+// (`remember_token` no-ops when `session.callback_token` is `None`), and
+// the helper is shared with `agent_profile_gc.rs`'s own tests, so changing
+// its signature is a cross-module edit outside this phase's scope. Callers
+// that need a token-bearing fake session (the `*_forgets_the_callback_token`
+// tests above) use this sibling instead; do not merge the two or touch the
+// existing helper's call sites.
+#[cfg(test)]
+pub(crate) async fn insert_fake_live_session_with_token_for_test(
+    registry: &TerminalRegistry,
+    terminal_id: &str,
+    token: &str,
+) {
+    let (_peer, local) = tokio::io::duplex(4096);
+    let (_read_half, write_half) =
+        crate::terminal_ipc_transport::split(Box::new(local) as crate::terminal_ipc_transport::BoxedIpcStream);
+    let session = Arc::new(TerminalSession {
+        id: terminal_id.to_owned(),
+        work_root_id: WorkRootId::from("fake-work-root".to_owned()),
+        title: "fake".to_owned(),
+        cwd_hint: None,
+        created_at_ms: now_ms(),
+        profile_id: None,
+        callback_token: Some(token.to_owned()),
         pid: std::process::id(),
         start_time: 0,
         write_half: Arc::new(AsyncMutex::new(write_half)),

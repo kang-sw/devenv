@@ -281,6 +281,15 @@ actually mounts.
   and `:1383` fail on the goal branch today, so `cargo` exits 101 even when the
   tree is otherwise clean. Record the site list before the merge and compare
   site-to-site after; a new *site* is the only signal.
+- **Re-measure that site list at the start of every phase; do not diff against
+  a list recorded earlier.** Phase 1 established that the integration targets are
+  load-sensitive on this machine: under a few hundred leaked
+  `terminal-helper`/`ws-dashboard` processes, `routes.rs`, `terminal_lifetime.rs`
+  and `terminal_notify_callback_restart.rs` produce extra failures that have
+  nothing to do with the tree. Comparing a clean run against a loaded run - in
+  either direction - manufactures a signal. The `--lib` target is the stable one;
+  the integration targets need their baseline taken under the same conditions as
+  the comparison run.
 - **`origin/ws-dashboard-dev` is already RED on `npm run test:settings`,** so
   "green after the merge" is not a coherent expectation for that suite. Its own
   registry/test mismatch is inherited, and `settingsSections.test.ts`
@@ -538,6 +547,78 @@ the failure-site list unchanged from the recorded baseline plus the new tests
 green, `npm run test:settings` green, and every mutation above run and observed
 to fail at its own site. Record the Rust failure-site baseline in this phase's
 Result - Phase 2 and Phase 3 compare against it.
+
+### Result (3c6b465f) - 2026-07-27
+
+Five tests, not six - the plan's Verification Plan said six while its own
+Implementation Plan named five. Five is correct: invariant 2 splits into two
+behavioral tests plus one structural, invariants 1 and 3 are one each, and
+invariant 4 adds no code. The implementer flagged the arithmetic rather than
+inventing a sixth test to match a number.
+
+Landed: `terminal_rs_has_exactly_one_production_env_clear`,
+`remove_forgets_the_callback_token`,
+`remove_for_work_roots_forgets_the_callback_token`,
+`sessions_write_lock_sites_are_enumerated`,
+`tokens_map_access_is_confined_to_its_choke_points`, plus the shared
+`production_text()`/`flattened()` scan helpers and a token-bearing fixture
+sibling.
+
+**Baseline, and a caveat on it that Phases 2 and 3 must act on.** The recorded
+site list is `crates/daemon/tests/routes.rs:1066` and `:1383`, with lib tests
+237 -> 242. That list is NOT stable on this machine. A later full-suite run
+during review surfaced additional failures at `routes.rs:4358`, `:13265`,
+`:13388`, `terminal_lifetime.rs:191` (x3) and
+`terminal_notify_callback_restart.rs:391`; the reviewer traced them to machine
+state rather than the diff - `ps` showed 531 live leaked
+`ws-dashboard`/`terminal-helper`/`claude` processes at the time, none of the
+failing files are touched by this phase, and the isolated `--lib` target was
+fully green (242 passed, 0 failed). The consequence for later phases is
+concrete: **re-measure the baseline immediately before each phase's own run
+instead of diffing against this recorded list.** A stale baseline would attribute
+load-induced integration failures to the merge, which is the same
+misattribution this ticket exists to prevent, pointed the other way.
+
+Deviations, both accepted:
+- A token-bearing sibling fixture (`insert_fake_live_session_with_token_for_test`)
+  was added rather than changing `insert_fake_live_session_for_test`'s signature,
+  because that helper also has a caller in `agent_profile_gc.rs` and this phase is
+  scoped to one file. The ticket allowed either.
+- `cargo fmt` and `cargo clippy` already fail on this branch, confirmed
+  pre-existing by comparison against the unmodified tree: 29 `terminal.rs` fmt
+  diffs and a compile-blocking `never_loop` deny in unrelated
+  `agent_attention.rs`. No blanket `cargo fmt` was run, since it would rewrite
+  29 sites outside this phase's scope. This is standing cleanup debt, untouched
+  and uncaused here.
+
+Finding the plan surfaced and the ticket had not: neither `insert` nor
+`insert_unchecked` writes `terminal-tokens/<id>.json` - `remember_token`
+populates the in-memory map only, and the file is written solely by
+`TerminalSession::spawn`. A fixture built on the insert path therefore has an
+in-memory token and no file, so the on-disk half of both token tests would have
+passed vacuously. The fixture calls `agent_token_store::write_token` directly to
+close that. Recorded in the terminal mental model.
+
+Verification: every mutation was run, observed at its own site, and reverted -
+including the negative control (a commented-out `.env_clear()` leaves the count
+unmoved, proving comment-stripping does not break falsifiability in either
+direction). `npm run test:settings` exit 0 with the four
+`notificationAvailability` assertions intact, so invariant 4 was observed rather
+than assumed.
+
+Review found one Important issue, now fixed: the tokens test used three
+sequential `assert_eq!`, and since `assert_eq!` panics at the first mismatch, a
+single mutation could never demonstrate the "fail on both" the ticket asks for.
+Restructured to compute all counts first and assert once over collected
+mismatches; the re-run mutation reports both affected deltas in one panic while
+the untouched `writes` count correctly does not appear. Correctness review
+independently re-implemented the scan pipeline and reproduced every asserted
+number, confirmed flatten-before-strip would yield 7 instead of 3, and confirmed
+the scan tests' own literals sit inside the excised span so an excise slip fails
+loud rather than passing silently. It also verified forward: `drain_all` on
+`origin/ws-dashboard-dev` splits its receiver across lines in a form the
+flattened scan does catch, so `sessions_write_lock_sites_are_enumerated` will in
+fact fire at the merge.
 
 ### Phase 2: resolve the six conflicts and land the merge commit
 
