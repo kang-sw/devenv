@@ -21,7 +21,7 @@ Board artifacts
 Scope
 - Read only ticket files selected as edit targets, graph tickets needed for binding-decision review, required conventions, focus updates, and explicitly routed spec/mental-model checks.
 - Review related-ticket decisions by default; cascade (`judge: cascade-ticket-edit`) only for broader board or multi-ticket propagation.
-- Ready promotion requires spec addressing (`judge: spec-address-gate`), not mandatory planned spec text.
+- Ready promotion requires spec addressing (`judge: spec-address-gate`).
 
 Movement
 - Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create_empty` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.

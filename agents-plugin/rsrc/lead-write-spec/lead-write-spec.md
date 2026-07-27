@@ -32,9 +32,8 @@ Target: user request
    c. Insert the anchor - on a heading line or anywhere in body text (not heading-only).
    d. Call `{{.McpNamespace}}/spec_index.verify()` for duplicate-anchor verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-6. Accuracy check - confirm every heading exists in the codebase. Spawn a host-native exploration worker directly with an accuracy-check prompt if uncertain.
-7. **Commit** - call `{{.McpNamespace}}/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
-8. **Output Handoff** - report changed spec path, changed stem, and whether the caller should add `spec:` or keep ticket-local `## Spec Impact`.
+6. **Commit** - call `{{.McpNamespace}}/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
+7. **Output Handoff** - report changed spec path, changed stem, and whether the caller should add `spec:` or keep ticket-local `## Spec Impact`.
 
 ## Judgments
 

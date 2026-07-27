@@ -188,7 +188,7 @@ When an item is genuinely ambiguous on either axis, classify it with the best-ju
 
 1. Determine the target spec file path. Apply `judge: directory-vs-flat`.
 2. Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
-3. For each classified behavior:
+3. For each behavior step 4 classified implemented - planned items are not written here:
    a. Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
    c. If step 4's classification pass flagged this item ambiguous, add `<!-- AMBIGUOUS: <reason> -->` on the line directly beneath the entry heading, and record the stem + reason for the wrap-up summary.

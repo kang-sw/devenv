@@ -187,8 +187,9 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
 - v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
 - v0045: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
-  all three forms: `### 🚧 <Feature Name>` headings, `> [!note] Planned 🚧` body
-  callouts, and `- 🚧 <name> [<stem>/p<N>]` items in `features:` frontmatter.
+  all three forms: `🚧 <Feature Name>` headings at any level (`#` through
+  `######`), `> [!note] Planned 🚧` body callouts, and
+  `- 🚧 <name> [<stem>/p<N>]` items in `features:` frontmatter.
   Resolve each marker before removing it: when a live `idea/`, `todo/`, or
   `ready/` ticket references that spec, move the pending text into that ticket's
   `## Spec Impact`; otherwise verify the behavior against source and keep the

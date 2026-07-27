@@ -219,3 +219,8 @@ rather than reusing the preserved output at
 whose call-site inventory now overstates Category A by one site. The re-plan
 question stated in `## Blocked` — whether commit ownership is a property of the
 call site rather than of the callee — is unaffected and still open.
+
+Renumbered since: `lead-write-spec`'s unconditional `git.commit` is now **step
+6**, not step 7 (its former step 6 accuracy check was a verbatim restatement of
+Invariants line 14 and was deleted); `## Background` and `## Prior Art` above
+still name it by the old number.
