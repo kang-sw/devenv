@@ -12,7 +12,8 @@ Target: user request
 - Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
 - All survey queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; ticket-association checks spawn a scoped exploration worker with a ticket-association prompt and cited evidence.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
-- Caller-visible status and implemented/planned classification for ambiguous items are decided autonomously using best judgment; every such item is recorded with its reason and reported in the final summary, and the ones written to the spec also carry an inline `<!-- AMBIGUOUS: <reason> -->` marker. Confirmation is still required for the archive gate and the once-per-run domain list.
+- The once-per-run domain list requires explicit user confirmation before the todo list is locked.
+- Ambiguous caller-visibility and implemented/planned calls are decided by best judgment and recorded with behavior name, chosen classification, and reason; every recorded item reaches the final summary, and those written to the spec also carry an inline `<!-- AMBIGUOUS: <reason> -->` marker.
 - Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `{{.McpNamespace}}/spec_index.verify()` after every spec file write or update.
 - Domain todo items use the key and title prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`); the key is derivable from the domain name for status mutation.
@@ -182,11 +183,11 @@ For each item in the behavior brief, decide autonomously using best judgment:
 1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`.
 2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned work is not written to the spec; it stays in the owning ticket's `## Spec Impact` or in the survey report.
 
-When an item is genuinely ambiguous on either axis, classify it with the best-judgment call and record its behavior name, chosen classification, and a one-line reason in this run's ambiguity record. That record is the wrap-up summary's only source, so it holds items excluded from the spec as internal-only or planned on the same terms as written ones. Do not stop to ask per item. Collect the classified list and the ambiguity record before writing anything.
+When an item is genuinely ambiguous on either axis, classify it with the best-judgment call and record its behavior name, chosen classification, and a one-line reason in this run's ambiguity record. The wrap-up summary reports from that record, so it holds items excluded from the spec as internal-only or planned on the same terms as written ones. Do not stop to ask per item. Collect the classified list and the ambiguity record before writing anything.
 
 ### 5. Write spec entries
 
-1. If step 4 classified no behavior in this domain implemented, write no spec file: record the domain as producing no spec for the wrap-up summary and skip to step 6.
+1. If step 4 left this domain with no behavior to write to the spec - every behavior classified planned, internal-only, or both - write no spec file: record the domain as producing no spec for the wrap-up summary and skip to step 6.
 2. Determine the target spec file path. Apply `judge: directory-vs-flat`.
 3. Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
 4. For each behavior step 4 classified implemented - planned items are not written here:
@@ -199,7 +200,7 @@ When an item is genuinely ambiguous on either axis, classify it with the best-ju
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit any spec file changes through `{{.McpNamespace}}/git.commit` and skip to step 7; a domain that step 5 left without a spec file has nothing to commit here.
+1. If step 5 wrote no spec file for this domain, there are no stems to associate and nothing to commit - skip to step 7 without spawning the worker below. Otherwise collect all tickets in `ready/` status relevant to this domain from the step 2 survey output; if none, commit the spec file through `{{.McpNamespace}}/git.commit` and skip to step 7.
 2. Spawn a scoped exploration worker for the ticket-association check, using this block as the task prompt:
 
 ```text
@@ -222,7 +223,7 @@ For each ticket:
 ```
 
 3. Collect the subagent result; review the ticket-association report and resolve any open questions with the user before committing.
-4. Commit all domain changes in one commit: spec file when step 5 wrote one, plus ticket association updates.
+4. Commit all domain changes in one commit: the spec file step 5 wrote, plus ticket association updates.
 
 ### 7. Complete domain
 
@@ -238,7 +239,9 @@ Call `{{.McpNamespace}}/spec_index.verify()` as an idempotent safety pass over a
 
 ### 2. Summary report
 
-Read the ambiguity list from step 4's ambiguity record, not from the `<!-- AMBIGUOUS -->` markers written into spec entries - items classified internal-only or planned are in the record and carry no marker. Name each one by its generated stem when step 5 wrote one, otherwise by its behavior name.
+Read the ambiguity list from step 4's ambiguity record - it is the authoritative source, and items classified internal-only or planned live there and carry no marker. Name each one by its generated stem when step 5 wrote one, otherwise by its behavior name.
+
+A resumed run holds no ambiguity record for domains classified in an earlier session. Reconstruct those entries from the `<!-- AMBIGUOUS: <reason> -->` markers under `ai-docs/spec/`, and label what the reconstruction cannot complete instead of emitting it as a finished count: append `(reconstructed from spec markers - items classified planned or internal-only carry no marker and are not recoverable)` to the ambiguity line, and `(not recorded in this session)` to the domains-with-no-spec-file line.
 
 Emit to the user:
 
@@ -247,7 +250,7 @@ Emit to the user:
 
 Domains covered: <N>
 Spec files created: <list of paths>
-Domains with no implemented behavior (no spec file written): <list, or none>
+Domains with no spec file written: <list, or none>
 Total stems generated: <count>
 Ambiguous classifications (auto-decided, review recommended): <count>
   <stem or behavior name> - <implemented|planned|internal-only> - <reason>
@@ -300,6 +303,5 @@ No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once 
 Forge-spec optimizes for **low-friction throughput per domain** while keeping the
 two high-leverage decisions - the archive gate and the once-per-run domain list -
 explicitly user-confirmed. Per-item caller-visibility and implementation-status
-classification is decided autonomously; ambiguous calls are recorded with a reason
-and surfaced in the wrap-up summary for review rather than blocking on a per-item
-ask, and are additionally marked inline when they produce a spec entry.
+classification is decided autonomously and surfaced for review afterward rather
+than spending a confirmation turn on each item.
