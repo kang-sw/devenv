@@ -378,6 +378,52 @@ neither; the spec anchor states the cap in review cycles and no longer says the
 run halts at cycle 3; `lead-implement.md` is byte-identical to its pre-phase state
 in both copies.
 
+### Result (d911f70d) - 2026-07-27
+
+Done. The budget is live where the executing lead actually reads it.
+
+- `implementReviewInstruction` states a per-slice budget on the three relaying
+  branches — 3 review cycles for `partitioned:` and for the bare-`partitioned`
+  fallback, 2 for `single` — each pinning cycle 1 to the initial review and
+  naming the derived relay count, so the off-by-one-round reading is closed from
+  both directions. `lead-only` is untouched.
+- The completes-not-halts behavior is a shared `const`
+  (`implementReviewFinalCycleClause`) rather than three copies, so the branches
+  cannot drift apart on the one clause that is identical across them. It routes
+  forward ("continue to the remaining todos") and ends with "the budget ends
+  relaying, not the run", which forecloses the `3ab81a53` halt reading explicitly
+  instead of by implication.
+- `{#260612-reviewer-allocation-tier-default}` now states the cap in review
+  cycles and replaces "caller escalation at cycle 3" with the completes-not-halts
+  behavior. "lead adjudication at cycle 2" was deliberately left in place for
+  Phase 2, whose own verification boundary asserts on it.
+- No file under `agents-plugin/rsrc/` or `agents-plugin-wsflow/rsrc/` was
+  touched; both `lead-implement.md` copies are byte-identical to their pre-phase
+  state, verified from the diff. No manifest or mirror regeneration was needed.
+
+Beyond the phase text: the survey found that no test pinned the fallback branch's
+Instruction at all — only its todo keys — so that branch got new coverage rather
+than a pin update, asserting on a string unique to the fallback to prove the
+branch was reached. The `lead-only` "names neither" boundary was also pinned with
+a negative assertion, mutation-checked by temporarily leaking the budget clause
+into that branch and confirming the failure. A second, non-anchor "relay cap" use
+in the same spec file was renamed in the same change, since the anchor fix left it
+dangling on a term the spec no longer defines.
+
+Review: one full-scope cycle, clean with 4 minor. Two accepted and relayed (the
+artifact-name split, the missing negative assertion); two rejected.
+
+Verification: `go build ./...` and `go test ./... -count=1` from
+`agents-plugin-tool/`, all 12 packages passing.
+
+> Forward: the generator and the spec now use different nouns for the run's output
+> artifact — `implementReviewInstruction` says "final report" (matching its own
+> `lead-only` branch and the playbook's final-action-gate step), while
+> `ai-docs/spec/workflow-skills.md` says "completion report" at both its
+> pre-existing site and the sentence this phase wrote. Each surface is internally
+> consistent, so nothing is ambiguous in place; settling on one noun across both
+> belongs to Phase 2, which edits these same strings.
+
 ### Phase 2: Adjudicator delegate
 
 Depends on Phase 1 — the adjudicator spends the budget Phase 1 establishes, and

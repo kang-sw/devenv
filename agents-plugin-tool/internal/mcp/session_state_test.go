@@ -250,6 +250,44 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if strings.Contains(review, "fit") {
 		t.Fatalf("review instruction mentioned unselected fit partition: %q", review)
 	}
+	for _, want := range []string{
+		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
+		"the initial review is cycle 1, so relay at most twice",
+		"stop relaying and continue to the remaining todos",
+		"carrying each unresolved finding with its disposition into the final report",
+		"the budget ends relaying, not the run",
+	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("partitioned review instruction missing %q: %q", want, review)
+		}
+	}
+}
+
+func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "partitioned",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     false,
+	})
+	review := requireInstruction(t, todoByKey(t, got, "review"))
+	if !strings.Contains(review, "Dispatch the selected reviewers") {
+		t.Fatalf("bare partitioned alloc did not reach the fallback review instruction: %q", review)
+	}
+	for _, want := range []string{
+		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
+		"the initial review is cycle 1, so relay at most twice",
+		"stop relaying and continue to the remaining todos",
+		"carrying each unresolved finding with its disposition into the final report",
+		"the budget ends relaying, not the run",
+	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("fallback review instruction missing %q: %q", want, review)
+		}
+	}
 }
 
 func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
@@ -1852,7 +1890,15 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 		t.Fatalf("bounded public/existing-test review = %q need=%v, want single true", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
 	}
 	review := readTodoInstruction(t, server, 3, key, "review")
-	for _, want := range []string{"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path", "Relay only new non-clean Critical/Important findings"} {
+	for _, want := range []string{
+		"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path",
+		"Relay only new non-clean Critical/Important findings",
+		"Budget 2 review cycles for this implementation slice",
+		"the initial review is cycle 1, so relay at most once",
+		"stop relaying and continue to the remaining todos",
+		"carrying each unresolved finding with its disposition into the final report",
+		"the budget ends relaying, not the run",
+	} {
 		if !strings.Contains(review, want) {
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
 		}
@@ -1893,6 +1939,12 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	review := readTodoInstruction(t, server, 4, key, "review")
 	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
 		t.Fatalf("lead-only review todo instruction not focused: %q", review)
+	}
+	for _, forbidden := range []string{"review cycles for this implementation slice", "the budget ends relaying, not the run"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked review-budget wording %q: %q\n"+
+				"lead-only dispatches no reviewers and never relays, so it must name neither a review-cycle budget nor the final-cycle behavior", forbidden, review)
+		}
 	}
 	complete := readTodoInstruction(t, server, 5, key, "complete")
 	for _, want := range []string{"retained branch", "commit range", "documentation not touched", "no-merge completion", "Do not push"} {
