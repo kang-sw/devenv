@@ -39,8 +39,8 @@ ESC=$'\033'
 
 # Single jq call to extract all fields (17 → 1 subprocess)
 IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
-  DURATION_MS API_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
-  RATE_7D_RAW RATE_7D_RESETS CACHE_CREATE CACHE_READ \
+  DURATION_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
+  RATE_7D_RAW RATE_7D_RESETS CACHE_CREATE CACHE_READ TRANSCRIPT_PATH \
   <<<"$(echo "$input" | jq -r '[
   (.model.display_name // ""),
   (.workspace.current_dir // ""),
@@ -50,7 +50,6 @@ IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS
   (.context_window.context_window_size // 0),
   (.context_window.total_output_tokens // 0),
   (.cost.total_duration_ms // 0),
-  (.cost.total_api_duration_ms // 0),
   (.cost.total_lines_added // 0),
   (.cost.total_lines_removed // 0),
   (.rate_limits.five_hour.used_percentage // 0),
@@ -58,7 +57,8 @@ IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS
   (.rate_limits.seven_day.used_percentage // 0),
   (.rate_limits.seven_day.resets_at // 0),
   (.context_window.current_usage.cache_creation_input_tokens // 0),
-  (.context_window.current_usage.cache_read_input_tokens // 0)
+  (.context_window.current_usage.cache_read_input_tokens // 0),
+  (.transcript_path // "")
 ] | join("\u001f")')"
 RATE_5HR=${_RATE_5HR%%.*}
 RATE_7D=${RATE_7D_RAW%%.*}
@@ -93,6 +93,14 @@ PCT=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.1f\", $TOKENS_USED / $CTX_MAX * 
 # Cache hit rate: cache_read / (cache_read + cache_creation)
 CACHE_TOTAL=$((CACHE_READ + CACHE_CREATE))
 CACHE_HIT=$(awk "BEGIN { if ($CACHE_TOTAL > 0) printf \"%.1f\", $CACHE_READ / $CACHE_TOTAL * 100; else print \"\" }")
+
+# Last assistant-turn timestamp (for the "output tokens last updated" pill) —
+# read from the transcript itself; no separate state/cache file needed since
+# the transcript already records when output_tokens last changed.
+LAST_MSG_ISO=""
+if [[ -n $TRANSCRIPT_PATH && -r $TRANSCRIPT_PATH ]]; then
+  LAST_MSG_ISO=$(tac "$TRANSCRIPT_PATH" 2>/dev/null | head -n 30 | jq -r 'select(.timestamp != null) | .timestamp' 2>/dev/null | head -n 1)
+fi
 
 # ═══════════════════════════════════════════════════════════
 # Style parameters — edit these to customize appearance
@@ -205,9 +213,6 @@ fi
 HRS=$((DURATION_MS / 3600000))
 MINS=$(((DURATION_MS % 3600000) / 60000))
 SECS=$(((DURATION_MS % 60000) / 1000))
-API_HRS=$((API_MS / 3600000))
-API_MINS=$(((API_MS % 3600000) / 60000))
-API_SECS=$(((API_MS % 60000) / 1000))
 
 fmt_time() {
   local h=$1 m=$2 s=$3
@@ -218,16 +223,45 @@ fmt_time() {
   else echo "${s}s"; fi
 }
 TIME_FMT=$(fmt_time "$HRS" "$MINS" "$SECS")
-API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 
 # Portable epoch → formatted date (GNU: date -d @EPOCH, BSD: date -r EPOCH)
 _fmt_epoch() { date -d "@$1" "$2" 2>/dev/null || date -r "$1" "$2" 2>/dev/null || echo "??"; }
+
+# Portable ISO8601 → epoch (GNU: date -d parses it directly; BSD: strip
+# fractional seconds and parse as UTC via -j -f)
+_iso_epoch() {
+  local iso="$1" out
+  out=$(date -d "$iso" +%s 2>/dev/null) && { printf '%s' "$out"; return; }
+  local stripped="${iso%Z}"
+  stripped="${stripped%%.*}Z"
+  date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$stripped" +%s 2>/dev/null
+}
 
 # 5h rate limit reset time (HH:MM)
 RATE_5HR_RESET_FMT=$(_fmt_epoch "$RATE_5HR_RESETS" "+%HH")
 
 # 7d rate limit reset weekday
 RATE_7D_TTL=$(_fmt_epoch "$RATE_7D_RESETS" "+%a")
+
+# Output-tokens last-updated: absolute HH:MM + relative "ago", derived from
+# the last assistant-turn timestamp found in the transcript above.
+LAST_UPD_ABS=""
+LAST_UPD_REL=""
+if [[ -n $LAST_MSG_ISO ]]; then
+  LAST_MSG_EPOCH=$(_iso_epoch "$LAST_MSG_ISO")
+  if [[ -n $LAST_MSG_EPOCH ]]; then
+    LAST_UPD_ABS=$(_fmt_epoch "$LAST_MSG_EPOCH" "+%H:%M")
+    _upd_elapsed=$((_NOW_EPOCH - LAST_MSG_EPOCH))
+    [ "$_upd_elapsed" -lt 0 ] && _upd_elapsed=0
+    _upd_hrs=$((_upd_elapsed / 3600))
+    _upd_mins=$(((_upd_elapsed % 3600) / 60))
+    if [ "$_upd_hrs" -gt 0 ]; then
+      LAST_UPD_REL="${_upd_hrs}h ${_upd_mins}m ago"
+    else
+      LAST_UPD_REL="${_upd_mins} mins ago"
+    fi
+  fi
+fi
 
 # Normalize Windows-style separators so basename/relative-path splitting
 # below (which only recognizes "/") works on backslash paths too.
@@ -239,13 +273,6 @@ DIR_REL=""
 if [[ "$DIR" == "$PROJECT_DIR"/* && "$DIR" != "$PROJECT_DIR" ]]; then
   DIR_REL="${DIR#"$PROJECT_DIR"}"
 fi
-
-# Output tokens/sec
-TOK_SEC=$(awk "BEGIN {
-  a = $API_MS + 0; t = $OUTPUT_TOKENS + 0
-  if (a > 0) printf \"%.1f\", t / (a / 1000)
-  else printf \"0.0\"
-}")
 
 # Git info — consolidated (8 → 2 subprocesses via git status + git diff)
 BRANCH_NAME=""
@@ -320,7 +347,7 @@ _layout() {
 
 # ── Pill content + visible width for each segment ──
 # Width formula: count display columns of visible text inside pill
-# (emoji 📁🌿🤔 = 2 cols / 1 char → +1; ⌛️ = 2 cols / 2 chars → +0)
+# (emoji 📁🌿🔄 = 2 cols / 1 char → +1; ⌛️ = 2 cols / 2 chars → +0)
 
 # === L1: [Model] [Dir] ===
 _PC0="${ESC}[38;5;${FG};1m ${MODEL} ${ESC}[22m"
@@ -450,23 +477,29 @@ _PBG3=$TOKENS_BG
 
 L2b=$(_layout 4)
 
-# === L3: [Time] [API] [Delta?] [Cost] ===
+# === L3: [Time+Cache] [Last Update] [Delta?] [Cost] ===
 _n3=0
 
 _PC0="${ESC}[38;5;${FG}m ⌛️ ${TIME_FMT} "
 _PW0=$((5 + ${#TIME_FMT})) # " ⌛️ TIME " (⌛️: 2col/2char → no adj)
+if [[ -n $CACHE_HIT ]]; then
+  _ch_pct="${CACHE_HIT}%"
+  _PC0+="${CACHE_HIT_COLOR}${_ch_pct} "
+  _PW0=$((_PW0 + ${#_ch_pct} + 1))
+fi
 _PBG0=$TIME_BG
 _n3=1
 
-_PC1="${ESC}[38;5;${FG}m 🤔 ${API_TIME_FMT} ${ESC}[38;5;${FG_DIM}m${TOK_SEC}t/s"
-_PW1=$((8 + ${#API_TIME_FMT} + ${#TOK_SEC})) # " 🤔(+1) APITIME TOKt/s"
-if [[ -n $CACHE_HIT ]]; then
-  _ch_pct="${CACHE_HIT}%"
-  _PC1+=" ${CACHE_HIT_COLOR}${_ch_pct}"
-  _PW1=$((_PW1 + 1 + ${#_ch_pct})) # " NN.N%"
+_PC1="${ESC}[38;5;${FG}m 🔄 "
+if [[ -n $LAST_UPD_ABS ]]; then
+  _upd_body="${LAST_UPD_ABS} ${LAST_UPD_REL}"
+  _PC1+="${LAST_UPD_ABS} ${ESC}[38;5;${FG_DIM}m${LAST_UPD_REL}"
+else
+  _upd_body="--"
+  _PC1+="${ESC}[38;5;${FG_DIM}m--"
 fi
 _PC1+=" "
-_PW1=$((_PW1 + 1))
+_PW1=$((5 + ${#_upd_body})) # " 🔄(+1) BODY " (BODY = "HH:MM N mins ago" or "--")
 _PBG1=$API_BG
 _n3=2
 
