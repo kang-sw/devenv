@@ -752,6 +752,13 @@ test("without a grant the toggle reconciles to unchecked and a ready edge fires 
         checkbox,
         "a denied requestPermission() must reconcile the box back to unchecked",
       ).not.toBeChecked({ timeout: 10_000 });
+      // ORDERING DEPENDENCY - do NOT drop the next line as redundant. The
+      // unchecked assertion above is, on its own, satisfiable by a click that
+      // did nothing at all: the box starts unchecked and that is asserted a
+      // few lines up. What closes that hole is the persisted-value assertion
+      // below - a fresh context has no `ws-dashboard.settings.notifications.v1`
+      // key, so `getItem` returns null, and only `onChange(true)` FOLLOWED BY
+      // the reconciling `onChange(false)` can leave it at PREFS_DISABLED.
       expect(await persistedNotificationPrefs(page)).toBe(PREFS_DISABLED);
 
       await closeSettings(page);
