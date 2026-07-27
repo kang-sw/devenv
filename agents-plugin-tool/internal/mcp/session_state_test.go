@@ -272,6 +272,49 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 			t.Fatalf("partitioned review instruction missing %q: %q", want, review)
 		}
 	}
+	for _, want := range implementElevatedRelayWants() {
+		if !strings.Contains(review, want) {
+			t.Fatalf("partitioned review instruction missing elevated-relay routing %q: %q", want, review)
+		}
+	}
+	for _, forbidden := range implementElevatedRelayForbidden() {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("partitioned review instruction retained superseded relay wording %q: %q", forbidden, review)
+		}
+	}
+}
+
+// implementElevatedRelayWants pins the routing rules that send a relay to
+// `implementer-elevated`. Each entry is load-bearing:
+//   - the capacity condition is stated positively on a [fixed]-then-[unresolved]
+//     finding, so settled dispositions do not trip it;
+//   - it fires after one failed relay, since the budget's last relay is the only
+//     slot the elevated delegate can still act in;
+//   - the root-cause condition is worded on newly surfaced findings, because
+//     recurrence of the same finding is already the capacity condition;
+//   - precedence dispatches one relay, not two, when both signals coincide.
+func implementElevatedRelayWants() []string {
+	return []string{
+		"Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]",
+		"the exclusion targets reviewer-invented churn, not unresolved carryover",
+		"Capacity: A finding the implementer reported [fixed] that the next review returns [unresolved] or still reports non-clean routes the next relay to `implementer-elevated` instead of `implementer-relay`",
+		"after one such failed relay rather than two, because the last relay is the only slot left to act in",
+		"Excluded: A finding carrying [won't fix], [deferred], [out-of-scope], or an open [escalate: <reason>] is a settled decision, not a failed fix attempt, and never triggers the capacity condition",
+		"Root-cause: A newly surfaced finding whose root cause matches an already-relayed finding routes the next relay to `implementer-elevated` too",
+		"independent of the cycle count and without waiting for the same finding to recur",
+		"Elevated inputs: Render `implementer-elevated` with the relay's declared inputs plus PriorFixCommits and PriorDispositions",
+		"Precedence: When an adjudicator override and a capacity or root-cause signal apply to the same relay, dispatch `implementer-elevated` once carrying the override list; never dispatch two relays for one cycle",
+	}
+}
+
+// implementElevatedRelayForbidden pins the superseded wording out of existence.
+// "only for genuinely new" read literally forbade the exact relay the capacity
+// condition exists to route, so its survival anywhere would re-close that route.
+func implementElevatedRelayForbidden() []string {
+	return []string{
+		"only for genuinely new non-clean Critical/Important findings",
+		"only for genuinely new",
+	}
 }
 
 func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing.T) {
@@ -308,6 +351,16 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 	} {
 		if !strings.Contains(review, want) {
 			t.Fatalf("fallback review instruction missing %q: %q", want, review)
+		}
+	}
+	for _, want := range implementElevatedRelayWants() {
+		if !strings.Contains(review, want) {
+			t.Fatalf("fallback review instruction missing elevated-relay routing %q: %q", want, review)
+		}
+	}
+	for _, forbidden := range implementElevatedRelayForbidden() {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("fallback review instruction retained superseded relay wording %q: %q", forbidden, review)
 		}
 	}
 }
@@ -1935,6 +1988,16 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	if strings.Contains(review, "review-adjudicator") {
 		t.Fatalf("single-review todo instruction dispatched the adjudicator delegate despite having no adjudication slot: %q", review)
 	}
+	// The 2-cycle budget affords one relay, so a [fixed]-then-[unresolved] finding is
+	// first observable at the terminal cycle-2 review, with no relay left to route to
+	// the elevated delegate. Naming the condition here would advertise an unreachable
+	// dispatch, so the single branch stays free of it.
+	for _, forbidden := range []string{"implementer-elevated", "Capacity:", "Root-cause:", "Elevated inputs:", "Precedence:"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("single-review todo instruction leaked elevated-relay routing %q: %q\n"+
+				"the single budget has no relay left after the failure becomes observable", forbidden, review)
+		}
+	}
 }
 
 func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
@@ -1982,6 +2045,14 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 		if strings.Contains(review, forbidden) {
 			t.Fatalf("lead-only review todo instruction leaked adjudication wording %q: %q\n"+
 				"lead-only relays nothing, so it has no contested finding to adjudicate", forbidden, review)
+		}
+	}
+	// Same shape for the elevated-relay routing: lead-only dispatches no relay, so it
+	// has no failed relay to escalate and no relay target to name.
+	for _, forbidden := range []string{"implementer-elevated", "Capacity:", "Root-cause:", "Elevated inputs:", "Precedence:", "[unresolved: <short reason>]"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked elevated-relay routing %q: %q\n"+
+				"lead-only relays nothing, so no relay can be routed to the elevated implementer", forbidden, review)
 		}
 	}
 	complete := readTodoInstruction(t, server, 5, key, "complete")
