@@ -307,8 +307,8 @@ to the nearest unresolved parent when the user delegates lower-level detail.
 {#260510-discuss-intent-frame-interview}
 
 `lead-write-spec` writes or updates behavioral spec entries for caller-visible
-behavior. It reads spec conventions, generates stable spec stems, writes planned
-or implemented entries according to the current behavior, verifies the spec
+behavior. It reads spec conventions, generates stable spec stems, writes
+implemented entries according to the current behavior, verifies the spec
 index, and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
@@ -318,10 +318,10 @@ action creates or moves a ticket into `ready/`; `todo/` tickets may carry
 optional `spec:` links as recovery hints. For `ready/` creation or promotion,
 `lead-write-ticket` accepts
 confirmed `spec:` or `spec-remove:` stems, or a ticket-local `## Spec Impact`
-section naming the target spec area, expected caller-visible change, and whether
-a contract-first planned spec is required. It invokes `lead-write-spec`
-autonomously only for contract-first planned spec entries, and stops when no
-stem or `## Spec Impact` can address the work, spec writing fails, or the
+section naming the target spec area and the expected caller-visible change. It
+never invokes `lead-write-spec` — spec addressing runs through `spec:`,
+`spec-remove:`, or `## Spec Impact` — and stops when no
+stem or `## Spec Impact` can address the work, or the
 behavior is too underspecified to spec.
 
 Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
@@ -854,7 +854,7 @@ also qualify for auto-delete once its structural guardrails pass.
 {#260707-implement-branch-cleanup-naming-gate}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
-adds or updates spec entries, strips planned markers when implementation lands,
+adds or updates spec entries,
 handles removed spec stems, verifies the spec index, and commits the spec pass.
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
@@ -1033,7 +1033,7 @@ the once-per-run behavioral domain list, then classifies per-item
 caller-visibility and implemented/planned status autonomously - ambiguous
 calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
 into the wrap-up summary rather than blocking on a per-item confirmation -
-writes anchor-keyed spec entries, verifies the index, and associates planned
+writes anchor-keyed spec entries, verifies the index, and associates spec
 stems with active tickets when required.
 {#260707-forge-spec-autoproceed-classification-2}
 

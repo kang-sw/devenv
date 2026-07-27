@@ -829,7 +829,7 @@ slug.
 as duplicate stems.
 
 `specs.list`, `specs.find`, and `specs.status` provide read-only spec discovery.
-They expose spec file metadata, anchors, ticket references, marker context, query
+They expose spec file metadata, anchors, ticket references, query
 matches, and exact-stem status without requiring callers to scan the spec tree
 manually.
 
