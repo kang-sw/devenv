@@ -150,7 +150,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then run mental-model-updater to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
 - v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `ws/playbook.print(name: "lead-write-spec")` to rebuild `features:` frontmatter.
 - v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
-- v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`; planned ticketed features -> `### 🚧 <Feature Name>`.
+- v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`.
 - v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.
 - v0026: If specs exist but no `{#YYMMDD-slug}` anchor exists, suggest `ws:lead-forge-spec`; do not edit specs automatically.
 - v0027: If mental-model docs exist but embed no spec stem, suggest `ws:lead-forge-mental-model`; do not edit mental models automatically.
@@ -186,6 +186,19 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
 - v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
+- v0045: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
+  all three forms: `### 🚧 <Feature Name>` headings, `> [!note] Planned 🚧` body
+  callouts, and `- 🚧 <name> [<stem>/p<N>]` items in `features:` frontmatter.
+  Resolve each marker before removing it: when a live `idea/`, `todo/`, or
+  `ready/` ticket references that spec, move the pending text into that ticket's
+  `## Spec Impact`; otherwise verify the behavior against source and keep the
+  text as an ordinary implemented entry when it shipped, or as
+  `> [!note] Implementation Gap · <YYYY-MM-DD>` when it did not. For a
+  `features:` item that shipped, strip the `🚧 ` prefix and its `[<stem>/p<N>]`
+  reference instead of deleting the line. Preserve every `{#YYMMDD-slug}` anchor
+  on the retained text, and update mental-model files that cross-reference a
+  changed anchor in the same commit. Planned behavior no longer belongs in a
+  spec; it lives in the owning ticket's `## Spec Impact`.
 -->
 
-<!-- Template Version: v0044 -->
+<!-- Template Version: v0045 -->

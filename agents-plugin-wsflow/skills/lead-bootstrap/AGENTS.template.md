@@ -158,6 +158,19 @@ Adapt structure to the project; this is a starting point, not a schema.
   clear status or readiness wording, report that a follow-up `lead-write-ticket`
   focus cleanup is needed.
 - v0005: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
+- v0006: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
+  all three forms: `### 🚧 <Feature Name>` headings, `> [!note] Planned 🚧` body
+  callouts, and `- 🚧 <name> [<stem>/p<N>]` items in `features:` frontmatter.
+  Resolve each marker before removing it: when a live `idea/`, `todo/`, or
+  `ready/` ticket references that spec, move the pending text into that ticket's
+  `## Spec Impact`; otherwise verify the behavior against source and keep the
+  text as an ordinary implemented entry when it shipped, or as
+  `> [!note] Implementation Gap · <YYYY-MM-DD>` when it did not. For a
+  `features:` item that shipped, strip the `🚧 ` prefix and its `[<stem>/p<N>]`
+  reference instead of deleting the line. Preserve every `{#YYMMDD-slug}` anchor
+  on the retained text, and update mental-model files that cross-reference a
+  changed anchor in the same commit. Planned behavior no longer belongs in a
+  spec; it lives in the owning ticket's `## Spec Impact`.
 -->
 
-<!-- Template Version: v0005 -->
+<!-- Template Version: v0006 -->
