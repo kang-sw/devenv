@@ -1843,6 +1843,197 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 	}
 }
 
+// ticketGraphAdvisoryFixture builds the smallest board that exercises all
+// three advisory kinds at once: a .done child of a non-epic parent whose every
+// child is now closed, carrying a dangling related: key. It yields a board
+// block, one fix advisory, and one check advisory, which is what lets the
+// commit-path and standalone renderers be compared over identical input.
+func ticketGraphAdvisoryFixture(t *testing.T) (string, []string) {
+	t.Helper()
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Anchor {#260101-demo-anchor}\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260726-refactor-graph-parent.md",
+		"---\ntitle: Graph parent\n---\n\n# Graph parent\n")
+	child := "ai-docs/tickets/.done/260726-feat-graph-child.md"
+	mustWrite(t, root, child,
+		"---\ntitle: Graph child\ncompleted: 2026-07-27\nparent: 260726-refactor-graph-parent\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# Graph child\n")
+	return root, []string{child}
+}
+
+// TestVerifyAdapterAppendsAmendRecipeToFixAdvisoriesOnly pins the one
+// presentation difference {#260723-tickets-verify-tool}'s identical-verdict
+// guarantee permits: the commit path knows a commit already exists, so a
+// mechanical remedy gets the amend recipe. A check or board advisory carries no
+// mechanical remedy, so appending it there would be a false instruction.
+func TestVerifyAdapterAppendsAmendRecipeToFixAdvisoriesOnly(t *testing.T) {
+	root, paths := ticketGraphAdvisoryFixture(t)
+
+	advisories, err := verifyAdapter(root, paths)
+	if err != nil {
+		t.Fatalf("verifyAdapter returned an error for a non-blocking fixture: %v", err)
+	}
+	if len(advisories) != 3 {
+		t.Fatalf("advisories = %#v, want a board block plus one fix and one check", advisories)
+	}
+
+	const recipe = "Then git commit --amend --no-edit."
+	var sawFix, sawCheck bool
+	for _, advisory := range advisories {
+		switch {
+		case strings.Contains(advisory, "FIX:"):
+			sawFix = true
+			if !strings.HasSuffix(advisory, "\n       "+recipe) {
+				t.Fatalf("fix advisory missing the amend recipe:\n%s", advisory)
+			}
+		case strings.Contains(advisory, "CHECK:"):
+			sawCheck = true
+			if strings.Contains(advisory, "--amend") {
+				t.Fatalf("check advisory must not carry the amend recipe:\n%s", advisory)
+			}
+		default:
+			if !strings.HasPrefix(advisory, "## Parent Board") {
+				t.Fatalf("unexpected advisory:\n%s", advisory)
+			}
+			if strings.Contains(advisory, "--amend") {
+				t.Fatalf("board advisory must not carry the amend recipe:\n%s", advisory)
+			}
+		}
+	}
+	if !sawFix || !sawCheck {
+		t.Fatalf("fixture did not produce both a fix and a check advisory: %#v", advisories)
+	}
+}
+
+// TestFormatTicketVerifyRendersAdvisoriesWithoutAmendRecipe is the standalone
+// half of the same comparison: same verdict, same advisories, minus the recipe
+// sentence — and advisories must never fire the "should be addressed or
+// explicitly accepted" next_instruction, which is wrong for a no-action-needed
+// ancestor note.
+func TestFormatTicketVerifyRendersAdvisoriesWithoutAmendRecipe(t *testing.T) {
+	root, paths := ticketGraphAdvisoryFixture(t)
+
+	result, err := wsdoc.TicketVerify(root, paths)
+	if err != nil {
+		t.Fatalf("TicketVerify returned error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("result.OK = false, want true; findings = %#v", result.Findings)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %#v, want none so the next_instruction assertion is non-vacuous", result.Warnings)
+	}
+
+	text := formatTicketVerify(result)
+	for _, want := range []string{"verify: PASS", "## Parent Board", "Parent [1]: 260726-refactor-graph-parent", "FIX:", "CHECK:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("formatTicketVerify output missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "--amend") {
+		t.Fatalf("standalone verify output leaked the commit-path amend recipe:\n%s", text)
+	}
+	if strings.Contains(text, "should be addressed or explicitly accepted") {
+		t.Fatalf("advisories wrongly fired the warning next_instruction:\n%s", text)
+	}
+}
+
+// TestVerifyAdapterDegradesToSilenceOnGraphLoadFailure closes the commit-side
+// half of the degrade-to-silence invariant. The wsdoc tests prove no advisories
+// are produced; this proves the commit still lands, since wsgit.Commit vetoes
+// on a non-nil verifier error and nothing else.
+func TestVerifyAdapterDegradesToSilenceOnGraphLoadFailure(t *testing.T) {
+	root := t.TempDir()
+	// No ai-docs/spec, so the spec-anchor scan fails. The dangling related:
+	// would otherwise produce a FIX:, which makes the silence non-vacuous.
+	path := "ai-docs/tickets/.done/260726-feat-graph-load-failure.md"
+	mustWrite(t, root, path,
+		"---\ntitle: Load failure\ncompleted: 2026-07-27\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# Load failure\n")
+
+	advisories, err := verifyAdapter(root, []string{path})
+	if err != nil {
+		t.Fatalf("a graph-load failure vetoed the commit: %v", err)
+	}
+	if len(advisories) != 0 {
+		t.Fatalf("advisories = %#v, want none after a graph-load failure", advisories)
+	}
+}
+
+// TestServeStdioGitCommitSurfacesTicketGraphParentBoard drives the real MCP
+// dispatch: a commit closing the last child of an epic must land, keep OK
+// unchanged, and carry the ## Parent Board block in the text response — while
+// format:"json" stays advisory-free, since CommitResult.Advisories is tagged
+// json:"-".
+func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+
+	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Anchor {#260101-demo-anchor}\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260726-epic-graph-e2e.md",
+		"---\ntitle: E2E epic\n---\n\n# E2E epic\n")
+
+	server := NewServer(root, "test")
+
+	textChild := "ai-docs/tickets/.done/260726-feat-graph-e2e-text.md"
+	// The dangling related: makes this commit carry both a multi-line board
+	// block and a single-block FIX:, which is the adjacency that needs a blank
+	// separator in formatGitCommit.
+	mustWrite(t, root, textChild,
+		"---\ntitle: E2E child\ncompleted: 2026-07-27\nparent: 260726-epic-graph-e2e\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# E2E child\n")
+
+	var out bytes.Buffer
+	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close the last child of an epic","ai_context":["User intent: prove the parent board reaches the git.commit response."]}}}`, textChild)
+	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
+		t.Fatalf("ServeStdio commit returned error: %v", err)
+	}
+	textLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(textLines) != 1 {
+		t.Fatalf("expected 1 commit response, got %d\n%s", len(textLines), out.String())
+	}
+	textByID := responseLinesByID(t, textLines)
+	if toolIsError(t, textByID["1"]) {
+		t.Fatalf("git.commit vetoed a commit whose only output is advisory: %s", toolText(t, textByID["1"]))
+	}
+	text := toolText(t, textByID["1"])
+	for _, want := range []string{"commit: ", "advisories:\n", "## Parent Board", "Parent [1]: 260726-epic-graph-e2e", "(just now)", "ACTION:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("git.commit text response missing %q: %q", want, text)
+		}
+	}
+	// The board block and the FIX: advisory must not run together.
+	if !strings.Contains(text, "\n\n  FIX:") {
+		t.Fatalf("git.commit text response missing the blank separator before the FIX: advisory: %q", text)
+	}
+	if !strings.Contains(text, "Then git commit --amend --no-edit.") {
+		t.Fatalf("git.commit text response missing the amend recipe: %q", text)
+	}
+
+	jsonChild := "ai-docs/tickets/.done/260726-feat-graph-e2e-json.md"
+	mustWrite(t, root, jsonChild,
+		"---\ntitle: E2E child json\ncompleted: 2026-07-27\nparent: 260726-epic-graph-e2e\n---\n\n# E2E child json\n")
+
+	out.Reset()
+	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close another child of the epic","ai_context":["User intent: prove the json:\"-\" tag holds for graph advisories."],"format":"json"}}}`, jsonChild)
+	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
+		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
+	}
+	jsonLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(jsonLines) != 1 {
+		t.Fatalf("expected 1 JSON commit response, got %d\n%s", len(jsonLines), out.String())
+	}
+	jsonByID := responseLinesByID(t, jsonLines)
+	if toolIsError(t, jsonByID["2"]) {
+		t.Fatalf("git.commit reported an error in JSON mode: %s", toolText(t, jsonByID["2"]))
+	}
+	jsonText := toolText(t, jsonByID["2"])
+	if strings.Contains(jsonText, "Parent Board") || strings.Contains(jsonText, "advisories") {
+		t.Fatalf("git.commit JSON response leaked advisories despite the json:\"-\" tag: %q", jsonText)
+	}
+}
+
 // aiContextDebugEvents fetches runtime.debug_events (a process-wide ring
 // buffer shared by every test in this package's binary — see appendDebugEvent
 // in server.go) via a standalone ServeStdio call and returns every

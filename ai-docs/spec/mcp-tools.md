@@ -972,6 +972,55 @@ ticket-verify gate (`#260723-git-commit-ticket-verify-gate`), so a standalone
 call and the commit gate return the same verdict for identical input. A residual
 mutation-tool check that enforces one of these rules (the ready-move sage-posture
 check) shares the same underlying predicate rather than duplicating it.
+
+Beyond those intra-file checks, verify also runs a cross-file ticket-graph pass
+over the whole board and returns its results as **advisories** — a carrier
+distinct from findings and warnings. Every advisory is non-blocking: advisories
+never affect `OK`, never become a commit veto, and never fire the warning-level
+"should be addressed or explicitly accepted" instruction, since an
+ancestor-already-closed note is explicitly no-action-needed. Four integrity
+checks resolve the verified ticket's **own** frontmatter (never an ancestor's)
+against the rest of the board: an unresolvable `parent:`, and a `related:` key
+resolving into neither namespace, are `FIX:` advisories (unambiguous defect,
+mechanical remedy); a `parent:` cycle, and a `parent:` whose target category is
+not `epic`, are `CHECK:` advisories (resolution needs judgment, so the message
+observes and asks rather than prescribing). Resolution is two-namespace and
+deliberately asymmetric: `related:` resolves against ticket stems **union** spec
+anchor stems (`{#YYMMDD-slug}` under `ai-docs/spec/`), because pointing a
+`related:` at a spec anchor is an intended reference form rather than a
+tolerated one; `parent:` resolves against ticket stems only, since the ancestor
+walk needs a status and a child set that a spec anchor has no equivalent of.
+Integrity advisories are capped at five per verified ticket, followed by a
+`... +N more` line — per subject, like the sibling-listing cap, so one ticket's
+advisories can never crowd out another's on a multi-ticket call.
+
+Alongside them, verify walks `parent:` upward at unbounded depth and emits one
+`## Parent Board` block describing each ancestor: a closure ACTION line when
+every child is closed, a second-tier ACTION line when every `ready`/`todo`
+child is closed and only `idea/` children remain, and a path-neutral NOTE when
+the ancestor is itself already closed. Ancestors are deduplicated by stem per
+call and labelled `Parent [N]:` by depth; a verified ticket with no `parent:`
+produces no section at all rather than an empty one, and a cyclic chain
+produces the `CHECK:` advisory and no block. The sibling listing (the
+`N of M child tickets still open` header and its rows) is the one output gated
+by path: it renders only when a verified path sits under `.done/` or
+`.dropped/`, because verify runs on every ticket-touching commit and an ungated
+listing would attach rows to all of them. Gating reads the path's status
+directory, not staged-rename detection. Every check reads frontmatter and
+status directories only — no ticket body is read, so an epic body naming a
+child stem in prose has no effect on the child edge set, which `parent:` alone
+authorizes.
+
+A graph-load failure degrades to silence, never to a veto: when the whole-board
+scan or the spec-anchor scan fails on a file unrelated to the call, the
+advisories are dropped and verify returns its ordinary verdict. Verify never
+fails the call because of an advisory; a call-level error stays reserved for
+malformed caller input.
+Both callers render the same advisory set; the commit gate appends the amend
+recipe sentence to `FIX:` advisories only, and that single appended sentence is
+the only difference the identical-verdict guarantee above permits.
+{#260727-tickets-verify-graph-advisories}
+
 Capability range: `>=0.35.1-dev <0.36.0`. {#260723-tickets-verify-tool}
 
 The Sage Review Gate is split into two sequential, non-looping stage gates
@@ -1176,7 +1225,12 @@ commit result is otherwise unchanged. Advisories are text-mode only, following
 the todo re-injection precedent (`#260626-git-commit-todo-reinjection`):
 structured JSON output carries no advisory field. Both `git.commit` entry points
 — the MCP tool and the `ws-mcp git commit` CLI mirror — surface the same
-advisories, since they share one gate. {#260727-git-commit-verify-advisories}
+advisories, since they share one gate. The cross-file ticket-graph advisories
+(`#260727-tickets-verify-graph-advisories`) ride this same channel, with one
+commit-path-only addition: an advisory carrying a mechanical remedy gains the
+sentence `Then git commit --amend --no-edit.`, which the standalone
+`tickets.verify` output omits because nothing has been committed there.
+{#260727-git-commit-verify-advisories}
 The gate is non-overridable: there is no flag that lets a hard-failing
 ticket commit through. A commit that stages no ticket files is unaffected.
 Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}

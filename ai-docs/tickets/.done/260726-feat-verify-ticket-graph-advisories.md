@@ -8,6 +8,7 @@ related:
   260724-bug-ws-git-commit-verify-fails-on-staged-rename: path-based emission gating is chosen specifically so this feature does not depend on staged-rename detection
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # Ticket-graph advisories at verify: parent-board nudge and cross-reference integrity
@@ -595,6 +596,74 @@ measurement to find:
 Board numbers in **Output Format** are illustrative renderings, not assertions;
 `260514` currently has 9 open children of 53 and `260605` has 4 of 31, and both
 move with every landing commit.
+
+### Result (b81bb3df) - 2026-07-27
+
+Code range `0ef10104..b81bb3df` (6 commits); mental models `b635b7f8`. Spec text
+landed inside the code range rather than as a separate closeout commit.
+
+New `internal/wsdoc/tickets_graph.go` runs one whole-board graph load — composed
+from the existing `scanTickets` and `scanSpecs` rather than new scanners — and
+serves both the `parent:` ancestor walk and the four integrity checks from it.
+
+**Carrier deviates from Prior Art, deliberately.** Prior Art suggested
+`VerifyResult.Advisories []string`; the landed carrier is
+`VerifyAdvisory{Kind, Text}` with `Kind` in `{fix, check, board}`. With
+`[]string` the commit layer would have to re-parse the `FIX:` prefix to decide
+amend-recipe eligibility, which makes the settled Output Format load-bearing for
+behavior. `Kind` keeps format and behavior independent.
+
+The `related:` known limitation was **normalised, not documented**: `relatedEntries`
+handles map, list, and bare-string forms and runs list items through `cleanScalar`,
+so a trailing `# comment` no longer survives. `TicketInfo.Related`'s type and JSON
+tag are unchanged. Chosen over stating the gap because `TicketInfo.Related` had no
+non-test consumers, making the helper near-zero-risk.
+
+**Deliberate omissions from the settled Output Format, each with a disposition:**
+
+- The `(unchanged by this close; shown for chain context)` line under a depth-2
+  ancestor is **not emitted**. The row-level `(epic, closable - see above)`
+  parenthetical already carries the chain-context signal, so the line is
+  redundant rather than missing. Note the reasoning that does *not* apply: an
+  earlier argument that the block "also renders on an ordinary `todo/`-path
+  commit" is false, because the sibling-listing tier is gated to
+  `.done`/`.dropped` paths.
+- `Did you mean <near-stem>?` is **not implemented**. No Decisions line specifies
+  a matching rule, so any fuzzy heuristic would be unspecified behavior.
+- The tier-1 ACTION text uses the shorter generic form. The longer example's
+  trailing clause is a fact about `260723`'s own `## Completion Criteria`, which
+  **No epic-body checks** forbids establishing.
+
+**Non-obvious contracts a later change must not undo.** `byStem` keeps the
+most-open copy of a duplicated stem so an abnormal board degrades toward "still
+open" instead of producing a false closure nudge — but the integrity subject
+resolves through a separate `byPath`/`verifiedInfo` lookup, so checks always read
+the verified file's own frontmatter. Collapsing those two lookups into one was an
+actual regression during review. The `No further ancestors.` claim derives from
+the ancestor's own frontmatter (`chainEndsAt`) rather than a call-scoped flag,
+which makes it correct under ancestor deduplication for free; the earlier
+call-global flag leaked across tickets in a multi-path verify.
+
+Review: two cycles. Cycle 1 returned one Important — the integrity cap was applied
+per verify call rather than per verified ticket, contradicting **Check set**, and
+the divergence had already been written into the spec. Both were corrected. Cycle 2
+returned clean on all three partitions with both `won't fix` items accepted.
+Pinning the closed-inclusive overflow wording also exposed a real defect: counts
+were emitted in a fixed global status order that contradicted the rows above them,
+and now follow the hidden rows' own order.
+
+Verification: `go build ./...` clean, full `go test ./... -count=1` green across
+all 12 packages, 39 graph subtests. All three cycle-2 code fixes were
+mutation-checked, each new test failing only for its own target. The whole-board
+sweep reproduces this ticket's measured baseline exactly — zero `FIX:`/`CHECK:` on
+any open ticket and 6 under `.done`/`.dropped` — across three separate runs
+spanning the fix cycles, so no false positive was introduced.
+
+Forward: `fix`/`check` advisories carry no subject path, so on a commit staging
+several tickets a reader cannot tell which ticket an advisory belongs to, and with
+the now-per-ticket cap a single response can carry several unattributed
+`... +N more` lines. Rejected here as scope expansion — the settled Output Format
+shows no path prefix — and left for whoever revisits that format.
 
 ## Out of Scope
 
