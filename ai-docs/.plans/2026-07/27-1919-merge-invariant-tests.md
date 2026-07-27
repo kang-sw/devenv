@@ -382,13 +382,37 @@
   - Invariant 2 structural: added a fifth method taking
     `self.sessions.write()` — `sessions_write_lock_sites_are_enumerated`
     failed at `terminal.rs:2413`, count 5.
-  - Invariant 3: added a second `self.tokens.read()` call site —
-    `tokens_map_access_is_confined_to_its_choke_points` failed at
-    `terminal.rs:2436` on the first (`total == 3`) assertion, count 4.
-    Honest residual: `assert_eq!` panics on its first failing assertion, so
-    the second (`reads == 1`) assertion's own failure was not independently
-    observed in this run, though the same source change necessarily also
-    raises `reads` to 2 - noted rather than claimed as separately verified.
+  - Invariant 3 (review cycle 1 re-run, post-restructure): the test was
+    rewritten so all three counts (`total`, `reads`, `writes`) are computed
+    up front and every mismatch is collected into a `Vec<String>`, then
+    checked with a single `assert!` that reports every mismatch together -
+    replacing the original three sequential `assert_eq!` calls, which could
+    only ever demonstrate the first one moving in a single mutation run
+    (the citation below of `terminal.rs:2436`/`:2429` was measured against
+    that now-superseded, pre-restructure source layout). With the
+    restructured test, added a second `self.tokens.read()` call site (a
+    temporary `#[allow(dead_code)] fn __mutation_probe_extra_tokens_read`
+    next to `token_for`) and ran `cargo test -p ws-dashboard-daemon --lib
+    tokens_map_access_is_confined_to_its_choke_points --no-fail-fast`. Both
+    affected deltas were observed together in the same panic (the `writes`
+    count correctly did not appear, since it was untouched):
+
+    ```
+    thread '...tokens_map_access_is_confined_to_its_choke_points' panicked at crates/daemon/src/terminal.rs:2473:9:
+    self.tokens access moved off its enumerated choke points - if this is legitimate, update this test's enumerating doc comment and the expected counts together:
+    `.tokens` appeared 4 times, expected 3 (one read in `token_for`, two writes in `remember_token`/`forget_token`)
+    `self.tokens.read()` appeared 2 times, expected 1 (`token_for`, the ONLY reader per its own CONTRACT)
+    ```
+
+    The ticket's "fail on both" verification boundary is now actually
+    observed, not inferred. The probe was reverted immediately after
+    capturing this output; confirmed clean via `git diff --stat` (only the
+    intended test-file lines remain) and a
+    `grep -n "MUTATION PROBE\|__mutation_probe"` sweep (zero hits). The
+    reported line `2473` reflects the mutated tree (temporary probe function
+    inserted above the test module shifts everything below it down by 6
+    lines); the unmutated `assert!` this maps to sits at
+    `terminal.rs:2466-2467`.
   - Invariant 4: no mutation re-run performed; confirmed instead (see
     `npm run test:settings` above) that `settingsSections.tsx` is unchanged
     in substance since the ticket's own recorded Phase 2 mutation run.

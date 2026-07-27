@@ -2334,6 +2334,16 @@ mod terminal_portability_skeleton_tests {
     /// test-only fixture functions below it). Comment-stripping (any line
     /// whose trimmed form starts with `//`) runs AFTER excision, on the
     /// surviving lines only.
+    ///
+    /// ASSUMPTION: every column-0 `#[cfg(test)]` in this file annotates a
+    /// braced item. A future `#[cfg(test)]` on a non-braced item (e.g.
+    /// `#[cfg(test)] use ...;` or a bare `const`) has no column-0 `}` of its
+    /// own, so this rule would skip forward to the NEXT unrelated column-0
+    /// `}` and over-excise real production code in between. Symptom: the
+    /// scan counts below drop unexpectedly (never silently pass) because
+    /// the excised span swallowed a counted call site - recognizable
+    /// immediately as a scan-helper bug, not a production regression, if
+    /// this comment is read first.
     fn production_text() -> String {
         const SOURCE: &str = include_str!("terminal.rs");
         let mut lines = SOURCE.lines();
@@ -2405,11 +2415,12 @@ mod terminal_portability_skeleton_tests {
             .count();
         assert_eq!(
             count, 4,
-            "expected exactly 4 methods taking `self.sessions.write()` \
-             (insert_unchecked, insert, remove, remove_for_work_roots); \
-             found {count} - if a write-lock call site was added, removed, \
-             or its discharge behavior changed, update both the enumerating \
-             CONTRACT comment above and this expected count together"
+            "expected exactly 4 textual occurrences of `self.sessions.write()` \
+             (one per write-lock call site: insert_unchecked, insert, remove, \
+             remove_for_work_roots); found {count} - if a write-lock call site \
+             was added, removed, or its discharge behavior changed, update both \
+             the enumerating CONTRACT comment above and this expected count \
+             together"
         );
     }
 
@@ -2422,25 +2433,42 @@ mod terminal_portability_skeleton_tests {
     // comment for `env_clear`); this scan is the only guard.
     #[test]
     fn tokens_map_access_is_confined_to_its_choke_points() {
+        // All three counts are computed and checked up front, and every
+        // mismatch is collected before the single `assert!` below - never
+        // three independent `assert_eq!` calls, which would short-circuit on
+        // the first mismatch and hide whichever of these three logically
+        // dependent counts moved alongside it (see the 260727 Phase 1
+        // mutation log in the Phase 1 plan Result for an observed instance).
         let text = flattened(&production_text());
         let total = text.matches(".tokens").count();
         let reads = text.matches("self.tokens.read()").count();
         let writes = text.matches("self.tokens.write()").count();
-        assert_eq!(
-            total, 3,
-            "expected `.tokens` to appear exactly 3 times in production \
-             code (one read in `token_for`, two writes in `remember_token`/ \
-             `forget_token`); found {total}"
-        );
-        assert_eq!(
-            reads, 1,
-            "expected exactly 1 `self.tokens.read()` call site (`token_for`, \
-             the ONLY reader per its own CONTRACT); found {reads}"
-        );
-        assert_eq!(
-            writes, 2,
-            "expected exactly 2 `self.tokens.write()` call sites \
-             (`remember_token`, `forget_token`); found {writes}"
+
+        let mut mismatches = Vec::new();
+        if total != 3 {
+            mismatches.push(format!(
+                "`.tokens` appeared {total} times, expected 3 (one read in \
+                 `token_for`, two writes in `remember_token`/`forget_token`)"
+            ));
+        }
+        if reads != 1 {
+            mismatches.push(format!(
+                "`self.tokens.read()` appeared {reads} times, expected 1 \
+                 (`token_for`, the ONLY reader per its own CONTRACT)"
+            ));
+        }
+        if writes != 2 {
+            mismatches.push(format!(
+                "`self.tokens.write()` appeared {writes} times, expected 2 \
+                 (`remember_token`, `forget_token`)"
+            ));
+        }
+        assert!(
+            mismatches.is_empty(),
+            "self.tokens access moved off its enumerated choke points - if \
+             this is legitimate, update this test's enumerating doc comment \
+             and the expected counts together:\n{}",
+            mismatches.join("\n")
         );
     }
 
