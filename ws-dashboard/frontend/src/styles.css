@@ -2025,24 +2025,6 @@ button {
   height: 100%;
 }
 
-.terminal-controls {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ws-space-04);
-  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
-  padding: var(--ws-space-04) var(--ws-space-06);
-}
-
-.terminal-status-line {
-  color: var(--ws-color-text-tertiary);
-  font-size: var(--ws-font-size-01);
-  line-height: var(--ws-line-height-01);
-  text-transform: uppercase;
-}
-
 .terminal-error {
   flex: 0 0 auto;
   border-left: var(--ws-border-width-state-rail) solid var(--ws-color-state-error-strong);
@@ -2058,10 +2040,6 @@ button {
    `.resource-row-muted`). */
 .terminal-pane-retired .terminal-surface {
   opacity: 0.6;
-}
-
-.terminal-pane-retired .terminal-status-line {
-  color: var(--ws-color-text-disabled);
 }
 
 .dockview-workbench-tab-active {

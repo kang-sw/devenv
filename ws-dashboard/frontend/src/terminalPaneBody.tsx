@@ -76,9 +76,9 @@ export type TerminalPaneActions = {
 };
 
 // Statuses a pane visually retires for (260724 Phase 2): the underlying
-// shell process is gone, so the pane switches to a gray-out treatment plus a
-// relabeled "Clear" affordance instead of "Terminate". Mirrors the
-// `pane.session.status === "running"` precedent in
+// shell process is gone, so the pane switches to a gray-out treatment; the
+// tab's own close (x) button still closes it the same way as a live pane.
+// Mirrors the `pane.session.status === "running"` precedent in
 // `terminalRestoreIntentsFromPanes` (terminals.ts) as the complementary
 // non-running set.
 const terminalRetiredStatuses: ReadonlySet<string> = new Set([
@@ -149,7 +149,6 @@ export function TerminalPaneBody({
   const ligaturesAddonRef = useRef<LigaturesAddon | null>(null);
   const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
-  const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Optimistic default matches current always-connect behavior for the
   // common case of a newly mounted, actually-visible pane; a pane mounted
   // while already hidden briefly opens then closes on the first watchdog
@@ -175,10 +174,6 @@ export function TerminalPaneBody({
       }
     }, 0);
   };
-
-  useEffect(() => {
-    setDisplaySession(pane.session);
-  }, [pane.session]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -532,11 +527,6 @@ export function TerminalPaneBody({
             rows: next.rows,
           }),
         );
-        setDisplaySession((current) => ({
-          ...current,
-          columns: next.columns,
-          rows: next.rows,
-        }));
         liveRef.current.actions.onSocketResize(
           liveRef.current.pane,
           next.columns,
@@ -815,11 +805,6 @@ export function TerminalPaneBody({
           if (liveRef.current.actions.isActivePane(liveRef.current.pane)) {
             refocusActiveTerminal();
           }
-        } else {
-          setDisplaySession((current) => ({
-            ...current,
-            status: message.status,
-          }));
         }
         liveRef.current.actions.onSocketMessage(liveRef.current.pane, message);
       } catch {
@@ -950,14 +935,13 @@ export function TerminalPaneBody({
     };
   }, [pane.output]);
 
-  // Gated on `pane.session.status` (the parent-owned session view), not the
-  // locally-mirrored `displaySession.status` above: `displaySession` only
-  // updates from the live WebSocket "message" listener and does not observe
-  // HTTP fallback-poll status updates (see `appendTerminalOutput` in
-  // terminals.ts), which is exactly the transport state this retirement
-  // treatment must also cover (260724 Phase 2). Retain-with-clear, not
-  // auto-remove, per the ticket contract - the pane and its scrollback stay
-  // visible until the user explicitly clears it.
+  // Gated on `pane.session.status` (the parent-owned session view), which
+  // observes both the live WebSocket "message" listener and HTTP
+  // fallback-poll status updates (see `appendTerminalOutput` in
+  // terminals.ts) - the retirement treatment must cover both transports
+  // (260724 Phase 2). Retain-with-clear, not auto-remove, per the ticket
+  // contract - the pane and its scrollback stay visible until the user
+  // explicitly clears it.
   const isRetired = terminalRetiredStatuses.has(pane.session.status);
 
   return (
@@ -973,20 +957,6 @@ export function TerminalPaneBody({
         ref={containerRef}
       />
       {pane.error ? <div className="terminal-error">{pane.error}</div> : null}
-      <div className="terminal-controls">
-        <span className="terminal-status-line">
-          {displaySession.status} · {displaySession.columns}x
-          {displaySession.rows}
-        </span>
-        <button
-          className="action-button"
-          data-command-id="terminal.close"
-          type="button"
-          onClick={() => actions.onClose(pane)}
-        >
-          {isRetired ? "Clear" : "Terminate"}
-        </button>
-      </div>
     </div>
   );
 }
