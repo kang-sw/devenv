@@ -491,6 +491,71 @@ surfaces in completion output); the `single` Instruction names the `[escalate]`
 degradation; the spec anchor no longer says "lead adjudication";
 manifest and wsflow mirror tests pass without hand-edits.
 
+### Result (42051e7a) - 2026-07-27
+
+Done. Contested findings now have an owner that is neither the reviewer nor the
+implementer.
+
+- New rsrc delegate `review-adjudicator` (`role: delegate`, `tier: large`),
+  carrying the aperture constraint, the read table, and the three-verdict output
+  contract. The read table's rows are addressed by their defense rather than
+  positionally, so a future row insertion cannot silently re-point the rules that
+  cite them.
+- The adjudication clause is shared by the `partitioned:` and fallback branches
+  and states both trigger arms with their differing budget effects: a
+  `[maintained]` override ships as the next relay and spends that cycle, while an
+  `[escalate]` verdict returns inside the current relay slot and spends nothing
+  because no review has run. All three verdicts have a stated disposition —
+  `[accept]` was initially left undefined, which under this ticket's own
+  do-not-supplement-from-memory contract is an undefined action.
+- `[escalate: <reason>]` landed at both of `implementer-relay`'s token
+  enumeration sites, pinned by a count assertion rather than a plain substring
+  check, so a one-site edit fails.
+- The `single` branch names the degradation instead of ignoring the token.
+- `lead-only` gained a negative pin for the adjudication vocabulary, matching the
+  precedent Phase 1 set, mutation-checked by leaking the clause onto that branch
+  and observing the failure.
+- Spec `{#260612-reviewer-allocation-tier-default}` now describes the adjudicator
+  as a delegate and carries the verdict vocabulary.
+
+Also closed here: Phase 1's forwarded noun split. The run's output artifact is
+"final report" across the generated Instructions and the spec, including the
+pre-existing spec sites and the mirroring `mcp-runtime` mental-model line. The
+playbook's "the normal completion report" was deliberately left alone — it names
+the *delegate's* return, a different artifact.
+
+Deliberate difference worth recording: `review-adjudicator`'s `variables:` list
+mixes CamelCase and snake_case. That is not an oversight — it reuses the exact key
+names the sibling playbooks already use for the same concepts, which is the
+stronger consistency axis than internal uniformity.
+
+Review: three cycles, partitioned. Cycle 1 returned non-clean with 4 Important
+(the dispatch clause named only 5 of the delegate's declared inputs, so a lead
+following it literally would hit `ErrUnprovidedVar`; the two trigger arms were
+conflated on budget; `lead-only` had no negative pin; and Phase 1's forwarded noun
+split had been omitted from the plan). Cycle 2 returned clean on all three
+partitions. Cycle 3 re-reviewed fit and test only, after a final relay fixing two
+prompt-wording defects; correctness was not re-run because no mechanism changed.
+Budget spent in full, no findings left contested.
+
+Verification: both regen commands run in order with `-count=1`, idempotent on a
+second run; `go build ./...` and `go test ./... -count=1` green on all 12
+packages; the wsflow mirror byte-identical and never hand-edited.
+
+> Forward: the adjudication clause is now a single unbroken paragraph of eight
+> sentences, and Phase 3 adds two more routing conditions to the same string plus
+> the "only for genuinely new" rewording. Under `lead-skill-authoring`'s reader
+> model this is the last comfortable moment to give the clause internal structure —
+> one rule per sentence with a leading token label, or a split by concern — before
+> Phase 3 doubles it.
+
+> Forward: `lead-implement.md`'s Task input mapping enumerates every delegate
+> except `review-adjudicator`, and its "Collect the normal completion report" step
+> does not describe the adjudicator's per-dispute verdict-line return. Correct for
+> Phase 2, which may not edit that file, but no phase currently owns the gap —
+> Phase 3's dispatch-surface list names three sites and not this mapping, even
+> though Phase 3 edits that exact line for `implementer-elevated`.
+
 ### Phase 3: Elevated implementer delegate and capacity escalation
 
 Depends on Phase 2 — same trigger surface, same regeneration pass, same
