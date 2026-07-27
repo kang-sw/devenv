@@ -115,8 +115,9 @@ export const SettingsNotificationContext =
 // `Notification` global defined, so `window.isSecureContext` - not
 // `typeof Notification` - is what distinguishes "insecure" from "secure but
 // denied". Checking `hasNotificationGlobal` second keeps the undefined-global
-// branch reachable for a browser that genuinely omits the global (Safari and
-// Firefox may): this is a reorder, never a swap.
+// branch reachable for the case it actually covers: a SECURE context whose
+// browser lacks the API entirely (iOS Safari < 16.4 over HTTPS, embedded
+// webviews) - this is a reorder, never a swap.
 export function notificationAvailability(
   isSecureContext: boolean,
   hasNotificationGlobal: boolean,
