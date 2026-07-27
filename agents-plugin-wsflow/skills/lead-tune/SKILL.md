@@ -6,5 +6,4 @@ description: Use when the user wants to tune or customize how the wsflow workflo
 # Workflow Tuning
 
 Call `wsflow/playbook.print(name: "lead-tune")` and execute the returned procedure
-inline against the current user request. If the playbook cannot be loaded, stop
-and report that blocker.
+inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.
