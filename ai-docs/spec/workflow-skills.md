@@ -333,6 +333,16 @@ updates the visible queue after each answer, and writes only user-confirmed
 items. Rejected, deferred, unanswered, or otherwise unconfirmed items are omitted
 unless the user explicitly approves recording their status.
 
+Queue conveyance does not depend on how a host renders the visible queue. Each
+queued item's visible text is the decision itself rather than a label, and any
+secondary note or description field is optional detail that may not render, so it
+never carries load-bearing content; the same rule applies to the Markdown
+checklist used when no task-list surface exists. Asking an item restates that
+item's full text in the response body, followed by a one-line status roll-up of
+the remaining items, so the question the user is answering stays legible even
+when the visible queue renders partially or not at all.
+{#260727-odq-item-conveyance-restate-in-body}
+
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or phase-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
