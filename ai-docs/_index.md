@@ -199,7 +199,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-bug-dashboard-e2e-harness-destroys-daemon-diagnostics` | todo | e2e browser-acceptance harness drains and discards the daemon's stdout/stderr instead of preserving diagnostics for failure analysis |
 | `260725-bug-dashboard-fitnow-short-viewport-shrink` | todo | macOS short-viewport regression gate fails: `fitNow()` shrinks the terminal to 47 rows instead of holding 120 |
 | `260725-bug-dashboard-terminal-create-failure-silent` | todo | Terminal creation failure is invisible in the UI: a failed `create_terminal` call is swallowed with no toast, console error, or state change |
-| `260727-chore-merge-ws-dashboard-dev-into-goal-branch` | todo | Merge `ws-dashboard-dev` into the goal branch: all six conflicts are trivial unions, but the incoming `drain_all` merges cleanly while skipping two CONTRACT-bound removal obligations |
+| `260727-chore-merge-ws-dashboard-dev-into-goal-branch` | ready | Merge `ws-dashboard-dev` into the goal branch: all six conflicts are trivial unions, but the incoming `drain_all` merges cleanly while skipping two CONTRACT-bound removal obligations - one of which a published spec sentence already promises |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |

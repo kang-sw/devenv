@@ -4,7 +4,10 @@ related:
   260725-feat-dashboard-pty-agent-attention-notification: its Phase 4 and Phase 5 CONTRACTs are the two obligations the incoming drain_all skips
   260725-feat-dashboard-graceful-shutdown-from-settings: the dev-side ticket d1d6bb31 landed against; kill-all is its endpoint
   260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile: source of the "std exposes no clear-flag introspection" argument behind invariant 1's test shape
-sage-review-design: recommended
+spec:
+  - 260726-dashboard-terminal-attention-event-stream
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Merge ws-dashboard-dev into the goal branch - six trivial conflicts, one clean-merge defect
@@ -35,6 +38,13 @@ evidence about that specific tree OID and nothing else.** They are citations,
 not edit coordinates - a resolution moves all of them. Find the code by the
 search named alongside.
 
+The preview is already slightly behind: its "ours" is one docs-only commit behind
+this branch's tip, and `origin/ws-dashboard-dev` has moved on since. `terminal.rs`
+is byte-unchanged across that gap, so every count Phase 1 pins was re-measured
+against the live file and holds - but the conflict-set enumeration has no such
+guarantee, which is why Phase 2 opens by re-running the merge-tree rather than
+trusting the table above.
+
 | File | Hunks | Conflicted lines | Verdict |
 |---|---|---|---|
 | `ws-dashboard/crates/daemon/src/terminal.rs` | 1 | 305 | mechanical add/add, empty base |
@@ -58,8 +68,9 @@ EMPTY, by sorted-list comparison of every selector each side introduces, so the
 "later duplicate rule silently wins" failure does not apply here. `_index.md`'s
 tickets table auto-merged to 107 rows with every row pointing at a real file, so
 no manual table edit is needed. And `git grep drain_all origin/ws-dashboard-dev`
-returns exactly two hits - the definition and the route registration in
-`router.rs` - which is the zero-tests finding below.
+returns exactly two hits - the definition and its sole call site inside
+`close_all_terminals`, both in `terminal.rs` - which is the zero-tests finding
+below.
 
 Assumed, not measured: that nothing outside the six conflicted files needs a
 resolution decision. `router.rs` in particular auto-merged and its `AppState`
@@ -87,14 +98,59 @@ Two consequences after a kill-all on the merged code:
    longer exist - verbatim the failure `remove`'s CONTRACT comment was written
    to prevent ("a reconnect's snapshot would show a phantom terminal after
    close").
-2. `forget_token` is the only caller of `agent_token_store::delete_token`.
-   Skipping it strands `terminal-tokens/<id>.json` on disk permanently and
-   leaves `self.tokens` entries that still satisfy `token_for`. Traced through
+2. The killed terminal's `self.tokens` entry survives and still satisfies
+   `token_for`, and `terminal-tokens/<id>.json` is left on disk. Traced through
    `post_terminal_turn_state`: `token_for` returns the stale token,
    `tokens_match` succeeds, the `state.terminals.get(&terminal_id)` lookup
    returns `None` and is treated as a benign race, and the handler falls through
    to `StatusCode::NO_CONTENT`. A killed terminal's token therefore gets 204
    where it should get 401.
+
+**Consequence 1 is not merely a broken source comment - it contradicts shipped
+spec text.** Search `attention entry is removed from the snapshot` in
+`ai-docs/spec/ws-web-dashboard/index.md`, under
+`{#260726-dashboard-terminal-attention-event-stream}`: "A terminal's attention
+entry is removed from the snapshot the moment its underlying terminal session
+closes (explicit close or owning workRoot/workspace removal), so a reconnect
+never reports state for a terminal that no longer exists." Both readings of that
+parenthetical convict the merge. On the natural reading - a kill-all *is* an
+explicit close, merely a bulk one - the merged code violates the sentence
+outright. On the strict enumerative reading, kill-all is a third close path the
+sentence never anticipated, and the sentence is incomplete. Either way the fix is
+the same in code, and the parenthetical must name the third path so the
+ambiguity does not survive. This is the strongest single argument for Phase 3:
+the merge does not just skip a convention recorded in a comment, it lands code
+that makes a documented, already-published contract false.
+
+Consequence 2 has no such backing. Nothing anywhere in `ai-docs/spec/` documents
+the token file, the registry's token choke points, or a 401 from the turn-state
+route (verified: zero hits tree-wide for `terminal-tokens`, `forget_token`,
+`revoke`, `401`). The token half is genuinely undocumented behavior, which is
+why `## Spec Impact` below splits the two halves rather than treating them as one
+contract.
+
+**Fourth correction: the on-disk half does not strand permanently.** An earlier
+pass claimed `forget_token` is the only caller of
+`agent_token_store::delete_token`. It is not - `agent_profile_gc.rs` calls it too,
+for every profile directory whose id is absent from the registry's live ids, and
+after a kill-all those ids are exactly the ones that are gone. So the token FILE
+is eventually reclaimed by the next GC sweep. What is never reclaimed is the
+in-memory `self.tokens` entry, and that is the entry `token_for` consults. The
+204-instead-of-401 defect and Phase 3's fix shape are unaffected; only the
+"permanently" was wrong. This also matters for Phase 3's integration test, which
+stays deterministic because the GC sweep task is spawned in `server.rs`, not in
+`build_router` - a test built on `build_router` never races it.
+
+**Fifth correction: the source numbers removal paths differently than this
+ticket does.** The CONTRACT comment above
+`insert_forgets_the_attention_entry_of_a_session_its_own_eviction_retain_drops`
+calls `insert`'s eviction retain "a FIFTH session-removal path". That FIFTH
+counts something else - review findings in the ticket that introduced it, not
+registry methods. This ticket counts *methods that can drop an id from
+`self.sessions`*, of which there are three pre-merge and four post-merge. Where
+Phase 1's structural test names the paths, it must use this ticket's counting and
+say so in one clause, so a reader who greps "FIFTH" is not left arbitrating
+between two live numberings.
 
 **Correction to the eviction row, and it changes what a test may assert.** The
 fact-gathering pass recorded `forget_token` as "n/a" for `insert`'s eviction
@@ -248,11 +304,79 @@ actually mounts.
 - **The merged `_index.md` will fail an inventory parity check** (107 rows, 128
   ticket files). Do not treat that as a resolution error and do not repair it
   inside the merge commit. See Phase 4.
+- **Between Phase 2 and Phase 3 the branch knowingly contradicts its own spec.**
+  Phase 2 lands `drain_all` unchanged, and from that commit until Phase 3 lands,
+  the attention-snapshot sentence under
+  `{#260726-dashboard-terminal-attention-event-stream}` is false on this branch.
+  This is accepted deliberately - folding the fix into the merge commit costs the
+  reviewability property the whole split exists to protect - but the two commits
+  must not be separated in time or left partially landed. Do not stop after
+  Phase 2.
+
+## Spec Impact
+
+Three distinct spec situations, deliberately not merged into one statement. Only
+the first is this ticket's to author.
+
+**1. Phase 3, attention half - addressed by an existing confirmed stem.**
+`260726-dashboard-terminal-attention-event-stream` (listed in `spec:`) already
+carries the contract, quoted in Background. Phase 3 does not introduce
+caller-visible behavior here; it makes the code match a sentence that is already
+published, and widens that sentence's parenthetical to name kill-all as a third
+close path. Expected caller-visible change: none that the spec does not already
+promise - a reconnect after a kill-all stops reporting terminals that no longer
+exist, which is what the sentence says happens today.
+**Contract-first spec: no.** The behavior is not open; it is already written
+down. The only spec edit is an enumeration widened to match code the same phase
+lands, which is closeout work, not a contract to settle in advance.
+
+**2. Phase 3, token half - new behavior, no existing anchor.** Nothing under
+`ai-docs/spec/` documents `terminal-tokens/<id>.json`, the registry's token
+choke points, or a 401 from the turn-state route; the only token text is the
+Daemon Foundation paragraph establishing that the route is authorized by an
+opaque daemon-generated token, and one line under
+`{#260727-dashboard-terminal-notify-failure-visibility}` acknowledging the hook
+sees a "stale token" as one indistinguishable silent failure among several.
+Target spec area: the turn-state route's authorization, whose natural home is
+`{#260516-ws-web-dashboard-token-free-pairing-landing}` (where the token is
+introduced) with a cross-reference from the attention anchor. Expected
+caller-visible change: a callback token stops being accepted once its terminal
+is closed by any path, so the hook's POST is rejected rather than silently
+succeeding against a dead terminal.
+**Contract-first spec: no.** The shape is fully determined by the three existing
+removal paths this fix mirrors, and pre-written text would restate Phase 3's own
+plan almost word for word. Author it at doc closeout, against what actually
+landed.
+
+**3. Phase 2's inherited gap - explicitly NOT addressed here.** The merge carries
+the dev side's Advanced settings section and three `/api/dashboard/*` control
+endpoints (build-info, shutdown, kill-all) onto this branch, and no spec anchor
+mentions any of them - `{#260722-ws-dashboard-settings-panel}` documents exactly
+two registered sections, Terminal style and Notifications, plus a planned
+hotkey-rebind section. Tree-wide greps for `Advanced`, `build-info`, `buildTime`
+and `kill-all` return nothing relevant.
+
+This is inherited debt, not a gate on this ticket, and the reasoning matters
+because it is the one place the spec-address gate is being answered with "no" for
+caller-visible behavior. The gate exists to stop implementation from starting
+against an undocumented *or unstable* contract. Here the contract is
+undocumented but entirely stable: it is shipped, frozen code on
+`origin/ws-dashboard-dev` that this ticket transports without reading it as a
+design question. Authoring that spec here would mean documenting another
+workstream's shipped behavior from the outside, on behalf of
+`260725-feat-dashboard-graceful-shutdown-from-settings` - the ticket `d1d6bb31`
+actually landed against, which exists only on the dev branch and therefore cannot
+be edited from here until this very merge lands. **Phase 5 performs that
+routing** - a deferral with no phase attached is how a declared gap becomes a
+forgotten one.
+**Contract-first spec: no.**
 
 ## Phases
 
-Phase 1 runs against the pre-merge tree. Phases 2, 3 and 4 are strictly ordered
-after it and after each other.
+Phase 1 runs against the pre-merge tree. Phases 2 through 5 are strictly ordered
+after it and after each other. All new unit tests named below go in
+`terminal.rs`'s existing `#[cfg(test)] mod terminal_portability_skeleton_tests` -
+the file has no `mod tests`.
 
 ### Phase 1: pin the surviving invariants as tests, before the merge
 
@@ -264,6 +388,40 @@ Where a test is a source scan rather than a behavioral assertion, say so at the
 test and say why - a reader who mistakes a source scan for a behavioral proof
 will over-trust it.
 
+**The shared scanning helper, and why it is not optional.** Invariants 1, 2 and 3
+are all source scans over "the production half of `terminal.rs`", and the naive
+readings of that phrase are all wrong in ways that make the tests silently
+useless. Build one helper first and let all three use it.
+
+- **There is no `mod tests` in this file.** `grep -c "mod tests" terminal.rs`
+  returns 0; the unit-test module is `mod terminal_portability_skeleton_tests`.
+  Truncating at a `mod tests` marker matches nothing, scans the whole file, and
+  makes invariant 1 count 3 instead of 1.
+- **Production code continues AFTER the test module,** so truncating at the first
+  `#[cfg(test)]` is also wrong - it would silently drop `impl TerminalError` and
+  five free functions from the scanned region, giving every one of these
+  invariants a blind spot exactly where a careless addition is most likely.
+  There are three top-level `#[cfg(test)]` items, not one.
+- The rule that works: walk lines; when a line is exactly `#[cfg(test)]` at
+  column 0, skip forward past the next line that is exactly `}` at column 0;
+  otherwise keep the line. Then drop lines whose trimmed form starts with `//`.
+  Verified against the current file: this excises exactly the three `#[cfg(test)]`
+  spans and keeps 2374 of 3566 lines, 1704 after comment-stripping.
+- **A second variant is required, and this is the subtle one.** rustfmt splits
+  receiver chains across lines - the file writes `self` / `.sessions` /
+  `.write()` / `.expect(...)` on four separate lines. So a literal search for
+  `self.sessions.write()` over the line-based text finds **zero**, and a search
+  for `self.tokens` finds **2** where the honest answer is 3. An earlier draft of
+  invariant 3 asserted 3 on exactly that reading and was wrong. Provide a
+  `flattened()` variant that removes ALL whitespace, and do every multi-token
+  count against it. Every number below is measured on that variant.
+  **Flatten AFTER comment-stripping, not before** - the order is load-bearing,
+  not stylistic. The three CONTRACT comments contain backticked `self.tokens`,
+  and flattening collapses the backticks against the identifier, so flattening
+  the un-stripped text makes invariant 3's total read 7 instead of 3. The
+  read/write splits and the `sessions` count happen to be identical either way,
+  which is exactly why this would be found late and by the wrong test.
+
 **Invariant 1 - exactly one production `env_clear()` in `terminal.rs`.** Search
 `env_clear` in that file: the sole production call site is inside
 `build_helper_command`'s `HelperEnvPlan::ClearAndSet` arm; every other hit is
@@ -272,13 +430,14 @@ either a comment or the `#[cfg(test)]` positive control inside
 invariant is already discharged by the merge itself: that existing test asserts
 `helper_env_plan(None, None, vec![]) == HelperEnvPlan::InheritHost`, so a
 resolution that drops the goal side's block fails to *compile*. The half nothing
-covers is "no SECOND site appears". Add `terminal_rs_has_exactly_one_production_env_clear`
-to `terminal.rs`'s `mod tests`: `include_str!` the file, truncate at the `mod
-tests` marker, drop lines whose trimmed form starts with `//`, count `.env_clear(`,
-assert 1. The source-text form is forced, not preferred:
-`260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` established that
-`std::process::Command` exposes no public clear-flag introspection, so there is
-no runtime observable for "some other call site cleared the env".
+covers is "no SECOND site appears". Add
+`terminal_rs_has_exactly_one_production_env_clear`: count `.env_clear(` in the
+comment-stripped production text and assert **1** (measured). This one needs no
+flattening - the call is written on a single line. The source-text form is
+forced, not preferred: `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile`
+established that `std::process::Command` exposes no public clear-flag
+introspection, so there is no runtime observable for "some other call site
+cleared the env".
 Mutation that fails it: add a second `.env_clear()` anywhere in production code
 (count 2), or delete the sole one (count 0). Falsifiable in both directions,
 which the comment-stripping must not break - verify by temporarily adding a
@@ -288,41 +447,79 @@ commented `.env_clear()` line and confirming the count does not move.
 cannot carry both halves.
 
 - Behavioral: the attention half is already covered on all three existing paths
-  - search `forgets_the_attention_entry` in `terminal.rs`'s `mod tests` for the
-  three tests and for `insert_fake_live_session_for_test`, the helper they
-  share. The token half is covered nowhere. Add
-  `remove_forgets_the_callback_token` and
+  - search `forgets_the_attention_entry` in `terminal.rs` for the three tests and
+  for `insert_fake_live_session_for_test`, the helper they share. The token half
+  is covered nowhere. Add `remove_forgets_the_callback_token` and
   `remove_for_work_roots_forgets_the_callback_token`, each asserting both that
   `token_for` stops resolving and that the on-disk `terminal-tokens/<id>.json`
   is gone. Each needs a pre-removal assertion that `token_for` *does* resolve;
   without it a test whose fixture never stored a token passes for the wrong
   reason.
+
+  **Two fixture traps, both of which produce a green test that proves nothing.**
+  First, `insert_fake_live_session_for_test` sets `callback_token: None`, and
+  `remember_token` no-ops without one - so the helper the three attention tests
+  share cannot seed a token, and a test built on it as-is passes its post-removal
+  assertion vacuously. Either extend the helper to take a token or add a
+  token-bearing sibling; the pre-removal assertion is what catches getting this
+  wrong.
+  Second, and worse: those three model tests all use `TerminalRegistry::default()`,
+  whose `state_dir` is `crate::persistent_state::default_state_dir()` - the
+  developer's **real** state directory. Writing the mandated on-disk assertion
+  against that registry creates and deletes files under the real
+  `terminal-tokens/` on every `cargo test` run, and passes, so nobody ever
+  notices. These two tests MUST construct the registry through
+  `TerminalRegistry::new(...)` with an explicit temp state dir; search
+  `TerminalRegistry::new(` inside the test module for the one existing test that
+  already does this and copy its shape.
   Mutation: delete the `self.forget_token(...)` call from `remove` - the
   post-removal assertion in `remove_forgets_the_callback_token` fails; the
   attention test stays green, proving the two halves are independent.
-- Structural: `sessions_removal_paths_are_enumerated`, a source scan over the
-  production half of `terminal.rs` counting write-lock mutations of
-  `self.sessions` that can drop an id (`.remove(`, `.retain(`, `.drain(`).
-  Assert the count is 3 pre-merge and 4 post-merge (Phase 3 bumps it), with a
-  comment naming each path and, for `insert`'s eviction, naming it as the one
-  path that discharges attention only and citing the deferral recorded in its
-  own CONTRACT comment. This is the only test in the ticket that would have
-  caught the actual defect: `drain_all` broke no assertion because no assertion
-  knew it existed.
-  Mutation: add any new `sessions`-removing method - count 4 pre-merge, fail.
-  The failure message must tell the author what to do, since the whole point is
-  to force a discharge decision at the moment a fifth path is written.
 
-**Invariant 3 - `token_for` is the sole reader of `self.tokens`,
-`remember_token` the sole writer.** Source scan,
-`tokens_map_access_is_confined_to_its_choke_points`: count `self.tokens`
-occurrences in the production half of `terminal.rs` and assert exactly three,
-one each inside `token_for`, `remember_token` and `forget_token` - the three
-CONTRACT comments already name themselves as those choke points, so search
-`self.tokens` to find them. Behavioral verification is not available: an extra
-reader elsewhere would be indistinguishable from `token_for` at runtime, which
-is why the map has a comment-enforced contract rather than a type-enforced one.
-Mutation: add a `self.tokens.read()` anywhere else in the impl - count 4, fail.
+- Structural: `sessions_write_lock_sites_are_enumerated`. Count
+  `self.sessions.write()` in the **flattened** production text and assert **4**
+  pre-merge, **5** post-merge (measured; `drain_all` adds the fifth).
+
+  Read the count as "places where the sessions map's membership can change",
+  not "removal paths" - the two are deliberately different, and a bare
+  `.remove(`/`.retain(`/`.drain(` scan is NOT an acceptable substitute. Measured:
+  that scan flags six production functions, three of which are unrelated -
+  `clear_profile_pending` mutating `pending_profile_ids`, `forget_token`
+  mutating `self.tokens`, and `close_terminal`, which is a false positive for a
+  different reason again: it does not mutate a map at all, it calls the
+  registry's own `remove` method, so it is a delegation rather than an
+  independent removal path. A scan cannot distinguish any of these, because the
+  receiver sits on an earlier line. Pinning the write-lock acquisition instead is both mechanically
+  unambiguous and the stronger invariant: nothing can drop an id without taking
+  that lock.
+  The test carries a comment enumerating all four sites with each one's
+  discharge status - `insert_unchecked` adds only and owes nothing;
+  `remove` and `remove_for_work_roots` discharge both obligations; `insert`'s
+  eviction retain discharges attention only, by the deferral recorded in its own
+  CONTRACT comment. State in that comment that this ticket counts *methods that
+  take the `sessions` write lock*, which is a different count from the "FIFTH
+  session-removal path" phrasing in the existing CONTRACT comment - otherwise a
+  reader who greps "FIFTH" is left arbitrating between two live numberings.
+  This is the only test in the ticket that would have caught the actual defect:
+  `drain_all` broke no assertion because no assertion knew it existed.
+  Mutation: add any new method taking the `sessions` write lock - count 5
+  pre-merge, fail. The failure message must tell the author what to do, since the
+  whole point is to force a discharge decision at the moment a new site is
+  written.
+
+**Invariant 3 - access to `self.tokens` is confined to its three choke points.**
+Source scan, `tokens_map_access_is_confined_to_its_choke_points`, over the
+**flattened** production text. Assert all three of: `.tokens` occurs **3** times,
+`self.tokens.read()` **1** time (in `token_for`), and `self.tokens.write()` **2**
+times (in `remember_token` and `forget_token`). All three measured. The
+decomposed form is worth the extra two assertions: the total alone would stay 3
+if someone converted a read into a write, and the read/write split is what the
+three CONTRACT comments actually claim.
+Behavioral verification is not available: an extra reader elsewhere would be
+indistinguishable from `token_for` at runtime, which is why the map has a
+comment-enforced contract rather than a type-enforced one.
+Mutation: add a `self.tokens.read()` anywhere else in the impl - total 4 and
+read-count 2, fail on both.
 
 **Invariant 4, the half that exists pre-merge - `notificationAvailability`'s four
 states stay pinned.** Search `notificationAvailability` in
@@ -347,6 +544,14 @@ Result - Phase 2 and Phase 3 compare against it.
 One merge commit. Code changes limited to keeping both sides' work and the
 minimum needed to make the union compile and its tests express the union. No
 behavior change, no `drain_all` fix, no inventory repair.
+
+**Re-verify the conflict set before resolving anything.** The six-file
+enumeration below is pinned to a preview OID computed when this ticket was
+written, and both branches can move. Re-run `git merge-tree --write-tree` against
+the current tips first and confirm the conflicted-file set is still exactly these
+six. If it is not, stop and re-survey rather than resolving against a stale map -
+a seventh conflicted file is precisely the kind of thing this ticket argues
+nobody looks for.
 
 Resolution per file. Ordering within each union is cosmetic unless stated.
 
@@ -389,8 +594,20 @@ Resolution per file. Ordering within each union is cosmetic unless stated.
   REVERSED 2026-07-25" paragraph), keep their new Activity-Console-retirement
   open question, drop the stale base-identical duplicate.
 
-Mandatory companion edit, in the same commit because the merge does not compile
-its own tests without it: `settingsSections.test.ts` asserts
+**Mandatory companion edit A, Rust.** Landing `drain_all` adds a fifth
+`self.sessions.write()` site, so Phase 1's
+`sessions_write_lock_sites_are_enumerated` goes red at this commit unless the
+expected count moves 4 → 5 here. Do that in this commit, and extend the test's
+enumerating comment with a `drain_all` line recording that it discharges
+**neither** obligation. That is not a workaround for an inconvenient test - it is
+the merge commit stating in its own diff exactly what it is landing, which is the
+one place a reader is guaranteed to look. Phase 3 then rewrites that line when it
+discharges them.
+Do not instead delete, ignore or `#[ignore]` the test. Its whole purpose is to
+fire here.
+
+**Mandatory companion edit B, frontend,** in this commit because the merge does
+not compile its own tests without it: `settingsSections.test.ts` asserts
 `SETTINGS_SECTIONS.length === 2`. Bump it to 3 and add the `advanced` descriptor
 assertions mirroring the existing `notifications` ones -
 `SETTINGS_SECTIONS[2].id === "advanced"`, its title, `Component ===
@@ -404,7 +621,11 @@ assertion fails. Reorder to put `advanced` at index 1 - the
 AdvancedSection` with an inline arrow - the identity assertion fails.
 
 Also add the browser step that makes the panel real rather than merely
-registered: in `dashboard-acceptance.spec.ts`, alongside the existing "insecure
+registered - **in a separate commit after the merge commit, still within this
+phase.** Unlike the two companion edits above it is not needed to make the union
+compile or its existing tests express the union; it is net-new coverage, and
+folding net-new coverage into the merge commit costs the same reviewability the
+`drain_all` split is protecting. In `dashboard-acceptance.spec.ts`, alongside the existing "insecure
 context disables the Notifications toggle" step, assert that the Settings nav
 lists an entry with `hasText: "Advanced"` and that activating it mounts content
 the section owns (a build-info field is the natural anchor - search
@@ -430,9 +651,17 @@ Fix shape, mirroring `remove_for_work_roots`: drop the `sessions` write lock
 first, THEN loop over the drained sessions calling `forget_token` and
 `attention.forget` for each. Do not call either while holding the `sessions`
 write lock - `forget_token` takes the `tokens` write lock, and the drop-then-loop
-in `remove_for_work_roots` exists for that reason. Add the CONTRACT comment
-naming this as the fourth choke point, and bump the expected count in
-`sessions_removal_paths_are_enumerated` from 3 to 4 as part of the same commit.
+in `remove_for_work_roots` exists for that reason. Add the CONTRACT comment on
+`drain_all` itself, mirroring the two on `remove`.
+
+The expected count in `sessions_write_lock_sites_are_enumerated` does NOT move
+here - Phase 2 already took it to 5, which is correct both before and after this
+fix, since discharging the obligations does not add or remove a write-lock site.
+What this commit changes in that test is its enumerating comment: the `drain_all`
+line stops reading "discharges neither" and starts reading "discharges both",
+alongside `remove` and `remove_for_work_roots`. Leaving that comment stale would
+leave the codebase's only enumeration of these paths asserting the exact
+falsehood this phase just fixed.
 
 **Invariant 5 - a killed terminal's token is rejected afterwards and its file is
 gone.** Integration test `close_all_terminals_revokes_callback_tokens` in
@@ -451,13 +680,19 @@ and the token file still exists, failing both assertions while the pre-kill
 control stays green.
 
 **Invariant 6 - a killed terminal leaves no AttentionHub entry.** Unit test
-`drain_all_forgets_the_attention_entry` in `terminal.rs`'s `mod tests`, modeled
+`drain_all_forgets_the_attention_entry`, modeled
 directly on `remove_forgets_the_attention_entry` and using the same
 `insert_fake_live_session_for_test` helper. Assert the entry is present before
 the drain and absent after; the before-assertion is the same non-vacuity guard
 as above.
 Mutation: delete the `attention.forget` call from the fixed `drain_all` - fails
 at its own site while the token test stays green.
+This invariant's authority is the published spec sentence under
+`{#260726-dashboard-terminal-attention-event-stream}`, not merely `remove`'s
+CONTRACT comment - so this test is the one that stops a documented contract from
+being false. The same phase must widen that sentence's parenthetical to name
+kill-all as a third close path; leaving the code fixed and the enumeration
+two-wide reproduces the exact ambiguity that let `drain_all` through.
 
 Deferred scope, stated so a reviewer does not read its absence as an oversight:
 this phase does NOT close `insert`'s eviction-path token gap. That gap is
@@ -485,22 +720,29 @@ diff-against-either-parent unreadable for the one property it needs to have.
 Verification boundary: the file count and the row count agree, every new row
 points at a file that exists, and no existing row moved.
 
-## Promotion prerequisite
+### Phase 5: route the inherited spec debt to its owning ticket
 
-This ticket lands in `todo/` and carries no `spec:` entry, deliberately - the
-merge itself changes no documented contract, since it only unions two bodies of
-already-shipped work.
+`## Spec Impact` item 3 declines to document the Advanced section and the three
+`/api/dashboard/*` control endpoints here, and says to route it afterwards. This
+phase is that routing, and it exists because "route it afterwards" with no phase
+attached is how a declared deferral becomes a silent one - the exact failure mode
+this whole ticket is about, committed against itself.
 
-Before it could reach `ready/`, one spec gap has to be settled, and it belongs
-to the dev side's work rather than to this merge. Grepping `ai-docs/spec/` for
-`Advanced`, `kill-all`, `build-info` and `dashboard/shutdown` returns nothing:
-`#260722-ws-dashboard-settings-panel` describes the settings registry without
-mentioning an Advanced section, and no anchor anywhere covers the three
-`/api/dashboard/*` control endpoints `d1d6bb31` added. Phase 3 also makes
-kill-all's behavior caller-visible in a new way (tokens revoked, attention
-cleared), which is a contract statement nothing currently carries.
+Sequentially dependent on Phase 2: `260725-feat-dashboard-graceful-shutdown-from-settings`
+exists only on `origin/ws-dashboard-dev` and is not editable from this branch
+until the merge lands.
 
-Do not invent that spec text here. Route it through spec authoring at promotion
-time, and decide then whether it attaches to this ticket or to
-`260725-feat-dashboard-graceful-shutdown-from-settings`, which is the ticket
-`d1d6bb31` actually landed against.
+Deliverable: append a spec-impact note to that ticket recording that its shipped
+behavior - the Advanced settings section, `build-info`, `shutdown`, `kill-all` -
+has no spec anchor, and that `{#260722-ws-dashboard-settings-panel}` still
+documents only two registered sections. Do not author the spec text; that is that
+ticket's own work, against behavior its authors know and this one does not. If
+its status or shape makes an appended note the wrong instrument, open an `idea/`
+ticket instead and say why in the Result.
+
+Also record there what Phase 3 made caller-visible (a callback token stops being
+accepted once its terminal is closed by any path, including kill-all), since that
+is a contract statement about their endpoint produced by this ticket's work.
+
+Verification boundary: the note exists on a ticket that resolves on this branch,
+names all four undocumented surfaces, and does not invent spec text.
