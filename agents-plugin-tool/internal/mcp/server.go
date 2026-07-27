@@ -2533,7 +2533,6 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 		}
 		b.WriteString("\n")
 		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
-		writeIndentedLines(&b, "  marker: ", spec.MarkerContexts)
 		writeIndentedLines(&b, "  legacy-marker: ", []string{spec.LegacyMarkerAdvisory})
 	}
 	return b.String()
@@ -2662,9 +2661,6 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 			fmt.Fprintf(&b, "  - line %d", loc.Line)
 			if loc.Heading != "" {
 				fmt.Fprintf(&b, " %s", loc.Heading)
-			}
-			if loc.MarkerContext != "" {
-				fmt.Fprintf(&b, " # %s", loc.MarkerContext)
 			}
 			b.WriteString("\n")
 		}
