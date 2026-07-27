@@ -15,6 +15,15 @@ The stem still reads `...-manually` because ticket stems are immutable. The
 scope is no longer manual-only: the premise that made it manual-only was tested
 directly and did not survive. See Background.
 
+## Status (2026-07-27)
+
+Not blocked; partially landed. Phase 1 is done (`87259c93`, see its `### Result`).
+Phase 2 has not been started and is still fully autonomously advanceable - it is
+the next target here. The six steps of `## Human verification residue` are
+undischarged and need a person at a browser; no agent may mark them observed.
+The ticket therefore stays open in `ready/` and is not closable until a human
+records those steps per the rule in `## Done when`.
+
 ## Background
 
 `260725-feat-dashboard-pty-agent-attention-notification` Phase 8 shipped both
@@ -294,6 +303,128 @@ runs as mandatory, not sampled. Confirm the four tests in
 `agent-attention-indicator.spec.ts` and `dashboard-acceptance.spec.ts`
 introduce no new failure site - they stay on the default channel, so a
 regression there would come from the extracted helpers, not the browser build.
+
+### Result (87259c93) - 2026-07-27
+
+The planned shape held; nothing in Decisions or the phase plan needed revising.
+The review fix `4acbdc98` is folded into this Result rather than carried as a
+separate `#### Edition` - it is a 7-line comment-only change that landed before
+this Result was written, not follow-up implementation on a completed phase.
+
+The four tests, named here because the mutation table below indexes them:
+
+1. `permission is granted and the Notifications toggle persists`
+2. `a ready edge fires exactly one notification; a second agent reaching ready fires none`
+3. `ready -> working -> ready fires a second; turning the toggle off gates a third`
+4. `without a grant the toggle reconciles to unchecked and a ready edge fires nothing`
+
+The helper lift produced `e2e/agentTurnState.ts` (60 lines) holding
+`readCallbackToken` and `postTurnState`. `agent-attention-indicator.spec.ts` keeps
+all 15 existing call sites byte-identical: the import is bound through two thin
+module-local functions, not partial applications, because `stateHome` and
+`daemon` are only assigned in `beforeAll`. `readFileSync` left that file's
+`node:fs` import with the helper. Neither commit touches any `frontend/src` file
+(`git show --name-only`).
+
+**Non-vacuity: 7/7 assertions, each the FIRST failure at ITS OWN site.** Every
+run's stdout was checked for the build line.
+
+| # | Mutation | Failing test | Failure site |
+|---|---|---|---|
+| 1 | spec: delete `test.use({ channel: "chromium" })` | test 1 | `agent-attention-notification.spec.ts:381` - `Expected "granted", Received "denied"` |
+| 2 | `App.tsx:2084` delete `saveNotificationPrefs(next);` | test 1 | `:459` - localStorage `Received null` |
+| 3 | `App.tsx:2250` body string -> `"MUTATED"` | test 2 | `:538` - `Expected "An agent is ready for your input.", Received "MUTATED"` |
+| 4 (mandatory) | `App.tsx` two lines: add `agentAttentionByRoot` to the effect dep array + delete the `previousGlobalAttentionToneRef` write | test 2 | `:564` - `Expected 1, Received 2` |
+| 5 | `browserAttentionCue.ts:87` -> one-shot latch | test 3 | `:654` - `Expected 2, Received 1` |
+| 6 (mandatory) | `App.tsx:2244` delete `notificationPrefs.enabled &&` | test 3 | `:692` - `Expected 2, Received 3` |
+| 7 | `settingsSections.tsx:163` delete `onChange(false);` | test 4 | `:754` - box stayed checked |
+
+The test reviewer independently reproduced mutations 4, 6 and 7 without being
+shown the implementer's numbers, and landed on the same assertions.
+
+**The empty-array trap did not fire**, and this was checked rather than assumed.
+Under mutation 4, test 2's earlier `expect.poll(length).toBe(1)` still PASSED in
+the same document before the later assertion failed at `Received: 2` - so the
+counted array was demonstrably non-empty and no reload separated the two reads.
+Same for mutation 6: the list reached 2 before failing at 3.
+
+**Mutation 4 needed two lines, and that is a finding about the code, not a plan
+defect.** `globalAttentionTone` is a memoized string, so an A-ready/B-ready
+sequence never changes the Tier 2 effect's dep array and the effect never
+re-runs. The ready-to-ready suppression the plan's assertion 4 targets is
+enforced by the memoized aggregate plus a previous-tone ref - not by
+`shouldFireAttentionNotification` at all. No single-line predicate mutation can
+make it fire twice. That is precisely why this assertion covers ground
+`browserAttentionCue.test.ts` structurally cannot reach.
+
+**Assertion 7c is vacuity-limited by construction and was not faked.** Nothing
+firing cannot be mutation-proven. Its guard is the non-null recorder check plus
+the fact that the identical recorder demonstrably records in tests 2 and 3.
+
+**A Constraints claim in this ticket is proven false.** This ticket's own
+Constraints section says "Only `npm run test:browser` chains the build; a bare
+`npx playwright test` serves whatever bundle is on disk." That is wrong.
+`playwright.config.ts:17` declares `globalSetup: "./e2e/globalSetup.ts"`, and
+`globalSetup.ts:77-99` runs `npm run build` unconditionally unless
+`WS_DASHBOARD_STATIC_DIR` or external-daemon mode is set. Rather than settle it
+on documentation, all 10 Playwright invocations in this phase were checked on
+stdout: each shows exactly one `[e2e globalSetup] building the production
+frontend` line and zero skip lines. The `ws-web-dashboard` mental-model entry on
+the same subject was re-read in full and is CORRECT and current - it already
+names the unconditional globalSetup build, both skip conditions, and the
+separate still-open daemon-binary hazard. The staleness is this ticket's alone.
+
+**Suite state.** Final `npm run test:browser`: `Running 12 tests` -> 10 passed,
+1 failed, 1 did not run. The sole failure is the known pre-existing site
+`e2e/dashboard-acceptance.spec.ts:961:1` failing at `:3779` (`Expected 120,
+Received 47`), byte-identical to the baseline. The "1 did not run" is
+`dashboard-acceptance.spec.ts:4020`, skipped by serial-mode cascade, same as
+baseline. No new build warnings.
+
+**Helper-extraction regression check** (the phase's stated no-new-failure-site
+requirement): all 5 tests in `agent-attention-indicator.spec.ts` green (`:543`,
+`:745`, `:993`, `:1131`, `:1253`), and `agent-spawn-profile.spec.ts:275` green.
+No new failure site.
+
+**Review.** Three partitioned reviewers. Fit: clean. Test: clean. Correctness:
+clean with 4 Minor, no Critical and no Important. Dispositions, all by the lead:
+
+1. The recorder pushes onto its array BEFORE `Reflect.construct`, so it counts
+   attempted constructions rather than browser-produced ones. WON'T FIX - that
+   is the literal Decision wording above and is correct for what is under test
+   (the app's decision to fire, not the browser's ability to construct). The
+   reviewer conceded the point; its actual suggestion was assertion-message
+   wording, which is cosmetic.
+2. Assertion 7a is satisfiable on its own by a click that did nothing, since the
+   box starts unchecked; what closes the hole is 7b, whose `toBe(PREFS_DISABLED)`
+   can only pass if both `onChange(true)` and the reconciling `onChange(false)`
+   ran. FIXED in `4acbdc98` - a 7-line comment recording the ordering dependency,
+   so a future edit cannot drop 7b as apparently redundant.
+3. Test 1's late-reconciliation guard has a small residual window. WON'T FIX -
+   the reviewer's own framing was noted-for-completeness, not a defect.
+4. `e2e/agentTurnState.ts` is in no tsconfig `include`, so it and the spec files
+   are type-checked by no script in `package.json`. WON'T FIX here - the plan
+   declared the tsconfig addition optional for this phase and enabling it could
+   ripple. Captured as
+   `260727-chore-dashboard-e2e-helper-modules-never-type-checked` (`idea/`).
+
+**Deviations.**
+
+1. Two assertions were STRENGTHENED past the plan, not weakened. The plan's
+   `await expect(checkbox).not.toBeChecked({ timeout: 10_000 })` for 7a would
+   race the initial checked render and could pass before the box was ever
+   checked - vacuous under mutation 7. Both that assertion and test 1's "stays
+   checked" now settle past the `requestPermission()` promise first, then assert.
+   Mutation 7 confirms 7a is now load-bearing.
+2. Cosmetic: `closeTerminalById` / `terminalTabsLocator` / `currentTerminalPaneId`
+   were not copied into the new file - no test has a happy-path UI close step
+   (teardown is `forceCloseTerminals` in `finally`), so copies would be dead code.
+3. Cosmetic: test 1's pre-click persistence check is `not.toBe(PREFS_ENABLED)`
+   rather than `toBeNull()`, to avoid brittleness on any unrelated future write
+   to that key. Mutation 2 still fails at the post-click assertion.
+
+**Follow-up captured:** `260727-chore-dashboard-e2e-helper-modules-never-type-checked`
+(`idea/`), from disposition 4 above.
 
 ### Phase 2: correct the insecure-context guard, its comment, and its spec claim
 
