@@ -63,6 +63,21 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 // or change this process's exit status - see the module CONTRACT above and
 // `notify_failure`'s own.
 pub async fn run_terminal_notify(args: TerminalNotifyArgs) -> anyhow::Result<()> {
+    // DECISION (kept deliberately, do not "fix" it back): this stamp is taken
+    // when the attempt STARTS, not when it fails, so the record's
+    // `lastFailureAtMs` precedes the real failure by the delivery duration (up
+    // to `REQUEST_TIMEOUT`) and by a little more than `log_failure`'s own later
+    // `now_ms()`. The earlier stamp is the SAFER direction for the daemon's
+    // escalation rule: a boot-reconcile adopt rewriting `callback.json` while
+    // this hook is in flight now leaves `callback.json`'s mtime NEWER than the
+    // recorded failure, so `should_warn`'s condition 3 correctly suppresses a
+    // failure against a target that has since been repaired. Consequence worth
+    // knowing: the ticket's "Residual false positive, accepted and named"
+    // paragraph describes the opposite (attempt-end) stamp and no longer
+    // describes this implementation - the mirrored risk it leaves is a genuine
+    // failure suppressed by a rewrite landing inside the microsecond window
+    // between this call and `resolve_callback_target`'s read, which is
+    // negligible in width.
     let now = now_ms();
     let profile_dir = args.callback.parent().map(|dir| dir.to_path_buf());
     match deliver(&args).await {

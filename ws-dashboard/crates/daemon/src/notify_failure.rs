@@ -46,7 +46,7 @@
 // path and every test can construct its own. A module static would make the
 // warn-once state process-global and untestable in parallel.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -139,6 +139,14 @@ pub fn record_failure(profile_dir: &Path, error: &str, now_ms: u64) {
     // `write_bound_base_url` uses and its own forward-note warns against
     // copying): this file sits beside a token-bearing `callback.json` in a
     // directory whose contents are already treated as sensitive.
+    //
+    // KNOWN, accepted: a process killed between the create below and the
+    // rename leaves one `notify-failures.json.tmp.*` file behind in a LIVE
+    // profile directory, which nothing reclaims (the GC sweep only removes
+    // whole orphan directories, and this directory is not one). It is inert -
+    // `read_record` reads only the published name - bounded to one file per
+    // crashed write, and is the same exposure `write_bound_base_url` already
+    // carries. Deliberately no reclaim path.
     if crate::agent_token_store::create_new_file_at_mode_0600(&temp_path, raw.as_bytes()).is_err() {
         let _ = fs::remove_file(&temp_path);
         return;
@@ -152,7 +160,30 @@ pub fn record_failure(profile_dir: &Path, error: &str, now_ms: u64) {
 /// the same reason `record_failure` is: the common case is that no record
 /// exists, which `fs::remove_file` reports as an error we do not care about.
 pub fn clear_record(profile_dir: &Path) {
+    // The same guard `record_failure` carries, for a reason that is specific
+    // to the deleting half: `args.callback.parent()` yields the EMPTY path for
+    // a relative `--callback` argument, and `Path::new("").join(...)` is the
+    // bare relative name `notify-failures.json` - which would resolve against
+    // the hook process's CWD and delete a same-named file that is not ours.
+    // The materialized hook config always passes an absolute path, so this is
+    // not reachable in production; the two functions' guards must still match.
+    if !profile_dir.is_dir() {
+        return;
+    }
     let _ = fs::remove_file(notify_failure_path(profile_dir));
+}
+
+/// What was observed at the moment a terminal was warned about, kept so a
+/// LATER observation can be told apart from the one already reported.
+///
+/// CONTRACT (why both fields, not just one): the pair is the only available
+/// discriminator between "the same unrepaired failure, seen again" and "a
+/// second, distinct breakage after a self-heal". See
+/// `NotifyFailureWatch::should_warn`'s doc comment for the derivation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WarnedObservation {
+    count: u32,
+    last_failure_at_ms: u64,
 }
 
 /// The daemon-side warn-once bookkeeping for the escalation rule.
@@ -161,7 +192,7 @@ pub fn clear_record(profile_dir: &Path) {
 /// the module CONTRACT on why this is never a module static.
 #[derive(Debug, Default)]
 pub struct NotifyFailureWatch {
-    warned: HashSet<String>,
+    warned: HashMap<String, WarnedObservation>,
 }
 
 impl NotifyFailureWatch {
@@ -181,9 +212,41 @@ impl NotifyFailureWatch {
     ///      unreadable mtime counts as "not superseded": absence of evidence
     ///      of repair must not be read as evidence of repair.
     ///
-    /// The warned flag is dropped (so a later recurrence warns again) when
-    /// the id is next observed with no record or `count == 0`; the other
-    /// drop trigger - the id leaving the live set - is `retain_live`.
+    /// There are THREE drop triggers for the warned flag, and the third one
+    /// is load-bearing rather than belt-and-braces:
+    ///
+    ///   a. the id is next observed with no record or `count == 0` (a
+    ///      successful delivery deleted the record) - handled below;
+    ///   b. the id leaves the live set - handled by `retain_live`;
+    ///   c. the observation shows the failure COUNTER WAS RESET since the
+    ///      warning was emitted - `counter_was_reset` below.
+    ///
+    /// CONTRACT (why (a) alone is not enough, and why (c) uses the pair it
+    /// uses): trigger (a) only fires if a sweep happens to sample the window
+    /// in which the record is absent. In the ticket's headline sequence -
+    /// broke, warned, owner returned and a delivery succeeded, then broke
+    /// again - that window is one turn long against a 300 s sweep period, so
+    /// (a) almost never lands and the second, distinct breakage would be
+    /// swallowed. The ticket's `## Decisions` states it must not be.
+    ///
+    /// The discriminator is that `clear_record` DELETES the record, so a
+    /// post-clear failure restarts the count at 1 while stamping a fresh
+    /// timestamp. Without a clear, the two fields always advance TOGETHER
+    /// (each new failure both increments the count and re-stamps the time).
+    /// A timestamp that advanced while the count did NOT can therefore only
+    /// mean the counter was reset by a successful delivery in between. Note
+    /// that comparing the count alone does not work: the reset restarts at 1,
+    /// so a first breakage warned about at `count == 1` - the idle-owner case
+    /// this whole mechanism exists for - is followed by a second breakage
+    /// also at `count == 1`, and no count-only comparison can separate them.
+    ///
+    /// KNOWN, accepted weakness (do not "fix" it): the writer's
+    /// read-modify-write of the count is not atomic, so two overlapping hook
+    /// processes can lose an increment - which looks exactly like a reset
+    /// (timestamp advanced, count did not) and costs one extra warning. That
+    /// is the same benign direction as the residual false positive the ticket
+    /// already accepts by name: one extra line in an operator-facing log. The
+    /// alternative is the silent swallow above.
     pub fn should_warn(
         &mut self,
         terminal_id: &str,
@@ -193,7 +256,7 @@ impl NotifyFailureWatch {
         grace_ms: u64,
     ) -> bool {
         let Some(record) = record.filter(|record| record.count > 0) else {
-            // Drop trigger: the failure is gone (record cleared by a
+            // Drop trigger (a): the failure is gone (record cleared by a
             // successful delivery, or never existed), so a future
             // recurrence deserves a fresh warning.
             self.warned.remove(terminal_id);
@@ -205,10 +268,21 @@ impl NotifyFailureWatch {
         if !aged_enough || !not_superseded {
             return false;
         }
-        if self.warned.contains(terminal_id) {
-            return false;
+        match self.warned.get(terminal_id) {
+            // Never warned about this id, or a drop trigger already fired.
+            None => {}
+            // Drop trigger (c): a distinct breakage after a self-heal.
+            Some(previous) if counter_was_reset(previous, record) => {}
+            // The same unrepaired failure, seen on a later sweep.
+            Some(_) => return false,
         }
-        self.warned.insert(terminal_id.to_owned());
+        self.warned.insert(
+            terminal_id.to_owned(),
+            WarnedObservation {
+                count: record.count,
+                last_failure_at_ms: record.last_failure_at_ms,
+            },
+        );
         true
     }
 
@@ -216,8 +290,16 @@ impl NotifyFailureWatch {
     /// warned flag, so a terminal id observed live again later can warn
     /// again rather than being suppressed for the daemon's whole lifetime.
     pub fn retain_live(&mut self, live_ids: &HashSet<String>) {
-        self.warned.retain(|id| live_ids.contains(id));
+        self.warned.retain(|id, _| live_ids.contains(id));
     }
+}
+
+/// True when the record observed now must have come from a counter reset
+/// since `previous` was warned about - see `should_warn`'s CONTRACT for the
+/// derivation and for the one accepted false positive (a lost increment from
+/// two overlapping hook writers).
+fn counter_was_reset(previous: &WarnedObservation, observed: &NotifyFailureRecord) -> bool {
+    observed.last_failure_at_ms > previous.last_failure_at_ms && observed.count <= previous.count
 }
 
 #[cfg(test)]
@@ -347,6 +429,92 @@ mod tests {
         // suppressed for the daemon's whole lifetime.
         let second = record(1, 3_000_000);
         assert!(watch.should_warn("t1", Some(&second), None, 3_000_000 + GRACE_MS, GRACE_MS));
+    }
+
+    // THE case the drop rule exists for, and the one a count-only rule cannot
+    // solve: the cleared window is one turn long against a 300 s sweep, so no
+    // observation ever sees the record absent - the warn-once flag has to be
+    // dropped from the RE-BROKEN record alone.
+    #[test]
+    fn should_warn_rewarns_when_a_self_heal_no_sweep_ever_observed_restarted_the_count_at_one() {
+        let mut watch = NotifyFailureWatch::default();
+        let first = record(1, 1_000_000);
+        assert!(watch.should_warn("t1", Some(&first), None, 1_000_000 + GRACE_MS, GRACE_MS));
+
+        // Owner returned, a delivery succeeded (clearing the record), the
+        // next turn broke again - all between two sweeps. The record is back
+        // at count 1 with a LATER timestamp: the count did not advance, so
+        // the counter must have been reset. A count-only comparison
+        // ("observed count < warned count") reads `1 < 1` as false here and
+        // swallows this second, distinct breakage forever.
+        let second = record(1, 5_000_000);
+        assert!(
+            watch.should_warn("t1", Some(&second), None, 5_000_000 + GRACE_MS, GRACE_MS),
+            "a fresh failure after a self-heal must warn again even though the count \
+             restarted at the same value that was warned about"
+        );
+
+        // ...and the re-warn re-arms warn-once against the NEW observation.
+        assert!(
+            !watch.should_warn("t1", Some(&second), None, 6_000_000, GRACE_MS),
+            "the re-warned observation must itself be suppressed on the next sweep"
+        );
+    }
+
+    #[test]
+    fn should_warn_rewarns_when_a_self_heal_no_sweep_ever_observed_restarted_the_count_from_five() {
+        let mut watch = NotifyFailureWatch::default();
+        let streak = record(5, 1_000_000);
+        assert!(watch.should_warn("t1", Some(&streak), None, 1_000_000 + GRACE_MS, GRACE_MS));
+
+        let after_self_heal = record(1, 5_000_000);
+        assert!(
+            watch.should_warn("t1", Some(&after_self_heal), None, 5_000_000 + GRACE_MS, GRACE_MS),
+            "a count that fell back to 1 can only mean clear_record deleted the record in between"
+        );
+    }
+
+    // The idle owner this mechanism exists for submits nothing more, so the
+    // record FREEZES: same count, same timestamp, sweep after sweep. Neither
+    // field advanced, so nothing was reset and warn-once must hold.
+    #[test]
+    fn should_warn_does_not_rewarn_for_the_frozen_record_of_an_idle_owner() {
+        let mut watch = NotifyFailureWatch::default();
+        let frozen = record(1, 1_000_000);
+        let first_sweep = 1_000_000 + GRACE_MS;
+        assert!(watch.should_warn("t1", Some(&frozen), None, first_sweep, GRACE_MS));
+
+        for sweep in 1..=3 {
+            let now = first_sweep + sweep * GRACE_MS;
+            assert!(
+                !watch.should_warn("t1", Some(&frozen), None, now, GRACE_MS),
+                "an unrepaired failure that nothing has touched must warn exactly once"
+            );
+        }
+    }
+
+    // An owner who keeps working against a broken target advances BOTH fields
+    // on every failure. That is an unbroken streak, not a reset, so warn-once
+    // must hold no matter how far the count climbs.
+    #[test]
+    fn should_warn_does_not_rewarn_while_a_growing_streak_advances_both_fields() {
+        let mut watch = NotifyFailureWatch::default();
+        let first = record(1, 1_000_000);
+        assert!(watch.should_warn("t1", Some(&first), None, 1_000_000 + GRACE_MS, GRACE_MS));
+
+        for (count, last_failure_at_ms) in [(2, 2_000_000), (3, 3_000_000), (9, 4_000_000)] {
+            let growing = record(count, last_failure_at_ms);
+            assert!(
+                !watch.should_warn(
+                    "t1",
+                    Some(&growing),
+                    None,
+                    last_failure_at_ms + GRACE_MS,
+                    GRACE_MS
+                ),
+                "count {count} advanced along with the timestamp - the counter was never reset"
+            );
+        }
     }
 
     #[test]

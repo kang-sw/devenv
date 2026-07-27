@@ -33,7 +33,13 @@ pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
 // `agent-profiles/` directory sitting around for up to this long between
 // sweeps is harmless; the important guarantee is ordering relative to
 // `boot_reconcile`, not sweep frequency).
-const AGENT_PROFILE_GC_SWEEP_PERIOD: Duration = Duration::from_secs(300);
+// `pub(crate)` only so `agent_profile_gc`'s TESTS can pass the same window the
+// production wiring below passes (a duplicated `Duration::from_secs(300)`
+// literal there would silently keep testing the old window if this constant
+// ever moves). The sweep itself still takes the window as a parameter and
+// never reaches back up into this module for it - see
+// `sweep_agent_profiles`' own doc comment.
+pub(crate) const AGENT_PROFILE_GC_SWEEP_PERIOD: Duration = Duration::from_secs(300);
 
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     run_with_shutdown(config, shutdown_signal())

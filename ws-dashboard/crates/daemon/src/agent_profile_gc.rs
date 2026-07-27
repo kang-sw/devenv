@@ -209,6 +209,11 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
+    // The window the production call sites pass (`server.rs`), referenced
+    // rather than re-typed as a literal so these tests cannot keep exercising
+    // an old window after the constant moves.
+    use crate::server::AGENT_PROFILE_GC_SWEEP_PERIOD;
+
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
@@ -281,7 +286,7 @@ mod tests {
             &state_dir,
             &registry,
             &mut NotifyFailureWatch::default(),
-            Duration::from_secs(300),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
         )
         .await;
 
@@ -317,7 +322,7 @@ mod tests {
             &state_dir,
             &registry,
             &mut NotifyFailureWatch::default(),
-            Duration::from_secs(300),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
         )
         .await;
 
@@ -376,7 +381,7 @@ mod tests {
             &state_dir,
             &registry,
             &mut NotifyFailureWatch::default(),
-            Duration::from_secs(300),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
         )
         .await;
 
@@ -408,7 +413,7 @@ mod tests {
             &state_dir,
             &registry,
             &mut NotifyFailureWatch::default(),
-            Duration::from_secs(300),
+            AGENT_PROFILE_GC_SWEEP_PERIOD,
         )
         .await;
 
