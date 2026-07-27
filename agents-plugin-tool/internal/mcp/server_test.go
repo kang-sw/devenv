@@ -1937,6 +1937,27 @@ func TestFormatTicketVerifyRendersAdvisoriesWithoutAmendRecipe(t *testing.T) {
 	}
 }
 
+// TestVerifyAdapterDegradesToSilenceOnGraphLoadFailure closes the commit-side
+// half of the degrade-to-silence invariant. The wsdoc tests prove no advisories
+// are produced; this proves the commit still lands, since wsgit.Commit vetoes
+// on a non-nil verifier error and nothing else.
+func TestVerifyAdapterDegradesToSilenceOnGraphLoadFailure(t *testing.T) {
+	root := t.TempDir()
+	// No ai-docs/spec, so the spec-anchor scan fails. The dangling related:
+	// would otherwise produce a FIX:, which makes the silence non-vacuous.
+	path := "ai-docs/tickets/.done/260726-feat-graph-load-failure.md"
+	mustWrite(t, root, path,
+		"---\ntitle: Load failure\ncompleted: 2026-07-27\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# Load failure\n")
+
+	advisories, err := verifyAdapter(root, []string{path})
+	if err != nil {
+		t.Fatalf("a graph-load failure vetoed the commit: %v", err)
+	}
+	if len(advisories) != 0 {
+		t.Fatalf("advisories = %#v, want none after a graph-load failure", advisories)
+	}
+}
+
 // TestServeStdioGitCommitSurfacesTicketGraphParentBoard drives the real MCP
 // dispatch: a commit closing the last child of an epic must land, keep OK
 // unchanged, and carry the ## Parent Board block in the text response — while
@@ -1957,8 +1978,11 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 	server := NewServer(root, "test")
 
 	textChild := "ai-docs/tickets/.done/260726-feat-graph-e2e-text.md"
+	// The dangling related: makes this commit carry both a multi-line board
+	// block and a single-block FIX:, which is the adjacency that needs a blank
+	// separator in formatGitCommit.
 	mustWrite(t, root, textChild,
-		"---\ntitle: E2E child\ncompleted: 2026-07-27\nparent: 260726-epic-graph-e2e\n---\n\n# E2E child\n")
+		"---\ntitle: E2E child\ncompleted: 2026-07-27\nparent: 260726-epic-graph-e2e\nrelated:\n  260726-nope-dangling: no such stem\n---\n\n# E2E child\n")
 
 	var out bytes.Buffer
 	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close the last child of an epic","ai_context":["User intent: prove the parent board reaches the git.commit response."]}}}`, textChild)
@@ -1978,6 +2002,13 @@ func TestServeStdioGitCommitSurfacesTicketGraphParentBoard(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("git.commit text response missing %q: %q", want, text)
 		}
+	}
+	// The board block and the FIX: advisory must not run together.
+	if !strings.Contains(text, "\n\n  FIX:") {
+		t.Fatalf("git.commit text response missing the blank separator before the FIX: advisory: %q", text)
+	}
+	if !strings.Contains(text, "Then git commit --amend --no-edit.") {
+		t.Fatalf("git.commit text response missing the amend recipe: %q", text)
 	}
 
 	jsonChild := "ai-docs/tickets/.done/260726-feat-graph-e2e-json.md"

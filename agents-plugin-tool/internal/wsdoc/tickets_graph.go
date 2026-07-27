@@ -30,11 +30,9 @@ const (
 	advisoryWrapWidth = 76
 )
 
-// graphStatusSortOrder is the settled row sort order: open reads
-// ready -> todo -> idea, closed reads .done -> .dropped, so the fixed-width
-// status column scans monotonically. ticketStatusRank is the single source of
-// the ordering; this slice only names the statuses to report counts for.
-var graphStatusSortOrder = []string{"ready", "todo", "idea", ".done", ".dropped"}
+// Row sort order is settled: open reads ready -> todo -> idea and closed reads
+// .done -> .dropped, so the fixed-width status column scans monotonically.
+// ticketStatusRank is the single source of that ordering — see sortedChildren.
 
 const actionAllChildrenClosed = "Check whether this epic can be closed. Read its `## Completion Criteria` first - \"all children closed\" is not itself the closure test."
 
@@ -79,6 +77,13 @@ func loadTicketGraph(root string) (*ticketGraph, error) {
 		specAnchors: map[string]bool{},
 	}
 	for _, ticket := range tickets {
+		// scanTickets is sorted by ticketStatusRank, so first-wins keeps the
+		// most-open copy when the same stem exists in two status directories.
+		// That direction matters: an abnormal duplicate then degrades toward
+		// "still open" rather than producing a false closure nudge.
+		if _, seen := graph.byStem[ticket.Stem]; seen {
+			continue
+		}
 		graph.byStem[ticket.Stem] = ticket
 	}
 	for _, ticket := range tickets {
@@ -424,20 +429,25 @@ func renderChildRow(child TicketInfo, verifiedStems, closableAbove map[string]bo
 	return row
 }
 
-// overflowLine reports per-status counts in sort order rather than a single
-// status, because the cap can land mid-group and the hidden rows may span
-// several statuses. openOnly drops the word "open" for the tiers where hidden
-// rows may be closed, since "open" would be false there.
+// overflowLine reports per-status counts rather than a single status, because
+// the cap can land mid-group and the hidden rows may span several statuses.
+// The counts follow the order the hidden rows themselves are in, not a global
+// status ranking: the idea-only tier arranges rows closed-first, so a global
+// order would contradict the rows printed directly above the line. openOnly
+// drops the word "open" for the tiers where hidden rows may be closed, since
+// "open" would be false there.
 func overflowLine(hidden []TicketInfo, openOnly bool) string {
 	counts := map[string]int{}
+	var order []string
 	for _, child := range hidden {
+		if counts[child.Status] == 0 {
+			order = append(order, child.Status)
+		}
 		counts[child.Status]++
 	}
-	parts := make([]string, 0, len(counts))
-	for _, status := range graphStatusSortOrder {
-		if counts[status] > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", counts[status], status))
-		}
+	parts := make([]string, 0, len(order))
+	for _, status := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[status], status))
 	}
 	word := ""
 	if openOnly {

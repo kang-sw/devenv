@@ -388,6 +388,197 @@ func TestTicketGraphAppliesIntegrityCap(t *testing.T) {
 	}
 }
 
+// TestTicketGraphIntegrityCapIsPerVerifiedTicket pins the cap's granularity.
+// Capped per call instead, this fixture would emit five advisories plus
+// "... +4 more", and because an advisory names no subject the caller could
+// not tell which of the three tickets lost its advisories entirely.
+func TestTicketGraphIntegrityCapIsPerVerifiedTicket(t *testing.T) {
+	f := newGraphFixture(t)
+	var paths []string
+	for _, stem := range []string{"260726-feat-cap-a", "260726-feat-cap-b", "260726-feat-cap-c"} {
+		paths = append(paths, f.ticket("todo", stem,
+			"related:",
+			"  260726-nope-1: x",
+			"  260726-nope-2: x",
+			"  260726-nope-3: x"))
+	}
+
+	result := f.verify(paths...)
+	if len(result.Advisories) != 9 {
+		t.Fatalf("Advisories = %v, want 3 per verified ticket with no cap reached", advisoryKinds(result.Advisories))
+	}
+	for _, advisory := range result.Advisories {
+		if strings.HasPrefix(advisory.Text, "... +") {
+			t.Fatalf("cap fired across the call rather than per verified ticket:\n%#v", result.Advisories)
+		}
+	}
+}
+
+// TestTicketGraphIgnoresDuplicateStemAcrossStatusDirs covers an abnormal board
+// (git mv is atomic, so this should not occur): the same stem in two status
+// directories must not duplicate its row, inflate the child count, or let a
+// closure nudge fire while an open copy still exists.
+func TestTicketGraphIgnoresDuplicateStemAcrossStatusDirs(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-duplicated")
+	parent := "parent: 260726-epic-duplicated"
+	f.ticket("todo", "260726-feat-two-places", parent)
+	f.ticket(".done", "260726-feat-two-places", parent)
+	verified := f.ticket(".done", "260726-feat-other", parent)
+
+	board := boardAdvisoryText(t, f.verify(verified))
+	if got := strings.Count(board, "260726-feat-two-places"); got != 1 {
+		t.Fatalf("duplicated stem rendered %d rows, want 1:\n%s", got, board)
+	}
+	// The open copy wins, so the epic reads as still in flight rather than
+	// attracting a false closure ACTION.
+	requireContains(t, board, "Parent [1]: 260726-epic-duplicated [todo] - 1 of 2 child tickets still open")
+	requireNotContains(t, board, "ACTION:")
+}
+
+// TestTicketGraphOmitsChainEndClaimWhenAncestorParentDangles pins that the
+// board never claims a chain ended when the walk was cut. The dangling edge
+// belongs to an ancestor, and integrity checks never inspect ancestors by
+// design, so nothing else in the output would mention it.
+func TestTicketGraphOmitsChainEndClaimWhenAncestorParentDangles(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-mid-dangling", "parent: 260726-epic-never-existed")
+	verified := f.ticket(".done", "260726-feat-under-dangling", "parent: 260726-epic-mid-dangling")
+
+	result := f.verify(verified)
+	board := boardAdvisoryText(t, result)
+	requireContains(t, board, "Parent [1]: 260726-epic-mid-dangling [todo] - all 1 child ticket closed")
+	requireNotContains(t, board, "No further ancestors.")
+
+	// The ancestor's own dangling parent: stays that ancestor's problem.
+	for _, advisory := range result.Advisories {
+		if advisory.Kind == AdvisoryKindFix {
+			t.Fatalf("an ancestor's frontmatter was checked: %#v", advisory)
+		}
+	}
+}
+
+func TestTicketGraphSingleChildEpicHeaderIsSingular(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-solo")
+	verified := f.ticket(".done", "260726-feat-solo-child", "parent: 260726-epic-solo")
+
+	board := boardAdvisoryText(t, f.verify(verified))
+	requireContains(t, board, "- all 1 child ticket closed")
+	requireNotContains(t, board, "1 child tickets")
+}
+
+// TestTicketGraphMultiLevelChainCrossReferencesClosableEpic is the only
+// depth>1 fixture: it exercises the unbounded walk past one hop, the
+// Parent [2] depth label, the plain (epic) parenthetical, and the
+// closableAbove cross-reference that turns a nearer ancestor's ACTION line
+// into "(epic, closable - see above)" on a farther ancestor's row.
+func TestTicketGraphMultiLevelChainCrossReferencesClosableEpic(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-top")
+	top := "parent: 260726-epic-top"
+	f.ticket("todo", "260726-epic-mid", top)
+	f.ticket("todo", "260726-epic-unrelated", top)
+	f.ticket("todo", "260726-chore-other", top)
+	f.ticket("idea", "260726-research-someday", top)
+
+	mid := "parent: 260726-epic-mid"
+	f.ticket(".done", "260726-bug-first", mid)
+	verified := f.ticket(".done", "260726-feat-last", mid)
+
+	board := boardAdvisoryText(t, f.verify(verified))
+	requireContains(t, board, "Parent [1]: 260726-epic-mid [todo] - all 2 child tickets closed")
+	requireContains(t, board, "Parent [2]: 260726-epic-top [todo] - 4 of 4 child tickets still open")
+	requireContains(t, board, "    todo    | 260726-epic-mid  (epic, closable - see above)")
+	requireContains(t, board, "    todo    | 260726-epic-unrelated  (epic)")
+	requireContains(t, board, "    idea    | 260726-research-someday")
+	if strings.Index(board, "Parent [1]:") > strings.Index(board, "Parent [2]:") {
+		t.Fatalf("ancestors must render nearest first:\n%s", board)
+	}
+}
+
+// TestTicketGraphOverflowLineDropsOpenForClosedInclusiveTier pins the wording
+// the plan flagged as a judgment call the ticket does not exemplify: where
+// hidden rows may be closed, the overflow line omits the word "open" because
+// it would be false. It also covers the .done -> .dropped closed sort order
+// and the .dropped row that motivates the 8-wide status column.
+func TestTicketGraphOverflowLineDropsOpenForClosedInclusiveTier(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-mixed-closed")
+	parent := "parent: 260726-epic-mixed-closed"
+	verified := f.ticket(".done", "260726-feat-done-a", parent)
+	for _, stem := range []string{"260726-feat-done-b", "260726-feat-done-c", "260726-feat-done-d"} {
+		f.ticket(".done", stem, parent)
+	}
+	f.ticket(".dropped", "260726-feat-dropped-a", parent)
+	f.ticket(".dropped", "260726-feat-dropped-b", parent)
+	f.ticket("idea", "260726-feat-idea-a", parent)
+	f.ticket("idea", "260726-feat-idea-b", parent)
+
+	board := boardAdvisoryText(t, f.verify(verified))
+	requireContains(t, board, "Parent [1]: 260726-epic-mixed-closed [todo] - 6 of 8 closed, 2 idea/ remaining")
+	requireContains(t, board, "    .dropped| 260726-feat-dropped-a")
+	requireContains(t, board, "    ... +3 more (1 .dropped, 2 idea)")
+	requireNotContains(t, board, "more open (")
+
+	if strings.Index(board, "260726-feat-done-d") > strings.Index(board, "260726-feat-dropped-a") {
+		t.Fatalf("closed rows must sort .done before .dropped:\n%s", board)
+	}
+}
+
+func TestTicketGraphSiblingListingGatesOnDroppedPath(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-dropped-gate")
+	parent := "parent: 260726-epic-dropped-gate"
+	verified := f.ticket(".dropped", "260726-feat-abandoned", parent)
+	f.ticket("todo", "260726-feat-open-one", parent)
+	f.ticket("idea", "260726-feat-open-two", parent)
+
+	board := boardAdvisoryText(t, f.verify(verified))
+	requireContains(t, board, "Parent [1]: 260726-epic-dropped-gate [todo] - 2 of 3 child tickets still open")
+	requireContains(t, board, "    todo    | 260726-feat-open-one")
+	requireContains(t, board, "    idea    | 260726-feat-open-two")
+}
+
+// TestTicketGraphActionFiresOnOpenPathWithoutJustNow separates two rules that
+// every other ACTION fixture leaves co-varying: ACTION lines fire regardless of
+// path gating (only the sibling listing is gated), and "(just now)" attaches to
+// closed rows only — on an open row it would read as a closure that did not
+// happen.
+func TestTicketGraphActionFiresOnOpenPathWithoutJustNow(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-open-path-action")
+	parent := "parent: 260726-epic-open-path-action"
+	f.ticket(".done", "260726-feat-accepted-landed", parent)
+	verified := f.ticket("idea", "260726-feat-deferred-idea", parent)
+
+	board := boardAdvisoryText(t, f.verify(verified))
+	requireContains(t, board, "Parent [1]: 260726-epic-open-path-action [todo] - 1 of 2 closed, 1 idea/ remaining")
+	requireContainsFlat(t, board, "ACTION: Every accepted child has landed; only idea/ children remain.")
+	requireContains(t, board, "    idea    | 260726-feat-deferred-idea")
+	requireNotContains(t, board, "just now")
+}
+
+// TestTicketGraphIntegrityIgnoresAncestorFrontmatter pins the settled subject
+// set: integrity checks read the verified ticket's own frontmatter and never an
+// ancestor's. A dangling related: on an ancestor is that ancestor's problem,
+// reported when a commit touches it.
+func TestTicketGraphIntegrityIgnoresAncestorFrontmatter(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260726-epic-dirty-frontmatter",
+		"related:",
+		"  260726-nope-on-the-ancestor: dangling on the parent")
+	verified := f.ticket(".done", "260726-feat-clean-child", "parent: 260726-epic-dirty-frontmatter")
+
+	result := f.verify(verified)
+	requireContains(t, boardAdvisoryText(t, result), "Parent [1]: 260726-epic-dirty-frontmatter")
+	for _, advisory := range result.Advisories {
+		if advisory.Kind != AdvisoryKindBoard {
+			t.Fatalf("an ancestor's frontmatter produced an advisory: %#v", advisory)
+		}
+	}
+}
+
 func TestTicketGraphRowsSortReadyTodoIdea(t *testing.T) {
 	f := newGraphFixture(t)
 	f.ticket("todo", "260726-epic-sorted")
@@ -489,11 +680,25 @@ func TestTicketGraphRelatedSpecAnchorEmitsNothing(t *testing.T) {
 	requireNoAdvisories(t, f.verify(ticket))
 }
 
+// TestTicketGraphEpicWithoutChildrenEmitsNothing gives the childless epic a
+// parent of its own, so the graph pass genuinely has work to do and the test
+// discriminates on childlessness rather than duplicating the no-parent case:
+// an epic's absence of children is not a defect (a pre-decomposition epic is
+// correctly scoped), so no check may fire on it. The closed sibling proves the
+// fixture is live rather than inert.
 func TestTicketGraphEpicWithoutChildrenEmitsNothing(t *testing.T) {
 	f := newGraphFixture(t)
-	epic := f.ticket("todo", "260726-epic-pre-decomposition")
+	f.ticket("todo", "260726-epic-umbrella")
+	childless := f.ticket("todo", "260726-epic-pre-decomposition", "parent: 260726-epic-umbrella")
+	sibling := f.ticket(".done", "260726-feat-umbrella-sibling", "parent: 260726-epic-umbrella")
 
-	requireNoAdvisories(t, f.verify(epic))
+	requireNoAdvisories(t, f.verify(childless))
+
+	// Positive control: the same board does produce a block, so the assertion
+	// above is about the childless epic and not about an inert fixture.
+	board := boardAdvisoryText(t, f.verify(sibling))
+	requireContains(t, board, "Parent [1]: 260726-epic-umbrella [todo] - 1 of 2 child tickets still open")
+	requireContains(t, board, "    todo    | 260726-epic-pre-decomposition  (epic)")
 }
 
 func TestTicketGraphIgnoresChildStemsNamedOnlyInTheEpicBody(t *testing.T) {
