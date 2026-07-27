@@ -8,6 +8,7 @@ related:
   260726-feat-verify-ticket-graph-advisories: supplies the advisory-not-blocking reversibility principle, and its mechanical-floor scope is what the ticket-body-read carve-out is measured against
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-28
 ---
 
 # Retire the 🚧 planned-marker mechanism; pending spec contracts live in the ticket
@@ -681,6 +682,127 @@ Verification boundary, one clause per sub-step (2.2 and 2.3 share one):
    the script's edition points.
 8. **2.9** — the cycle ticket is in `.dropped/` with a `## Resolution`, and the
    commit-ownership ticket still exists and still carries the extracted finding.
+
+### Result (e89fbcf5) - 2026-07-28
+
+All nine sub-steps landed. 26 commits from the survey plan; three partitioned
+review cycles (correctness, fit, test), each followed by a fix relay.
+
+**Verification boundary, clause by clause.** All eight are satisfied. Two could
+not be evidenced from this corpus alone and are recorded honestly rather than
+worked around:
+
+- Clause 1's `specs.list` still renders `tickets=` half is not demonstrable on
+  the live corpus, because no spec here declares ticket frontmatter — a corpus
+  fact this ticket itself calls out in 2.1. Confirmed instead on a fixture:
+  `ai-docs/spec/demo.md - Demo [anchors=1 tickets=260504-ticket-demo]`.
+- Clause 3's "a fresh `lead-write-ticket` run reaches `ready/` with no
+  contract-first branch offered" is a live-procedure clause with no automated
+  evidence. It is reasoned from the branch's absence
+  (`grep -rn contract-first-spec` over both plugin trees and `ai-docs/spec/`
+  returns zero), not from an executed run.
+
+Clause 5's "recorded in `### Result`" sub-clause is this paragraph: 2.6's
+conversion was decided by reading the Rust, as the clause required. The shipped
+rule for `active_work_root_count` is **availability only** —
+`WorkspaceBuilder::push` computes `enabled = available && active` for the view
+but increments the counter under `if available` alone (`discovery.rs:186-203`,
+asserted by `routes.rs:881-925`). The callout had claimed activation *and*
+availability. The spec now matches the code, and "disabled or" was dropped
+because only `recoveryNeeded` is emitted.
+
+**Two lead deviations, both settled before implementation.** D1: the marker
+predicate keys on shape at line start rather than the emoji alone, because
+`documentation-system.md` carried six literal markers in prose and a bare check
+fails this phase's own clause 4. D2: ticket-to-spec matching is scoped to the
+marker's own anchor plus the exact spec path, because the wider wording names 15
+unrelated dashboard tickets and inverts its own expected orphaned outcome. Both
+were unsatisfiable as written, not preferences.
+
+**Lead-directed scope extension.** `internal/wsdoc/tickets_template.go:65` was a
+fourth site carrying the `Contract-first spec: yes|no` clause that the ticket's
+"apply it to all three sites" wording missed. Removed under this ticket's
+authority: leaving it would have violated the rejected-alternatives list, which
+forbids keeping convention text for a retired mechanism because it invites
+re-adoption.
+
+**What the review cycles cost and bought.** Cycle 1 returned 6 Important and 12
+Minor; cycle 2 returned 3 Important, two of them found independently by two
+partitions; cycle 3 returned 1 Important, also found independently by two
+partitions. Nothing was dismissed without a stated reason.
+
+The durable finding is that **the same defect class was introduced twice by this
+ticket's own fixes**. Cycle 1's directive scoped `lead-forge-spec` step 5's
+iteration to implemented items, which silently defeated step 4's promise that
+step 5 collects every ambiguity marker for the wrap-up. Cycle 2's repair of that
+made an in-session record the wrap-up's *only* source and forbade reading the
+on-disk markers — which made a resumed session emit a confident
+`Ambiguous classifications: 0` instead of an incomplete list. Both are the
+advisory-asymmetry rule recorded in Phase 1: an uncertain input landed on the
+branch that asserts absence. The second occurrence sharpened it into a corollary
+now in `ai-docs/mental-model/documentation-system.md` — replacing a recoverable
+source with a better but ephemeral one, and forbidding the old source, converts
+undescribed recovery into prescribed-against recovery.
+
+**Three lead directives were proven wrong by measurement and correctly
+overridden.** The cycle-1 assertion `strings.Contains(listText, "marker: ")`
+fails on the *unmutated* tree, because Phase 1's retained advisory renders
+`legacy-marker: ` and contains it as a substring — on the exact fixture the
+directive named. The cycle-2 preference for guarding at the end-to-end
+`server_test.go:1133` fixture would have been half-vacuous, because that
+fixture's only anchor carries no marker token and `omitempty` drops the field;
+proven by dumping the real JSON-RPC payload. The cycle-3 directive to compare
+`strings.ToLower(key)` against a snake_case literal does not catch a *deleted*
+`json:"-"` tag, because Go emits `MarkerContexts`, which lowercases to
+`markercontexts`.
+
+**What ships unguarded**, measured rather than assumed:
+
+1. `rsrc/` playbook prose is guarded for *consistency*, not content. A partial
+   revert fails four hash checks; a clean revert plus regen is fully green. This
+   covers the `lead-update-spec` §5 deletion and renumber, `lead-write-spec`, and
+   the `spec-conventions.md` retirement text. Two exceptions now carry targeted
+   content guards — the Implementation Gap carve-out across the three
+   hand-maintained `WORKFLOW.md` (`internal/wsrsrc/workflow_guide_test.go`) and
+   the `lead-forge-spec` ambiguity contract (`57c743d3`) — both added because the
+   sentence carries safety-critical force and had been broken more than once.
+2. The two `lead-bootstrap/AGENTS.template.md` copies can silently disagree;
+   reverting a fix in the wsflow copy alone leaves both suites green.
+   `test_wsflow_skill_bundle.py:229-230` *requires* the two files to differ, so a
+   naive equality guard needs a substitution table. Captured in
+   `260728-research-parallel-workflow-guide-divergence`.
+3. Everything in the three `WORKFLOW.md` except the one guarded sentence.
+
+**Guarded and mutation-proven dead:** the retired `formatSpecs` marker line at
+any indentation including tabs, the `formatSpecStatus` ` # ` suffix, both
+`json:"-"` tags independently at the wire level under both the reverted-tag and
+deleted-tag shapes, Phase 1's advisory across all three render paths plus its
+truncation bound, and the carve-out in each of the three `WORKFLOW.md`
+separately.
+
+**Observed during closeout, no action taken:** `ws/convention.read` served
+pre-retirement convention text this session, because the running MCP binary
+predates this branch. The source files at HEAD contain none of it. This is the
+plugin-version propagation surface and it resolves with the merge-time bump.
+
+**Tickets created or moved:** `260728-chore-spec-mcp-server-repair-unspecified`,
+`260728-chore-ws-tree-skill-pointer-guard`,
+`260728-bug-chmod-based-tests-skip-silently`,
+`260728-research-presentation-artifact-convention-policy`,
+`260728-research-parallel-workflow-guide-divergence` created;
+`260726-bug-spec-planned-marker-ready-ticket-cycle` dropped with a
+`## Resolution`; evidence appended to `260723-research-reviewer-worktree-isolation`
+and a resolution note to `260726-research-spec-planned-marker-management-cost`.
+
+**Forward, for `260726-bug-inline-playbook-invocation-commit-ownership`:** 2.4
+deleted `lead-write-ticket.md:106`'s inline invocation while `lead-discuss.md:62`
+survives, so that ticket's Phase 1 survey overstates Category A by one site and
+must be re-run. Separately, deleting `lead-write-spec`'s former step 6 renumbered
+its unconditional commit from step 7 to step 6, and `lead-update-spec`'s from
+step 7 to step 6; the two Phase 1 instruction bullets were corrected in place and
+the ticket's `## Landing-order inversion` section enumerates what was left as
+historical record.
+
 
 ## Reviewed (2026-07-26, round 3)
 

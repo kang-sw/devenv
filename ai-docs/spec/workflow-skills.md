@@ -307,22 +307,21 @@ to the nearest unresolved parent when the user delegates lower-level detail.
 {#260510-discuss-intent-frame-interview}
 
 `lead-write-spec` writes or updates behavioral spec entries for caller-visible
-behavior. It reads spec conventions, generates stable spec stems, writes planned
-or implemented entries according to the current behavior, verifies the spec
-index, and commits the spec update.
+behavior. It reads spec conventions, generates stable spec stems, writes
+implemented entries according to the current behavior, verifies the spec index,
+and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
-accepted backlog and `ready/` as the spec-addressed implementation-ready status. The
-spec-address gate runs only when a non-`epic`, non-`research`, non-`workset`
-action creates or moves a ticket into `ready/`; `todo/` tickets may carry
-optional `spec:` links as recovery hints. For `ready/` creation or promotion,
-`lead-write-ticket` accepts
-confirmed `spec:` or `spec-remove:` stems, or a ticket-local `## Spec Impact`
-section naming the target spec area, expected caller-visible change, and whether
-a contract-first planned spec is required. It invokes `lead-write-spec`
-autonomously only for contract-first planned spec entries, and stops when no
-stem or `## Spec Impact` can address the work, spec writing fails, or the
-behavior is too underspecified to spec.
+accepted backlog and `ready/` as the spec-addressed implementation-ready
+status. The spec-address gate runs only when a non-`epic`, non-`research`,
+non-`workset` action creates or moves a ticket into `ready/`; `todo/` tickets
+may carry optional `spec:` links as recovery hints. For `ready/` creation or
+promotion, `lead-write-ticket` accepts confirmed `spec:` or `spec-remove:`
+stems, or a ticket-local `## Spec Impact` section naming the target spec area
+and the expected caller-visible change. It never invokes `lead-write-spec`;
+spec addressing runs through `spec:`, `spec-remove:`, or `## Spec Impact`. It
+stops when no stem or `## Spec Impact` can address the work, or the behavior is
+too underspecified to spec.
 
 Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
 writes mechanism decisions, rejected alternatives, future-scope hints, Result
@@ -854,8 +853,8 @@ also qualify for auto-delete once its structural guardrails pass.
 {#260707-implement-branch-cleanup-naming-gate}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
-adds or updates spec entries, strips planned markers when implementation lands,
-handles removed spec stems, verifies the spec index, and commits the spec pass.
+adds or updates spec entries, handles removed spec stems, verifies the spec
+index, and commits the spec pass.
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
@@ -1030,12 +1029,22 @@ force or suppress the subagent inference step.
 current specs under `ai-docs/.old/spec/` after user confirmation, surveys
 source, tickets, archived specs, and commit history, asks the user to confirm
 the once-per-run behavioral domain list, then classifies per-item
-caller-visibility and implemented/planned status autonomously - ambiguous
-calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
-into the wrap-up summary rather than blocking on a per-item confirmation -
-writes anchor-keyed spec entries, verifies the index, and associates planned
-stems with active tickets when required.
+caller-visibility and implemented/planned status autonomously rather than
+blocking on a per-item confirmation, writes anchor-keyed spec entries, verifies
+the index, and associates spec stems with active tickets when required.
 {#260707-forge-spec-autoproceed-classification-2}
+
+Each autonomous classification call that was genuinely ambiguous is recorded
+with its behavior name, chosen classification, and a reason, and that record is
+what the wrap-up summary reports from. The record covers both axes, so items
+excluded from the spec as internal-only or planned appear on the same terms as
+written ones; entries actually written to a spec additionally carry an inline
+`<!-- AMBIGUOUS: <reason> -->` marker. A domain whose behaviors are all
+excluded produces no spec file and is named as such in the summary. A run
+resumed after the recording session reconstructs the list from the inline
+markers and labels what reconstruction cannot recover, rather than reporting a
+partial list as a complete count.
+{#260728-forge-spec-ambiguity-record}
 
 At wrap-up, `lead-forge-spec` asks whether to run `lead-forge-mental-model`
 next and invokes it on a yes answer, regardless of how the run was reached

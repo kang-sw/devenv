@@ -228,17 +228,19 @@ workRoots as the visible resource set. A known workRoot remains visible until a
 future explicit forget/remove policy removes it, even when it is currently
 missing, inaccessible, moved, or inactive.
 
-> [!note] Planned 🚧 {#260524-dashboard-workspace-root-prune-policy}
-> The registry will distinguish owner-managed workspaces from automatically
-> detected workRoots. A workspace has a root workRoot anchor, such as an
-> owner-added directory or Git root, and may contain discovered child workRoots
-> such as linked Git worktrees. If the root workRoot becomes unavailable, the
-> workspace remains visible in a disabled or recovery-needed state while any
-> child workRoot is still active, where active means activation permits
-> targeting and availability is currently usable. This gives callers room to
-> reconnect the root or derive a new workspace from a dangling child. Automatic
-> pruning removes a workspace only when it has no active workRoots. Explicit
-> forget/remove UI remains a separate owner-driven cleanup policy.
+The registry distinguishes owner-managed workspaces from automatically detected
+workRoots. A workspace has a root workRoot anchor, such as an owner-added
+directory or Git root, and may contain discovered child workRoots such as linked
+Git worktrees. If the root workRoot becomes unavailable, the workspace remains
+visible in a recovery-needed state while any child workRoot is still active,
+where active means availability is currently usable. Activation does not enter
+this judgment — an `offline` workRoot that is still available keeps its
+workspace visible. This gives callers room to reconnect the root or derive a new
+workspace from a dangling child. Automatic pruning removes a workspace only when
+it has no active workRoots, and pruning also drops the affected workRoots'
+terminal sessions and open-registry entries. Explicit forget/remove UI remains a
+separate owner-driven cleanup policy.
+{#260524-dashboard-workspace-root-prune-policy}
 
 WorkRoot view-models separate live availability from user-controlled
 activation. `availability` describes the daemon's current filesystem/Git

@@ -5,14 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
-
-var ticketRefRE = regexp.MustCompile(`\[(\d{6}-[\w-]+/p\d+)\]`)
 
 func ProjectTree(root string) (string, error) {
 	aiDocs := filepath.Join(root, "ai-docs")
@@ -175,17 +172,9 @@ func renderSpecDir(b *strings.Builder, repoRoot, dir string, indent int, markers
 		if title == "" {
 			title, _ = fm["summary"].(string)
 		}
-		total, wip, refs := specStats(fm)
 		stats := []string{}
-		if total > 0 {
+		if total := specStats(fm); total > 0 {
 			stats = append(stats, fmt.Sprintf("%df", total))
-		}
-		if wip > 0 {
-			wipText := fmt.Sprintf("WIP %d", wip)
-			if len(refs) > 0 {
-				wipText += " -> " + strings.Join(refs, ", ")
-			}
-			stats = append(stats, wipText)
 		}
 		titlePart := ""
 		if title != "" {
@@ -218,20 +207,12 @@ func legacyMarkerAdvisoryFor(repoRoot, path string, markers []legacyMarker, reso
 	return resolver.advise(filepath.ToSlash(rel), markers)
 }
 
-func specStats(fm map[string]any) (int, int, []string) {
+// specStats counts the `features:` frontmatter entries a spec declares. The
+// planned/WIP half was retired with the `🚧` marker mechanism; the plain count
+// stays because downstream projects still maintain `features:` frontmatter.
+func specStats(fm map[string]any) int {
 	features, _ := fm["features"].([]string)
-	refs := []string{}
-	wip := 0
-	for _, feature := range features {
-		if strings.HasPrefix(feature, "🚧") {
-			wip++
-			matches := ticketRefRE.FindAllStringSubmatch(feature, -1)
-			for _, match := range matches {
-				refs = append(refs, match[1])
-			}
-		}
-	}
-	return len(features), wip, refs
+	return len(features)
 }
 
 func renderTickets(b *strings.Builder, ticketsRoot string) {

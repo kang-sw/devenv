@@ -107,7 +107,7 @@ caller's side, where the callee never reads it.
 - **Make the commit conditional on invocation mode.** Leading candidate:
   `playbook.print` already takes a `context` object ("Optional caller-supplied
   substitution values for variables declared in the playbook's frontmatter"), so
-  the caller sets a variable the callee's step 7 branches on. This gives the
+  the caller sets a variable the callee's step 6 branches on. This gives the
   fail-safe for free — an unset variable renders as direct mode, i.e. commit as
   today — so a caller that forgets to signal reproduces the current behavior
   rather than silently dropping a commit. The survey may override this choice.
@@ -117,7 +117,7 @@ caller's side, where the callee never reads it.
 - **State the ownership rule in the callee's own text.** That is the diagnosed
   defect — the rule exists only caller-side, where the callee never reads it — so
   the requirement is specifically that `lead-write-spec`'s own Invariants (or
-  step 7 itself) carry it. Not `agents-plugin/rsrc/subagent-rules.md`: its header
+  step 6 itself) carry it. Not `agents-plugin/rsrc/subagent-rules.md`: its header
   states "delegates do not read this file directly" and it scopes to spawning
   general-purpose workers, not playbook-to-playbook invocation. A shared
   auto-include is acceptable *in addition*, if the survey finds multiple callees.
@@ -187,3 +187,64 @@ Both blockers need a decision this ticket did not settle, so implementation is n
 resumable as written. Two follow-ups also surfaced and should be routed when the
 re-plan happens: whether `lead-discuss.md:62` joins Phase 1's targets, and whether
 `lead-sprint.md:97` is a separate doc-gate pre-emption bug in its own right.
+
+## Landing-order inversion (2026-07-28)
+
+`260726-refactor-retire-spec-planned-marker-mechanism` Phase 2 landed **first**,
+against the `## Decisions` bullet that reserved that order for this ticket. It was
+not preempted by choice: this ticket is blocked on its own Phase 1 stop condition
+and needs an owner re-plan, so waiting on it would have stalled the retirement
+indefinitely. The same bullet supplies the sanctioned fallback — "If the
+retirement does land first anyway, this ticket must re-run the survey."
+
+What the retirement removed:
+
+- `lead-write-ticket.md:106`'s inline `lead-write-spec` invocation — the
+  Spec-address Check's contract-first branch, this ticket's *named* Category A
+  instance — no longer exists. Step 3 of **On: Spec-address Check** now ends at
+  writing or updating `## Spec Impact`. `judge: contract-first-spec` was deleted
+  from both `lead-write-ticket` and `lead-write-spec`.
+
+What survives:
+
+- `lead-discuss.md:62` (the ticket-Drop branch) still calls `lead-write-spec`
+  inline and still continues to `tickets.close` and its own `git.commit` — so
+  Category A is not empty, and the defect still reproduces. Categories B and C
+  are untouched by the retirement; `lead-sprint.md:97` -> `lead-update-spec`
+  remains the decisive Category C case.
+
+Required on re-plan: **re-run the survey** over `agents-plugin/rsrc/**/*.md`
+rather than reusing the preserved output at
+`ai-docs/.plans/2026-07/27-1854-260726-bug-inline-playbook-invocation-commit-ownership-phase1.md`,
+whose call-site inventory now overstates Category A by one site. The re-plan
+question stated in `## Blocked` — whether commit ownership is a property of the
+call site rather than of the callee — is unaffected and still open.
+
+Renumbered since. Two playbooks this ticket cites by step number moved:
+
+- `lead-write-spec`'s unconditional `git.commit` is now **step 6**, not step 7.
+  Its former step 6 accuracy check was a verbatim restatement of Invariants line
+  14 and was deleted.
+- `lead-update-spec`'s commit, in its `### 6. Finalize` step, is now **step 6**,
+  not step 7. The retirement deleted that playbook's former §5 marker-strip step
+  and renumbered §6 and §7 down.
+
+The two Phase 1 bullets that carried the old `lead-write-spec` number were
+corrected in place — "the callee's step 7 branches on" and "(or step 7 itself)
+carry it" now say step 6. Phase 1 has no `### Result`, so its plan text is still
+editable, and both are implementation instructions: left uncorrected they would
+send an implementer to `**Output Handoff**`, a step that commits nothing, while
+the real unconditional commit kept firing.
+
+The remaining old numbers are left as written, as records of what each passage
+said when it was written:
+
+- `## Background` `:19`, "`lead-write-spec` step 7 is an unconditional commit",
+  and the fenced block under it, which reproduces the pre-renumber playbook line
+  verbatim as evidence and is retained as a quotation of what the file said then.
+- `## Decisions`, "step 7 already commits it conditionally".
+- `## Blocked`, "`lead-sprint.md:97` -> `lead-update-spec`, whose step-7 commit
+  pre-empts lead-sprint's own Doc Commit Gate" — that one names
+  `lead-update-spec`'s old number, not `lead-write-spec`'s.
+
+`## Prior Art` carries no step number at all.

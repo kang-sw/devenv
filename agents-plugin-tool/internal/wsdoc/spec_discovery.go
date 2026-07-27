@@ -28,7 +28,7 @@ type SpecInfo struct {
 	Summary          string           `json:"summary,omitempty"`
 	Anchors          []SpecAnchorInfo `json:"anchors,omitempty"`
 	TicketRefs       []string         `json:"ticket_refs,omitempty"`
-	MarkerContexts   []string         `json:"marker_contexts,omitempty"`
+	MarkerContexts   []string         `json:"-"` // in-process only: feeds SpecsFind match scoring; never serialized
 	MatchingSnippets []string         `json:"matching_snippets,omitempty"`
 	MatchScore       int              `json:"match_score,omitempty"`
 	Matches          []MatchEvidence  `json:"matches,omitempty"`
@@ -51,7 +51,7 @@ type SpecAnchorInfo struct {
 	SpecStem      string `json:"spec_stem"`
 	Line          int    `json:"line"`
 	Heading       string `json:"heading,omitempty"`
-	MarkerContext string `json:"marker_context,omitempty"`
+	MarkerContext string `json:"-"` // in-process only; see SpecInfo.MarkerContexts
 }
 
 type SpecAnchorStatus struct {

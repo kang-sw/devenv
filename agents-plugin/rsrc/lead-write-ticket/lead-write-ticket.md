@@ -21,7 +21,7 @@ Board artifacts
 Scope
 - Read only ticket files selected as edit targets, graph tickets needed for binding-decision review, required conventions, focus updates, and explicitly routed spec/mental-model checks.
 - Review related-ticket decisions by default; cascade (`judge: cascade-ticket-edit`) only for broader board or multi-ticket propagation.
-- Ready promotion requires spec addressing (`judge: spec-address-gate`), not mandatory planned spec text.
+- Ready promotion requires spec addressing (`judge: spec-address-gate`).
 
 Movement
 - Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create_empty` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.
@@ -103,7 +103,7 @@ Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promoti
 
 1. For `todo/` (not promoting): existing `spec:` links are optional recovery hints only; implementation still routes through proceed.
 2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
-3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance. When `judge: contract-first-spec` is yes: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` inline, list the resulting stem in `spec:`, and drop redundant `## Spec Impact` text.
+3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance.
 4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/`; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
 
 ## On: Output Handoff
@@ -160,12 +160,6 @@ Mechanics: see **On: Spec-address Check**; stop condition is `judge: missing-spe
 `ready/`: already spec-addressed.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`. See the workflow manual's Ticket System Concepts section for what each status directory means.
-
-### judge: contract-first-spec
-
-Yes: planned behavior must be visible and stable before implementation begins.
-Usually yes: externally consumed schemas, CLI/API contracts, file or wire formats, cross-skill routing contracts, or multi-ticket planned behavior.
-No: ticket only needs a spec area for post-implementation closeout, final behavior will be refined during implementation, or planned text would mostly restate the ticket phase.
 
 ### judge: cascade-ticket-edit
 

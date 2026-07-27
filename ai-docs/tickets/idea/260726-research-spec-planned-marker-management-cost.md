@@ -215,3 +215,38 @@ role and whether `lead-write-spec` keeps a planned-content branch at all.
   ticket. It produces a recommendation; a separate actionable ticket implements it.
 - The inline commit-ownership defect is a genuine bug on its own terms. Do not let
   its fate be decided as a side effect of the `🚧` verdict.
+
+## Answered by implementation (2026-07-28)
+
+This ticket's question was decided in the direction it was asking about: the
+`🚧` mechanism was retired by
+`260726-refactor-retire-spec-planned-marker-mechanism` Phase 2. The actionable
+ticket this one's `## Non-Scope` anticipated is that ticket, and the dependent
+named in topic 4 was dropped, not unblocked, exactly as topic 4 predicted.
+
+Three corrections to the evidence recorded above, so a future reader does not
+follow it into a wrong place:
+
+- **`lead-write-spec` step 7 is now step 6.** The `## Standing evidence` bullet
+  citing "step 7 commits unconditionally" was accurate when written. Phase 2
+  deleted the former step 6 (an accuracy check that had become a verbatim
+  restatement of Invariants line 14 once its `🚧` clause was removed) and
+  renumbered, so step 7 now names `**Output Handoff**`. The commit-ownership
+  argument the bullet makes is unaffected; only the number moved.
+- **`lead-update-spec` §5 no longer exists.** Two sentences above cite it as a
+  live section — "§5 exists to reconcile markers and was simply never run" and
+  "retiring the mechanism deletes `lead-update-spec` §5, which is downstream's
+  only marker-cleanup path". Phase 2 deleted §5 and renumbered §6→§5 and §7→§6,
+  so the file's current `### 5. Handle removals` is a removals step, not the
+  marker-reconciliation step a reader following those sentences would expect to
+  find there. Both sentences are dated analysis of why the mechanism was
+  retired and are left as written; only the section number is stale.
+- **The inline commit-ownership defect outlived the verdict, as this ticket's
+  `## Non-Scope` required.** It is live in
+  `260726-bug-inline-playbook-invocation-commit-ownership`, still in `ready/`
+  and still blocked on its own re-plan question.
+
+Left in `idea/` rather than closed: the retirement was carried out by a separate
+ticket that did not name this one, so closing it is a decision for a session that
+holds that scope. The reasoning recorded here retains value as the cost analysis
+that the retirement's rejected-alternatives list rests on.
