@@ -50,6 +50,11 @@ export type AgentChatPaneActions = {
     blocks: readonly TranscriptBlock[],
   ) => void;
   isActivePane: (pane: AgentChatPaneState) => boolean;
+  // Analogous to `TerminalPaneActions.onFocusInput`/`.shouldAutoFocus`
+  // (`terminalPaneBody.tsx`) - wired to the prompt input's native `onFocus`
+  // below, and consumed by the root-switch auto-focus effect further down.
+  onFocusInput: (pane: AgentChatPaneState) => void;
+  shouldAutoFocus: (pane: AgentChatPaneState) => boolean;
 };
 
 // Phase 3 (`260711-feat-ws-dashboard-agent-activity-chat-ui`) mid-turn
@@ -142,6 +147,11 @@ export function AgentChatPaneBody({
   const [promptValue, setPromptValue] = useState("");
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  // Root-switch auto-focus target - the prompt input rendered in the
+  // `pane.session` branch below. `null` whenever this pane has no session
+  // yet (the "start a harness" empty state renders no input at all), which
+  // the effect below already tolerates as a plain no-op.
+  const promptInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -150,6 +160,19 @@ export function AgentChatPaneBody({
       }
     };
   }, []);
+
+  // Root-switch auto-focus: mirrors `terminalPaneBody.tsx`'s identically
+  // named effect - fires once per false->true transition of
+  // `actions.shouldAutoFocus(pane)` (this pane was the last one focused
+  // within the root that just became selected) and moves real keyboard
+  // focus onto the prompt input, same as clicking into it would.
+  const shouldAutoFocus = actions.shouldAutoFocus(pane);
+  useEffect(() => {
+    if (!shouldAutoFocus) {
+      return;
+    }
+    promptInputRef.current?.focus();
+  }, [shouldAutoFocus]);
 
   // A history-entry resume can swap in a different `activityId` under the
   // same pane/tab; the mid-turn queue and prompt history are scoped to the
@@ -432,6 +455,7 @@ export function AgentChatPaneBody({
         </div>
         <div className="agent-chat-prompt-box">
           <input
+            ref={promptInputRef}
             className="agent-chat-prompt-input"
             data-testid="agent-chat-prompt-input"
             type="text"
@@ -442,6 +466,7 @@ export function AgentChatPaneBody({
               setHistoryIndex(null);
             }}
             onKeyDown={handlePromptKeyDown}
+            onFocus={() => actions.onFocusInput(pane)}
           />
           <button
             type="button"

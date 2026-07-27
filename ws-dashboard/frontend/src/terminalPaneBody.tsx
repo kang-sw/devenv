@@ -51,6 +51,12 @@ export type TerminalPaneActions = {
   ) => void;
   onFocusInput: (pane: TerminalPaneState) => void;
   isActivePane: (pane: TerminalPaneState) => boolean;
+  // Root-switch auto-focus (per-workRoot last-focused-pane UX fix): true for
+  // exactly one pane per render - the pane App-level `lastFocusedPaneByRootRef` recorded
+  // as last-focused within the NOW-selected root - so the effect below can
+  // restore real keyboard focus the instant a work root becomes active
+  // again, without requiring an extra click on the pane itself.
+  shouldAutoFocus: (pane: TerminalPaneState) => boolean;
   // Looked up once at TerminalPaneBody mount, by `pane.logicalKey`, against
   // the session-lifetime `terminalVisualRestoreRef` snapshot. Returns
   // `undefined` for a brand-new session (restore-intent fallback or a
@@ -1000,6 +1006,34 @@ export function TerminalPaneBody({
       }
     };
   }, [pane.output]);
+
+  // Root-switch auto-focus: when `actions.shouldAutoFocus(pane)` flips to
+  // `true` (this pane is the one the App-level `lastFocusedPaneByRootRef`
+  // recorded as last-focused within the root that just became selected),
+  // grab real keyboard focus the same way a user click into the terminal
+  // would - `terminal.focus()` fires this container's own `focusin`
+  // listener (`markFocusedTerminal`, mount effect above), which sets
+  // `keepTerminalFocusRef.current = true` and lets the existing 100ms
+  // watchdog defend the focus from there, so no separate keep-focus
+  // bookkeeping is duplicated here. Deps `[shouldAutoFocus]` only: this must
+  // fire once per false->true transition, not on every render while it
+  // stays `true` (which would fight the user's own subsequent clicks
+  // elsewhere in the same still-selected root). Deferred one tick, mirroring
+  // `refocusActiveTerminal`'s idiom, so this runs after the sidebar click's
+  // own window-level `focusin`/`pointerdown` listeners have already cleared
+  // any stale `keepTerminalFocusRef` state from the previously focused pane.
+  const shouldAutoFocus = actions.shouldAutoFocus(pane);
+  useEffect(() => {
+    if (!shouldAutoFocus) {
+      return;
+    }
+    window.setTimeout(() => {
+      terminalRef.current?.focus();
+      containerRef.current
+        ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
+    }, 0);
+  }, [shouldAutoFocus]);
 
   // Gated on `pane.session.status` (the parent-owned session view), which
   // observes both the live WebSocket "message" listener and HTTP
