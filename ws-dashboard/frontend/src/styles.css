@@ -2015,14 +2015,23 @@ button {
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  border: var(--ws-space-04) solid transparent;
   background: var(--ws-color-canvas);
   padding: 0;
 }
 
+/* Gutter lives here (not as `.terminal-surface`'s own border) because
+   FitAddon's proposeDimensions() only subtracts `terminal.element`'s (this
+   `.xterm` div's) own padding from the parent's computed width - it never
+   accounts for a border/padding on the parent itself. With
+   `box-sizing: border-box` in effect, getComputedStyle(parent).width
+   returns the parent's outer (border-box) size, so a border on
+   `.terminal-surface` was invisible to FitAddon's math and it proposed a
+   column count ~border-width too wide, overlapping xterm's own internal
+   viewport scrollbar. */
 .terminal-surface .xterm {
   width: 100%;
   height: 100%;
+  padding: var(--ws-space-04);
 }
 
 .terminal-error {
