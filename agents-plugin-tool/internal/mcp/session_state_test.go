@@ -258,9 +258,12 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 		"the budget ends relaying, not the run",
 		"[maintained]",
 		"[escalate: <reason>]",
-		"Render `review-adjudicator`",
+		"Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract",
+		"passing an empty string for the authority inputs the target kind does not use",
 		"Adjudication runs inside the current relay slot and consumes no review cycle",
-		"[override: <reason>] ships as the next relay and spends that cycle rather than adding one",
+		"On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one",
+		"on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run",
+		"An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report",
 		"[out-of-scope: <reason>] leaves the relay list, costs no relay",
 		"carried into the final report as unresolved by decision",
 		"Adjudicate at most once per relay slot",
@@ -293,9 +296,12 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 		"the budget ends relaying, not the run",
 		"[maintained]",
 		"[escalate: <reason>]",
-		"Render `review-adjudicator`",
+		"Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract",
+		"passing an empty string for the authority inputs the target kind does not use",
 		"Adjudication runs inside the current relay slot and consumes no review cycle",
-		"[override: <reason>] ships as the next relay and spends that cycle rather than adding one",
+		"On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one",
+		"on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run",
+		"An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report",
 		"[out-of-scope: <reason>] leaves the relay list, costs no relay",
 		"carried into the final report as unresolved by decision",
 		"Adjudicate at most once per relay slot",
@@ -1967,6 +1973,15 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 		if strings.Contains(review, forbidden) {
 			t.Fatalf("lead-only review todo instruction leaked review-budget wording %q: %q\n"+
 				"lead-only dispatches no reviewers and never relays, so it must name neither a review-cycle budget nor the final-cycle behavior", forbidden, review)
+		}
+	}
+	// Same negative-pin shape for the adjudication vocabulary: lead-only produces no
+	// relay, so it can produce no dispute, so none of the arbitration tokens or the
+	// delegate name may appear on this branch.
+	for _, forbidden := range []string{"[maintained]", "[escalate: <reason>]", "review-adjudicator", "Adjudicate at most once per relay slot", "[out-of-scope: <reason>]"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked adjudication wording %q: %q\n"+
+				"lead-only relays nothing, so it has no contested finding to adjudicate", forbidden, review)
 		}
 	}
 	complete := readTodoInstruction(t, server, 5, key, "complete")

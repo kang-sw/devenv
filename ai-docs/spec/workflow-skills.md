@@ -669,7 +669,7 @@ existing `impl/*` or legacy `implement/*` branches retain the standard isolated 
 `yes` also emits a concise not-applicable warning without changing independently
 derived delegation, review, documentation, final-action, or merge behavior. A
 successful exception keeps focused verification, one logical explicit-path
-commit with `## AI Context`, lead-owned review, and a completion report naming
+commit with `## AI Context`, lead-owned review, and a final report naming
 the retained branch and commit range; it omits final-action and merge work and
 never pushes.
 Automatic direct-edit itself remains limited to single-file internal-only work
@@ -720,15 +720,17 @@ returned by `playbook.render` is authoritative for that delegate and the table i
 the allocation default. The review budget counts review cycles, not relays, and
 is per implementation slice: 2 cycles for single-reviewer, 3 cycles for
 partitioned, where the lead may arbitrate a contested finding through the
-`review-adjudicator` delegate before the second relay. Adjudication runs inside
-a relay slot, consumes no review cycle, is bounded to one per slot, and returns
-one verdict per dispute: uphold the refusal, override it into the next relay, or
-record it as a scope deferral carried into the completion report. The
-single-reviewer budget has no adjudication slot. The initial review is cycle 1, so
+`review-adjudicator` delegate. Adjudication runs inside a relay slot, consumes no
+review cycle, is bounded to one per slot, and returns one verdict per dispute:
+uphold the refusal, override it, or record it as a scope deferral carried into
+the final report. Overriding a maintained refusal ships the fix as the next relay
+and spends that cycle; overriding a mid-relay escalation returns the verdict
+inside the current slot and spends nothing. The single-reviewer budget has no
+adjudication slot. The initial review is cycle 1, so
 the budget permits one fewer relay than its cycle count. The last budgeted cycle
 completes the run rather than halting it: the lead stops relaying, proceeds to
 closeout, and carries unresolved findings with their dispositions into the
-completion report.
+final report.
 {#260612-reviewer-allocation-tier-default}
 
 Delegates in the review fix-loop are stateless by contract: each implementer and

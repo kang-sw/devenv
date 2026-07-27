@@ -65,7 +65,9 @@ verdict lines only.
 | requires scope expansion beyond the plan | the plan and the ticket or inline authority |
 | disproven by specific evidence | the offered evidence itself |
 
-A defense matching no row is inadmissible: return `[override: <reason>]` naming the row it failed to match.
+A won't-fix reason matching no row is inadmissible: return `[override: <reason>]` stating that the reason is none of the three admissible defenses.
+An escalation defends nothing, so judge it on row 2 alone: `[override: <reason>]` when the plan already covers the required fix, `[out-of-scope: <reason>]` when it does not.
+Row 3 licenses the commit range only for locating the evidence the implementer named; forming your own opinion of the code from it is the re-review this role forbids.
 
 ## Output
 

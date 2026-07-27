@@ -59,7 +59,7 @@ Per-finding disposition — one line per finding:
 - `[fixed]` — addressed and committed.
 - `[won't fix: <reason>]` — refused; reason must cite a specific local pattern or scope boundary.
 - `[deferred: <reason>]` — not addressed this cycle; state the resolution condition.
-- `[escalate: <reason>]` — needs a plan update or ticket material; routed to adjudication before the next review.
+- `[escalate: <reason>]` — needs a plan update or ticket material; the lead decides the plan-scope question before the next review.
 
 Followed by:
 - What changed.

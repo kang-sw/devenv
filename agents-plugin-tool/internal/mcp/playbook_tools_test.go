@@ -1257,7 +1257,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		// Output bullet. A single unanchored Contains would pass with only one site
 		// updated — the exact drift that made the escalation token invisible before.
 		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
-		"- `[escalate: <reason>]` — needs a plan update or ticket material; routed to adjudication before the next review.",
+		"- `[escalate: <reason>]` — needs a plan update or ticket material; the lead decides the plan-scope question before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
@@ -1324,6 +1324,8 @@ func TestRenderPlaybookShippedReviewAdjudicatorDeclaredContext(t *testing.T) {
 		"`[override: <reason>]`",
 		"`[out-of-scope: <reason>]`",
 		"Rely only on this prompt and the named paths; do not depend on prior conversation.",
+		"An escalation defends nothing, so judge it on row 2 alone: `[override: <reason>]` when the plan already covers the required fix, `[out-of-scope: <reason>]` when it does not.",
+		"Row 3 licenses the commit range only for locating the evidence the implementer named; forming your own opinion of the code from it is the re-review this role forbids.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review-adjudicator render missing %q:\n%s", want, body)
