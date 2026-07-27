@@ -1170,8 +1170,14 @@ returned instead; no commit is written and `HEAD` does not move. This makes the
 verify floor non-bypassable for ticket-touching commits — a hand-edited ticket
 that never went through a mutation tool is still caught at commit — closing the
 direct-file-edit bypass that prose-only guardrails left open. A soft warning
-(missing spec addressing) does not block the commit; it lands with the warning
-surfaced. The gate is non-overridable: there is no flag that lets a hard-failing
+(missing spec addressing, unresolved phases) does not block the commit; it lands
+with the warning surfaced as an advisory line in the commit response, and the
+commit result is otherwise unchanged. Advisories are text-mode only, following
+the todo re-injection precedent (`#260626-git-commit-todo-reinjection`):
+structured JSON output carries no advisory field. Both `git.commit` entry points
+— the MCP tool and the `ws-mcp git commit` CLI mirror — surface the same
+advisories, since they share one gate. {#260727-git-commit-verify-advisories}
+The gate is non-overridable: there is no flag that lets a hard-failing
 ticket commit through. A commit that stages no ticket files is unaffected.
 Capability range: `>=0.35.1-dev <0.36.0`. {#260723-git-commit-ticket-verify-gate}
 
