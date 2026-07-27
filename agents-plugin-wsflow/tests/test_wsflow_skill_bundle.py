@@ -66,6 +66,10 @@ POINTER_TAIL_TITLES = {
     "lead-review": "Review",
     "lead-ship": "Ship",
     "lead-tune": "Workflow Tuning",
+    "lead-implement": "Implement",
+    "lead-check-blockers": "Check Blockers",
+    "lead-update-spec": "Update Spec",
+    "lead-workflow-manual": "Workflow Manual",
 }
 
 FORBIDDEN_PATTERNS = {
@@ -121,11 +125,13 @@ class WsflowSkillBundleTest(unittest.TestCase):
     def test_skill_files_are_thin_playbook_shims(self):
         # lead-proceed, lead-write-ticket, lead-write-spec, lead-add-rule,
         # lead-bootstrap, lead-forge-mental-model, lead-forge-spec,
-        # lead-review, lead-ship, and lead-tune all carry the
-        # mcp-server-repair pointer in place of the generic "stop and report
-        # that blocker" tail, so they are checked separately below (see
-        # POINTER_TAIL_TITLES) with their own exact tail; the other 4 shims
-        # keep the strict un-pointed form unchanged.
+        # lead-review, lead-ship, lead-tune, lead-implement,
+        # lead-check-blockers, lead-update-spec, and lead-workflow-manual all
+        # carry the mcp-server-repair pointer in place of the generic "stop
+        # and report that blocker" tail, so they are checked separately below
+        # (see POINTER_TAIL_TITLES) with their own exact tail. That accounts
+        # for every non-inline, non-parallel-init shim; none remain on the
+        # un-pointed form.
         offenders = []
         for skill in sorted(
             EXPECTED_SKILLS
