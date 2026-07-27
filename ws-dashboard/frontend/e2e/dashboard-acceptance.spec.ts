@@ -1062,35 +1062,38 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         value: false,
       });
     });
-    await page.locator('[data-command-id="settings.open"]').click();
-    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
-    await expect(dialog).toBeVisible();
-    await dialog
-      .locator(".settings-section-nav-button", { hasText: "Notifications" })
-      .click();
-    const checkbox = dialog.locator(
-      '.settings-notification-toggle input[type="checkbox"]',
-    );
-    await expect(checkbox).toBeDisabled();
-    await expect(dialog.locator(".settings-field-note")).toContainText(
-      "not a secure context",
-    );
+    try {
+      await page.locator('[data-command-id="settings.open"]').click();
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+      await expect(dialog).toBeVisible();
+      await dialog
+        .locator(".settings-section-nav-button", { hasText: "Notifications" })
+        .click();
+      const checkbox = dialog.locator(
+        '.settings-notification-toggle input[type="checkbox"]',
+      );
+      await expect(checkbox).toBeDisabled();
+      await expect(dialog.locator(".settings-field-note")).toContainText(
+        "not a secure context",
+      );
 
-    await dialog.locator('[data-command-id="settings.close"]').click();
-    await expect(
-      page.locator('[role="dialog"][aria-label="Settings"]'),
-    ).toHaveCount(0);
-    // Restore: every later step of this giant serial test shares this same
-    // document, and must not silently run under a faked insecure context.
-    await page.evaluate(() => {
-      Object.defineProperty(window, "isSecureContext", {
-        configurable: true,
-        value: true,
+      await dialog.locator('[data-command-id="settings.close"]').click();
+      await expect(
+        page.locator('[role="dialog"][aria-label="Settings"]'),
+      ).toHaveCount(0);
+      note(
+        "notifications settings: a faked insecure context disables the OS-notification checkbox and states the insecure-context reason in the note",
+      );
+    } finally {
+      // Restore: every later step of this giant serial test shares this same
+      // document, and must not silently run under a faked insecure context.
+      await page.evaluate(() => {
+        Object.defineProperty(window, "isSecureContext", {
+          configurable: true,
+          value: true,
+        });
       });
-    });
-    note(
-      "notifications settings: a faked insecure context disables the OS-notification checkbox and states the insecure-context reason in the note",
-    );
+    }
   });
 
   // --- Add-server modal open/validate/cancel (260722 blocker-2: previously ----
