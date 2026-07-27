@@ -48,7 +48,7 @@ review findings files and produce committed, verified results.
 1. Load context: read the plan path and each review findings path.
 2. Classify each Critical or Important finding against the lead disposition notes.
 3. Apply fixes for accepted findings within scope; escalate for a plan update if a required fix needs ticket material or a plan deviation.
-4. For every relayed Critical or Important finding, decide `[fixed]`, `[won't fix: <reason>]`, or `[deferred: <reason>]`.
+4. For every relayed Critical or Important finding, decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.
 5. Run the verification instructions and any tests required by the plan or findings.
 6. Commit logical checkpoints; each fix commit `## AI Context` records the relevant per-finding dispositions known at that checkpoint.
 7. Return the fix-cycle report below.
@@ -59,6 +59,7 @@ Per-finding disposition — one line per finding:
 - `[fixed]` — addressed and committed.
 - `[won't fix: <reason>]` — refused; reason must cite a specific local pattern or scope boundary.
 - `[deferred: <reason>]` — not addressed this cycle; state the resolution condition.
+- `[escalate: <reason>]` — needs a plan update or ticket material; routed to adjudication before the next review.
 
 Followed by:
 - What changed.

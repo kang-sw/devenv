@@ -83,6 +83,20 @@ func shippedImplementerRelayContext() map[string]string {
 	}
 }
 
+func shippedReviewAdjudicatorContext() map[string]string {
+	return map[string]string{
+		"PlanPath":         "ai-docs/.plans/plan.md",
+		"ReviewPaths":      "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"DispositionNotes": "C1 [won't fix: conflicts with the local table-driven test pattern]; F2 [escalate: the fix needs a plan update].",
+		"CommitRange":      "abc123..def456",
+		"ReviewCycle":      "2",
+		"target_kind":      "ticket",
+		"ticket_path":      "ai-docs/tickets/ready/260726-bug-demo.md",
+		"selected_phase":   "Phase 2: Adjudicator delegate",
+		"inline_contract":  "",
+	}
+}
+
 func shippedPlanPopulatorContext() map[string]string {
 	return map[string]string{
 		"target_kind":     "ticket",
@@ -1239,10 +1253,18 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"`[fixed]`",
 		"`[won't fix: <reason>]`",
 		"`[deferred: <reason>]`",
+		// Both token enumerations anchored explicitly: Process step 4 first, then the
+		// Output bullet. A single unanchored Contains would pass with only one site
+		// updated — the exact drift that made the escalation token invisible before.
+		"decide `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or `[escalate: <reason>]`.",
+		"- `[escalate: <reason>]` — needs a plan update or ticket material; routed to adjudication before the next review.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
 		}
+	}
+	if got := strings.Count(body, "`[escalate: <reason>]`"); got != 2 {
+		t.Fatalf("implementer-relay must enumerate `[escalate: <reason>]` at both sites (Process step 4 and the Output bullet), got %d occurrence(s):\n%s", got, body)
 	}
 	for _, forbidden := range []string{
 		"BriefPath",
@@ -1258,6 +1280,65 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	if strings.Contains(body, "Continuity tip") {
 		t.Fatalf("implementer-relay render must not include delegation continuity tip:\n%s", body)
+	}
+}
+
+// TestRenderPlaybookShippedReviewAdjudicatorDeclaredContext pins the adjudicator
+// delegate's render contract: every declared input substitutes, a lead render mints
+// the child session key (role: delegate), the frontmatter tier reaches the caller,
+// and the aperture constraint plus the three verdict tokens survive into the body.
+func TestRenderPlaybookShippedReviewAdjudicatorDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "review-adjudicator", shippedReviewAdjudicatorContext(), wsconfig.Options{CacheHome: cacheHome}, worktreeRoot, "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "large" {
+		t.Fatalf("review-adjudicator recommended tier = %q, want large", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Your ws session_key",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Review findings paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"Implementer disposition record: C1 [won't fix: conflicts with the local table-driven test pattern]; F2 [escalate: the fix needs a plan update].",
+		"Commit range under review: abc123..def456",
+		"Review cycle: 2",
+		"Authority kind: ticket",
+		"Ticket path: `ai-docs/tickets/ready/260726-bug-demo.md`",
+		"Selected phase: Phase 2: Adjudicator delegate",
+		`Answer only "is the implementer's stated reason true"; never answer "is this code correct".`,
+		"Do not re-review the diff for correctness: the reviewer's factual claims about the diff stand unless the implementer supplied specific disproving evidence.",
+		"`[accept]`",
+		"`[override: <reason>]`",
+		"`[out-of-scope: <reason>]`",
+		"Rely only on this prompt and the named paths; do not depend on prior conversation.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("review-adjudicator render missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "{{.") {
+		t.Fatalf("review-adjudicator render left an unsubstituted variable placeholder:\n%s", body)
+	}
+	key := extractSplicedKey(t, body)
+	entry, ok := s.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("minted key %q not found in registry", key)
+	}
+	if entry.scope != roleDelegate {
+		t.Fatalf("review-adjudicator minted key scope = %q, want %q", entry.scope, roleDelegate)
 	}
 }
 
