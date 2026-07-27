@@ -19,8 +19,11 @@ const (
 	// graphRowCap bounds the child rows rendered under one ancestor; the
 	// hidden remainder collapses into a per-status overflow line.
 	graphRowCap = 5
-	// graphIntegrityCap bounds the integrity advisories per verify call,
-	// mirroring the row cap.
+	// graphIntegrityCap bounds the integrity advisories per *verified ticket*,
+	// mirroring the row cap — which is itself per subject (per ancestor).
+	// Capping per call instead would let one ticket's advisories crowd out
+	// another's entirely, and nothing in the advisory names which ticket lost
+	// them.
 	graphIntegrityCap = 5
 	// advisoryWrapWidth is a presentation detail only; tests assert
 	// substrings and line shapes, never a wrapped column.
@@ -79,6 +82,14 @@ func loadTicketGraph(root string) (*ticketGraph, error) {
 		graph.byStem[ticket.Stem] = ticket
 	}
 	for _, ticket := range tickets {
+		// byStem keeps one entry per stem, so the child edge must follow it. A
+		// stem present in two status directories is an abnormal board (git mv
+		// is atomic), but left unguarded it duplicates the child row, inflates
+		// the child count, and can fire the tier-1 closure ACTION while an open
+		// copy of that child still exists.
+		if graph.byStem[ticket.Stem].Path != ticket.Path {
+			continue
+		}
 		if parent := strings.TrimSpace(ticket.Parent); parent != "" {
 			graph.children[parent] = append(graph.children[parent], ticket.Stem)
 		}
@@ -123,6 +134,7 @@ func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvi
 	var integrity []VerifyAdvisory
 	var ancestors []boardAncestor
 	index := map[string]int{}
+	chainTruncated := false
 
 	for _, ticket := range verified {
 		info, ok := graph.byStem[ticket.Stem]
@@ -131,8 +143,10 @@ func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvi
 			// directory, say). The intra-file guardrails already report that.
 			continue
 		}
-		chain, cycle := walkAncestors(graph, ticket.Stem)
-		integrity = append(integrity, integrityAdvisories(graph, info, cycle)...)
+		chain, cycle, truncated := walkAncestors(graph, ticket.Stem)
+		// The cap is applied per verified ticket, not across the call, so one
+		// ticket's advisories can never crowd out another's.
+		integrity = append(integrity, capIntegrityAdvisories(integrityAdvisories(graph, info, cycle))...)
 		if len(cycle) > 0 {
 			// Ancestor status is undefined on a cyclic chain, so the CHECK:
 			// advisory is this ticket's whole board output.
@@ -149,38 +163,47 @@ func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvi
 			index[stem] = len(ancestors)
 			ancestors = append(ancestors, boardAncestor{stem: stem, depth: depth + 1, gated: gated})
 		}
+		if truncated {
+			chainTruncated = true
+		}
 	}
 
 	var out []VerifyAdvisory
-	if block := renderBoardBlock(graph, ancestors, verifiedStems); block != "" {
+	if block := renderBoardBlock(graph, ancestors, verifiedStems, chainTruncated); block != "" {
 		out = append(out, VerifyAdvisory{Kind: AdvisoryKindBoard, Text: block})
 	}
-	return append(out, capIntegrityAdvisories(integrity)...), nil
+	return append(out, integrity...), nil
 }
 
 // walkAncestors follows `parent:` upward at unbounded depth. On a cycle it
 // returns the full revisiting path (starting at stem) and an empty chain, so
-// the caller can report the cycle without having to reconstruct it. An
-// unresolvable parent simply ends the walk: it is reported by the FIX: check
-// rather than by a partial board.
-func walkAncestors(graph *ticketGraph, stem string) (chain []string, cycle []string) {
+// the caller can report the cycle without having to reconstruct it.
+//
+// truncated reports that the walk stopped at an ancestor whose `parent:` does
+// not resolve. That edge belongs to an ancestor, and the integrity checks by
+// design never inspect ancestors, so nothing else in the output would mention
+// it — which is why the caller must not then claim the chain simply ended.
+func walkAncestors(graph *ticketGraph, stem string) (chain []string, cycle []string, truncated bool) {
 	seen := map[string]bool{stem: true}
 	path := []string{stem}
 	current := stem
 	for {
 		info, ok := graph.byStem[current]
 		if !ok {
-			return chain, nil
+			return chain, nil, false
 		}
 		parent := strings.TrimSpace(info.Parent)
 		if parent == "" {
-			return chain, nil
+			return chain, nil, false
 		}
 		if seen[parent] {
-			return nil, append(path, parent)
+			return nil, append(path, parent), false
 		}
 		if _, ok := graph.byStem[parent]; !ok {
-			return chain, nil
+			// The verified ticket's own unresolvable parent is already a FIX:
+			// advisory; only an ancestor's is silent, so only that one has to
+			// suppress the closing claim.
+			return chain, nil, current != stem
 		}
 		seen[parent] = true
 		path = append(path, parent)
@@ -269,7 +292,7 @@ func capIntegrityAdvisories(items []VerifyAdvisory) []VerifyAdvisory {
 // renderBoardBlock emits a single advisory holding every ancestor entry, or ""
 // when nothing rendered — a verified ticket with no parent (most tickets)
 // produces no section at all rather than an empty one.
-func renderBoardBlock(graph *ticketGraph, ancestors []boardAncestor, verifiedStems map[string]bool) string {
+func renderBoardBlock(graph *ticketGraph, ancestors []boardAncestor, verifiedStems map[string]bool, chainTruncated bool) string {
 	// closableAbove accumulates in emission order, so an epic child that
 	// already rendered as a nearer ancestor carrying an ACTION line can be
 	// cross-referenced from a farther ancestor's row.
@@ -288,7 +311,14 @@ func renderBoardBlock(graph *ticketGraph, ancestors []boardAncestor, verifiedSte
 	if len(blocks) == 0 {
 		return ""
 	}
-	return "## Parent Board\n\n" + strings.Join(blocks, "\n\n") + "\n\n  No further ancestors."
+	block := "## Parent Board\n\n" + strings.Join(blocks, "\n\n")
+	if chainTruncated {
+		// The walk was cut by an ancestor's dangling parent: edge, so the
+		// chain is not known to have ended; saying it did would assert
+		// something the pass never established.
+		return block
+	}
+	return block + "\n\n  No further ancestors."
 }
 
 // renderAncestor returns the ancestor's block and whether it carried an ACTION
@@ -324,7 +354,7 @@ func renderAncestor(graph *ticketGraph, ancestor boardAncestor, verifiedStems, c
 	case len(children) == 0:
 		return "", false
 	case len(open) == 0:
-		header = fmt.Sprintf("all %d child tickets closed", len(children))
+		header = fmt.Sprintf("all %d %s closed", len(children), childTicketNoun(len(children)))
 		rows = closed
 		action = actionAllChildrenClosed
 	case len(acceptedOpen) == 0:
@@ -337,7 +367,7 @@ func renderAncestor(graph *ticketGraph, ancestor boardAncestor, verifiedStems, c
 		if !ancestor.gated {
 			return "", false
 		}
-		header = fmt.Sprintf("%d of %d child tickets still open", len(open), len(children))
+		header = fmt.Sprintf("%d of %d %s still open", len(open), len(children), childTicketNoun(len(children)))
 		rows = open
 		siblingListing = true
 	}
@@ -364,13 +394,27 @@ func renderAncestor(graph *ticketGraph, ancestor boardAncestor, verifiedStems, c
 	return b.String(), action != ""
 }
 
+// childTicketNoun keeps the header grammatical on a single-child epic, where
+// "all 1 child tickets closed" would read as a formatting bug.
+func childTicketNoun(n int) string {
+	if n == 1 {
+		return "child ticket"
+	}
+	return "child tickets"
+}
+
 // renderChildRow puts status first in a fixed 8-wide column (".dropped" is the
 // widest status) so the scanned field never shifts, then the variable-width
 // stem. No bullet marker: the indentation already groups the rows.
+//
+// "(just now)" is restricted to closed rows. Every settled example attaches it
+// to a .done row, where it reads as "just closed"; on an open row (a verified
+// idea/ child in the idea-only tier) it would read as a closure that did not
+// happen — the same false-close assertion the ancestor NOTE is worded to avoid.
 func renderChildRow(child TicketInfo, verifiedStems, closableAbove map[string]bool) string {
 	row := fmt.Sprintf("    %-8s| %s", child.Status, child.Stem)
 	switch {
-	case verifiedStems[child.Stem]:
+	case isClosedTicketStatus(child.Status) && verifiedStems[child.Stem]:
 		row += "  (just now)"
 	case isEpicTicketStem(child.Stem) && closableAbove[child.Stem]:
 		row += "  (epic, closable - see above)"

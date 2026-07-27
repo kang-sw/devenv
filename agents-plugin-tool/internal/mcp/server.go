@@ -2494,12 +2494,18 @@ func formatGitCommit(result wsgit.CommitResult) string {
 	}
 	if len(result.Advisories) > 0 {
 		b.WriteString("advisories:\n")
-		for _, advisory := range result.Advisories {
-			// Each advisory may itself be multi-line (Phase 2 grows
-			// multi-line blocks, e.g. a "## Parent Board" section, into this
-			// channel); indent every line consistently rather than only the
-			// first, so a multi-line advisory does not lose its indentation
-			// on line 2+.
+		for i, advisory := range result.Advisories {
+			// Advisories are separated by a blank line. Without it a
+			// multi-line block (a "## Parent Board" section) and the
+			// single-block advisory after it run together as one wall of
+			// text, which is only reachable now that Phase 2 puts both kinds
+			// on this channel at once.
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			// Each advisory may itself be multi-line; indent every line
+			// consistently rather than only the first, so a multi-line
+			// advisory does not lose its indentation on line 2+.
 			for _, line := range strings.Split(advisory, "\n") {
 				fmt.Fprintf(&b, "  %s\n", line)
 			}

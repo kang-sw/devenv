@@ -990,8 +990,9 @@ anchor stems (`{#YYMMDD-slug}` under `ai-docs/spec/`), because pointing a
 `related:` at a spec anchor is an intended reference form rather than a
 tolerated one; `parent:` resolves against ticket stems only, since the ancestor
 walk needs a status and a child set that a spec anchor has no equivalent of.
-Integrity advisories are capped at five per call, followed by a `... +N more`
-line.
+Integrity advisories are capped at five per verified ticket, followed by a
+`... +N more` line — per subject, like the sibling-listing cap, so one ticket's
+advisories can never crowd out another's on a multi-ticket call.
 
 Alongside them, verify walks `parent:` upward at unbounded depth and emits one
 `## Parent Board` block describing each ancestor: a closure ACTION line when
@@ -1012,8 +1013,9 @@ authorizes.
 
 A graph-load failure degrades to silence, never to a veto: when the whole-board
 scan or the spec-anchor scan fails on a file unrelated to the call, the
-advisories are dropped and verify returns its ordinary verdict. Advisories never
-become verify's Go error return, which stays reserved for caller-input problems.
+advisories are dropped and verify returns its ordinary verdict. Verify never
+fails the call because of an advisory; a call-level error stays reserved for
+malformed caller input.
 Both callers render the same advisory set; the commit gate appends the amend
 recipe sentence to `FIX:` advisories only, and that single appended sentence is
 the only difference the identical-verdict guarantee above permits.
