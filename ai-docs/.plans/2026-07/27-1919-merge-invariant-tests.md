@@ -314,3 +314,94 @@
 ## Escalations
 
 - None.
+
+### Result
+
+- **Baseline** (captured before any edit, `cargo test -p ws-dashboard-daemon
+  --no-fail-fast`, exit 101): exactly two pre-existing failures, both
+  unrelated to this phase:
+  - `crates/daemon/tests/routes.rs:1066`
+    (`dashboard_resources_refresh_prunes_workspace_without_available_work_roots`)
+  - `crates/daemon/tests/routes.rs:1383`
+    (`online_missing_work_root_returns_bounded_unavailable_without_path_leak`)
+  Every other target green: `src/lib.rs` unittests 237 passed; `src/main.rs`
+  0; `agent_hook_missing_state_dir` 1; `routes` 176 passed/2 failed; `server`
+  16; `terminal_lifetime` 4; `terminal_notify` 2;
+  `terminal_notify_callback_restart` 1; `terminal_notify_end_to_end` 2;
+  `terminal_windows_reaper_acceptance` 0.
+
+- **Five new tests added**, all inside `mod
+  terminal_portability_skeleton_tests`: `terminal_rs_has_exactly_one_production_env_clear`,
+  `remove_forgets_the_callback_token`,
+  `remove_for_work_roots_forgets_the_callback_token`,
+  `sessions_write_lock_sites_are_enumerated`,
+  `tokens_map_access_is_confined_to_its_choke_points` — plus the non-test
+  fixture sibling `insert_fake_live_session_with_token_for_test`, placed next
+  to `insert_fake_live_session_for_test`. **Discrepancy flagged, not
+  silently resolved**: this Verification Plan's own text above says "the six
+  new tests must be green", but the Implementation Plan's concretely-named
+  list (steps 2, 4x2, 5, 6) sums to 5, not 6. Went with the concrete list;
+  did not invent a sixth test to make the count match the prose.
+
+- **Post-change run** (same command, exit 101): lib unittests 242 passed
+  (237 baseline + 5 new). The two `routes.rs` failure sites are byte-for-byte
+  identical to baseline (`:1066`, `:1383`); every other target unchanged.
+  Failure-site list is IDENTICAL to baseline, as required.
+
+- **`npm run test:settings`** (frontend): exit 0, green. The four
+  `notificationAvailability` assertions (`settingsSections.test.ts:139-158`)
+  are present and passing pre-merge. `settingsSections.tsx`'s last commit
+  touching it (`b0ee16a8c7`) is comment-only, confirmed via `git show`
+  (reworded the reorder rationale, no logic change) — the actual
+  secure-context-ordering fix is unchanged since the ticket's own recorded
+  Phase 2, so no fresh mutation re-run was needed per this phase's own
+  conditional.
+
+- **Mutation log** — every mutation below was actually applied as a
+  temporary edit, verified with a single-test `cargo test -p
+  ws-dashboard-daemon --no-fail-fast <name>` run, its failure site read from
+  the output, then reverted before the next one. Post-revert state confirmed
+  clean via `git diff --stat` (only the intended +302 lines remain) and a
+  `grep -n "MUTATION PROBE\|__mutation_probe"` sweep (zero hits).
+  - Invariant 1a (second real `.env_clear(` call, via an inert
+    `#[allow(dead_code)]` probe function): failed at `terminal.rs:2384` (the
+    test's own `count == 1` assertion), count 2.
+  - Invariant 1b (delete the sole call site): failed at `terminal.rs:2379`,
+    count 0.
+  - Invariant 1c (add a fully-commented `.env_clear()` line): exit 0, stayed
+    green — proves comment-stripping.
+  - Invariant 2 behavioral (a): removed `remove`'s
+    `self.forget_token(terminal_id)` call — `remove_forgets_the_callback_token`
+    failed at `terminal.rs:3486` (its own post-removal assertion) while
+    `remove_forgets_the_attention_entry` stayed green.
+  - Invariant 2 behavioral (b): removed `remove_for_work_roots`'s
+    `self.forget_token(&session.id)` call —
+    `remove_for_work_roots_forgets_the_callback_token` failed at
+    `terminal.rs:3537`, sibling attention test stayed green. Both symmetric
+    mutations were run, not time-boxed to one.
+  - Invariant 2 structural: added a fifth method taking
+    `self.sessions.write()` — `sessions_write_lock_sites_are_enumerated`
+    failed at `terminal.rs:2413`, count 5.
+  - Invariant 3: added a second `self.tokens.read()` call site —
+    `tokens_map_access_is_confined_to_its_choke_points` failed at
+    `terminal.rs:2436` on the first (`total == 3`) assertion, count 4.
+    Honest residual: `assert_eq!` panics on its first failing assertion, so
+    the second (`reads == 1`) assertion's own failure was not independently
+    observed in this run, though the same source change necessarily also
+    raises `reads` to 2 - noted rather than claimed as separately verified.
+  - Invariant 4: no mutation re-run performed; confirmed instead (see
+    `npm run test:settings` above) that `settingsSections.tsx` is unchanged
+    in substance since the ticket's own recorded Phase 2 mutation run.
+
+- `cargo fmt -p ws-dashboard-daemon -- --check` and `cargo clippy -p
+  ws-dashboard-daemon --tests --no-deps` both already fail on this branch
+  pre-edit (confirmed by running the same fmt check against the pre-edit
+  tree via `git stash`: 29 pre-existing `terminal.rs` diffs; clippy's
+  compile-blocking `never_loop` deny lives in `agent_attention.rs`, untouched
+  by this phase). Exactly one new fmt diff appears, in the new
+  `insert_fake_live_session_with_token_for_test` sibling - it is the same
+  `crate::terminal_ipc_transport::split(...)` line-wrap already unformatted
+  in the function it copies (`insert_fake_live_session_for_test`), so it
+  mirrors pre-existing debt rather than introducing a new one. Left
+  unformatted rather than running a blanket `cargo fmt`, which would rewrite
+  ~29 unrelated pre-existing sites outside this phase's scope.
