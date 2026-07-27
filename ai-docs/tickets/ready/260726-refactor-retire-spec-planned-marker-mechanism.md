@@ -304,6 +304,171 @@ Verification boundary:
 6. `### Result` names the retained detection surface and the note's removal
    condition.
 
+### Result (3514973a) - 2026-07-28
+
+Done. All four surfaces carry the compat advisory; `ai-docs/spec/mcp-tools.md`
+documents it on both contracts. Commits: `3b4afa52` (implementation), `ed79d3c7`
+(review cycle 1 fixes), `3514973a` (review cycle 2 fixes), `073b6325` (mental
+model). All six verification clauses hold, clause 4 included.
+
+#### Retained detection surface — 2.1 may extend this list, never shrink it
+
+Everything the advisory is built on, so that 2.1 does not delete a live
+dependency. Go reports unused locals and imports but **not** unused struct fields
+or unused unexported functions, so the compiler will not catch a mistake here.
+
+- `internal/wsdoc/legacy_marker.go` in full: the three shape regexes
+  (heading, `> [!note] Planned 🚧` callout, `- 🚧 ` list), `fenceTracker`,
+  `htmlCommentTracker`, `splitMarkdownIndent` / `maxMarkdownBlockIndent`,
+  `yamlFrontmatterEnd`, `legacyMarkerLines`, `collectSpecImpact` /
+  `specImpactSection` / the `specImpactHeading` constant, `legacyMarkerResolver`
+  with its `incomplete` flag, and `advise`.
+- `SpecInfo.LegacyMarkerAdvisory` and `SpecInfo.legacyMarkers` (unexported),
+  `SpecAnchorStatus.LegacyMarkerAdvisory`, and `applyLegacyMarkerAdvisories`
+  in `spec_discovery.go`.
+- `scanLegacyMarkersUnderSpecRoot` and the repo-root threading through
+  `renderSpecs` / `renderSpecDir` in `project_tree.go`.
+- The four render points in `internal/mcp/server.go`: `formatSpecs`,
+  `formatSpecFind` (its own append — it inherits nothing), `formatSpecStatus`,
+  and the `project_tree` line.
+- `specAnchorRE` (`spec_tools.go`) as the anchor extractor.
+- `TicketsList` with `Statuses: idea/todo/ready` and `TicketInfo.Specs` /
+  `SpecRemoves` as the frontmatter half of the resolver.
+
+Not built on: `markerContext`, `specMarkerContexts`, `specStats`,
+`SpecInfo.TicketRefs`. All four are byte-identical to the phase base, verified by
+programmatic body extraction rather than by reading the diff.
+
+#### Removal condition
+
+The compat note is deleted once no supported downstream version can still emit
+markers — concretely, one bootstrap ratchet cycle after 2.7's v0045 / v0006 ship.
+Phase 2 **retains** the note; deletion belongs to a later, unwritten ticket.
+
+#### Lead deviations from the ticket text
+
+Two settled before implementation, both re-verified against the corpus. Both were
+unsatisfiable-as-written, not preferences.
+
+- **D1 — the predicate keys on marker shape at line start, not on the emoji
+  alone.** The `## Decisions` justification claimed the three prose files match
+  "only because they describe the mechanism", implying a bare `🚧` check is safe.
+  `documentation-system.md` carries **six** literal `🚧`, two of which embed the
+  marker shapes inside inline code mid-line. A bare check — or an unanchored
+  shape check — fires on it and fails this phase's own clause 4.
+- **D2 — a ticket matches via the marker's own anchor stem or the exact spec
+  path, never "any anchor belonging to that file".** Phase 1's wording is
+  over-broad and contradicts the ticket's own expected outcome:
+  `ws-web-dashboard/index.md` carries 72 anchors and 15 live-ticket `spec:`
+  entries resolve into it, so file-level matching reports 15 unrelated dashboard
+  tickets for a workspace-root-prune-policy marker and inverts clause 1.
+
+A third departure was taken during review: the orphaned branch's guidance gained
+an "or as an Implementation Gap callout if it did not" clause the ticket's
+verbatim string lacks. The ticket's text is a conditional with no else — an agent
+finding the behavior did not ship is told to "strip it" with nothing to preserve,
+against the first `## Constraints` line. 2.6 supplies the missing branch.
+
+Two more the implementation made and the lead accepted:
+
+- The ticket's "reuse `markerContext` / `specMarkerContexts`" instruction was
+  **not** honored; a standalone predicate was written instead. Sound, for a
+  reason the ticket does not state: building on `specMarkerContexts` would have
+  pinned a *second* consumer onto a function 2.1 wants reduced to one, via 2.1's
+  own retain-boundary.
+- `mcp-tools.md` extends two existing anchored sections' prose rather than
+  minting a new anchor. Correct, but not for the reason first given (Phase 2
+  retains the note, it does not delete it) — the real reason is that `{#slug}`
+  anchors are durable identities that tickets and mental models cross-reference,
+  and minting one for a note with a stated sunset creates a reference that must
+  later be broken.
+
+#### Errors in the ticket text
+
+- **Three drifted `server.go` offsets**: 2526 → 2536, 2627-2628 → 2637-2638,
+  2518 → 2529. The ticket's own round-3 review noted it "has already carried two
+  wrong line numbers"; these are three more.
+- **Phase 1's match rule contradicts the ticket's `## Decisions`** — see D2.
+- **The `## Decisions` predicate justification is factually wrong** — see D1.
+- Phase 1 does not cover the `features:`-frontmatter marker form that 2.7
+  requires v0045 to cover. The lead kept it as a third shape: it is the form
+  `spec_discovery_test.go`'s existing fixture uses, and it is safe for clause 4.
+
+#### Review
+
+Two partitioned cycles, one under budget. Cycle 1 (correctness / fit / test)
+returned 0 Critical, 6 Important, 24 Minor; **every** finding was adjudicated
+fix-it, none dismissed, and a relay applied all 19 items.
+
+Cycle 2 (correctness of the new logic / verification that each fix closed its
+finding) returned 5 more Important. The important thing about cycle 2 is what it
+caught: cycle 1's fix **introduced a regression** and applied its own new rule to
+only one of two consumers.
+
+- The fix added a CommonMark fence tracker to `legacyMarkerLines` but left
+  `specImpactSection` on bare `TrimSpace`, and gave the tracker no unbalanced-
+  fence recovery — so one unclosed fence anywhere before `## Spec Impact` hid the
+  heading, dropped every reference, and reported a marker a live `ready/` ticket
+  owns as "orphaned; strip it". `3b4afa52` did not have that failure.
+- Cycle 1's own A3 directive, written by the lead, was wrong. Tightening the
+  `## Spec Impact` heading match moved the failure from over-matching to
+  under-matching, while `tickets_mutate.go`'s ready gate stayed loose — so
+  `## Spec Impact and Phases` passed the ready gate as spec-addressed and then
+  had its markers reported orphaned. Reverted in cycle 3; the two sites must
+  agree and loose is the safe direction.
+- A guard the fix added to close a finding was itself the anti-pattern the same
+  cycle flagged: a `chmod 000` test that skips where chmod does not restrict. On
+  a DrvFs `TMPDIR` it skipped and both mutations killing the behavior it guards
+  survived with the suite green.
+
+Three of the five cycle-2 Importants were the same shape and produced the rule
+now recorded in `ai-docs/mental-model/documentation-system.md`: an advisory whose
+branches differ in destructiveness must land every uncertain or degraded input on
+the non-destructive branch. This phase shipped three separate paths — a read
+failure, an unbalanced fence, an over-tight heading match — that each emitted a
+delete instruction off an error path.
+
+Cycle 3's relay reversed two lead directives, correctly: the proposed
+permission-independent driver (a directory named `<stem>.md`) does not work
+because `scanTickets` skips directories before `readTicket`, and the resolver's
+ticket sort could not be made load-bearing because `advise` sorts the rendered
+strings — so the dead sort was deleted rather than tested around.
+
+Review stopped at the budget. One item ships unresolved with a stated
+disposition: `TestTicketGraphUnreadableTicketDegradesToSilence` still uses the
+`chmod 000` pattern. It is pre-existing (`b81bb3df`, present at the phase base,
+never touched in this range) and its premise — one unreadable ticket among
+readable ones — is not served by the driver this phase used. Captured as
+`260728-bug-chmod-based-tests-skip-silently`.
+
+#### Verification
+
+`go build ./...`, `go vet ./...`, `go test ./... -count=1` green across all 12
+packages; also green with `TMPDIR` on a DrvFs mount, with zero skips in the
+legacy-marker suite. Every mutation that survived a prior cycle now fails, each
+naming its catching test. Ticket-corpus parity: all 458 live and archived tickets
+extract byte-identically under the new `specImpactSection` as under `3b4afa52`'s.
+Real-repo spot check: exactly one file flagged
+(`ai-docs/spec/ws-web-dashboard/index.md`, line 231), verdict **orphaned** as the
+ticket expected, and nothing for `documentation-system.md`, `mcp-tools.md`, or
+`workflow-skills.md`.
+
+#### Forward to Phase 2
+
+- `readyGateWarning` still uses a literal `"## Spec Impact"` with bare
+  `TrimSpace`, while `collectSpecImpact` uses the `specImpactHeading` constant
+  with the ≤3-column indent rule. They agree on prefix looseness — the property
+  that matters — but differ on what "line start" means. Not a defect today; if
+  2.1 or a later ticket unifies them, unify toward the safe direction.
+- Phase 1 introduced no `🚧` into `ai-docs/spec/`; `grep -c 🚧 mcp-tools.md` is 0,
+  so 2.5's "zero `🚧`" clause is not pre-broken.
+- `ai-docs/spec/` still specifies the mechanism as live in
+  `documentation-system.md:98-102,236,240` and `workflow-skills.md:857`, while
+  `mcp-tools.md` now says it is being retired. That contradiction is scheduled —
+  2.5 owns all three — but it exists in this repo from this commit onward, so
+  Phase 1's "independently valuable even if Phase 2 never lands" claim holds only
+  for the tooling, not for the spec corpus.
+
 ### Phase 2: Remove the mechanism and ratchet downstream
 
 Requires Phase 1 landed. Run the sub-steps in the stated order — 2.7 changes
