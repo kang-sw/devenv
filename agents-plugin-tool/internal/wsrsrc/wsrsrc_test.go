@@ -891,6 +891,40 @@ func TestValidateRealTree(t *testing.T) {
 	}
 }
 
+// TestLeadWriteTicketSageGatePrecedesCommit pins the step order established
+// by 260726-bug-sage-ready-enforcement-single-chokepoint: "Sage Review Gate"
+// must render as step 5 and "Commit" as step 6 in lead-write-ticket's
+// "## On: invoke" section. tickets.sage_stamp writes the posture uncommitted
+// and relies on step 6 to commit it together with the rest of the ticket
+// edit; a silent re-inversion (or reintroducing a conditional instead of the
+// required unconditional order) reproduces the "no staged changes in
+// requested paths" bug the reorder fixed, and no other test in this repo
+// asserts on the semantic step order (only mechanical regen/mirror
+// byte-consistency). Content-level, not presence-only: it fails on a
+// re-inversion, not merely a missing heading.
+func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "lead-write-ticket", "lead-write-ticket.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read lead-write-ticket.md: %v", err)
+	}
+	text := string(raw)
+
+	const gateHeading = "### 5. Sage Review Gate"
+	const commitHeading = "### 6. Commit"
+	gateIdx := strings.Index(text, gateHeading)
+	commitIdx := strings.Index(text, commitHeading)
+	if gateIdx == -1 {
+		t.Fatalf("lead-write-ticket.md missing %q", gateHeading)
+	}
+	if commitIdx == -1 {
+		t.Fatalf("lead-write-ticket.md missing %q", commitHeading)
+	}
+	if gateIdx > commitIdx {
+		t.Fatalf("Sage Review Gate (offset %d) must precede Commit (offset %d) in ## On: invoke; re-inversion detected", gateIdx, commitIdx)
+	}
+}
+
 // TestGenerateRealManifest regenerates agents-plugin/rsrc/manifest.json from
 // the current tree. Run with WSRSRC_REGEN=1 to update after editing rsrc files.
 //

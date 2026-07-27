@@ -66,6 +66,11 @@ func TestTicketCreateTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
 	}
 }
 
+// TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal
+// asserts the C4 fix: a ready-landing create stamps *both* required fields
+// (design and completeness), mirroring prepareSageReviewForUpwardMove /
+// TicketsMove, so create_empty(ready) and move(to: "ready") produce the same
+// posture shape.
 func TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -85,12 +90,11 @@ func TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal(t *t
 			if !strings.Contains(body, `title: ""`) {
 				t.Fatalf("ready stub missing title: %q", body)
 			}
-			wantLine := "sage-review-design: " + tc.wantReview
-			if !strings.Contains(body, wantLine) {
-				t.Fatalf("ready stub missing %s: %q", wantLine, body)
-			}
-			if strings.Contains(body, "sage-review-completeness:") {
-				t.Fatalf("ready stub must not stamp sage-review-completeness: %q", body)
+			for _, field := range []string{"sage-review-design", "sage-review-completeness"} {
+				wantLine := field + ": " + tc.wantReview
+				if !strings.Contains(body, wantLine) {
+					t.Fatalf("ready stub missing %s: %q", wantLine, body)
+				}
 			}
 			if !strings.Contains(res.Tip, tc.wantReview) {
 				t.Fatalf("Tip = %q, want resolved posture %q", res.Tip, tc.wantReview)
@@ -123,6 +127,15 @@ func TestTicketCreateReadyWarnsOnUnresolvedSageReviewDesignPosture(t *testing.T)
 			}
 			if !strings.Contains(res.Tip, tc.wantWarn) {
 				t.Fatalf("Tip = %q, want it to contain %q", res.Tip, tc.wantWarn)
+			}
+			body := readCreatedTicket(t, root, res)
+			// C4: completeness must be stamped too (same resolved posture as
+			// design for a brand-new ticket), so the warning's silence about
+			// completeness matches an actually-terminal completeness field
+			// rather than an unstamped one that ws/git.commit would also
+			// reject.
+			if !strings.Contains(body, "sage-review-completeness: ") {
+				t.Fatalf("ready stub must stamp sage-review-completeness alongside design: %q", body)
 			}
 			if _, statErr := os.Stat(filepath.Join(root, "ai-docs", "tickets", "ready", "260101-feat-foo.md")); statErr != nil {
 				t.Fatalf("ticket file should have been created, stat err = %v", statErr)

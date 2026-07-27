@@ -2460,6 +2460,88 @@ func TestServeStdioTicketsCloseUnresolvedPhaseStatesSoftWarnNextInstruction(t *t
 	}
 }
 
+// TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse is a C5
+// dispatch-level test: a todo/ -> ready/ move at the shipped default
+// (sage_review: auto -> required, never skipped) with an unresolved posture
+// must succeed and carry the ready-sage-posture warning text in the actual
+// tools/call response text, not just in wsdoc.TicketMutateResult.Tip.
+func TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-ready-unresolved-warn"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Unresolved\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902608, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "ready",
+	})
+	if !strings.Contains(moveResp, "sage-review-design is unreviewed") {
+		t.Fatalf("tickets.move to ready response missing unresolved-posture warning: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
+		t.Fatalf("tickets.move to ready response missing consequence statement: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "ws/tickets.sage_gate") {
+		t.Fatalf("tickets.move to ready response missing resolving-call pointer: %s", moveResp)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "ready", stem+".md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("moved ticket should exist at ready/: matches=%v err=%v", matches, err)
+	}
+}
+
+// TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse is
+// the tickets.create_empty counterpart of the above (C5): creating directly
+// at ready/ under the shipped default posture must succeed and surface the
+// same warning shape in the dispatch response.
+func TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902609, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
+		"stem":          "feat-ready-create-unresolved-warn",
+		"initial_state": "ready",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/ready/") {
+		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
+	}
+	if !strings.Contains(createResp, "sage-review-design is unreviewed") {
+		t.Fatalf("tickets.create_empty ready response missing unresolved-posture warning: %s", createResp)
+	}
+	if !strings.Contains(createResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
+		t.Fatalf("tickets.create_empty ready response missing consequence statement: %s", createResp)
+	}
+	if !strings.Contains(createResp, "ws/tickets.sage_gate") {
+		t.Fatalf("tickets.create_empty ready response missing resolving-call pointer: %s", createResp)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "ready", "*-feat-ready-create-unresolved-warn.md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("created ticket should exist at ready/: matches=%v err=%v", matches, err)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read created ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review-design: required") || !strings.Contains(body, "sage-review-completeness: required") {
+		t.Fatalf("created ticket missing both stamped required fields (C4 parity with tickets.move):\n%s", body)
+	}
+}
+
 func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

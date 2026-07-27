@@ -139,6 +139,16 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 			// with tickets_verify.go's hard guardrail.
 			designRequired, completenessRequired := sageReviewStageRequirement(stem)
 			readySageWarning = readySagePostureWarning(readyPostureProblems(designRequired, postures.Design, completenessRequired, postures.Completeness))
+		} else if err := blockedUpwardMoveError(postures); err != nil {
+			// Non-ready upward moves (idea -> todo, or a demote/re-promote
+			// round trip re-entering todo) have no ready-sage-posture
+			// guardrail downstream to relocate enforcement to —
+			// tickets_verify.go's guardrail only runs for status == "ready".
+			// Removing this rejection would move enforcement to nowhere, so
+			// the pre-existing hard block for a blocked required stage stays
+			// here, unlike the ready-landing case (de-blocked, soft warning
+			// only, per the single-chokepoint decision).
+			return TicketMutateResult{}, err
 		}
 	}
 
@@ -335,6 +345,25 @@ func sageReviewStageError(field, posture string) error {
 
 func sageReviewBlockedError(field string) error {
 	return fmt.Errorf("%s: blocked; address blocked review before promoting", field)
+}
+
+// blockedUpwardMoveError restores the hard rejection for a non-ready upward
+// move (e.g. idea -> todo) that leaves a required sage-review stage blocked,
+// design checked before completeness. ready/ landings are exempt from this
+// call site: their blocked case is a soft warning instead
+// (readySagePostureWarning), because ws/git.commit's ready-sage-posture
+// guardrail is the sole HARD enforcement point there. Outside a ready
+// landing, tickets_verify.go's guardrail never runs (it is gated on
+// status == "ready"), so there is no chokepoint downstream to catch a
+// blocked non-ready move; this call site remains the only enforcement.
+func blockedUpwardMoveError(postures sageReviewPostures) error {
+	if postures.Design == "blocked" {
+		return sageReviewBlockedError("sage-review-design")
+	}
+	if postures.Completeness == "blocked" {
+		return sageReviewBlockedError("sage-review-completeness")
+	}
+	return nil
 }
 
 // sageReviewNonWaivableAdvisory is the shared non-waivable statement +

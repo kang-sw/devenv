@@ -193,6 +193,25 @@ func TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory(t *testing.T) {
 		}
 	})
 
+	// C8: resolveStage's `recommended` + answer=="yes" -> `run` branch must
+	// carry the advisory too, symmetric with sageGateCombined's equivalent
+	// accepted-recommended-design branch (which already attached it) — a
+	// "run" result is a run result regardless of which posture produced it.
+	t.Run("recommended-accept-run-standalone", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "recommended"})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo", Answer: "yes"}, "ask")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "run" {
+			t.Fatalf("action = %q, want run", res.Action)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want it carried on the accepted-recommended run result too (symmetric with sageGateCombined)")
+		}
+	})
+
 	t.Run("required-run-combined", func(t *testing.T) {
 		root := t.TempDir()
 		writeSageTicket(t, root, stem, map[string]string{

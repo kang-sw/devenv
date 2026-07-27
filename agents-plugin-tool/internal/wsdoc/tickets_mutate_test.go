@@ -260,6 +260,43 @@ func TestTicketsMoveUpwardIdeaToTodo(t *testing.T) {
 	}
 }
 
+// TestTicketsMoveUpwardNonReadyBlockedRejectsMove is the C3 regression test:
+// de-blocking is scoped to the ready/ landing only (per the ticket's decision
+// text, "tickets.move and create_empty stop rejecting on ready sage
+// posture"). A non-ready upward move (e.g. idea/ -> todo/) re-entering a
+// `sage-review-design: blocked` posture — reachable via a demote/re-promote
+// round trip after sage_stamp records `blocked` on a todo-landing design
+// review — must still hard-reject, because tickets_verify.go's
+// ready-sage-posture guardrail only runs for status == "ready"; outside a
+// ready landing there is no chokepoint downstream to relocate enforcement
+// to, so removing this rejection would move enforcement to nowhere.
+func TestTicketsMoveUpwardNonReadyBlockedRejectsMove(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-nonready-blocked"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Blocked\nsage-review-design: blocked\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	_, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "todo",
+		SageReview: "auto",
+	})
+	if err == nil {
+		t.Fatal("TicketsMove idea->todo with blocked design posture: expected rejection, got nil error")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("error = %v, want blocked-posture rejection", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("git called despite blocked rejection: %#v", runner.calls)
+	}
+	// The ticket must remain at idea/, not moved.
+	if _, statErr := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); statErr == nil {
+		t.Fatalf("ticket moved to todo/ despite blocked rejection")
+	}
+}
+
 func TestTicketsMoveDownwardReadyToTodoReturnsTip(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-down"
@@ -666,6 +703,9 @@ func TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly(t *testing.T) {
 	}
 	if strings.Contains(result.Tip, "review has not run yet") {
 		t.Fatalf("Tip = %q, blocked warning must not reuse the unreviewed variant's wording", result.Tip)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatalf("git was not called; the move must still succeed (soft warning only, not a block)")
 	}
 }
 

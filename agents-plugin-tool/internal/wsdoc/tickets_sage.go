@@ -18,9 +18,15 @@ import (
 //
 // Commit boundary: like tickets_mutate.go these functions never import wsgit.
 // SageGate still computes commit title/paths/ai_context for its ask-decline
-// path, returned for the MCP dispatch layer to commit via
-// wsgit.NewClient().Commit(...) (kept byte-for-byte identical to today's
-// git.commit-produced commits). SageRecord does not: it only writes the
+// path (posture already persisted by SageGate itself), but the MCP dispatch
+// layer no longer commits it automatically — that auto-commit used a
+// nil-Verifier wsgit.NewClient() (bypassing the ready-sage-posture guardrail
+// chokepoint) and, once Sage Review Gate moved ahead of Commit in
+// lead-write-ticket, its `-A` staging swept the whole uncommitted ticket into
+// the small decline commit. SageGate's decline path is now stage-only like
+// tickets.sage_stamp ({#260720-wsdoc-commit-boundary}): the commit fields
+// survive only as advisory metadata for the caller's own ws/git.commit.
+// SageRecord follows the same pattern already: it only writes the
 // frontmatter posture and any Blocked section and returns the applied
 // outcome — the caller commits separately via its own ws/git.commit, so
 // SageRecordResult carries no commit metadata.
@@ -42,15 +48,29 @@ type SageGateResult struct {
 
 	// Advisory carries the non-waivable statement + review-scope line
 	// (sageReviewNonWaivableAdvisory, tickets_mutate.go) on the ordinary
-	// path an agent actually reaches: a required stage's "run" result and a
+	// path an agent actually reaches: every "run" result (required's direct
+	// run and a recommended stage's accepted "yes" run alike) and a
 	// recommended stage's "ask" prompt, per ticket decision — not only on an
 	// answer=="no" decline path, which posture "required" never reaches
-	// (required never asks).
+	// (required never asks). A "run" result is a run result regardless of
+	// which posture produced it, so the text is attached uniformly rather
+	// than only on the "required" branch.
 	Advisory string
 
-	// Commit metadata is populated only on the ask-decline path (recommended
-	// posture + Answer=="no"), where the legacy prose persisted `skipped` and
-	// committed a small standalone commit. Empty CommitTitle means no commit.
+	// CommitTitle/CommitPaths/AIContext are populated only on the ask-decline
+	// path (recommended posture + Answer=="no"), where the posture write
+	// (already persisted above, in this same call) is left uncommitted.
+	// These fields no longer trigger a commit performed by the MCP dispatch
+	// layer: an automatic commit through wsgit.NewClient() (a nil-Verifier
+	// client) bypassed the ready-sage-posture guardrail chokepoint, and once
+	// lead-write-ticket's Sage Review Gate step moved ahead of Commit, that
+	// auto-commit's `-A` staging swept the whole uncommitted ticket into a
+	// bare "chore(sage): skip ... review" commit with none of the ticket's
+	// real `## AI Context` — the same defect class 260725 already fixed once
+	// for tickets.sage_stamp ({#260720-wsdoc-commit-boundary}). The MCP
+	// dispatch layer now only surfaces these as advisory metadata; the
+	// caller commits the posture change itself via its own ws/git.commit.
+	// Empty CommitTitle means no pending commit.
 	CommitTitle string
 	CommitPaths []string
 	AIContext   []string
@@ -92,9 +112,11 @@ type SageRecordResult struct {
 type stageOutcome struct {
 	action    string // "run" | "ask" | "stop_blocked" | "skip"
 	askPrompt string
-	// advisory carries sageReviewNonWaivableAdvisory when action=="run" via
-	// posture "required" or action=="ask" via posture "recommended" — the
-	// two ordinary-path cases named by the ticket decision.
+	// advisory carries sageReviewNonWaivableAdvisory on every action=="run"
+	// (posture "required", or posture "recommended" accepted via
+	// answer=="yes") and on action=="ask" via posture "recommended" — a "run"
+	// result carries the text regardless of which posture produced it, and
+	// "ask" carries it per the ticket decision.
 	advisory string
 	// commit* set only when action=="skip" via an ask-decline.
 	commitTitle string
@@ -200,7 +222,7 @@ func resolveStage(ticketAbs, ticketRel, reviewer, field, posture, resolvedConfig
 	case "recommended":
 		switch answer {
 		case "yes":
-			return stageOutcome{action: "run"}, nil
+			return stageOutcome{action: "run", advisory: sageReviewNonWaivableAdvisory}, nil
 		case "no":
 			if err := writeFrontmatterField(ticketAbs, map[string]string{field: "skipped"}); err != nil {
 				return stageOutcome{}, err

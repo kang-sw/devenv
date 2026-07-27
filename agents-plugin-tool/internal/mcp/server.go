@@ -1388,19 +1388,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		commitHash := ""
-		if result.CommitTitle != "" {
-			commitRes, commitErr := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
-				Paths:     result.CommitPaths,
-				Title:     result.CommitTitle,
-				AIContext: result.AIContext,
-			})
-			if commitErr != nil {
-				return toolTextResponse(req.ID, "", commitErr)
-			}
-			commitHash = commitRes.Hash
-		}
-		return toolTextResponse(req.ID, formatSageGate(result, commitHash), nil)
+		// The ask-decline path (recommended posture + answer=="no") writes
+		// and persists the "skipped" posture inside wsdoc.SageGate itself,
+		// but no longer commits it here: mirroring 260725's tickets.sage_stamp
+		// fix ({#260720-wsdoc-commit-boundary}), an automatic commit through a
+		// nil-Verifier wsgit.NewClient() swept the whole uncommitted ticket
+		// into a bare "chore(sage): skip ... review" commit once the Sage
+		// Review Gate step moved ahead of Commit in lead-write-ticket. The
+		// posture write stays uncommitted; result.CommitTitle/CommitPaths/
+		// AIContext survive only as advisory metadata that formatSageGate
+		// surfaces so the caller commits it themselves via ws/git.commit,
+		// through the same guarded chokepoint every other ticket commit uses.
+		return toolTextResponse(req.ID, formatSageGate(result), nil)
 	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2781,7 +2780,7 @@ func formatTicketVerify(result wsdoc.VerifyResult) string {
 	return b.String()
 }
 
-func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
+func formatSageGate(result wsdoc.SageGateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "action: %s\n", result.Action)
 	if result.AskPrompt != "" {
@@ -2793,26 +2792,56 @@ func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
 	if result.Mode != "" {
 		fmt.Fprintf(&b, "mode: %s\n", result.Mode)
 	}
-	if commitHash != "" {
-		fmt.Fprintf(&b, "commit: %s (%s)\n", commitHash, result.CommitTitle)
+	if result.CommitTitle != "" {
+		// The posture write behind this title was already persisted by
+		// wsdoc.SageGate; it is not committed here (see the dispatch case's
+		// comment). Surface it as advisory metadata for the caller's own
+		// ws/git.commit rather than as a claimed commit.
+		fmt.Fprintf(&b, "pending_commit_title: %s\n", result.CommitTitle)
+		fmt.Fprintf(&b, "pending_commit_paths: %s\n", strings.Join(result.CommitPaths, ", "))
+		if len(result.AIContext) > 0 {
+			fmt.Fprintf(&b, "pending_commit_ai_context: %s\n", strings.Join(result.AIContext, "; "))
+		}
 	}
 	if result.Advisory != "" {
-		fmt.Fprintf(&b, "advisory: %s\n", result.Advisory)
+		fmt.Fprintf(&b, "advisory: %s\n", capitalizeFirst(result.Advisory))
 	}
 	b.WriteString(sageGateNextInstruction(result))
 	return b.String()
 }
 
+// capitalizeFirst upper-cases only the first byte, matching the capitalized-
+// sentence convention formatSageGate's sibling fields use. It intentionally
+// leaves the shared sageReviewNonWaivableAdvisory constant itself lowercase
+// (tickets_mutate.go) so its other embedding — mid-sentence inside
+// readySagePostureWarning's Tip-channel text — stays grammatically correct;
+// only this display site capitalizes.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 func sageGateNextInstruction(result wsdoc.SageGateResult) string {
+	var pendingCommit string
+	if result.CommitTitle != "" {
+		pendingCommit = " The posture change above was written but not committed; call ws/git.commit(paths: [" +
+			strings.Join(result.CommitPaths, ", ") + "], title: \"" + result.CommitTitle +
+			"\", ai_context: [...]) yourself to commit it."
+	}
 	switch result.Action {
 	case "skip":
+		if pendingCommit != "" {
+			return "next_instruction: Sage review gate resolved with no further review required." + pendingCommit
+		}
 		return "next_instruction: Sage review gate resolved with no review required; proceed to handoff."
 	case "stop_blocked":
 		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker."
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no."
 	case "run":
-		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
+		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + pendingCommit
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
