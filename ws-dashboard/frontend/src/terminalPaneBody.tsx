@@ -5,6 +5,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { LigaturesAddon } from "@xterm/addon-ligatures";
 import {
   clampTerminalSize,
   terminalWebSocketCursor,
@@ -139,6 +140,13 @@ export function TerminalPaneBody({
   // active. This is a character-width lookup change only; the output/data path
   // is untouched.
   const unicodeAddonRef = useRef<Unicode11Addon | null>(null);
+  // Programming-ligature shaper for this pane's terminal. Held so it can be
+  // disposed on unmount. `null` when construction/activation failed, in
+  // which case the terminal renders unchanged with no ligatures. Loaded
+  // immediately after `terminal.open()` and before the GPU renderer chain
+  // below so a WebGL texture atlas (if one loads) already sees ligatures
+  // active at construction time, per the addon's own ordering guidance.
+  const ligaturesAddonRef = useRef<LigaturesAddon | null>(null);
   const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
@@ -197,6 +205,25 @@ export function TerminalPaneBody({
     serializeAddonRef.current = serializeAddon;
     terminal.open(container);
     terminalRef.current = terminal;
+
+    // Activate programming-ligature shaping (`->`, `=>`, `!=`, etc.) right
+    // after open() and before the GPU renderer chain below, so a WebGL
+    // texture atlas - if one loads - already reflects ligatures at
+    // construction time instead of needing a reactivation step.
+    // `fallbackLigatures: []` keeps this strictly font-driven: without it,
+    // when Local Font Access is denied or the addon is served over a
+    // non-secure-context LAN origin, it silently joins a hardcoded ~68-glyph
+    // pattern list regardless of whether the resolved font actually has
+    // those ligature glyphs. Wrapped in try/catch so a construction/
+    // activation failure leaves the terminal working unchanged with no
+    // ligatures.
+    try {
+      const ligaturesAddon = new LigaturesAddon({ fallbackLigatures: [] });
+      terminal.loadAddon(ligaturesAddon);
+      ligaturesAddonRef.current = ligaturesAddon;
+    } catch {
+      ligaturesAddonRef.current = null;
+    }
 
     // Attach a GPU renderer AFTER open() so a canvas/WebGL context exists;
     // without one xterm 5.x falls back to its slow DOM renderer, which
@@ -572,6 +599,10 @@ export function TerminalPaneBody({
       // no-op when the built-in v6 tables were left active.
       unicodeAddonRef.current?.dispose();
       unicodeAddonRef.current = null;
+      // Unload the ligature shaper before disposing the terminal; a no-op
+      // when construction/activation failed at mount.
+      ligaturesAddonRef.current?.dispose();
+      ligaturesAddonRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       serializeAddonRef.current = null;
