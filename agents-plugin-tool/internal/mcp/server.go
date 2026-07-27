@@ -2492,6 +2492,19 @@ func formatGitCommit(result wsgit.CommitResult) string {
 			b.WriteString("\n")
 		}
 	}
+	if len(result.Advisories) > 0 {
+		b.WriteString("advisories:\n")
+		for _, advisory := range result.Advisories {
+			// Each advisory may itself be multi-line (Phase 2 grows
+			// multi-line blocks, e.g. a "## Parent Board" section, into this
+			// channel); indent every line consistently rather than only the
+			// first, so a multi-line advisory does not lose its indentation
+			// on line 2+.
+			for _, line := range strings.Split(advisory, "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
+	}
 	return b.String()
 }
 
@@ -2684,25 +2697,35 @@ func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) s
 }
 
 // verifyAdapter adapts wsdoc.TicketVerify's richer VerifyResult into the
-// plain-error shape wsgit.Client.Verifier expects, so wsgit.Commit can veto a
-// commit without importing internal/wsdoc directly (see
-// {#260720-wsdoc-commit-boundary}). Wired into both the git.commit dispatch
-// case below and the CLI gitCommit handler (via VerifyAdapter) so every
-// ws.git.commit entry point is gated identically.
-func verifyAdapter(root string, paths []string) error {
+// wsgit.Client.Verifier shape, so wsgit.Commit can veto a commit without
+// importing internal/wsdoc directly (see {#260720-wsdoc-commit-boundary}).
+// Wired into both the git.commit dispatch case below and the CLI gitCommit
+// handler (via VerifyAdapter) so every ws.git.commit entry point is gated
+// identically. On the pass branch, result.Warnings is formatted into the
+// advisories return value using the same "WARN [%s] %s: %s" text shape as
+// formatTicketVerify, so a warning reads identically whether seen via
+// tickets.verify or via git.commit.
+func verifyAdapter(root string, paths []string) ([]string, error) {
 	result, err := wsdoc.TicketVerify(root, paths)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if result.OK {
-		return nil
+	if !result.OK {
+		var b strings.Builder
+		b.WriteString("ticket verify failed:\n")
+		for _, finding := range result.Findings {
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+		}
+		return nil, fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
 	}
-	var b strings.Builder
-	b.WriteString("ticket verify failed:\n")
-	for _, finding := range result.Findings {
-		fmt.Fprintf(&b, "- [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+	if len(result.Warnings) == 0 {
+		return nil, nil
 	}
-	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+	advisories := make([]string, 0, len(result.Warnings))
+	for _, warning := range result.Warnings {
+		advisories = append(advisories, fmt.Sprintf("WARN [%s] %s: %s", warning.Guardrail, warning.Path, warning.Message))
+	}
+	return advisories, nil
 }
 
 // formatTicketVerify renders a wsdoc.VerifyResult for the standalone

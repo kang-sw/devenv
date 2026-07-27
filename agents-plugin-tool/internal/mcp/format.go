@@ -55,7 +55,7 @@ func FormatTicketVerify(result wsdoc.VerifyResult) string {
 // wsgit.Client.Verifier adapter so a raw `ws-mcp git commit` never bypasses
 // the guardrails `ws-mcp serve`'s git.commit tool enforces (see
 // {#260720-wsdoc-commit-boundary}).
-func VerifyAdapter(root string, paths []string) error {
+func VerifyAdapter(root string, paths []string) ([]string, error) {
 	return verifyAdapter(root, paths)
 }
 

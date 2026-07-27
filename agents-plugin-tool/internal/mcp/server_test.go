@@ -1756,6 +1756,93 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 }
 
+// unresolvedPhaseTicketBody mirrors
+// wsdoc.TestTicketVerifyUnresolvedPhaseIsSoftWarnOnly's fixture: a closed
+// ticket with a resolved Phase 1 and an unresolved (non-`[dropped]`) Phase 2,
+// which TicketVerify reports as a soft "unresolved-phases" warning, never a
+// hard finding.
+const unresolvedPhaseTicketBody = "---\ntitle: Closed with open phase\ncompleted: 2026-07-23\n---\n\n" +
+	"## Phases\n\n" +
+	"### Phase 1: First\n\n" +
+	"### Result (abc123) - 2026-07-23\n\n" +
+	"Done.\n\n" +
+	"### Phase 2: Second\n\n" +
+	"Never resolved.\n"
+
+// TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories is the
+// concrete instance of {#260720-wsdoc-commit-boundary}'s Phase 1 verification
+// boundary: a real ticket that trips wsdoc.TicketVerify's soft
+// unresolved-phases warning must still commit (Warnings never block OK), and
+// the warning text must surface through verifyAdapter into
+// wsgit.CommitResult.Advisories and formatGitCommit's text-mode "advisories:"
+// block — but never through format:"json", since CommitResult.Advisories
+// carries a `json:"-"` tag (see {#260626-git-commit-todo-reinjection}
+// precedent).
+func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+
+	server := NewServer(root, "test")
+
+	textTicketPath := "ai-docs/tickets/.done/260726-feat-openphase-text.md"
+	mustWrite(t, root, textTicketPath, unresolvedPhaseTicketBody)
+
+	var out bytes.Buffer
+	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase","ai_context":["User intent: prove unresolved-phases warnings surface as git.commit advisories."]}}}`, textTicketPath)
+	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
+		t.Fatalf("ServeStdio commit returned error: %v", err)
+	}
+	textLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(textLines) != 1 {
+		t.Fatalf("expected 1 commit response, got %d\n%s", len(textLines), out.String())
+	}
+	textByID := responseLinesByID(t, textLines)
+	if toolIsError(t, textByID["1"]) {
+		t.Fatalf("git.commit reported an error for a soft-warning-only ticket: %s", toolText(t, textByID["1"]))
+	}
+	text := toolText(t, textByID["1"])
+	if !strings.Contains(text, "commit: ") {
+		t.Fatalf("git.commit text response missing commit hash: %q", text)
+	}
+	if !strings.Contains(text, "advisories:\n") || !strings.Contains(text, "WARN [unresolved-phases]") {
+		t.Fatalf("git.commit text response missing advisories block: %q", text)
+	}
+
+	jsonTicketPath := "ai-docs/tickets/.done/260726-feat-openphase-json.md"
+	mustWrite(t, root, jsonTicketPath, unresolvedPhaseTicketBody)
+
+	out.Reset()
+	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase json","ai_context":["User intent: prove the json:\"-\" tag holds for advisories."],"format":"json"}}}`, jsonTicketPath)
+	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
+		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
+	}
+	jsonLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(jsonLines) != 1 {
+		t.Fatalf("expected 1 JSON commit response, got %d\n%s", len(jsonLines), out.String())
+	}
+	jsonByID := responseLinesByID(t, jsonLines)
+	if toolIsError(t, jsonByID["2"]) {
+		t.Fatalf("git.commit reported an error for a soft-warning-only ticket in JSON mode: %s", toolText(t, jsonByID["2"]))
+	}
+	jsonText := toolText(t, jsonByID["2"])
+	if strings.Contains(jsonText, "advisories") || strings.Contains(jsonText, "WARN") {
+		t.Fatalf("git.commit JSON response leaked advisories despite the json:\"-\" tag: %q", jsonText)
+	}
+	var jsonCommit struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &jsonCommit); err != nil {
+		t.Fatal(err)
+	}
+	if jsonCommit.Hash == "" {
+		t.Fatalf("JSON commit response missing hash: %q", jsonText)
+	}
+}
+
 // aiContextDebugEvents fetches runtime.debug_events (a process-wide ring
 // buffer shared by every test in this package's binary — see appendDebugEvent
 // in server.go) via a standalone ServeStdio call and returns every

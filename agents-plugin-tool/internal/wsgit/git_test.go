@@ -734,14 +734,14 @@ func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
 	}}
 	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
-	client := Client{Runner: runner, Verifier: func(gotRoot string, gotPaths []string) error {
+	client := Client{Runner: runner, Verifier: func(gotRoot string, gotPaths []string) ([]string, error) {
 		if gotRoot != root {
 			t.Fatalf("verifier root = %q, want %q", gotRoot, root)
 		}
 		if len(gotPaths) != 1 || gotPaths[0] != ticketPath {
 			t.Fatalf("verifier paths = %#v, want [%q]", gotPaths, ticketPath)
 		}
-		return verifyErr
+		return nil, verifyErr
 	}}
 
 	_, err := client.Commit(context.Background(), root, CommitOptions{
@@ -759,6 +759,39 @@ func TestCommitBlockedByVerifierNeverReachesCommit(t *testing.T) {
 		if len(call.args) > 0 && call.args[0] == "commit" {
 			t.Fatalf("Commit issued `git commit` despite a blocking Verifier: %#v", runner.calls)
 		}
+	}
+}
+
+// TestCommitVetoDiscardsAdvisoriesAlongsideError pins the intended-but-until-
+// now-implicit behavior at Commit's verifier call site: a Verifier that
+// returns both advisories and a non-nil error must still veto the commit,
+// and the advisories it returned must not leak into the (zero-value)
+// CommitResult — a vetoed commit has nothing to advise on.
+func TestCommitVetoDiscardsAdvisoriesAlongsideError(t *testing.T) {
+	root := t.TempDir()
+	ticketPath := "ai-docs/tickets/todo/not-a-valid-stem.md"
+	mustWriteGitTestFixture(t, root, ticketPath, "---\ntitle: Bad\n---\n\nBody.\n")
+
+	runner := &sequenceRunner{outs: [][]byte{
+		{}, // pre-status
+		{}, // add
+		[]byte("1 A. N... 100644 100644 100644 aaa bbb " + ticketPath + "\n"), // post-status
+	}}
+	verifyErr := errors.New("ticket verify failed: stem does not match the ticket stem pattern")
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
+		return []string{"WARN [unresolved-phases] should never surface: commit is vetoed"}, verifyErr
+	}}
+
+	result, err := client.Commit(context.Background(), root, CommitOptions{
+		Paths:     []string{ticketPath},
+		Title:     "test: veto discards advisories",
+		AIContext: []string{"User intent: prove a veto's advisories never leak into CommitResult."},
+	})
+	if !errors.Is(err, verifyErr) {
+		t.Fatalf("Commit error = %v, want %v", err, verifyErr)
+	}
+	if len(result.Advisories) != 0 {
+		t.Fatalf("result.Advisories = %#v, want empty — a vetoed commit must discard advisories returned alongside its error", result.Advisories)
 	}
 }
 
@@ -818,12 +851,12 @@ func TestCommitPromotionVerifierSeesOnlyDestinationPath(t *testing.T) {
 		[]byte("abc123\n"), // rev-parse HEAD
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(gotRoot string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(gotRoot string, paths []string) ([]string, error) {
 		gotPaths = paths
 		if gotRoot != root {
 			t.Fatalf("verifier root = %q, want %q", gotRoot, root)
 		}
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -861,9 +894,9 @@ func TestCommitCloseVerifierSeesOnlyDestinationPath(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) ([]string, error) {
 		gotPaths = paths
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -902,9 +935,9 @@ func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	verifierCalled := false
-	client := Client{Runner: runner, Verifier: func(string, []string) error {
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
 		verifierCalled = true
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -920,6 +953,9 @@ func TestCommitOutrightDeletionSkipsVerifierEntirely(t *testing.T) {
 	}
 	if verifierCalled {
 		t.Fatalf("Verifier was invoked for an outright deletion with no remaining paths to verify")
+	}
+	if len(result.Advisories) != 0 {
+		t.Fatalf("result.Advisories = %#v, want empty when the Verifier is skipped entirely", result.Advisories)
 	}
 }
 
@@ -952,9 +988,9 @@ func TestCommitDivergentCaseExcludesRenameOldPathEvenWhenCallerPassedIt(t *testi
 		[]byte("abc123\n"),
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) ([]string, error) {
 		gotPaths = paths
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -991,9 +1027,9 @@ func TestCommitStillRefusesUnrelatedStagedRenameOldPath(t *testing.T) {
 		[]byte(postStatus),
 	}}
 	verifierCalled := false
-	client := Client{Runner: runner, Verifier: func(string, []string) error {
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
 		verifierCalled = true
-		return nil
+		return nil, nil
 	}}
 
 	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
@@ -1028,9 +1064,9 @@ func TestCommitIndexOnlyPathStillRefusesUnrelatedStagedRename(t *testing.T) {
 		[]byte(postStatus),
 	}}
 	verifierCalled := false
-	client := Client{Runner: runner, Verifier: func(string, []string) error {
+	client := Client{Runner: runner, Verifier: func(string, []string) ([]string, error) {
 		verifierCalled = true
-		return nil
+		return nil, nil
 	}}
 
 	_, err := client.Commit(context.Background(), "/repo", CommitOptions{
@@ -1062,9 +1098,9 @@ func TestCommitContentOnlyEditLeavesVerifierPathsUnmodified(t *testing.T) {
 		[]byte("abc123\n"),
 	}}
 	var gotPaths []string
-	client := Client{Runner: runner, Verifier: func(_ string, paths []string) error {
+	client := Client{Runner: runner, Verifier: func(_ string, paths []string) ([]string, error) {
 		gotPaths = paths
-		return nil
+		return nil, nil
 	}}
 
 	result, err := client.Commit(context.Background(), root, CommitOptions{
