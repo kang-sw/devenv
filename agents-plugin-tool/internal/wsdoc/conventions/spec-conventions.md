@@ -19,16 +19,11 @@ description, abstract it further.
 - `ai-docs/spec/<area>/` (directory) for areas with multiple sub-sections.
 - `ai-docs/spec/<area>.md` (flat leaf) for single, self-contained feature surfaces.
 
-## 🚧 Markers
+## Implementation Status
 
-- New unimplemented feature heading: `### 🚧 Feature Name {#YYMMDD-feature-slug}`.
-- Planned change to an existing feature: `> [!note] Planned 🚧`
-  callout beneath the existing feature body. Current behavior description stays unchanged.
-- Do not put ticket references in the marker. Before implementation, readiness traceability lives in ticket `spec:`, `spec-remove:`, or `## Spec Impact`; after implementation, commits carry `## Spec` sections referencing spec-stems.
-- No `🚧` means implemented — verify each such feature actually exists before committing.
-- `🚧` entries are contract-first planned spec text: use them only when planned behavior must be visible and stable before implementation begins.
-- `🚧` entries for implementation behavior require a non-`epic`, non-`research`, non-`workset` `ready/` ticket. Epic, research, or workset tickets may only back `🚧` text that documents planned decomposition, investigation outputs, or operating context, not implementation-ready behavior.
-- Do not write a `🚧` entry merely because a ticket enters `ready/`; ticket-local `## Spec Impact` is the default ready addressing path when implementation should determine exact spec text.
+- Every spec entry describes implemented behavior — verify each described feature actually exists before committing.
+- Planned-but-unbuilt behavior does not live in the spec. Before implementation, readiness traceability lives in ticket `spec:`, `spec-remove:`, or `## Spec Impact`; after implementation, commits carry `## Spec` sections referencing spec-stems.
+- A known-but-unscheduled gap with no ticket uses the Implementation Gap Callout below.
 
 ## Implementation Gap Callout
 
@@ -40,8 +35,8 @@ Use `> [!note] Implementation Gap · YYYY-MM-DD` for a known-but-unscheduled gap
 The callout body text identifies which form applies.
 
 - The date records when the gap was first noted; use today's date when first authoring.
-- No ticket required — this distinguishes it from `🚧` entries, which require contract-first planned behavior backed by a non-`epic`, non-`research`, non-`workset` `ready/` ticket for implementation behavior; epic/research/workset tickets may back only planned decomposition, investigation text, or operating context.
-- Resolution path: at the next spec review, either create a qualifying ticket and convert to `🚧` only when the gap is contract-first planned behavior, or accept the current state and absorb into body prose.
+- No ticket required.
+- Resolution path: at the next spec review, either create a qualifying ticket and carry the gap's contract text in that ticket's `## Spec Impact` — removing the callout at implementation closeout — or accept the current state and absorb into body prose.
 - Discuss sessions surface a staleness warning for entries older than 90 days.
 
 Permanent behavioral invariants belong in body prose, not in any callout. Write them directly in the body — they are facts about the system, not exceptions worth flagging.
@@ -91,13 +86,6 @@ A specific sub-concept within a section can also carry an anchor. {#260421-sub-c
 
 > [!note] Implementation Gap · YYYY-MM-DD
 > Known-but-unscheduled incomplete behavior. No ticket yet.
-
-> [!note] Planned 🚧
-> Will gain X capability. Current behavior unchanged until implemented.
-
-## 🚧 New Feature {#260421-new-feature}
-
-Planned behavior description — what the caller will observe once implemented.
 ```
 
 ## Doctrine
