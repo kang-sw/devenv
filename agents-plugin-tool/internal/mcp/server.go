@@ -2544,6 +2544,10 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 // advisory therefore has to be appended here explicitly, or the specs.find
 // query path silently loses it while the no-query fallback keeps it. Each line
 // is prefixed with the spec path so the note stays attributable.
+//
+// The advisory loop is bounded by the same maxFindTextDocuments cut the
+// delegated body applies, so the note can never name a spec that was truncated
+// out of the response above it.
 func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
 	var b strings.Builder
 	b.WriteString(formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
@@ -2551,9 +2555,20 @@ func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
 			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
 		}
 	}))
-	for _, spec := range specs {
+	rendered := specs
+	if len(rendered) > maxFindTextDocuments {
+		rendered = rendered[:maxFindTextDocuments]
+	}
+	separated := false
+	for _, spec := range rendered {
 		if strings.TrimSpace(spec.LegacyMarkerAdvisory) == "" {
 			continue
+		}
+		if !separated {
+			// Each document block is emitted with a leading "\n", so without
+			// this the first advisory runs flush against the last hit line.
+			b.WriteString("\n")
+			separated = true
 		}
 		fmt.Fprintf(&b, "legacy-marker: %s: %s\n", spec.Path, strings.TrimSpace(spec.LegacyMarkerAdvisory))
 	}

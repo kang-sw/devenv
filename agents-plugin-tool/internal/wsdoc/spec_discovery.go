@@ -22,21 +22,24 @@ type SpecStatusOptions struct {
 }
 
 type SpecInfo struct {
-	Path           string           `json:"path"`
-	Filename       string           `json:"filename"`
-	Title          string           `json:"title,omitempty"`
-	Summary        string           `json:"summary,omitempty"`
-	Anchors        []SpecAnchorInfo `json:"anchors,omitempty"`
-	TicketRefs     []string         `json:"ticket_refs,omitempty"`
-	MarkerContexts []string         `json:"marker_contexts,omitempty"`
+	Path             string           `json:"path"`
+	Filename         string           `json:"filename"`
+	Title            string           `json:"title,omitempty"`
+	Summary          string           `json:"summary,omitempty"`
+	Anchors          []SpecAnchorInfo `json:"anchors,omitempty"`
+	TicketRefs       []string         `json:"ticket_refs,omitempty"`
+	MarkerContexts   []string         `json:"marker_contexts,omitempty"`
+	MatchingSnippets []string         `json:"matching_snippets,omitempty"`
+	MatchScore       int              `json:"match_score,omitempty"`
+	Matches          []MatchEvidence  `json:"matches,omitempty"`
+	MatchesSpecStem  bool             `json:"matches_spec_stem,omitempty"`
+	MatchesTicketRef bool             `json:"matches_ticket_ref,omitempty"`
+
 	// LegacyMarkerAdvisory is a non-blocking migration note emitted when the
-	// file still carries a legacy `🚧` planned marker. Empty otherwise.
-	LegacyMarkerAdvisory string          `json:"legacy_marker_advisory,omitempty"`
-	MatchingSnippets     []string        `json:"matching_snippets,omitempty"`
-	MatchScore           int             `json:"match_score,omitempty"`
-	Matches              []MatchEvidence `json:"matches,omitempty"`
-	MatchesSpecStem      bool            `json:"matches_spec_stem,omitempty"`
-	MatchesTicketRef     bool            `json:"matches_ticket_ref,omitempty"`
+	// file still carries a legacy `🚧` planned marker. Empty otherwise. It is
+	// appended after the pre-existing fields so this struct's original block
+	// stays byte-identical and the phase boundary stays mechanically checkable.
+	LegacyMarkerAdvisory string `json:"legacy_marker_advisory,omitempty"`
 
 	// legacyMarkers is the parsed marker set backing LegacyMarkerAdvisory. It
 	// stays unexported so the wire shape is unchanged; it exists only so the
@@ -246,7 +249,7 @@ func applyLegacyMarkerAdvisories(root string, specs []SpecInfo) {
 	}
 	resolver := newLegacyMarkerResolver(root)
 	for i := range specs {
-		specs[i].LegacyMarkerAdvisory = resolver.Advise(specs[i].Path, specs[i].legacyMarkers)
+		specs[i].LegacyMarkerAdvisory = resolver.advise(specs[i].Path, specs[i].legacyMarkers)
 	}
 }
 

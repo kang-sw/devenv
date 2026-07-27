@@ -808,8 +808,8 @@ and each value's scope is resolved through the layered config scope model.
 ticket inventory for the current repository. The document map omits entries
 ignored by the repository's Git ignore rules so generated or vendored
 directories do not dominate the readable project context. The spec inventory
-also flags any spec file that still carries a legacy planned marker (`🚧`) with
-the same advisory the spec discovery tools emit; the flag is advisory and never
+also flags any spec file that still carries a legacy planned marker with the
+same advisory the spec discovery tools emit; the flag is advisory and never
 fails the call.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
@@ -835,15 +835,22 @@ manually.
 
 All three tools, including `specs.find`'s query path, additionally emit a
 compatibility advisory for each spec file that still carries a legacy planned
-marker (`🚧`) — the retired contract-first planned-entry mechanism. Detection
-keys on the marker's shape at the start of a line, so prose that merely
-describes the mechanism is not flagged. Resolution runs ticket to spec: when a
-live ticket (`idea`, `todo`, or `ready`) names the exact spec file path or the
-marker's own anchor stem, the advisory names those tickets with their statuses
+marker — the contract-first planned-entry mechanism being retired by
+`260726-refactor-retire-spec-planned-marker-mechanism`. Detection keys on the
+marker's shape at the start of a line and follows CommonMark block rules, so
+prose that merely describes the mechanism is not flagged: a marker named
+mid-sentence, quoted inside a fenced code block, or indented four or more
+columns as an indented code block is documentation, not a marker. The advisory
+names the marker's line numbers. Resolution runs ticket to spec: when a live
+ticket (`idea`, `todo`, or `ready`) names the exact spec file path or one of the
+marker's own anchor stems, the advisory names those tickets with their statuses
 and directs the caller to move the marker text into the ticket's `## Spec
 Impact` and then strip the marker; when no live ticket does, the advisory
 reports the marker as orphaned and directs the caller to strip it, keeping the
-described behavior as an ordinary implemented entry if it shipped. The advisory
+described behavior as an ordinary implemented entry if it shipped or as an
+Implementation Gap callout if it did not. When the live-ticket scan cannot be
+completed, the advisory reports that ownership could not be determined and must
+be resolved manually rather than reporting the marker as orphaned. The advisory
 is informational only and never fails a call or blocks a commit.
 
 Spec, ticket, and mental-model discovery tools default to compact line-oriented

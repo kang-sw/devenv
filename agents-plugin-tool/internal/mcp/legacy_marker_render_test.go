@@ -1,11 +1,17 @@
 package mcp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
+
+// legacyMarkerAdvisoryPrefix mirrors wsdoc's note prefix, including the marker's
+// 1-based line number, so a render-side change to the note is caught here too.
+const legacyMarkerAdvisoryPrefix = "legacy planned marker (contract-first planned-entry mechanism being retired by " +
+	"260726-refactor-retire-spec-planned-marker-mechanism): 1 marker(s) at line 10"
 
 func legacyMarkerRenderRoot(t *testing.T) string {
 	t.Helper()
@@ -30,7 +36,7 @@ func TestFormatSpecSurfacesRenderLegacyMarkerAdvisory(t *testing.T) {
 		t.Fatalf("SpecsList returned error: %v", err)
 	}
 	listText := formatSpecs(list)
-	if !strings.Contains(listText, "  legacy-marker: legacy planned marker (retired mechanism): 1 marker(s); no live ticket references this spec") {
+	if !strings.Contains(listText, "  legacy-marker: "+legacyMarkerAdvisoryPrefix+"; no live ticket references this spec") {
 		t.Fatalf("formatSpecs text = %q", listText)
 	}
 
@@ -42,7 +48,10 @@ func TestFormatSpecSurfacesRenderLegacyMarkerAdvisory(t *testing.T) {
 	if !strings.Contains(findText, "candidate spec for query=") {
 		t.Fatalf("formatSpecFind lost its delegated body: %q", findText)
 	}
-	if !strings.Contains(findText, "legacy-marker: ai-docs/spec/demo.md: legacy planned marker (retired mechanism): 1 marker(s); no live ticket references this spec") {
+	// A blank line separates the advisory from the last hit line: document
+	// blocks are emitted with a leading "\n", so without it the note runs flush
+	// against the preceding hit.
+	if !strings.Contains(findText, "\n\nlegacy-marker: ai-docs/spec/demo.md: "+legacyMarkerAdvisoryPrefix+"; no live ticket references this spec") {
 		t.Fatalf("formatSpecFind text = %q", findText)
 	}
 
@@ -51,8 +60,31 @@ func TestFormatSpecSurfacesRenderLegacyMarkerAdvisory(t *testing.T) {
 		t.Fatalf("SpecsStatus returned error: %v", err)
 	}
 	statusText := formatSpecStatus(status)
-	if !strings.Contains(statusText, "legacy-marker: ai-docs/spec/demo.md: legacy planned marker (retired mechanism): 1 marker(s)") {
+	if !strings.Contains(statusText, "legacy-marker: ai-docs/spec/demo.md: "+legacyMarkerAdvisoryPrefix) {
 		t.Fatalf("formatSpecStatus text = %q", statusText)
+	}
+}
+
+// formatSpecFind's advisory loop is bounded by the same maxFindTextDocuments cut
+// the delegated body applies, so the note can never name a spec that was
+// truncated out of the listing above it.
+func TestFormatSpecFindDropsAdvisoriesForTruncatedDocuments(t *testing.T) {
+	specs := []wsdoc.SpecInfo{}
+	for i := 0; i < maxFindTextDocuments; i++ {
+		specs = append(specs, wsdoc.SpecInfo{Path: fmt.Sprintf("ai-docs/spec/rank%02d.md", i), MatchScore: 100 - i})
+	}
+	specs = append(specs, wsdoc.SpecInfo{
+		Path:                 "ai-docs/spec/truncated.md",
+		MatchScore:           1,
+		LegacyMarkerAdvisory: "legacy planned marker: 1 marker(s) at line 3; no live ticket references this spec",
+	})
+
+	got := formatSpecFind("prune policy", specs)
+	if strings.Contains(got, "ai-docs/spec/truncated.md") {
+		t.Fatalf("formatSpecFind named a truncated document: %q", got)
+	}
+	if strings.Contains(got, "legacy-marker") {
+		t.Fatalf("formatSpecFind emitted an advisory for a truncated document: %q", got)
 	}
 }
 
