@@ -719,7 +719,12 @@ When a delegate playbook declares its own `tier:`, the `recommended-tier`
 returned by `playbook.render` is authoritative for that delegate and the table is
 the allocation default. The review budget counts review cycles, not relays, and
 is per implementation slice: 2 cycles for single-reviewer, 3 cycles for
-partitioned with lead adjudication at cycle 2. The initial review is cycle 1, so
+partitioned, where the lead may arbitrate a contested finding through the
+`review-adjudicator` delegate before the second relay. Adjudication runs inside
+a relay slot, consumes no review cycle, is bounded to one per slot, and returns
+one verdict per dispute: uphold the refusal, override it into the next relay, or
+record it as a scope deferral carried into the completion report. The
+single-reviewer budget has no adjudication slot. The initial review is cycle 1, so
 the budget permits one fewer relay than its cycle count. The last budgeted cycle
 completes the run rather than halting it: the lead stops relaying, proceeds to
 closeout, and carries unresolved findings with their dispositions into the
