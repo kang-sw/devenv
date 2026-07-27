@@ -665,7 +665,14 @@ export function TerminalPaneBody({
       terminal.options.fontFamily = buildEffectiveTerminalFontFamily(
         liveRef.current.terminalPrefs.fontFamilyOverride,
       );
-      fitNowRef.current?.();
+      // A font swap can change glyph cell width, so fit() may resize with a
+      // changed column count, which reflows the buffer. On a normal buffer
+      // with real scrollback that remaps ydisp/ybase and visibly jumps the
+      // viewport to the top - only safe to do on an alt-screen session
+      // (same carve-out as the shrink/restore trick below).
+      if (terminal.buffer.active.type === "alternate") {
+        fitNowRef.current?.();
+      }
     };
     document.fonts.addEventListener("loadingdone", onFontsLoadingDone);
 
