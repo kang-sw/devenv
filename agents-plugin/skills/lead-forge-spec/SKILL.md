@@ -7,3 +7,4 @@ description: Reconstruct specs from scratch by surveying the project, confirming
 
 Call `ws/playbook.print(name: "lead-forge-spec")` and execute the returned procedure
 inline against the user request.
+If this call fails to connect, run `/ws:mcp-server-repair`.

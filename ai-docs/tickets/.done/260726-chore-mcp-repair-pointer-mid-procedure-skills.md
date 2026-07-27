@@ -6,6 +6,7 @@ related:
   260726-feat-ws-cli-lenient-tool-name-resolution: sibling CLI-fallback ergonomics ticket from the same MCP-down dogfooding class
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-28
 ---
 
 # mcp-server-repair pointers reach only front-door skills, not the skills a procedure lands in
@@ -100,3 +101,72 @@ Verification boundary: `test_wsflow_skill_bundle.py` passes with
 `lead-write-ticket` and `lead-write-spec` asserted as carrying the pointer tail;
 the ten enumerated ws-tree skills each contain the pointer wording; the manifest
 regenerates clean with no diff on re-run.
+
+### Result (a6cf3215) - 2026-07-28
+
+Done. Both trees now carry the tree-namespaced repair pointer on every SKILL.md
+that makes a `playbook.print` call. Commits: `a6cf3215` (sweep), `8d8f7613`
+(doc-drift fix), `3f58ea17` (scope extension), `ba94c526` (mental model + debt
+tickets).
+
+**Two lead-directed scope extensions, both reasoned from the ticket's governing
+Decision — "Cover skills reached after routing, not just entry points" — rather
+than from its enumerated list.**
+
+- The ten ws-tree skills were also edited in their eight existing
+  `agents-plugin-wsflow/skills/` copies. The ticket named the ws tree for those
+  ten and the wsflow tree for the two front doors; leaving the wsflow copies
+  un-pointed would have made the same skill behave differently by host, which is
+  the failure the pointer exists to prevent. Same closed skill set, wider tree
+  coverage.
+- Four further wsflow-only skills were added: `lead-check-blockers`,
+  `lead-implement`, `lead-update-spec`, `lead-workflow-manual`. `lead-implement`
+  is the canonical destination after `lead-proceed` routes — the single most
+  likely place to land mid-procedure, and the ticket's Background describes
+  exactly that scenario. Enumerating it as out of scope while pointing at
+  `lead-tune` would have been arbitrary.
+
+Left pointer-free in both trees, correctly: `lead-goal-step`,
+`lead-prefer-subagent`, `lead-verify-discussion`. They carry inline bodies, make
+no `playbook.print` call, and are `substitutionMirroredSkills` members — there is
+no call for the pointer to attach to.
+
+**The ticket's regen instruction was wrong.** Phase text said
+`WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1`. That gate runs
+`TestGenerateRealManifest`, which regenerates `agents-plugin/rsrc/manifest.json` —
+not the skills manifest the phase needed. The correct gate is
+`WSRSRC_REGEN_SKILLS=1 go test ./internal/wsrsrc/... -run TestGenerateRealSkillsManifest -count=1`.
+Following the ticket literally would have left `agents-plugin/skills/manifest.json`
+stale with no failing test to say so. Captured as a Common Mistakes bullet in
+`ai-docs/mental-model/workflow-skills.md`.
+
+**The `## Spec Impact` premise is false.** It asserts that
+`ai-docs/spec/workflow-skills.md` already documents the `mcp-server-repair`
+fallback. `grep -rn "mcp-server-repair" ai-docs/spec/` returns nothing; the
+mechanism has no spec coverage at all. The conclusion the section reached — that
+this phase owes the spec nothing — happens to hold anyway, since the phase only
+propagated an existing convention, but it was reached from a premise that does
+not. Authoring spec text at the end of an already-reviewed phase would have
+shipped unreviewed, so the gap is captured as
+`260728-chore-spec-mcp-server-repair-unspecified` instead.
+
+**Review:** one partitioned cycle, stopped one under budget. Cycle 1 was clean on
+correctness and the delta was mechanical and mutation-verified — the reviewer
+confirmed four regressions fail the suite (un-pointed revert, tail deleted,
+pointer line removed, wrong namespace), and the implementer re-verified two more
+after the extension. Dispositions: M1 `[fixed]` (the four-skill extension),
+M2 `[won't fix]` — the merge commit is this repo's carrier for `## Ticket
+Updates`, M3 `[deferred]`.
+
+M3 is `260728-chore-ws-tree-skill-pointer-guard`: the wsflow tree enforces the
+shim-shape invariant in `test_wsflow_skill_bundle.py`, while the ws tree only
+sha256-hashes it in `skills/manifest.json`. Both trees now hold the same
+invariant and exactly one enforces it, so the weaker tree is the one that will
+drift. Deferred rather than built because the invariant itself is unsettled —
+"ends with the pointer" is checkable but narrower than the thin-shim property
+actually worth defending, and the three-skill exemption must be derived from file
+content rather than a name list that becomes the next thing to drift.
+
+Verification: `python3 -m unittest discover agents-plugin-wsflow/tests` 10/10;
+`go build ./...` clean; `go test ./... -count=1` green across all 12 packages;
+skills-manifest regen idempotent at 22 sha256 entries, 5 recomputed by hand.

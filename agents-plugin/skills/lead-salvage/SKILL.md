@@ -7,3 +7,4 @@ description: Use when a large implementation, sprint, branch, or agent run may n
 
 Call `ws/playbook.print(name: "lead-salvage")` and execute the returned procedure
 inline against the user request.
+If this call fails to connect, run `/ws:mcp-server-repair`.

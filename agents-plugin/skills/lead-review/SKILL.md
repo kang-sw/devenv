@@ -7,3 +7,4 @@ description: Use when the user wants to review a pull request or merge request b
 
 Call `ws/playbook.print(name: "lead-review")` and execute the returned procedure
 inline against the user request.
+If this call fails to connect, run `/ws:mcp-server-repair`.

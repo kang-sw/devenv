@@ -53,6 +53,25 @@ PARALLEL_INIT_TITLES = {
     "lead-goal-fan-out-step": "Goal Fan-Out Step",
 }
 
+# Single-call shims that carry the mcp-server-repair pointer tail instead of
+# the generic "stop and report that blocker" un-pointed form.
+POINTER_TAIL_TITLES = {
+    "lead-proceed": "Proceed",
+    "lead-write-ticket": "Write Ticket",
+    "lead-write-spec": "Write Spec",
+    "lead-add-rule": "Add Rule",
+    "lead-bootstrap": "Bootstrap",
+    "lead-forge-mental-model": "Forge Mental Model",
+    "lead-forge-spec": "Forge Spec",
+    "lead-review": "Review",
+    "lead-ship": "Ship",
+    "lead-tune": "Workflow Tuning",
+    "lead-implement": "Implement",
+    "lead-check-blockers": "Check Blockers",
+    "lead-update-spec": "Update Spec",
+    "lead-workflow-manual": "Workflow Manual",
+}
+
 FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
     "full ws skill namespace": re.compile(r"\bws:"),
@@ -104,16 +123,21 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-proceed carries the mcp-server-repair pointer in place of the
-        # generic "stop and report that blocker" tail, so it is checked
-        # separately below with its own exact tail; the other 13 shims keep the
-        # strict un-pointed form unchanged.
+        # lead-proceed, lead-write-ticket, lead-write-spec, lead-add-rule,
+        # lead-bootstrap, lead-forge-mental-model, lead-forge-spec,
+        # lead-review, lead-ship, lead-tune, lead-implement,
+        # lead-check-blockers, lead-update-spec, and lead-workflow-manual all
+        # carry the mcp-server-repair pointer in place of the generic "stop
+        # and report that blocker" tail, so they are checked separately below
+        # (see POINTER_TAIL_TITLES) with their own exact tail. That accounts
+        # for every non-inline, non-parallel-init shim; none remain on the
+        # un-pointed form.
         offenders = []
         for skill in sorted(
             EXPECTED_SKILLS
             - EXPECTED_INLINE_SKILLS
             - EXPECTED_PARALLEL_INIT_SKILLS
-            - {"lead-proceed"}
+            - set(POINTER_TAIL_TITLES)
         ):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
@@ -132,32 +156,39 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 offenders.append(str(path.relative_to(PLUGIN_DIR)))
         self.assertEqual(offenders, [])
 
-    def test_lead_proceed_shim_carries_repair_pointer(self):
-        path = SKILLS_DIR / "lead-proceed" / "SKILL.md"
-        text = path.read_text(encoding="utf-8")
-        match = re.fullmatch(
-            r"---\n"
-            r"name: lead-proceed\n"
-            r"description: .+\n"
-            r"---\n\n"
-            r"# .+\n\n"
-            r"Call `wsflow/playbook\.print\(name: \"lead-proceed\"\)` and execute the returned procedure\n"
-            r"inline against the current user request\. "
-            r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
-            text,
-        )
-        self.assertIsNotNone(match, f"{path.relative_to(PLUGIN_DIR)} missing the mcp-server-repair pointer tail")
+    def test_single_call_shims_carry_repair_pointer(self):
+        # All single-call shims in POINTER_TAIL_TITLES share the identical
+        # joined-tail shape, differing only by skill name and title. A missing
+        # pointer on any of them must fail loudly rather than silently
+        # matching the generic un-pointed shim regex instead.
+        offenders = []
+        for skill, title in POINTER_TAIL_TITLES.items():
+            path = SKILLS_DIR / skill / "SKILL.md"
+            text = path.read_text(encoding="utf-8")
+            match = re.fullmatch(
+                r"---\n"
+                rf"name: {re.escape(skill)}\n"
+                r"description: .+\n"
+                r"---\n\n"
+                rf"# {re.escape(title)}\n\n"
+                rf"Call `wsflow/playbook\.print\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
+                r"inline against the current user request\. "
+                r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
+                text,
+            )
+            if match is None:
+                offenders.append(str(path.relative_to(PLUGIN_DIR)))
+        self.assertEqual(offenders, [])
 
     def test_parallel_init_skill_files_are_playbook_shims(self):
-        # lead-discuss and lead-sprint gain the mcp-server-repair pointer after
-        # the existing final line; lead-goal-fan-out-step keeps the un-suffixed
-        # form. Explicit per-skill tails (not an optional regex group) so a
-        # missing pointer on discuss/sprint fails loudly instead of silently
-        # passing.
+        # All three parallel-init skills gain the mcp-server-repair pointer
+        # after the existing final line. Explicit per-skill tails (not an
+        # optional regex group) so a missing pointer on any of them fails
+        # loudly instead of silently passing.
         pointer_tail = {
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-sprint": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-goal-fan-out-step": r"",
+            "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }
         offenders = []
         for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):

@@ -7,3 +7,4 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 
 Call `ws/playbook.print(name: "lead-skill-authoring")` and execute the returned procedure
 inline against the user request.
+If this call fails to connect, run `/ws:mcp-server-repair`.
