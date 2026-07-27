@@ -560,6 +560,11 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	}
 }
 
+// implementReviewFinalCycleClause states what the last budgeted review cycle does.
+// The budget ends relaying only; the run continues through the remaining todos so an
+// autonomous goal run is never stranded at the cap.
+const implementReviewFinalCycleClause = "After the last budgeted cycle returns, stop relaying and continue to the remaining todos, carrying each unresolved finding with its disposition into the completion report; the budget ends relaying, not the run."
+
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
@@ -568,12 +573,12 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings.", formatReviewPartitions(verdict.ReviewAlloc))
+		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFinalCycleClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
-		return "Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. Relay only new non-clean Critical/Important findings."
+		return "Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. Relay only new non-clean Critical/Important findings. Budget 2 review cycles for this implementation slice: the initial review is cycle 1, so relay at most once. " + implementReviewFinalCycleClause
 	}
-	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
+	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. " + implementReviewFinalCycleClause
 }
 
 func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
