@@ -506,6 +506,60 @@ or `spec-address` on a `ready/` ticket) appears in `ws/git.commit`'s response,
 the commit still lands, and `OK` is unchanged. No new check is added in this
 phase.
 
+### Result (7e0c35f5) - 2026-07-27
+
+Code range `35239ebc..7e0c35f5`; spec `36f04c6a`, mental model `c5a65070`.
+
+`wsgit.Verifier` is now `func(root string, paths []string) ([]string, error)`,
+and `wsgit.CommitResult` carries `Advisories []string`. `verifyAdapter` and the
+exported `VerifyAdapter` format `wsdoc.VerifyResult.Warnings` into
+`WARN [guardrail] path: message` lines and return them as advisories, returning a
+non-nil error only for hard `Findings`. Both `ws/git.commit` entry points stay
+gated identically, since the advisories ride the result struct that both
+argument-free formatters already receive.
+
+**Answers the phase left open.** JSON mode carries no advisories: the field is
+tagged `json:"-"`, so both emission sites omit it through plain
+`encoding/json.Marshal` with no per-call-site branch — matching the todo
+re-injection precedent. Trailer order is commit output -> advisories -> todo
+re-injection -> session-key tip, keeping the tip last per
+`{#260708-git-commit-session-key-tip}`. On a veto the advisories are discarded
+deliberately, pinned by `TestCommitVetoDiscardsAdvisoriesAlongsideError`.
+
+**Deviation from Prior Art, accepted.** Prior Art suggested a
+`wsdoc.VerifyResult.Advisories` field alongside the commit-result field. Phase 1
+adds only the commit-result half, because nothing populates a wsdoc-side field
+until Phase 2. The fit review confirmed this does not force a Phase 2 reshape:
+the `[]string` carrier is pre-formatted and unattributed, which is exactly what
+the multi-line, per-call-deduplicated `## Parent Board` block needs, and the
+renderer splits each advisory on newlines and indents every line so a multi-line
+block renders correctly on arrival.
+
+Verification: `go build ./...` clean and `go test ./... -count=1` green across
+all 12 packages. The verification boundary is proved end-to-end by
+`TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories`, which drives
+the real MCP dispatch over a `.done` ticket fixture carrying an
+`unresolved-phases` warning and asserts all three clauses — warning surfaced,
+commit landed, `OK` unchanged — with a non-vacuous JSON-mode absence assertion
+(the same fixture is shown to warn on the text path first). The correctness
+reviewer additionally confirmed the CLI entry point by live e2e.
+
+Review: correctness, fit, and test partitions all returned clean with zero
+Critical/Important findings. Six minor findings; four were fixed in `7e0c35f5`
+(stale `Verifier` doc comment, multi-line advisory indentation, explicit
+veto-discard intent plus its test, and an empty-`Advisories` assertion on the
+verifier-skipped path). Two were rejected: a dedicated `wsgit`-level threading
+test, made redundant by the veto-discard test's stub verifier, and the spec
+qualification, which belonged to the documentation pass and landed as
+`36f04c6a`.
+
+Spec: `{#260723-git-commit-ticket-verify-gate}` gained sub-anchor
+`{#260727-git-commit-verify-advisories}` for the advisory channel, its
+text-mode-only boundary, and entry-point parity.
+
+Not carried forward: Phase 2's checks, the `## Parent Board` block, and any
+`wsdoc`-side advisory field remain unimplemented, as scoped.
+
 ### Phase 2: Ticket-graph advisories
 
 Add the ancestor walk, the board block, and the cross-reference integrity checks
