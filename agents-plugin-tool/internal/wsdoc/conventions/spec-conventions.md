@@ -21,7 +21,7 @@ description, abstract it further.
 
 ## Implementation Status
 
-- Every spec entry describes implemented behavior — verify each described feature actually exists before committing.
+- Every spec entry describes implemented behavior — verify each described feature actually exists before committing. An Implementation Gap Callout is the exception: a verification pass keeps it rather than deleting it.
 - Planned-but-unbuilt behavior does not live in the spec. Before implementation, readiness traceability lives in ticket `spec:`, `spec-remove:`, or `## Spec Impact`; after implementation, commits carry `## Spec` sections referencing spec-stems.
 - A known-but-unscheduled gap with no ticket uses the Implementation Gap Callout below.
 

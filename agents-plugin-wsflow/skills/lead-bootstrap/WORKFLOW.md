@@ -59,7 +59,10 @@ template rather than relying on a project-local guide override.
   the identifier used in tickets, commits, and mental-model cross-references.
 - Planned work stays in ticket `## Spec Impact` until implementation closeout;
   spec entries describe implemented behavior only. Verify the behavior exists
-  before writing or keeping its entry.
+  before writing or keeping its entry. A known-but-unscheduled gap with no
+  ticket is the exception: it stays as a
+  `> [!note] Implementation Gap · YYYY-MM-DD` callout, and a verification pass
+  keeps it rather than deleting it.
 - If stem-generation or duplicate-anchor tools are unavailable, choose a clear
   date-prefixed stem manually, search the spec tree for duplicates, and verify
   with wsflow tooling when it becomes available.
