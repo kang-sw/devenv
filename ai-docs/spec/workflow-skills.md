@@ -717,8 +717,13 @@ first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
 correctness `large`, fit and test `medium` — raised for unusually subtle risk.
 When a delegate playbook declares its own `tier:`, the `recommended-tier`
 returned by `playbook.render` is authoritative for that delegate and the table is
-the allocation default. Relay cap is 2 cycles for single-reviewer, 3 cycles for
-partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
+the allocation default. The review budget counts review cycles, not relays, and
+is per implementation slice: 2 cycles for single-reviewer, 3 cycles for
+partitioned with lead adjudication at cycle 2. The initial review is cycle 1, so
+the budget permits one fewer relay than its cycle count. The last budgeted cycle
+completes the run rather than halting it: the lead stops relaying, proceeds to
+closeout, and carries unresolved findings with their dispositions into the
+completion report.
 {#260612-reviewer-allocation-tier-default}
 
 Delegates in the review fix-loop are stateless by contract: each implementer and
@@ -738,8 +743,8 @@ full findings, reports the severity verdict, reviews the current diff per its
 charter, and is not asked to classify regression-vs-preexisting. The lead
 enforces convergence by dedup against the durable disposition record — a settled
 finding is not re-relayed, only genuinely new Critical/Important findings are —
-layered over the relay cap as the backstop for the pathological case of a
-reviewer inventing new findings each cycle.
+layered over the review-cycle budget as the backstop for the pathological case
+of a reviewer inventing new findings each cycle.
 Delegated review-fix relay is file-first: the lead renders the
 `implementer-relay` playbook with declared inputs for plan path, review cycle,
 current commit range, non-clean review paths, disposition notes, verification
