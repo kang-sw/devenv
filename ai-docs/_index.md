@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` | ready | hop-1 default-spawn env-clear regression guard is fragile and platform-partial |
 | `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: automate the reachable gate and fix the insecure-context permission guard left undischarged by Phase 8 |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
@@ -314,9 +313,31 @@ dropped tickets live in hidden archive dirs and git history.
   ws-dashboard-daemon` aborts at the failing `routes` target and never reaches
   the later integration targets, so `--no-fail-fast` is required for the daemon
   suite to carry any signal.
-  After this closure, `ready/` holds two tickets, both `260726`-dated:
-  `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` and
-  `260726-chore-dashboard-verify-notification-permission-tier-manually`.
+
+- `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` — CLOSED
+  (`.done/`, 2026-07-27). Single phase, one commit `28aaf8b6`, no remediation
+  Edition: both review partitions came back with no Critical and no Important
+  findings. The hop-1 default-spawn env guard no longer reads a rendering of
+  the decision — `build_helper_command` now computes a `HelperEnvPlan` through a
+  pure `helper_env_plan`, applies it at exactly one `env_clear()` site, and the
+  test asserts the plan value itself, so the primary guard runs identically on
+  Windows. Mutation evidence M1-M4 is in the ticket's Result and was
+  independently reproduced by the test reviewer; do not re-derive it. Two things
+  worth not re-deriving elsewhere: the ticket's own recorded verification
+  baseline was already stale when the phase ran (true branch-point baseline at
+  `b7f524f7` is lib 236 / routes 176, same two known failure sites), and the
+  ticket's ~17 source citations had drifted (+42 lines in
+  `build_helper_command`, +97..+101 in the test block, two citations outright
+  wrong) — the Result records the corrections.
+
+- `260726-chore-dashboard-verify-notification-permission-tier-manually`
+  (`ready/`) — after the closure above this is the ONLY ticket in `ready/`, so
+  it is the next goal-run target. It cannot be fully closed by an autonomous
+  agent: it carries a `## Human verification residue` section that needs a
+  person to watch a native browser permission prompt and an OS notification.
+  Its Phases 1 and 2 ARE automatable and should be run autonomously; stop at the
+  human-verification residue and hand it to the owner rather than treating the
+  ticket as blocked from the start.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
