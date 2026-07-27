@@ -156,10 +156,27 @@ where
     // tracked and `.abort()`-ed in both `select!` arms). Track the
     // `JoinHandle` and abort it alongside `shutdown_task` so it participates
     // in the same graceful-shutdown path instead of leaking.
+    // CONTRACT (260726 Phase 1): both the sweep PERIOD and the
+    // delivery-failure escalation's GRACE WINDOW are supplied from this one
+    // call site, out of the same constant. The escalation rule deliberately
+    // does not reach up here for it: `agent_profile_gc`/`notify_failure` are
+    // leaf modules, and having them import a constant from this top-level
+    // wiring module would invert the layering just to name a number. Passing
+    // it down also lets the rule's unit tests choose their own window.
     let gc_sweep_task = state_dir.map(|state_dir| {
         let sweep_registry = terminals.clone();
         tokio::spawn(async move {
-            crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
+            // Owned by THIS task (never a module static), so the warn-once
+            // set dies with the task on the `.abort()` shutdown path below.
+            let mut notify_failure_watch =
+                crate::notify_failure::NotifyFailureWatch::default();
+            crate::agent_profile_gc::sweep_agent_profiles(
+                &state_dir,
+                &sweep_registry,
+                &mut notify_failure_watch,
+                AGENT_PROFILE_GC_SWEEP_PERIOD,
+            )
+            .await;
             let mut interval = tokio::time::interval(AGENT_PROFILE_GC_SWEEP_PERIOD);
             // The first tick fires immediately; the sweep above already
             // covered "run once immediately at boot", so this first tick is
@@ -167,7 +184,13 @@ where
             interval.tick().await;
             loop {
                 interval.tick().await;
-                crate::agent_profile_gc::sweep_agent_profiles(&state_dir, &sweep_registry).await;
+                crate::agent_profile_gc::sweep_agent_profiles(
+                    &state_dir,
+                    &sweep_registry,
+                    &mut notify_failure_watch,
+                    AGENT_PROFILE_GC_SWEEP_PERIOD,
+                )
+                .await;
             }
         })
     });

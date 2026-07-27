@@ -189,7 +189,13 @@ pub fn write_callback_target(
 // writers never truncate-then-write the same temp file before renaming. See
 // the CONTRACT above `write_bound_base_url` for why a per-terminal-id temp
 // name (the precedent's own scheme) is not available here.
-fn unique_temp_path(path: &Path) -> PathBuf {
+//
+// `pub(crate)` since 260726 Phase 1: `notify_failure::record_failure` is the
+// second writer with no per-writer id available to derive a temp name from
+// (its file is keyed by a directory path that overlapping hook processes
+// share), so it needs this exact collision-free scheme rather than
+// `write_callback_target`'s fixed `.json.tmp` name.
+pub(crate) fn unique_temp_path(path: &Path) -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()

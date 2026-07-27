@@ -393,3 +393,82 @@ async fn terminal_notify_cli_delivers_a_real_turn_state_post_through_the_real_ro
     let _ = std::fs::remove_dir_all(&work_root);
     let _ = std::fs::remove_dir_all(&fixture_dir);
 }
+
+// CONTRACT (260726 Phase 1 - THE regression guard this phase is most at risk
+// of breaking): the phase adds a `notify-failures.json` write on the failure
+// path of the very process whose module CONTRACT forbids it from ever
+// printing or exiting non-zero. A writer bug (an `unwrap`, a `create_dir_all`
+// on a missing parent, a leaked `io::Error` propagated out of
+// `run_terminal_notify`) would surface as exactly the per-turn `<Event> hook
+// error` noise inside a user's live agent session that the whole design
+// exists to avoid - and no other test in this file drives the FAILURE path
+// of the real compiled binary. Port 1 is refused immediately on every
+// supported platform, so this is deterministic and needs no daemon, no
+// relay, and no timeout beyond process spawn.
+#[tokio::test]
+async fn terminal_notify_cli_stays_silent_against_a_deliberately_broken_callback_target() {
+    let fixture_dir = temp_fixture_path("broken-callback");
+    std::fs::create_dir_all(&fixture_dir).expect("create broken-callback fixture dir");
+    let callback_path = fixture_dir.join("callback.json");
+    std::fs::write(
+        &callback_path,
+        serde_json::json!({
+            "baseUrl": "http://127.0.0.1:1",
+            "terminalId": "term_broken",
+            "token": "wrong",
+        })
+        .to_string(),
+    )
+    .expect("write broken callback.json fixture");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ws-dashboard"))
+        .arg("terminal-notify")
+        .arg("--callback")
+        .arg(&callback_path)
+        .arg("--state")
+        .arg("ready")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .expect("spawn the real compiled ws-dashboard terminal-notify subprocess");
+
+    assert!(
+        output.status.success(),
+        "a failed delivery must still exit 0 - a non-zero exit makes the vendor CLI surface a \
+         visible hook error on every turn boundary"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expected empty stdout, got {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "expected empty stderr, got {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // The failure is instead durable next to the callback file - the whole
+    // point of the phase. Assert it here too, so a future change that
+    // silently stops recording is caught by the same test that guards the
+    // silence it must not trade for.
+    let record: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture_dir.join("notify-failures.json"))
+            .expect("a failed delivery must leave a notify-failures.json beside callback.json"),
+    )
+    .expect("notify-failures.json must be valid JSON");
+    assert_eq!(record["count"], 1);
+    assert!(record["lastFailureAtMs"].as_u64().unwrap_or(0) > 0);
+    assert!(
+        record["lastError"]
+            .as_str()
+            .expect("lastError is a string")
+            .contains("127.0.0.1:1"),
+        "lastError must name the real failure, got {:?}",
+        record["lastError"]
+    );
+
+    let _ = std::fs::remove_dir_all(&fixture_dir);
+}

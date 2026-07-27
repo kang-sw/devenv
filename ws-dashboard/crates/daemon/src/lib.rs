@@ -21,6 +21,7 @@ pub mod git_toolbar;
 pub mod git_worktree;
 pub mod logging;
 pub mod mock;
+pub mod notify_failure;
 pub mod persistent_state;
 pub mod resources;
 pub mod root_picker;

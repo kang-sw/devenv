@@ -52,9 +52,31 @@ use crate::cli::TerminalNotifyArgs;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(750);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
+// CONTRACT (260726 Phase 1): both arms touch the failure record beside the
+// callback file, and the `Err` arm hands the SAME `error` binding to
+// `record_failure` and `log_failure` - the record's `lastError` being
+// verbatim identical to the log line's error text is structural here, not
+// merely documented. The record is keyed by `args.callback.parent()` (a path
+// sibling), never by the parsed `terminalId`, because the failure this
+// mechanism most needs to report is an unreadable/unparseable callback file,
+// from which no terminal id can be recovered. Neither call can print, fail,
+// or change this process's exit status - see the module CONTRACT above and
+// `notify_failure`'s own.
 pub async fn run_terminal_notify(args: TerminalNotifyArgs) -> anyhow::Result<()> {
-    if let Err(error) = deliver(&args).await {
-        log_failure(&args, &error);
+    let now = now_ms();
+    let profile_dir = args.callback.parent().map(|dir| dir.to_path_buf());
+    match deliver(&args).await {
+        Ok(()) => {
+            if let Some(profile_dir) = profile_dir.as_deref() {
+                crate::notify_failure::clear_record(profile_dir);
+            }
+        }
+        Err(error) => {
+            if let Some(profile_dir) = profile_dir.as_deref() {
+                crate::notify_failure::record_failure(profile_dir, &error, now);
+            }
+            log_failure(&args, &error);
+        }
     }
     Ok(())
 }
@@ -63,10 +85,15 @@ async fn deliver(args: &TerminalNotifyArgs) -> Result<(), String> {
     let target = agent_callback::resolve_callback_target(&args.callback)
         .map_err(|error| format!("resolving callback target: {error}"))?;
 
+    // The file resolved, but carries no credential - the shape a bare
+    // `bound-base-url.json` has, not a per-terminal `callback.json`. (This
+    // message used to blame "Phase 4 has not populated this callback target
+    // yet"; 260725 Phase 4 shipped, so that text would now misdirect anyone
+    // reading a log line containing it.)
     let (Some(terminal_id), Some(token)) = (target.terminal_id, target.token) else {
         return Err(format!(
-            "callback file at {} has no terminalId/token - Phase 4 has not populated this \
-             callback target yet",
+            "callback file at {} has no terminalId/token - expected a per-terminal callback \
+             target, not a base-url-only file",
             args.callback.display()
         ));
     };
