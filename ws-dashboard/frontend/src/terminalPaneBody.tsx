@@ -708,7 +708,11 @@ export function TerminalPaneBody({
         terminalRef.current.rows !== beforeFit.rows)
     ) {
       forwardSizeRef.current?.();
-    } else if (beforeFit && terminalRef.current) {
+    } else if (
+      beforeFit &&
+      terminalRef.current &&
+      terminalRef.current.buffer.active.type === "alternate"
+    ) {
       // Size didn't actually change while hidden (the common case - e.g.
       // switching dashboard tabs without resizing the browser window), so a
       // same-size resize would be silently dropped both by the frontend
@@ -720,6 +724,12 @@ export function TerminalPaneBody({
       // different sizes through - a one-row shrink then restore - so each
       // one forwards and triggers a real SIGWINCH, guaranteeing a full
       // redraw.
+      //
+      // Gated to the alternate screen buffer only: a normal-buffer session
+      // (plain shell, no full-screen app) never had the under-repaint
+      // symptom in the first place, and resize-driven reflow of a normal
+      // buffer's real scrollback can jump the viewport to the top - a
+      // regression with no corresponding benefit there.
       const terminal = terminalRef.current;
       const shrunkRows = Math.max(1, terminal.rows - 1);
       if (shrunkRows !== terminal.rows) {
