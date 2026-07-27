@@ -1029,12 +1029,22 @@ force or suppress the subagent inference step.
 current specs under `ai-docs/.old/spec/` after user confirmation, surveys
 source, tickets, archived specs, and commit history, asks the user to confirm
 the once-per-run behavioral domain list, then classifies per-item
-caller-visibility and implemented/planned status autonomously - ambiguous
-calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
-into the wrap-up summary rather than blocking on a per-item confirmation -
-writes anchor-keyed spec entries, verifies the index, and associates spec
-stems with active tickets when required.
+caller-visibility and implemented/planned status autonomously rather than
+blocking on a per-item confirmation, writes anchor-keyed spec entries, verifies
+the index, and associates spec stems with active tickets when required.
 {#260707-forge-spec-autoproceed-classification-2}
+
+Each autonomous classification call that was genuinely ambiguous is recorded
+with its behavior name, chosen classification, and a reason, and that record is
+what the wrap-up summary reports from. The record covers both axes, so items
+excluded from the spec as internal-only or planned appear on the same terms as
+written ones; entries actually written to a spec additionally carry an inline
+`<!-- AMBIGUOUS: <reason> -->` marker. A domain whose behaviors are all
+excluded produces no spec file and is named as such in the summary. A run
+resumed after the recording session reconstructs the list from the inline
+markers and labels what reconstruction cannot recover, rather than reporting a
+partial list as a complete count.
+{#260728-forge-spec-ambiguity-record}
 
 At wrap-up, `lead-forge-spec` asks whether to run `lead-forge-mental-model`
 next and invokes it on a yes answer, regardless of how the run was reached
