@@ -186,3 +186,33 @@ Verification boundary:
 | 1 | Phase 1 bullet 3 delegates the guardrail's shape to a coordination the phase cannot itself close | important |
 | 2 | Reported by verify is never made concrete: no message shape, no severity, no statement of what verify reads | important |
 | 3 | No acceptance check that the narrowed evaluation window preserves the marker's guarantee | minor |
+
+## Resolution (2026-07-28) — dropped
+
+This ticket's premise was **retired, not solved**. It existed to make the `🚧`
+marker's ordering prerequisite satisfiable; Phase 2 of
+`260726-refactor-retire-spec-planned-marker-mechanism` removed the marker
+mechanism itself, so there is no prerequisite left to order. Concretely, every
+rule this ticket's cycle was built from is gone:
+
+- `spec-conventions`' "`🚧` entries for implementation behavior require a
+  non-`epic`, non-`research`, non-`workset` `ready/` ticket" — the whole
+  `## 🚧 Markers` section is deleted (2.2).
+- `lead-write-ticket`'s **On: Spec-address Check** step 3 no longer invokes
+  `lead-write-spec`, and `judge: contract-first-spec` is deleted from both
+  playbooks (2.4). The contract-first branch this ticket was written to make
+  executable no longer exists.
+- `lead-write-spec`'s "Session reminder" — the line that restated the
+  unsatisfiable precondition — is deleted with the judge that emitted it (2.3).
+
+Nothing here is deferred into a follow-up guardrail: with no `🚧` to write, the
+proposed commit-state invariant and the verify-side advisory have no subject.
+`ticket-conventions`' ready spec-address requirement survives untouched and is
+now addressed solely through `spec:`, `spec-remove:`, or `## Spec Impact`.
+
+The one finding that outlived the premise — `lead-write-spec` step 7 committing
+unconditionally while callers invoke it inline — was extracted before this drop
+and lives in `260726-bug-inline-playbook-invocation-commit-ownership`, which is
+in `ready/` and does not depend on the marker question. That ticket also carries
+a dated note recording that the retirement landed ahead of it and that its
+inline-caller survey must be re-run.
