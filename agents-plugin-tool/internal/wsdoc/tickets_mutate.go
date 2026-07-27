@@ -484,29 +484,36 @@ func readyPostureProblems(designRequired bool, design string, completenessRequir
 // non-terminal posture. Unlike sageReviewStageError/sageReviewBlockedError
 // (which build tickets.verify's HARD FAIL text — the sole enforcement
 // point), this text never blocks the caller; it states the consequence
-// (ws/git.commit will still fail on guardrail ready-sage-posture) and the
-// reachable escape (ws/tickets.sage_gate). Only the first problem is
-// reported, matching readyPostureProblems' design-before-completeness order
-// and the historical single-field error precedent. The "unreviewed" and
-// "blocked" variants are deliberately distinct sentences (per ticket
-// decision): unreviewed means review has not run yet; blocked means a prior
-// review already found unresolved issues — the two imply different next
-// actions for the caller.
+// (ws/git.commit will still fail on guardrail ready-sage-posture) and a
+// reachable escape. Only the first problem is reported, matching
+// readyPostureProblems' design-before-completeness order and the historical
+// single-field error precedent. The "unreviewed" and "blocked" variants are
+// deliberately distinct sentences (per ticket decision): unreviewed means
+// review has not run yet; blocked means a prior review already found
+// unresolved issues — the two imply different next actions for the caller.
+// Their instruction clauses differ for the same reason: ws/tickets.sage_gate
+// resolves an unreviewed posture, but it is a no-op on `blocked` (it returns
+// stop_blocked before any resolution logic), so only ws/tickets.sage_stamp
+// with a non-block verdict can clear that state. Naming an escape no tool can
+// perform would reproduce the dead end this warning exists to remove.
 func readySagePostureWarning(problems []readyPostureProblem) string {
 	if len(problems) == 0 {
 		return ""
 	}
 	first := problems[0]
-	var state string
+	var state, instruction string
 	if first.Blocked {
 		state = "blocked (a prior review found unresolved issues)"
+		instruction = "Address the blocker, then re-run the review and record a non-block verdict via " +
+			"ws/tickets.sage_stamp(stem, stage, verdicts) to resolve it — ws/tickets.sage_gate cannot clear a blocked posture"
 	} else {
 		state = "unreviewed (posture " + first.Posture + "; review has not run yet)"
+		instruction = "Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it"
 	}
 	return fmt.Sprintf(
 		"%s is %s; ws/git.commit will fail on guardrail ready-sage-posture until this resolves. "+
-			"Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it; %s",
-		first.Field, state, sageReviewNonWaivableAdvisory,
+			"%s; %s",
+		first.Field, state, instruction, sageReviewNonWaivableAdvisory,
 	)
 }
 

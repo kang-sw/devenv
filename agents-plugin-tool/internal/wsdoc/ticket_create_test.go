@@ -128,6 +128,13 @@ func TestTicketCreateReadyWarnsOnUnresolvedSageReviewDesignPosture(t *testing.T)
 			if !strings.Contains(res.Tip, tc.wantWarn) {
 				t.Fatalf("Tip = %q, want it to contain %q", res.Tip, tc.wantWarn)
 			}
+			// TicketCreate can only ever produce the unreviewed variant (a
+			// brand-new ticket has no prior posture to be blocked from), so it
+			// must carry the sage_gate instruction clause, not the sage_stamp
+			// one the blocked variant uses.
+			if !strings.Contains(res.Tip, "Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it") {
+				t.Fatalf("Tip = %q, want the unreviewed variant's sage_gate instruction clause", res.Tip)
+			}
 			body := readCreatedTicket(t, root, res)
 			// C4: completeness must be stamped too (same resolved posture as
 			// design for a brand-new ticket), so the warning's silence about

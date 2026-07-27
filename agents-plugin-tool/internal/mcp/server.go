@@ -2810,8 +2810,8 @@ func capitalizeFirst(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// sageGatePostureUncommittedNote is the single sentence every non-terminal gate
-// action carries about the posture write. Sharing one sentence is the point: the
+// sageGatePostureUncommittedNote is the single sentence every gate action
+// carries about the posture write. Sharing one sentence is the point: the
 // prior code said three different things about one condition ("skip" handed over
 // a ready-to-paste commit call, "run" appended the same call, "ask" said
 // nothing).
@@ -2829,7 +2829,13 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	case "skip":
 		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
 	case "stop_blocked":
-		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker."
+		// stop_blocked carries the note too: sageGateCombined can persist a
+		// design posture (design recommended + answer "yes") before the
+		// completeness stage hits its blocked branch, so this action is not
+		// guaranteed to be write-free. The note's hedged "Any sage-review
+		// posture this call wrote" stays true on the branches that wrote
+		// nothing, which is why it can be attached unconditionally.
+		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker." + sageGatePostureUncommittedNote
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":

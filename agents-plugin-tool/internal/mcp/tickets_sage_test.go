@@ -74,12 +74,15 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 	}
 
 	// D1/D3/D4: no gate action may propose a commit for the posture flip, and
-	// all three non-terminal actions must describe the uncommitted write the
-	// same way. A regression that reintroduces a canonical title, a
-	// pending_commit_* key family, or a ready-to-paste ws/git.commit call on
-	// any branch fails here.
+	// every action must describe the uncommitted write the same way. A
+	// regression that reintroduces a canonical title, a pending_commit_* key
+	// family, or a ready-to-paste ws/git.commit call on any branch fails here.
+	// stop_blocked is included because sageGateCombined can persist a design
+	// posture before reaching the completeness blocked branch, so it is not a
+	// write-free action.
 	skipOut := formatSageGate(wsdoc.SageGateResult{Action: "skip"})
-	for name, text := range map[string]string{"skip": skipOut, "ask": askOut, "run": out} {
+	blockedOut := formatSageGate(wsdoc.SageGateResult{Action: "stop_blocked"})
+	for name, text := range map[string]string{"skip": skipOut, "ask": askOut, "run": out, "stop_blocked": blockedOut} {
 		if strings.Contains(text, "ws/git.commit") || strings.Contains(text, "git.commit(") {
 			t.Fatalf("formatSageGate %s must not hand the caller a commit call:\n%s", name, text)
 		}
