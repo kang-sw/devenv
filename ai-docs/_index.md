@@ -258,6 +258,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
 | `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` | idea | Deferred sibling of `260726`: tab-strip scroll on activation may swallow the close click on an overflowing workbench tab strip; verified in dockview source, never reproduced in a browser |
 | `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` | idea | A vestigial loop in the attention SSE stream keeps `cargo clippy -p ws-dashboard-daemon --all-targets` permanently red, so clippy cannot gate any phase |
+| `260727-chore-dashboard-e2e-helper-modules-never-type-checked` | idea | `tsconfig.e2e-tests.json` includes only `daemonHarness.*`, so shared e2e helper modules and every `*.spec.ts` are type-checked by no script in `package.json` |
 
 ## Ticket Focus
 
@@ -331,13 +332,25 @@ dropped tickets live in hidden archive dirs and git history.
   wrong) — the Result records the corrections.
 
 - `260726-chore-dashboard-verify-notification-permission-tier-manually`
-  (`ready/`) — after the closure above this is the ONLY ticket in `ready/`, so
-  it is the next goal-run target. It cannot be fully closed by an autonomous
-  agent: it carries a `## Human verification residue` section that needs a
-  person to watch a native browser permission prompt and an OS notification.
-  Its Phases 1 and 2 ARE automatable and should be run autonomously; stop at the
-  human-verification residue and hand it to the owner rather than treating the
-  ticket as blocked from the start.
+  (`ready/`) — still the ONLY ticket in `ready/`, and still the next goal-run
+  target. PHASE 1 IS LANDED (`87259c93`, review fix `4acbdc98`): the Tier 2
+  browser gate now exists as a sibling `e2e/agent-attention-notification.spec.ts`
+  under `channel: "chromium"`, 4 tests, all 7 assertions proven non-vacuous by
+  per-assertion mutation runs recorded in the ticket's Phase 1 Result — do not
+  re-derive them. PHASE 2 IS THE NEXT AUTONOMOUS TARGET: reorder
+  `currentNotificationAvailability()` to consult `isSecureContext` first, extract
+  it as a pure function for unit coverage, settle whether the checkbox is offered
+  at all on an insecure origin, and amend both spec anchors that carry the false
+  "the `Notification` global is absent on a non-secure context" claim. What will
+  finally block closure is neither phase but the `## Human verification residue`
+  steps 1-6: a person must watch a native permission prompt and an OS banner. No
+  agent may mark them observed or infer them from a green Playwright run, so this
+  ticket stays open in `ready/` after Phase 2 lands. Also recorded in the Phase 1
+  Result and worth not re-deriving: this ticket's own Constraints text claiming
+  only `npm run test:browser` chains the frontend build is FALSE (Playwright
+  `globalSetup` builds unconditionally on every invocation path); the
+  `ws-web-dashboard` mental-model entry on the same subject was checked and is
+  correct, so the staleness is the ticket's alone.
 
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
