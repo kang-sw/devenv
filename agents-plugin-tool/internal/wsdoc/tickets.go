@@ -260,7 +260,7 @@ func readTicket(root, path, status string) (TicketInfo, error) {
 	}
 	info.Title, _ = fm["title"].(string)
 	info.Parent, _ = fm["parent"].(string)
-	info.Related, _ = fm["related"].(map[string]string)
+	info.Related = relatedEntries(fm["related"])
 	info.Specs = scalarList(fm["spec"])
 	info.SpecRemoves = scalarList(fm["spec-remove"])
 	info.Plans = scalarList(fm["plans"])
@@ -294,6 +294,53 @@ func ticketPhases(text string) ([]TicketPhase, bool) {
 		}
 	}
 	return phases, anyResult
+}
+
+// relatedEntries normalises every frontmatter shape the hand-rolled parser
+// (frontmatter.go) can produce for `related:` into the stem -> note map
+// TicketInfo advertises. The nested `key: note` form already arrives as
+// map[string]string, but the equally legal list form (`- <stem>` items)
+// arrives as []string and used to be dropped on the floor by a bare type
+// assertion, so a list-form related: silently resolved to nil. List items also
+// never pass through cleanScalar in the parser, so a trailing " # comment"
+// stays glued to the item and is stripped here. Normalising is what lets the
+// cross-reference integrity checks (tickets_graph.go) see a frontmatter shape
+// they would otherwise skip without saying so — the ticket forbids advertising
+// a floor the check does not cover.
+func relatedEntries(value any) map[string]string {
+	switch typed := value.(type) {
+	case map[string]string:
+		return typed
+	case []string:
+		out := map[string]string{}
+		for _, item := range typed {
+			item = cleanScalar(item)
+			if item == "" {
+				continue
+			}
+			stem, note := item, ""
+			if idx := strings.Index(item, ":"); idx >= 0 {
+				stem = strings.TrimSpace(item[:idx])
+				note = strings.TrimSpace(item[idx+1:])
+			}
+			if stem == "" {
+				continue
+			}
+			out[stem] = note
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	case string:
+		stem := cleanScalar(typed)
+		if stem == "" {
+			return nil
+		}
+		return map[string]string{stem: ""}
+	default:
+		return nil
+	}
 }
 
 func scalarList(value any) []string {
