@@ -4,6 +4,7 @@ related:
   260726-feat-doc-organization-autonomy-odq-admission-filter: adjacent ODQ change — that one narrows what enters the queue, this one fixes how queued items are conveyed
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # The Open Decision Queue ledger can degrade to illegible while satisfying every stated rule
@@ -107,3 +108,39 @@ no runtime probe:
    Markdown-checklist fallback.
 2. `lead-write-ticket`'s ODQ step 4 carries the restate-in-body obligation.
 3. Both regen commands run clean and produce no diff on a second run.
+
+### Result (e2caca2b) - 2026-07-27
+
+Done. The ledger is now legible by construction on every rendering path.
+
+- `task-list.md` gained a fallback clause on the visible-list rule ("otherwise
+  print a concise Markdown checklist, applying the same item rules below to it"),
+  so the composition rules govern the fallback path explicitly rather than by
+  implication.
+- Both host variants now carry the same item-composition sentence: the item's
+  visible text is the decision itself, self-describing and not a label; any
+  secondary note or description field is optional detail that may not render and
+  must never carry load-bearing content.
+- `lead-write-ticket.md` "On: Open Decision Queue" step 4 now restates the asked
+  item's full text in the response body plus a one-line status roll-up of the
+  remaining items — the harness-independent half the ticket identified as
+  load-bearing.
+
+Deviation from the phase text, deliberate: the phase says "subjects
+self-describing" and "`description` explicitly non-load-bearing", naming two
+Claude Code `TaskCreate` field literals. Writing those literals into the
+host-neutral file would have reproduced the ticket's own defect one level up — a
+rule naming a field that has no referent on the Markdown-checklist path. Both
+files name the thing by its role instead ("the item's/task's visible text", "any
+secondary note or description field"), which preserves the hazard while staying
+valid on all three surfaces. A review round caught that the first pass had
+genericized only `description` and left `subject`; `504f811b` fixed the
+asymmetry.
+
+Verification: all three boundary conditions confirmed by artifact inspection.
+Both regen commands ran clean and produced no diff on a second run; the wsflow
+package tests pass (10 tests).
+
+Spec: `{#260727-odq-item-conveyance-restate-in-body}` states the conveyance
+contract — queue conveyance does not depend on host rendering, item text is the
+decision itself, restate-in-body plus roll-up when asking.
