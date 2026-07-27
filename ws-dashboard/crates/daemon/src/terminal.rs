@@ -1288,6 +1288,49 @@ pub async fn post_terminal_turn_state(
     StatusCode::NO_CONTENT.into_response()
 }
 
+// CONTRACT (260726 Phase 1, hop-1 env-plan guard): hop 1's env decision is
+// expressed as a VALUE computed by this pure function, so a test can assert
+// on the decision itself instead of trying to read it back off a built
+// `std::process::Command` - which is impossible, because std exposes no
+// public API distinguishing "no env method was ever called" from
+// "env_clear() called with nothing re-added" (see the application site in
+// `build_helper_command` and the CONTRACT in
+// `helper_spawn_default_no_command_matches_existing_arg_shape`). The
+// previous guard could only sniff `Command`'s unix `Debug` string, which
+// made it fragile and, on the default path, effectively unfalsifiable.
+// `ClearAndSet` is keyed strictly off `command.is_some()`, mirroring
+// `build_helper_command`'s own argv branch on the same `command` reference.
+#[derive(Debug, Eq, PartialEq)]
+enum HelperEnvPlan {
+    /// No explicit command: hop 1 inherits the daemon's environment
+    /// untouched - neither `.env()` nor `.env_clear()` is called.
+    InheritHost,
+    /// Explicit command: hop 1 clears the environment and re-adds exactly
+    /// these scrubbed pairs.
+    ClearAndSet(Vec<(std::ffi::OsString, std::ffi::OsString)>),
+}
+
+fn helper_env_plan(
+    command: Option<&(String, Vec<String>)>,
+    scrub: Option<&crate::agent_env_profile::EnvScrubProfile>,
+    host_env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> HelperEnvPlan {
+    match command {
+        None => HelperEnvPlan::InheritHost,
+        Some(_) => {
+            // Defensive, non-panicking fallback for a direct (unit-test)
+            // caller passing `command = Some(..)` with `scrub = None`. This
+            // is NOT a second live resolution: the only production caller,
+            // `build_helper_command`, resolves the fallback once at its own
+            // top and always passes `Some` here, so both consumers (this
+            // scrub and the `--scrub-marker` argv loop) provably read the
+            // same resolved profile - see that function's CONTRACT.
+            let scrub = scrub.unwrap_or(&crate::agent_env_profile::CLAUDE);
+            HelperEnvPlan::ClearAndSet(crate::agent_env_profile::scrub_env_os(host_env, scrub))
+        }
+    }
+}
+
 // CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub; extended
 // Phase 2, browser spawn profile): pure builder extracted from
 // `TerminalSession::spawn` so the "default (no explicit command) path is
@@ -1302,9 +1345,10 @@ pub async fn post_terminal_turn_state(
 // env, but that inherited env is seeded from hop 1's env at process-spawn
 // time, so a hop-1 regression would otherwise leave the helper's base env
 // dirty even if hop 2's own scrub step were correct - see plan Codebase
-// Findings. `scrub` is only ever read inside the `command.is_some()`
-// branch below, so its value is inert on the default path; callers still
-// pass `None` there for the same reason `command` is `None` - one resolved
+// Findings. `scrub`'s fallback is resolved once at the top of this function
+// (260726 Phase 1) but is only ever CONSUMED on the `command.is_some()`
+// path, so its value stays inert on the default path; callers still pass
+// `None` there for the same reason `command` is `None` - one resolved
 // profile, one paired scrub list, never independently defaulted.
 #[allow(clippy::too_many_arguments)]
 fn build_helper_command(
@@ -1323,6 +1367,18 @@ fn build_helper_command(
     scrub: Option<&crate::agent_env_profile::EnvScrubProfile>,
     host_env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> std::process::Command {
+    // CONTRACT (260725 Phase 2; hoisted 260726 Phase 1): `scrub` must be
+    // `Some` whenever `command` is `Some` - `resolve_create_command` returns
+    // them paired, one resolved profile producing both. Falling back to
+    // `CLAUDE` (the strictest list this codebase knows) rather than
+    // panicking or silently skipping the scrub keeps a defensive
+    // caller-error path safe instead of leaving a dirty env - see the hop-1
+    // defense-in-depth CONTRACT above. Resolved HERE, exactly once per call,
+    // and unconditionally on `command`, so the two consumers below - the
+    // `--scrub-marker` argv loop (which threads markers to hop 2) and the
+    // `helper_env_plan` application site (which scrubs hop 1's own env) -
+    // provably read the SAME profile and cannot default independently.
+    let scrub = scrub.unwrap_or(&crate::agent_env_profile::CLAUDE);
     let mut helper_command = std::process::Command::new(helper_binary);
     helper_command
         .arg("terminal-helper")
@@ -1358,17 +1414,6 @@ fn build_helper_command(
         for (key, value) in env_overlay {
             helper_command.arg("--env-overlay").arg(format!("{key}={value}"));
         }
-        // CONTRACT (260725 Phase 2): `scrub` must be `Some` whenever
-        // `command` is `Some` - `resolve_create_command` returns them
-        // paired, one resolved profile producing both. Falling back to
-        // `CLAUDE` (the strictest list this codebase knows) rather than
-        // panicking or silently skipping the scrub keeps a defensive
-        // caller-error path safe instead of leaving a dirty env - see the
-        // hop-1 defense-in-depth CONTRACT above.
-        let scrub = scrub.unwrap_or(&crate::agent_env_profile::CLAUDE);
-        helper_command
-            .env_clear()
-            .envs(crate::agent_env_profile::scrub_env_os(host_env, scrub).into_iter());
         // CONTRACT (review cycle 1, finding C1): thread this SAME resolved
         // `scrub` list to hop 2 via `--scrub-marker`, so the helper's own
         // shell spawn (`terminal_helper_process.rs::apply_scrub_and_overlay`)
@@ -1378,6 +1423,28 @@ fn build_helper_command(
         // 2 - the hop that actually seeds the PTY child's env.
         for marker in scrub.markers {
             helper_command.arg("--scrub-marker").arg(*marker);
+        }
+    }
+    // CONTRACT (260726 Phase 1, hop-1 env-plan guard): the guarded surface is
+    // this plan VALUE, not the `Command` built below - `std::process::Command`
+    // exposes no public API to tell "no env method ever called" apart from
+    // "env_clear() called with nothing re-added" (both report an empty
+    // `get_envs()` iterator), so a Debug-string sniff was the only prior
+    // observable and it is fragile (see the unix secondary detector in
+    // `helper_spawn_default_no_command_matches_existing_arg_shape` and its own
+    // CONTRACT). Note `command.is_some()` is evaluated TWICE in this function -
+    // once by the `if let Some((program, args))` argv branch above (which owns
+    // --command/--command-arg/--env-overlay/--scrub-marker) and once by
+    // `helper_env_plan` below - but both read the SAME `command` reference, so
+    // they cannot diverge. KNOWN RESIDUAL: an `env_clear()` written directly
+    // into this function outside this one application site is invisible to
+    // this guard (and to std's public API) on every platform; the hardened
+    // unix secondary detector in that test is the only thing that can still
+    // catch that specific case.
+    match helper_env_plan(command, Some(scrub), host_env) {
+        HelperEnvPlan::InheritHost => {}
+        HelperEnvPlan::ClearAndSet(env) => {
+            helper_command.env_clear().envs(env);
         }
     }
     helper_command
@@ -2808,6 +2875,19 @@ mod terminal_portability_skeleton_tests {
             command.get_envs().next().is_none(),
             "default path must not call .env()/.env_clear() at all"
         );
+        // PRIMARY GUARD (260726 Phase 1): the falsifiable, platform-neutral
+        // assertion this test previously lacked - it asserts on the env plan
+        // VALUE, which discriminates, rather than on a built `Command`, which
+        // cannot (see the CONTRACT below).
+        assert_eq!(
+            helper_env_plan(
+                None,
+                None,
+                Vec::<(std::ffi::OsString, std::ffi::OsString)>::new()
+            ),
+            HelperEnvPlan::InheritHost,
+            "default (no-command) path must plan to inherit the host env untouched"
+        );
         // CONTRACT (review cycle 1, finding T1): `get_envs()` alone cannot
         // distinguish "no env method ever called" from "env_clear() called
         // with nothing re-added" - both report zero explicit entries,
@@ -2825,10 +2905,22 @@ mod terminal_portability_skeleton_tests {
         {
             let debug = format!("{command:?}");
             assert!(
-                !debug.starts_with("env "),
-                "default path's Debug rendering must not show env manipulation \
-                 (env -i/env -u), which would indicate an unconditional env_clear() \
-                 snuck into this branch: {debug:?}"
+                !debug.contains("env -i"),
+                "default path's Debug rendering must not contain an env_clear() \
+                 marker (env -i): {debug:?}"
+            );
+            // Positive control for the secondary detector itself: proves the
+            // "env -i" substring check is actually live on this toolchain's
+            // `Debug` impl, rather than a check that would pass against any
+            // string at all.
+            let mut cleared = std::process::Command::new("/usr/bin/true");
+            cleared.env_clear();
+            let cleared_debug = format!("{cleared:?}");
+            assert!(
+                cleared_debug.contains("env -i"),
+                "positive control: a deliberately env_clear()ed Command's Debug \
+                 must contain env -i, or this secondary detector cannot fire: \
+                 {cleared_debug:?}"
             );
         }
         let args: Vec<String> = command
@@ -2917,6 +3009,65 @@ mod terminal_portability_skeleton_tests {
             .position(|arg| arg == "--env-overlay")
             .expect("--env-overlay present");
         assert_eq!(args[env_overlay_pos + 1], "BASE_URL=http://x");
+    }
+
+    // CONTRACT (260726 Phase 1, non-vacuity): the other half of the env-plan
+    // guard. The default-path assertion above only proves `helper_env_plan`
+    // returns `InheritHost` for `None`; a function that returned
+    // `InheritHost` unconditionally would satisfy it. This test proves the
+    // plan value DISCRIMINATES - an explicit command yields `ClearAndSet`
+    // carrying the scrubbed pairs.
+    #[test]
+    fn helper_env_plan_with_command_scrubs_claude_markers_and_preserves_others() {
+        let mut host_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = crate::agent_env_profile::CLAUDE
+            .markers
+            .iter()
+            .map(|marker| {
+                (
+                    std::ffi::OsString::from(*marker),
+                    std::ffi::OsString::from("marker-value"),
+                )
+            })
+            .collect();
+        host_env.push((
+            std::ffi::OsString::from("PATH"),
+            std::ffi::OsString::from("/usr/bin:/bin"),
+        ));
+        host_env.push((
+            std::ffi::OsString::from("HOME"),
+            std::ffi::OsString::from("/home/example"),
+        ));
+
+        let plan = helper_env_plan(
+            Some(&("agent-cli".to_owned(), Vec::new())),
+            Some(&crate::agent_env_profile::CLAUDE),
+            host_env,
+        );
+
+        let HelperEnvPlan::ClearAndSet(pairs) = plan else {
+            panic!("an explicit command must plan to clear and set, got {plan:?}");
+        };
+        let envs: HashMap<String, String> = pairs
+            .into_iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+            .collect();
+        for marker in crate::agent_env_profile::CLAUDE.markers {
+            assert!(
+                !envs.contains_key(*marker),
+                "marker {marker} must be scrubbed out of the env plan"
+            );
+        }
+        assert_eq!(
+            envs.get("PATH").map(String::as_str),
+            Some("/usr/bin:/bin"),
+            "an ordinary shell var must survive the plan - deny-list, not allowlist"
+        );
+        assert_eq!(envs.get("HOME").map(String::as_str), Some("/home/example"));
     }
 
     // CONTRACT (260725 Phase 2, non-vacuity): proves `build_helper_command`
