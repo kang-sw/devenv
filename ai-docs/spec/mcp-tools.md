@@ -837,11 +837,13 @@ All three tools, including `specs.find`'s query path, additionally emit a
 compatibility advisory for each spec file that still carries a legacy planned
 marker — the contract-first planned-entry mechanism being retired by
 `260726-refactor-retire-spec-planned-marker-mechanism`. Detection keys on the
-marker's shape at the start of a line and follows CommonMark block rules, so
-prose that merely describes the mechanism is not flagged: a marker named
-mid-sentence, quoted inside a fenced code block, or indented four or more
-columns as an indented code block is documentation, not a marker. The advisory
-names the marker's line numbers. Resolution runs ticket to spec: when a live
+marker's shape at the start of a line and follows CommonMark block rules in the
+document body, so prose that merely describes the mechanism is not flagged: a
+marker named mid-sentence, quoted inside a fenced code block, placed inside an
+HTML comment, or indented four or more columns as an indented code block is
+documentation, not a marker. YAML frontmatter is not CommonMark and is exempt
+from those block rules, so a marker nested under `features:` is still detected
+however deeply it is indented. The advisory names the marker's line numbers. Resolution runs ticket to spec: when a live
 ticket (`idea`, `todo`, or `ready`) names the exact spec file path or one of the
 marker's own anchor stems, the advisory names those tickets with their statuses
 and directs the caller to move the marker text into the ticket's `## Spec

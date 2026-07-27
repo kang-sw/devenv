@@ -21,30 +21,39 @@ import (
 // files as carrying markers, which is a false positive.
 //
 // "Line start" follows CommonMark, not a bare trim: a line inside a fenced code
-// block is never a marker, and four or more leading columns of indentation make
-// the line an indented code block, which is also never a marker. Both forms are
-// the ordinary markdown idiom for *documenting* the marker syntax, so trimming
-// first would flag exactly the documentation this predicate exists to spare.
+// block or an HTML comment is never a marker, and four or more leading columns
+// of indentation make the line an indented code block, which is also never a
+// marker. All three forms are the ordinary markdown idiom for *documenting* the
+// marker syntax, so trimming first would flag exactly the documentation this
+// predicate exists to spare. The block rules apply to the document body only:
+// YAML frontmatter is not CommonMark, and its keys nest by indentation.
 var (
 	legacyMarkerHeadingRE = regexp.MustCompile(`^#{1,6}\s+🚧`)
 	legacyMarkerCalloutRE = regexp.MustCompile(`^>\s*\[!\s*[A-Za-z]+\s*\]\s*Planned\s+🚧`)
 	legacyMarkerListRE    = regexp.MustCompile(`^-\s+🚧\s`)
 	legacySpecPathRE      = regexp.MustCompile(`ai-docs/spec/[A-Za-z0-9._/-]+\.md`)
-	// specImpactHeadingRE opens the section on `## Spec Impact` exactly, or on
-	// `## Spec Impact` followed by a non-word delimiter (an anchor, a dash, a
-	// parenthetical). It deliberately does not open on `## Spec Impacts` or
-	// `## Spec Impact Analysis`, which are different sections.
-	specImpactHeadingRE = regexp.MustCompile(`^##[ \t]+Spec Impact(?:[ \t]*[^\sA-Za-z0-9].*)?$`)
 )
+
+// specImpactHeading is the section heading whose body the resolver harvests. It
+// is matched as a loose prefix, deliberately: `readyGateWarning` in
+// tickets_mutate.go opens on exactly the same prefix test, and the two sites
+// must agree on what a Spec Impact section is. A ticket the ready gate accepts
+// as spec-addressed must never then have its markers reported as orphaned.
+//
+// Loose is also the safe direction on its own terms — see collectLegacyMarkerRefs:
+// a spurious harvest can only add a bystander ticket to the *matched* branch,
+// while a missed harvest produces a "strip it" instruction against a live
+// contract. Do not tighten this to an exact-form match without changing the
+// ready gate in the same commit.
+const specImpactHeading = "## Spec Impact"
 
 // maxMarkdownBlockIndent is CommonMark's limit: a block-level construct may be
 // indented up to three columns. The fourth column opens an indented code block.
 const maxMarkdownBlockIndent = 3
 
-// legacyMarker is one marker-carrying line, its 1-based line number, and the
-// spec anchor stems that line declares (empty when the line carries none).
+// legacyMarker is one marker-carrying line's 1-based line number and the spec
+// anchor stems that line declares (empty when the line carries none).
 type legacyMarker struct {
-	Text    string
 	Line    int
 	Anchors []string
 }
@@ -103,6 +112,30 @@ func markdownFence(line string) (byte, int, string, bool) {
 	return char, run, body[run:], true
 }
 
+// htmlCommentTracker follows CommonMark HTML block type 2: the block opens on a
+// line whose first non-space content is `<!--` and runs through the line that
+// carries `-->`. A marker shape inside a comment is documentation, not a marker.
+type htmlCommentTracker struct {
+	open bool
+}
+
+// step advances the tracker by one line and reports whether that line is inside
+// an HTML comment. The delimiter lines themselves count as inside.
+func (h *htmlCommentTracker) step(line string) bool {
+	indent, body := splitMarkdownIndent(line)
+	if h.open {
+		if strings.Contains(body, "-->") {
+			h.open = false
+		}
+		return true
+	}
+	if indent > maxMarkdownBlockIndent || !strings.HasPrefix(body, "<!--") {
+		return false
+	}
+	h.open = !strings.Contains(body[len("<!--"):], "-->")
+	return true
+}
+
 // splitMarkdownIndent returns the leading indent width (a tab counts as four
 // columns, matching CommonMark) and the remainder of the line with leading
 // whitespace and trailing whitespace removed.
@@ -122,6 +155,23 @@ func splitMarkdownIndent(line string) (int, string) {
 	return indent, ""
 }
 
+// yamlFrontmatterEnd returns the index of the first body line: one past the
+// closing `---` of a leading YAML frontmatter block. A document with no
+// frontmatter, or with an unterminated one, yields 0 so the CommonMark block
+// rules apply to the whole document.
+func yamlFrontmatterEnd(lines []string) int {
+	if len(lines) == 0 || strings.TrimRight(lines[0], " \t\r") != "---" {
+		return 0
+	}
+	for i := 1; i < len(lines); i++ {
+		switch strings.TrimRight(lines[i], " \t\r") {
+		case "---", "...":
+			return i + 1
+		}
+	}
+	return 0
+}
+
 // legacyMarkerLines returns the legacy planned markers in a spec document body.
 // It deliberately does not call markerContext: that helper's looseness
 // (`planned`/`wip` substrings anywhere in a line) still serves specs.find match
@@ -130,12 +180,28 @@ func splitMarkdownIndent(line string) (int, string) {
 func legacyMarkerLines(text string) []legacyMarker {
 	out := []legacyMarker{}
 	fence := fenceTracker{}
-	for i, line := range strings.Split(text, "\n") {
-		if fence.step(line) {
-			continue
-		}
+	comment := htmlCommentTracker{}
+	lines := strings.Split(text, "\n")
+	bodyStart := yamlFrontmatterEnd(lines)
+	for i, line := range lines {
 		indent, body := splitMarkdownIndent(line)
-		if body == "" || indent > maxMarkdownBlockIndent {
+		// The CommonMark block rules govern the document body only. YAML
+		// frontmatter nests by indentation, so a `features:` marker sits four or
+		// more columns in as a matter of course; applying the indent rule there
+		// turns a real marker into a silent miss.
+		if i >= bodyStart {
+			if comment.open {
+				comment.step(line)
+				continue
+			}
+			if fence.step(line) || comment.step(line) {
+				continue
+			}
+			if indent > maxMarkdownBlockIndent {
+				continue
+			}
+		}
+		if body == "" {
 			continue
 		}
 		if !legacyMarkerHeadingRE.MatchString(body) &&
@@ -143,7 +209,7 @@ func legacyMarkerLines(text string) []legacyMarker {
 			!legacyMarkerListRE.MatchString(body) {
 			continue
 		}
-		marker := legacyMarker{Text: body, Line: i + 1}
+		marker := legacyMarker{Line: i + 1}
 		// Every anchor on the line counts: a marker heading may declare more
 		// than one, and a ticket naming any of them owns the marker.
 		for _, match := range specAnchorRE.FindAllStringSubmatch(body, -1) {
@@ -174,11 +240,21 @@ type legacyMarkerResolver struct {
 
 // newLegacyMarkerResolver scans live tickets (idea/todo/ready) once. Read
 // failures are recorded rather than propagated: the advisory is advisory.
+//
+// The ticket slice is left in TicketsList order. Rendered output is sorted by
+// stem in advise, which fully determines the caller-visible order, so a second
+// sort here would carry nothing.
 func newLegacyMarkerResolver(root string) *legacyMarkerResolver {
 	resolver := &legacyMarkerResolver{}
 	tickets, err := TicketsList(root, TicketListOptions{Statuses: []string{"idea", "todo", "ready"}})
 	if err != nil {
-		resolver.incomplete = true
+		// An absent tickets tree is not a failed scan: a repository with no
+		// tickets has no live tickets, which is a determinate answer. Marking it
+		// incomplete would suppress a correct orphaned verdict forever. Only a
+		// tickets tree that exists and could not be scanned is incomplete.
+		if _, statErr := os.Stat(filepath.Join(root, "ai-docs", "tickets")); !os.IsNotExist(statErr) {
+			resolver.incomplete = true
+		}
 		return resolver
 	}
 	for _, ticket := range tickets {
@@ -189,11 +265,7 @@ func newLegacyMarkerResolver(root string) *legacyMarkerResolver {
 		for _, ref := range ticket.SpecRemoves {
 			collectLegacyMarkerRefs(refs, ref)
 		}
-		impact, ok := specImpactSection(root, ticket.Path)
-		if !ok {
-			resolver.incomplete = true
-		}
-		collectLegacyMarkerRefs(refs, impact)
+		collectLegacyMarkerRefs(refs, specImpactSection(root, ticket.Path))
 		if len(refs) == 0 {
 			continue
 		}
@@ -203,9 +275,6 @@ func newLegacyMarkerResolver(root string) *legacyMarkerResolver {
 			refs:   refs,
 		})
 	}
-	sort.SliceStable(resolver.tickets, func(i, j int) bool {
-		return resolver.tickets[i].Stem < resolver.tickets[j].Stem
-	})
 	return resolver
 }
 
@@ -233,35 +302,57 @@ func collectLegacyMarkerRefs(refs map[string]bool, text string) {
 }
 
 // specImpactSection returns the body text of a ticket's `## Spec Impact`
-// section, and whether the ticket could be read. A ticket with no such section
-// reads successfully and yields "".
+// section. A ticket with no such section, or one that cannot be read, yields "".
 //
-// Section boundaries are fence-aware: the house commit template quoted inside a
-// fenced block carries `## AI Context` / `## Ticket Updates` / `## Spec` lines,
-// and a fence-blind scan would close the section on them and drop every
-// reference after that point.
-func specImpactSection(root, relPath string) (string, bool) {
+// A read failure here is not treated as an incomplete scan: every ticket in the
+// list has already been read successfully by scanTickets, so this second read
+// can only fail on a race. The incomplete-scan signal comes from the TicketsList
+// error in newLegacyMarkerResolver, which is the reachable failure.
+func specImpactSection(root, relPath string) string {
 	if strings.TrimSpace(relPath) == "" {
-		return "", true
+		return ""
 	}
 	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
 	if err != nil {
-		return "", false
+		return ""
 	}
+	lines := strings.Split(string(raw), "\n")
+	section, balanced := collectSpecImpact(lines, true)
+	if balanced {
+		return section
+	}
+	// The document's fences do not balance, so fence tracking is not
+	// trustworthy for it: the unclosed opener swallows every later line,
+	// including the heading, and the section silently disappears — which lands
+	// a live ticket's contract in the "orphaned; strip it" branch. Rescan
+	// without the tracker rather than guessing where the fence should close.
+	section, _ = collectSpecImpact(lines, false)
+	return section
+}
+
+// collectSpecImpact walks a ticket body once and returns the `## Spec Impact`
+// body plus whether the document's code fences balanced.
+//
+// Section boundaries are fence- and indent-aware: the house commit template
+// quoted inside a fenced block or an indented code block carries
+// `## AI Context` / `## Ticket Updates` / `## Spec` lines, and a scan blind to
+// either would close the section on them and drop every reference after that
+// point.
+func collectSpecImpact(lines []string, fenceAware bool) (string, bool) {
 	var b strings.Builder
 	inSection := false
 	fence := fenceTracker{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if fence.step(line) {
+	for _, line := range lines {
+		if fenceAware && fence.step(line) {
 			if inSection {
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
 			continue
 		}
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## ") {
-			inSection = specImpactHeadingRE.MatchString(trimmed)
+		indent, body := splitMarkdownIndent(line)
+		if indent <= maxMarkdownBlockIndent && strings.HasPrefix(body, "## ") {
+			inSection = strings.HasPrefix(body, specImpactHeading)
 			continue
 		}
 		if inSection {
@@ -269,7 +360,7 @@ func specImpactSection(root, relPath string) (string, bool) {
 			b.WriteString("\n")
 		}
 	}
-	return b.String(), true
+	return b.String(), !fence.open
 }
 
 // advise returns the compat note for one spec file, or "" when that file carries
@@ -283,7 +374,10 @@ func (r *legacyMarkerResolver) advise(specPath string, markers []legacyMarker) s
 		return ""
 	}
 	matched := []string{}
-	incomplete := false
+	// A nil resolver has no ownership knowledge at all, which is the same
+	// epistemic state as a failed scan. Defaulting it to "orphaned" would emit a
+	// delete instruction off the absence of a scan.
+	incomplete := true
 	if r != nil {
 		incomplete = r.incomplete
 		path := filepath.ToSlash(specPath)

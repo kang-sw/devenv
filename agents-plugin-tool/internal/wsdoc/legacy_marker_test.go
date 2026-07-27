@@ -71,7 +71,7 @@ func TestLegacyMarkerLinesIgnoreFencedExamples(t *testing.T) {
 		"",
 		"An indented fence, closed by a longer run:",
 		"",
-		"  ````text",
+		"  ```text",
 		"## 🚧 Long Fence Example {#260101-w}",
 		"  ````",
 		"",
@@ -103,6 +103,60 @@ func TestLegacyMarkerLinesExtractAllAnchorsAndLineNumbers(t *testing.T) {
 	}
 	if len(got[2].Anchors) != 0 || got[2].Line != 5 {
 		t.Fatalf("anchorless marker = %#v", got[2])
+	}
+}
+
+// Each row pins one CommonMark fence rule by its observable consequence: a
+// marker line that is inside the block when the rule holds and outside it when
+// the rule is dropped. Without these, a tracker that closed on a shorter run, on
+// the other fence character, or on a line carrying an info string would flag
+// documentation as a live marker with the suite green.
+func TestLegacyMarkerLinesFollowFenceOpenAndCloseRules(t *testing.T) {
+	const marker = "## 🚧 Example {#260101-x}"
+	cases := []struct {
+		name  string
+		lines []string
+		want  int
+	}{
+		// A closing fence may not carry an info string, so the second ```go
+		// keeps the block open and the marker stays inside it.
+		{"info string does not close", []string{"```go", "func x() {}", "```go", marker, "```"}, 0},
+		{"shorter run does not close", []string{"````", "x", "```", marker, "````"}, 0},
+		{"other fence char does not close", []string{"```", "x", "~~~", marker, "```"}, 0},
+		{"longer run closes", []string{"```", "x", "````", marker}, 1},
+		{"two backticks are not a fence", []string{"``", marker}, 1},
+		// "``` a ` b" cannot open a fence: a backtick info string may not
+		// contain a backtick, so the marker below it is a real marker.
+		{"backtick in info string is not an opener", []string{"``` a ` b", marker}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := legacyMarkerLines(strings.Join(tc.lines, "\n"))
+			if len(got) != tc.want {
+				t.Fatalf("legacyMarkerLines(%q) = %#v, want %d markers", tc.lines, got, tc.want)
+			}
+		})
+	}
+}
+
+// YAML frontmatter is not CommonMark: its keys nest by indentation, so a
+// `features:` marker sits four or more columns in as a matter of course.
+// Applying the indented-code-block rule there would silently drop it while
+// markerContext still reports the same line.
+func TestLegacyMarkerLinesDetectNestedFrontmatterMarker(t *testing.T) {
+	text := "---\ntitle: Nested\nfeatures:\n  planned:\n    - 🚧 pending prune policy [260113-t/p1]\n---\n# Nested\n"
+	got := legacyMarkerLines(text)
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("legacyMarkerLines = %#v, want one marker at line 5", got)
+	}
+}
+
+// A marker shape inside an HTML comment is documentation, not a marker.
+func TestLegacyMarkerLinesIgnoreHTMLCommentedMarkers(t *testing.T) {
+	text := "# Doc\n\n<!--\n## 🚧 Commented {#260101-x}\n-->\n\n<!-- one-liner: ## 🚧 Inline {#260101-y} -->\n\n## 🚧 Real Marker {#260101-real}\n"
+	got := legacyMarkerLines(text)
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("legacyMarkerLines = %#v, want one marker at line 9", got)
 	}
 }
 
@@ -317,15 +371,17 @@ func TestLegacyMarkerAdvisoryMatchesSecondAnchorOnMarkerLine(t *testing.T) {
 	}
 }
 
-// Multiple owners render as a comma-joined, stem-sorted list. Directory scan
-// order is idea/todo/ready, so the todo ticket is discovered first and only the
-// sorts put the ready ticket in front — both the resolver sort and the rendered
-// sort are load-bearing here. The todo ticket matches through `spec-remove:`,
-// which is the other harvest source with no other coverage.
+// Multiple owners render as a comma-joined, stem-sorted list. TicketsList orders
+// by status rank first (ready < todo), so it hands the resolver the ready ticket
+// ahead of the todo ticket even though `260100-feat-other` sorts before
+// `260102-feat-owner`. The rendered sort is therefore the sole carrier of the
+// output order here: deleting it, or reversing it, produces the wrong string.
+// The todo ticket matches through `spec-remove:`, which is the other harvest
+// source with no other coverage.
 func TestLegacyMarkerAdvisoryJoinsMatchedTicketsInStemOrder(t *testing.T) {
 	root := legacyMarkerCorpus(t)
 	addLegacyMarkerOwnerTicket(t, root)
-	mustWrite(t, root, "ai-docs/tickets/todo/260104-feat-other.md",
+	mustWrite(t, root, "ai-docs/tickets/todo/260100-feat-other.md",
 		"---\ntitle: Other\nspec-remove:\n  - 260101-anchor\n---\n# Other\n")
 
 	specs, err := SpecsList(root)
@@ -336,13 +392,42 @@ func TestLegacyMarkerAdvisoryJoinsMatchedTicketsInStemOrder(t *testing.T) {
 		if spec.Path != "ai-docs/spec/demo.md" {
 			continue
 		}
-		want := "live tickets referencing this spec: 260102-feat-owner [ready], 260104-feat-other [todo] —"
+		want := "live tickets referencing this spec: 260100-feat-other [todo], 260102-feat-owner [ready] —"
 		if !strings.Contains(spec.LegacyMarkerAdvisory, want) {
 			t.Fatalf("advisory = %q, want %q", spec.LegacyMarkerAdvisory, want)
 		}
 		return
 	}
 	t.Fatal("demo.md missing from SpecsList")
+}
+
+// A spec carrying more than one marker must report every line, the real count,
+// and the plural label: the advisory's whole added value is telling the caller
+// where to strip, and that instruction is only non-trivial above N=1.
+func TestLegacyMarkerAdvisoryRendersEveryMarkerLine(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/multi.md",
+		"---\ntitle: Multi\n---\n# Multi\n\n## 🚧 First {#260120-first}\n\n## 🚧 Second {#260120-second}\n")
+
+	specs, err := SpecsList(root)
+	if err != nil {
+		t.Fatalf("SpecsList returned error: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("SpecsList = %#v", specs)
+	}
+	want := "2 marker(s) at lines 6, 8;"
+	if !strings.Contains(specs[0].LegacyMarkerAdvisory, want) {
+		t.Fatalf("advisory = %q, want %q", specs[0].LegacyMarkerAdvisory, want)
+	}
+
+	tree, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+	if !strings.Contains(tree, want) {
+		t.Fatalf("ProjectTree lost the multi-marker line list:\n%s", tree)
+	}
 }
 
 // The `- 🚧 ` list shape reaches the advisory surfaces, not only the predicate.
@@ -403,13 +488,12 @@ func TestSpecImpactSectionSurvivesFencedHeadings(t *testing.T) {
 	t.Fatal("demo.md missing from SpecsList")
 }
 
-// `## Spec Impacts` and `## Spec Impact Analysis` are different sections, and a
-// `## Spec Impact` line quoted inside a fence is not a heading at all.
-func TestSpecImpactSectionOpensOnlyOnItsOwnHeading(t *testing.T) {
+// A `## Spec Impact` line quoted inside a fence is not a heading at all, so the
+// ticket quoting one owns nothing. This is also the `.done` guard: the closed
+// ticket in the corpus names the marker's own anchor, so a scan that included
+// archived statuses would break the orphaned assertion.
+func TestSpecImpactSectionIgnoresFencedHeading(t *testing.T) {
 	root := legacyMarkerCorpus(t)
-	mustWrite(t, root, "ai-docs/tickets/todo/260108-feat-near-heading.md",
-		"---\ntitle: Near\n---\n# Near\n\n## Spec Impacts\n\n- ai-docs/spec/demo.md sits under a plural heading.\n\n"+
-			"## Spec Impact Analysis\n\n- 260101-anchor sits under a longer heading.\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260109-feat-quoted-heading.md",
 		"---\ntitle: Quoted\n---\n# Quoted\n\n## Notes\n\n```text\n## Spec Impact\n\n- ai-docs/spec/demo.md\n```\n")
 
@@ -423,27 +507,100 @@ func TestSpecImpactSectionOpensOnlyOnItsOwnHeading(t *testing.T) {
 		}
 		checkAdvisory(t, "SpecsList", spec.LegacyMarkerAdvisory,
 			[]string{"no live ticket references this spec"},
-			[]string{"260108-feat-near-heading", "260109-feat-quoted-heading"})
+			[]string{"260109-feat-quoted-heading", "260105-feat-closed"})
 		return
 	}
 	t.Fatal("demo.md missing from SpecsList")
 }
 
-// One unreadable ticket must never turn into "the marker is orphaned; strip
-// it". An unread ticket is an unknown owner, not an absent one, and a read
-// failure must not produce an instruction to delete a contract.
-func TestLegacyMarkerAdvisoryReportsIncompleteScanInsteadOfOrphaned(t *testing.T) {
+// The advisory and `readyGateWarning` must agree on what a Spec Impact section
+// is. The ready gate opens on the loose prefix `## Spec Impact`, so a ticket
+// headed `## Spec Impact and Phases` is promoted as spec-addressed; if the
+// advisory required a stricter form, that same ticket's markers would then be
+// reported as orphaned and the caller told to delete a live contract.
+func TestSpecImpactSectionOpensOnTheSameLoosePrefixAsTheReadyGate(t *testing.T) {
+	for _, heading := range []string{
+		"## Spec Impact",
+		"## Spec Impact and Phases",
+		"## Spec Impact Analysis",
+		"## Spec Impacts",
+		"## Spec Impact — notes",
+	} {
+		t.Run(heading, func(t *testing.T) {
+			root := legacyMarkerCorpus(t)
+			mustWrite(t, root, "ai-docs/tickets/ready/260115-feat-loose-heading.md",
+				"---\ntitle: Loose\n---\n# Loose\n\n"+heading+"\n\n- ai-docs/spec/demo.md gains the prune policy entry.\n")
+
+			// The ready gate's own predicate, applied to the same heading.
+			if !strings.HasPrefix(strings.TrimSpace(heading), "## Spec Impact") {
+				t.Fatalf("fixture heading %q is not one the ready gate accepts", heading)
+			}
+			assertDemoAdvisoryNames(t, root, "260115-feat-loose-heading [ready]")
+		})
+	}
+}
+
+// A 4-space-indented quote of the house commit template must not close the
+// section: the block-indent rule the predicate already applies to marker lines
+// governs the section heading too, otherwise the verdict flips to "orphaned;
+// strip it" on the presence of an unrelated indented block.
+func TestSpecImpactSectionSurvivesIndentedHeadings(t *testing.T) {
 	root := legacyMarkerCorpus(t)
-	locked := filepath.Join(root, "ai-docs", "tickets", "todo", "260106-feat-locked.md")
-	if err := os.WriteFile(locked, []byte("---\ntitle: Locked\n---\n# Locked\n"), 0o644); err != nil {
-		t.Fatal(err)
+	mustWrite(t, root, "ai-docs/tickets/ready/260116-feat-indented.md",
+		"---\ntitle: Indented\n---\n# Indented\n\n## Spec Impact\n\nThe commit body uses the house template:\n\n"+
+			"    <type>(<scope>): <summary>\n\n    ## AI Context\n    - why\n\n    ## Spec\n    - some-spec\n\n"+
+			"- ai-docs/spec/demo.md gains the prune policy entry.\n\n## Phases\n")
+
+	assertDemoAdvisoryNames(t, root, "260116-feat-indented [ready]")
+}
+
+// An unbalanced fence anywhere in the ticket must not hide the section. The
+// markdown-in-markdown idiom — a fenced example that itself contains a fence,
+// written without widening the outer fence — leaves the fence count odd, and a
+// tracker left open at EOF swallows the heading and every reference under it.
+// When the fences do not balance, fence tracking is not trustworthy for that
+// document, so the scan runs again without it.
+func TestSpecImpactSectionRecoversFromUnbalancedFences(t *testing.T) {
+	root := legacyMarkerCorpus(t)
+	mustWrite(t, root, "ai-docs/tickets/ready/260117-feat-unbalanced.md",
+		"---\ntitle: Unbalanced\n---\n# Unbalanced\n\n## Context\n\n"+
+			"```markdown\n<type>(<scope>): <summary>\n\n```go\nx := 1\n```\n```\n\n"+
+			"## Spec Impact\n\n- ai-docs/spec/demo.md gains the prune policy entry.\n")
+
+	assertDemoAdvisoryNames(t, root, "260117-feat-unbalanced [ready]")
+}
+
+func assertDemoAdvisoryNames(t *testing.T, root, want string) {
+	t.Helper()
+	specs, err := SpecsList(root)
+	if err != nil {
+		t.Fatalf("SpecsList returned error: %v", err)
 	}
-	if err := os.Chmod(locked, 0o000); err != nil {
-		t.Fatal(err)
+	for _, spec := range specs {
+		if spec.Path != "ai-docs/spec/demo.md" {
+			continue
+		}
+		checkAdvisory(t, "SpecsList", spec.LegacyMarkerAdvisory,
+			[]string{want, "move the marker text"},
+			[]string{"the marker is orphaned", "strip it,"})
+		return
 	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
-	if _, err := os.ReadFile(locked); err == nil {
-		t.Skip("unreadable-ticket simulation ineffective in this environment")
+	t.Fatal("demo.md missing from SpecsList")
+}
+
+// A live-ticket scan that fails must never turn into "the marker is orphaned;
+// strip it". An unscanned ticket tree is an unknown owner, not an absent one,
+// and a read failure must not produce an instruction to delete a contract.
+//
+// The failure is driven by a tickets path that exists but is not a directory.
+// That is permission-independent by construction: unlike `chmod 000`, which is a
+// no-op on DrvFs/9p mounts, as root, and on Windows, it fails identically on
+// every platform and filesystem, so this guard can never degrade into a skip.
+func TestLegacyMarkerAdvisoryReportsIncompleteScanInsteadOfOrphaned(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/demo.md", legacyMarkerSpecBody)
+	if err := os.WriteFile(filepath.Join(root, "ai-docs", "tickets"), []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	specs, err := SpecsList(root)
@@ -464,6 +621,39 @@ func TestLegacyMarkerAdvisoryReportsIncompleteScanInsteadOfOrphaned(t *testing.T
 		return
 	}
 	t.Fatal("demo.md missing from SpecsList")
+}
+
+// A repository with no tickets tree has no live tickets. That is a determinate
+// answer, not a failed scan: reporting it as incomplete would suppress a correct
+// orphaned verdict permanently.
+func TestLegacyMarkerAdvisoryReportsOrphanedWithoutTicketsDirectory(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/demo.md", legacyMarkerSpecBody)
+
+	specs, err := SpecsList(root)
+	if err != nil {
+		t.Fatalf("SpecsList returned error: %v", err)
+	}
+	for _, spec := range specs {
+		if spec.Path != "ai-docs/spec/demo.md" {
+			continue
+		}
+		checkAdvisory(t, "SpecsList", spec.LegacyMarkerAdvisory,
+			[]string{"no live ticket references this spec", "the marker is orphaned"},
+			[]string{"the live ticket scan was incomplete"})
+		return
+	}
+	t.Fatal("demo.md missing from SpecsList")
+}
+
+// A nil resolver has no ownership knowledge, which is the same epistemic state
+// as a failed scan. It must never default into the delete instruction.
+func TestLegacyMarkerAdviseOnNilResolverNeverSaysStripIt(t *testing.T) {
+	var resolver *legacyMarkerResolver
+	got := resolver.advise("ai-docs/spec/demo.md", []legacyMarker{{Line: 3}})
+	checkAdvisory(t, "nil resolver", got,
+		[]string{"the live ticket scan was incomplete", "marker ownership could not be determined"},
+		[]string{"the marker is orphaned", "strip it"})
 }
 
 // The advisory is a migration note, never a gate: no surface may fail because a
