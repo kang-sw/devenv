@@ -2705,6 +2705,15 @@ func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) s
 // advisories return value using the same "WARN [%s] %s: %s" text shape as
 // formatTicketVerify, so a warning reads identically whether seen via
 // tickets.verify or via git.commit.
+//
+// result.Advisories (the cross-file ticket-graph pass) rides the same channel
+// verbatim, with one commit-path-only presentation detail: an advisory whose
+// Kind is a mechanical remedy gets the amend recipe appended, because at this
+// layer the commit already exists. The recipe is deliberately not part of the
+// check text, so standalone ws/tickets.verify — where nothing has been
+// committed and an amend instruction would be nonsense — omits it. The verdict
+// and the advisory set are identical on both paths, which is what
+// {#260723-tickets-verify-tool}'s identical-verdict guarantee requires.
 func verifyAdapter(root string, paths []string) ([]string, error) {
 	result, err := wsdoc.TicketVerify(root, paths)
 	if err != nil {
@@ -2718,12 +2727,20 @@ func verifyAdapter(root string, paths []string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
 	}
-	if len(result.Warnings) == 0 {
+	if len(result.Warnings) == 0 && len(result.Advisories) == 0 {
 		return nil, nil
 	}
-	advisories := make([]string, 0, len(result.Warnings))
+	advisories := make([]string, 0, len(result.Warnings)+len(result.Advisories))
 	for _, warning := range result.Warnings {
 		advisories = append(advisories, fmt.Sprintf("WARN [%s] %s: %s", warning.Guardrail, warning.Path, warning.Message))
+	}
+	for _, advisory := range result.Advisories {
+		text := advisory.Text
+		if advisory.Kind == wsdoc.AdvisoryKindFix {
+			// 7-space continuation, matching the FIX:/CHECK: hanging indent.
+			text += "\n       Then git commit --amend --no-edit."
+		}
+		advisories = append(advisories, text)
 	}
 	return advisories, nil
 }
@@ -2731,7 +2748,9 @@ func verifyAdapter(root string, paths []string) ([]string, error) {
 // formatTicketVerify renders a wsdoc.VerifyResult for the standalone
 // tickets.verify tool: an overall PASS/FAIL line followed by one bullet per
 // finding (hard, hyphenated FAIL) and warning (soft, WARN) — mirroring
-// formatTicketMutate/formatSageGate's plain-text style.
+// formatTicketMutate/formatSageGate's plain-text style — then the ticket-graph
+// advisories, which render identically here and on the commit path except that
+// the commit path appends the amend recipe.
 func formatTicketVerify(result wsdoc.VerifyResult) string {
 	var b strings.Builder
 	if result.OK {
@@ -2744,6 +2763,14 @@ func formatTicketVerify(result wsdoc.VerifyResult) string {
 	}
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(&b, "  WARN [%s] %s: %s\n", warning.Guardrail, warning.Path, warning.Message)
+	}
+	// Advisories render verbatim: the board block carries its own 4-space row
+	// indent, and the commit path's formatGitCommit adds its own 2-space pass.
+	// They deliberately do not feed the next_instruction switch below — an
+	// ancestor note is explicitly no-action-needed, so "should be addressed or
+	// explicitly accepted" would be wrong.
+	for _, advisory := range result.Advisories {
+		fmt.Fprintf(&b, "\n%s\n", advisory.Text)
 	}
 	switch {
 	case !result.OK:
