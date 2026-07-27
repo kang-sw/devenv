@@ -1324,8 +1324,11 @@ func TestRenderPlaybookShippedReviewAdjudicatorDeclaredContext(t *testing.T) {
 		"`[override: <reason>]`",
 		"`[out-of-scope: <reason>]`",
 		"Rely only on this prompt and the named paths; do not depend on prior conversation.",
-		"An escalation defends nothing, so judge it on row 2 alone: `[override: <reason>]` when the plan already covers the required fix, `[out-of-scope: <reason>]` when it does not.",
-		"Row 3 licenses the commit range only for locating the evidence the implementer named; forming your own opinion of the code from it is the re-review this role forbids.",
+		"An escalation defends nothing, so it takes `[override: <reason>]` when the plan already covers the required fix, and `[out-of-scope: <reason>]` when it does not.",
+		"The specific-evidence row licenses the commit range only for locating the evidence the implementer named; forming your own opinion of the code from it is the re-review this role forbids.",
+		// Row references are by defense name, not position: a future row insertion or
+		// reorder must not silently re-point these rules at the wrong defense.
+		"an escalation by the scope-expansion row.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review-adjudicator render missing %q:\n%s", want, body)

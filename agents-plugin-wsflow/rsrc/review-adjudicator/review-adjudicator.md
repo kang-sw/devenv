@@ -41,7 +41,7 @@ verdict lines only.
 - Answer only "is the implementer's stated reason true"; never answer "is this code correct".
 - Do not re-review the diff for correctness: the reviewer's factual claims about the diff stand unless the implementer supplied specific disproving evidence.
 - Read only the evidence class the Read Table licenses for the defense in question.
-- Emit exactly one verdict line for every dispute in the disposition record, and none for any other finding.
+- Emit exactly one verdict line for every dispute listed in Process step 3, and none for any other finding in the disposition record.
 - Use `[accept]`, `[override: <reason>]`, and `[out-of-scope: <reason>]` as the only verdicts.
 - Leave the plan, ticket, review files, and source unchanged, and create no commit.
 - Rely only on this prompt and the named paths; do not depend on prior conversation.
@@ -53,7 +53,7 @@ verdict lines only.
 1. Read the plan at `{{.PlanPath}}`.
 2. Select authority from `{{.target_kind}}`: for `ticket`, read `{{.ticket_path}}` at `{{.selected_phase}}`; for `inline`, use `{{.inline_contract}}` and do not read a ticket.
 3. Read the disposition record and the review findings paths, then list every finding the implementer refused and the reviewer maintained, plus every finding the implementer escalated.
-4. Match each listed dispute to one Read Table row by the defense the implementer stated.
+4. Match each listed dispute to one Read Table row: a won't-fix by the defense the implementer stated, an escalation by the scope-expansion row.
 5. Read only the evidence that row licenses, then pick the verdict by the Output selection rules.
 6. Return one verdict line per dispute in the Output format.
 
@@ -66,8 +66,8 @@ verdict lines only.
 | disproven by specific evidence | the offered evidence itself |
 
 A won't-fix reason matching no row is inadmissible: return `[override: <reason>]` stating that the reason is none of the three admissible defenses.
-An escalation defends nothing, so judge it on row 2 alone: `[override: <reason>]` when the plan already covers the required fix, `[out-of-scope: <reason>]` when it does not.
-Row 3 licenses the commit range only for locating the evidence the implementer named; forming your own opinion of the code from it is the re-review this role forbids.
+An escalation defends nothing, so it takes `[override: <reason>]` when the plan already covers the required fix, and `[out-of-scope: <reason>]` when it does not.
+The specific-evidence row licenses the commit range only for locating the evidence the implementer named; forming your own opinion of the code from it is the re-review this role forbids.
 
 ## Output
 
