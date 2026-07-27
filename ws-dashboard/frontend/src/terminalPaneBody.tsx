@@ -1022,12 +1022,27 @@ export function TerminalPaneBody({
   // `refocusActiveTerminal`'s idiom, so this runs after the sidebar click's
   // own window-level `focusin`/`pointerdown` listeners have already cleared
   // any stale `keepTerminalFocusRef` state from the previously focused pane.
+  //
+  // Also re-fits/forwards size proactively here rather than leaning on
+  // Effect A's `paneVisible` correction below: that correction only starts
+  // once the 100ms `focusWatchdog` poll notices `container.offsetParent`
+  // went non-null, so it can lag a root switch by up to ~100ms. A manual
+  // click into the terminal happens well after that window in practice
+  // (human reaction time), masking the race - but auto-focus lands on the
+  // very next tick, so without this, typing immediately after a root switch
+  // could reach the daemon before the PTY's dimensions were corrected for
+  // the newly visible pane's actual size. `fitNow`/`forwardSize` are both
+  // cheap no-ops when the size already matches (fit) or was already
+  // forwarded (`lastForwardedSizeRef` dedupe), so calling them here in
+  // addition to Effect A's own later correction is harmless.
   const shouldAutoFocus = actions.shouldAutoFocus(pane);
   useEffect(() => {
     if (!shouldAutoFocus) {
       return;
     }
     window.setTimeout(() => {
+      fitNowRef.current?.();
+      forwardSizeRef.current?.();
       terminalRef.current?.focus();
       containerRef.current
         ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
