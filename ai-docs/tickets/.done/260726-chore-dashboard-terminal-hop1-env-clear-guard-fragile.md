@@ -4,6 +4,7 @@ related:
   260725-feat-dashboard-pty-agent-attention-notification: found-during
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-27
 ---
 
 # hop-1 default-spawn env regression guard is fragile and platform-partial
@@ -335,3 +336,110 @@ this phase's Result, in the same form the parent ticket used.
 - Phase is done when: the suite's failure set is exactly the two sites above,
   every mutation M1-M4 was observed failing at a named site and reverted, and
   the tree is clean.
+
+### Result (28aaf8b6) - 2026-07-27
+
+Landed as a single code commit touching one file,
+`ws-dashboard/crates/daemon/src/terminal.rs` (+169/-18). Both review
+partitions returned no Critical and no Important findings, so there is no
+remediation Edition this cycle. After the change `build_helper_command` has
+exactly one `env_clear()` site — `terminal.rs:1447`, inside the `ClearAndSet`
+arm — verified by grep: the file's only other occurrences are comments and the
+test-local positive control at `:2917`.
+
+**Mutation evidence — the mandatory non-vacuity deliverable.** Each mutation
+was applied to real source, the suite run, the failure read from output, then
+reverted. The test reviewer independently reproduced M1, M2 and M3 without
+being shown the implementer's numbers and landed on identical sites.
+
+| Mutation | Failing test | Failure site |
+|---|---|---|
+| M1: `helper_env_plan`'s `None` arm returns `ClearAndSet(host_env.into_iter().collect())` | `helper_spawn_default_no_command_matches_existing_arg_shape` | `terminal.rs:2882:9` (`left: ClearAndSet([]), right: InheritHost`) |
+| M2: `scrub_env_os` returns its input unfiltered | `helper_env_plan_with_command_scrubs_claude_markers_and_preserves_others` | `terminal.rs:3060:13` (marker `CLAUDECODE` must be scrubbed) |
+| M3: remove `.env_clear()` from the test's local control `Command` | `helper_spawn_default_no_command_matches_existing_arg_shape` | `terminal.rs:2918:13` (positive control must contain `env -i`) |
+| M4: revert all, re-run | failure set is exactly the two known pre-existing sites | `crates/daemon/tests/routes.rs:1066` and `:1383`; tree clean |
+
+M2 also cascaded into three pre-existing sibling tests
+(`agent_env_profile.rs:97`, `terminal.rs:2987`, `terminal.rs:3129`) — expected,
+since `scrub_env_os` is shared.
+
+**How the one-fallback-resolution constraint was actually resolved.** The
+`scrub.unwrap_or(&CLAUDE)` resolution was hoisted to the top of
+`build_helper_command`, unconditional on `command`, and `Some(scrub)` is passed
+into `helper_env_plan`. That is the Constraints section's first named option,
+but it needed one refinement the plan did not anticipate: `helper_env_plan`
+keeps the literal `Option<&EnvScrubProfile>` parameter rather than taking the
+resolved `&'static EnvScrubProfile` directly, because the phase's own mandatory
+test literal `helper_env_plan(None, None, fixture)` does not compile against a
+bare non-`Option` parameter. So the resolution happens once in the caller and
+the callee still accepts an `Option` — the argv loop and the env plan provably
+read the same resolved profile, and the mandated test literals still compile.
+
+**Verification.** `cargo test -p ws-dashboard-daemon --no-fail-fast`, run from
+`ws-dashboard/`. Lib target `237 passed; 0 failed; 2 ignored`; `tests/routes.rs`
+`176 passed; 2 failed` at the two known pre-existing sites; every other target
+green; overall exit `101`, expected. `cargo test --no-run` emitted zero warnings
+and zero errors.
+
+The `+1` on the lib target is the one new test — the two additions to the
+existing default-path test add assertions, not test count.
+
+**The Verification-boundary baseline recorded in this phase plan was already
+stale when the phase ran.** The plan's `174 passed; 2 failed` / lib
+`204 passed` numbers predate a later ticket that landed on the branch. The true
+baseline at the branch point `b7f524f7` was lib 236 / routes 176, with the same
+two failure sites. The failure *sites* named in the plan were correct and are
+still the right completion criterion; only the counts had drifted.
+
+**Review outcome — three Minor findings, all dispositioned won't-fix.**
+
+1. Two textual `unwrap_or(&CLAUDE)` sites now exist. The suggested
+   `debug_assert!(scrub.is_some())` would panic on exactly the defensive
+   `command=Some`/`scrub=None` path this ticket requires to survive without
+   panicking, and a `HELPER_SCRUB_FALLBACK` alias would not reduce divergence
+   risk because both sites already name the same constant.
+2. `contains("env -i")` could in principle match inside a rendered program path.
+   The failure direction is a false positive only, and the detector is
+   non-load-bearing by design.
+3. The primary guard calls the pure function directly rather than routing
+   through `build_helper_command`. That shape is mandated verbatim by this
+   phase's Completed-behavior list, and the test partition confirmed the routing
+   itself stays covered by the retained `get_envs()` assertion.
+
+The test partition also ruled out two of its own suspicions: the empty
+`host_env` fixture in the primary guard is harmless because `InheritHost`
+carries no data, and the deleted `starts_with("env ")` assertion's unique
+coverage (a bare `env_remove` without a full clear) is still caught by the
+retained `get_envs().next().is_none()` assertion.
+
+**Deviations from the plan — cosmetic only, all self-reported.**
+
+- M2 was applied as `let _ = profile; env.into_iter().collect()` to avoid an
+  unused-parameter warning; identical mutation semantics, fully reverted.
+- The `#[cfg(unix)]` block's pre-existing message reads `(env -i/env -u)`, not
+  the plan's transcribed `(env -u/env -i)`; the implementation matched real
+  source.
+- The new test's `HashMap` is `<String, String>` rather than the sibling test's
+  `<String, Option<String>>`, since `ClearAndSet` pairs are non-optional.
+
+**Doc drift fixed on contact.** `build_helper_command`'s CONTRACT sentence
+"`scrub` is only ever read inside the `command.is_some()` branch" became false
+the moment the resolution was hoisted. Reworded to "resolved once at the top …
+only ever CONSUMED on the `command.is_some()` path".
+
+**No spec change, verified rather than assumed.** The governing entry
+`{#260725-ws-web-dashboard-terminal-spawn-profile}` is intact at
+`ai-docs/spec/ws-web-dashboard/index.md:2162`, with its byte-for-byte sentence
+at `:2148`. The correctness reviewer verified behavioral equivalence on both
+paths, including the ordering change — the env application site moved from
+inside the argv branch to after it.
+
+**Unresolved finding carried out of the survey: this ticket's own citations had
+drifted.** Of ~17 cited source locations, the `build_helper_command` block had
+moved a uniform +42 lines and the test block +97 to +101. Two citations were
+worse than drifted and are wrong as written above: `terminal.rs:2634-2639` now
+holds unrelated boot-reconcile content (the `CARGO_BIN_EXE_*` note it meant is
+at `:2668-2674`), and the pairing-invariant CONTRACT cited at `:1374-1379` is
+really the `resolve_create_command` doc comment at `:1410-1422`. No cited code
+had changed — only its coordinates. Frozen plan text is left as written; this
+note is the correction of record.
