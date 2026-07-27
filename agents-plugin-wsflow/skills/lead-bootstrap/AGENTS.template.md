@@ -160,8 +160,8 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0005: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
 - v0006: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
   all three forms: `🚧 <Feature Name>` headings at any level (`#` through
-  `######`), `> [!<keyword>] Planned 🚧` body callouts under any callout
-  keyword (`note`, `warning`, or any other), and `- 🚧 <name>` items in
+  `######`), `> [!<keyword>] Planned 🚧` body callouts under any alphabetic
+  callout keyword (`note`, `warning`, and the like), and `- 🚧 <name>` items in
   `features:` frontmatter, with or without a trailing `[<stem>/p<N>]` reference.
   Resolve each marker before removing it: when a live `idea/`, `todo/`, or
   `ready/` ticket references that spec, move the pending text into that ticket's
