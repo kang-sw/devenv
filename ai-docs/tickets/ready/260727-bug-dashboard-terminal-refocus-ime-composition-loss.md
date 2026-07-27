@@ -4,8 +4,8 @@ related:
   260725-feat-dashboard-terminal-steady-state-stream-throughput: shares the refocusActiveTerminal call site; that ticket's Phase 4 debounce work must compose with this fix rather than reintroduce an unguarded refocus
 related-mental-model:
   - ws-web-dashboard/terminal-render
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Terminal refocus steals IME composition focus, corrupting Korean input
