@@ -22,18 +22,26 @@ type SpecStatusOptions struct {
 }
 
 type SpecInfo struct {
-	Path             string           `json:"path"`
-	Filename         string           `json:"filename"`
-	Title            string           `json:"title,omitempty"`
-	Summary          string           `json:"summary,omitempty"`
-	Anchors          []SpecAnchorInfo `json:"anchors,omitempty"`
-	TicketRefs       []string         `json:"ticket_refs,omitempty"`
-	MarkerContexts   []string         `json:"marker_contexts,omitempty"`
-	MatchingSnippets []string         `json:"matching_snippets,omitempty"`
-	MatchScore       int              `json:"match_score,omitempty"`
-	Matches          []MatchEvidence  `json:"matches,omitempty"`
-	MatchesSpecStem  bool             `json:"matches_spec_stem,omitempty"`
-	MatchesTicketRef bool             `json:"matches_ticket_ref,omitempty"`
+	Path           string           `json:"path"`
+	Filename       string           `json:"filename"`
+	Title          string           `json:"title,omitempty"`
+	Summary        string           `json:"summary,omitempty"`
+	Anchors        []SpecAnchorInfo `json:"anchors,omitempty"`
+	TicketRefs     []string         `json:"ticket_refs,omitempty"`
+	MarkerContexts []string         `json:"marker_contexts,omitempty"`
+	// LegacyMarkerAdvisory is a non-blocking migration note emitted when the
+	// file still carries a legacy `🚧` planned marker. Empty otherwise.
+	LegacyMarkerAdvisory string          `json:"legacy_marker_advisory,omitempty"`
+	MatchingSnippets     []string        `json:"matching_snippets,omitempty"`
+	MatchScore           int             `json:"match_score,omitempty"`
+	Matches              []MatchEvidence `json:"matches,omitempty"`
+	MatchesSpecStem      bool            `json:"matches_spec_stem,omitempty"`
+	MatchesTicketRef     bool            `json:"matches_ticket_ref,omitempty"`
+
+	// legacyMarkers is the parsed marker set backing LegacyMarkerAdvisory. It
+	// stays unexported so the wire shape is unchanged; it exists only so the
+	// document body is read once per scan.
+	legacyMarkers []legacyMarker
 }
 
 type SpecAnchorInfo struct {
@@ -47,10 +55,18 @@ type SpecAnchorStatus struct {
 	SpecStem  string           `json:"spec_stem"`
 	Locations []SpecAnchorInfo `json:"locations"`
 	Files     []SpecInfo       `json:"files"`
+	// LegacyMarkerAdvisory carries the compat note for every matched file that
+	// still holds a legacy `🚧` planned marker, one `<path>: <note>` line each.
+	LegacyMarkerAdvisory string `json:"legacy_marker_advisory,omitempty"`
 }
 
 func SpecsList(root string) ([]SpecInfo, error) {
-	return scanSpecs(root)
+	specs, err := scanSpecs(root)
+	if err != nil {
+		return nil, err
+	}
+	applyLegacyMarkerAdvisories(root, specs)
+	return specs, nil
 }
 
 func SpecsFind(root string, opts SpecFindOptions) ([]SpecInfo, error) {
@@ -58,6 +74,7 @@ func SpecsFind(root string, opts SpecFindOptions) ([]SpecInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	applyLegacyMarkerAdvisories(root, specs)
 	query := strings.TrimSpace(opts.Query)
 	specStem := strings.TrimSpace(opts.SpecStem)
 	ticketStem := strings.TrimSpace(opts.TicketStem)
@@ -126,7 +143,9 @@ func SpecsStatus(root string, opts SpecStatusOptions) (*SpecAnchorStatus, error)
 	if err != nil {
 		return nil, err
 	}
+	applyLegacyMarkerAdvisories(root, specs)
 	status := SpecAnchorStatus{SpecStem: specStem}
+	advisories := []string{}
 	for _, spec := range specs {
 		matched := false
 		for _, anchor := range spec.Anchors {
@@ -138,8 +157,12 @@ func SpecsStatus(root string, opts SpecStatusOptions) (*SpecAnchorStatus, error)
 		if matched {
 			spec.MatchesSpecStem = true
 			status.Files = append(status.Files, spec)
+			if spec.LegacyMarkerAdvisory != "" {
+				advisories = append(advisories, spec.Path+": "+spec.LegacyMarkerAdvisory)
+			}
 		}
 	}
+	status.LegacyMarkerAdvisory = strings.Join(advisories, "\n")
 	if len(status.Locations) == 0 {
 		return nil, fmt.Errorf("spec anchor not found: %s", specStem)
 	}
@@ -204,7 +227,27 @@ func readSpec(root, path string) (SpecInfo, error) {
 	info.Anchors = specAnchorsInText(text)
 	info.TicketRefs = specTicketRefs(fm)
 	info.MarkerContexts = specMarkerContexts(text)
+	info.legacyMarkers = legacyMarkerLines(text)
 	return info, nil
+}
+
+// applyLegacyMarkerAdvisories fills LegacyMarkerAdvisory in place. The live
+// ticket scan runs once per tool call, never once per spec file.
+func applyLegacyMarkerAdvisories(root string, specs []SpecInfo) {
+	needed := false
+	for _, spec := range specs {
+		if len(spec.legacyMarkers) > 0 {
+			needed = true
+			break
+		}
+	}
+	if !needed {
+		return
+	}
+	resolver := newLegacyMarkerResolver(root)
+	for i := range specs {
+		specs[i].LegacyMarkerAdvisory = resolver.Advise(specs[i].Path, specs[i].legacyMarkers)
+	}
 }
 
 func specAnchorsInText(text string) []SpecAnchorInfo {

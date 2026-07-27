@@ -29,7 +29,7 @@ func ProjectTree(root string) (string, error) {
 	renderAIDocs(&b, aiDocs, ignored)
 	b.WriteString("\n\n")
 	if isDir(filepath.Join(aiDocs, "spec")) {
-		renderSpecs(&b, filepath.Join(aiDocs, "spec"))
+		renderSpecs(&b, root, filepath.Join(aiDocs, "spec"))
 		b.WriteString("\n\n")
 	}
 	if isDir(filepath.Join(aiDocs, "tickets")) {
@@ -120,18 +120,21 @@ func gitIgnoreMatcher(repoRoot string) func(string) bool {
 	}
 }
 
-func renderSpecs(b *strings.Builder, specRoot string) {
+// renderSpecs takes both the repository root and the spec directory: the legacy
+// planned-marker advisory resolves against live tickets, which live outside the
+// spec tree. The resolver is built once per ProjectTree call.
+func renderSpecs(b *strings.Builder, repoRoot, specRoot string) {
 	b.WriteString("spec:\n")
-	renderSpecDir(b, specRoot, 1)
+	renderSpecDir(b, repoRoot, specRoot, 1, newLegacyMarkerResolver(repoRoot))
 }
 
-func renderSpecDir(b *strings.Builder, root string, indent int) {
+func renderSpecDir(b *strings.Builder, repoRoot, dir string, indent int, resolver *legacyMarkerResolver) {
 	prefix := strings.Repeat("  ", indent)
-	for _, entry := range sortedEntries(root) {
-		path := filepath.Join(root, entry.Name())
+	for _, entry := range sortedEntries(dir) {
+		path := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
 			fmt.Fprintf(b, "%s%s/\n", prefix, entry.Name())
-			renderSpecDir(b, path, indent+1)
+			renderSpecDir(b, repoRoot, path, indent+1, resolver)
 			continue
 		}
 		if filepath.Ext(entry.Name()) != ".md" {
@@ -163,7 +166,30 @@ func renderSpecDir(b *strings.Builder, root string, indent int) {
 			statsPart = "  [" + strings.Join(stats, ", ") + "]"
 		}
 		fmt.Fprintf(b, "%s%s%s%s\n", prefix, entry.Name(), titlePart, statsPart)
+		if advisory := legacyMarkerAdvisoryFor(repoRoot, path, resolver); advisory != "" {
+			fmt.Fprintf(b, "%s  legacy-marker: %s\n", prefix, advisory)
+		}
 	}
+}
+
+// legacyMarkerAdvisoryFor reads the spec body directly rather than reusing
+// specStats: specStats reads `features:` frontmatter, which no spec file in
+// this corpus declares, so a frontmatter-only check detects nothing. Read
+// failures yield no advisory — the note never blocks tree rendering.
+func legacyMarkerAdvisoryFor(repoRoot, path string, resolver *legacyMarkerResolver) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	markers := legacyMarkerLines(string(raw))
+	if len(markers) == 0 {
+		return ""
+	}
+	rel, err := filepath.Rel(repoRoot, path)
+	if err != nil {
+		return ""
+	}
+	return resolver.Advise(filepath.ToSlash(rel), markers)
 }
 
 func specStats(fm map[string]any) (int, int, []string) {

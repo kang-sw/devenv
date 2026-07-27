@@ -2534,16 +2534,30 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 		b.WriteString("\n")
 		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
 		writeIndentedLines(&b, "  marker: ", spec.MarkerContexts)
+		writeIndentedLines(&b, "  legacy-marker: ", []string{spec.LegacyMarkerAdvisory})
 	}
 	return b.String()
 }
 
+// formatSpecFind inherits nothing from formatSpecs: it delegates wholly to
+// formatDocumentFind, which knows nothing of SpecInfo. The legacy-marker
+// advisory therefore has to be appended here explicitly, or the specs.find
+// query path silently loses it while the no-query fallback keeps it. Each line
+// is prefixed with the spec path so the note stays attributable.
 func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
-	return formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
+	var b strings.Builder
+	b.WriteString(formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
 		for _, spec := range specs {
 			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
 		}
-	})
+	}))
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.LegacyMarkerAdvisory) == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "legacy-marker: %s: %s\n", spec.Path, strings.TrimSpace(spec.LegacyMarkerAdvisory))
+	}
+	return b.String()
 }
 
 func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
@@ -2650,6 +2664,7 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 			b.WriteString("\n")
 		}
 	}
+	writeIndentedLines(&b, "legacy-marker: ", strings.Split(status.LegacyMarkerAdvisory, "\n"))
 	return b.String()
 }
 
