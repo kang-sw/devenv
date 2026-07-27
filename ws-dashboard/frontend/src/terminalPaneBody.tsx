@@ -210,15 +210,18 @@ export function TerminalPaneBody({
     // after open() and before the GPU renderer chain below, so a WebGL
     // texture atlas - if one loads - already reflects ligatures at
     // construction time instead of needing a reactivation step.
-    // `fallbackLigatures: []` keeps this strictly font-driven: without it,
-    // when Local Font Access is denied or the addon is served over a
-    // non-secure-context LAN origin, it silently joins a hardcoded ~68-glyph
-    // pattern list regardless of whether the resolved font actually has
-    // those ligature glyphs. Wrapped in try/catch so a construction/
-    // activation failure leaves the terminal working unchanged with no
-    // ligatures.
+    // Use the addon's default constructor (default fallback-ligature list)
+    // rather than overriding `fallbackLigatures`: font-based GSUB detection
+    // needs the Local Font Access API (`navigator.fonts.query()` /
+    // `window.queryLocalFonts()`), which is Chromium-only and requires a
+    // secure context. This dashboard is dogfooded over plain HTTP on a LAN
+    // address, so that API is never available here, font-driven detection
+    // silently resolves to nothing, and the built-in fallback list is the
+    // only way ligatures ever render in this environment. Wrapped in
+    // try/catch so a construction/activation failure leaves the terminal
+    // working unchanged with no ligatures.
     try {
-      const ligaturesAddon = new LigaturesAddon({ fallbackLigatures: [] });
+      const ligaturesAddon = new LigaturesAddon();
       terminal.loadAddon(ligaturesAddon);
       ligaturesAddonRef.current = ligaturesAddon;
     } catch {
@@ -652,6 +655,26 @@ export function TerminalPaneBody({
         terminalRef.current.rows !== beforeFit.rows)
     ) {
       forwardSizeRef.current?.();
+    } else if (beforeFit && terminalRef.current) {
+      // Size didn't actually change while hidden (the common case - e.g.
+      // switching dashboard tabs without resizing the browser window), so a
+      // same-size resize would be silently dropped both by the frontend
+      // dedupe (`lastForwardedSizeRef` in forwardSize) and by the kernel
+      // (Linux only emits SIGWINCH when ws_row/ws_col actually differ). A
+      // full-screen TUI app (htop/vim/tmux) that under-repainted while its
+      // alt-screen scrollback was replayed client-side would then stay
+      // visually stale with no redraw trigger. Force two genuinely
+      // different sizes through - a one-row shrink then restore - so each
+      // one forwards and triggers a real SIGWINCH, guaranteeing a full
+      // redraw.
+      const terminal = terminalRef.current;
+      const shrunkRows = Math.max(1, terminal.rows - 1);
+      if (shrunkRows !== terminal.rows) {
+        terminal.resize(terminal.cols, shrunkRows);
+        forwardSizeRef.current?.();
+        terminal.resize(beforeFit.columns, beforeFit.rows);
+        forwardSizeRef.current?.();
+      }
     }
   }, [paneVisible]);
 
