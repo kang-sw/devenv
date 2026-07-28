@@ -41,12 +41,19 @@ sha2.workspace = true
 # WHY `macos_fsevent` AND NOT `macos_kqueue`. Naming notify's own default is
 # the MINIMUM change that makes dev's `default-features = false` intent build:
 # it restores exactly the backend notify would have picked, and adds no
-# behavior of its own. Both measurements, recorded so the decision is not
-# re-litigated from one number:
-#   - `macos_kqueue`: `--test git_watch` 11/11 on this worktree's tiny fixture
-#     repos. But notify's kqueue backend has no recursive kernel primitive - it
-#     emulates one by WalkDir'ing the whole subtree and opening a watch on
-#     EVERY ENTRY, files included, with no ignore filter
+# behavior of its own. It is also the correct backend on its merits:
+#   - `macos_fsevent`: `--test git_watch` 11/11, and no fd cost at all (one
+#     FSEvents stream per root). notify creates that stream with
+#     `kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer`
+#     at latency 0.0 (`notify-8.2.0/src/fsevent.rs:300-301`), i.e. per-FILE
+#     event paths with no coalescing - exactly what `work_root_watch.rs`'s
+#     invalidation keys on.
+#   - `macos_kqueue`: measured `--test git_watch` 11/11 too (under the older,
+#     un-canonicalized fixture; not re-measured since, as nothing turns on it
+#     now). That green was always a fixture-SCALE artifact regardless: notify's
+#     kqueue backend has no recursive kernel
+#     primitive - it emulates one by WalkDir'ing the whole subtree and opening
+#     a watch on EVERY ENTRY, files included, with no ignore filter
 #     (`notify-8.2.0/src/kqueue.rs:295-316`), and each watch costs one fd
 #     (`kqueue-1.2.0/src/watcher.rs:93`). Per-ENTRY, not per-directory. This
 #     worktree has ~154k entries; `launchctl limit maxfiles` here reports a 256
@@ -55,18 +62,25 @@ sha2.workspace = true
 #     `do_arm_recursive`), so nothing bounds it, and a mid-WalkDir failure
 #     leaks the partial fd set. fd exhaustion is process-global: it would
 #     starve HTTP accept and helper sockets, not just the watcher.
-#   - `macos_fsevent`: `--test git_watch` 6/11, the five reds all "must bump
-#     within 5s" timeouts, and no fd cost (one FSEvents stream per root).
-#     `work_root_watch.rs` expects per-directory events; FSEvents' coalesced
-#     recursive stream does not deliver them.
-# So kqueue's green suite is a fixture-scale artifact that hides a real-repo fd
-# hazard, while fsevent's reds are a real, visible, inherited dev-side macOS
-# condition. We take the visible reds.
+# So both backends pass the suite, and fsevent does it without the real-repo fd
+# hazard. fsevent wins outright; there is no trade-off to re-litigate.
+#
+# CORRECTION (2026-07-28, commit 1858a86f's successor). An earlier revision of
+# this comment recorded fsevent as 6/11 with five "must bump within 5s" reds,
+# and attributed them to FSEvents delivering a coalesced recursive stream. Both
+# halves were wrong. The stream is not coalesced (see the flags above), and the
+# five reds were a defect in `tests/git_watch.rs`'s OWN fixture, not in the
+# backend: the fixture registered `WatchTargets` built straight from
+# `std::env::temp_dir()` without the `canonical_or_normalized` pass every
+# production caller goes through (`discovery.rs`'s `watch_reconcile_entry_for`).
+# On macOS `std::env::temp_dir()` is `/var/folders/<...>/T`, a symlink to
+# `/private/var/folders/<...>/T`; notify canonicalizes internally, so events
+# arrived spelled `/private/var/...` against a root registered as `/var/...`
+# and `owners_for_path`'s prefix scan matched nothing. Canonicalizing the
+# fixture root took the suite to 11/11 with no production change.
 #
 # This selection is macOS-only - `cfg`-wise inert on Linux/Windows, which keep
-# inotify and ReadDirectoryChangesW. The backend choice is NOT settled here;
-# `260728-bug-dashboard-macos-kqueue-fd-ceiling-unguarded` carries both
-# measurements and owns the decision.
+# inotify and ReadDirectoryChangesW.
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 
 [target.'cfg(unix)'.dependencies]

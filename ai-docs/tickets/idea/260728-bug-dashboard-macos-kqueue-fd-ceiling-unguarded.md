@@ -1,5 +1,5 @@
 ---
-title: "dashboard fs watch: the macOS backend selection is unresolved - kqueue costs one fd per filesystem entry, fsevent loses five git_watch tests"
+title: "dashboard fs watch: macOS backend selection - RESOLVED as macos_fsevent; kqueue's per-entry fd cost recorded as the reason"
 related:
   260727-chore-merge-ws-dashboard-dev-into-goal-branch: surfaced-by
   260726-refactor-ws-dashboard-git-fs-watch-invalidation: subject
@@ -14,120 +14,127 @@ references (history is queried by `git log --grep=<stem>`), so it stays.
 Read it as "the macOS fs-watch backend question", not as "kqueue ships and
 needs a guard".
 
-## Symptom
+## Status: settled
 
-`ws-dashboard/crates/daemon` currently builds macOS fs-watching on
-`notify`'s `macos_fsevent`, and five of `tests/git_watch.rs`'s eleven tests
-are red on macOS as a result. That is a deliberate, visible state, not a
-settled one: **neither macOS backend notify offers is actually good enough
-for what `work_root_watch.rs` needs**, and this ticket exists so the choice
-gets made on its own evidence rather than inside an unrelated merge.
+`ws-dashboard/crates/daemon` builds macOS fs-watching on `notify`'s
+`macos_fsevent`, and `tests/git_watch.rs` is **11 passed, 0 failed** on
+macOS. The backend question this ticket was opened to defer is **decided in
+fsevent's favour**, on its own evidence and with no trade-off left to weigh:
+fsevent passes the whole suite AND carries no per-fd cost, while kqueue's
+equal pass rate is a fixture-scale artifact over a real-repo fd hazard (see
+Evidence). Nothing here is awaiting a decision.
 
-Surfaced while resolving Phase 2 of
-`260727-chore-merge-ws-dashboard-dev-into-goal-branch`. The dev side's
-`notify = { version = "8", default-features = false }` does not build on
-macOS at all - notify gates its fsevent module on
-`not(feature = "macos_kqueue")` rather than on `macos_fsevent`, so dropping
-default features removes the `fsevent-sys` crate while still compiling the
-module that imports it. Some feature must be named. The merge first named
-`macos_kqueue` on test-pass-rate evidence; review found that evidence was
-measured at a scale that hides the backend's real cost, and the merge was
-corrected to `macos_fsevent` (notify's own default, i.e. the minimum change
-that makes the `default-features = false` intent build). The backend
-decision itself is deferred here.
+The ticket is retained as the durable record of why the selection is what it
+is - the kqueue finding below is the load-bearing reason, and it is not
+written down anywhere else at this length. It carries no open work.
 
-## Evidence
+## Correction: the original "five reds" diagnosis was wrong
 
-Both measurements, taken on the same worktree with everything else
-identical. Carry both forward; neither number alone decides anything.
+This ticket originally recorded fsevent as 6/11, and attributed the five reds
+to `work_root_watch.rs` being written against a per-directory event model
+while "FSEvents delivers a coalesced recursive stream". **Both halves of that
+were false**, and it is recorded here rather than deleted because the false
+version briefly drove a proposed fix direction (rewriting the invalidation
+logic against a stream shape that does not exist).
 
-### `macos_kqueue` - green suite, per-ENTRY fd cost
+- **FSEvents is not coalescing here.** notify creates the stream with
+  `kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer` at
+  latency `0.0` (`notify-8.2.0/src/fsevent.rs:300-301`) - per-FILE event
+  paths, delivered without deferral. That is precisely the shape
+  `work_root_watch.rs`'s invalidation keys on.
+- **The five reds were a defect in the test fixture, not in the backend.**
+  `tests/git_watch.rs`'s `armed_fixture_with_config` built its
+  `WatchTargets { worktree, git_dir, common_dir }` straight from
+  `std::env::temp_dir()`, skipping the `canonical_or_normalized` pass that
+  every production caller goes through (`discovery.rs`'s
+  `watch_reconcile_entry_for` routes all three fields through it, and
+  `watch_key` shares the same chain). On macOS `std::env::temp_dir()` is
+  `/var/folders/<...>/T`, a symlink to `/private/var/folders/<...>/T`.
+  notify canonicalizes a watched root internally, so every delivered event
+  path read `/private/var/...` while the registry held `/var/...` as the
+  owning root; `owners_for_path`'s `starts_with` prefix scan matched no
+  owner, no epoch bumped, and each positive-bump assertion ran out its 5s
+  deadline.
+- **Canonicalizing the fixture root took the suite to 11/11**, with **no
+  production change** - the invalidation logic was never at fault.
+
+Corroboration that the fixture, not the backend, was the variable:
+
+- All five reds were `armed_fixture` cases asserting a POSITIVE bump. The
+  `armed_fixture` cases that "passed" asserted negatives or spawn counts,
+  both of which hold vacuously under a total owner miss.
+- The one positive-bump case that passed throughout
+  (`a_route_driven_branch_create_on_one_worktree_bumps_a_sibling_linked_worktrees_refs`)
+  is the only one built through `full_router_app_state()` and the real,
+  canonicalizing discovery path.
+- kqueue's earlier 11/11 under the same broken fixture is consistent with
+  this: the mismatch only bites a backend that canonicalizes the watched
+  root before reporting event paths.
+- The same `/var` -> `/private/var` symlink was independently traced as the
+  cause of the separate, pre-existing `discovery.rs:1213` failure.
+
+Fixed in `tests/git_watch.rs` by canonicalizing the fixture root at creation
+(`init_git_repo_at_canonical_path`), applied to `armed_fixture_with_config`
+and to the three inline fixtures that had copied the same pattern. The
+gitignored-write case's two negative assertions were vacuous before this and
+now hold for real.
+
+## Evidence: why fsevent and not kqueue
+
+Both measured on the same worktree with everything else identical.
+
+### `macos_fsevent` - full green, no fd cost
 
 - `cargo test -p ws-dashboard-daemon --test git_watch`: **11 passed, 0
-  failed**.
-- That green is a fixture-scale artifact. `git_watch.rs` builds tiny
-  throwaway repos; a real work root is four orders of magnitude larger.
-- notify's kqueue backend has **no recursive kernel primitive**. It
-  emulates one: `add_watch` with `is_recursive` WalkDirs the entire subtree
-  and calls `add_single_watch` on **every entry, files included, with no
-  ignore filter** (search `add_single_watch` in `notify`'s `src/kqueue.rs`).
-  `kqueue::Watcher::add_filename` documents that it opens the file and
-  holds the descriptor. So the cost is **one fd per filesystem entry**, not
-  the "one fd per watched directory" the original Cargo.toml comment
-  claimed.
-- Scale on this worktree: `find . | wc -l` = **154,423** entries (1,781
-  with `node_modules` and `target` pruned). `launchctl limit maxfiles` on
-  this machine reports a **256** soft limit.
+  failed** (2026-07-28, with the fixture repair above).
+- One FSEvents stream per watched root. No per-entry, and no per-directory,
+  file-descriptor cost.
+- Per-file event paths, no coalescing (`fsevent.rs:300-301` flags above).
+
+### `macos_kqueue` - equal pass rate, per-ENTRY fd cost
+
+- `--test git_watch` 11/11 as well, measured under the older
+  un-canonicalized fixture and not re-measured since (nothing turns on it
+  now). Either way the green was always a fixture-SCALE artifact:
+  `git_watch.rs` builds tiny throwaway repos, and a real work root is four
+  orders of magnitude larger.
+- notify's kqueue backend has **no recursive kernel primitive**. It emulates
+  one: `add_watch` with `is_recursive` WalkDirs the entire subtree and calls
+  `add_single_watch` on **every entry, files included, with no ignore
+  filter** (`notify-8.2.0/src/kqueue.rs:295-316`).
+  `kqueue::Watcher::add_filename` documents that it opens the file and holds
+  the descriptor (`kqueue-1.2.0/src/watcher.rs:93`). The cost is **one fd per
+  filesystem entry**, not the "one fd per watched directory" the original
+  Cargo.toml comment claimed.
+- Scale on this worktree: `find . | wc -l` = **154,423** entries (1,781 with
+  `node_modules` and `target` pruned). `launchctl limit maxfiles` on this
+  machine reports a **256** soft limit.
 - The mitigations that exist are Linux-only. `max_dirs` is enforced only in
   the Linux plan/apply and Linux incremental paths, and `do_arm` *computes*
   an `IgnoreSet` that it then never passes to `do_arm_recursive` - so the
-  `node_modules`/`target` exclusion machinery is entirely inert for macOS
-  registration.
-- Failure is not clean. `do_arm_recursive`'s unwind unwatches only the
-  previously *successful* roots, so the root that failed mid-WalkDir keeps
-  its partially-added watches and their fds until the whole watcher drops.
-  fd exhaustion is process-global: it starves HTTP accept, helper Unix
-  sockets, and `git_exec` spawns, not just the watcher.
+  `node_modules`/`target` exclusion machinery would be inert for macOS
+  registration. (This is not a live defect under fsevent, which registers one
+  recursive stream and needs no registration-time pruning; the computed
+  `IgnoreSet` is still applied on the event-classification path, which is
+  what the now-non-vacuous gitignored-write case proves.)
+- Failure would not be clean. `do_arm_recursive`'s unwind unwatches only the
+  previously *successful* roots, so a root that failed mid-WalkDir would keep
+  its partially-added watches and their fds until the whole watcher drops. fd
+  exhaustion is process-global: it starves HTTP accept, helper Unix sockets,
+  and `git_exec` spawns, not just the watcher.
 - Production reaches this path by default (`WatchConfig::default()` is
   `WatchMode::Auto`; `tests/routes.rs` pins `WatchMode::Off`, which is why
-  the route suite cannot see it).
+  the route suite would not have seen it).
 
-### `macos_fsevent` - no fd cost, five real reds
-
-- `cargo test -p ws-dashboard-daemon --test git_watch`: **6 passed, 5
-  failed**. One FSEvents stream per root; no per-entry fd cost at all.
-- The five reds, with their assertion text (measured 2026-07-28):
-  - `writing_an_untracked_file_bumps_worktree_epoch_only` - "an untracked
-    file write must bump the worktree epoch within 5s"
-  - `git_switch_dash_c_bumps_refs_epoch` - "git switch -c must bump refs
-    within 5s"
-  - `git_worktree_add_bumps_refs_epoch_on_the_primary_root` - "git worktree
-    add must bump the primary root's refs within 5s"
-  - `a_directory_created_after_arming_gets_registered_and_a_write_inside_it_bumps`
-    - "a write inside a directory created after arming must bump worktree
-    within 5s"
-  - `mkdir_and_write_in_one_step_still_bumps_via_the_parent_directory_event`
-    - "mkdir+write in one step must still bump worktree within 5s"
-- These are **not flaky timeouts to be re-run away**. They are one
-  substantive finding: `work_root_watch.rs` is written against a
-  per-directory event model - it registers per-directory watches and
-  expects a distinct event per directory, including for directories that
-  appear after arming. FSEvents delivers a **coalesced recursive stream**
-  instead, so the per-directory events the invalidation logic keys on never
-  arrive, and no epoch bumps. Read the last two test names above: they name
-  exactly the post-arming-directory case that coalescing erases.
-
-## Fix direction (not decided)
-
-The real question is which of these the project wants; each has a different
-owner and cost.
-
-1. **Adapt `work_root_watch.rs` to FSEvents' event model on macOS** -
-   stop keying invalidation on per-directory events and derive epoch bumps
-   from the coalesced stream's paths. Keeps zero fd cost. Costs a real
-   change to the invalidation logic, which is the subject of
-   `260726-refactor-ws-dashboard-git-fs-watch-invalidation`.
-2. **Ship kqueue and make `do_arm_recursive` macOS-aware in the same
-   change** - thread the already-computed `IgnoreSet` through, apply a
-   `max_dirs`-equivalent cap on macOS, correct `do_arm_recursive`'s "no
-   walk, no cap" doc comment (true under FSEvents, false under kqueue), and
-   unwatch the failing root on the unwind path. Note that even fully
-   ignore-filtered, this is still per-entry, and the pruned figure above
-   (1,781) is one worktree's, not a bound.
-3. **Neither backend; watch a narrow path set on macOS** - e.g. only
-   `.git`/refs plus a shallow tracked-file frontier, accepting reduced
-   coverage in exchange for a bounded fd count and no reliance on
-   per-directory delivery.
-
-Before choosing, measure two unknowns: the real fd cost of arming a
-realistic work root under kqueue *with* the ignore set applied, and where
-the daemon's soft `maxfiles` limit actually sits after launchd/shell
-inheritance. Option 2 is only viable if that pair leaves headroom.
+Choosing kqueue would have required threading the `IgnoreSet` into
+`do_arm_recursive`, adding a `max_dirs`-equivalent macOS cap, and fixing the
+unwind leak - all to reach a still-unbounded per-entry cost. fsevent needs
+none of it.
 
 ## Deliberately not in scope
 
-- Changing the current `macos_fsevent` selection without doing one of the
-  three above. The five reds are the honest visible state and must not be
-  turned green by swapping backends again.
 - Linux and Windows. inotify and ReadDirectoryChangesW are unaffected; the
   feature selection is `cfg`-inert on both.
+- `discovery.rs:1213`. It shares the `/var` -> `/private/var` root cause but
+  is a production-side bug on the dev line, not a fixture defect, and is not
+  owned here.
