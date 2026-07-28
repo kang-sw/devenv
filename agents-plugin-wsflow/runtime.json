@@ -19,8 +19,6 @@
     "agenda.list": ">=0.36.27-dev <0.37.0",
     "enter.implement": ">=0.36.27-dev <0.37.0",
     "enter.proceed": ">=0.36.27-dev <0.37.0",
-    "enter.sprint": ">=0.36.27-dev <0.37.0",
-    "enter.salvage": ">=0.36.27-dev <0.37.0",
     "todo.append": ">=0.36.27-dev <0.37.0",
     "todo.insert_before": ">=0.36.27-dev <0.37.0",
     "todo.insert_after": ">=0.36.27-dev <0.37.0",

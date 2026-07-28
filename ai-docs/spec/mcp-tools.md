@@ -257,9 +257,8 @@ blobs` rather than an empty list. These are the fallback primitives for modes
 not covered by a typed enter tool, and let a caller discover or clear
 orphaned blobs without guessing key names from tool descriptions.
 
-**Enter (typed mode switches).** `enter.implement`, `enter.proceed`,
-`enter.sprint`, and `enter.salvage` each perform one atomic write that both
-stores the typed payload as an agenda blob (keyed by the mode name) and
+**Enter (typed mode switches).** `enter.implement` and `enter.proceed` each
+perform one atomic write that both stores the typed payload as an agenda blob (keyed by the mode name) and
 **replaces** the entire todo list with items derived from the mode. Because the
 list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
@@ -363,9 +362,6 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`, and `Next: ...`; JSON
   output returns the structured result plus `next_instruction` and the identical
   `raw` string.
-- `sprint` (`enter.sprint`): Edit, Verify, Commit, Post-edit decision, Wrap episode.
-- `salvage` (`enter.salvage`): Containment, Survey fanout, Premise interview, Classification,
-  Capture.
 
 **Todo.** Item identity is a caller-provided `key`, unique within the active
 list after normalization; keys are lowercased, may contain only lowercase

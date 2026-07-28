@@ -714,30 +714,6 @@ func deriveProceedTodos() []todoItem {
 	})
 }
 
-// deriveSprintTodos mirrors the lead-sprint episode lifecycle (On: sprint-edit
-// plus On: wrap episode).
-func deriveSprintTodos() []todoItem {
-	return withPendingStatus([]todoItem{
-		{Key: "edit", Title: "Edit (lead-owned, in-context)"},
-		{Key: "verify", Title: "Verify (focused)"},
-		{Key: "commit", Title: "Commit (Sprint-Edit markers)"},
-		{Key: "post-edit", Title: "Post-edit decision (keep / wrap / shift)"},
-		{Key: "wrap", Title: "Wrap episode (spec + mental-model + doc closure)"},
-	})
-}
-
-// deriveSalvageTodos mirrors the lead-salvage states: containment, survey
-// fanout, premise interview, classification, capture.
-func deriveSalvageTodos() []todoItem {
-	return withPendingStatus([]todoItem{
-		{Key: "containment", Title: "Containment (freeze evidence, confirm failure claim)"},
-		{Key: "survey-fanout", Title: "Survey fanout"},
-		{Key: "premise-interview", Title: "Premise interview"},
-		{Key: "classification", Title: "Classification (salvage report + recovery plan)"},
-		{Key: "capture", Title: "Capture (recovery tickets after approval)"},
-	})
-}
-
 // withPendingStatus stamps every item with pending status. Derivation builders
 // leave Status empty for brevity.
 func withPendingStatus(items []todoItem) []todoItem {
@@ -1156,14 +1132,6 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 		return toolTextResponse(id, text, err)
 	}
 	return toolTextResponse(id, result.Raw, nil)
-}
-
-func (s *Server) handleEnterSprint(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "enter.sprint", "sprint", args, deriveSprintTodos())
-}
-
-func (s *Server) handleEnterSalvage(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "enter.salvage", "salvage", args, deriveSalvageTodos())
 }
 
 func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) response {
