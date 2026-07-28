@@ -642,6 +642,10 @@ pub async fn git_worktree_remove_submit(
     }
     state.codex_sessions.remove_for_work_roots(&ids);
     state.claude_sessions.remove_for_work_roots(&ids);
+    state
+        .document_write_locks
+        .evict_for_work_root(&work_root_id)
+        .await;
 
     let resources = live_dashboard_resources(
         &state.opened_work_roots,

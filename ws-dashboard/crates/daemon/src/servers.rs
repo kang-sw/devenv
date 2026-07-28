@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -2062,7 +2062,7 @@ async fn request_remote_sse(
     token: &BearerAuthToken,
     operation: &ServerScopedForwardOperation,
 ) -> Result<RemoteSseResponse, ForwardOperationError> {
-    let response = reqwest::Client::new()
+    let response = shared_http_client()
         .get(remote_url(endpoint, &operation.legacy_path))
         .header(
             header::AUTHORIZATION.as_str(),
@@ -2114,7 +2114,7 @@ async fn request_remote_dashboard_operation(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<ForwardedDashboardResponse, ForwardOperationError> {
-    let mut request = reqwest::Client::new()
+    let mut request = shared_http_client()
         .request(
             operation.method.clone(),
             remote_url(endpoint, &operation.legacy_path),
@@ -2423,7 +2423,7 @@ async fn request_remote_link_token(
     endpoint: &str,
     passphrase: &str,
 ) -> Result<BearerAuthToken, LinkAuthError> {
-    let response = reqwest::Client::new()
+    let response = shared_http_client()
         .post(remote_url(endpoint, "/api/dashboard/link-auth"))
         .json(&RemoteLinkAuthRequest {
             passphrase: passphrase.to_owned(),
@@ -2466,7 +2466,7 @@ async fn request_remote_resources(
     endpoint: &str,
     token: &BearerAuthToken,
 ) -> Result<DashboardResourcesView, ResourceForwardError> {
-    let response = reqwest::Client::new()
+    let response = shared_http_client()
         .get(remote_url(endpoint, "/api/dashboard/resources"))
         .header(
             axum::http::header::AUTHORIZATION.as_str(),
@@ -2485,6 +2485,33 @@ async fn request_remote_resources(
         .json::<DashboardResourcesView>()
         .await
         .map_err(|_| ResourceForwardError::UnexpectedStatus)
+}
+
+const REMOTE_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REMOTE_HTTP_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+static SHARED_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Process-wide client shared by every remote-server forward call
+/// (`request_remote_sse`, `request_remote_dashboard_operation`,
+/// `request_remote_link_token`, `request_remote_resources`).
+///
+/// Deliberately has no total `.timeout(...)`: reqwest applies that timeout
+/// "from when the request starts connecting until the response body has
+/// finished" (reqwest 0.12 docs), which would forcibly kill
+/// `request_remote_sse`'s forwarded stream once the deadline elapsed even
+/// though that stream is meant to run indefinitely. `read_timeout` bounds
+/// each individual read instead (resetting after every successful read), so
+/// it catches a stalled/half-open connection on any of the four call sites
+/// - including the SSE forward - without capping total stream duration.
+fn shared_http_client() -> &'static reqwest::Client {
+    SHARED_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(REMOTE_HTTP_CONNECT_TIMEOUT)
+            .read_timeout(REMOTE_HTTP_READ_TIMEOUT)
+            .build()
+            .expect("shared reqwest client build failed")
+    })
 }
 
 fn remote_url(endpoint: &str, path: &str) -> String {
@@ -2740,5 +2767,27 @@ mod tests {
 
         assert_eq!(parsed.remote_endpoint, "http://127.0.0.1:60437");
         assert_eq!(parsed.link_passphrase.as_deref(), Some("secret"));
+    }
+
+    // CONTRACT (260726 Phase 3): all four remote-forward call sites
+    // (`request_remote_sse`, `request_remote_dashboard_operation`,
+    // `request_remote_link_token`, `request_remote_resources`) must share one
+    // process-wide `reqwest::Client` rather than each constructing (and
+    // leaking, per reqwest's own connection-pool-per-client model) its own -
+    // this is the bounded-resource half of this phase's contract, mirrored
+    // after `git_exec.rs`'s `GIT_TIMEOUT: OnceLock` pure-helper convention.
+    // Identity (`ptr::eq`), not just equal config, is what proves reuse:
+    // a look-alike client built fresh on every call would still pass an
+    // equality check on Debug output but would defeat the whole point
+    // (connection pooling, not re-dialing TLS/TCP per forwarded request).
+    #[test]
+    fn shared_http_client_returns_the_same_cached_instance_across_calls() {
+        let first = shared_http_client();
+        let second = shared_http_client();
+        assert!(
+            std::ptr::eq(first, second),
+            "shared_http_client must return the same OnceLock-cached client on every call, \
+             not build a fresh one per call site"
+        );
     }
 }

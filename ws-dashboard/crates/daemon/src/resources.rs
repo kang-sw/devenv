@@ -50,6 +50,9 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
         }
         state.codex_sessions.remove_for_work_roots(&pruned);
         state.claude_sessions.remove_for_work_roots(&pruned);
+        for id in &pruned {
+            state.document_write_locks.evict_for_work_root(id).await;
+        }
     }
     view
 }

@@ -77,6 +77,17 @@ impl DocumentWriteLocks {
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
+
+    /// Evict every lock entry belonging to `work_root_id`. Callers must
+    /// invoke this at each real work-root removal site (not on rollback of a
+    /// registration that never persisted) so `locks` does not grow
+    /// unboundedly across the daemon's lifetime as work roots are opened and
+    /// closed.
+    pub async fn evict_for_work_root(&self, work_root_id: &WorkRootId) {
+        let prefix = format!("{}\0", work_root_id.as_str());
+        let mut locks = self.locks.lock().await;
+        locks.retain(|key, _| !key.starts_with(&prefix));
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -916,5 +927,77 @@ mod opened_work_roots_normalization_tests {
         let roots = opened.owner_candidate_roots();
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0].path, expected_plain_path());
+    }
+}
+
+// CONTRACT (260726 Phase 3): `DocumentWriteLocks.locks` must not grow
+// monotonically across repeated writes to many files - eviction is the
+// bound. These tests assert eviction by identity: a lingering map entry
+// would make a post-eviction `lock_for` call on the same key return the
+// same `Arc` the pre-eviction caller is still holding, so a fresh `Arc`
+// (via `Arc::ptr_eq` returning false) is proof the old entry is gone, not
+// just that some entry with that key exists.
+#[cfg(test)]
+mod document_write_locks_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn evict_for_work_root_only_removes_the_targeted_root() {
+        let locks = DocumentWriteLocks::default();
+        let root_a = WorkRootId::from("root-a");
+        let root_b = WorkRootId::from("root-b");
+
+        let a_lock = locks.lock_for(&root_a, "file.txt").await;
+        let b_lock = locks.lock_for(&root_b, "file.txt").await;
+
+        locks.evict_for_work_root(&root_a).await;
+
+        // Evicted root: a fresh lookup yields a brand-new Arc, since the
+        // old entry (and the map's clone of `a_lock`) is gone.
+        let a_lock_after = locks.lock_for(&root_a, "file.txt").await;
+        assert!(!Arc::ptr_eq(&a_lock, &a_lock_after));
+
+        // Untouched root: its entry survives the eviction, so lock_for
+        // returns the same Arc for the same key.
+        let b_lock_after = locks.lock_for(&root_b, "file.txt").await;
+        assert!(Arc::ptr_eq(&b_lock, &b_lock_after));
+    }
+
+    #[tokio::test]
+    async fn evict_for_work_root_evicts_every_path_under_the_root() {
+        let locks = DocumentWriteLocks::default();
+        let root = WorkRootId::from("root-a");
+
+        let lock_one = locks.lock_for(&root, "a.txt").await;
+        let lock_two = locks.lock_for(&root, "dir/b.txt").await;
+
+        locks.evict_for_work_root(&root).await;
+
+        let lock_one_after = locks.lock_for(&root, "a.txt").await;
+        let lock_two_after = locks.lock_for(&root, "dir/b.txt").await;
+        assert!(!Arc::ptr_eq(&lock_one, &lock_one_after));
+        assert!(!Arc::ptr_eq(&lock_two, &lock_two_after));
+    }
+
+    #[tokio::test]
+    async fn evict_for_work_root_does_not_evict_a_prefix_colliding_root() {
+        // Key format is `format!("{}\0{}", work_root_id, path)` — the NUL
+        // separator means a root id that is merely a string-prefix of
+        // another (e.g. "root" vs "root-2") does not collide, since the
+        // eviction prefix scan matches on "root\0", not "root".
+        let locks = DocumentWriteLocks::default();
+        let root = WorkRootId::from("root");
+        let other = WorkRootId::from("root-2");
+
+        let root_lock = locks.lock_for(&root, "a.txt").await;
+        let other_lock = locks.lock_for(&other, "a.txt").await;
+
+        locks.evict_for_work_root(&root).await;
+
+        let root_lock_after = locks.lock_for(&root, "a.txt").await;
+        assert!(!Arc::ptr_eq(&root_lock, &root_lock_after));
+
+        let other_lock_after = locks.lock_for(&other, "a.txt").await;
+        assert!(Arc::ptr_eq(&other_lock, &other_lock_after));
     }
 }
