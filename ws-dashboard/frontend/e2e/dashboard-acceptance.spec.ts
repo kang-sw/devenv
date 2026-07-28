@@ -1096,6 +1096,38 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
   });
 
+  // --- Advanced settings section (260727 Phase 2: the section arrived with ----
+  // --- the ws-dashboard-dev merge with no browser-level coverage - the unit ---
+  // --- test pins only the registry descriptor, never that the panel mounts) ---
+  await test.step("Advanced settings section lists and mounts build info", async () => {
+    await page.locator('[data-command-id="settings.open"]').click();
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await expect(dialog).toBeVisible();
+    const advancedNav = dialog.locator(".settings-section-nav-button", {
+      hasText: "Advanced",
+    });
+    await expect(advancedNav).toBeVisible();
+    await advancedNav.click();
+
+    // Build info arrives over HTTP after mount, so this also proves the panel's
+    // `/api/dashboard/build-info` call reaches the daemon through the merged
+    // router - a registry-only assertion could not see that. Deliberately reads
+    // the build-info half only: the same panel's danger zone can shut this
+    // daemon down or kill every terminal, and both would break every later step
+    // of this serial test.
+    const buildInfo = dialog.locator(".settings-buildinfo");
+    await expect(buildInfo).toBeVisible();
+    await expect(buildInfo.locator("dt").first()).toHaveText("Version");
+
+    await dialog.locator('[data-command-id="settings.close"]').click();
+    await expect(
+      page.locator('[role="dialog"][aria-label="Settings"]'),
+    ).toHaveCount(0);
+    note(
+      "advanced settings: the section nav lists an Advanced entry and activating it mounts the daemon build-info list",
+    );
+  });
+
   // --- Add-server modal open/validate/cancel (260722 blocker-2: previously ----
   // --- human-smoke only, no automated coverage) ------------------------------
   await test.step("add-server modal opens, validates, and cancels", async () => {
