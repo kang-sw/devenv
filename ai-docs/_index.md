@@ -155,6 +155,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260725-bug-dashboard-terminal-platform-macos-unsupported` | ready | Dashboard daemon does not build on macOS: the `#[cfg(unix)]` terminal platform layer is Linux-only (pidfd syscalls + `/proc` start-time) |
 | `260725-feat-dashboard-nav-row-two-line-open-state` | ready | Left-nav work-root rows: two-line layout with open-surface counts, plus open-vs-closed de-emphasis |
+| `260726-refactor-ws-dashboard-long-uptime-leak-hardening` | ready | Long-uptime daemon handle/process leak hardening: terminal-helper orphan/grace reaper (Phase 1 done), git invocation hardening (Phase 2), bounded-map/half-open cleanup (Phase 3) |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-bug-implement-merge-target-discovery` | todo | Investigate safer merge-target discovery for nested implement branches |

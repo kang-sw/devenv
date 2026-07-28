@@ -177,6 +177,63 @@ then is reaped (connection closed, no zombie, fd released) within one sweep
 interval after grace expires, without needing a new `create_terminal`; open
 terminals, and terminals mid-creation, are unaffected by the sweep.
 
+### Result (d63817ad) - 2026-07-28
+
+All three sub-fixes landed as planned, in `ws-dashboard/crates/daemon`:
+`kill_verified_and_delete_entry` (shared by sub-fix 1 and the sweep backstop),
+a bounded `NO_HANDSHAKE_TIMEOUT` in `serve_connections` (sub-fix 2), a Unix
+zombie-reap fix centralized in `SharedState::transition` (sub-fix 3b), and a
+new `terminal_reaper` module driving `TerminalRegistry::sweep_once`
+(`sweep_evict_expired` + `sweep_registry_backstop`, sub-fix 3/3a) on a stated
+10s interval, wired into `server.rs` startup/shutdown.
+
+Partitioned review (correctness, fit, test) surfaced 3 Important correctness
+findings and 3 Important test-coverage gaps in cycle 1, all fixed in one
+relay (`d63817ad`) and confirmed clean on re-review:
+
+- The backstop could SIGKILL a helper in the same sweep tick that
+  `sweep_evict_expired` (or the lazy `insert` path) had just evicted for
+  graceful self-exit — fixed with a time-boxed `recently_evicted` skip-set
+  (`EVICTION_BACKSTOP_GRACE`, 30s).
+- The registry-dir age gate used `connect_timeout` with no margin; production
+  `connect_timeout` is 400ms (not the 3s the ticket/plan assumed), leaving no
+  slack for the `spawn`-returns-to-`insert` scheduling gap — fixed with a
+  `STALE_ENTRY_SWEEP_MARGIN` (2s) added on top of `connect_timeout`.
+- `insert`'s lazy `retain` still keyed eviction on `is_live()`, violating the
+  grace-authority decision (a still-in-grace session could be dropped from
+  the map with its IPC connection never closed, permanently unreachable by
+  the sweep) — fixed by switching to `admits_attach()` and routing through
+  the same `evict_and_close` path the sweep uses.
+- Sub-fix 2's self-exit path, sub-fix 1's `Some(entry)` handshake-orphan arm,
+  and `sweep_registry_backstop`'s scan-and-dispatch logic each had zero direct
+  test coverage — all three now have dedicated unit or real-process
+  integration tests.
+
+Two Minor correctness findings were deferred, not fixed, by disposition:
+`SharedState::transition`'s child-reap now runs ahead of
+`kill_shell_if_running`, narrowing who owns the child across the two kill
+paths; and the reaper's `write_half` lock await inside `close_ipc_connection`
+is unbounded and could stall the single reaper loop against a wedged
+connection. Both need their own design pass rather than a review-cycle patch;
+tracked here for a future phase or follow-up ticket, not yet filed.
+
+The plan's real-process E2E test for sub-fix 1's handshake-failure path was
+replaced with two unit-level tests (production `connect_timeout`/helper
+binary aren't test-configurable enough to induce that race deterministically
+against the real daemon binary without adding test-only production
+configurability) — accepted as adequate coverage by the test reviewer on
+re-review.
+
+Verification: `cargo build -p ws-dashboard-daemon` clean; `cargo test -p
+ws-dashboard-daemon --lib terminal` 53 passed; `cargo test -p
+ws-dashboard-daemon --test terminal_lifetime` 5 passed (including two new
+real-process integration tests); `cargo clippy -p ws-dashboard-daemon --tests`
+no new warnings. Spec updated (`{#260728-terminal-helper-periodic-reap}` in
+`ai-docs/spec/ws-web-dashboard/index.md`, commit `76ab01fa`) to replace the
+now-stale "only two events terminate a helper process" claim. Mental model
+updated (`ai-docs/mental-model/ws-web-dashboard/terminal.md`, commit
+`0ccaf7fe`).
+
 ### Phase 2: git invocation hardening (no-prompt + descendant-process containment)
 
 At the `git_text`/`run_git` seam set `GIT_TERMINAL_PROMPT=0` and disable
