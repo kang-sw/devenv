@@ -724,6 +724,81 @@ all of Phase 1's tests still green, since a wrong resolution is exactly what
 they exist to catch. State explicitly in the Result whether the whole
 `npm run test:browser` suite was run or only individual spec files.
 
+#### Result (62a9bc3c)
+
+Four commits: `62a9bc3c` (merge + both companion edits), `2dd3c860`
+(Playwright step), `1858a86f` and `ce340ab1` (review remediation). The
+conflict set was re-verified at the current tips before anything was
+resolved and was exactly the six named files - no seventh.
+
+**The phase's own thesis held, and it is the finding.** All six conflicts
+were trivial "keep both sides" unions with no shared identifiers. Every
+defect that mattered was in the region git merged silently, with no marker:
+
+1. `tests/git_watch.rs` is a NEW file on the dev side, so it could not
+   conflict, yet it constructs `AppState` and `TerminalRegistry::new`
+   against pre-merge shapes this branch had already changed. A new file from
+   one side against an API the other side changed is invisible to conflict
+   detection by construction.
+2. Dev's `notify = { version = "8", default-features = false }` does not
+   build on macOS at all: notify gates `pub mod fsevent` on
+   `not(feature = "macos_kqueue")`, so dropping default features removes
+   `fsevent-sys` while still compiling the module that imports it.
+3. The acceptance suite's `.xterm-rows` assertions cannot observe terminal
+   text once dev's WebGL renderer is active. Byte-identical on both sides
+   and at the base, so they never conflicted. Routed to
+   `260728-bug-dashboard-acceptance-xterm-rows-assertions-blind-under-webgl-renderer`.
+
+**Two corrections landed inside this phase; both are recorded because each
+was nearly shipped as fact.** The merge first named `macos_kqueue` on a
+pass-rate measurement (11/11 vs 6/11). Correctness review found the runtime
+cost that measurement hides: notify's kqueue backend has no recursive kernel
+primitive and emulates one with an unfiltered `WalkDir`, costing one fd per
+filesystem ENTRY (154,423 on this worktree, against a 256 soft `maxfiles`
+limit), while `max_dirs` and the computed `IgnoreSet` are both Linux-only.
+Reverted to `macos_fsevent` in `1858a86f`. The diagnosis recorded beside that
+revert - "FSEvents delivers a coalesced recursive stream" - was then itself
+refuted on re-review: notify creates the stream with
+`kFSEventStreamCreateFlagFileEvents` at latency 0.0, per-file and
+undeferred. The five reds were a fixture defect;
+`armed_fixture_with_config` skipped the `canonical_or_normalized` pass every
+production caller makes, so the registry held `/var/...` while notify
+reported `/private/var/...`. Canonicalizing the fixture took the suite to
+11/11 in `ce340ab1` with no production change. The false diagnosis had
+already produced a proposed fix direction that would have rewritten
+invalidation logic against a stream shape that does not exist.
+
+Deviation from the stated verification boundary: it required the failure-site
+list to be identical to Phase 1's baseline, and it is not. The full daemon
+suite carries three reds, not two. The third,
+`discovery.rs:1213`, is inherited - `discovery.rs` is byte-identical between
+dev's tip and the merged tree, and the failure is dev's own
+`GitProbeCache::evict` key-derivation bug exposed by this machine's
+`/var`->`/private/var` symlink, already tracked as Gap 1 of
+`260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps`.
+The other two are the same baseline tests, confirmed by name, shifted +36
+lines. Nothing outside `git_watch` moved in either direction across all four
+commits.
+
+Everything else in the boundary met: all five Phase 1 tests green, with
+`sessions_write_lock_sites_are_enumerated` passing only because the count
+moved 4 -> 5 (mutation-confirmed: reverting fails `left: 5, right: 4`);
+`npm run build` green; `npm run test:settings` green and mutation-confirmed;
+`agent-attention-notification.spec.ts` 4/4. **Only individual spec files were
+run, not the whole `npm run test:browser` suite.** `dashboard-acceptance.spec.ts`
+fails at its first `.xterm-rows` assertion (finding 3 above); a step trace
+confirms the new Advanced-panel step passed before that abort.
+
+`drain_all` landed deliberately broken and its CONTRACT comment now says so.
+One clause was added there beyond the plan: the comment claimed parity with
+`remove_for_work_roots`, which was true on dev's tip and this merge made
+false, since post-merge `remove_for_work_roots` discharges both obligations
+and `drain_all` still discharges neither.
+
+Forward to Phase 3: the merge commit's enumerating comment records
+`drain_all` as discharging neither obligation, and the `PARITY BROKEN` clause
+marks the second place to rewrite when Phase 3 discharges them.
+
 ### Phase 3: discharge `drain_all`'s removal obligations and cover the kill-all endpoint
 
 Separate commit, per Decisions.

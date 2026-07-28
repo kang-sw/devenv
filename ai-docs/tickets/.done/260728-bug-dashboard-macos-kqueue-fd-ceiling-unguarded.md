@@ -3,6 +3,7 @@ title: "dashboard fs watch: macOS backend selection - RESOLVED as macos_fsevent;
 related:
   260727-chore-merge-ws-dashboard-dev-into-goal-branch: surfaced-by
   260726-refactor-ws-dashboard-git-fs-watch-invalidation: subject
+completed: 2026-07-28
 ---
 
 ## Stem note
@@ -138,3 +139,12 @@ none of it.
 - `discovery.rs:1213`. It shares the `/var` -> `/private/var` root cause but
   is a production-side bug on the dev line, not a fixture defect, and is not
   owned here.
+
+
+## Resolution (2026-07-28)
+
+Opened during Phase 2 of `260727-chore-merge-ws-dashboard-dev-into-goal-branch` to defer a macOS fs-watch backend decision, and closed in the same phase because the decision turned out not to need deferring. `macos_fsevent` is selected, `tests/git_watch.rs` is 11/11 on macOS, and no production code changed to get there.
+
+The ticket is closed rather than dropped because its content is a settled decision with its evidence, not abandoned scope. Two things in it are worth not re-deriving: kqueue's cost is one file descriptor per filesystem ENTRY (notify emulates recursion with an unfiltered WalkDir), which is why it is not the backend even though it also passed the suite; and the five reds that originally looked like a backend limitation were a test-fixture defect - `armed_fixture_with_config` skipped the `canonical_or_normalized` pass every production caller makes, so on macOS the registry held `/var/...` while notify reported `/private/var/...` and `owners_for_path` matched nothing.
+
+The false diagnosis this ticket briefly carried ("FSEvents delivers a coalesced recursive stream") is retained in the body as a correction rather than deleted, because it had already driven a proposed fix direction that would have rewritten invalidation logic against a stream shape that does not exist.
