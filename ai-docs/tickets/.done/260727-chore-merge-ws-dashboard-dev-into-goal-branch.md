@@ -8,6 +8,7 @@ spec:
   - 260726-dashboard-terminal-attention-event-stream
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-28
 ---
 
 # Merge ws-dashboard-dev into the goal branch - six trivial conflicts, one clean-merge defect
@@ -724,7 +725,7 @@ all of Phase 1's tests still green, since a wrong resolution is exactly what
 they exist to catch. State explicitly in the Result whether the whole
 `npm run test:browser` suite was run or only individual spec files.
 
-#### Result (62a9bc3c)
+### Result (62a9bc3c) - 2026-07-28
 
 Four commits: `62a9bc3c` (merge + both companion edits), `2dd3c860`
 (Playwright step), `1858a86f` and `ce340ab1` (review remediation). The
@@ -1021,3 +1022,58 @@ is a contract statement about their endpoint produced by this ticket's work.
 
 Verification boundary: the note exists on a ticket that resolves on this branch,
 names all four undocumented surfaces, and does not invent spec text.
+
+### Result (ffdf4d37) - 2026-07-28
+
+**The phase's own instruction text was wrong, and an earlier phase of this
+same ticket is what proved it.** Phase 5's draft told the note to record that
+a callback token stops being accepted "by any path, including kill-all." That
+is false: only three removal paths in `terminal.rs` revoke the token -
+`remove` (explicit close), `remove_for_work_roots` (owning
+workRoot/workspace removal), and `drain_all` (kill-all sweep, the obligation
+this ticket's own Phase 3 restored). A fourth path, `insert`'s
+eviction-on-cap `sessions.retain`, discharges the attention entry but never
+calls `forget_token`; that gap predates this ticket and is tracked separately
+at `260728-bug-dashboard-terminal-eviction-leaks-callback-token`. All four
+sites were re-verified directly against `terminal.rs`, and the note carries
+the accurate three-path wording plus an explicit callout of the fourth path
+rather than the phase text's "any path" claim. **Record this as a deviation
+from the phase text, not as its smooth execution** - a note wrong about
+someone else's endpoint contract is not something the receiving ticket's own
+authors could catch from their side, which is why it mattered enough to check
+against source rather than transcribe.
+
+**Sharper root cause.** The spec sentence Phase 3 had already landed
+(`{#260516-ws-web-dashboard-token-free-pairing-landing}`) enumerates the same
+three closes correctly - it was never wrong. The stale artifact was the
+*phase instruction itself*, written before Phase 3 discovered what it
+discovered; this ticket's own plan text aged against its own findings
+mid-execution, one phase apart.
+
+**Delta.** A `## Spec Impact` section appended to
+`ai-docs/tickets/idea/260725-feat-dashboard-graceful-shutdown-from-settings.md`
+(39 insertions, 0 deletions, one file), recording that its shipped v1 behavior
+has no spec anchor. Instrument decision: appended to the existing ticket
+rather than opening a new `idea/` ticket, because that is where the behavior
+actually landed (its own dogfood notes name `build-info`, `shutdown`, and
+`terminals/kill-all`), `idea/` uses freeform topic sections by convention
+with no phase structure to conflict with, and the ticket had no existing
+`## Spec Impact` section to collide with.
+
+**Verification evidence.** All four surfaces re-verified against source
+rather than copied from the phase text: the `advanced` settings section
+(`settingsSections.tsx:403-410`), `GET /api/dashboard/build-info`
+(`router.rs:157`), `POST /api/dashboard/shutdown` (`router.rs:159`), and
+`POST /api/dashboard/terminals/kill-all` (`router.rs:440-443`) - note the
+`terminals/` path segment, which the phase text's shorthand omits. The
+phase's claim that `{#260722-ws-dashboard-settings-panel}` documents only two
+registered sections was checked and holds (Terminal style, Notifications,
+plus one explicitly planned, unregistered hotkey section). The commit diff is
+append-only: 39 insertions, 0 deletions, one file touched. `ws/tickets.verify`:
+PASS. The string "any path" appears nowhere in the edited file. Review:
+**clean**, no findings.
+
+**Non-goal held.** The note records that a spec gap exists and what is in it;
+it authors no spec text for the four surfaces. Writing that spec is the
+target ticket's own future work, against behavior its own authors know and
+this one does not.

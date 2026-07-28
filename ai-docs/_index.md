@@ -230,7 +230,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-refactor-unwire-agents-activity-badge` | todo | Cut the always-on workroot activity ("agents") badge fetch while leaving its rendering/projection logic dormant in the tree for possible future revival |
 | `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` | todo | Route `git_worktree.rs`'s 8 direct git spawns through the `git_exec` seam so they are bounded and counted, the deferred remainder of the fs-watch invalidation Phase 1 seam |
 | `260726-refactor-ws-dashboard-long-uptime-leak-hardening` | todo | Harden long-uptime resource leaks (terminal reaper, git-invocation policy, bounded maps) found in a four-surface handle/process/subscriber audit |
-| `260727-chore-merge-ws-dashboard-dev-into-goal-branch` | ready | Merge `ws-dashboard-dev` into the goal branch: all six conflicts are trivial unions, but the incoming `drain_all` merges cleanly while skipping two CONTRACT-bound removal obligations - one of which a published spec sentence already promises |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -306,6 +305,13 @@ dropped tickets live in hidden archive dirs and git history.
 | `260728-bug-dashboard-terminal-eviction-leaks-callback-token` | idea | `TerminalRegistry::insert`'s eviction path leaks the evicted terminal's callback token |
 
 ## Ticket Focus
+
+- `260727-chore-merge-ws-dashboard-dev-into-goal-branch` — CLOSED (`.done/`,
+  Phase 5 `ffdf4d37`). All five phases landed; Results hold detail, not
+  restated. Open: `260728-bug-dashboard-terminal-eviction-leaks-callback-token`,
+  `260728-bug-dashboard-acceptance-xterm-rows-assertions-blind-under-webgl-renderer`,
+  `260725-feat-dashboard-graceful-shutdown-from-settings` (spec-gap note).
+  Test reds / fmt-clippy debt remain.
 
 - `260725-feat-dashboard-pty-agent-attention-notification` — CLOSED
   (`.done/`, Phase 8 `bd32b10c`). All eight phases landed: the vendor
