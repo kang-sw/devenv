@@ -860,6 +860,78 @@ Verification boundary: `cargo test -p ws-dashboard-daemon --no-fail-fast`, both
 mutations run and observed to fail at their own sites, and the failure-site list
 still matching Phase 1's baseline.
 
+### Result (92c7875b) - 2026-07-28
+
+`TerminalRegistry::drain_all` (the kill-all sweep) now discharges both removal
+obligations for every drained session - it forgets the attention entry and
+forgets the callback token (in-memory map plus the on-disk token file) - where
+before it emptied the sessions map and discharged neither. Three commits:
+`ecb46f92` (fix + two tests), `9b7357fd` (spec widening + new idea ticket),
+`92c7875b` (review remediation).
+
+**Both reviews returned non-clean, one Important each, and both were
+substantive - this is the phase's most reportable fact.**
+
+- *Correctness review.* The new CONTRACT comment closed with a claim that
+  keeping `sessions` and `tokens` apart "preserves the invariant that keeps a
+  future reverse-order acquisition from becoming a real deadlock". That
+  invariant does not exist: `insert` holds the `sessions` write guard while
+  calling `remember_token`, which takes `tokens.write()`, so `sessions` ->
+  `tokens` simultaneous hold already occurs on the registry's hottest path. The
+  comment now states the true rationale - hold duration, not deadlock
+  avoidance. **The false premise originated in this phase's own plan and was
+  carried into `ecb46f92`'s AI Context**; the correction is forward-only, and
+  this is the second consecutive phase in which a wrong reason was recorded
+  beside a right fix and caught only by review. Say that plainly - it is the
+  ticket's own thesis landing on the ticket.
+- *Test review.* The clause this phase exists to introduce was **unpinned by
+  any test**. Both new tests drove exactly one session, so a forget loop
+  mutated to `.iter().take(1)` passed the entire suite with results identical
+  to baseline - a fully surviving mutant on the phase's own deliverable. Fixed
+  by driving two sessions and asserting both are forgotten, plus a first-ever
+  assertion on the kill-all route's `{"closed": N}` body. The mutant was then
+  re-run and confirmed to die at
+  `drain_all_forgets_the_attention_entry` (terminal.rs:3495), and the
+  mutation reverted with baseline reconfirmed.
+
+**Verification evidence.** `cargo test -p ws-dashboard-daemon --no-fail-fast`:
+lib 294 pass / 1 fail, routes 183 pass / 2 fail, git_watch 11/11. Failure-site
+list equals exactly the three known pre-existing reds
+(`discovery.rs:1213`, and two in `routes.rs`) and nothing else - unchanged from
+the Phase 2 baseline. The test review independently falsified both non-vacuity
+controls (a wrong token makes the pre-kill 204 red at `routes.rs:16898`;
+disabling `forget_token`'s `delete_token` reds `routes.rs:16927` specifically),
+so the on-disk half is proven real and not incidental.
+
+**Deviation.** The plan's Mutation A as literally specified was unobtainable -
+reverting `drain_all` drops both forgets, so the sibling test also reds and the
+intended 1:1 pairing cannot exist. The implementer substituted an isolating
+variant (drop only `forget_token`); the test reviewer ran both and ruled the
+substitution legitimate, confirming the literal variant's extra failure is the
+expected consequence at the correct site.
+
+**Deferred follow-ups.**
+- `260728-bug-dashboard-terminal-eviction-leaks-callback-token` (idea/): the
+  eviction path in `insert` discharges attention but not the token. Filed, not
+  fixed - it predates both merged branches and has its own blast radius.
+- Four Minor review items were explicitly ruled out of scope: the 401 assert
+  can shadow the disk assert under a `drain_all`-local regression;
+  `TerminalRegistry::default()` aims a disk-deleting `drain_all` at the real
+  state dir (harmless only because the fixture's `callback_token` is `None`);
+  the lock-hold-duration ordering is narrated but untested; the unit
+  non-vacuity control is weaker than the integration one.
+- **`ai-docs/_index.md` inventory refresh is deliberately NOT done in this
+  phase.** It is Phase 4's entire scope and follows immediately; doing a
+  partial pass here would be rewritten by Phase 4. Record this as a stated
+  deferral, not as a completed step.
+
+**Doc delta this phase.** The spec gained a callback-token revocation sentence
+(there was none - grep found zero revocation mentions), scoped to the same
+three close paths the attention sentence enumerates so the two halves of one
+removal rule cannot drift apart. The terminal mental model gained a
+removal-choke-point change recipe naming all three paths, both obligations, and
+the known eviction deviation.
+
 ### Phase 4: restore `_index.md` inventory parity in its own commit
 
 After the merge, 128 ticket files under `ready/` + `todo/` + `idea/` have 107

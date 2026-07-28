@@ -51,7 +51,11 @@ consumes the owner session cookie, and is the one route in this surface a
 spawned agent terminal's own hook process calls directly. The pairing route
 remains the only unauthenticated *browser* entrypoint; this callback route is
 a non-browser, token-authed exception to that browser-facing rule, not a
-second hole in it.
+second hole in it. That per-terminal callback token is revoked whenever its
+terminal closes through explicit close, owning workRoot/workspace removal, or
+a kill-all sweep that tears down every terminal at once. A hook process that
+still POSTs against the token afterward is rejected rather than authorized,
+because the token no longer resolves to any terminal.
 {#260516-ws-web-dashboard-token-free-pairing-landing}
 
 Authenticated owner sessions have broad host-control authority for dashboard
