@@ -2730,22 +2730,33 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadSkillAuthoring verifies lead-skill-authoring resolves
-// from the real rsrc tree and contains procedure body text. delegates:false — no tip.
-func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
+// TestSkillAuthoringRelocatedOutOfRsrc replaces the former
+// TestPlaybookPrintGoldenLeadSkillAuthoring golden. The authoring manual is no
+// longer a shipped playbook: it moved to ai-docs/ref/skill-authoring.md, which
+// AGENTS.md binds as a mandatory pre-edit read. The relocation is only safe
+// while the content actually survives at the new path, so this asserts the
+// destination carries the doctrine text the old golden checked, and that the
+// playbook name stays unresolvable so a reintroduction fails loudly.
+func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil)
+	if _, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil); err == nil {
+		t.Error("lead-skill-authoring must no longer resolve as an rsrc playbook")
+	}
+
+	relocated := filepath.Join("..", "..", "..", "ai-docs", "ref", "skill-authoring.md")
+	raw, err := os.ReadFile(relocated)
 	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
+		t.Fatalf("relocated authoring manual missing: %v", err)
 	}
+	body := string(raw)
 	if !strings.Contains(body, "executability under pressure") {
-		t.Errorf("body %q: expected doctrine text 'executability under pressure'", body)
+		t.Error("relocated manual lost the doctrine text 'executability under pressure'")
 	}
-	// delegates:false — continuity tip must NOT appear.
-	if strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	// The playbook-serving frontmatter has no meaning outside rsrc and must be gone.
+	if strings.HasPrefix(body, "---") {
+		t.Error("relocated manual still carries playbook frontmatter")
 	}
 }
 

@@ -33,7 +33,6 @@ lead-check-blockers
 lead-proceed
 lead-review
 lead-ship
-lead-skill-authoring
 lead-tune
 lead-update-spec
 lead-verify-discussion
@@ -48,9 +47,9 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 13 entry skills the user invokes as
+The directly invocable surface is narrowed to 12 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
-`lead-ship`, `lead-bootstrap`, `lead-skill-authoring`,
+`lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
 `lead-verify-discussion`, `lead-tune`, `lead-goal-step`, and
 `lead-goal-fan-out-step`. The remaining
@@ -194,6 +193,10 @@ when a handler exceeds four steps and mixes responsibilities. Sub-block names
 describe the responsibility they perform; single-purpose checklists are not
 split only because they are long. Compact checkpoint skills may stay prose or
 short lists when output and end state are obvious.
+These authoring rules are maintained as `ai-docs/ref/skill-authoring.md`, an
+upstream reference document read directly rather than a shipped invocable
+skill; the audit they describe covers `agents-plugin/skills/*/SKILL.md` and
+`agents-plugin/rsrc/lead-*/lead-*.md`.
 {#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
@@ -208,9 +211,8 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
-The wsflow package excludes skeleton flows and upstream authoring helper
-skills: `lead-write-skeleton` and
-`lead-skill-authoring`. Shipped wsflow `SKILL.md` files are thin entry shims:
+The wsflow package excludes skeleton flows: `lead-write-skeleton`.
+Shipped wsflow `SKILL.md` files are thin entry shims:
 they keep package-local bare `name: lead-*` frontmatter, call
 `wsflow/playbook.print(name: "<lead-name>")`, execute the returned procedure
 against the current user request, and report a blocker if the playbook cannot

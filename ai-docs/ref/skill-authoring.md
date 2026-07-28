@@ -1,7 +1,3 @@
----
-kind: print
----
-
 # Skill Authoring
 
 Canonical reference for skill and agent authoring.

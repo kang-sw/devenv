@@ -38,8 +38,7 @@ history.
   installs when Claude Code is available; it intentionally does not install
   wsflow into Claude.
 - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
-  Codex UI install has verified `ws:lead-skill-authoring`,
-  `ws:lead-write-ticket`, and `ws:lead-discuss`.
+  Codex UI install has verified `ws:lead-write-ticket` and `ws:lead-discuss`.
 - `agents-plugin-wsflow/` is an agentless derivative package with
   Codex/Claude manifests, package-local no-agent MCP env, shared launcher
   copies, a reduced `runtime.json`, thin wsflow skill shims over shared
@@ -63,7 +62,7 @@ history.
 
 | File | Use |
 |------|-----|
-| `agents-plugin/skills/lead-skill-authoring/SKILL.md` | Skill/agent/prompt/convention authoring rules |
+| `ai-docs/ref/skill-authoring.md` | On auditing skill/agent/prompt/convention content — authoring rules and invariant checklist |
 | `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
 | `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
@@ -76,7 +75,7 @@ history.
 
 Before editing tickets/specs/mental models, read the matching convention through
 `ws/convention.read`. Before editing skill, agent, prompt, or convention text,
-read `agents-plugin/skills/lead-skill-authoring/SKILL.md`. Before editing full
+read `ai-docs/ref/skill-authoring.md`. Before editing full
 `agents-plugin/skills/lead-*` skills, shared `agents-plugin/rsrc/` playbooks,
 plugin packaging, runtime contracts, launcher behavior, prompt guidance, or
 release validation that may affect wsflow, read
@@ -154,7 +153,7 @@ auto-chaining through the pipeline.
 | `ai-docs/spec/plugin-runtime.md` | Plugin Runtime | Codex plugin packaging, runtime metadata, launcher repair, release assets, and runtime CLI |
 | `ai-docs/spec/mcp-tools.md` | MCP Tools | Host-neutral ws MCP tool contracts for context, workflow state, Git, docs, and agents |
 | `ai-docs/spec/named-agent-runtime.md` | Named Agent Runtime | Durable named-agent sessions, async lifecycle, subquery fan-out, diagnostics, and Codex backend behavior |
-| `ai-docs/spec/workflow-skills.md` | Workflow Skills | Codex-facing lead skills, routing, sprint work, reconstruction, utilities, and workflow primitives |
+| `ai-docs/spec/workflow-skills.md` | Workflow Skills | Codex-facing lead skills, routing, reconstruction, utilities, and workflow primitives |
 | `ai-docs/spec/documentation-system.md` | Documentation System | Project memory, conventions, specs, tickets, mental models, reference tracing, and doc workflows |
 | `ai-docs/spec/api-documentation-cache.md` | API Documentation Cache | Host-neutral API documentation lookup through cached domain docs and manager sessions |
 | `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Root Claude shim, agents-plugin compatibility metadata, installer behavior, and retired legacy boundaries |
