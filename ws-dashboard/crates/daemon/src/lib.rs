@@ -26,6 +26,7 @@ pub mod terminal_helper_process;
 pub mod terminal_helper_protocol;
 pub mod terminal_ipc_transport;
 pub mod terminal_platform;
+pub mod terminal_reaper;
 pub mod terminal_reconcile;
 pub mod terminal_registry_file;
 pub mod work_root_activity;

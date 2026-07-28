@@ -27,6 +27,15 @@ pub struct StartupInfo {
 
 pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
 
+// CONTRACT (260726 Phase 1 sub-fix 3): the periodic orphan-reaper sweep tick
+// period. Chosen well under the 30s attach-grace window
+// (`terminal::DAEMON_GRACE_WINDOW_MS`) so worst-case post-grace teardown
+// latency stays a small fraction of the grace period itself, while staying
+// well above the cost of a single sweep (an in-memory retain plus one
+// registry-dir scan) so the sweep never meaningfully competes with request
+// traffic.
+const TERMINAL_REAPER_INTERVAL: Duration = Duration::from_secs(10);
+
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     run_with_shutdown(config, shutdown_signal())
         .await
@@ -102,6 +111,12 @@ where
         crate::terminal::DEFAULT_RECONCILE_CONNECT_TIMEOUT,
     )
     .await;
+    // CONTRACT (260726 Phase 1 sub-fix 3): started immediately after boot
+    // reconcile, against a clone of the just-constructed registry - `terminals`
+    // itself moves into `AppState` below, and `TerminalRegistry` is cheaply
+    // `Clone` (an `Arc`-backed handle to the same shared session map), so the
+    // reaper task and the router observe exactly the same live sessions.
+    let reaper_task = crate::terminal_reaper::spawn(terminals.clone(), TERMINAL_REAPER_INTERVAL);
     // In-app "shut down dashboard" trigger: an HTTP handler fires this Notify,
     // which the shutdown_task below selects on alongside the external signal.
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
@@ -157,10 +172,12 @@ where
     tokio::select! {
         result = &mut server => {
             shutdown_task.abort();
+            reaper_task.abort();
             result?;
         }
         () = force_after_shutdown(shutdown_rx, grace_period) => {
             shutdown_task.abort();
+            reaper_task.abort();
             tracing::warn!(
                 grace_period_ms = grace_period.as_millis(),
                 "forcing ws-dashboard daemon shutdown after grace period"
