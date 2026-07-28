@@ -2325,11 +2325,8 @@ func TestPlaybookPrintGoldenLeadBackfillDocs(t *testing.T) {
 	if !strings.Contains(body, "never delegate spec authoring") {
 		t.Errorf("body %q: lost the invariant keeping spec authoring with the lead", body)
 	}
-	if !strings.Contains(body, "name that group's spec commit as a separate input") {
-		t.Errorf("body %q: lost the separate-spec-commit input; folding it into the range swallows every intervening commit", body)
-	}
-	if !strings.Contains(body, "does not rescope from its own checkpoint") {
-		t.Errorf("body %q: lost the authoritative-range rule; mental-model-updater resolves scope from its own checkpoint first", body)
+	if !strings.Contains(body, "never once per group") {
+		t.Errorf("body %q: lost the single mental-model sweep; per-group dispatch re-reads the whole corpus N times and lets two delegates edit one domain doc from partial views", body)
 	}
 	// The discovery delegate must never be handed a lead playbook stem
 	// (idea/260626-research-playbook-print-lead-surface-leak).

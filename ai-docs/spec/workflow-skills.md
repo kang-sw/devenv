@@ -842,13 +842,11 @@ commit carrying `(mental-model-updated)` and the newest commit touching
 reports per group what changed and what existing documentation already covers.
 Discovery returns candidates, not verdicts: caller-visibility judgment stays with
 the lead, which applies it by running `lead-update-spec` inline per group. Each
-group produces at most one `docs(spec):` commit and one `mental-model-updater`
-dispatch. The dispatch passes the group range unmodified and names that group's
-spec commit as a separate input rather than widening the range to reach it, since
-the spec commit sits at HEAD and one range spanning both would swallow every
-intervening commit; the dispatch also declares its range authoritative so the
-delegate does not rescope from its own `mental-model-updated` checkpoint.
-Undocumented commits are not contiguous, so the unit of work is the group rather
+group produces at most one `docs(spec):` commit. The two document kinds do not
+share a unit: spec entries map to discrete behaviors and so are reconciled per
+group, while mental-model domains are corpus-wide and are swept once over the
+whole window after every spec pass, which also places those spec commits inside
+the swept range. Undocumented commits are not contiguous, so the unit of work is the group rather
 than one wide range. A marker-derived audit window is bounded by high-water marks
 and therefore finds only drift newer than the last documentation pass; earlier
 gaps require a caller-supplied range, and the skill reports that bound with its

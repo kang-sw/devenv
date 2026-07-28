@@ -85,10 +85,19 @@ convention applied as a filter, not a third criterion. The delegate also reads
 `mental-model-conventions` for the mental-model half; the two questions have
 different answers and neither convention answers both.
 
-**Order is spec, then mental model, per group.** This matches `lead-implement`,
-whose `{doc-pre-pass}` runs `lead-update-spec` first, and it is what
-`mental-model-updater` step 3 expects: it inspects "the scoped spec diff to
-identify spec headings that add assessment targets".
+**Spec is per group; mental model is one sweep.** The two halves do not share a
+unit and forcing them to was the original design error. Spec entries map to
+discrete behaviors, so they group and each group earns its own commit. Mental-model
+domains do not: `mental-model-updater` step 4 reads `ai-docs/mental-model.md` and
+*every* file under `ai-docs/mental-model/` regardless of range, so a per-group
+dispatch would re-read the whole corpus once per group and let two delegates edit
+the same domain document from partial views. One sweep over the audit window,
+after all spec passes, is both cheaper and safer.
+
+Spec still runs first, matching `lead-implement`'s `{doc-pre-pass}` and satisfying
+`mental-model-updater` step 3, which inspects "the scoped spec diff to identify
+spec headings that add assessment targets" — with a single trailing sweep those
+spec commits are inside the window by construction.
 
 **One `docs(spec):` commit per group.** Not a batch. Beyond producing more useful
 history, this is what keeps `260726-bug-inline-playbook-invocation-commit-ownership`
@@ -106,30 +115,22 @@ commit per group, so it wants that too. Category C stays empty. A design that
 batched groups into one commit would need `lead-update-spec` to *not* commit, and
 would silently reopen what the retirement closed.
 
-**The group range and the group's spec commit are two separate dispatch inputs.**
-In backfill the spec commit lands *after* the code it documents, and
-`mental-model-updater` step 3 wants a spec diff in scope. The obvious fix —
-widening the range to `<group-start>..<spec-commit>` — is wrong: the spec commit
-is at HEAD while a group's commits sit arbitrarily deep, so one contiguous range
-spanning both swallows every intervening commit, including groups already
-processed. That is precisely the over-wide range the group-list decision exists
-to avoid. So the range is passed unmodified and the spec commit is named
-separately, by hash, for the delegate to read directly. When a group produced no
-spec commit — `lead-update-spec` reports `Spec: no changes.` and commits nothing
-whenever `judge: spec-impact` rejects the whole group, which is the expected
-outcome for a pure internal refactor — the input is `none`.
+**The single mental-model sweep dissolves two hazards rather than mitigating
+them.** Sage review found both: widening a group's range to `<group-start>..<spec-commit>`
+swallows every intervening commit, because the spec commit sits at HEAD while a
+group's commits sit arbitrarily deep; and `mental-model-updater` step 1 resolves
+scope "from the last `mental-model-updated` checkpoint; if absent, use the
+caller-provided base", so caller scope is the fallback, not the authority — after
+the first group's delegate committed, every later group would have scoped to
+`<previous-commit>..HEAD` and silently seen none of its own source commits.
 
-**Every dispatch must declare its range authoritative.**
-`mental-model-updater` Process step 1 resolves scope "from the last
-`mental-model-updated` checkpoint; if absent, use the caller-provided base" —
-caller scope is the fallback, not the authority. Benign for `lead-implement`,
-where the checkpoint precedes the branch. Inverted for backfill: once group 1's
-delegate commits, the checkpoint becomes HEAD-adjacent, so group 2 would scope to
-`<group-1-commit>..HEAD`, see none of its own source commits, and report no
-changes without erroring. The dispatch prompt therefore states the range is
-authoritative and forbids checkpoint rescoping. This is a caller-side mitigation
-of a callee contract that does not accept an authoritative range; see Out of
-Scope for why the clean fix is deferred.
+Both existed only because the design dispatched per group. With one trailing
+sweep over `<base>..HEAD`, the range needs no widening (the spec commits are
+inside it) and the checkpoint-first rule becomes *correct* rather than hazardous:
+the checkpoint is the `(mental-model-updated)` marker the audit floor was derived
+from, so the delegate resolves to exactly the intended window. No override
+instruction, no separate backfill delegate, and no change to a callee
+`lead-implement` also calls.
 
 **The marker floor is a high-water mark and is reported as one.** The default
 window runs from the newest `(mental-model-updated)` commit and the newest
@@ -149,7 +150,8 @@ original range.
 - `mental-model-updater` — existing medium-tier delegate; writes mental-model
   docs, commits with `(mental-model-updated)` in the body, and reports
   `## Spec Coverage Gaps` flags. Reused unchanged, including its checkpoint-first
-  range resolution, which this ticket works around caller-side rather than edits.
+  range resolution, which the single-sweep dispatch makes correct rather than
+  hazardous.
 - `lead-update-spec` — existing lead-inline rsrc playbook; resolves a range,
   applies `judge: spec-impact`, writes entries, verifies the index, commits.
   Reused unchanged.
@@ -231,11 +233,10 @@ phase.
   against real drift.
 - **Changing `lead-update-spec` or `mental-model-updater`.** Both are reused as
   they are. If backfill needs behavior neither provides, that is a separate
-  ticket, not a quiet edit to a shared callee with another caller. Specifically
-  deferred: giving `mental-model-updater` an authoritative caller range instead of
-  checkpoint-first resolution. That is the clean fix for the rescoping hazard
-  above, but it is a cross-skill interface change on a callee `lead-implement` also
-  calls, so it needs its own ticket and approval rather than riding this one.
+  ticket, not a quiet edit to a shared callee with another caller. The single-sweep
+  design removes the one place this was under pressure: no change to
+  `mental-model-updater`'s range contract is needed, so `lead-implement`'s sweep
+  behavior is provably untouched.
 - **A `(spec-updated)` checkpoint marker** symmetric to `(mental-model-updated)`.
   It would make the spec floor exact instead of approximate, but it is a
   commit-body convention change affecting every downstream project.

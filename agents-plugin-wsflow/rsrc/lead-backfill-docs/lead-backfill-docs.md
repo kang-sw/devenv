@@ -16,9 +16,7 @@ Execution
 - Resolve the audit floor once before the first dispatch; never re-resolve it after a group commits.
 - Process groups oldest-first, one at a time.
 - Run `lead-update-spec` inline; never delegate spec authoring.
-- Pass each group's range to `mental-model-updater` unmodified; name that group's spec commit as a separate input.
-- State the supplied range as authoritative in every dispatch, so a delegate does not rescope from its own checkpoint.
-- Spawn a fresh `mental-model-updater` per group; never reuse one across groups.
+- Dispatch `mental-model-updater` once over the whole audit window, after every group's spec pass; never once per group.
 - Commit one `docs(spec): ...` per group; do not batch groups into one commit.
 - Use `{{.McpNamespace}}/git.*` for range discovery, log audit, and diff inspection.
 - All written content is English regardless of conversation language.
@@ -47,22 +45,25 @@ tell the caller that gaps below it need an explicit `..` range.
 2. Spawn one fresh subagent with **Discovery dispatch**; choose the worker tier from dispatch metadata.
 3. On `No groups in window.`, report `Backfill: no gaps.` and stop.
 
-### 3. Reconcile each group
+### 3. Reconcile spec, group by group
 
-Oldest first, completing both halves of one group before starting the next:
+Oldest first, one group at a time:
 
 1. Print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` against `<group-range>`.
 2. Record the resulting spec commit hash, or `none` when it reported no changes.
-3. Spawn a fresh `mental-model-updater` with **Mental-model dispatch**: the group range unmodified, plus this group's spec commit named separately, or `none`.
-4. Collect its `## Spec Coverage Gaps` block.
 
-### 4. Reconcile residual flags
+### 4. Sweep mental model once
+
+1. Spawn one `mental-model-updater` with **Mental-model dispatch** over `<base>..HEAD`, which now contains every spec commit step 3 produced.
+2. Collect its `## Spec Coverage Gaps` block.
+
+### 5. Reconcile residual flags
 
 1. Collect every `## Spec Coverage Gaps` entry naming a stem no group's spec pass touched.
 2. Run one further inline `lead-update-spec` pass over the union of those groups' ranges.
 3. Report what remains unresolved after that pass.
 
-### 5. Report
+### 6. Report
 
 Emit **Completion report**.
 
@@ -97,22 +98,17 @@ Rendered mental-model-updater prompt: <prompt-path>
 
 Read that prompt file and execute it.
 
-Commit range: <group-range>
-Spec commit for this group: <hash|none>
+Commit range: <base>..HEAD
 Output path: <path>
-
-This range is authoritative: scope to it exactly, and do not resolve scope from
-a `mental-model-updated` checkpoint. This is a retroactive backfill, so the
-group's spec commit sits outside the range at HEAD rather than inside it; read
-it by hash for the spec-heading step. When it is `none`, that group produced no
-spec change and there is no spec diff to inspect.
 ```
 
 ### Completion report
 
 ```text
 Backfill: <N groups reconciled> | no gaps
-- <group-range>: spec <hash|none>, mental-model <hash|none>
+Window: <base>..HEAD (<marker-derived|caller-supplied>)
+- <group-range>: spec <hash|none>
+Mental model: <hash|none>
 
 Unresolved:
 - <group-range or stem>: <reason>
@@ -124,5 +120,7 @@ Omit `Unresolved` when nothing remains.
 
 Backfill optimizes for **judgment placed once**: discovery is delegated because
 it is wide and mechanical, spec authoring stays with the lead because it is
-narrow and contested, and groups are sized so one group is one decision. When
-ambiguous, reconcile fewer commits correctly rather than more approximately.
+narrow and contested, and groups are sized so one group is one decision. Spec
+entries are per-behavior and so are grouped; mental-model domains are corpus-wide
+and so are swept once. When ambiguous, reconcile fewer commits correctly rather
+than more approximately.
