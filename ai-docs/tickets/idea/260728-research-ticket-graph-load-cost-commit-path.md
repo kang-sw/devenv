@@ -62,8 +62,56 @@ a mitigation changes how the graph loads (caching, incremental indexing), it
 should not make this silent-failure mode worse, and ideally should give it a
 visible advisory.
 
+## Ruled out: excluding `.done/` and `.dropped/` from the scan (2026-07-28)
+
+The obvious mitigation — stop scanning the two append-only directories, since
+they are exactly the ones that grow without bound — was raised and checked
+against the advisory code. It does not work, and it fails in the worst
+direction.
+
+`sortedChildren` builds from `graph.children`, which is populated only from
+tickets the scan returned (`tickets_graph.go:107-118`). Drop the archive and a
+closed child never enters that map. The closure advisories at
+`tickets_graph.go:372-391` then read a parent whose children are all closed as
+`len(children) == 0` and take the no-children branch instead of emitting
+`actionAllChildrenClosed`. The advisory whose entire purpose is "this epic's
+children are all closed, check whether it can close too" would go silent in
+precisely the case it exists for — not degrade, invert.
+
+Second, `graph.byStem` resolves `parent:`/`related:` targets at
+`tickets_graph.go:218,239,250,268`. Closed tickets are legitimate reference
+targets, and today a `related:` pointing into `.done/` resolves cleanly with no
+advisory (verified by experiment). Excluding the archive turns every such
+reference into an unresolved-target `FIX:` advisory — false positives on
+correct boards, which is the failure mode most likely to train readers to
+ignore the advisory channel.
+
+What the check does establish is how little the archive is actually needed for.
+Per archived ticket the graph consumes only `Stem`, `Status`, and `Parent`.
+`Stem` and `Status` are both derivable from the path (`.done/<stem>.md`) with no
+file read at all. `Parent` is the only field that requires opening the file. So
+a viable scoping fix is not "exclude the archive" but "read less of it", and the
+question that gates it is whether archived `Parent` edges can be indexed or
+cached rather than re-read per call.
+
+That reshapes the options from the three listed above to:
+
+- **Cache across calls**, keyed on something that changes when the archive
+  changes. Sound because archived tickets are effectively immutable once moved;
+  the work is in picking an invalidation key that cannot go stale silently.
+- **Load lazily** — build the graph only when the tickets actually being
+  verified carry `parent:`/`related:` edges. Most code-only commits touch no
+  ticket at all and already skip this; the question is what fraction of
+  ticket-touching commits genuinely need cross-file resolution.
+
+Both still need the measurement this ticket asks for first: which commits
+actually need the graph, and at what archive size the current cost stops being
+acceptable.
+
 ## Non-Scope
 
 - Does not propose a specific caching or scoping strategy. That is an
   implementation decision downstream of settling the cost-acceptability
   question above.
+- Does not revisit excluding `.done/`/`.dropped/`; that option is ruled out
+  above on evidence, not deferred.
