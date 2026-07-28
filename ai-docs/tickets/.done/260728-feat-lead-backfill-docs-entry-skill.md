@@ -7,6 +7,7 @@ related:
   260726-bug-inline-playbook-invocation-commit-ownership: this ticket adds lead-update-spec's second caller
 related-mental-model:
   - workflow-skills
+completed: 2026-07-28
 ---
 
 # lead-backfill-docs: entry skill for retroactive spec and mental-model reconciliation
@@ -169,6 +170,8 @@ that reconciles spec and mental-model coverage for commits that never went
 through an implementation doc pass. The entry-skill enumeration and count move
 from 12 to 13, and `lead-update-spec` gains a second documented caller. A new
 delegate playbook `doc-gap-discovery` joins the render-only surface.
+`lead-discuss` gains an outbound route to the new skill (Phase 3), recorded as an
+inbound-route clause on the same entry.
 
 ## Phases
 
@@ -208,6 +211,48 @@ neither floor exists (a project that has never run a doc pass). This is a soft
 call — the honest audit window is the whole history and that is usually not what
 the user wants — so it belongs in `Judgments`, not in a hardcoded default.
 
+### Result (707236ae) - 2026-07-28
+
+Phase 1 complete across two commits: `707236ae` authored the surface and
+`efe795eb` applied the sage-driven single-sweep revision.
+
+Both playbooks landed as planned. `doc-gap-discovery` reads `spec-conventions`
+and `mental-model-conventions` as its only criteria, with step 1 stating
+explicitly that it must not supplement them with a qualifies/does-not-qualify
+list of its own — the convention carries the Definition and Refactor test but no
+triage table, and without that sentence a medium-tier delegate would have
+improvised the third criterion the design forbids. Group boundaries are a
+top-down first-match table (merge commit / differing `## Ticket Updates` stem /
+disjoint paths / doc-only) rather than prose, and `## Excluded` is explicitly
+barred from carrying "already covered" so a screened group cannot vanish.
+
+`lead-backfill-docs` runs six steps: resolve the window, discover groups,
+reconcile spec group by group, sweep mental model once over `<base>..HEAD`,
+reconcile residual `## Spec Coverage Gaps` flags, report. `judge: absent-floor`
+covers the never-documented project — merge-base when HEAD differs from `main`,
+ask the user when it does not.
+
+Shims took the parallel-init form (`playbook.print` + `workflow_manual` in
+parallel), matching `lead-discuss` and `lead-goal-fan-out-step`; the wsflow
+`SKILL.md` is hand-maintained because `lead-backfill-docs` is not in
+`substitutionMirroredSkills`, which is the established pattern for entry skills.
+All three manifests plus the wsflow `rsrc/` mirror came from the env-gated regen
+tests; nothing was hand-edited.
+
+`test_wsflow_skill_bundle.py` needed a third edit beyond the two planned: the
+`pointer_tail` dict inside `test_parallel_init_skill_files_are_playbook_shims`
+is keyed per-skill deliberately, so adding to `EXPECTED_PARALLEL_INIT_SKILLS`
+alone raised `KeyError`. Its "Both parallel-init skills" comment is now "Every".
+
+`TestPlaybookPrintGoldenLeadBackfillDocs` asserts the doctrine plus the two
+invariants that encode contested decisions (`never delegate spec authoring`,
+`never once per group`), and separately prints `doc-gap-discovery` to assert it
+contains no `lead-update-spec` string — the delegate must not learn a lead stem,
+per `idea/260626-research-playbook-print-lead-surface-leak`. Both content
+assertions were mutation-checked; because `printPlaybook` validates the manifest
+hash before content, the mutated body had to be regenerated into the manifest
+first to reach them, then restored by manual edit and regenerated again.
+
 ### Phase 2: Spec and mental-model updates
 
 - `ai-docs/spec/workflow-skills.md` — entry enumeration and count 12 -> 13; a
@@ -225,6 +270,72 @@ hand-maintained copies of the same fact, so a spec-only edit can still break the
 bundle test. Re-run the three regen tests if any `rsrc/` body changed during this
 phase.
 
+### Result (707236ae) - 2026-07-28
+
+Phase 2 complete, in the same two commits as Phase 1 (`707236ae`, `efe795eb`).
+
+`spec/workflow-skills.md` gained the namespace-block entry, the count move 12 ->
+13 with its enumeration, the wsflow shipped list, and the anchored behavior entry
+`{#260728-retroactive-doc-backfill-entry}`. The `lead-update-spec` paragraph now
+names both callers. The render-eligible "five" clause was scoped rather than
+renumbered, with a note that `doc-gap-discovery` joins the render-only surface.
+`spec/documentation-system.md` gained a paragraph placing the skill as the
+retroactive entry point for both document kinds.
+`mental-model/workflow-skills.md` gained the bullet under the same anchor.
+
+Two drift items left by the sprint/salvage retirement were fixed on contact: the
+`spec/workflow-skills.md` frontmatter summary still said "sprint work", and the
+mental model still said "sprint-edit episode closure". A pre-existing gap was
+also filled — three parallel-init enumerations named only two of the three
+skills, having never been updated when `lead-goal-fan-out-step` was added.
+
+Verification: `spec_index_verify: ok`, `tickets.verify` clean, full Go suite
+green across 12 packages, 10 wsflow tests OK. The count-and-roster coupling the
+phase predicted did hold — the bundle test is what caught the missing
+`pointer_tail` entry.
+
+### Phase 3: Route stale-doc observations from `lead-discuss`
+
+Added after Phase 2, on the observation that the new entry skill had zero inbound
+routing: it was reachable only by a user who already knew it existed.
+`lead-discuss` is where stale documentation is actually noticed, so it is the
+natural referrer.
+
+Extend `lead-discuss`'s existing Evidence invariant rather than adding a bullet,
+and state the discriminator that separates backfill's case from a plain
+spec-authoring gap.
+
+### Result (8c584079) - 2026-07-28
+
+The invariant now reads:
+
+```text
+- When docs are stale or insufficient, say so; do not speculate. When the
+  staleness traces to commits that never had a doc pass, name
+  `{{.SkillNamespace}}:lead-backfill-docs`.
+```
+
+Three choices worth recording. Extending the existing bullet rather than adding
+one: the "docs are stale" condition is already owned by that line, and splitting
+it lets a pressured reader act on "say so" and never reach the route. The
+`traces to commits` clause: docs nobody ever wrote are a spec-authoring gap, and
+routing those to backfill spawns a discovery delegate that returns no groups.
+The verb `name` rather than a hand-off: `lead-discuss` carries `Never proactively
+ask to wrap up or persist; wait for the user's explicit signal`, so it surfaces
+the route and lets the user choose.
+
+Blast radius was checked before editing. `TestPlaybookPrintGoldenLeadDiscuss`
+asserts only the doctrine and the `Continuity tip`, so it was unaffected, and
+discuss's routing rules are not generally enumerated in spec — the `lead-tune`
+disambiguation line has no spec counterpart — so only the new backfill entry
+gained a clause recording the inbound route. Mirror confirmed at
+`agents-plugin-wsflow/rsrc/lead-discuss/lead-discuss.md:22`; full Go suite green,
+10 wsflow tests OK, `spec_index_verify: ok`.
+
+A `lead-workflow-manual` pointer was considered and not added: the manual's
+`lead-tune` line is a topic pointer, not a skill roster, and the manual does not
+enumerate entry skills.
+
 ## Out of Scope
 
 - **MCP-ifying the grouping.** Floor resolution and merge-chunk grouping are
@@ -240,3 +351,14 @@ phase.
 - **A `(spec-updated)` checkpoint marker** symmetric to `(mental-model-updated)`.
   It would make the spec floor exact instead of approximate, but it is a
   commit-body convention change affecting every downstream project.
+
+
+## Resolution (2026-07-28)
+
+Shipped as designed. `/ws:lead-backfill-docs` is the retroactive entry point for both document kinds, reusing `lead-update-spec` and `mental-model-updater` unchanged — no callee contract moved, so `lead-implement`'s doc pass is provably untouched and `260726-bug-inline-playbook-invocation-commit-ownership` Category C stays empty.
+
+Two design corrections came from sage review and are worth carrying: the mental-model half is a single window sweep rather than a per-group dispatch (a per-group dispatch would have re-read the whole corpus per group and let two delegates edit one domain from partial views), and the discovery delegate reads `spec-conventions` instead of a lead playbook stem, which keeps `idea/260626-research-playbook-print-lead-surface-leak`'s obscurity defense intact.
+
+Known bound, accepted: the default audit window starts at a high-water marker, so gaps below the last documentation pass need an explicit `..` range from the caller. The skill reports the bound with its result rather than implying full coverage.
+
+No MCP-layer work was required — the flow has no `enter.*` tool, which is recorded in Out of Scope as a possible Lever B follow-up once the playbook has run against real drift.
