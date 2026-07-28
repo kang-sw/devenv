@@ -467,7 +467,9 @@ settings_path, claude_json_path, repo_dir, plugin_cache = sys.argv[1], sys.argv[
 
 # ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
-    "ENABLE_TOOL_SEARCH": "1"
+    "ENABLE_TOOL_SEARCH": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000",
+    "CLAUDE_FORK_SUBAGENT": "1"
 }
 
 if os.path.isfile(settings_path):
