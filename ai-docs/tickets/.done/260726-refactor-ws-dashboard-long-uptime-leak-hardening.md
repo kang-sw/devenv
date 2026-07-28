@@ -4,6 +4,7 @@ sage-review-design: completed
 related-mental-model:
   - ws-web-dashboard
 sage-review-completeness: completed
+completed: 2026-07-28
 ---
 
 # Long-uptime resource-leak hardening (terminal reaper, git guards, bounded maps)
@@ -522,3 +523,10 @@ line in the `ws-web-dashboard` mental-model/spec on landing (the terminal grace
 contract at `terminal.rs:41-45` is the source of truth to reconcile with).
 
 Contract-first spec: no.
+
+
+## Resolution (2026-07-28)
+
+All three phases landed and merged into `goal/ws-dashboard-dev/copper-heron-vale` via `git merge --no-ff` per-phase: Phase 1 (`d63817ad`, handshake-failure kill + helper self-timeout + backstop sweep), Phase 2 (`247b2a37`, git no-prompt env + outstanding-reader cap), Phase 3 (`1920575d`, DocumentWriteLocks eviction + WS heartbeat + reqwest client split). Each phase went through partitioned correctness/fit/test review with at least one relay cycle; all Important/Critical findings resolved, remaining Minors dispositioned (fixed or accepted-and-documented) in each phase's Result section. Spec and mental model updated for all three phases. Verified at each merged-tree state: `cargo build` clean, full lib + integration test suites passing, no new clippy warnings.
+
+Not yet done: merging `goal/ws-dashboard-dev/copper-heron-vale` into `ws-dashboard-dev` itself — that is a separate, higher-stakes integration-branch decision left for explicit user confirmation rather than folded into this ticket's closure.
