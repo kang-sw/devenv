@@ -26,9 +26,12 @@ pass through as inert HTML comments, content present). Concretely:
 - `playbook.print(name: "lead-workflow-manual")` returns the full manual including
   the gated `ws.ferrule(root: ...) ... mint your lead key` bootstrap line plus the
   always-shown per-root rule that also names `ws.ferrule`.
-- `playbook.print(name: "lead-proceed" | "lead-discuss" | "lead-sprint" |
-  "lead-salvage")` returns the repointed self-load line, which contains the
-  reserved fresh-bootstrap sentinel literal (`freshBootstrapKey`) in clear text.
+- `playbook.print(name: "lead-proceed" | "lead-discuss")` returns the repointed
+  self-load line, which contains the reserved fresh-bootstrap sentinel literal
+  (`freshBootstrapKey`) in clear text. The evidence set also covered
+  `lead-sprint` and `lead-salvage` until 2026-07-28, when
+  `260726-chore-retire-sprint-salvage-relocate-skill-authoring` deleted both;
+  the leak itself is unchanged.
 
 So both obscured secrets — the `ws.ferrule` escalation call and the
 `ws.workflow_manual` fresh-mode sentinel — are readable by any subagent that calls

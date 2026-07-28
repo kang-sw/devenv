@@ -248,3 +248,28 @@ said when it was written:
   `lead-update-spec`'s old number, not `lead-write-spec`'s.
 
 `## Prior Art` carries no step number at all.
+
+## Category C dissolved by the sprint/salvage retirement (2026-07-28)
+
+`260726-chore-retire-sprint-salvage-relocate-skill-authoring` Phase 1 deleted
+`lead-sprint` and `lead-salvage`. That removes both of this ticket's non-Category-A
+call sites:
+
+- **Category C is empty.** `lead-sprint.md:97` -> `lead-update-spec` was the only
+  Category C entry, and `## Blocked` calls it "the decisive one" on the grounds
+  that "the same callee, `lead-update-spec`, needs opposite behavior from two
+  different callers." Only one of those callers survives. `lead-implement`'s
+  `{doc-pre-pass}` still wants `lead-update-spec` to commit; nothing now wants the
+  opposite. The stated reason a callee-side rule cannot work no longer holds.
+- **Category B loses one of three entries.** `lead-salvage.md:90/91/92/94` ->
+  `lead-write-ticket` is gone. `lead-implement.md:76` and `lead-forge-spec.md:262`
+  are unaffected.
+- The follow-up question "whether `lead-sprint.md:97` is a separate doc-gate
+  pre-emption bug in its own right" is moot — the file and its Doc Commit Gate
+  invocation are both deleted.
+
+This does not by itself unblock the ticket: the second blocker (whether commit
+ownership is a property of the call site or of the callee) is a real design
+question that outlives the retirement, and the preserved Phase 1 survey output
+still needs re-running for the reason already stated above. But the re-plan should
+not open by re-deriving a conflict that no longer exists.
