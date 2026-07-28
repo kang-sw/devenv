@@ -289,6 +289,102 @@ capped rather than accumulating without bound — or the leak is explicitly
 documented as accepted with no code change; an unkillable-child case is
 either detected and reported or explicitly documented as out of reach.
 
+### Result (247b2a37) - 2026-07-28
+
+Both remaining items landed in `ws-dashboard/crates/daemon/src/git_exec.rs`
+(plus one field in `router.rs`): `GIT_TERMINAL_PROMPT=0` and empty
+`GIT_ASKPASS`/`SSH_ASKPASS` on every `capture_with_program` spawn (no-prompt
+half), and Addition A resolved to option (b) — a bounded
+`MAX_OUTSTANDING_GIT_READERS` (32) cap on detached reader threads, refusing a
+new spawn with `GitFailure::TooManyDetachedReaders` once too many are wedged
+behind immortal descendants, over option (a) process-group/Job-Object
+teardown, because (a) needed new `unsafe`/platform-specific surgery on the
+one seam every daemon git spawn goes through for a leak class the no-prompt
+half already narrows. Addition B (the unkillable-child case) is
+accept-and-document, no code change, consistent with the same disposition
+already made for a materially identical concern in
+`260726-refactor-ws-dashboard-git-fs-watch-invalidation` commit `0c48065a`.
+
+Scope was extended past the ticket's literal wording to also set
+`GIT_SSH_COMMAND` (append `-o BatchMode=yes` to an already-set value) for the
+SSH-remote case, since `GIT_TERMINAL_PROMPT`/`GIT_ASKPASS` alone do not stop
+`ssh` from opening `/dev/tty` for a host-key/passphrase prompt — the
+realistic dogfood trigger this ticket's Background section names. Read as
+within the Cross-Child Decision "git policy is uniform," flagged by the
+survey plan for lead confirmation, and confirmed.
+
+Partitioned review (correctness, fit, test) surfaced 3 Important correctness
+findings and 1 Important test finding in cycle 1, all fixed in one relay
+(`247b2a37`) and confirmed clean (minors only) on re-review:
+
+- The initial implementation set an unconditional `GIT_SSH_COMMAND` default
+  ("ssh -o BatchMode=yes") whenever the daemon's own environment left it
+  unset — empirically verified by the reviewer to silently override a
+  repository's `core.sshCommand` (deploy key, `ssh -i`, `ProxyCommand`),
+  turning a working authenticated remote into a hard failure. Fixed by
+  narrowing to append-only: `GIT_SSH_COMMAND` is now set on the child only
+  when the daemon's own environment already defines it (appending the batch
+  flag); when absent, nothing is set and git's own `core.sshCommand`/built-in
+  `ssh` resolution runs untouched. The residual gap — no env-level override,
+  daemon has a controlling terminal, `ssh` can still prompt on `/dev/tty` — is
+  accepted and documented, not fixed.
+- The initial doc/module contract overclaimed "no credential path can block
+  this call"; `credential.helper` is invoked before any prompt fallback and
+  is not gated by `GIT_TERMINAL_PROMPT` (reviewer measured a configured
+  helper blocking ~6s despite the other vars being set). Fixed by narrowing
+  the doc claims to name exactly what's covered and documenting
+  `credential.helper` as an accepted residual gap — disabling helpers would
+  also drop credentials the daemon legitimately needs.
+- A tripped `TooManyDetachedReaders` cap was a permanent, invisible absorbing
+  state: once 16 immortal-descendant calls accumulate, every git call
+  daemon-wide fails forever with no operator-visible signal. Fixed by adding
+  `GitSpawnStatsSnapshot::outstanding_readers`, surfaced as
+  `outstandingReaders` in `GET /api/dashboard/diag/git`
+  ({#260728-dashboard-git-invocation-no-prompt-and-reader-cap}).
+- The `GIT_SSH_COMMAND` branch-selection logic had zero test coverage; the
+  plan's literal call-through-`capture_with_program` test shape is genuinely
+  racy under the process-wide `OnceLock` cache. Fixed by extracting a pure
+  `build_ssh_command(Option<&str>) -> Option<String>` helper and adding a
+  direct, race-free unit test for both branches.
+
+Four Minor findings were fixed in the same relay (counter-contract doc
+extended for the new failure variant; soft-cap doc corrected from "hard
+ceiling" to the actual `cap - 1 + 2N` tolerance; a compile-time
+`const { assert!(...) }` guards the cap test's even-number assumption on
+`MAX_OUTSTANDING_GIT_READERS`, strictly stronger than the originally
+suggested `debug_assert!` per clippy's own preference). Four Minor findings
+were dispositioned won't-fix/accepted with a doc-only note each: the
+`-o BatchMode=yes` append can lose to an earlier conflicting `-o` flag or
+break a non-`ssh` wrapper (OpenSSH first-value-wins, pre-existing
+operator-customization edge case); `git_worktree.rs`'s direct `git` spawns
+(`worktree add`/`remove`, `merge-base`, `check-ref-format`) remain outside
+the seam, pre-existing and already noted at `router.rs:605-612`, not
+enumerated by this phase's Out of Scope; a duplicate `detached_readers` doc
+comment (struct field + method) is in-convention for this file's verbose
+style. Re-review (cycle 2) confirmed every fix and closed all four Important
+findings, surfacing 4 new/carried Minor findings, none requiring further
+action: a doc line overstates the append-only guarantee for a blank or
+non-UTF-8 inherited `GIT_SSH_COMMAND` (wording only, behavior already
+correct); the new `outstanding_readers` field doc duplicates the diag route's
+`CONTRACT` paragraph; the new `outstandingReaders` diag field itself has no
+test assertion; the cap test's determinism rests on an empirically-robust but
+not structurally-guaranteed wall-clock margin (carried from cycle 1, never
+relayed).
+
+Verification: `cargo build -p ws-dashboard-daemon` clean; `cargo test -p
+ws-dashboard-daemon --lib git_exec` 17 passed; `cargo test -p
+ws-dashboard-daemon --lib git_toolbar` 6 passed; `cargo test -p
+ws-dashboard-daemon --test routes` 172 passed; `cargo clippy -p
+ws-dashboard-daemon --tests` no new warnings. Spec updated
+({#260728-dashboard-git-invocation-no-prompt-and-reader-cap} in
+`ai-docs/spec/ws-web-dashboard/index.md`, commit `efd14ac9`). Mental model
+updated (`ai-docs/mental-model/ws-web-dashboard/index.md`, commit
+`d4c4594f`) — records the `git_exec.rs` entry point and the
+append-only-not-synthesized `GIT_SSH_COMMAND` invariant as a Common Mistake,
+since a well-intentioned future change reinstating a default would
+reintroduce the `core.sshCommand`-clobbering regression this cycle just
+fixed.
+
 ### Phase 3: Bounded-map + half-open cleanup (DocumentWriteLocks, WS heartbeat, reqwest timeout)
 
 Add eviction to `DocumentWriteLocks.locks`. Prefer pruning on work-root

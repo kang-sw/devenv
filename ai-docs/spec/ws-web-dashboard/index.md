@@ -793,6 +793,7 @@ filesystem watcher currently knows about:
 ```json
 {
   "totalSpawns": 0, "timeouts": 0, "failures": 0, "bySubcommand": {}, "uptimeMs": 0,
+  "outstandingReaders": 0,
   "repos": [
     {
       "key": "/abs/path/to/repo",
@@ -821,7 +822,41 @@ counters cover Git invocations that go through the shared execution path — the
 toolbar, discovery, and Activity projection paths above — and do not include the
 worktree add and remove flows, which invoke Git directly. Two reads taken a
 known interval apart yield the daemon's Git invocation rate, which is the
-intended use.
+intended use. `outstandingReaders` is a live gauge, not cumulative — see below.
+
+### No-Interactive-Prompt Policy And Detached-Reader Cap {#260728-dashboard-git-invocation-no-prompt-and-reader-cap}
+
+Every Git invocation through the shared execution path additionally runs with
+`GIT_TERMINAL_PROMPT=0` and empty `GIT_ASKPASS`/`SSH_ASKPASS`, so git's own
+terminal-prompt and askpass-fallback credential paths (including
+`core.askpass`, shadowed by the empty `GIT_ASKPASS`) fail immediately instead
+of blocking for the invocation budget. When the daemon's own process
+environment already sets `GIT_SSH_COMMAND`, `-o BatchMode=yes` is appended to
+it so an SSH remote using that override also fails fast on a host-key or
+passphrase prompt; no `GIT_SSH_COMMAND` is set when the daemon's environment
+does not already define one — this deliberately avoids overriding a
+repository's own `core.sshCommand` (a deploy key, a `ProxyCommand`, a
+non-`ssh` transport), so an SSH remote reached without an explicit
+`GIT_SSH_COMMAND` override is unaffected by this policy and can still prompt
+on a controlling terminal. `credential.helper` is also unaffected — a
+configured credential helper is invoked before any prompt fallback and is not
+gated by `GIT_TERMINAL_PROMPT`, so a slow or blocking helper still consumes
+the full invocation budget. Both are accepted, documented gaps: closing the
+first would require reading repository-level Git config, which the shared
+execution path does not do; closing the second would mean disabling
+credential helpers outright, dropping credentials the daemon otherwise needs.
+
+The shared execution path also bounds the OS threads it leaves running past a
+timed-out or truncated read (see above): once too many such reader threads
+are simultaneously alive — bounded by a fixed, approximate cap — a new Git
+invocation is refused immediately rather than spawned, so an accumulation of
+wedged reads behind immortal descendant processes cannot grow without bound.
+A refusal counts toward `failures`/`totalSpawns` like any other failed
+invocation. The live count of these outstanding reader threads is reported as
+`outstandingReaders` in the diagnostics response above; a value at or near the
+cap, together with a `failures` count that stops decreasing, is the
+distinguishing signal that invocations are failing because the cap has
+tripped rather than because of an ordinary failure spike.
 
 ## Shared Git Probe Memo And Per-WorkRoot Git Context {#260726-dashboard-shared-git-probe-memo-and-per-root-git-context}
 
