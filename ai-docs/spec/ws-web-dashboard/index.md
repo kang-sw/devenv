@@ -565,6 +565,35 @@ HTTP envelope.
   upstream-initiated close propagates a close frame to the browser, with no
   lingering task.
 
+### Remote Forward Timeout And Client Sharing {#260728-remote-forward-timeout-and-client-sharing}
+
+Every linked-server one-shot and SSE forward above is backed by one of two
+process-wide, lazily-built HTTP clients rather than a fresh client per
+request, differing in timeout policy by call shape:
+
+- **Streaming client** — used only by SSE forwarding (document-event and
+  activity-event proxying). Carries a connect timeout plus a read timeout
+  that resets after every successful read and defaults to 30s, overridable
+  via `WS_DASHBOARD_REMOTE_SSE_READ_TIMEOUT_MS` (a non-positive or unparsable
+  value falls back to the 30s default, not to "no timeout"). This bounds a
+  stalled or half-open upstream SSE connection without capping total stream
+  duration, so a healthy, indefinitely-long forwarded stream is not killed by
+  its own age.
+- **Operation client** — used by every other forward: terminal HTTP
+  lifecycle, remote Activity/Git/workspace operations (including
+  `git-worktree-add` and workspace removal), link-token exchange, and the
+  resources fetch. Carries a connect timeout only — deliberately no read or
+  total timeout. A read timeout on this client would bound
+  time-to-first-response-byte as well as body reads, and some forwarded
+  operations have no daemon-side deadline today (`git-worktree-add`'s handler
+  spawns an unbounded `git worktree add`; `work-roots/open` triggers full
+  live discovery on the remote), so either can legitimately run past 30s
+  against a large repo. This is an accepted, documented gap carried over
+  unchanged from before client sharing was introduced: a genuinely
+  unreachable remote is still bounded by the connect timeout, but a remote
+  that accepts the connection and then hangs mid-operation blocks the forward
+  indefinitely.
+
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
 The dashboard exposes known workspace and workRoot membership from a
@@ -2121,6 +2150,24 @@ passed out of that grace window with no live process behind it, the WebSocket
 route rejects the upgrade with a bounded not-found response before accepting
 the socket, the same as any other unknown terminal id.
 {#260723-terminal-attach-grace-window}
+
+Every terminal WebSocket connection carries a server-initiated liveness probe,
+independent of the attach-grace contract above: the daemon sends an
+unsolicited Ping frame on a ~15s interval and tears the connection down after
+~45s (a ~2-3 missed-beat tolerance) with no inbound frame from the browser,
+including a Pong reply to the daemon's own Ping. Any inbound frame counts as
+activity and resets the idle window. This detects a half-open browser
+connection (network loss without a clean TCP close) that would otherwise be
+invisible to the daemon, since the socket loop only reacts to inbound frames
+and a half-open peer never sends one; a session that still admits attach is
+unaffected — only the dead connection is torn down, not the underlying
+terminal session. Coverage is scoped to an idle half-open peer: a peer that
+goes dead while the daemon is mid-write to it is not caught by this probe and
+falls back to ordinary TCP-level failure detection. A linked-server terminal
+relays Ping/Pong in both directions, so the same probe and idle-teardown
+behavior applies whether the socket is server-local or reached through
+[Remote Terminal WebSocket Gatewaying](#remote-terminal-websocket-gatewaying).
+{#260728-terminal-websocket-heartbeat}
 
 ## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
 
