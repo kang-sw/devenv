@@ -12,6 +12,11 @@
 //!   silently change mid-run,
 //! - stdout/stderr are drained concurrently with the wait so a large-output
 //!   child can never deadlock against a full pipe buffer,
+//! - no interactive prompt (terminal, askpass, or ssh) can block a call:
+//!   `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`/`SSH_ASKPASS`, and a
+//!   `BatchMode=yes` `GIT_SSH_COMMAND` are set on every spawn, so a
+//!   credential-required fetch fails fast instead of blocking for the full
+//!   timeout budget,
 //! - every spawn (successful, failed, or timed out) is counted in a shared
 //!   [`GitSpawnStats`], broken down by subcommand, and
 //! - a genuinely unexpected failure is logged via `tracing::warn!`, while a
@@ -30,7 +35,7 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Result of a successful (zero-exit, non-timed-out) `capture` call.
@@ -96,6 +101,12 @@ pub enum GitFailure {
     /// The process exited with a non-zero status (`-1` when the exit code is
     /// unavailable, e.g. the process was signal-terminated).
     Status(i32),
+    /// Refused to spawn: [`MAX_OUTSTANDING_GIT_READERS`] detached reader
+    /// threads (from prior timed-out/truncated calls, each potentially wedged
+    /// behind an immortal descendant) are already alive on this
+    /// [`GitSpawnStats`]. Piling on more of the same leak instead of bounding
+    /// it would defeat the point of the cap.
+    TooManyDetachedReaders,
 }
 
 /// Whether a non-zero exit at a given call site is routine (a probe whose
@@ -206,6 +217,18 @@ pub struct GitSpawnStats {
     failures: AtomicU64,
     by_subcommand: Mutex<BTreeMap<GitSubcommand, u64>>,
     started_at: Instant,
+    /// Reader threads (see [`spawn_reader`]) currently alive across every
+    /// `capture` call sharing this `GitSpawnStats`. The field owns its own
+    /// `Arc`, so `detached_readers.clone()` yields an independently-owned,
+    /// `'static`-capable handle to pass into a detached thread's closure
+    /// regardless of how long the `&GitSpawnStats` borrow lives — no
+    /// `capture`/`capture_with_program` signature change needed. Incremented
+    /// on spawn, decremented as the reader thread's last statement, so it
+    /// tracks "alive," not "collected vs. abandoned": a reader wedged behind
+    /// an immortal descendant (its `read_to_end` never returns) simply never
+    /// reaches the decrement and stays counted forever — exactly the leak
+    /// [`MAX_OUTSTANDING_GIT_READERS`] must bound.
+    detached_readers: Arc<AtomicU64>,
 }
 
 impl Default for GitSpawnStats {
@@ -216,6 +239,7 @@ impl Default for GitSpawnStats {
             failures: AtomicU64::new(0),
             by_subcommand: Mutex::new(BTreeMap::new()),
             started_at: Instant::now(),
+            detached_readers: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -241,6 +265,15 @@ impl GitSpawnStats {
 
     fn record_failure(&self) {
         self.failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Reader threads (see [`spawn_reader`]) currently alive across every
+    /// `capture` call sharing this `GitSpawnStats`: incremented on spawn,
+    /// decremented as the reader thread's last statement, so a reader wedged
+    /// behind an immortal descendant stays counted forever instead of being
+    /// silently dropped from the gauge.
+    pub fn outstanding_readers(&self) -> u64 {
+        self.detached_readers.load(Ordering::Relaxed)
     }
 
     pub fn snapshot(&self) -> GitSpawnStatsSnapshot {
@@ -285,6 +318,18 @@ const MAX_POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// at most this much beyond `budget`.
 const COLLECT_GRACE: Duration = Duration::from_millis(50);
 
+/// Cap on reader threads simultaneously alive (see
+/// [`GitSpawnStats::outstanding_readers`]) across every `capture` call
+/// sharing one [`GitSpawnStats`]. Bounds the "DELIBERATE THREAD LEAK" left by
+/// the timeout and output-truncated paths below: an ordinary reader
+/// increments then decrements near-instantly and nets to ~0, so only readers
+/// genuinely wedged behind an immortal descendant accumulate against this
+/// cap. 32 (16 stuck `capture` calls' worth, two readers each) is small
+/// enough to keep a targeted unit test's wall-clock bounded at a 200ms-budget
+/// timeout, and large enough not to trip under ordinary transient network
+/// blips.
+const MAX_OUTSTANDING_GIT_READERS: u64 = 32;
+
 static GIT_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// `WS_DASHBOARD_GIT_TIMEOUT_MS`-driven default budget for `capture`, default
@@ -299,6 +344,25 @@ pub fn git_timeout_from_env() -> Duration {
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .unwrap_or(DEFAULT_GIT_TIMEOUT_MS);
         Duration::from_millis(millis)
+    })
+}
+
+static GIT_SSH_COMMAND: OnceLock<String> = OnceLock::new();
+
+/// `GIT_SSH_COMMAND` value passed to every git spawn through this seam, read
+/// and appended once per process (mirroring [`git_timeout_from_env`]'s
+/// `OnceLock` shape). Always carries `-o BatchMode=yes` so `ssh` (invoked by
+/// git for `git@`/`ssh://` remotes) never opens `/dev/tty` for a
+/// password/passphrase/host-key prompt — `GIT_TERMINAL_PROMPT`/`GIT_ASKPASS`
+/// alone do not cover that path. Preserves any operator-configured
+/// `GIT_SSH_COMMAND` by appending the flag rather than overwriting it; falls
+/// back to plain `ssh` when unset or blank.
+fn ssh_command_from_env() -> &'static str {
+    GIT_SSH_COMMAND.get_or_init(|| match env::var("GIT_SSH_COMMAND") {
+        Ok(existing) if !existing.trim().is_empty() => {
+            format!("{existing} -o BatchMode=yes")
+        }
+        _ => "ssh -o BatchMode=yes".to_owned(),
     })
 }
 
@@ -399,21 +463,41 @@ fn collect_reader(rx: &mpsc::Receiver<ReaderOutput>, deadline: Option<Instant>) 
 ///
 /// A read error is delivered as a truncated buffer instead of being discarded,
 /// so a partial read can never be presented as a complete one.
+///
+/// `outstanding` (a clone of [`GitSpawnStats`]'s `detached_readers`) is
+/// incremented before the spawn attempt and decremented as the spawned
+/// closure's last statement, so [`GitSpawnStats::outstanding_readers`] counts
+/// "reader threads currently alive." If the spawn itself fails, the closure
+/// never runs, so this decrements immediately instead of leaking the slot —
+/// preserving the caller's `reader_spawn_failed` error path, which still
+/// needs a live, accurate count.
 fn spawn_reader(
     name: &str,
     mut pipe: impl Read + Send + 'static,
     tx: mpsc::Sender<ReaderOutput>,
+    outstanding: Arc<AtomicU64>,
 ) -> io::Result<()> {
-    std::thread::Builder::new()
+    outstanding.fetch_add(1, Ordering::Relaxed);
+    let result = std::thread::Builder::new()
         .name(name.to_owned())
-        .spawn(move || {
-            let mut bytes = Vec::new();
-            let truncated = pipe.read_to_end(&mut bytes).is_err();
-            let _ = tx.send(ReaderOutput { bytes, truncated });
+        .spawn({
+            let outstanding = Arc::clone(&outstanding);
+            move || {
+                let mut bytes = Vec::new();
+                let truncated = pipe.read_to_end(&mut bytes).is_err();
+                let _ = tx.send(ReaderOutput { bytes, truncated });
+                outstanding.fetch_sub(1, Ordering::Relaxed);
+            }
         })
         // The handle is dropped on purpose: the readers are detached on every
         // path (see `collect_reader`), never joined.
-        .map(|_| ())
+        .map(|_| ());
+    if result.is_err() {
+        // The thread never started, so nothing else will decrement this
+        // reader's slot.
+        outstanding.fetch_sub(1, Ordering::Relaxed);
+    }
+    result
 }
 
 /// Kill and reap the direct child after a reader thread could not be spawned,
@@ -450,7 +534,23 @@ fn reader_spawn_failed(
 /// outlives `budget` by more than one kill-and-reap plus, on the
 /// child-already-exited path only, the fixed [`COLLECT_GRACE`] floor. (Modulo
 /// an unkillable child: `wait()` after `kill()` blocks while a child is wedged
-/// in uninterruptible I/O, which is inherent to reaping rather than leaking.)
+/// in uninterruptible I/O, e.g. a stale 9p/NFS/CIFS mount under WSL. Portably
+/// detecting that state has no cross-platform equivalent to Linux's
+/// `/proc/<pid>/stat` `D`-state check, so it is accepted as out of reach for
+/// this phase with no code change, the same disposition already given to a
+/// materially identical concern in commit `0c48065a`.)
+///
+/// No credential path can block this call either: `GIT_TERMINAL_PROMPT=0`, an
+/// empty `GIT_ASKPASS`/`SSH_ASKPASS`, and a `BatchMode=yes` `GIT_SSH_COMMAND`
+/// are set on every spawn, so a fetch/push/pull against a remote that would
+/// otherwise prompt for credentials fails fast instead of consuming the full
+/// `budget`.
+///
+/// A call also fails fast, before spawning anything, when
+/// [`MAX_OUTSTANDING_GIT_READERS`] reader threads from prior timed-out or
+/// truncated calls are still alive on this `stats` — seeing
+/// `GitFailure::TooManyDetachedReaders` instead of adding yet another reader
+/// to the pile.
 ///
 /// A child that exits within `budget` but leaves a descendant holding the
 /// inherited pipes still yields its **real exit status**, with
@@ -489,6 +589,18 @@ fn capture_with_program(
 ) -> Result<GitOutcome, GitFailure> {
     let subcommand = GitSubcommand::from_args(args);
     stats.record_spawn(subcommand);
+
+    if stats.outstanding_readers() >= MAX_OUTSTANDING_GIT_READERS {
+        stats.record_failure();
+        tracing::warn!(
+            subcommand = subcommand.as_str(),
+            outstanding = stats.outstanding_readers(),
+            cap = MAX_OUTSTANDING_GIT_READERS,
+            "refusing git spawn: too many detached reader threads already alive",
+        );
+        return Err(GitFailure::TooManyDetachedReaders);
+    }
+
     let start = Instant::now();
 
     let mut command = Command::new(program);
@@ -502,7 +614,16 @@ fn capture_with_program(
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // No interactive prompt (terminal, askpass, or ssh) can block this
+        // spawn: a credential-required fetch/push/pull fails fast instead of
+        // consuming the full `budget`. Unconditional (no `program == "git"`
+        // guard, unlike `-C` above): harmless for the test-injected program,
+        // which never reads these vars.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
+        .env("GIT_SSH_COMMAND", ssh_command_from_env());
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -527,10 +648,20 @@ fn capture_with_program(
     // outlives this call cannot touch freed state.
     let (stdout_tx, stdout_rx) = mpsc::channel();
     let (stderr_tx, stderr_rx) = mpsc::channel();
-    if let Err(error) = spawn_reader("ws-git-stdout", stdout_pipe, stdout_tx) {
+    if let Err(error) = spawn_reader(
+        "ws-git-stdout",
+        stdout_pipe,
+        stdout_tx,
+        stats.detached_readers.clone(),
+    ) {
         return Err(reader_spawn_failed(stats, subcommand, &mut child, error));
     }
-    if let Err(error) = spawn_reader("ws-git-stderr", stderr_pipe, stderr_tx) {
+    if let Err(error) = spawn_reader(
+        "ws-git-stderr",
+        stderr_pipe,
+        stderr_tx,
+        stats.detached_readers.clone(),
+    ) {
         // The stdout reader spawned above is left to end on its own: killing
         // the child closes its write end of that pipe, so `read_to_end`
         // returns and the thread exits.
@@ -593,6 +724,19 @@ fn capture_with_program(
         // Rejected alternative: waiting for the readers with a grace period.
         // Any grace long enough to be useful can still push the total wait
         // past `budget`, which is the defect this avoids.
+        //
+        // The leak is bounded, not unbounded: `spawn_reader` increments
+        // `stats.detached_readers` before the two readers above were spawned,
+        // and a genuinely wedged reader (behind an immortal descendant) never
+        // reaches its decrement, so `MAX_OUTSTANDING_GIT_READERS` caps how
+        // many can pile up before further spawns are refused up-front (see
+        // the check at the top of this function).
+        //
+        // `child.wait()` here is itself unbounded against a child wedged in
+        // uninterruptible I/O (a stale 9p/NFS/CIFS mount under WSL): that
+        // case is accepted with no code change (see `capture`'s doc comment)
+        // because portably detecting it has no cross-platform equivalent to
+        // Linux's `/proc/<pid>/stat` `D`-state check.
         let _ = child.kill();
         let _ = child.wait();
         stats.record_timeout();
@@ -1253,6 +1397,120 @@ mod tests {
         assert!(
             truncated.status.success(),
             "the exit status a status-only caller reads is unaffected by truncation"
+        );
+    }
+
+    /// A child that echoes the no-prompt env vars back through stdout, so a
+    /// test can assert what actually reaches the child rather than trusting
+    /// the `Command` builder call. Mirrors `EMIT_AND_EXIT_ZERO`'s per-platform
+    /// shape.
+    #[cfg(unix)]
+    const EMIT_NO_PROMPT_ENV: (&str, &[&str]) = (
+        "sh",
+        &[
+            "-c",
+            r#"printf '%s:%s:%s' "$GIT_TERMINAL_PROMPT" "$GIT_ASKPASS" "$GIT_SSH_COMMAND""#,
+        ],
+    );
+    #[cfg(windows)]
+    const EMIT_NO_PROMPT_ENV: (&str, &[&str]) = (
+        "powershell",
+        &[
+            "-NoProfile",
+            "-Command",
+            "[Console]::Out.Write($env:GIT_TERMINAL_PROMPT + ':' + $env:GIT_ASKPASS + ':' + $env:GIT_SSH_COMMAND)",
+        ],
+    );
+
+    /// Pins the no-prompt half of this phase: `GIT_TERMINAL_PROMPT`,
+    /// `GIT_ASKPASS`, and `GIT_SSH_COMMAND` must actually reach the spawned
+    /// child, not merely be intended by the `Command` builder call. Assumes
+    /// the ambient test environment does not already export
+    /// `GIT_SSH_COMMAND` (true in CI and ordinary dev shells).
+    ///
+    /// The "preserve and append to an existing `GIT_SSH_COMMAND`" branch of
+    /// `ssh_command_from_env` is deliberately not exercised by a second unit
+    /// test: that value is cached in a process-wide `OnceLock`, and every
+    /// other test in this module also unconditionally initializes it on its
+    /// first `capture_with_program` call. `cargo test` runs this module's
+    /// tests concurrently by default, so no test can reliably win the race to
+    /// observe the pre-`GIT_SSH_COMMAND`-set state — attempting it would
+    /// produce a flaky, test-order-dependent pin rather than a real one.
+    #[test]
+    fn capture_sets_no_prompt_env_vars_reaching_the_child() {
+        let stats = GitSpawnStats::default();
+        let outcome = capture_with_program(
+            EMIT_NO_PROMPT_ENV.0,
+            &stats,
+            Path::new("."),
+            EMIT_NO_PROMPT_ENV.1,
+            GitFailureExpectation::Unexpected,
+            Duration::from_secs(5),
+        )
+        .expect("emitting the no-prompt env vars must succeed");
+        assert_eq!(
+            outcome.stdout_text().map(str::trim),
+            Some("0::ssh -o BatchMode=yes"),
+            "GIT_TERMINAL_PROMPT/GIT_ASKPASS/GIT_SSH_COMMAND must reach the child unmodified"
+        );
+    }
+
+    /// Addition A's containment pin: once `MAX_OUTSTANDING_GIT_READERS`
+    /// reader threads have piled up behind timed-out calls whose grandchild
+    /// still holds the pipes (the same "DELIBERATE THREAD LEAK" pattern
+    /// pinned by
+    /// `capture_times_out_within_budget_when_a_grandchild_still_holds_the_pipes`),
+    /// the next call must be refused immediately — no new child spawned, no
+    /// waiting out a budget — instead of piling on yet another wedged reader.
+    /// Unix-only: provoking a grandchild needs a shell; the cap itself is
+    /// platform-independent.
+    #[cfg(unix)]
+    #[test]
+    fn capture_refuses_to_spawn_once_the_outstanding_reader_cap_is_reached() {
+        let stats = GitSpawnStats::default();
+        // Each call leaves two readers wedged behind the backgrounded
+        // `sleep 5` grandchild for ~5s measured from its own start, so
+        // MAX_OUTSTANDING_GIT_READERS/2 sequential 200ms-budget calls
+        // saturate the cap well within that 5s window.
+        let stuck_calls = MAX_OUTSTANDING_GIT_READERS / 2;
+        for _ in 0..stuck_calls {
+            let result = capture_with_program(
+                "sh",
+                &stats,
+                Path::new("."),
+                &["-c", "sleep 5 & sleep 5"],
+                GitFailureExpectation::Unexpected,
+                Duration::from_millis(200),
+            );
+            assert!(
+                matches!(result, Err(GitFailure::Timeout)),
+                "expected Timeout while saturating the reader cap, got {result:?}"
+            );
+        }
+        assert_eq!(
+            stats.outstanding_readers(),
+            MAX_OUTSTANDING_GIT_READERS,
+            "the cap-saturating calls must leave every one of their readers wedged"
+        );
+
+        let start = Instant::now();
+        let result = capture_with_program(
+            "sh",
+            &stats,
+            Path::new("."),
+            &["-c", "sleep 5 & sleep 5"],
+            GitFailureExpectation::Unexpected,
+            Duration::from_millis(200),
+        );
+        assert!(
+            matches!(result, Err(GitFailure::TooManyDetachedReaders)),
+            "expected TooManyDetachedReaders once the cap is saturated, got {result:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
+            "a cap refusal must return immediately, without spawning a child or waiting \
+             out a budget; took {:?}",
+            start.elapsed()
         );
     }
 }
