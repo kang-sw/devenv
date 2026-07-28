@@ -32,6 +32,7 @@ Included:
 
 - `lead-workflow-manual`
 - `lead-discuss`
+- `lead-backfill-docs`
 - `lead-write-spec`
 - `lead-write-ticket`
 - `lead-proceed`

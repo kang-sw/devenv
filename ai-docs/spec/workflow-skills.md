@@ -1,6 +1,6 @@
 ---
 title: Workflow Skills
-summary: Codex-facing ws lead skills for planning, implementation routing, sprint work, reconstruction, utilities, and host-neutral workflow primitives.
+summary: Codex-facing ws lead skills for planning, implementation routing, documentation reconciliation, reconstruction, utilities, and host-neutral workflow primitives.
 ---
 
 # Workflow Skills
@@ -22,6 +22,7 @@ workflow-reference roles:
 
 ```text
 lead-add-rule
+lead-backfill-docs
 lead-bootstrap
 lead-discuss
 lead-forge-mental-model
@@ -47,12 +48,12 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 12 entry skills the user invokes as
+The directly invocable surface is narrowed to 13 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
-`lead-verify-discussion`, `lead-tune`, `lead-goal-step`, and
-`lead-goal-fan-out-step`. The remaining
+`lead-verify-discussion`, `lead-tune`, `lead-goal-step`,
+`lead-goal-fan-out-step`, and `lead-backfill-docs`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -209,7 +210,7 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
 `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
-`lead-forge-mental-model`, and `lead-review`.
+`lead-forge-mental-model`, `lead-review`, and `lead-backfill-docs`.
 
 The wsflow package excludes skeleton flows: `lead-write-skeleton`.
 Shipped wsflow `SKILL.md` files are thin entry shims:
@@ -251,7 +252,9 @@ their delegate prompts through wsflow-mode `playbook.render` for the five legacy
 render-eligible stems: the lead renders the chosen prompt to a path, hands it to
 a native subagent, and integrates the subagent's returned result.
 The five render-eligible prompts are `reference-discovery`, `plan-populator-survey`,
-`plan-populator-research`, `code-reviewer`, and `mental-model-updater`.
+`plan-populator-research`, `code-reviewer`, and `mental-model-updater`. The count
+is scoped to this implement spine; render-eligible prompts introduced by later
+non-spine flows, such as `doc-gap-discovery`, are additional to it.
 
 ws `lead-implement` and the ws named-agent delegation path are unchanged by this
 convergence; the change is wsflow-local.
@@ -826,7 +829,31 @@ also qualify for auto-delete once its structural guardrails pass.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, handles removed spec stems, verifies the spec
-index, and commits the spec pass.
+index, and commits the spec pass. Two callers reach it: `lead-implement`'s
+in-flow documentation pass, and `lead-backfill-docs` retroactively. Both expect
+it to commit its own spec pass.
+
+`lead-backfill-docs` reconciles spec and mental-model coverage for commits that
+never received a documentation pass, including work that never routed through an
+implementation flow. It resolves an audit window from commit markers — the newest
+commit carrying `(mental-model-updated)` and the newest commit touching
+`ai-docs/spec/` — or from a caller-supplied range, then delegates discovery to
+`doc-gap-discovery`, which partitions the window into contiguous groups and
+reports per group what changed and what existing documentation already covers.
+Discovery returns candidates, not verdicts: caller-visibility judgment stays with
+the lead, which applies it by running `lead-update-spec` inline per group. Each
+group produces at most one `docs(spec):` commit and one `mental-model-updater`
+dispatch. The dispatch passes the group range unmodified and names that group's
+spec commit as a separate input rather than widening the range to reach it, since
+the spec commit sits at HEAD and one range spanning both would swallow every
+intervening commit; the dispatch also declares its range authoritative so the
+delegate does not rescope from its own `mental-model-updated` checkpoint.
+Undocumented commits are not contiguous, so the unit of work is the group rather
+than one wide range. A marker-derived audit window is bounded by high-water marks
+and therefore finds only drift newer than the last documentation pass; earlier
+gaps require a caller-supplied range, and the skill reports that bound with its
+result.
+{#260728-retroactive-doc-backfill-entry}
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
