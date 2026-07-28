@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::convert::Infallible;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
@@ -78,15 +78,48 @@ impl DocumentWriteLocks {
             .clone()
     }
 
-    /// Evict every lock entry belonging to `work_root_id`. Callers must
-    /// invoke this at each real work-root removal site (not on rollback of a
-    /// registration that never persisted) so `locks` does not grow
-    /// unboundedly across the daemon's lifetime as work roots are opened and
-    /// closed.
-    pub async fn evict_for_work_root(&self, work_root_id: &WorkRootId) {
-        let prefix = format!("{}\0", work_root_id.as_str());
+    /// Evict every lock entry belonging to any id in `work_root_ids`, in one
+    /// lock acquisition and one `retain` pass. Callers must invoke this at
+    /// each real work-root removal site (not on rollback of a registration
+    /// that never persisted) so `locks` does not grow unboundedly across
+    /// work-root churn over the daemon's lifetime.
+    ///
+    /// Batch shape (`&BTreeSet<WorkRootId>`, not a single id) mirrors
+    /// `TerminalRegistry`/`CodexProviderRegistry`/`ClaudeProviderRegistry`'s
+    /// `remove_for_work_roots` - the sibling cleanup calls already run at the
+    /// same three call sites (`resources.rs`, `git_worktree.rs`,
+    /// `root_picker.rs`) against the same in-scope `BTreeSet<WorkRootId>`.
+    ///
+    /// Scope note: this bounds growth across *work-root* churn (roots opened
+    /// and later removed), matching the ticket's stated preference for
+    /// prune-on-unregister over the strong-count-returns-to-1 alternative.
+    /// It does not bound growth from unique-*file* churn within a single
+    /// work root that stays open indefinitely - every distinct path ever
+    /// written under a still-open root keeps its entry. That is the accepted
+    /// tradeoff of this strategy, not an oversight; a still-open root has no
+    /// natural prune point short of the strong-count alternative the ticket
+    /// explicitly deprioritized.
+    ///
+    /// Race note: eviction is unconditional, including an entry whose
+    /// `Arc<Mutex<()>>` a concurrent in-flight write already holds. Because
+    /// `local_work_root_id_for_path` derives `WorkRootId` deterministically
+    /// from path, a root removed-and-reopened at the same path while a write
+    /// is in flight can produce two different mutexes guarding the same
+    /// `(work-root, path)` - the same serialization hazard
+    /// `{#260524-ws-dashboard-document-edit-save-fanout}` depends on,
+    /// reachable here by a narrow remove/write-race/reopen window distinct
+    /// from the strong-count strategy's version of the same hazard.
+    pub async fn evict_for_work_roots(&self, work_root_ids: &BTreeSet<WorkRootId>) {
+        if work_root_ids.is_empty() {
+            return;
+        }
         let mut locks = self.locks.lock().await;
-        locks.retain(|key, _| !key.starts_with(&prefix));
+        locks.retain(|key, _| {
+            let Some((id, _path)) = key.split_once('\0') else {
+                return true;
+            };
+            !work_root_ids.iter().any(|work_root_id| work_root_id.as_str() == id)
+        });
     }
 }
 
@@ -942,7 +975,7 @@ mod document_write_locks_tests {
     use super::*;
 
     #[tokio::test]
-    async fn evict_for_work_root_only_removes_the_targeted_root() {
+    async fn evict_for_work_roots_only_removes_the_targeted_root() {
         let locks = DocumentWriteLocks::default();
         let root_a = WorkRootId::from("root-a");
         let root_b = WorkRootId::from("root-b");
@@ -950,7 +983,9 @@ mod document_write_locks_tests {
         let a_lock = locks.lock_for(&root_a, "file.txt").await;
         let b_lock = locks.lock_for(&root_b, "file.txt").await;
 
-        locks.evict_for_work_root(&root_a).await;
+        locks
+            .evict_for_work_roots(&BTreeSet::from([root_a.clone()]))
+            .await;
 
         // Evicted root: a fresh lookup yields a brand-new Arc, since the
         // old entry (and the map's clone of `a_lock`) is gone.
@@ -964,14 +999,16 @@ mod document_write_locks_tests {
     }
 
     #[tokio::test]
-    async fn evict_for_work_root_evicts_every_path_under_the_root() {
+    async fn evict_for_work_roots_evicts_every_path_under_the_root() {
         let locks = DocumentWriteLocks::default();
         let root = WorkRootId::from("root-a");
 
         let lock_one = locks.lock_for(&root, "a.txt").await;
         let lock_two = locks.lock_for(&root, "dir/b.txt").await;
 
-        locks.evict_for_work_root(&root).await;
+        locks
+            .evict_for_work_roots(&BTreeSet::from([root.clone()]))
+            .await;
 
         let lock_one_after = locks.lock_for(&root, "a.txt").await;
         let lock_two_after = locks.lock_for(&root, "dir/b.txt").await;
@@ -980,11 +1017,12 @@ mod document_write_locks_tests {
     }
 
     #[tokio::test]
-    async fn evict_for_work_root_does_not_evict_a_prefix_colliding_root() {
+    async fn evict_for_work_roots_does_not_evict_a_prefix_colliding_root() {
         // Key format is `format!("{}\0{}", work_root_id, path)` — the NUL
         // separator means a root id that is merely a string-prefix of
         // another (e.g. "root" vs "root-2") does not collide, since the
-        // eviction prefix scan matches on "root\0", not "root".
+        // eviction scan splits on "\0" and compares the whole id, not a
+        // "root" prefix.
         let locks = DocumentWriteLocks::default();
         let root = WorkRootId::from("root");
         let other = WorkRootId::from("root-2");
@@ -992,12 +1030,55 @@ mod document_write_locks_tests {
         let root_lock = locks.lock_for(&root, "a.txt").await;
         let other_lock = locks.lock_for(&other, "a.txt").await;
 
-        locks.evict_for_work_root(&root).await;
+        locks
+            .evict_for_work_roots(&BTreeSet::from([root.clone()]))
+            .await;
 
         let root_lock_after = locks.lock_for(&root, "a.txt").await;
         assert!(!Arc::ptr_eq(&root_lock, &root_lock_after));
 
         let other_lock_after = locks.lock_for(&other, "a.txt").await;
         assert!(Arc::ptr_eq(&other_lock, &other_lock_after));
+    }
+
+    // CONTRACT (260726 Phase 3, FIT cycle-1 fix): the batch shape is the
+    // whole point of matching `remove_for_work_roots`'s convention - all
+    // three real call sites pass an already-in-scope multi-id
+    // `BTreeSet<WorkRootId>` in one call, not one id at a time. Exercise
+    // that directly: evicting two roots (plus one untouched root) in a
+    // single call must clear both and leave the third alone.
+    #[tokio::test]
+    async fn evict_for_work_roots_evicts_every_id_in_the_batch_in_one_call() {
+        let locks = DocumentWriteLocks::default();
+        let root_a = WorkRootId::from("root-a");
+        let root_b = WorkRootId::from("root-b");
+        let root_c = WorkRootId::from("root-c");
+
+        let a_lock = locks.lock_for(&root_a, "file.txt").await;
+        let b_lock = locks.lock_for(&root_b, "file.txt").await;
+        let c_lock = locks.lock_for(&root_c, "file.txt").await;
+
+        locks
+            .evict_for_work_roots(&BTreeSet::from([root_a.clone(), root_b.clone()]))
+            .await;
+
+        let a_lock_after = locks.lock_for(&root_a, "file.txt").await;
+        let b_lock_after = locks.lock_for(&root_b, "file.txt").await;
+        let c_lock_after = locks.lock_for(&root_c, "file.txt").await;
+        assert!(!Arc::ptr_eq(&a_lock, &a_lock_after));
+        assert!(!Arc::ptr_eq(&b_lock, &b_lock_after));
+        assert!(Arc::ptr_eq(&c_lock, &c_lock_after));
+    }
+
+    #[tokio::test]
+    async fn evict_for_work_roots_on_an_empty_set_is_a_no_op() {
+        let locks = DocumentWriteLocks::default();
+        let root = WorkRootId::from("root-a");
+        let a_lock = locks.lock_for(&root, "file.txt").await;
+
+        locks.evict_for_work_roots(&BTreeSet::new()).await;
+
+        let a_lock_after = locks.lock_for(&root, "file.txt").await;
+        assert!(Arc::ptr_eq(&a_lock, &a_lock_after));
     }
 }

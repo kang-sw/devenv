@@ -2062,7 +2062,7 @@ async fn request_remote_sse(
     token: &BearerAuthToken,
     operation: &ServerScopedForwardOperation,
 ) -> Result<RemoteSseResponse, ForwardOperationError> {
-    let response = shared_http_client()
+    let response = streaming_http_client()
         .get(remote_url(endpoint, &operation.legacy_path))
         .header(
             header::AUTHORIZATION.as_str(),
@@ -2114,7 +2114,7 @@ async fn request_remote_dashboard_operation(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<ForwardedDashboardResponse, ForwardOperationError> {
-    let mut request = shared_http_client()
+    let mut request = operation_http_client()
         .request(
             operation.method.clone(),
             remote_url(endpoint, &operation.legacy_path),
@@ -2423,7 +2423,7 @@ async fn request_remote_link_token(
     endpoint: &str,
     passphrase: &str,
 ) -> Result<BearerAuthToken, LinkAuthError> {
-    let response = shared_http_client()
+    let response = operation_http_client()
         .post(remote_url(endpoint, "/api/dashboard/link-auth"))
         .json(&RemoteLinkAuthRequest {
             passphrase: passphrase.to_owned(),
@@ -2466,7 +2466,7 @@ async fn request_remote_resources(
     endpoint: &str,
     token: &BearerAuthToken,
 ) -> Result<DashboardResourcesView, ResourceForwardError> {
-    let response = shared_http_client()
+    let response = operation_http_client()
         .get(remote_url(endpoint, "/api/dashboard/resources"))
         .header(
             axum::http::header::AUTHORIZATION.as_str(),
@@ -2488,29 +2488,83 @@ async fn request_remote_resources(
 }
 
 const REMOTE_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const REMOTE_HTTP_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_REMOTE_SSE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-static SHARED_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static STREAMING_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static OPERATION_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static REMOTE_SSE_READ_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
-/// Process-wide client shared by every remote-server forward call
-/// (`request_remote_sse`, `request_remote_dashboard_operation`,
-/// `request_remote_link_token`, `request_remote_resources`).
+/// `WS_DASHBOARD_REMOTE_SSE_READ_TIMEOUT_MS`-driven read-timeout budget for
+/// [`streaming_http_client`], default 30s. Mirrors `git_exec.rs`'s
+/// `git_timeout_from_env` `OnceLock`-memoized env-var convention. Read once
+/// per process; a non-positive or unparsable value falls back to the
+/// default rather than meaning "no timeout" (unlike `git_timeout_from_env`'s
+/// `0`), since an unbounded read here would defeat the reason this client
+/// carries `read_timeout` at all.
+fn remote_sse_read_timeout_from_env() -> Duration {
+    *REMOTE_SSE_READ_TIMEOUT.get_or_init(|| {
+        std::env::var("WS_DASHBOARD_REMOTE_SSE_READ_TIMEOUT_MS")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .filter(|millis| *millis > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(DEFAULT_REMOTE_SSE_READ_TIMEOUT)
+    })
+}
+
+/// Pure client builder factored out of the `OnceLock` getters below so a
+/// test can construct a client with a tiny `read_timeout` and drive it
+/// against a real hung listener directly, without touching the process-wide
+/// `OnceLock`/env-var machinery - mirrors `git_exec.rs::capture_with_program`
+/// taking an explicit `Duration` budget parameter rather than only being
+/// reachable through the memoized `git_timeout_from_env`.
+fn build_streaming_client(connect_timeout: Duration, read_timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(connect_timeout)
+        .read_timeout(read_timeout)
+        .build()
+        .expect("streaming reqwest client build failed")
+}
+
+/// Client used only by `request_remote_sse`, the one call site whose
+/// response is a long-lived forwarded stream. Deliberately has no total
+/// `.timeout(...)`: reqwest applies that timeout "from when the request
+/// starts connecting until the response body has finished" (reqwest 0.12
+/// docs), which would forcibly kill the forwarded stream once the deadline
+/// elapsed even though it is meant to run indefinitely. `read_timeout`
+/// bounds each individual read instead (resetting after every successful
+/// read), so it catches a stalled/half-open SSE connection without capping
+/// total stream duration.
+fn streaming_http_client() -> &'static reqwest::Client {
+    STREAMING_HTTP_CLIENT.get_or_init(|| {
+        build_streaming_client(REMOTE_HTTP_CONNECT_TIMEOUT, remote_sse_read_timeout_from_env())
+    })
+}
+
+/// Client shared by the three non-streaming forward calls
+/// (`request_remote_dashboard_operation`, `request_remote_link_token`,
+/// `request_remote_resources`).
 ///
-/// Deliberately has no total `.timeout(...)`: reqwest applies that timeout
-/// "from when the request starts connecting until the response body has
-/// finished" (reqwest 0.12 docs), which would forcibly kill
-/// `request_remote_sse`'s forwarded stream once the deadline elapsed even
-/// though that stream is meant to run indefinitely. `read_timeout` bounds
-/// each individual read instead (resetting after every successful read), so
-/// it catches a stalled/half-open connection on any of the four call sites
-/// - including the SSE forward - without capping total stream duration.
-fn shared_http_client() -> &'static reqwest::Client {
-    SHARED_HTTP_CLIENT.get_or_init(|| {
+/// CONTRACT (review cycle-1 correctness finding): deliberately carries no
+/// `read_timeout` (and no total `.timeout()`), unlike [`streaming_http_client`].
+/// A `read_timeout` bounds time-to-first-response-byte as well as body
+/// reads, and `request_remote_dashboard_operation` forwards operations with
+/// no daemon-side deadline today - e.g. `git-worktree-add`'s handler spawns
+/// a bare, unbounded `git worktree add` (`git_worktree.rs`, outside the
+/// bounded `git_exec` seam; a documented Phase 2 residual gap) and
+/// `/api/dashboard/work-roots/open` triggers full live discovery on the
+/// remote. Either can legitimately run past 30s on a large repo. Giving this
+/// client a `read_timeout` would turn a slow-but-successful remote operation
+/// into a user-visible forward failure (`ForwardOperationError::Unavailable`)
+/// while the remote daemon still completes it - a regression the pre-Phase-3
+/// `reqwest::Client::new()` default (no timeouts at all) did not have.
+/// `connect_timeout` alone still bounds a genuinely unreachable remote.
+fn operation_http_client() -> &'static reqwest::Client {
+    OPERATION_HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(REMOTE_HTTP_CONNECT_TIMEOUT)
-            .read_timeout(REMOTE_HTTP_READ_TIMEOUT)
             .build()
-            .expect("shared reqwest client build failed")
+            .expect("operation reqwest client build failed")
     })
 }
 
@@ -2769,25 +2823,80 @@ mod tests {
         assert_eq!(parsed.link_passphrase.as_deref(), Some("secret"));
     }
 
-    // CONTRACT (260726 Phase 3): all four remote-forward call sites
-    // (`request_remote_sse`, `request_remote_dashboard_operation`,
-    // `request_remote_link_token`, `request_remote_resources`) must share one
-    // process-wide `reqwest::Client` rather than each constructing (and
-    // leaking, per reqwest's own connection-pool-per-client model) its own -
-    // this is the bounded-resource half of this phase's contract, mirrored
-    // after `git_exec.rs`'s `GIT_TIMEOUT: OnceLock` pure-helper convention.
-    // Identity (`ptr::eq`), not just equal config, is what proves reuse:
-    // a look-alike client built fresh on every call would still pass an
-    // equality check on Debug output but would defeat the whole point
-    // (connection pooling, not re-dialing TLS/TCP per forwarded request).
+    // CONTRACT (260726 Phase 3): each of the two process-wide clients
+    // (`streaming_http_client` for `request_remote_sse`, `operation_http_client`
+    // for the three non-streaming forwards) must be reused rather than
+    // constructing (and leaking, per reqwest's own connection-pool-per-client
+    // model) a fresh client per call - mirrored after `git_exec.rs`'s
+    // `GIT_TIMEOUT: OnceLock` pure-helper convention. Identity (`ptr::eq`),
+    // not just equal config, is what proves reuse: a look-alike client built
+    // fresh on every call would still pass an equality check on Debug output
+    // but would defeat the whole point (connection pooling, not re-dialing
+    // TLS/TCP per forwarded request).
     #[test]
-    fn shared_http_client_returns_the_same_cached_instance_across_calls() {
-        let first = shared_http_client();
-        let second = shared_http_client();
+    fn streaming_http_client_returns_the_same_cached_instance_across_calls() {
+        let first = streaming_http_client();
+        let second = streaming_http_client();
         assert!(
             std::ptr::eq(first, second),
-            "shared_http_client must return the same OnceLock-cached client on every call, \
+            "streaming_http_client must return the same OnceLock-cached client on every call, \
              not build a fresh one per call site"
+        );
+    }
+
+    #[test]
+    fn operation_http_client_returns_the_same_cached_instance_across_calls() {
+        let first = operation_http_client();
+        let second = operation_http_client();
+        assert!(
+            std::ptr::eq(first, second),
+            "operation_http_client must return the same OnceLock-cached client on every call, \
+             not build a fresh one per call site"
+        );
+    }
+
+    // CONTRACT (review cycle-1 test finding): the identity tests above prove
+    // caching, not that `read_timeout` is actually wired into connection
+    // behavior - they would pass identically even if `.read_timeout(...)`
+    // were dropped from the builder or set to the wrong value. This drives a
+    // real network hang through `build_streaming_client` directly (bypassing
+    // `streaming_http_client`'s process-wide `OnceLock`/env-var machinery,
+    // mirroring `git_exec.rs`'s `capture_with_program` taking an explicit
+    // `Duration` budget) so the test can shrink the timeout without racing
+    // any other test in this binary for who initializes
+    // `STREAMING_HTTP_CLIENT` first.
+    #[tokio::test]
+    async fn streaming_client_read_timeout_bounds_a_hung_response() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind hang listener");
+        let addr = listener.local_addr().expect("hang listener addr");
+
+        // Accept the connection and then do nothing: never read the
+        // request, never write a response. This is the stalled/half-open
+        // shape `read_timeout` exists to bound. Held open well past the
+        // test's own budget so an early drop can't be mistaken for the
+        // timeout actually firing.
+        tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                drop(socket);
+            }
+        });
+
+        let client = build_streaming_client(Duration::from_millis(500), Duration::from_millis(300));
+        let start = std::time::Instant::now();
+        let result = client.get(format!("http://{addr}/")).send().await;
+        let elapsed = start.elapsed();
+
+        let error = result.expect_err("a hung response must fail, not succeed");
+        assert!(
+            error.is_timeout(),
+            "expected a timeout error from read_timeout, got: {error:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "read_timeout must bound the hang well under a generous wall-clock budget; took {elapsed:?}"
         );
     }
 }

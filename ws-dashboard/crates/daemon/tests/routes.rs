@@ -7451,6 +7451,66 @@ async fn git_worktree_remove_clears_terminal_sessions_for_removed_root() {
     remove_static_fixture(&base);
 }
 
+// CONTRACT (260726 Phase 3, TEST cycle-1 fix): the sibling terminal/codex/
+// claude cleanup calls added at this same git-worktree-remove call site each
+// have their own dedicated end-to-end test (this file, above and below);
+// `DocumentWriteLocks::evict_for_work_roots`'s wiring at the same call site
+// (`git_worktree.rs:645-648`) had none - only the isolated map method was
+// unit-tested (`work_root_files.rs`'s `document_write_locks_tests`), never
+// through a real work-root-removal route. `DocumentWriteLocks` exposes no
+// count/listing API (unlike `GitSpawnStats::outstanding_readers`), so this
+// seeds a lock directly through the same `AppState::document_write_locks`
+// handle the real `write_work_root_file` route uses (a shared `Arc` clone,
+// not a bypass of the removal-side wiring under test) and proves eviction
+// the same way the unit tests do: a lingering entry would hand
+// `lock_for` back the identical `Arc` seeded before removal, so only a
+// fresh `Arc` (via `Arc::ptr_eq` returning false) proves the removal route
+// actually evicted it.
+#[tokio::test]
+async fn git_worktree_remove_clears_document_write_locks_for_removed_root() {
+    if skip_without_git("git_worktree_remove_clears_document_write_locks_for_removed_root") {
+        return;
+    }
+    let (base, primary) = seeded_primary_repo("git-worktree-remove-write-locks");
+    let target = base.join("wt-write-locks");
+
+    let state = app_state();
+    let document_write_locks = state.document_write_locks.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let workspace_id = opened_primary_workspace(app.clone(), cookie.as_str(), &primary).await;
+    let created = add_linked_worktree_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        "Write Lock Topic",
+        &target,
+    )
+    .await;
+
+    let work_root_id = WorkRootId::from(created.clone());
+    let seeded_lock = document_write_locks.lock_for(&work_root_id, "README.md").await;
+
+    git_worktree_remove_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &created,
+        serde_json::json!({ "deleteBranch": false, "force": false }),
+        StatusCode::OK,
+    )
+    .await;
+
+    let lock_after_removal = document_write_locks.lock_for(&work_root_id, "README.md").await;
+    assert!(
+        !Arc::ptr_eq(&seeded_lock, &lock_after_removal),
+        "git-worktree-remove must evict this work root's DocumentWriteLocks entries, \
+         not just the sibling terminal/codex/claude registries"
+    );
+
+    remove_static_fixture(&base);
+}
+
 #[tokio::test]
 async fn git_worktree_remove_clears_codex_and_claude_sessions_for_removed_root() {
     if skip_without_git("git_worktree_remove_clears_codex_and_claude_sessions_for_removed_root") {

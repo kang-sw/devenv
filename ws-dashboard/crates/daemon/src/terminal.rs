@@ -85,6 +85,17 @@ const STALE_ENTRY_SWEEP_MARGIN: Duration = Duration::from_secs(2);
 // heartbeat only detects and tears down a dead *browser* connection on a
 // session that otherwise still admits attach. A ~2-3 missed-beat tolerance
 // keeps this well clear of ordinary scheduling jitter.
+//
+// Coverage scope (review cycle-1 correctness finding): this only detects an
+// *idle* half-open peer - no inbound activity while the `select!` loop is
+// between sends, including a Pong reply to our own Ping. `tokio::select!`
+// does not poll other branches while parked inside an already-selected
+// branch's own `.await` (e.g. `send_output_backfill`'s write blocking on a
+// full socket send buffer against a dead peer), so a peer that goes dead
+// mid-write is not caught by this heartbeat; that shape still falls back to
+// the kernel's TCP retransmit timeout. The ticket's finding scopes
+// explicitly to the idle case, so this is an intentional scope limit, not a
+// gap in this mechanism.
 const WS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const WS_HEARTBEAT_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -1500,6 +1511,12 @@ async fn terminal_socket_task(
     }
 
     let mut heartbeat = interval(WS_HEARTBEAT_INTERVAL);
+    // Default `MissedTickBehavior::Burst` would fire every accumulated tick
+    // back-to-back after the loop is blocked longer than one interval (slow
+    // backfill, contended runtime), emitting several Pings in immediate
+    // succession. `Delay` keeps this to one liveness probe per interval,
+    // matching the stated one-probe-per-15s intent.
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     heartbeat.tick().await; // first tick fires immediately; consume it so the interval starts counting from "now"
     let mut last_activity = Instant::now();
 
