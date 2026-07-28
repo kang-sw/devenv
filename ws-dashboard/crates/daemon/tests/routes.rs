@@ -16866,6 +16866,10 @@ async fn turn_state_route_rejects_terminal_a_token_used_for_terminal_b() {
 //      module's header). Sending the cookie on the turn-state POSTs, or
 //      omitting it on kill-all, makes the test fail at the wrong step and
 //      prove nothing.
+//
+// (review cycle 1, finding 2) Also asserts the `{"closed": N}` response body
+// itself - the route's own statement of how many sessions it drained - since
+// nothing previously checked it.
 #[tokio::test]
 async fn close_all_terminals_revokes_callback_tokens() {
     let root = temp_fixture_path("kill-all-revokes-token");
@@ -16916,6 +16920,15 @@ async fn close_all_terminals_revokes_callback_tokens() {
         .await
         .expect("kill-all response");
     assert_eq!(kill_all.status(), StatusCode::OK);
+    let kill_all_body = axum::body::to_bytes(kill_all.into_body(), 4096)
+        .await
+        .expect("kill-all body");
+    let kill_all_value: serde_json::Value =
+        serde_json::from_slice(&kill_all_body).expect("kill-all JSON");
+    assert_eq!(
+        kill_all_value["closed"], 1,
+        "kill-all's own response must report exactly the one terminal it drained"
+    );
 
     let after = turn_state_request(app, &terminal_id, &terminal_token, "working").await;
     assert_eq!(

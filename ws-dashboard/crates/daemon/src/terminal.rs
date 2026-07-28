@@ -735,9 +735,15 @@ impl TerminalRegistry {
     // no path acquires them in the reverse order today, but `forget_token`
     // does synchronous disk I/O per session, so running it under the sessions
     // write lock would stall every other terminal request (list/create/attach/
-    // close) for the whole sweep, proportional to terminal count. Keeping the
-    // two locks never held simultaneously also preserves the invariant that
-    // keeps a future reverse-order acquisition from becoming a real deadlock.
+    // close) for the whole sweep, proportional to terminal count. The
+    // `sessions` -> `tokens` order this drop-then-loop follows is not a new
+    // invariant it establishes: `insert` already holds the `sessions` write
+    // guard (acquired, dropped after `remember_token` returns) while calling
+    // `remember_token`, which itself takes `tokens.write()` - so both locks
+    // are already held simultaneously on the registry's hottest path.
+    // `drain_all` simply follows that same established order; what its
+    // drop-then-loop shape actually buys is hold duration, not a deadlock
+    // invariant that does not exist.
     pub fn drain_all(&self) -> Vec<Arc<TerminalSession>> {
         let drained: Vec<Arc<TerminalSession>> = self
             .sessions
@@ -3447,34 +3453,49 @@ mod terminal_portability_skeleton_tests {
     // CONTRACT (260727 Phase 3): `drain_all` is the THIRD choke point subject
     // to the same forget-on-removal rule - a kill-all sweep must forget every
     // drained terminal's attention entry, not merely empty the sessions map.
-    // The pre-drain `len() == 1` assertion is the non-vacuity control: without
-    // it, a fixture that never published an entry would satisfy the post-drain
-    // `is_empty()` for entirely the wrong reason. Attention-only, so the
-    // token-free `insert_fake_live_session_for_test` is the right seeder and
+    // Two sessions, not one: a forget loop that only handled the first
+    // drained session (e.g. a `.take(1)`-shaped bug) would still pass this
+    // test if it seeded and drained just one session, so this test seeds TWO
+    // and asserts both are gone. The pre-drain `len() == 2` assertion is the
+    // non-vacuity control: without it, a fixture that never published an
+    // entry would satisfy the post-drain `is_empty()` for entirely the wrong
+    // reason. Attention-only, so the token-free
+    // `insert_fake_live_session_for_test` is the right seeder and
     // `TerminalRegistry::default()` is safe here (no on-disk assertion - see
     // `remove_forgets_the_callback_token` for the temp-state-dir form).
     #[tokio::test]
     async fn drain_all_forgets_the_attention_entry() {
         let registry = TerminalRegistry::default();
-        insert_fake_live_session_for_test(&registry, "term_forget_on_drain_all").await;
+        insert_fake_live_session_for_test(&registry, "term_forget_on_drain_all_a").await;
+        insert_fake_live_session_for_test(&registry, "term_forget_on_drain_all_b").await;
         registry.attention.record_and_publish(
-            "term_forget_on_drain_all".to_owned(),
+            "term_forget_on_drain_all_a".to_owned(),
+            WorkRootId::from("fake-work-root".to_owned()),
+            crate::agent_turn_state::TurnState::Working,
+        );
+        registry.attention.record_and_publish(
+            "term_forget_on_drain_all_b".to_owned(),
             WorkRootId::from("fake-work-root".to_owned()),
             crate::agent_turn_state::TurnState::Working,
         );
         assert_eq!(
             registry.attention.snapshot().len(),
-            1,
-            "non-vacuity control: the attention entry must be PRESENT before \
-             the drain, or the post-drain assertion proves nothing"
+            2,
+            "non-vacuity control: both attention entries must be PRESENT \
+             before the drain, or the post-drain assertion proves nothing"
         );
 
-        registry.drain_all();
+        let drained = registry.drain_all();
 
+        assert_eq!(
+            drained.len(),
+            2,
+            "drain_all must return every drained session, not just some of them"
+        );
         assert!(
             registry.attention.snapshot().is_empty(),
-            "drain_all must forget the attention entry of every drained \
-             session, not just empty the sessions map"
+            "drain_all must forget the attention entry of EVERY drained \
+             session, not just the first, and not just empty the sessions map"
         );
     }
 
