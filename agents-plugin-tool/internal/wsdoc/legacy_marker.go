@@ -182,6 +182,21 @@ func legacyMarkerLines(text string) []legacyMarker {
 	fence := fenceTracker{}
 	comment := htmlCommentTracker{}
 	lines := strings.Split(text, "\n")
+	// bodyStart only gates the CommonMark block-exemption checks below (fenced
+	// code, HTML comments, four-space indent): those rules do not apply inside
+	// YAML frontmatter, which nests by indentation instead. It does NOT gate the
+	// marker regexes themselves — those run unconditionally on every line,
+	// frontmatter included. That is deliberate, not an oversight: 2.7 of
+	// 260726-refactor-retire-spec-planned-marker-mechanism requires the
+	// `features:`-frontmatter marker form to be covered by this advisory, not
+	// only body forms, since 2.1 retired project_tree's WIP counter, the only
+	// other tool that ever surfaced it. A frontmatter marker is folded into the
+	// same line-ordered result as body markers and gets the same generic
+	// advisory text (see advise's "strip it, keeping the described behavior as
+	// ... an ordinary implemented entry ... or ... Implementation Gap callout"),
+	// which describes the body-prose destination the migration writes to, not
+	// the source shape being stripped — so it fits a YAML list bullet exactly as
+	// well as a body callout or heading.
 	bodyStart := yamlFrontmatterEnd(lines)
 	for i, line := range lines {
 		indent, body := splitMarkdownIndent(line)

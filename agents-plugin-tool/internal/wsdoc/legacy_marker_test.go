@@ -31,7 +31,12 @@ func TestLegacyMarkerLinesMatchShapesNotProse(t *testing.T) {
 		{"heading marker", "## 🚧 Feature {#260101-x}", true},
 		{"deep heading marker", "###### 🚧 Feature {#260101-x}", true},
 		{"callout marker", "> [!note] Planned 🚧 {#260101-x}", true},
-		{"frontmatter list marker", "- 🚧 pending [260101-t/p1]", true},
+		// This line carries no `---` delimiters, so it is not actually inside
+		// frontmatter — it only pins the bare list-shape regex at column 0.
+		// See TestLegacyMarkerLinesDetectNestedFrontmatterMarker and
+		// TestLegacyMarkerLinesCombineFrontmatterAndBodyMarkers for real
+		// frontmatter-block coverage.
+		{"list marker", "- 🚧 pending [260101-t/p1]", true},
 		{"indented callout marker", "  > [!note] Planned 🚧 {#260101-x}", true},
 		{"three-space heading marker", "   ## 🚧 Feature {#260101-x}", true},
 		// Four columns opens a CommonMark indented code block, which is the
@@ -151,6 +156,44 @@ func TestLegacyMarkerLinesDetectNestedFrontmatterMarker(t *testing.T) {
 	got := legacyMarkerLines(text)
 	if len(got) != 1 || got[0].Line != 5 {
 		t.Fatalf("legacyMarkerLines = %#v, want one marker at line 5", got)
+	}
+}
+
+// A downstream tree mid-migration typically carries both forms at once: a
+// `features:` frontmatter entry not yet rewritten, and body markers still
+// pending conversion. 260726 2.7 requires the frontmatter form to be covered
+// "not only body forms", and the retained detection surface keeps it as the
+// same list-shape regex applied without a frontmatter exemption (see the
+// bodyStart comment in legacyMarkerLines). This pins that the two forms are
+// folded into one line-ordered result rather than the frontmatter entry being
+// silently dropped or reported through a separate path.
+func TestLegacyMarkerLinesCombineFrontmatterAndBodyMarkers(t *testing.T) {
+	text := "---\ntitle: Mixed\nfeatures:\n  - 🚧 pending prune policy [260118-t/p1]\n---\n" +
+		"# Mixed\n\nSome implemented behavior.\n\n" +
+		"## 🚧 First Body Marker {#260118-first}\n\nSome more prose.\n\n" +
+		"> [!note] Planned 🚧 {#260118-second}\n> Body callout text.\n\n" +
+		"- 🚧 pending body list item [260118-t/p2]\n"
+	got := legacyMarkerLines(text)
+	if len(got) != 4 {
+		t.Fatalf("legacyMarkerLines = %#v, want 4 markers", got)
+	}
+	wantLines := []int{4, 10, 14, 17}
+	for i, line := range wantLines {
+		if got[i].Line != line {
+			t.Fatalf("marker %d line = %d, want %d (%#v)", i, got[i].Line, line, got)
+		}
+	}
+	if len(got[0].Anchors) != 0 {
+		t.Fatalf("frontmatter marker anchors = %#v, want none", got[0].Anchors)
+	}
+	if len(got[1].Anchors) != 1 || got[1].Anchors[0] != "260118-first" {
+		t.Fatalf("heading marker anchors = %#v", got[1].Anchors)
+	}
+	if len(got[2].Anchors) != 1 || got[2].Anchors[0] != "260118-second" {
+		t.Fatalf("callout marker anchors = %#v", got[2].Anchors)
+	}
+	if len(got[3].Anchors) != 0 {
+		t.Fatalf("body list marker anchors = %#v, want none", got[3].Anchors)
 	}
 }
 
