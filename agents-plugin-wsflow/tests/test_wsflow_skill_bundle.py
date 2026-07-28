@@ -26,7 +26,6 @@ EXPECTED_SKILLS = {
     "lead-proceed",
     "lead-review",
     "lead-ship",
-    "lead-sprint",
     "lead-tune",
     "lead-update-spec",
     "lead-verify-discussion",
@@ -46,10 +45,9 @@ EXPECTED_INLINE_SKILLS = {
     "lead-goal-step",
     "mcp-server-repair",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint", "lead-goal-fan-out-step"}
+EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-goal-fan-out-step"}
 PARALLEL_INIT_TITLES = {
     "lead-discuss": "Discuss",
-    "lead-sprint": "Sprint",
     "lead-goal-fan-out-step": "Goal Fan-Out Step",
 }
 
@@ -80,7 +78,11 @@ FORBIDDEN_PATTERNS = {
     "full ws agent dotted tool": re.compile(r"\bagents\."),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    "excluded salvage skill": re.compile(r"\blead-salvage\b"),
+    # lead-sprint and lead-salvage were retired outright rather than merely
+    # excluded from wsflow, so these guard against a reintroduced reference to
+    # a skill that no longer exists in either lineage.
+    "retired sprint skill": re.compile(r"\blead-sprint\b"),
+    "retired salvage skill": re.compile(r"\blead-salvage\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 
@@ -181,13 +183,12 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_parallel_init_skill_files_are_playbook_shims(self):
-        # All three parallel-init skills gain the mcp-server-repair pointer
+        # Both parallel-init skills gain the mcp-server-repair pointer
         # after the existing final line. Explicit per-skill tails (not an
-        # optional regex group) so a missing pointer on any of them fails
+        # optional regex group) so a missing pointer on either of them fails
         # loudly instead of silently passing.
         pointer_tail = {
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-sprint": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }
         offenders = []
