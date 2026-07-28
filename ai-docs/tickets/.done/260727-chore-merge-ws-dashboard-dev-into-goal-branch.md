@@ -725,7 +725,7 @@ all of Phase 1's tests still green, since a wrong resolution is exactly what
 they exist to catch. State explicitly in the Result whether the whole
 `npm run test:browser` suite was run or only individual spec files.
 
-#### Result (62a9bc3c)
+### Result (62a9bc3c) - 2026-07-28
 
 Four commits: `62a9bc3c` (merge + both companion edits), `2dd3c860`
 (Playwright step), `1858a86f` and `ce340ab1` (review remediation). The
