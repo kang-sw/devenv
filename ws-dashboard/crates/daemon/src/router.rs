@@ -613,6 +613,13 @@ async fn dashboard_build_info(State(state): State<AppState>) -> Response {
 /// CONTRACT: `failures` already INCLUDES `timeouts` (a timeout increments
 /// both), so `timeouts` is a subset breakdown, not a disjoint bucket - a
 /// consumer must never sum the two.
+/// CONTRACT: `outstandingReaders` is a live gauge (see
+/// `GitSpawnStats::outstanding_readers`), not a cumulative counter - it can
+/// go up and down. A value pinned at or near
+/// `git_exec::MAX_OUTSTANDING_GIT_READERS` is the operator-visible signal
+/// that every git call is failing with `TooManyDetachedReaders` (an
+/// immortal-descendant cap trip), distinguishing that permanent, otherwise
+/// invisible state from an ordinary `Spawn`/`Status`/`Timeout` failure spike.
 async fn dashboard_diag_git(State(state): State<AppState>) -> Response {
     let snapshot = state.git_spawn_stats.snapshot();
     let by_subcommand: serde_json::Map<String, serde_json::Value> = snapshot
@@ -647,6 +654,7 @@ async fn dashboard_diag_git(State(state): State<AppState>) -> Response {
         "failures": snapshot.failures,
         "bySubcommand": by_subcommand,
         "uptimeMs": snapshot.uptime_ms,
+        "outstandingReaders": snapshot.outstanding_readers,
         "repos": repos,
     }))
     .into_response()

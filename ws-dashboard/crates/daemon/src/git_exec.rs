@@ -12,11 +12,18 @@
 //!   silently change mid-run,
 //! - stdout/stderr are drained concurrently with the wait so a large-output
 //!   child can never deadlock against a full pipe buffer,
-//! - no interactive prompt (terminal, askpass, or ssh) can block a call:
-//!   `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`/`SSH_ASKPASS`, and a
-//!   `BatchMode=yes` `GIT_SSH_COMMAND` are set on every spawn, so a
-//!   credential-required fetch fails fast instead of blocking for the full
-//!   timeout budget,
+//! - the terminal-prompt, askpass, and (when the daemon's own environment
+//!   already names one) ssh-command prompt paths cannot block a call:
+//!   `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`/`SSH_ASKPASS` are set on
+//!   every spawn, and any inherited `GIT_SSH_COMMAND` has `-o BatchMode=yes`
+//!   appended so a fetch/push/pull that would otherwise prompt over one of
+//!   those paths fails fast instead of blocking for the full timeout budget.
+//!   Two paths are accepted residual gaps, not covered by this: a work root
+//!   with no `GIT_SSH_COMMAND` override on a daemon with a controlling
+//!   terminal can still see `ssh` open `/dev/tty` for a host-key/passphrase
+//!   prompt (see [`ssh_command_from_env`]), and `credential.helper` is not
+//!   gated by `GIT_TERMINAL_PROMPT` at all and can still block on its own
+//!   (see [`capture`]'s doc comment),
 //! - every spawn (successful, failed, or timed out) is counted in a shared
 //!   [`GitSpawnStats`], broken down by subcommand, and
 //! - a genuinely unexpected failure is logged via `tracing::warn!`, while a
@@ -204,6 +211,15 @@ pub struct GitSpawnStatsSnapshot {
     pub failures: u64,
     pub by_subcommand: BTreeMap<GitSubcommand, u64>,
     pub uptime_ms: u64,
+    /// Live reader-thread gauge at snapshot time (see
+    /// [`GitSpawnStats::outstanding_readers`]), surfaced so an operator
+    /// looking at `/dashboard/diag/git` can distinguish "every git call is
+    /// failing because [`MAX_OUTSTANDING_GIT_READERS`] tripped" from an
+    /// ordinary `Spawn`/`Status`/`Timeout` failure spike — without this the
+    /// tripped-cap state is otherwise invisible: it is permanent (only an
+    /// immortal descendant's reader ever fails to decrement) and reads as an
+    /// anonymous `failures` increment.
+    pub outstanding_readers: u64,
 }
 
 /// Process-wide-shape but explicitly-owned counters for every `git` spawn
@@ -288,6 +304,7 @@ impl GitSpawnStats {
             failures: self.failures.load(Ordering::Relaxed),
             by_subcommand,
             uptime_ms: self.started_at.elapsed().as_millis() as u64,
+            outstanding_readers: self.outstanding_readers(),
         }
     }
 }
@@ -318,7 +335,7 @@ const MAX_POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// at most this much beyond `budget`.
 const COLLECT_GRACE: Duration = Duration::from_millis(50);
 
-/// Cap on reader threads simultaneously alive (see
+/// Approximate, *soft* cap on reader threads simultaneously alive (see
 /// [`GitSpawnStats::outstanding_readers`]) across every `capture` call
 /// sharing one [`GitSpawnStats`]. Bounds the "DELIBERATE THREAD LEAK" left by
 /// the timeout and output-truncated paths below: an ordinary reader
@@ -328,6 +345,16 @@ const COLLECT_GRACE: Duration = Duration::from_millis(50);
 /// enough to keep a targeted unit test's wall-clock bounded at a 200ms-budget
 /// timeout, and large enough not to trip under ordinary transient network
 /// blips.
+///
+/// This is a bound, not an exact ceiling: the check at the top of
+/// `capture_with_program` is a plain relaxed load with no reservation, and
+/// the increments happen later inside `spawn_reader`, so N concurrent
+/// `spawn_blocking` callers can all observe `cap - 1` before any of them
+/// increments, each then adding two readers — the number of readers
+/// *simultaneously alive* can therefore reach roughly `cap - 1 + 2N`
+/// (N bounded by the blocking-pool's concurrency), not exactly `cap`. This
+/// ticket's boundary only requires bounding the leak, not exact enforcement,
+/// so no CAS/`fetch_update` reservation is used here.
 const MAX_OUTSTANDING_GIT_READERS: u64 = 32;
 
 static GIT_TIMEOUT: OnceLock<Duration> = OnceLock::new();
@@ -347,23 +374,65 @@ pub fn git_timeout_from_env() -> Duration {
     })
 }
 
-static GIT_SSH_COMMAND: OnceLock<String> = OnceLock::new();
+/// Pure branch-selection logic behind [`ssh_command_from_env`], factored out
+/// so it can be unit-tested directly without the process-wide `OnceLock` (see
+/// that function's doc comment for why a test cannot reliably drive the
+/// `OnceLock` itself).
+///
+/// `existing` is the daemon's own `GIT_SSH_COMMAND`, already trimmed and
+/// filtered to `None` when absent, blank, or non-UTF-8 by the caller.
+///
+/// - `Some(existing)` -> append `" -o BatchMode=yes"` and return it: this is
+///   an *append*, not a resolution, so an inherited value that already sets
+///   its own conflicting `-o BatchMode=no`, or a non-`ssh` wrapper that
+///   rejects `-o` flags outright, is a pre-existing operator-customization
+///   edge case not handled here — accepted, no code change (OpenSSH honors
+///   the *first* value seen for a repeated `-o` key, so an earlier
+///   `BatchMode=no` in `existing` wins over the appended flag).
+/// - `None` -> return `None`: do NOT synthesize a default `ssh -o
+///   BatchMode=yes`. Synthesizing one would set `GIT_SSH_COMMAND` on the
+///   child unconditionally, and git's own env-var resolution treats
+///   `GIT_SSH_COMMAND` as *overriding* `core.sshCommand` — so a default here
+///   would silently discard a work root's or the operator's configured
+///   deploy key / `ssh -i` / `ProxyCommand` / non-`ssh` transport on every
+///   daemon-issued `fetch`/`push`/`pull`. Leaving `GIT_SSH_COMMAND` unset on
+///   the child instead lets git's own resolution (`core.sshCommand` or the
+///   built-in `ssh`) run untouched, at the accepted cost that a work root
+///   with no env-level override, on a daemon process that has a controlling
+///   terminal, can still see `ssh` open `/dev/tty` for a host-key/passphrase
+///   prompt — out of reach for this option, in the same accepted-residual
+///   tone as [`capture`]'s unkillable-child disposition.
+fn build_ssh_command(existing: Option<&str>) -> Option<String> {
+    existing.map(|value| format!("{value} -o BatchMode=yes"))
+}
 
-/// `GIT_SSH_COMMAND` value passed to every git spawn through this seam, read
-/// and appended once per process (mirroring [`git_timeout_from_env`]'s
-/// `OnceLock` shape). Always carries `-o BatchMode=yes` so `ssh` (invoked by
-/// git for `git@`/`ssh://` remotes) never opens `/dev/tty` for a
-/// password/passphrase/host-key prompt — `GIT_TERMINAL_PROMPT`/`GIT_ASKPASS`
-/// alone do not cover that path. Preserves any operator-configured
-/// `GIT_SSH_COMMAND` by appending the flag rather than overwriting it; falls
-/// back to plain `ssh` when unset or blank.
-fn ssh_command_from_env() -> &'static str {
-    GIT_SSH_COMMAND.get_or_init(|| match env::var("GIT_SSH_COMMAND") {
-        Ok(existing) if !existing.trim().is_empty() => {
-            format!("{existing} -o BatchMode=yes")
-        }
-        _ => "ssh -o BatchMode=yes".to_owned(),
-    })
+static GIT_SSH_COMMAND: OnceLock<Option<String>> = OnceLock::new();
+
+/// `GIT_SSH_COMMAND` value passed to every git spawn through this seam
+/// (`None` meaning "leave it unset on the child"), read once per process
+/// (mirroring [`git_timeout_from_env`]'s `OnceLock` shape) and resolved by
+/// the pure [`build_ssh_command`] helper.
+///
+/// Append-only contract: when the daemon's own `GIT_SSH_COMMAND` is already
+/// set (non-empty after trim), `-o BatchMode=yes` is appended to it so `ssh`
+/// (invoked by git for `git@`/`ssh://` remotes) does not open `/dev/tty` for
+/// a password/passphrase/host-key prompt on that already-configured
+/// transport. When it is unset (or non-UTF-8, which makes `env::var` return
+/// `Err` and is treated the same as unset), no value is synthesized — see
+/// [`build_ssh_command`] for why overwriting here would silently clobber
+/// `core.sshCommand`, and for the accepted residual gap this narrowing
+/// leaves open.
+fn ssh_command_from_env() -> Option<&'static str> {
+    GIT_SSH_COMMAND
+        .get_or_init(|| {
+            let existing = env::var("GIT_SSH_COMMAND").ok();
+            let existing = existing
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            build_ssh_command(existing)
+        })
+        .as_deref()
 }
 
 /// Deadline for a bounded wait started at `now`, or `None` for an unbounded
@@ -540,11 +609,21 @@ fn reader_spawn_failed(
 /// this phase with no code change, the same disposition already given to a
 /// materially identical concern in commit `0c48065a`.)
 ///
-/// No credential path can block this call either: `GIT_TERMINAL_PROMPT=0`, an
-/// empty `GIT_ASKPASS`/`SSH_ASKPASS`, and a `BatchMode=yes` `GIT_SSH_COMMAND`
-/// are set on every spawn, so a fetch/push/pull against a remote that would
-/// otherwise prompt for credentials fails fast instead of consuming the full
-/// `budget`.
+/// The terminal-prompt, askpass, and (when covered, see
+/// [`ssh_command_from_env`]) ssh-prompt paths cannot block this call:
+/// `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`/`SSH_ASKPASS` are set on
+/// every spawn, and an already-configured `GIT_SSH_COMMAND` gets `-o
+/// BatchMode=yes` appended, so a fetch/push/pull that would otherwise prompt
+/// over one of those paths fails fast instead of consuming the full `budget`.
+///
+/// This is not every credential path: `credential.helper` is not an askpass
+/// and is not gated by `GIT_TERMINAL_PROMPT` — git invokes a configured
+/// helper *before* any prompt fallback and waits for it (measured: a helper
+/// that sleeps 6s still blocks the call for ~6s even with the vars above
+/// set). Disabling `credential.helper` outright would also drop legitimate
+/// stored credentials the daemon needs, so this is accepted as a residual gap
+/// with no code change, the same accept-and-document disposition given to the
+/// unkillable-child case above.
 ///
 /// A call also fails fast, before spawning anything, when
 /// [`MAX_OUTSTANDING_GIT_READERS`] reader threads from prior timed-out or
@@ -560,7 +639,10 @@ fn reader_spawn_failed(
 ///
 /// Every call increments `stats.total` and the per-subcommand counter,
 /// regardless of outcome. `stats.timeouts`/`stats.failures` are incremented
-/// on `Timeout`; `stats.failures` alone on `Spawn`/`Status`. A truncated
+/// on `Timeout`; `stats.failures` alone on `Spawn`/`Status`/
+/// `TooManyDetachedReaders` (the cap-refusal path also runs
+/// `record_spawn` before the check, so a refusal still counts toward
+/// `total`/`by_subcommand` like every other outcome). A truncated
 /// collection increments neither, since the invocation itself neither timed out
 /// nor failed, but is always logged so the condition stays visible.
 /// `Spawn`/`Timeout` are always logged via `tracing::warn!`; `Status` (non-zero
@@ -615,15 +697,21 @@ fn capture_with_program(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        // No interactive prompt (terminal, askpass, or ssh) can block this
-        // spawn: a credential-required fetch/push/pull fails fast instead of
-        // consuming the full `budget`. Unconditional (no `program == "git"`
-        // guard, unlike `-C` above): harmless for the test-injected program,
-        // which never reads these vars.
+        // No terminal-prompt or askpass path can block this spawn: a
+        // credential-required fetch/push/pull over those paths fails fast
+        // instead of consuming the full `budget`. Unconditional (no
+        // `program == "git"` guard, unlike `-C` above): harmless for the
+        // test-injected program, which never reads these vars.
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
-        .env("SSH_ASKPASS", "")
-        .env("GIT_SSH_COMMAND", ssh_command_from_env());
+        .env("SSH_ASKPASS", "");
+    // GIT_SSH_COMMAND is set only when the daemon's own environment already
+    // names one (see `ssh_command_from_env`'s append-only contract) — never
+    // synthesized, so an unset value here leaves git's own `core.sshCommand`
+    // resolution untouched on the child.
+    if let Some(ssh_command) = ssh_command_from_env() {
+        command.env("GIT_SSH_COMMAND", ssh_command);
+    }
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -1422,20 +1510,27 @@ mod tests {
         ],
     );
 
-    /// Pins the no-prompt half of this phase: `GIT_TERMINAL_PROMPT`,
-    /// `GIT_ASKPASS`, and `GIT_SSH_COMMAND` must actually reach the spawned
-    /// child, not merely be intended by the `Command` builder call. Assumes
-    /// the ambient test environment does not already export
-    /// `GIT_SSH_COMMAND` (true in CI and ordinary dev shells).
+    /// Pins the no-prompt half of this phase: `GIT_TERMINAL_PROMPT` and
+    /// `GIT_ASKPASS` must actually reach the spawned child, not merely be
+    /// intended by the `Command` builder call, and `GIT_SSH_COMMAND` must be
+    /// left unset on the child (not synthesized) when the daemon's own
+    /// environment does not already set one — see `ssh_command_from_env`'s
+    /// append-only contract. Assumes the ambient test environment does not
+    /// already export `GIT_SSH_COMMAND` (true in CI and ordinary dev shells);
+    /// if it did, this pin would observe the append branch instead, which is
+    /// also correct behavior, just not what this pin targets.
     ///
-    /// The "preserve and append to an existing `GIT_SSH_COMMAND`" branch of
-    /// `ssh_command_from_env` is deliberately not exercised by a second unit
-    /// test: that value is cached in a process-wide `OnceLock`, and every
-    /// other test in this module also unconditionally initializes it on its
-    /// first `capture_with_program` call. `cargo test` runs this module's
-    /// tests concurrently by default, so no test can reliably win the race to
-    /// observe the pre-`GIT_SSH_COMMAND`-set state — attempting it would
-    /// produce a flaky, test-order-dependent pin rather than a real one.
+    /// `ssh_command_from_env`'s branch-selection logic itself (append vs.
+    /// leave-unset) is exercised separately and deterministically by
+    /// `build_ssh_command_appends_only_when_an_existing_value_is_present`
+    /// against the pure `build_ssh_command` helper, with no `OnceLock`/env
+    /// involvement and therefore no race — the process-wide `OnceLock` this
+    /// function caches into cannot be driven from two different starting
+    /// states within one test binary (`cargo test` runs this module's tests
+    /// concurrently by default, and every test that reaches
+    /// `capture_with_program` also triggers `ssh_command_from_env`'s
+    /// `get_or_init`, so whichever test's environment happens to run first
+    /// wins the cache for the rest of the process).
     #[test]
     fn capture_sets_no_prompt_env_vars_reaching_the_child() {
         let stats = GitSpawnStats::default();
@@ -1450,8 +1545,32 @@ mod tests {
         .expect("emitting the no-prompt env vars must succeed");
         assert_eq!(
             outcome.stdout_text().map(str::trim),
-            Some("0::ssh -o BatchMode=yes"),
-            "GIT_TERMINAL_PROMPT/GIT_ASKPASS/GIT_SSH_COMMAND must reach the child unmodified"
+            Some("0::"),
+            "GIT_TERMINAL_PROMPT/GIT_ASKPASS must reach the child unmodified, and \
+             GIT_SSH_COMMAND must stay unset (not synthesized) with no ambient override"
+        );
+    }
+
+    /// Direct, deterministic pin on `ssh_command_from_env`'s pure
+    /// branch-selection logic (Important test finding: the process-wide
+    /// `OnceLock` around `ssh_command_from_env` cannot be driven through both
+    /// branches from a test, but `build_ssh_command` has no such dependency).
+    /// Covers both of the function's two documented behaviors: append to an
+    /// existing value, and leave unset (never synthesize a default) when
+    /// there is none.
+    #[test]
+    fn build_ssh_command_appends_only_when_an_existing_value_is_present() {
+        assert_eq!(
+            build_ssh_command(Some("/opt/deploy/ssh-wrapper.sh")),
+            Some("/opt/deploy/ssh-wrapper.sh -o BatchMode=yes".to_owned()),
+            "an existing GIT_SSH_COMMAND must be preserved with the flag appended, \
+             never overwritten"
+        );
+        assert_eq!(
+            build_ssh_command(None),
+            None,
+            "absent GIT_SSH_COMMAND must stay unset, not default to a synthesized value, \
+             so core.sshCommand resolution is left untouched"
         );
     }
 
@@ -1472,6 +1591,18 @@ mod tests {
         // `sleep 5` grandchild for ~5s measured from its own start, so
         // MAX_OUTSTANDING_GIT_READERS/2 sequential 200ms-budget calls
         // saturate the cap well within that 5s window.
+        //
+        // This division is exact only for an even MAX_OUTSTANDING_GIT_READERS
+        // (32 today): an odd value would under-saturate the cap by one reader
+        // and fail the `assert_eq!` below for a reason unrelated to the
+        // behavior under test, so a future constant change is asserted to
+        // stay even rather than failing confusingly.
+        const {
+            assert!(
+                MAX_OUTSTANDING_GIT_READERS.is_multiple_of(2),
+                "stuck_calls below assumes an even MAX_OUTSTANDING_GIT_READERS (two readers per call)"
+            );
+        };
         let stuck_calls = MAX_OUTSTANDING_GIT_READERS / 2;
         for _ in 0..stuck_calls {
             let result = capture_with_program(
