@@ -16843,6 +16843,97 @@ async fn turn_state_route_rejects_terminal_a_token_used_for_terminal_b() {
     let _ = fs::remove_dir_all(&state_dir);
 }
 
+// CONTRACT (260727 Phase 3): the kill-all sweep is the THIRD terminal-close
+// path (alongside explicit close and workRoot/workspace removal) and owes the
+// same two removal obligations - `TerminalRegistry::drain_all` must
+// `forget_token` (in-memory entry AND the on-disk
+// `terminal-tokens/<id>.json`) and `attention.forget` every session it drops.
+// This test covers the token half through the real HTTP surface; the
+// attention half is covered as a unit test at the choke point
+// (`terminal.rs::drain_all_forgets_the_attention_entry`).
+//
+// Two structural details this test depends on, both load-bearing:
+//   1. The pre-kill 204 is a NON-VACUITY CONTROL, not a courtesy. It proves
+//      the very token the post-kill assertion expects to be REJECTED was
+//      genuinely accepted a moment earlier. Without it, a fixture that never
+//      minted a usable token would satisfy the 401 for entirely the wrong
+//      reason and read forever after as proof the defect is fixed.
+//   2. Cookie asymmetry: the kill-all route is registered inside `protected`
+//      and therefore sits BEHIND `require_owner_auth`, so its POST carries the
+//      owner cookie - while the turn-state POSTs on either side of it must NOT
+//      carry one, since that route is deliberately registered outside
+//      `require_owner_auth` (see `router.rs::build_router`'s CONTRACT and this
+//      module's header). Sending the cookie on the turn-state POSTs, or
+//      omitting it on kill-all, makes the test fail at the wrong step and
+//      prove nothing.
+#[tokio::test]
+async fn close_all_terminals_revokes_callback_tokens() {
+    let root = temp_fixture_path("kill-all-revokes-token");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    assert!(
+        state.config.owner_auth_enabled,
+        "the cookie asymmetry this test relies on is only meaningful with \
+         owner auth ENABLED"
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+    let token_path =
+        ws_dashboard_daemon::agent_token_store::token_store_path(&state_dir, &terminal_id);
+    assert!(
+        token_path.exists(),
+        "non-vacuity control: the on-disk token file must EXIST before the \
+         kill-all sweep, or its later absence proves nothing"
+    );
+
+    // Non-vacuity control: this exact token authenticates BEFORE the kill.
+    let before = turn_state_request(app.clone(), &terminal_id, &terminal_token, "working").await;
+    assert_eq!(
+        before, StatusCode::NO_CONTENT,
+        "non-vacuity control: the token must be accepted BEFORE the kill-all \
+         sweep, or the post-kill 401 proves nothing"
+    );
+
+    // Kill-all sits behind `require_owner_auth`, so this POST DOES carry the
+    // owner cookie - unlike the turn-state POSTs on either side of it.
+    let kill_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/terminals/kill-all")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("kill-all request"),
+        )
+        .await
+        .expect("kill-all response");
+    assert_eq!(kill_all.status(), StatusCode::OK);
+
+    let after = turn_state_request(app, &terminal_id, &terminal_token, "working").await;
+    assert_eq!(
+        after,
+        StatusCode::UNAUTHORIZED,
+        "a callback token must stop authenticating once its terminal has been \
+         swept by kill-all"
+    );
+    assert!(
+        !token_path.exists(),
+        "kill-all must delete the on-disk callback-token file, not merely \
+         drop the in-memory entry"
+    );
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
 #[tokio::test]
 async fn turn_state_route_rejects_an_invalid_state_value_only_after_a_valid_token() {
     let root = temp_fixture_path("turn-state-invalid-state");

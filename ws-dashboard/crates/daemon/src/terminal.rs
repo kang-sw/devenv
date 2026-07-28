@@ -720,18 +720,37 @@ impl TerminalRegistry {
     // `terminate()` each. Backs the "kill all terminals" teardown - a detached
     // helper keeps running orphaned unless explicitly killed, so the map drain
     // alone is not enough.
-    // PARITY BROKEN (260727 Phase 2): the "same as `remove_for_work_roots`"
-    // clause above described the dev branch, where neither function discharged
-    // anything. This merge brought our `remove_for_work_roots`, which now
-    // forgets BOTH the callback token and the attention entry, while
-    // `drain_all` still forgets neither - so the two are no longer parallel.
-    // Phase 3 owns closing that gap; do not fix it here.
+    // CONTRACT (260727 Phase 3): full parity with `remove`/
+    // `remove_for_work_roots` - a kill-all sweep forgets BOTH obligations for
+    // every drained session, at the same two lockstep choke points: the
+    // callback token (`forget_token`, which also deletes the on-disk
+    // `terminal-tokens/<id>.json`, or a revoked terminal's token would keep
+    // authenticating turn-state callbacks after the terminal is gone) and the
+    // attention entry (`attention.forget`, or a reconnect's snapshot would
+    // show a phantom terminal after the sweep).
+    // The `sessions` write guard is scoped to the drain and released BEFORE
+    // the forget loop, mirroring `remove_for_work_roots`'s explicit
+    // `drop(sessions)`. This is a lock-HOLD-DURATION rule, not deadlock
+    // avoidance: `self.sessions` and `self.tokens` are distinct `RwLock`s and
+    // no path acquires them in the reverse order today, but `forget_token`
+    // does synchronous disk I/O per session, so running it under the sessions
+    // write lock would stall every other terminal request (list/create/attach/
+    // close) for the whole sweep, proportional to terminal count. Keeping the
+    // two locks never held simultaneously also preserves the invariant that
+    // keeps a future reverse-order acquisition from becoming a real deadlock.
     pub fn drain_all(&self) -> Vec<Arc<TerminalSession>> {
-        let mut sessions = self
+        let drained: Vec<Arc<TerminalSession>> = self
             .sessions
             .write()
-            .expect("terminal registry lock poisoned");
-        sessions.drain().map(|(_, session)| session).collect()
+            .expect("terminal registry lock poisoned")
+            .drain()
+            .map(|(_, session)| session)
+            .collect();
+        for session in &drained {
+            self.forget_token(&session.id);
+            self.attention.forget(&session.id);
+        }
+        drained
     }
 }
 
@@ -2438,16 +2457,14 @@ mod terminal_portability_skeleton_tests {
     // status: `insert_unchecked` (adds only, owes nothing to tokens or
     // attention), `insert`'s own eviction `retain` (discharges attention
     // only - the callback-token half of that same gap is deferred debt,
-    // tracked separately from this phase), `remove` and
-    // `remove_for_work_roots` (both discharge token AND attention in full),
-    // and `drain_all` (260727 Phase 2, arrived with the ws-dashboard-dev
-    // merge: it takes the write lock and empties the whole map, yet
-    // discharges NEITHER obligation - it neither `forget_token`s nor
-    // `attention.forget`s any of the sessions it drops, so every drained
-    // terminal leaks both its callback token and its attention entry).
-    // That "discharges neither" state is knowingly landed here and is
-    // Phase 3's to fix; Phase 3 rewrites this line to "discharges both"
-    // once it does - the fix does not belong to this phase.
+    // tracked separately from this phase), and `remove`,
+    // `remove_for_work_roots`, and `drain_all` (all three discharge token
+    // AND attention in full). `drain_all` arrived with the 260727 Phase 2
+    // ws-dashboard-dev merge discharging NEITHER obligation; 260727 Phase 3
+    // brought it to parity - it now `forget_token`s and `attention.forget`s
+    // every session it drops, each call made after the sessions write guard
+    // is released (see `drain_all`'s own CONTRACT for why that ordering is a
+    // lock-hold-duration rule, not deadlock avoidance).
     #[test]
     fn sessions_write_lock_sites_are_enumerated() {
         let count = flattened(&production_text())
@@ -3424,6 +3441,40 @@ mod terminal_portability_skeleton_tests {
         assert!(
             registry.attention.snapshot().is_empty(),
             "remove must forget the attention entry, not just the session and token"
+        );
+    }
+
+    // CONTRACT (260727 Phase 3): `drain_all` is the THIRD choke point subject
+    // to the same forget-on-removal rule - a kill-all sweep must forget every
+    // drained terminal's attention entry, not merely empty the sessions map.
+    // The pre-drain `len() == 1` assertion is the non-vacuity control: without
+    // it, a fixture that never published an entry would satisfy the post-drain
+    // `is_empty()` for entirely the wrong reason. Attention-only, so the
+    // token-free `insert_fake_live_session_for_test` is the right seeder and
+    // `TerminalRegistry::default()` is safe here (no on-disk assertion - see
+    // `remove_forgets_the_callback_token` for the temp-state-dir form).
+    #[tokio::test]
+    async fn drain_all_forgets_the_attention_entry() {
+        let registry = TerminalRegistry::default();
+        insert_fake_live_session_for_test(&registry, "term_forget_on_drain_all").await;
+        registry.attention.record_and_publish(
+            "term_forget_on_drain_all".to_owned(),
+            WorkRootId::from("fake-work-root".to_owned()),
+            crate::agent_turn_state::TurnState::Working,
+        );
+        assert_eq!(
+            registry.attention.snapshot().len(),
+            1,
+            "non-vacuity control: the attention entry must be PRESENT before \
+             the drain, or the post-drain assertion proves nothing"
+        );
+
+        registry.drain_all();
+
+        assert!(
+            registry.attention.snapshot().is_empty(),
+            "drain_all must forget the attention entry of every drained \
+             session, not just empty the sessions map"
         );
     }
 
