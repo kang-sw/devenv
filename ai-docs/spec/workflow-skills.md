@@ -850,7 +850,9 @@ the swept range. Undocumented commits are not contiguous, so the unit of work is
 than one wide range. A marker-derived audit window is bounded by high-water marks
 and therefore finds only drift newer than the last documentation pass; earlier
 gaps require a caller-supplied range, and the skill reports that bound with its
-result.
+result. `lead-discuss` names this skill when documentation staleness traces to
+commits that never had a doc pass, which distinguishes it from a spec entry
+nobody wrote in the first place.
 {#260728-retroactive-doc-backfill-entry}
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
