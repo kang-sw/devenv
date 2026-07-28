@@ -95,21 +95,41 @@ pub fn scan_registry_dir(registry_dir: &Path) -> Vec<TerminalRegistryEntry> {
         if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
             continue;
         }
-        match fs::read_to_string(&path)
-            .map_err(io::Error::from)
-            .and_then(|raw| serde_json::from_str::<TerminalRegistryEntry>(&raw).map_err(io::Error::other))
-        {
-            Ok(entry) => entries.push(entry),
-            Err(error) => {
+        if let Some(entry) = read_registry_entry_at(&path) {
+            entries.push(entry);
+        }
+    }
+    entries
+}
+
+/// Reads and parses exactly one `<registry_dir>/<terminal_id>.json` entry,
+/// without scanning the rest of the directory - the daemon-side single-entry
+/// lookup `scan_registry_dir`'s whole-directory scan does not fit (e.g.
+/// sub-fix 1's post-handshake-failure read, sub-fix 3's per-entry sweep
+/// re-check). `None` covers both "file does not exist" and "file exists but
+/// is malformed" (logged the same way `scan_registry_dir` logs a malformed
+/// entry) - callers must treat both the same, as "nothing usable here".
+pub fn read_registry_entry(registry_dir: &Path, terminal_id: &str) -> Option<TerminalRegistryEntry> {
+    read_registry_entry_at(&registry_entry_path(registry_dir, terminal_id))
+}
+
+fn read_registry_entry_at(path: &Path) -> Option<TerminalRegistryEntry> {
+    match fs::read_to_string(path)
+        .map_err(io::Error::from)
+        .and_then(|raw| serde_json::from_str::<TerminalRegistryEntry>(&raw).map_err(io::Error::other))
+    {
+        Ok(entry) => Some(entry),
+        Err(error) => {
+            if error.kind() != io::ErrorKind::NotFound {
                 tracing::warn!(
                     %error,
                     path = %path.display(),
                     "skipping malformed terminal registry entry"
                 );
             }
+            None
         }
     }
-    entries
 }
 
 #[cfg(test)]
@@ -177,6 +197,26 @@ mod tests {
         let scanned = scan_registry_dir(&dir);
         assert_eq!(scanned.len(), 1);
         assert_eq!(scanned[0].terminal_id, "term_good");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_registry_entry_round_trips_a_single_entry_without_scanning_the_directory() {
+        let dir = temp_dir("read-single");
+        let entry = sample_entry("term_a");
+        write_registry_entry(&dir, &entry).expect("write entry");
+
+        assert_eq!(
+            read_registry_entry(&dir, "term_a"),
+            Some(entry),
+            "must read back exactly the entry just written"
+        );
+        assert_eq!(
+            read_registry_entry(&dir, "term_missing"),
+            None,
+            "a terminal id with no registry file must read as None, not error"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
