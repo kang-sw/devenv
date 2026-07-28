@@ -2015,32 +2015,23 @@ button {
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  border: var(--ws-space-04) solid transparent;
   background: var(--ws-color-canvas);
   padding: 0;
 }
 
+/* Gutter lives here (not as `.terminal-surface`'s own border) because
+   FitAddon's proposeDimensions() only subtracts `terminal.element`'s (this
+   `.xterm` div's) own padding from the parent's computed width - it never
+   accounts for a border/padding on the parent itself. With
+   `box-sizing: border-box` in effect, getComputedStyle(parent).width
+   returns the parent's outer (border-box) size, so a border on
+   `.terminal-surface` was invisible to FitAddon's math and it proposed a
+   column count ~border-width too wide, overlapping xterm's own internal
+   viewport scrollbar. */
 .terminal-surface .xterm {
   width: 100%;
   height: 100%;
-}
-
-.terminal-controls {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ws-space-04);
-  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
-  padding: var(--ws-space-04) var(--ws-space-06);
-}
-
-.terminal-status-line {
-  color: var(--ws-color-text-tertiary);
-  font-size: var(--ws-font-size-01);
-  line-height: var(--ws-line-height-01);
-  text-transform: uppercase;
+  padding: var(--ws-space-04);
 }
 
 .terminal-error {
@@ -2058,10 +2049,6 @@ button {
    `.resource-row-muted`). */
 .terminal-pane-retired .terminal-surface {
   opacity: 0.6;
-}
-
-.terminal-pane-retired .terminal-status-line {
-  color: var(--ws-color-text-disabled);
 }
 
 .dockview-workbench-tab-active {
@@ -3705,6 +3692,60 @@ button {
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+/* Checkbox settings rows (e.g. Terminal section's "Font ligatures" / "GPU
+   acceleration"): inline checkbox + label instead of the stacked
+   label-above-input layout used by `.settings-field`. */
+.settings-field-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ws-space-03);
+}
+
+.settings-field-checkbox .settings-field-label {
+  text-transform: none;
+  font-weight: 500;
+}
+
+/* Downloadable-fonts row list under the Terminal section's Font family
+   field: one clickable row per catalog entry, doubling as both the
+   download/retry trigger (idle/error) and the apply-to-prefs action
+   (done). */
+.settings-downloadable-fonts {
+  display: grid;
+  gap: var(--ws-space-02);
+}
+
+.settings-downloadable-font-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-04);
+  padding: var(--ws-space-02) var(--ws-space-04);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  cursor: pointer;
+}
+
+.settings-downloadable-font-row:hover {
+  background: var(--ws-color-panel-hover);
+}
+
+.settings-downloadable-font-row:disabled {
+  cursor: default;
+}
+
+.settings-downloadable-font-label {
+  min-width: 0;
+}
+
+.settings-downloadable-font-icon {
+  flex: 0 0 auto;
 }
 
 /* Advanced settings section: build provenance + danger zone. */

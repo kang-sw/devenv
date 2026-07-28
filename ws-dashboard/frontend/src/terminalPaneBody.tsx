@@ -5,6 +5,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { LigaturesAddon } from "@xterm/addon-ligatures";
 import {
   clampTerminalSize,
   terminalWebSocketCursor,
@@ -50,6 +51,12 @@ export type TerminalPaneActions = {
   ) => void;
   onFocusInput: (pane: TerminalPaneState) => void;
   isActivePane: (pane: TerminalPaneState) => boolean;
+  // Root-switch auto-focus (per-workRoot last-focused-pane UX fix): true for
+  // exactly one pane per render - the pane App-level `lastFocusedPaneByRootRef` recorded
+  // as last-focused within the NOW-selected root - so the effect below can
+  // restore real keyboard focus the instant a work root becomes active
+  // again, without requiring an extra click on the pane itself.
+  shouldAutoFocus: (pane: TerminalPaneState) => boolean;
   // Looked up once at TerminalPaneBody mount, by `pane.logicalKey`, against
   // the session-lifetime `terminalVisualRestoreRef` snapshot. Returns
   // `undefined` for a brand-new session (restore-intent fallback or a
@@ -76,9 +83,9 @@ export type TerminalPaneActions = {
 };
 
 // Statuses a pane visually retires for (260724 Phase 2): the underlying
-// shell process is gone, so the pane switches to a gray-out treatment plus a
-// relabeled "Clear" affordance instead of "Terminate". Mirrors the
-// `pane.session.status === "running"` precedent in
+// shell process is gone, so the pane switches to a gray-out treatment; the
+// tab's own close (x) button still closes it the same way as a live pane.
+// Mirrors the `pane.session.status === "running"` precedent in
 // `terminalRestoreIntentsFromPanes` (terminals.ts) as the complementary
 // non-running set.
 const terminalRetiredStatuses: ReadonlySet<string> = new Set([
@@ -140,6 +147,13 @@ export function TerminalPaneBody({
   // active. This is a character-width lookup change only; the output/data path
   // is untouched.
   const unicodeAddonRef = useRef<Unicode11Addon | null>(null);
+  // Programming-ligature shaper for this pane's terminal. Held so it can be
+  // disposed on unmount. `null` when construction/activation failed, in
+  // which case the terminal renders unchanged with no ligatures. Loaded
+  // immediately after `terminal.open()` and before the GPU renderer chain
+  // below so a WebGL texture atlas (if one loads) already sees ligatures
+  // active at construction time, per the addon's own ordering guidance.
+  const ligaturesAddonRef = useRef<LigaturesAddon | null>(null);
   const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
   // Set by the compositionstart/compositionend listeners below (mount
@@ -149,7 +163,6 @@ export function TerminalPaneBody({
   // to `refocusActiveTerminal`, which is defined outside every effect
   // (260727 Phase 1 - IME composition focus-steal fix).
   const composingRef = useRef(false);
-  const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Optimistic default matches current always-connect behavior for the
   // common case of a newly mounted, actually-visible pane; a pane mounted
   // while already hidden briefly opens then closes on the first watchdog
@@ -201,10 +214,6 @@ export function TerminalPaneBody({
   };
 
   useEffect(() => {
-    setDisplaySession(pane.session);
-  }, [pane.session]);
-
-  useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
@@ -221,6 +230,15 @@ export function TerminalPaneBody({
       ),
       fontSize: liveRef.current.terminalPrefs.fontSize,
       theme: { background: liveRef.current.terminalPrefs.themeBackground },
+      // LigaturesAddon's activate() calls the proposed/experimental
+      // `registerCharacterJoiner` API, which xterm.js guards behind this
+      // flag and throws without it - a throw the ligature-loading try/catch
+      // below silently swallows with no console output, making ligatures
+      // permanently inert whenever this is unset. Harmless to set
+      // unconditionally (it only relaxes an API guard) rather than gating on
+      // `terminalPrefs.ligaturesEnabled`, which isn't computed until after
+      // this constructor call.
+      allowProposedApi: true,
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -230,6 +248,52 @@ export function TerminalPaneBody({
     terminal.open(container);
     terminalRef.current = terminal;
 
+    // Renderer/addon selection happens once here, at construction time, and
+    // is not live-swapped later - `terminalPrefs.gpuAcceleration` /
+    // `.ligaturesEnabled` only take effect for terminals constructed after a
+    // settings change (matches the "Applies to newly opened terminal panes"
+    // settings-UI note).
+    const useLigatures = liveRef.current.terminalPrefs.ligaturesEnabled;
+    // WebGL/Canvas renderers draw glyphs via `CanvasRenderingContext2D`/GL
+    // texture atlases, which have no mechanism to honor
+    // `font-feature-settings`/`calt` ligature substitution - only xterm's
+    // built-in DOM renderer (real text nodes, CSS cascade) can shape
+    // ligatures. This is an architectural limitation of the GPU renderers,
+    // not a bug (matches microsoft/vscode#274296; VS Code documents
+    // disabling GPU acceleration as the official workaround for the same
+    // limitation). So ligatures force the DOM renderer by skipping the GPU
+    // renderer addons entirely, at the cost of DOM-renderer performance.
+    const useGpuRenderer =
+      liveRef.current.terminalPrefs.gpuAcceleration && !useLigatures;
+
+    // Activate programming-ligature shaping (`->`, `=>`, `!=`, etc.) right
+    // after open() and before the GPU renderer chain below, so a WebGL
+    // texture atlas - if one loads - already reflects ligatures at
+    // construction time instead of needing a reactivation step.
+    // Use the addon's default constructor (default fallback-ligature list)
+    // rather than overriding `fallbackLigatures`: font-based GSUB detection
+    // needs the Local Font Access API (`navigator.fonts.query()` /
+    // `window.queryLocalFonts()`), which is Chromium-only and requires a
+    // secure context. This dashboard is dogfooded over plain HTTP on a LAN
+    // address, so that API is never available here, font-driven detection
+    // silently resolves to nothing, and the built-in fallback list is the
+    // only way ligatures ever render in this environment. Wrapped in
+    // try/catch so a construction/activation failure leaves the terminal
+    // working unchanged with no ligatures.
+    if (useLigatures) {
+      try {
+        const ligaturesAddon = new LigaturesAddon();
+        terminal.loadAddon(ligaturesAddon);
+        ligaturesAddonRef.current = ligaturesAddon;
+      } catch (error) {
+        // Logged rather than silently swallowed: a prior silent failure here
+        // (missing `allowProposedApi`, see the Terminal constructor above)
+        // made ligatures look inert with zero observable signal anywhere.
+        console.error("Failed to activate terminal ligatures addon", error);
+        ligaturesAddonRef.current = null;
+      }
+    }
+
     // Attach a GPU renderer AFTER open() so a canvas/WebGL context exists;
     // without one xterm 5.x falls back to its slow DOM renderer, which
     // dominates throughput when a full-screen TUI repaints many frames per
@@ -237,34 +301,39 @@ export function TerminalPaneBody({
     // the built-in DOM renderer, so an environment without GPU acceleration -
     // or one that loses its GL context at runtime - still renders output
     // unchanged. This only swaps the render backend; the output/data path is
-    // untouched.
-    const loadCanvasRenderer = () => {
-      try {
-        const canvasAddon = new CanvasAddon();
-        terminal.loadAddon(canvasAddon);
-        rendererAddonRef.current = canvasAddon;
-      } catch {
-        // No 2D canvas renderer either; leave the DOM renderer in place.
-        rendererAddonRef.current = null;
-      }
-    };
-    try {
-      const webglAddon = new WebglAddon();
-      // A lost GPU context would otherwise blank the terminal permanently;
-      // dispose the WebGL addon and drop to the canvas renderer so output
-      // keeps rendering.
-      webglAddon.onContextLoss(() => {
-        webglAddon.dispose();
-        if (rendererAddonRef.current === webglAddon) {
+    // untouched. Skipped entirely when GPU acceleration is off (either by
+    // preference or because ligatures forced it off above) - the DOM
+    // renderer stays active, which is required for ligature glyphs to
+    // render at all.
+    if (useGpuRenderer) {
+      const loadCanvasRenderer = () => {
+        try {
+          const canvasAddon = new CanvasAddon();
+          terminal.loadAddon(canvasAddon);
+          rendererAddonRef.current = canvasAddon;
+        } catch {
+          // No 2D canvas renderer either; leave the DOM renderer in place.
           rendererAddonRef.current = null;
         }
+      };
+      try {
+        const webglAddon = new WebglAddon();
+        // A lost GPU context would otherwise blank the terminal permanently;
+        // dispose the WebGL addon and drop to the canvas renderer so output
+        // keeps rendering.
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose();
+          if (rendererAddonRef.current === webglAddon) {
+            rendererAddonRef.current = null;
+          }
+          loadCanvasRenderer();
+        });
+        terminal.loadAddon(webglAddon);
+        rendererAddonRef.current = webglAddon;
+      } catch {
+        // WebGL unavailable in this environment; try 2D canvas, then DOM.
         loadCanvasRenderer();
-      });
-      terminal.loadAddon(webglAddon);
-      rendererAddonRef.current = webglAddon;
-    } catch {
-      // WebGL unavailable in this environment; try 2D canvas, then DOM.
-      loadCanvasRenderer();
+      }
     }
 
     // Swap xterm's default (Unicode v6) character-width tables for the v11
@@ -453,7 +522,26 @@ export function TerminalPaneBody({
       // the fit-relevant *measured* signal, unlike `offsetParent`, which
       // stays non-null (pane visible) throughout this collapse.
       const proposed = fitAddon.proposeDimensions();
-      if (!proposed || proposed.rows <= 1) {
+      if (!proposed || proposed.rows <= 1 || proposed.cols <= 1) {
+        return;
+      }
+      // A workRoot switch's Dockview relayout (see the `paneVisible` effect
+      // below) can transiently propose a size collapsed on BOTH axes at
+      // once, well below the terminal's last-good size, before Dockview's
+      // own layout engine settles - confirmed empirically
+      // (`proposeDimensions()` briefly returning e.g. 10x3 immediately
+      // after a root switch, corrected roughly one frame later). A
+      // deliberate user resize essentially never shrinks both axes to
+      // under a quarter of their prior size in a single measurement, so
+      // treat that specific pattern as a transient mismeasurement and skip
+      // rather than apply it - the next ResizeObserver/visibility-triggered
+      // fit picks up the real size once layout has settled.
+      if (
+        terminal.cols > 4 &&
+        terminal.rows > 4 &&
+        proposed.cols < terminal.cols / 4 &&
+        proposed.rows < terminal.rows / 4
+      ) {
         return;
       }
       try {
@@ -512,11 +600,6 @@ export function TerminalPaneBody({
             rows: next.rows,
           }),
         );
-        setDisplaySession((current) => ({
-          ...current,
-          columns: next.columns,
-          rows: next.rows,
-        }));
         liveRef.current.actions.onSocketResize(
           liveRef.current.pane,
           next.columns,
@@ -584,10 +667,45 @@ export function TerminalPaneBody({
       refocusActiveTerminal();
     }, 100);
 
+    // A previously-downloaded custom webfont (e.g. Fira Code) doesn't
+    // survive a page reload in `document.fonts` state, so `App.tsx`'s own
+    // mount effect independently re-fetches it via `reregisterDownloadedFonts`
+    // (see `downloadableFonts.ts`), racing with this effect. If the
+    // `fontFamily` read above resolves to such a font before its bytes are
+    // registered, the browser silently substitutes the fallback for the
+    // initial glyph measurement/paint, and the GPU renderer caches that
+    // measurement - nothing else re-triggers a re-measure once the real font
+    // lands. A one-shot `document.fonts.ready` read here would be unreliable:
+    // React fires child mount effects (this one) before parent mount effects
+    // (App.tsx's), so at this point `reregisterDownloadedFonts` may not have
+    // even started its network fetch yet, and `.ready` could resolve before
+    // that fetch registers a pending load. Listening for `loadingdone`
+    // instead catches every load batch that completes for the life of this
+    // mount, regardless of when it started relative to this effect.
+    const onFontsLoadingDone = () => {
+      if (terminalRef.current !== terminal) {
+        // Pane unmounted/remounted since this listener was registered.
+        return;
+      }
+      terminal.options.fontFamily = buildEffectiveTerminalFontFamily(
+        liveRef.current.terminalPrefs.fontFamilyOverride,
+      );
+      // A font swap can change glyph cell width, so fit() may resize with a
+      // changed column count, which reflows the buffer. On a normal buffer
+      // with real scrollback that remaps ydisp/ybase and visibly jumps the
+      // viewport to the top - only safe to do on an alt-screen session
+      // (same carve-out as the shrink/restore trick below).
+      if (terminal.buffer.active.type === "alternate") {
+        fitNowRef.current?.();
+      }
+    };
+    document.fonts.addEventListener("loadingdone", onFontsLoadingDone);
+
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", scheduleResizeForward);
       window.clearInterval(focusWatchdog);
+      document.fonts.removeEventListener("loadingdone", onFontsLoadingDone);
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
       }
@@ -618,6 +736,10 @@ export function TerminalPaneBody({
       // no-op when the built-in v6 tables were left active.
       unicodeAddonRef.current?.dispose();
       unicodeAddonRef.current = null;
+      // Unload the ligature shaper before disposing the terminal; a no-op
+      // when construction/activation failed at mount.
+      ligaturesAddonRef.current?.dispose();
+      ligaturesAddonRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       serializeAddonRef.current = null;
@@ -656,18 +778,71 @@ export function TerminalPaneBody({
     // next incidental ResizeObserver callback, and forward the size only if
     // it actually changed, reusing the existing fitNow/forwardSize
     // closures.
-    const beforeFit = terminalRef.current
-      ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
-      : null;
-    fitNowRef.current?.();
-    if (
-      beforeFit &&
-      terminalRef.current &&
-      (terminalRef.current.cols !== beforeFit.columns ||
-        terminalRef.current.rows !== beforeFit.rows)
-    ) {
-      forwardSizeRef.current?.();
-    }
+    //
+    // A workRoot switch toggles `display:none` on Dockview's entire
+    // per-root layout subtree, which forces Dockview's own internal layout
+    // engine through a real hide -> show cycle that needs its own tick(s)
+    // to settle real group/panel sizes - unlike an intra-root tab switch,
+    // which never hides that Dockview instance at all. Reading the
+    // container's box on the very same tick this effect runs can therefore
+    // observe a genuinely-but-transiently tiny measurement (confirmed
+    // empirically: proposeDimensions briefly returning single-digit
+    // columns immediately after a root switch, then the correct size ~one
+    // frame later), which fitNow's degenerate guard does not catch since
+    // it only rejects `rows <= 1`. Deferring through two rAFs lets both
+    // Dockview's relayout and the browser's own layout/paint settle first.
+    let rafA = 0;
+    let rafB = 0;
+    rafA = window.requestAnimationFrame(() => {
+      rafB = window.requestAnimationFrame(() => {
+        const beforeFit = terminalRef.current
+          ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
+          : null;
+        fitNowRef.current?.();
+        if (
+          beforeFit &&
+          terminalRef.current &&
+          (terminalRef.current.cols !== beforeFit.columns ||
+            terminalRef.current.rows !== beforeFit.rows)
+        ) {
+          forwardSizeRef.current?.();
+        } else if (
+          beforeFit &&
+          terminalRef.current &&
+          terminalRef.current.buffer.active.type === "alternate"
+        ) {
+          // Size didn't actually change while hidden (the common case - e.g.
+          // switching dashboard tabs without resizing the browser window), so a
+          // same-size resize would be silently dropped both by the frontend
+          // dedupe (`lastForwardedSizeRef` in forwardSize) and by the kernel
+          // (Linux only emits SIGWINCH when ws_row/ws_col actually differ). A
+          // full-screen TUI app (htop/vim/tmux) that under-repainted while its
+          // alt-screen scrollback was replayed client-side would then stay
+          // visually stale with no redraw trigger. Force two genuinely
+          // different sizes through - a one-row shrink then restore - so each
+          // one forwards and triggers a real SIGWINCH, guaranteeing a full
+          // redraw.
+          //
+          // Gated to the alternate screen buffer only: a normal-buffer session
+          // (plain shell, no full-screen app) never had the under-repaint
+          // symptom in the first place, and resize-driven reflow of a normal
+          // buffer's real scrollback can jump the viewport to the top - a
+          // regression with no corresponding benefit there.
+          const terminal = terminalRef.current;
+          const shrunkRows = Math.max(1, terminal.rows - 1);
+          if (shrunkRows !== terminal.rows) {
+            terminal.resize(terminal.cols, shrunkRows);
+            forwardSizeRef.current?.();
+            terminal.resize(beforeFit.columns, beforeFit.rows);
+            forwardSizeRef.current?.();
+          }
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      window.cancelAnimationFrame(rafB);
+    };
   }, [paneVisible]);
 
   // Effect B - socket lifecycle only (260714 Phase 2 Prong 2). Deps
@@ -744,11 +919,6 @@ export function TerminalPaneBody({
           if (liveRef.current.actions.isActivePane(liveRef.current.pane)) {
             refocusActiveTerminal();
           }
-        } else {
-          setDisplaySession((current) => ({
-            ...current,
-            status: message.status,
-          }));
         }
         liveRef.current.actions.onSocketMessage(liveRef.current.pane, message);
       } catch {
@@ -879,14 +1049,74 @@ export function TerminalPaneBody({
     };
   }, [pane.output]);
 
-  // Gated on `pane.session.status` (the parent-owned session view), not the
-  // locally-mirrored `displaySession.status` above: `displaySession` only
-  // updates from the live WebSocket "message" listener and does not observe
-  // HTTP fallback-poll status updates (see `appendTerminalOutput` in
-  // terminals.ts), which is exactly the transport state this retirement
-  // treatment must also cover (260724 Phase 2). Retain-with-clear, not
-  // auto-remove, per the ticket contract - the pane and its scrollback stay
-  // visible until the user explicitly clears it.
+  // Root-switch auto-focus: when `actions.shouldAutoFocus(pane)` flips to
+  // `true` (this pane is the one the App-level `lastFocusedPaneByRootRef`
+  // recorded as last-focused within the root that just became selected),
+  // grab real keyboard focus the same way a user click into the terminal
+  // would - `terminal.focus()` fires this container's own `focusin`
+  // listener (`markFocusedTerminal`, mount effect above), which sets
+  // `keepTerminalFocusRef.current = true` and lets the existing 100ms
+  // watchdog defend the focus from there, so no separate keep-focus
+  // bookkeeping is duplicated here. Deps `[shouldAutoFocus]` only: this must
+  // fire once per false->true transition, not on every render while it
+  // stays `true` (which would fight the user's own subsequent clicks
+  // elsewhere in the same still-selected root). Deferred one tick, mirroring
+  // `refocusActiveTerminal`'s idiom, so this runs after the sidebar click's
+  // own window-level `focusin`/`pointerdown` listeners have already cleared
+  // any stale `keepTerminalFocusRef` state from the previously focused pane.
+  //
+  // Also re-fits/forwards size proactively here rather than leaning on
+  // Effect A's `paneVisible` correction below: that correction only starts
+  // once the 100ms `focusWatchdog` poll notices `container.offsetParent`
+  // went non-null, so it can lag a root switch by up to ~100ms. A manual
+  // click into the terminal happens well after that window in practice
+  // (human reaction time), masking the race - but auto-focus lands on the
+  // very next tick, so without this, typing immediately after a root switch
+  // could reach the daemon before the PTY's dimensions were corrected for
+  // the newly visible pane's actual size. `fitNow`/`forwardSize` are both
+  // cheap no-ops when the size already matches (fit) or was already
+  // forwarded (`lastForwardedSizeRef` dedupe), so calling them here in
+  // addition to Effect A's own later correction is harmless.
+  //
+  // The fit/forward half is deferred through two rAFs (same reasoning as
+  // Effect A below): reading the container's box on the very same tick a
+  // root switch happens can observe Dockview's own relayout mid-flight, not
+  // yet settled. The focus half stays on an immediate `setTimeout(0)` -
+  // unlike the size measurement, grabbing focus has no correctness
+  // dependency on layout being settled, and delaying it would reintroduce
+  // perceptible input lag.
+  const shouldAutoFocus = actions.shouldAutoFocus(pane);
+  useEffect(() => {
+    if (!shouldAutoFocus) {
+      return;
+    }
+    window.setTimeout(() => {
+      terminalRef.current?.focus();
+      containerRef.current
+        ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
+    }, 0);
+    let rafA = 0;
+    let rafB = 0;
+    rafA = window.requestAnimationFrame(() => {
+      rafB = window.requestAnimationFrame(() => {
+        fitNowRef.current?.();
+        forwardSizeRef.current?.();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      window.cancelAnimationFrame(rafB);
+    };
+  }, [shouldAutoFocus]);
+
+  // Gated on `pane.session.status` (the parent-owned session view), which
+  // observes both the live WebSocket "message" listener and HTTP
+  // fallback-poll status updates (see `appendTerminalOutput` in
+  // terminals.ts) - the retirement treatment must cover both transports
+  // (260724 Phase 2). Retain-with-clear, not auto-remove, per the ticket
+  // contract - the pane and its scrollback stay visible until the user
+  // explicitly clears it.
   const isRetired = terminalRetiredStatuses.has(pane.session.status);
 
   return (
@@ -902,20 +1132,6 @@ export function TerminalPaneBody({
         ref={containerRef}
       />
       {pane.error ? <div className="terminal-error">{pane.error}</div> : null}
-      <div className="terminal-controls">
-        <span className="terminal-status-line">
-          {displaySession.status} · {displaySession.columns}x
-          {displaySession.rows}
-        </span>
-        <button
-          className="action-button"
-          data-command-id="terminal.close"
-          type="button"
-          onClick={() => actions.onClose(pane)}
-        >
-          {isRetired ? "Clear" : "Terminate"}
-        </button>
-      </div>
     </div>
   );
 }

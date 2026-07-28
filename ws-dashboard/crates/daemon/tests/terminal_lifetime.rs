@@ -653,6 +653,26 @@ fn proc_start_time(pid: u64) -> Option<u64> {
     after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
+// Reads a `<terminal_id>.json` registry entry's `pid`/`startTime` straight
+// off disk - the same identity pair `HelperReaper` uses to verify-before-
+// signal. Used by the sweep test below to capture the HELPER's identity
+// right after `create_terminal` returns (the entry is guaranteed durably
+// written by then - see `terminal_helper_process.rs`'s "Registry-write
+// ordering" CONTRACT), so it can later confirm that exact process is gone
+// once the sweep has run, without racing the helper's own delete-on-exit
+// cleanup removing the file out from under a second read.
+#[cfg(unix)]
+fn read_registry_pid(state_home: &std::path::Path, terminal_id: &str) -> Option<(u64, u64)> {
+    let path = state_home
+        .join("terminals")
+        .join(format!("{terminal_id}.json"));
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let pid = value.get("pid")?.as_u64()?;
+    let start_time = value.get("startTime")?.as_u64()?;
+    Some((pid, start_time))
+}
+
 // CONTRACT (260724 dead-shell Phase 3, Unix-regression leg): guard the LIVE,
 // steady-state PTY-master-EOF exit-detection path. Phase 1 added a
 // `#[cfg(windows)]` process-handle "reaper" thread (blocks on
@@ -840,4 +860,233 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
     daemon.kill_hard().await;
     let _ = std::fs::remove_dir_all(&state_home);
     let _ = std::fs::remove_dir_all(&work_root);
+}
+
+// CONTRACT (260726 Phase 1 sub-fix 3, periodic sweep backstop): once
+// `admits_attach()` goes false for an exited session (its 30s attach grace
+// has fully elapsed), the periodic sweep must actually close the daemon<->
+// helper IPC connection - abort the reader task and shut down the write
+// half - so the helper observes EOF and self-exits, rather than merely
+// dropping the daemon-side `Arc<TerminalSession>` out of the registry map
+// and leaving the helper running detached forever. This proves the
+// daemon-visible half of that contract end-to-end against a REAL helper
+// process, with only ONE `create_terminal` call: after the shell exits, the
+// full grace window, plus at least one sweep tick past it, elapse, the
+// terminal must (a) no longer be listed and must refuse a WebSocket
+// reattach, and (b) have no leaked helper process behind it - the exact
+// helper process this test captured the identity of right after creation.
+//
+// The shell's own zombie-reap (sub-fix 3b, `SharedState::transition`'s Unix
+// `child.wait()`) is covered separately by a fast, real-process-free unit
+// test in `terminal_helper_process.rs`
+// (`transition_from_running_reaps_the_child_via_wait_without_a_prior_kill`);
+// this test only asserts what is externally observable through the
+// daemon's HTTP surface and the registry file the helper itself persisted -
+// wiring a way to observe the shell's own PID (a grandchild of this test
+// process, invisible to `std::process::Child`) from outside would add
+// fragile `/proc` child-enumeration plumbing for no additional coverage
+// sub-fix 3b's unit test does not already provide.
+#[cfg(unix)]
+#[tokio::test]
+async fn terminal_past_grace_is_swept_and_its_helper_process_is_reaped() {
+    let client = reqwest::Client::new();
+    let state_home = temp_fixture_path("state-sweep");
+    std::fs::create_dir_all(&state_home).expect("create state home dir");
+    let work_root = temp_fixture_path("root-sweep");
+    std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    // Leak-safe cleanup: reaps any still-live detached helper (identified by
+    // its own persisted pid/startTime) and removes the temp dirs on every
+    // exit path, including a panic unwinding mid-wait.
+    let _reaper = HelperReaper {
+        state_home: state_home.clone(),
+        work_root: work_root.clone(),
+    };
+
+    let daemon = spawn_real_daemon(&state_home).await;
+    let work_root_id = open_work_root(&client, &daemon.base_url, &work_root).await;
+    let terminal_id = create_terminal(&client, &daemon.base_url, &work_root_id).await;
+
+    // Capture the helper's own identity now, while its registry entry is
+    // guaranteed to still exist - it will be deleted once the helper
+    // self-exits later in this test.
+    let (helper_pid, helper_start_time) = read_registry_pid(&state_home, &terminal_id)
+        .expect("registry entry must exist right after create_terminal returns");
+
+    send_input(
+        &client,
+        &daemon.base_url,
+        &terminal_id,
+        &delayed_exit_marker_command("SWEEP-GRACE-MARKER"),
+    )
+    .await;
+    poll_output_until_contains(
+        &client,
+        &daemon.base_url,
+        &terminal_id,
+        0,
+        "SWEEP-GRACE-MARKER",
+    )
+    .await;
+
+    // Let the shell's own scheduled exit fire (comfortably past its
+    // `sleep 1`), then wait out the full attach-grace window - the shell's
+    // exit starts the 30s grace clock (`terminal::DAEMON_GRACE_WINDOW_MS`),
+    // not terminal creation.
+    tokio::time::sleep(DELAYED_EXIT_MARGIN).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    // Poll for up to one sweep interval (`server::TERMINAL_REAPER_INTERVAL`,
+    // 10s) plus generous margin: the sweep must evict the now-past-grace
+    // session from the listing without a second `create_terminal`.
+    let sweep_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let listed: serde_json::Value = client
+            .get(format!(
+                "{}/api/dashboard/work-roots/{work_root_id}/terminals",
+                daemon.base_url
+            ))
+            .send()
+            .await
+            .expect("list terminals request")
+            .json()
+            .await
+            .expect("list terminals JSON");
+        let still_listed = listed
+            .as_array()
+            .expect("listed terminals array")
+            .iter()
+            .any(|entry| entry["terminalId"] == terminal_id);
+        if !still_listed {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < sweep_deadline,
+            "terminal past its attach grace was never swept out of the listing"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // Reattach must now be refused outright: the session is gone from the
+    // registry entirely (unknown terminal), not merely non-`Running`.
+    let mut request = format!(
+        "ws://{}/api/dashboard/terminals/{terminal_id}/socket?after=0",
+        daemon
+            .base_url
+            .strip_prefix("http://")
+            .expect("daemon base url is http")
+    )
+    .into_client_request()
+    .expect("post-sweep websocket request");
+    request
+        .headers_mut()
+        .insert(axum::http::header::HOST, "127.0.0.1".parse().unwrap());
+    let upgrade_result = tokio_tungstenite::connect_async(request).await;
+    assert!(
+        upgrade_result.is_err(),
+        "a swept terminal must refuse a WebSocket reattach"
+    );
+
+    // The helper process itself must be gone - no lingering process, and
+    // (Unix) no zombie: a zombie's `/proc/<pid>` entry persists until
+    // reaped, so this only passes once the OS has fully collected it.
+    let reap_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if proc_start_time(helper_pid) != Some(helper_start_time) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < reap_deadline,
+            "swept terminal's helper process is still alive"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    daemon.kill_hard().await;
+    let _ = std::fs::remove_dir_all(&state_home);
+    let _ = std::fs::remove_dir_all(&work_root);
+}
+
+// CONTRACT (260726 Phase 1 sub-fix 2, test-partition finding #1): sub-fix 2
+// is the ticket's answer to "even with the daemon down" - a helper that is
+// spawned but never once completes a handshake must self-exit on its own,
+// with zero daemon involvement, within `NO_HANDSHAKE_TIMEOUT`
+// (`terminal_helper_process.rs`, currently 10s). No test anywhere in the
+// diff drove this branch; this test invokes the REAL `terminal-helper`
+// re-exec subcommand directly as its own process (never through
+// `create_terminal`, never through any daemon) and never connects to the
+// socket it binds - the only thing that can end this process is sub-fix 2's
+// own bounded accept-loop wait.
+#[tokio::test]
+async fn terminal_helper_self_exits_when_no_handshake_ever_completes() {
+    let registry_dir = temp_fixture_path("no-handshake-registry");
+    std::fs::create_dir_all(&registry_dir).expect("create registry dir");
+    let registry_json = registry_dir.join("term_no_handshake.json");
+    let socket_path = registry_dir.join("term_no_handshake.sock");
+    let cwd = std::env::temp_dir();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ws-dashboard"))
+        .arg("terminal-helper")
+        .arg("--registry-dir")
+        .arg(&registry_dir)
+        .arg("--terminal-id")
+        .arg("term_no_handshake")
+        .arg("--work-root-id")
+        .arg("fake-work-root")
+        .arg("--cwd")
+        .arg(&cwd)
+        .arg("--title")
+        .arg("No Handshake")
+        .arg("--columns")
+        .arg("80")
+        .arg("--rows")
+        .arg("24")
+        .arg("--socket-path")
+        .arg(&socket_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn real terminal-helper subprocess directly, with no daemon involved");
+
+    // The registry entry must appear quickly (helper-side startup, before
+    // the socket is even bound) - proving this genuinely reached the accept
+    // loop rather than failing to start at all.
+    let write_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if registry_json.exists() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < write_deadline,
+            "helper never wrote its registry entry"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // NEVER connect to `socket_path` - that is the entire point of this
+    // test. Wait past `NO_HANDSHAKE_TIMEOUT` (10s) with generous margin and
+    // assert the process exits ON ITS OWN: no daemon, no SIGKILL from this
+    // test, nothing but sub-fix 2's own bounded wait.
+    let exit_status = timeout(Duration::from_secs(20), child.wait())
+        .await
+        .expect("helper must self-exit within NO_HANDSHAKE_TIMEOUT without ever handshaking")
+        .expect("wait on self-exited helper process");
+    assert!(
+        exit_status.success(),
+        "a clean self-exit (no handshake ever occurred) must not be reported as a process \
+         error: {exit_status:?}"
+    );
+
+    assert!(
+        !registry_json.exists(),
+        "the self-exited helper must prune its own registry entry"
+    );
+    assert!(
+        !socket_path.exists(),
+        "the self-exited helper must prune its own socket file"
+    );
+
+    let _ = std::fs::remove_dir_all(&registry_dir);
 }

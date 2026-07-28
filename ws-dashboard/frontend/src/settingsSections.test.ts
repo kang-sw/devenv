@@ -27,8 +27,8 @@ assertEqual(
 
 assertEqual(
   SETTINGS_SECTIONS.length,
-  1,
-  "Phase 1 registers exactly the Terminal section",
+  2,
+  "the registry has the Terminal and Advanced sections",
 );
 
 const terminalDescriptor = SETTINGS_SECTIONS[0];
@@ -37,6 +37,12 @@ assertEqual(
   terminalDescriptor.id,
   "terminal",
   "the Terminal descriptor's id is stable",
+);
+
+assertEqual(
+  SETTINGS_SECTIONS[1].id,
+  "advanced",
+  "the Advanced descriptor's id is stable",
 );
 
 assertEqual(

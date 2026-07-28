@@ -31,6 +31,16 @@ use crate::terminal_registry_file::{delete_registry_entry, write_registry_entry,
 const MAX_OUTPUT_CHUNKS: usize = 1024;
 const GRACE_WINDOW: Duration = Duration::from_secs(30);
 const IDLE_ACCEPT_POLL: Duration = Duration::from_secs(2);
+// CONTRACT (260726 Phase 1 sub-fix 2): bounds how long this helper waits for
+// its FIRST successful handshake before self-exiting, independent of
+// whatever the daemon is doing (covers "daemon crashes/never connects before
+// this helper's first accept"). Comfortably above the daemon's own
+// `DEFAULT_CONNECT_TIMEOUT`/`DEFAULT_RECONCILE_CONNECT_TIMEOUT` connect
+// budgets (`terminal.rs`) to leave margin for retry/backoff; an
+// executor-adjustable constant, not a hard ticket number. Only gates the
+// pre-handshake wait - once `shell_started` flips true, the existing
+// `IDLE_ACCEPT_POLL` idle-reconnect behavior is unchanged.
+const NO_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct RingState {
     output: VecDeque<TerminalHelperOutputChunk>,
@@ -155,6 +165,18 @@ impl SharedState {
             *self.exited_at.lock().expect("exited_at lock poisoned") = Some(Instant::now());
             self.master.lock().expect("master lock poisoned").take();
             self.writer_tx.lock().expect("writer_tx lock poisoned").take();
+            // CONTRACT (260726 Phase 1 sub-fix 3b, Unix zombie fix): a
+            // self-detected exit (PTY-EOF reader thread on Unix; this same
+            // path on Windows too, where it is a harmless idempotent extra
+            // `wait()` alongside the handle-wait reaper) never previously
+            // reaped `self.child` - only `kill_shell_if_running` did. Take
+            // and `wait()` it here (no `.kill()`: the child already exited
+            // on its own, unlike the daemon-initiated kill path) so every
+            // self-detected-exit path is reaped uniformly, not just the
+            // daemon-initiated one.
+            if let Some(mut child) = self.child.lock().expect("child lock poisoned").take() {
+                let _ = child.wait();
+            }
         }
         self.notify.notify_one();
     }
@@ -222,13 +244,31 @@ async fn serve_connections(
     listener: &mut IpcListener,
     shared: &Arc<SharedState>,
 ) -> anyhow::Result<()> {
+    // CONTRACT (sub-fix 2): captured once, at helper-process start, so
+    // `NO_HANDSHAKE_TIMEOUT` below bounds the wait for this helper's very
+    // first successful handshake - not merely the current accept-loop
+    // iteration.
+    let started_at = Instant::now();
     loop {
         let wait = match shared.exited_at() {
             Some(exited_at) => match GRACE_WINDOW.checked_sub(exited_at.elapsed()) {
                 Some(remaining) => remaining,
                 None => break,
             },
-            None => IDLE_ACCEPT_POLL,
+            // `shell_started` (flipped exactly once, on the first
+            // `HandshakeAck`) doubles as "has a handshake ever completed".
+            // Once true, a connection has succeeded at least once and the
+            // shell may still be legitimately running with no current
+            // connection - keep the existing unconditional idle-reconnect
+            // poll. Before that, bound the wait by how long this helper has
+            // been alive without ever completing a handshake; elapsing this
+            // budget `break`s the accept loop the same way grace exhaustion
+            // above already does, self-exiting the helper.
+            None if shared.shell_started.load(Ordering::SeqCst) => IDLE_ACCEPT_POLL,
+            None => match NO_HANDSHAKE_TIMEOUT.checked_sub(started_at.elapsed()) {
+                Some(remaining) => remaining,
+                None => break,
+            },
         };
         match tokio::time::timeout(wait, listener.accept()).await {
             Ok(Ok(stream)) => {
@@ -739,6 +779,45 @@ mod ring_state_tests {
 #[cfg(test)]
 mod kill_path_guard_tests {
     use super::*;
+    use portable_pty::{ChildKiller, ExitStatus};
+
+    /// Minimal `Child` stand-in that records whether `wait()` was called,
+    /// without wiring a real PTY child - `transition`'s reap guard is pure
+    /// state logic (which method got called), not a real-process concern
+    /// (that is covered end-to-end by the real-process `terminal_lifetime`
+    /// integration tests).
+    #[derive(Debug)]
+    struct RecordingChild {
+        wait_called: Arc<AtomicBool>,
+    }
+
+    impl Child for RecordingChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+            Ok(Some(ExitStatus::with_exit_code(0)))
+        }
+        fn wait(&mut self) -> std::io::Result<ExitStatus> {
+            self.wait_called.store(true, Ordering::SeqCst);
+            Ok(ExitStatus::with_exit_code(0))
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+        #[cfg(windows)]
+        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+
+    impl ChildKiller for RecordingChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(RecordingChild {
+                wait_called: self.wait_called.clone(),
+            })
+        }
+    }
 
     fn shared_state_for_test() -> SharedState {
         SharedState {
@@ -816,6 +895,35 @@ mod kill_path_guard_tests {
             shared.status_and_next_sequence().0,
             TerminalHelperStatus::Terminated,
             "kill path must stamp Terminated so a racing exit observer's Exited is a no-op"
+        );
+    }
+
+    // Regression coverage for 260726 Phase 1 sub-fix 3b: a self-detected
+    // exit (the PTY-EOF reader thread calling `transition(Exited)` directly,
+    // WITHOUT going through `kill_shell_if_running` first) must still reap
+    // the child via `wait()` - otherwise the shell becomes a zombie once its
+    // parent (this helper) never collects its exit status. Distinct from
+    // `kill_shell_if_running_stamps_terminated` above, which covers the
+    // daemon-initiated kill path's own child reap (`child.kill()` +
+    // `child.wait()`) - this test isolates the OTHER path into `transition`.
+    #[test]
+    fn transition_from_running_reaps_the_child_via_wait_without_a_prior_kill() {
+        let shared = shared_state_for_test();
+        let wait_called = Arc::new(AtomicBool::new(false));
+        *shared.child.lock().expect("child lock poisoned") = Some(Box::new(RecordingChild {
+            wait_called: wait_called.clone(),
+        }));
+
+        shared.transition(TerminalHelperStatus::Exited);
+
+        assert!(
+            wait_called.load(Ordering::SeqCst),
+            "a self-detected Running -> Exited transition must reap the child via wait(), \
+             not merely drop it (that would leave a zombie)"
+        );
+        assert!(
+            shared.child.lock().expect("child lock poisoned").is_none(),
+            "the child slot must be taken once reaped"
         );
     }
 }

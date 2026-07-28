@@ -2251,8 +2251,8 @@ workRoot, carrying title plus a workRoot-relative cwd hint) still applies
 only when boot reconcile could not adopt any live or in-grace helper for that
 terminal id — it no longer describes the ordinary daemon-restart case.
 
-Only two events terminate a helper process: an explicit terminal-close
-request, or removal of the owning workRoot/workspace root. Termination is
+An explicit terminal-close request or removal of the owning workRoot/
+workspace root terminates a helper process. Termination is
 graceful-then-verified: the daemon first sends the helper a graceful-shutdown
 request over the IPC channel, then falls back to an identity-verified kill of
 the helper's recorded pid — never a bare-pid re-resolve, so a pid reused by
@@ -2261,6 +2261,20 @@ killed. On Windows, the helper additionally places its spawned shell into a
 kill-on-close job object so the fallback kill tears down the whole shell
 subtree; on Unix, the helper detaches from the daemon at spawn time so it
 keeps running independent of the daemon process.
+
+Beyond those two owner-driven events, the daemon also proactively reaps a
+helper process on a periodic bounded interval, rather than only lazily on the
+next terminal creation. A helper that never completes its initial handshake
+with the daemon (for example the daemon crashed or was killed immediately
+after spawning it) self-terminates after a bounded timeout independent of the
+daemon. A helper whose terminal has exited and aged past the attach grace
+window (see [Terminal Attach Grace Window](#260723-terminal-attach-grace-window))
+is torn down once its grace has fully elapsed: the daemon closes its side of
+the connection so the helper exits on its own, or, if no daemon-side
+connection to it remains, kills it directly — in both cases only after
+verifying the helper's recorded pid and process-start-time still match, the
+same identity-verified guarantee as any other daemon-initiated kill.
+{#260728-terminal-helper-periodic-reap}
 
 When the frontend instead reattaches to a still-alive daemon terminal by id on
 reload, it restores that pane's visual appearance rather than replaying only

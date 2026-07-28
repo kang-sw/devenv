@@ -34,7 +34,7 @@ source, and tests for behavioral truth.
 | developer-environment-tools | `mental-model/developer-environment-tools.md` | install.sh, shell/editor config, tmux helpers, Claude TUIs |
 | prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt loading (wsprompt/go:embed), call-time rsrc playbook loading (wsrsrc/filesystem), delegate orientation, bundle metadata |
 | ws-web-dashboard | `mental-model/ws-web-dashboard/index.md` | Personal ws dashboard daemon, owner-auth boundary, UI serving, Activity Console streams, resource view-model API/fixtures, and host-control separation |
-| ws-web-dashboard/terminal | `mental-model/ws-web-dashboard/terminal.md` | Sub-domain: daemon-side terminal helper-process ownership, NDJSON IPC transport, registry file, and boot-reconcile decision table |
+| ws-web-dashboard/terminal | `mental-model/ws-web-dashboard/terminal.md` | Sub-domain: daemon-side terminal helper-process ownership, NDJSON IPC transport, registry file, boot-reconcile decision table, and periodic orphan/grace-expiry sweep |
 | ws-web-dashboard/terminal-render | `mental-model/ws-web-dashboard/terminal-render.md` | Sub-domain: frontend terminal render-state batching, rAF-deferred output-cursor accumulator, and its flush/pending-read contract |
 
 ## Directory Hierarchy

@@ -69,7 +69,13 @@ assertEqual(
 
 assertDeepEqual(
   DEFAULT_TERMINAL_STYLE_PREFS,
-  { fontFamilyOverride: "", fontSize: 12, themeBackground: "#0b0d10" },
+  {
+    fontFamilyOverride: "",
+    fontSize: 12,
+    themeBackground: "#0b0d10",
+    gpuAcceleration: true,
+    ligaturesEnabled: false,
+  },
   "defaults reproduce today's hardcoded fontSize/theme values",
 );
 
@@ -97,6 +103,8 @@ assertDeepEqual(
     fontFamilyOverride: "Iosevka Term",
     fontSize: 16,
     themeBackground: "#101820",
+    gpuAcceleration: false,
+    ligaturesEnabled: true,
   };
   saveTerminalStylePrefs(prefs, storage);
   assertDeepEqual(
@@ -122,6 +130,32 @@ assertDeepEqual(
     loadTerminalStylePrefs(storage),
     DEFAULT_TERMINAL_STYLE_PREFS,
     "a version-mismatched payload falls back to the default terminal style prefs",
+  );
+
+  // A pre-existing v1 payload saved before gpuAcceleration/ligaturesEnabled
+  // existed (same version, missing fields) must NOT be rejected wholesale -
+  // it should keep its other fields and only default the two new ones.
+  fakeStorage.set(
+    "ws-dashboard.settings.terminal.v1",
+    JSON.stringify({
+      version: 1,
+      value: {
+        fontFamilyOverride: "Iosevka Term",
+        fontSize: 16,
+        themeBackground: "#101820",
+      },
+    }),
+  );
+  assertDeepEqual(
+    loadTerminalStylePrefs(storage),
+    {
+      fontFamilyOverride: "Iosevka Term",
+      fontSize: 16,
+      themeBackground: "#101820",
+      gpuAcceleration: DEFAULT_TERMINAL_STYLE_PREFS.gpuAcceleration,
+      ligaturesEnabled: DEFAULT_TERMINAL_STYLE_PREFS.ligaturesEnabled,
+    },
+    "a pre-existing v1 payload missing gpuAcceleration/ligaturesEnabled keeps its other fields and defaults only the new two",
   );
 }
 

@@ -14,6 +14,7 @@ use futures_util::{SinkExt, StreamExt};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 use ws_dashboard_core::WorkRootId;
 
@@ -25,7 +26,7 @@ use crate::terminal_helper_protocol::{
 use crate::terminal_ipc_transport::{IpcReadHalf, IpcWriteHalf};
 use crate::terminal_reconcile::{classify, IdentityStatus, IpcStatus, ReconcileRow};
 use crate::terminal_registry_file::{
-    delete_registry_entry, scan_registry_dir, TerminalRegistryEntry,
+    delete_registry_entry, read_registry_entry, scan_registry_dir, TerminalRegistryEntry,
 };
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
@@ -45,6 +46,33 @@ const DEFAULT_BROWSER_PTY_TERM: &str = "xterm-256color";
 const DAEMON_GRACE_WINDOW_MS: u64 = 30_000;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_millis(3_000);
 pub(crate) const DEFAULT_RECONCILE_CONNECT_TIMEOUT: Duration = Duration::from_millis(400);
+
+// CONTRACT (260726 Phase 1 correctness review I1): the registry-dir backstop
+// must give the primary graceful self-exit path (helper observes the IPC
+// EOF `close_ipc_connection` produces -> `kill_shell_if_running` ->
+// `delete_registry_entry` -> unlink socket, typically sub-millisecond) a
+// real chance to run before the backstop's own SIGKILL. Without this, the
+// backstop can preempt sub-fix 3(a)'s designed teardown in the very same
+// tick that produced the eviction - and can even SIGKILL a helper whose
+// shell is still alive (an IPC-error-only eviction via `mark_ipc_closed`).
+// Ids evicted by `sweep_evict_expired`/`insert`'s lazy eviction are held out
+// of the backstop's kill-eligible set for this long: generous relative to
+// any realistic self-exit latency, but well under the 30s grace window, so
+// a helper that is genuinely stuck still gets caught by a later sweep tick.
+const EVICTION_BACKSTOP_GRACE: Duration = Duration::from_secs(30);
+
+// CONTRACT (260726 Phase 1 correctness review I2): `connect_timeout` alone
+// is exactly the budget a slow-but-successful `TerminalSession::spawn` is
+// allowed to consume before its registry entry is even inserted into
+// `sessions` - and the production registry is constructed with
+// `DEFAULT_RECONCILE_CONNECT_TIMEOUT` (400ms), not the 3s the ticket/plan
+// assumed, so a stale-enough gate of exactly `connect_timeout` leaves zero
+// slack for the scheduling gap between `spawn` returning `Ok` and
+// `insert()` actually taking the write lock. This adds a fixed floor on top
+// of whatever `connect_timeout` is configured to - generous relative to any
+// realistic insert-path scheduling delay, small relative to the 10s sweep
+// interval and 30s grace window.
+const STALE_ENTRY_SWEEP_MARGIN: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPlatform {
@@ -154,6 +182,11 @@ pub struct TerminalRegistry {
     helper_binary: PathBuf,
     registry_dir: PathBuf,
     connect_timeout: Duration,
+    // CONTRACT (260726 Phase 1 correctness review I1): ids evicted by
+    // `sweep_evict_expired`/`insert`'s lazy eviction, timestamped so
+    // `sweep_registry_backstop` can hold them out of its kill-eligible set
+    // for `EVICTION_BACKSTOP_GRACE` - see that constant's CONTRACT.
+    recently_evicted: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl Default for TerminalRegistry {
@@ -183,6 +216,7 @@ impl TerminalRegistry {
             helper_binary,
             registry_dir,
             connect_timeout,
+            recently_evicted: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -255,13 +289,13 @@ impl TerminalRegistry {
                 self.insert_unchecked(session);
             }
             ReconcileRow::KillVerified => {
-                let pid = entry.pid;
-                let start_time = entry.start_time;
-                let _ = tokio::task::spawn_blocking(move || {
-                    crate::terminal_platform::kill_verified(pid, start_time)
-                })
+                kill_verified_and_delete_entry(
+                    &self.registry_dir,
+                    &entry.terminal_id,
+                    entry.pid,
+                    entry.start_time,
+                )
                 .await;
-                delete_registry_entry(&self.registry_dir, &entry.terminal_id);
             }
             ReconcileRow::DropNoSuchProcess | ReconcileRow::DropPidReused => {
                 unreachable!("identity already verified above; classify cannot return this row")
@@ -287,17 +321,43 @@ impl TerminalRegistry {
             .cloned()
     }
 
-    fn insert(&self, session: Arc<TerminalSession>) -> Result<(), TerminalError> {
-        let mut sessions = self
-            .sessions
-            .write()
-            .expect("terminal registry lock poisoned");
-        sessions.retain(|_, session| session.is_live());
-        if sessions.len() >= MAX_TERMINAL_SESSIONS {
-            return Err(TerminalError::BadRequest("too many terminal sessions"));
-        }
-        sessions.insert(session.id.clone(), session);
-        Ok(())
+    // CONTRACT (260726 Phase 1 correctness review I3): this lazy eviction
+    // must key off `admits_attach()`, exactly like the periodic sweep's own
+    // eviction step (`sweep_evict_expired`) - `is_live()` alone would drop a
+    // session still inside its 30s attach grace the instant an unrelated
+    // `create_terminal` call happens to land, discarding the grace window's
+    // whole purpose. Worse, since a session dropped here leaves `sessions`
+    // entirely, the periodic sweep could never find it again to close its
+    // IPC connection - the exact fd/parked-helper leak this phase targets.
+    // Every session evicted here is therefore closed through the same
+    // `evict_and_close` path the periodic sweep uses (IPC teardown +
+    // `EVICTION_BACKSTOP_GRACE` protection from the registry-dir backstop),
+    // not merely dropped out of the map.
+    async fn insert(&self, session: Arc<TerminalSession>) -> Result<(), TerminalError> {
+        let (evicted, result) = {
+            let mut sessions = self
+                .sessions
+                .write()
+                .expect("terminal registry lock poisoned");
+            let mut evicted = Vec::new();
+            sessions.retain(|_, s| {
+                if s.admits_attach() {
+                    true
+                } else {
+                    evicted.push(s.clone());
+                    false
+                }
+            });
+            let result = if sessions.len() >= MAX_TERMINAL_SESSIONS {
+                Err(TerminalError::BadRequest("too many terminal sessions"))
+            } else {
+                sessions.insert(session.id.clone(), session);
+                Ok(())
+            };
+            (evicted, result)
+        };
+        self.evict_and_close(evicted).await;
+        result
     }
 
     // Boot-reconcile-only insertion path: adopted sessions must all land in
@@ -359,6 +419,152 @@ impl TerminalRegistry {
             .expect("terminal registry lock poisoned");
         sessions.drain().map(|(_, session)| session).collect()
     }
+
+    // CONTRACT (260726 Phase 1 sub-fix 3, grace authority): the 30s
+    // attach-grace window (`admits_attach()`) is the ONLY correct eviction
+    // gate for the periodic sweep - `!is_live()` alone would evict the
+    // instant a shell exits, before its grace window even starts, which is
+    // exactly what the grace window exists to prevent. Mirrors
+    // `remove_for_work_roots`'s retain-and-collect shape: returns every
+    // evicted session so `sweep_once` can close each one's IPC connection
+    // (the eviction step itself does not touch IPC - that would require
+    // `.await`ing under the write lock).
+    pub(crate) fn sweep_evict_expired(&self) -> Vec<Arc<TerminalSession>> {
+        let mut sessions = self
+            .sessions
+            .write()
+            .expect("terminal registry lock poisoned");
+        let mut evicted = Vec::new();
+        sessions.retain(|_, session| {
+            if session.admits_attach() {
+                true
+            } else {
+                evicted.push(session.clone());
+                false
+            }
+        });
+        evicted
+    }
+
+    // Shared by the periodic sweep's own eviction step and `insert`'s lazy
+    // eviction (260726 Phase 1 correctness review I1/I3): records each
+    // evicted session's id BEFORE closing its IPC connection, so
+    // `sweep_registry_backstop` can hold it out of its kill-eligible set for
+    // `EVICTION_BACKSTOP_GRACE` (see that constant's CONTRACT) - giving the
+    // helper's own graceful self-exit the primary chance to run instead of
+    // being preempted by a same/next-tick SIGKILL.
+    async fn evict_and_close(&self, evicted: Vec<Arc<TerminalSession>>) {
+        if evicted.is_empty() {
+            return;
+        }
+        {
+            let mut recently_evicted = self
+                .recently_evicted
+                .lock()
+                .expect("terminal registry lock poisoned");
+            let now = Instant::now();
+            for session in &evicted {
+                recently_evicted.insert(session.id.clone(), now);
+            }
+        }
+        for session in evicted {
+            session.close_ipc_connection().await;
+        }
+    }
+
+    // CONTRACT (260726 Phase 1 sub-fix 3, registry-dir backstop): re-scans
+    // `registry_dir` for `<id>.json`/`.sock` entries with no corresponding
+    // LIVE session in this registry's own map - catching helpers whose
+    // handshake-failure cleanup (sub-fix 1) never ran (e.g. a hard daemon
+    // crash mid-`create_terminal`, or a crash before boot-reconcile ever saw
+    // the entry). Deliberately never calls `connect_and_handshake`: unlike
+    // `reconcile_entry`, a runtime sweep only ever kills, it never adopts -
+    // attempting a handshake here would silently reintroduce an
+    // adopt-shaped code path the ticket explicitly forbids for the sweep.
+    // An entry younger than `connect_timeout + STALE_ENTRY_SWEEP_MARGIN`
+    // (`registry_entry_is_stale_enough_for_sweep`) is always skipped - it
+    // may simply be mid-`create_terminal`, not yet inserted into `sessions`
+    // (review I2). An entry whose id was evicted within
+    // `EVICTION_BACKSTOP_GRACE` is also always skipped (review I1) - it is
+    // still `<id>.json`-stale by construction (its entry predates eviction),
+    // but its helper is expected to self-exit on its own within
+    // milliseconds of the eviction step's `close_ipc_connection` call, and
+    // that graceful path must win the race, not this backstop's SIGKILL.
+    pub(crate) async fn sweep_registry_backstop(&self) {
+        let scan_dir = self.registry_dir.clone();
+        let entries = tokio::task::spawn_blocking(move || scan_registry_dir(&scan_dir))
+            .await
+            .unwrap_or_default();
+        if entries.is_empty() {
+            return;
+        }
+
+        let live_ids: std::collections::HashSet<String> = self
+            .sessions
+            .read()
+            .expect("terminal registry lock poisoned")
+            .keys()
+            .cloned()
+            .collect();
+        let recently_evicted_ids: std::collections::HashSet<String> = {
+            let mut recently_evicted = self
+                .recently_evicted
+                .lock()
+                .expect("terminal registry lock poisoned");
+            let now = Instant::now();
+            recently_evicted
+                .retain(|_, evicted_at| now.duration_since(*evicted_at) < EVICTION_BACKSTOP_GRACE);
+            recently_evicted.keys().cloned().collect()
+        };
+        let now = now_ms();
+
+        for entry in entries {
+            if live_ids.contains(&entry.terminal_id) || recently_evicted_ids.contains(&entry.terminal_id)
+            {
+                continue;
+            }
+            if !registry_entry_is_stale_enough_for_sweep(
+                now,
+                entry.created_at_ms,
+                self.connect_timeout,
+            ) {
+                continue;
+            }
+            match identity_status(entry.pid, entry.start_time) {
+                IdentityStatus::VerifiedOurs => {
+                    kill_verified_and_delete_entry(
+                        &self.registry_dir,
+                        &entry.terminal_id,
+                        entry.pid,
+                        entry.start_time,
+                    )
+                    .await;
+                }
+                IdentityStatus::NoSuchProcess | IdentityStatus::PidReused => {
+                    // Same never-kill invariant as `reconcile_entry`: an
+                    // unverified identity is dropped only, never signaled.
+                    delete_registry_entry(&self.registry_dir, &entry.terminal_id);
+                }
+            }
+        }
+    }
+
+    // Single entry point the periodic reaper task drives: evict every
+    // session whose attach grace has expired and close its IPC connection,
+    // then sweep the registry directory for orphaned entries no live
+    // session accounts for. Order matters: the in-memory eviction (cheap,
+    // synchronous under the write lock) runs first, then IPC teardown
+    // (async), then the registry-dir backstop (a full directory scan) -
+    // cheapest/most-common work first. The Unix shell-zombie reap
+    // (sub-fix 3b) needs no daemon-side action here: it lives entirely in
+    // the helper process's own `SharedState::transition`, triggered once the
+    // helper observes the IPC EOF this function's `close_ipc_connection`
+    // call produces.
+    pub(crate) async fn sweep_once(&self) {
+        let evicted = self.sweep_evict_expired();
+        self.evict_and_close(evicted).await;
+        self.sweep_registry_backstop().await;
+    }
 }
 
 fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
@@ -367,6 +573,43 @@ fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
         Some(_) => IdentityStatus::PidReused,
         None => IdentityStatus::NoSuchProcess,
     }
+}
+
+// CONTRACT: any daemon-initiated kill of a registry entry MUST route through
+// `terminal_platform::kill_verified` (never a bare pid kill) - shared by
+// `reconcile_entry`'s `KillVerified` row, `TerminalSession::spawn`'s
+// handshake-failure cleanup (sub-fix 1), and the periodic sweep's
+// registry-dir backstop (sub-fix 3), so the kill+delete sequence has exactly
+// one implementation. Mirrors `reconcile_entry`'s original inline shape:
+// verified kill first (best-effort - an already-gone process makes this a
+// harmless no-op), then unconditionally prune both registry files.
+async fn kill_verified_and_delete_entry(
+    registry_dir: &Path,
+    terminal_id: &str,
+    pid: u32,
+    start_time: u64,
+) {
+    let _ =
+        tokio::task::spawn_blocking(move || crate::terminal_platform::kill_verified(pid, start_time))
+            .await;
+    delete_registry_entry(registry_dir, terminal_id);
+}
+
+// Pure predicate for the periodic sweep's registry-dir backstop age gate,
+// split out so the "must never touch an entry younger than the connect/
+// handshake timeout" contract (an open/mid-`create_terminal` registry-dir
+// entry) is unit-testable without a real filesystem scan, process, or async
+// driver. CONTRACT (260726 Phase 1 correctness review I2): the threshold is
+// `connect_timeout + STALE_ENTRY_SWEEP_MARGIN`, not `connect_timeout` alone
+// - see that constant's CONTRACT for why a bare `connect_timeout` gate has
+// zero slack over the in-flight `create_terminal` window.
+fn registry_entry_is_stale_enough_for_sweep(
+    now_ms: u64,
+    created_at_ms: u64,
+    connect_timeout: Duration,
+) -> bool {
+    let threshold_ms = connect_timeout.as_millis() as u64 + STALE_ENTRY_SWEEP_MARGIN.as_millis() as u64;
+    now_ms.saturating_sub(created_at_ms) > threshold_ms
 }
 
 /// Result of a successful connect + handshake against a helper's IPC
@@ -450,6 +693,13 @@ pub struct TerminalSession {
     write_half: Arc<AsyncMutex<IpcWriteHalf>>,
     inner: Mutex<TerminalSessionInner>,
     output_signal: watch::Sender<u64>,
+    // CONTRACT (260726 Phase 1 sub-fix 3a): the reader task's `JoinHandle`
+    // was previously discarded (fire-and-forget `tokio::spawn`), so nothing
+    // could ever cancel it from outside - the exact mechanism that let a
+    // swept-but-still-connected session's IPC reader linger. Populated once,
+    // in `from_connection`, right after the reader task is spawned; taken
+    // and aborted by `close_ipc_connection`.
+    reader_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 struct TerminalSessionInner {
@@ -671,7 +921,7 @@ pub async fn create_terminal(
     {
         Ok(session) => {
             let view = session.view();
-            match state.terminals.insert(session.clone()) {
+            match state.terminals.insert(session.clone()).await {
                 Ok(()) => Json(view).into_response(),
                 Err(error) => {
                     session.terminate().await;
@@ -876,9 +1126,32 @@ impl TerminalSession {
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
 
-        let connected = connect_and_handshake(&socket_path, connect_timeout)
+        let Some(connected) = connect_and_handshake(&socket_path, connect_timeout).await else {
+            // CONTRACT (260726 Phase 1 sub-fix 1): a helper that was
+            // spawned but never completed the handshake within budget must
+            // not leak - read back the registry entry it may have already
+            // durably written (see `write_registry_entry`'s ordering
+            // CONTRACT in `terminal_helper_process.rs`: the entry lands
+            // BEFORE the shell is ever spawned) and, if present, kill it
+            // through a verified handle. Either way, prune both registry
+            // files - covers both "the helper wrote its entry but never
+            // handshaked" and "the helper never even wrote the file" edges.
+            let registry_dir_owned = registry_dir.to_path_buf();
+            let id_for_read = id.clone();
+            let entry = tokio::task::spawn_blocking(move || {
+                read_registry_entry(&registry_dir_owned, &id_for_read)
+            })
             .await
-            .ok_or(TerminalError::BadRequest("terminal spawn failed"))?;
+            .unwrap_or(None);
+            match entry {
+                Some(entry) => {
+                    kill_verified_and_delete_entry(registry_dir, &id, entry.pid, entry.start_time)
+                        .await;
+                }
+                None => delete_registry_entry(registry_dir, &id),
+            }
+            return Err(TerminalError::BadRequest("terminal spawn failed"));
+        };
 
         Ok(Self::from_connection(
             id,
@@ -922,8 +1195,13 @@ impl TerminalSession {
                 grace_until_ms,
             }),
             output_signal: watch::channel(0).0,
+            reader_task: Mutex::new(None),
         });
-        spawn_ipc_reader_task(session.clone(), connected.reader);
+        let reader_task = spawn_ipc_reader_task(session.clone(), connected.reader);
+        *session
+            .reader_task
+            .lock()
+            .expect("terminal session lock poisoned") = Some(reader_task);
         session
     }
 
@@ -953,10 +1231,14 @@ impl TerminalSession {
 
     // CONTRACT (grace-reattach, ticket "Boot reconcile policy" row 2): a
     // session that has exited but is still inside its grace window remains
-    // visible/attachable even though `is_live()` is false. Every OTHER
-    // `is_live()` call site (`write_input`, `resize`, eviction `retain`)
-    // deliberately keeps the strict Running-only check - only the WS
-    // upgrade gate and the work-root listing use this relaxed predicate.
+    // visible/attachable even though `is_live()` is false. `write_input`/
+    // `resize` deliberately keep the strict Running-only `is_live()` check;
+    // the WS upgrade gate, the work-root listing, and BOTH eviction
+    // `retain`s (`insert`'s lazy path and the periodic sweep's
+    // `sweep_evict_expired` - review I3) use this relaxed predicate instead,
+    // since the 30s attach grace is the binding authority for when a
+    // session may be dropped/disconnected, not merely for when it may still
+    // be attached to.
     fn admits_attach(&self) -> bool {
         let inner = self.inner.lock().expect("terminal session lock poisoned");
         inner.status == TerminalStatus::Running
@@ -1115,12 +1397,40 @@ impl TerminalSession {
         };
         let _ = self.output_signal.send(seq);
     }
+
+    // CONTRACT (260726 Phase 1 sub-fix 3a): the periodic sweep's eviction
+    // step must actually close the daemon<->helper IPC connection once
+    // `admits_attach()` goes false, not merely drop the daemon-side
+    // `Arc<TerminalSession>` out of the registry map - `IpcReadHalf`/
+    // `IpcWriteHalf` are `tokio::io::split()` halves sharing the underlying
+    // stream's state, so dropping only one half does not close the
+    // underlying socket. Both halves must be torn down: abort the reader
+    // task (owns the read half) AND `.shutdown()` the write half. The write
+    // shutdown half-closes the transport, which is what makes the helper's
+    // own reader observe EOF and fall into its
+    // `if shared.exited_at().is_some() { break; }` self-exit check - no
+    // new helper-side logic is needed for this daemon-initiated-disconnect
+    // path. An already-broken pipe on `.shutdown()` is expected/harmless
+    // (discarded, matching the existing `let _ = write_ndjson(...)` style
+    // used elsewhere in this file).
+    async fn close_ipc_connection(&self) {
+        let reader_task = self
+            .reader_task
+            .lock()
+            .expect("terminal session lock poisoned")
+            .take();
+        if let Some(reader_task) = reader_task {
+            reader_task.abort();
+        }
+        let mut writer = self.write_half.lock().await;
+        let _ = writer.shutdown().await;
+    }
 }
 
 fn spawn_ipc_reader_task(
     session: Arc<TerminalSession>,
     mut reader: NdjsonReader<IpcReadHalf>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             match reader.read_message::<HelperToDaemonMessage>().await {
@@ -1152,7 +1462,7 @@ fn spawn_ipc_reader_task(
                 }
             }
         }
-    });
+    })
 }
 
 async fn terminal_socket_task(
@@ -1579,6 +1889,7 @@ mod terminal_portability_skeleton_tests {
                 grace_until_ms: None,
             }),
             output_signal: watch::channel(0).0,
+            reader_task: Mutex::new(None),
         }
     }
 
@@ -1788,6 +2099,217 @@ mod terminal_portability_skeleton_tests {
         assert!(!session.admits_attach());
     }
 
+    // CONTRACT (260726 Phase 1 sub-fix 3, grace authority): the periodic
+    // sweep's eviction step must key strictly off `admits_attach()`, never
+    // `!is_live()` alone - a session that has exited but is still inside its
+    // 30s attach grace must survive a sweep tick exactly as a still-`Running`
+    // session does; only a session whose grace has genuinely elapsed may be
+    // evicted.
+    #[tokio::test]
+    async fn sweep_evict_expired_never_evicts_before_admits_attach_goes_false() {
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            std::env::temp_dir().join(format!("ws-dashboard-sweep-evict-{}", now_ms())),
+            Duration::from_millis(200),
+        );
+
+        let still_running = Arc::new(fake_terminal_session().await);
+
+        let in_grace = Arc::new(fake_terminal_session().await);
+        {
+            let mut inner = in_grace.inner.lock().expect("terminal session lock poisoned");
+            inner.status = TerminalStatus::Exited;
+            inner.grace_until_ms = Some(now_ms() + 60_000);
+        }
+
+        let grace_expired = Arc::new(fake_terminal_session().await);
+        {
+            let mut inner = grace_expired
+                .inner
+                .lock()
+                .expect("terminal session lock poisoned");
+            inner.status = TerminalStatus::Exited;
+            inner.grace_until_ms = Some(0); // already elapsed
+        }
+
+        registry.insert_unchecked(still_running.clone());
+        registry.insert_unchecked(in_grace.clone());
+        registry.insert_unchecked(grace_expired.clone());
+
+        let evicted = registry.sweep_evict_expired();
+
+        assert_eq!(evicted.len(), 1, "exactly the grace-expired session must be evicted");
+        assert_eq!(evicted[0].id, grace_expired.id);
+        assert!(
+            registry.get(&still_running.id).is_some(),
+            "a still-Running session must never be evicted"
+        );
+        assert!(
+            registry.get(&in_grace.id).is_some(),
+            "a session still inside its attach grace must never be evicted"
+        );
+        assert!(
+            registry.get(&grace_expired.id).is_none(),
+            "a session past its attach grace must be evicted"
+        );
+    }
+
+    // CONTRACT (260726 Phase 1 correctness review I2): production
+    // `connect_timeout` is 400ms (`DEFAULT_RECONCILE_CONNECT_TIMEOUT`), not
+    // the 3s the ticket/plan assumed - the gate must be
+    // `connect_timeout + STALE_ENTRY_SWEEP_MARGIN`, with real slack over the
+    // in-flight `create_terminal` window, not exactly `connect_timeout`
+    // (which is precisely the budget a slow-but-successful handshake is
+    // allowed to consume, leaving zero room for `insert()`'s own scheduling
+    // delay after that).
+    #[test]
+    fn registry_entry_is_stale_enough_for_sweep_excludes_entries_younger_than_connect_timeout_plus_margin(
+    ) {
+        let connect_timeout = Duration::from_millis(400);
+        let threshold_ms =
+            connect_timeout.as_millis() as u64 + STALE_ENTRY_SWEEP_MARGIN.as_millis() as u64;
+
+        assert!(
+            !registry_entry_is_stale_enough_for_sweep(10_000, 10_000 - 700, connect_timeout),
+            "an entry well younger than connect_timeout + margin (mid-create) must never be swept"
+        );
+        assert!(
+            !registry_entry_is_stale_enough_for_sweep(
+                10_000,
+                10_000 - threshold_ms,
+                connect_timeout
+            ),
+            "an entry exactly at the connect-timeout+margin boundary must not yet be swept"
+        );
+        assert!(
+            registry_entry_is_stale_enough_for_sweep(
+                10_000 + 1,
+                10_000 - threshold_ms,
+                connect_timeout
+            ),
+            "an entry older than connect_timeout + margin must be eligible for the sweep's backstop"
+        );
+    }
+
+    // CONTRACT (260726 Phase 1 sub-fix 1 / sub-fix 3): the kill+delete
+    // sequence every daemon-initiated kill of a registry entry MUST route
+    // through is exercised here against a REAL process (unlike the pure
+    // `classify`/`registry_entry_is_stale_enough_for_sweep` unit tests
+    // above) - this proves the shared helper both `TerminalSession::spawn`'s
+    // handshake-failure cleanup and the sweep's registry-dir backstop reuse
+    // actually terminates a live process and prunes both registry files, not
+    // merely that it calls the right functions in the right order.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_verified_and_delete_entry_kills_a_real_process_and_prunes_both_registry_files() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-kill-and-delete-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut real_process = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn real process to stand in for an orphaned helper");
+        let pid = real_process.id();
+        let start_time = crate::terminal_platform::process_start_time(pid)
+            .expect("real process must report a start time");
+
+        let entry = TerminalRegistryEntry {
+            terminal_id: "term_kill_and_delete".to_owned(),
+            work_root_id: "root-kill".to_owned(),
+            pid,
+            start_time,
+            socket_path: registry_dir.join("term_kill_and_delete.sock"),
+            created_at_ms: now_ms(),
+            title: "Kill And Delete".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write entry");
+        std::fs::write(&entry.socket_path, b"stand-in socket file")
+            .expect("write stand-in socket file");
+
+        kill_verified_and_delete_entry(&registry_dir, &entry.terminal_id, entry.pid, entry.start_time)
+            .await;
+
+        let mut exited = false;
+        for _ in 0..50 {
+            if real_process
+                .try_wait()
+                .expect("poll killed process")
+                .is_some()
+            {
+                exited = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            exited,
+            "the shared kill+delete helper must actually terminate the orphaned process"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "the registry .json entry must be pruned"
+        );
+        assert!(
+            !entry.socket_path.exists(),
+            "the stray .sock file must be pruned alongside the .json entry"
+        );
+
+        let _ = real_process.wait();
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (260726 Phase 1 sub-fix 1): a helper that spawns successfully
+    // (proving `spawn_detached` itself did not fail) but never completes the
+    // handshake within `connect_timeout` must not leave `TerminalSession::
+    // spawn` panicking or hanging - it must surface as a spawn error, having
+    // attempted the read-then-cleanup path. `/bin/true` stands in for the
+    // helper binary: it ignores every argument and exits almost instantly,
+    // so it never binds the IPC socket or writes a registry entry, which
+    // deliberately exercises the "helper never even wrote the file" edge
+    // (see `kill_verified_and_delete_entry`'s doc comment above for the
+    // sibling "kill a still-running orphan" edge). It also exits fast enough
+    // that nothing is left running afterward, so this test has no process to
+    // clean up.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_returns_an_error_and_cleans_up_when_the_helper_never_completes_the_handshake() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-spawn-handshake-timeout-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+
+        let result = TerminalSession::spawn(
+            Path::new("/bin/true"),
+            &registry_dir,
+            Duration::from_millis(80),
+            WorkRootId::from("fake-work-root".to_owned()),
+            std::env::temp_dir(),
+            "Handshake Timeout".to_owned(),
+            default_columns(),
+            default_rows(),
+            None,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(TerminalError::BadRequest(_))),
+            "a helper that never completes the handshake must surface as a spawn error, not a panic or a hang"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "no registry entry should be left behind for a helper that never wrote one"
+        );
+
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
     // CONTRACT (260723 Phase 1 binding item #2): the ticket's 6-row
     // boot-reconcile table's "never kill on unverified identity" rows must
     // be exercised end-to-end through the real async
@@ -1922,6 +2444,429 @@ mod terminal_portability_skeleton_tests {
 
         let _ = foreign.kill();
         let _ = foreign.wait();
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (260726 Phase 1 correctness review I3): `insert`'s lazy
+    // eviction is a second, independent code path from the periodic sweep's
+    // `sweep_evict_expired` - it must honor the exact same grace-authority
+    // gate (`admits_attach()`, never `!is_live()` alone) and must actually
+    // close the IPC connection of anything it does evict, not merely drop
+    // the `Arc` out of the map (which would silently defeat the periodic
+    // sweep too, since a session dropped here can never be found by it
+    // again).
+    #[tokio::test]
+    async fn insert_never_evicts_a_session_inside_its_attach_grace_and_closes_what_it_does_evict() {
+        use tokio::io::AsyncReadExt;
+
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            std::env::temp_dir().join(format!("ws-dashboard-insert-evict-{}", now_ms())),
+            Duration::from_millis(200),
+        );
+
+        let in_grace = Arc::new(fake_terminal_session().await);
+        {
+            let mut inner = in_grace.inner.lock().expect("terminal session lock poisoned");
+            inner.status = TerminalStatus::Exited;
+            inner.grace_until_ms = Some(now_ms() + 60_000);
+        }
+
+        // Built inline (not via `fake_terminal_session`) so the duplex
+        // peer half can be retained here and used to observe EOF - direct
+        // proof that `insert`'s lazy eviction actually closed the session's
+        // IPC connection, not merely dropped it out of the map.
+        let (mut peer, local) = tokio::io::duplex(4096);
+        let (_read_half, write_half) = crate::terminal_ipc_transport::split(
+            Box::new(local) as crate::terminal_ipc_transport::BoxedIpcStream
+        );
+        let grace_expired = Arc::new(TerminalSession {
+            id: opaque_terminal_id(),
+            work_root_id: WorkRootId::from("fake-work-root".to_owned()),
+            title: "fake".to_owned(),
+            cwd_hint: None,
+            created_at_ms: now_ms(),
+            pid: std::process::id(),
+            start_time: 0,
+            write_half: Arc::new(AsyncMutex::new(write_half)),
+            inner: Mutex::new(TerminalSessionInner {
+                status: TerminalStatus::Exited,
+                columns: default_columns(),
+                rows: default_rows(),
+                output: VecDeque::new(),
+                next_sequence: 1,
+                grace_until_ms: Some(0), // already elapsed
+            }),
+            output_signal: watch::channel(0).0,
+            reader_task: Mutex::new(None),
+        });
+
+        registry.insert_unchecked(in_grace.clone());
+        registry.insert_unchecked(grace_expired.clone());
+
+        let newcomer = Arc::new(fake_terminal_session().await);
+        registry
+            .insert(newcomer.clone())
+            .await
+            .expect("insert must succeed under the session cap");
+
+        assert!(
+            registry.get(&in_grace.id).is_some(),
+            "a session still inside its attach grace must survive an unrelated insert"
+        );
+        assert!(
+            registry.get(&grace_expired.id).is_none(),
+            "a session past its attach grace must be evicted by insert's own lazy path"
+        );
+        assert!(
+            registry.get(&newcomer.id).is_some(),
+            "the newly inserted session itself must land in the registry"
+        );
+
+        let mut buf = [0u8; 1];
+        let read = tokio::time::timeout(Duration::from_secs(1), peer.read(&mut buf))
+            .await
+            .expect("peer read must not hang")
+            .expect("peer read must not error");
+        assert_eq!(
+            read, 0,
+            "insert's lazy eviction must shut down the write half, observable as EOF on the peer"
+        );
+    }
+
+    // CONTRACT (260726 Phase 1 correctness review I1): `sweep_registry_
+    // backstop` must not SIGKILL the helper of a session `sweep_evict_
+    // expired` evicted in the SAME tick - the just-evicted id's `<id>.json`
+    // is, by construction, already old enough to look "orphaned" to the
+    // backstop's own age gate the instant it is checked, even though the
+    // helper's own graceful self-exit (triggered by the eviction step's
+    // `close_ipc_connection`) has had zero time to run yet.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sweep_once_never_kills_the_helper_of_a_session_it_just_evicted_in_the_same_tick() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-sweep-i1-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(50),
+        );
+
+        let mut real_process = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn real process to stand in for a still-running helper");
+        let pid = real_process.id();
+        let start_time = crate::terminal_platform::process_start_time(pid)
+            .expect("real process must report a start time");
+
+        let terminal_id = "term_sweep_i1".to_owned();
+        let entry = TerminalRegistryEntry {
+            terminal_id: terminal_id.clone(),
+            work_root_id: "root-sweep-i1".to_owned(),
+            pid,
+            start_time,
+            socket_path: registry_dir.join(format!("{terminal_id}.sock")),
+            // Old enough to already exceed connect_timeout + margin the
+            // instant the backstop checks it - exactly what makes the I1
+            // race dangerous without the fix.
+            created_at_ms: now_ms().saturating_sub(60_000),
+            title: "Sweep I1".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write orphan-shaped entry for the still-live session");
+
+        let mut session = fake_terminal_session().await;
+        session.id = terminal_id.clone();
+        {
+            let mut inner = session.inner.lock().expect("terminal session lock poisoned");
+            inner.status = TerminalStatus::Exited;
+            inner.grace_until_ms = Some(0); // already elapsed - eligible this tick
+        }
+        registry.insert_unchecked(Arc::new(session));
+
+        registry.sweep_once().await;
+
+        assert!(
+            real_process
+                .try_wait()
+                .expect("poll standing-in process")
+                .is_none(),
+            "the just-evicted session's helper must not be SIGKILLed in the same sweep tick"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir)
+                .iter()
+                .any(|found| found.terminal_id == terminal_id),
+            "the just-evicted session's registry entry must not be deleted by the same-tick backstop"
+        );
+        assert!(
+            registry.get(&terminal_id).is_none(),
+            "the session must still be evicted from the live map by sweep_evict_expired itself"
+        );
+
+        let _ = real_process.kill();
+        let _ = real_process.wait();
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (260726 Phase 1 test-partition finding #3): `sweep_registry_
+    // backstop`'s actual scan-and-dispatch logic (live-id exclusion,
+    // VerifiedOurs-vs-unverified dispatch) had no direct test - only its
+    // pure age-gate predicate did. This drives the real function end to end
+    // against a populated registry directory: a genuinely orphaned
+    // verified-identity entry must be killed and pruned, an entry whose
+    // identity does not verify must be pruned WITHOUT ever signaling
+    // anything, and an entry that still has a live in-memory session must be
+    // left completely untouched even though its `<id>.json` looks equally
+    // stale on disk.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sweep_registry_backstop_kills_verified_orphan_drops_unverified_and_skips_live_entries() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-sweep-backstop-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(50),
+        );
+        let stale_created_at_ms = now_ms().saturating_sub(60_000);
+
+        // (a) A genuine orphan: a real process, verified identity, no live
+        // session anywhere - must be killed and pruned.
+        let mut orphan_process = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn real process to stand in for a genuinely orphaned helper");
+        let orphan_pid = orphan_process.id();
+        let orphan_start_time = crate::terminal_platform::process_start_time(orphan_pid)
+            .expect("real process must report a start time");
+        let orphan_entry = TerminalRegistryEntry {
+            terminal_id: "term_backstop_orphan".to_owned(),
+            work_root_id: "root-backstop".to_owned(),
+            pid: orphan_pid,
+            start_time: orphan_start_time,
+            socket_path: registry_dir.join("term_backstop_orphan.sock"),
+            created_at_ms: stale_created_at_ms,
+            title: "Orphan".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &orphan_entry)
+            .expect("write orphan entry");
+
+        // (b) An unverified identity (no such process) - must be pruned
+        // without ever attempting a kill.
+        let unverified_entry = TerminalRegistryEntry {
+            terminal_id: "term_backstop_unverified".to_owned(),
+            work_root_id: "root-backstop".to_owned(),
+            pid: 0x7fff_fffe,
+            start_time: 123,
+            socket_path: registry_dir.join("term_backstop_unverified.sock"),
+            created_at_ms: stale_created_at_ms,
+            title: "Unverified".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &unverified_entry)
+            .expect("write unverified entry");
+
+        // (c) A stale-looking entry that DOES have a live in-memory session
+        // - must be skipped entirely (live-id exclusion), even though its
+        // age alone would otherwise make it eligible.
+        let mut live_session = fake_terminal_session().await;
+        live_session.id = "term_backstop_live".to_owned();
+        let live_session = Arc::new(live_session);
+        registry.insert_unchecked(live_session.clone());
+        let live_entry = TerminalRegistryEntry {
+            terminal_id: "term_backstop_live".to_owned(),
+            work_root_id: "root-backstop".to_owned(),
+            pid: orphan_pid,
+            start_time: orphan_start_time,
+            socket_path: registry_dir.join("term_backstop_live.sock"),
+            created_at_ms: stale_created_at_ms,
+            title: "Live".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &live_entry)
+            .expect("write live-session-shadowed entry");
+
+        registry.sweep_registry_backstop().await;
+
+        let mut exited = false;
+        for _ in 0..50 {
+            if orphan_process
+                .try_wait()
+                .expect("poll orphan process")
+                .is_some()
+            {
+                exited = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(exited, "a verified-identity orphan must actually be killed");
+
+        let remaining: std::collections::HashSet<String> = scan_registry_dir(&registry_dir)
+            .into_iter()
+            .map(|entry| entry.terminal_id)
+            .collect();
+        assert!(
+            !remaining.contains("term_backstop_orphan"),
+            "the killed orphan's registry entry must be pruned"
+        );
+        assert!(
+            !remaining.contains("term_backstop_unverified"),
+            "an unverified-identity entry must still be pruned"
+        );
+        assert!(
+            remaining.contains("term_backstop_live"),
+            "an entry with a live in-memory session must be left untouched by the backstop"
+        );
+
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (260726 Phase 1 test-partition finding #2): the only
+    // previously tested edges of `TerminalSession::spawn`'s handshake-
+    // failure cleanup were "helper never even wrote its registry file"
+    // (`/bin/true`, above) and the shared `kill_verified_and_delete_entry`
+    // helper called directly (bypassing `spawn` entirely). Neither drives
+    // the actual `Some(entry) =>` arm INSIDE `spawn` itself - a bug
+    // swapping `entry.pid`/`entry.start_time`, or the wrong `id`/
+    // `registry_dir` variable, would pass both. This uses a tiny POSIX
+    // shell script as `helper_binary` that deterministically reproduces the
+    // ticket's headline orphan scenario: it durably writes its OWN
+    // `<id>.json` registry entry (with its own real pid/start-time, read
+    // back from `/proc/self/stat` before writing anything) and a stand-in
+    // `.sock` file, then blocks forever without ever accepting a
+    // connection - so `connect_and_handshake` is guaranteed to exhaust
+    // `connect_timeout` and return `None`, driving `spawn`'s `Some(entry)`
+    // arm against the entry it actually reads back off disk. The script
+    // also drops its own pid/start-time into a side-channel file (outside
+    // `registry_dir`, so it survives the entry's deletion) so this test can
+    // independently confirm the real process was actually killed - proving
+    // `entry.pid`/`entry.start_time` were threaded through correctly rather
+    // than merely proving "no panic, files deleted".
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_kills_the_verified_orphan_when_the_helper_writes_its_entry_but_never_handshakes() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-spawn-some-entry-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let script_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-never-handshake-helper-{}-{}.sh",
+            std::process::id(),
+            now_ms()
+        ));
+        let identity_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-never-handshake-identity-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+
+        let script = format!(
+            r#"#!/bin/sh
+set -eu
+registry_dir=""
+terminal_id=""
+socket_path=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --registry-dir) registry_dir="$2"; shift 2 ;;
+    --terminal-id) terminal_id="$2"; shift 2 ;;
+    --socket-path) socket_path="$2"; shift 2 ;;
+    --*) shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$registry_dir"
+after_comm=$(sed 's/.*)//' /proc/$$/stat)
+start_time=$(printf '%s' "$after_comm" | awk '{{print $20}}')
+printf '%s %s' "$$" "$start_time" > {identity_path}
+cat > "$registry_dir/$terminal_id.json.tmp" <<JSON
+{{"terminalId":"$terminal_id","workRootId":"fake-work-root","pid":$$,"startTime":$start_time,"socketPath":"$socket_path","createdAtMs":0,"title":"never-handshakes","cwdHint":null,"columns":80,"rows":24}}
+JSON
+mv "$registry_dir/$terminal_id.json.tmp" "$registry_dir/$terminal_id.json"
+touch "$socket_path"
+exec sleep 30
+"#,
+            identity_path = identity_path.display(),
+        );
+        std::fs::write(&script_path, script).expect("write never-handshake helper script");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
+                .expect("make never-handshake helper script executable");
+        }
+
+        let result = TerminalSession::spawn(
+            &script_path,
+            &registry_dir,
+            Duration::from_millis(300),
+            WorkRootId::from("fake-work-root".to_owned()),
+            std::env::temp_dir(),
+            "Some Entry Orphan".to_owned(),
+            default_columns(),
+            default_rows(),
+            None,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(TerminalError::BadRequest(_))),
+            "a helper that wrote its entry but never handshaked must still surface as a spawn error"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "the Some(entry) arm must prune the registry entry it read back"
+        );
+
+        let identity =
+            std::fs::read_to_string(&identity_path).expect("read the script's identity side-channel");
+        let mut parts = identity.split_whitespace();
+        let script_pid: u32 = parts
+            .next()
+            .expect("identity file must contain a pid")
+            .parse()
+            .expect("identity pid must be numeric");
+        let script_start_time: u64 = parts
+            .next()
+            .expect("identity file must contain a start time")
+            .parse()
+            .expect("identity start time must be numeric");
+
+        let mut killed = false;
+        for _ in 0..50 {
+            if crate::terminal_platform::process_start_time(script_pid) != Some(script_start_time) {
+                killed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            killed,
+            "spawn's Some(entry) arm must actually kill the real orphaned process, proving \
+             entry.pid/entry.start_time were threaded through correctly"
+        );
+
+        let _ = std::fs::remove_file(&script_path);
+        let _ = std::fs::remove_file(&identity_path);
         let _ = std::fs::remove_dir_all(&registry_dir);
     }
 }

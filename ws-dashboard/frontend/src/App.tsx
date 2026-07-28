@@ -359,6 +359,7 @@ import {
   TerminalPrefsContext,
   type TerminalStylePrefs,
 } from "./terminalPrefs";
+import { reregisterDownloadedFonts } from "./downloadableFonts";
 import {
   SETTINGS_SECTIONS,
   SettingsTerminalContext,
@@ -479,6 +480,14 @@ export function App() {
   const [terminalPrefs, setTerminalPrefs] = useState<TerminalStylePrefs>(() =>
     loadTerminalStylePrefs(),
   );
+  // One-time boot reconciliation: `document.fonts` state doesn't survive a
+  // page reload, so any downloadable webfont the owner previously fetched
+  // (see `downloadableFonts.ts`) needs re-registering here so a terminal
+  // opened later in the session can actually use it. Best-effort/fire-and-
+  // forget - failures are swallowed inside `reregisterDownloadedFonts` itself.
+  useEffect(() => {
+    void reregisterDownloadedFonts();
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -3711,6 +3720,21 @@ function WorkbenchShell({
   >(null);
   const focusedTerminalPaneIdRef = useRef<string | null>(null);
   focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
+  // Per-workRoot "last focused pane" (terminal or agent-chat), keyed by
+  // `serverScopedIdentity`-style root key. Unlike `focusedTerminalPaneId`/
+  // `focusedAgentChatPaneId` above (global, single "currently focused pane"
+  // trackers shared across every open root), this remembers one entry PER
+  // root so switching the active root can restore focus to whichever pane
+  // the user was last typing into within that specific root - see the
+  // `shouldAutoFocus` actions below and their consumers in
+  // `terminalPaneBody.tsx`/`agentChatPaneBody.tsx`. A plain ref (not state):
+  // it only needs to be read at focus-decision time inside those actions,
+  // never to trigger a re-render on its own. Never pruned on pane close - a
+  // stale entry simply never matches any currently-rendered pane's id, so it
+  // is harmless dead weight rather than a correctness hazard.
+  const lastFocusedPaneByRootRef = useRef<
+    Record<string, { surface: "terminal" | "agentChat"; paneId: string }>
+  >({});
   // Selected-workRoot named-agent activity for the compact top-bar badge.
   // Keep the owning root id beside the fetch state so a root switch never
   // renders the previous root's activity for a frame before the effect resets.
@@ -4318,9 +4342,25 @@ function WorkbenchShell({
           onVisibilityGated: updateTerminalPaneVisibilityGated,
           onSocketMessage: applyTerminalSocketMessage,
           onSocketResize: acceptTerminalSocketResize,
-          onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
+          onFocusInput: (pane) => {
+            setFocusedTerminalPaneId(pane.paneId);
+            lastFocusedPaneByRootRef.current[rootKey] = {
+              surface: "terminal",
+              paneId: pane.paneId,
+            };
+          },
           isActivePane: (pane) =>
             focusedTerminalPaneIdRef.current === pane.paneId,
+          // Root-switch auto-focus (see `lastFocusedPaneByRootRef` above):
+          // true only for the one pane that was last focused within THIS
+          // root, and only once this root is actually the selected one -
+          // never for a background/keep-alive root's own
+          // `buildEditorGroupsForRoot` call.
+          shouldAutoFocus: (pane) =>
+            rootKey === selectedWorkRootStateKey &&
+            lastFocusedPaneByRootRef.current[rootKey]?.surface ===
+              "terminal" &&
+            lastFocusedPaneByRootRef.current[rootKey]?.paneId === pane.paneId,
           onVisualRestoreEntryFor: (pane) =>
             terminalVisualRestoreRef.current[pane.logicalKey],
           getPendingNextSequence: pendingNextSequenceFor,
@@ -4352,6 +4392,23 @@ function WorkbenchShell({
           onResumeFromBubble: () => undefined,
           onReconcileTranscript: reconcileAgentChatTranscript,
           isActivePane: (pane) => focusedAgentChatPaneId === pane.paneId,
+          // Analogous to the terminal `onFocusInput`/`shouldAutoFocus` pair
+          // above - no native "focusin" tracking existed for agent-chat
+          // panes before this, only tab-activation-driven
+          // `setFocusedAgentChatPaneId` calls elsewhere. Wired to the prompt
+          // input's `onFocus` in `agentChatPaneBody.tsx`.
+          onFocusInput: (pane) => {
+            setFocusedAgentChatPaneId(pane.paneId);
+            lastFocusedPaneByRootRef.current[rootKey] = {
+              surface: "agentChat",
+              paneId: pane.paneId,
+            };
+          },
+          shouldAutoFocus: (pane) =>
+            rootKey === selectedWorkRootStateKey &&
+            lastFocusedPaneByRootRef.current[rootKey]?.surface ===
+              "agentChat" &&
+            lastFocusedPaneByRootRef.current[rootKey]?.paneId === pane.paneId,
         },
         closedAgentPaneByRoot[root.id] ?? [],
         isSelectedRoot ? activityPaneOpenByRoot[rootKey] ?? false : false,
