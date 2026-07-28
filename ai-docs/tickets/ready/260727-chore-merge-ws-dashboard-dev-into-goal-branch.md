@@ -948,6 +948,53 @@ diff-against-either-parent unreadable for the one property it needs to have.
 Verification boundary: the file count and the row count agree, every new row
 points at a file that exists, and no existing row moved.
 
+### Result (7af26617) - 2026-07-28
+
+**The phase's own stated numbers had gone stale inside the ticket that exists
+to catch exactly that.** The plan text above says 128 files / 107 rows / 21
+missing. The real gap, measured on this branch at execution time, is **131
+files / 108 rows / 23 missing** - the plan text predates Phase 2's merge and
+the tickets Phases 2 and 3 filed afterward. Three independent measurements
+(lead, survey planner, implementer) agreed on 131/108/23, so this is not a
+counting slip on one side; the plan simply aged after it was written.
+
+**Delta.** 23 rows added to the `## Tickets` table in `ai-docs/_index.md`: 1
+`ready`, 10 `todo`, 12 `idea`. No existing row edited, moved, or removed.
+
+**Verification evidence.** File count under `ready/`+`todo/`+`idea/` (131) =
+data-row count (131). Stem-set equality confirmed both directions: `diff`
+between the file-stem list and the table-stem list exits 0, both lists 131
+lines. The commit diff is 23 insertions / 0 deletions with `ai-docs/_index.md`
+the only file touched - which is what proves "no existing row moved"
+mechanically rather than by eyeball. All four boundary conditions from the
+phase plan hold.
+
+**Two findings the survey had to derive, now captured in
+`ai-docs/mental-model/documentation-system.md`'s Extension Points section so a
+later refresh does not re-derive them.** (1) The Summary column has no
+frontmatter source other than `title` - no `description`/`summary` field
+exists anywhere in this ticket system, so the column is authored, not copied.
+(2) The status-grouped, stem-ascending ordering rule holds for 106 of the 108
+pre-Phase-4 rows; two historical `ready` rows sit outside their block and were
+deliberately left in place, because re-sorting to make the rule clean would
+break the phase's own verification boundary ("no existing row moved") to
+satisfy an aesthetic.
+
+**Review: clean, 5 Minor, none actioned.** All five share one shape - the
+summary content is accurate and uncontradicted, but the sourced detail came
+from a ticket's `## Decisions` section where the plan's rule named only
+`## Background`/`## Scope`, or (one case) a sentence-shaped title was expanded
+rather than copied near-verbatim. Disposition: accepted as-is. The real
+finding is that the plan's sourcing rule was drawn too narrowly - `## Decisions`
+is a legitimate source - so the rule was widened in the mental-model bullet
+above rather than rewriting five accurate rows to satisfy a technicality.
+
+**Restraint worth recording.** `260725-feat-ws-dashboard-git-review-comments`
+got no "UI 3" label. Its two sibling tickets carry `(UI 1)` and `(UI 2)` lifted
+verbatim from their own titles and the epic's `## Phases`, but no UI number for
+this one exists in either the ticket or the epic - inventing one would have had
+the index assert a classification no source makes.
+
 ### Phase 5: route the inherited spec debt to its owning ticket
 
 `## Spec Impact` item 3 declines to document the Advanced section and the three
