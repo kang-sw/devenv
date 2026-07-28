@@ -2490,9 +2490,10 @@ change, wire-shaped as
 where `state` is one of `working` / `ready` / `idle` — the same three-value
 vocabulary the daemon's per-terminal turn-state callback route accepts, not a
 parallel enum. A terminal's attention entry is removed from the snapshot the
-moment its underlying terminal session closes (explicit close or owning
-workRoot/workspace removal), so a reconnect never reports state for a
-terminal that no longer exists.
+moment its underlying terminal session closes (explicit close, owning
+workRoot/workspace removal, or a kill-all sweep that tears down every
+terminal at once), so a reconnect never reports state for a terminal that no
+longer exists.
 
 If the stream falls behind its buffered event backlog, the daemon ends the
 SSE response rather than silently skipping forward: attention state is not
