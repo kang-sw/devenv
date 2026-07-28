@@ -28,25 +28,46 @@ tracing-appender.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true
 sha2.workspace = true
-# CONTRACT (260727 Phase 2, merge companion - macOS backend selection):
-# `macos_fsevent` is notify 8's ONLY default feature, so the inherited
-# `default-features = false` bought nothing on Linux/Windows and did not build
-# at all on macOS: notify gates its fsevent module on
-# `not(feature = "macos_kqueue")` rather than on `macos_fsevent`, so dropping
-# default features removes the `fsevent-sys` crate while still compiling the
-# module that imports it (E0432 on `use fsevent_sys`). A feature had to be
-# named; `macos_kqueue` is named on evidence, not taste. Measured on this
-# worktree with everything else identical: `--test git_watch` is 11/11 with
-# `macos_kqueue` and 6/11 with `macos_fsevent`, the five reds all being
-# "epoch must bump within 5s" timeouts. `work_root_watch.rs` registers
-# per-directory watches and expects per-directory events; kqueue delivers
-# those, FSEvents' coalesced recursive stream does not. This selection is
-# macOS-only - `cfg`-wise inert on Linux/Windows, which keep inotify and
-# ReadDirectoryChangesW. Known cost NOT addressed here: kqueue holds one file
-# descriptor per watched directory, and the process-budget guard next to this
-# watcher (`linux_inotify_process_budget`) is Linux-only, so a large-repo fd
-# ceiling on macOS is unguarded and wants its own ticket.
-notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
+# CONTRACT (260727 Phase 2 + review fix - macOS backend selection):
+# WHY A FEATURE MUST BE NAMED AT ALL. `macos_fsevent` is notify 8's ONLY
+# default feature, so the inherited `default-features = false` bought nothing
+# on Linux/Windows and did not build at all on macOS: notify gates its fsevent
+# module on `not(feature = "macos_kqueue")` rather than on `macos_fsevent`
+# (`notify-8.2.0/src/lib.rs:204`), so dropping default features removes the
+# `fsevent-sys` crate while still compiling the module that imports it (E0432
+# on `use fsevent_sys`). Naming a feature is therefore a build requirement,
+# not a taste call.
+#
+# WHY `macos_fsevent` AND NOT `macos_kqueue`. Naming notify's own default is
+# the MINIMUM change that makes dev's `default-features = false` intent build:
+# it restores exactly the backend notify would have picked, and adds no
+# behavior of its own. Both measurements, recorded so the decision is not
+# re-litigated from one number:
+#   - `macos_kqueue`: `--test git_watch` 11/11 on this worktree's tiny fixture
+#     repos. But notify's kqueue backend has no recursive kernel primitive - it
+#     emulates one by WalkDir'ing the whole subtree and opening a watch on
+#     EVERY ENTRY, files included, with no ignore filter
+#     (`notify-8.2.0/src/kqueue.rs:295-316`), and each watch costs one fd
+#     (`kqueue-1.2.0/src/watcher.rs:93`). Per-ENTRY, not per-directory. This
+#     worktree has ~154k entries; `launchctl limit maxfiles` here reports a 256
+#     soft limit. `work_root_watch.rs`'s `max_dirs` cap and its computed
+#     `IgnoreSet` are both Linux-only (the ignore set is never threaded into
+#     `do_arm_recursive`), so nothing bounds it, and a mid-WalkDir failure
+#     leaks the partial fd set. fd exhaustion is process-global: it would
+#     starve HTTP accept and helper sockets, not just the watcher.
+#   - `macos_fsevent`: `--test git_watch` 6/11, the five reds all "must bump
+#     within 5s" timeouts, and no fd cost (one FSEvents stream per root).
+#     `work_root_watch.rs` expects per-directory events; FSEvents' coalesced
+#     recursive stream does not deliver them.
+# So kqueue's green suite is a fixture-scale artifact that hides a real-repo fd
+# hazard, while fsevent's reds are a real, visible, inherited dev-side macOS
+# condition. We take the visible reds.
+#
+# This selection is macOS-only - `cfg`-wise inert on Linux/Windows, which keep
+# inotify and ReadDirectoryChangesW. The backend choice is NOT settled here;
+# `260728-bug-dashboard-macos-kqueue-fd-ceiling-unguarded` carries both
+# measurements and owns the decision.
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

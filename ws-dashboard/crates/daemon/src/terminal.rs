@@ -720,6 +720,12 @@ impl TerminalRegistry {
     // `terminate()` each. Backs the "kill all terminals" teardown - a detached
     // helper keeps running orphaned unless explicitly killed, so the map drain
     // alone is not enough.
+    // PARITY BROKEN (260727 Phase 2): the "same as `remove_for_work_roots`"
+    // clause above described the dev branch, where neither function discharged
+    // anything. This merge brought our `remove_for_work_roots`, which now
+    // forgets BOTH the callback token and the attention entry, while
+    // `drain_all` still forgets neither - so the two are no longer parallel.
+    // Phase 3 owns closing that gap; do not fix it here.
     pub fn drain_all(&self) -> Vec<Arc<TerminalSession>> {
         let mut sessions = self
             .sessions
