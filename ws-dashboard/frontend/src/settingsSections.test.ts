@@ -1,4 +1,5 @@
 import {
+  AdvancedSection,
   NotificationSection,
   notificationAvailability,
   SETTINGS_SECTIONS,
@@ -30,8 +31,8 @@ assertEqual(
 
 assertEqual(
   SETTINGS_SECTIONS.length,
-  2,
-  "Phase 8 grows the registry to Terminal + Notifications",
+  3,
+  "the ws-dashboard-dev merge grows the registry to Terminal + Notifications + Advanced",
 );
 
 const terminalDescriptor = SETTINGS_SECTIONS[0];
@@ -124,6 +125,44 @@ assertEqual(
   typeof SettingsNotificationContext,
   "object",
   "SettingsNotificationContext is a React context object",
+);
+
+// --- Advanced section registry (ws-dashboard-dev merge) ---------------------
+//
+// Mirrors the Notifications block above. `AdvancedSection` carries no settings
+// context of its own (it reads build info over HTTP and owns its own state), so
+// there is no context-object assertion here - the other four hold identically.
+
+const advancedDescriptor = SETTINGS_SECTIONS[2];
+
+assertEqual(
+  advancedDescriptor.id,
+  "advanced",
+  "the Advanced descriptor's id is stable",
+);
+
+assertEqual(
+  advancedDescriptor.title,
+  "Advanced",
+  "the Advanced descriptor's title is stable",
+);
+
+assertEqual(
+  advancedDescriptor.Component === AdvancedSection,
+  true,
+  "the registry Component is the stable module-scope AdvancedSection reference",
+);
+
+assertEqual(
+  typeof advancedDescriptor.Component,
+  "function",
+  "the registry Component is a renderable function component",
+);
+
+assertEqual(
+  AdvancedSection.length,
+  0,
+  "AdvancedSection takes no props - it fetches build info and owns its own state",
 );
 
 // --- Notification availability, all four states -----------------------------

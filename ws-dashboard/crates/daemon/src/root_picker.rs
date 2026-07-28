@@ -219,9 +219,14 @@ pub async fn open_work_root(
 ) -> Response {
     let requested_path = PathBuf::from(request.path);
     let requested_path = PathBuf::from(normalize_display_path(&requested_path));
+    // The spawn counters must be the shared `AppState` handle, not the
+    // provider's private throwaway: this route's discovery probes
+    // (`GitDiscovery::probe`, `probe_git_worktree_paths`) are production git
+    // spawns that `GET /api/dashboard/diag/git` claims to cover.
     let provider = LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(
         requested_path.clone(),
-    )]);
+    )])
+    .with_git_spawn_stats(state.git_spawn_stats.clone());
     // Discovery runs synchronous filesystem and `git` subprocess work, so
     // keep it off the async worker threads.
     let view = tokio::task::spawn_blocking(move || provider.dashboard_resources())

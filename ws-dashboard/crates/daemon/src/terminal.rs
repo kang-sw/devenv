@@ -714,6 +714,19 @@ impl TerminalRegistry {
         }
         removed
     }
+
+    // CONTRACT (same kill obligation as `remove_for_work_roots`): drains the
+    // ENTIRE registry and returns every removed session so the caller can
+    // `terminate()` each. Backs the "kill all terminals" teardown - a detached
+    // helper keeps running orphaned unless explicitly killed, so the map drain
+    // alone is not enough.
+    pub fn drain_all(&self) -> Vec<Arc<TerminalSession>> {
+        let mut sessions = self
+            .sessions
+            .write()
+            .expect("terminal registry lock poisoned");
+        sessions.drain().map(|(_, session)| session).collect()
+    }
 }
 
 fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
@@ -1511,6 +1524,22 @@ fn resolve_create_command(
     // travel yet (Phase 4 owns the callback token and is explicitly barred
     // from `--env-overlay` regardless of this seam).
     Ok((command, Vec::new(), Some(profile.scrub), profile.hook_config))
+}
+
+/// Tears down every terminal on this daemon, helper processes included: drains
+/// the whole registry and `terminate()`s each session (graceful IPC shutdown +
+/// verified-PID kill, which also collapses each helper's kill-on-close job and
+/// its child shell). This is the deliberate, UI-native counterpart to a blanket
+/// `taskkill /IM` - unlike a daemon shutdown, it does NOT preserve terminals.
+/// Global teardown, so it bypasses the per-terminal work-root access check that
+/// `close_terminal` applies. Returns the number of terminals closed.
+pub async fn close_all_terminals(State(state): State<AppState>) -> Response {
+    let sessions = state.terminals.drain_all();
+    let closed = sessions.len();
+    for session in sessions {
+        session.terminate().await;
+    }
+    Json(serde_json::json!({ "closed": closed })).into_response()
 }
 
 impl TerminalSession {
@@ -2399,28 +2428,33 @@ mod terminal_portability_skeleton_tests {
     // retain the "FIFTH session-removal path" (that phrasing counts
     // session-REMOVAL paths, not write-lock call sites; do not conflate the
     // two when grepping "FIFTH" - they are different numberings for
-    // different questions). Today's four sites and each one's discharge
+    // different questions). Today's five sites and each one's discharge
     // status: `insert_unchecked` (adds only, owes nothing to tokens or
     // attention), `insert`'s own eviction `retain` (discharges attention
     // only - the callback-token half of that same gap is deferred debt,
     // tracked separately from this phase), `remove` and
-    // `remove_for_work_roots` (both discharge token AND attention in full).
-    // Phase 2 adds `drain_all`, moving this count to 5 (with its own
-    // "discharges neither" line); Phase 3 rewrites that line to "discharges
-    // both" once its fix lands - neither change belongs to this phase.
+    // `remove_for_work_roots` (both discharge token AND attention in full),
+    // and `drain_all` (260727 Phase 2, arrived with the ws-dashboard-dev
+    // merge: it takes the write lock and empties the whole map, yet
+    // discharges NEITHER obligation - it neither `forget_token`s nor
+    // `attention.forget`s any of the sessions it drops, so every drained
+    // terminal leaks both its callback token and its attention entry).
+    // That "discharges neither" state is knowingly landed here and is
+    // Phase 3's to fix; Phase 3 rewrites this line to "discharges both"
+    // once it does - the fix does not belong to this phase.
     #[test]
     fn sessions_write_lock_sites_are_enumerated() {
         let count = flattened(&production_text())
             .matches("self.sessions.write()")
             .count();
         assert_eq!(
-            count, 4,
-            "expected exactly 4 textual occurrences of `self.sessions.write()` \
+            count, 5,
+            "expected exactly 5 textual occurrences of `self.sessions.write()` \
              (one per write-lock call site: insert_unchecked, insert, remove, \
-             remove_for_work_roots); found {count} - if a write-lock call site \
-             was added, removed, or its discharge behavior changed, update both \
-             the enumerating CONTRACT comment above and this expected count \
-             together"
+             remove_for_work_roots, drain_all); found {count} - if a write-lock \
+             call site was added, removed, or its discharge behavior changed, \
+             update both the enumerating CONTRACT comment above and this \
+             expected count together"
         );
     }
 

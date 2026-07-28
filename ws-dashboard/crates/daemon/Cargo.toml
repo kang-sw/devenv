@@ -28,6 +28,25 @@ tracing-appender.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true
 sha2.workspace = true
+# CONTRACT (260727 Phase 2, merge companion - macOS backend selection):
+# `macos_fsevent` is notify 8's ONLY default feature, so the inherited
+# `default-features = false` bought nothing on Linux/Windows and did not build
+# at all on macOS: notify gates its fsevent module on
+# `not(feature = "macos_kqueue")` rather than on `macos_fsevent`, so dropping
+# default features removes the `fsevent-sys` crate while still compiling the
+# module that imports it (E0432 on `use fsevent_sys`). A feature had to be
+# named; `macos_kqueue` is named on evidence, not taste. Measured on this
+# worktree with everything else identical: `--test git_watch` is 11/11 with
+# `macos_kqueue` and 6/11 with `macos_fsevent`, the five reds all being
+# "epoch must bump within 5s" timeouts. `work_root_watch.rs` registers
+# per-directory watches and expects per-directory events; kqueue delivers
+# those, FSEvents' coalesced recursive stream does not. This selection is
+# macOS-only - `cfg`-wise inert on Linux/Windows, which keep inotify and
+# ReadDirectoryChangesW. Known cost NOT addressed here: kqueue holds one file
+# descriptor per watched directory, and the process-budget guard next to this
+# watcher (`linux_inotify_process_budget`) is Linux-only, so a large-repo fd
+# ceiling on macOS is unguarded and wants its own ticket.
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -36,8 +55,10 @@ libc = "0.2"
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
 ] }
 
 [dev-dependencies]

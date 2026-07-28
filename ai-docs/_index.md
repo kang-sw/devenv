@@ -386,6 +386,33 @@ dropped tickets live in hidden archive dirs and git history.
   and not to be assumed: the full `npm run test:browser` suite was NOT re-run at
   Phase 2's tip.
 
+- `260725-feat-dashboard-terminal-steady-state-stream-throughput` (ready, feat)
+  — open-state terminal streaming throughput: four independent,
+  behavior-preserving per-output-chunk fixes remaining after the `260723`
+  batch — Phase 1 xterm WebGL renderer (canvas/DOM fallback), Phase 2 port the
+  daemon O(1) `output_after` to the helper ring, Phase 3 batched Output frame
+  (array of chunks) across both IPC hops, Phase 4 debounce the per-chunk
+  `refocusActiveTerminal`. Deliberately scoped away from a retention/replay
+  redesign (would collide with the gapless-contiguous sequence invariant and
+  xterm-owned scrollback). Phase 1 shipped live as a hotfix; Phases 2–4 open.
+  Spec addressing via `## Spec Impact`
+  (`#260516-ws-web-dashboard-terminal-io-transport`, Contract-first: no). Sage
+  combined = passed.
+
+- `260726-refactor-ws-dashboard-git-fs-watch-invalidation` — **done, closed
+  2026-07-26** (`ai-docs/tickets/.done/`). All four phases landed: git-exec
+  seam (`0c48065a`), per-root git context (`3b66441d`), `GitStateCache` with
+  a real `EpochSource` (`b8e4f89b`), and the `notify`-backed watcher arming
+  real epochs on every platform (`fcb69d9b`). Interval-driven git polling is
+  replaced by FS-watch-driven epoch invalidation behind cached
+  `/git/status`/`/git/branches`, with a 120 s-armed/2 s-degraded TTL as the
+  missed-event safety net. See the ticket's own `### Result` sections for
+  full per-phase detail. Follow-ups split out:
+  `260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps`
+  (idea), `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam`
+  (todo), `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots`
+  (idea).
+
 **Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
 `260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
 ticket closed (`ai-docs/tickets/.done/`) — the daemon builds and

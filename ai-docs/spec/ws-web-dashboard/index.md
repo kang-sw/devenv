@@ -718,6 +718,21 @@ Git toolbar routes remain owner-authenticated,
 address workRoots by opaque `workRootId`, keep Git work off async workers, and
 avoid exposing host paths in command logs or bounded browser-visible errors.
 
+Behind that poll, Git status/branch freshness is change-triggered with a TTL
+ceiling rather than recomputed on every tick: a per-repo `notify` filesystem
+watcher, armed when the repo's mount supports it, invalidates the cached
+answer as soon as a relevant file changes, so the poll only re-reads when
+something actually moved. The TTL is the ceiling on how stale a read can be
+when no watcher event arrived: 120 s while the watcher is armed, 2 s when it
+is degraded (unsupported mount, over the per-process directory-watch budget)
+or unarmed. Watcher unavailability degrades freshness, never correctness — a
+degraded repo still answers from the same lock-free poll path, just on the
+tighter TTL. User-initiated mutations (branch switch/create, fetch, push,
+pull, worktree add/remove) are never TTL-delayed: they invalidate the cached
+answer directly, independent of whether a watcher event has arrived. Watcher
+health, and each repo's current worktree/refs invalidation counters, are
+visible at [`GET /api/dashboard/diag/git`](#260726-dashboard-git-invocation-budget-and-spawn-diagnostics).
+
 Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots
 with offline activation return a bounded offline response. Online workRoots
@@ -736,7 +751,135 @@ the sole correctness mechanism: explicit refresh remains deterministic, polling
 does not become browser-side resource authority, overlapping refresh requests
 are suppressed, stale poll results do not overwrite newer open or activation
 resource views, and refresh failures keep the last known resource tree visible.
-Filesystem watchers, if added later, act only as refresh hints.
+The per-repo filesystem watchers described above act only as an invalidation
+hint for the Git status/branch cache; they do not replace this canonical
+resource refresh as the source of workRoot availability, and a watcher outage
+degrades cache freshness, not availability correctness.
+
+An *unavailable* Git workRoot (known to the registry, but its Git probe
+currently fails) answers Git toolbar routes with `409 workRoot unavailable`.
+An *unknown* workRoot id (not present in the registry at all — for example
+after the canonical resource refresh has pruned it) answers with
+`404 unknown workRoot`. The two are deliberately distinct: unavailable is a
+transient, retryable read against a workRoot the caller may still recover,
+while unknown means the id no longer resolves to anything and the caller must
+re-open the workRoot by path.
+
+## Git Invocation Budget And Spawn Diagnostics {#260726-dashboard-git-invocation-budget-and-spawn-diagnostics}
+
+Every Git invocation the daemon makes for toolbar state, resource discovery, and
+Activity projection runs under a wall-clock budget. On expiry the child is
+terminated and the call reports failure, so a wedged or slow Git invocation
+surfaces as a bounded error instead of an indefinitely pending request.
+`WS_DASHBOARD_GIT_TIMEOUT_MS` sets the budget (default `10000`); `0` disables
+bounding entirely and restores unbounded waiting. The sibling
+`WS_DASHBOARD_GIT_PROBE_TTL_MS` (default `30000`, `0` disables) memoizes
+discovery probes and is unrelated to the budget.
+
+The bound covers waiting, not termination itself: a child wedged in
+uninterruptible I/O — for example against a disconnected network mount — cannot
+be terminated or reaped, so the budget bounds every case except an unkillable
+child.
+
+A Git invocation that finishes while its output remains incomplete still reports
+its real exit status, because the command's success or failure is independent of
+whether the daemon could read all of its output. Output can remain incomplete
+when a descendant process the command started keeps the inherited output
+channels open. Callers that only need the exit status — branch switch, branch
+create, fetch, push, pull — succeed normally in that case. Callers that parse
+output instead treat incomplete output as a failure, so a partial read is never
+consumed as a complete answer.
+
+Routinely non-zero Git exits are not reported as daemon faults: a branch with no
+configured upstream, an unborn `HEAD`, a directory that is not a repository, and
+a branch-existence check for a branch that does not exist are all expected
+answers rather than errors. Unexpected failures, spawn failures, and budget
+expiries are logged with the subcommand, exit code, bounded stderr, and elapsed
+time; host paths are not exposed.
+
+`GET /api/dashboard/diag/git` is owner-authenticated and reports cumulative
+counters for the current daemon process, plus one entry per repo the
+filesystem watcher currently knows about:
+
+```json
+{
+  "totalSpawns": 0, "timeouts": 0, "failures": 0, "bySubcommand": {}, "uptimeMs": 0,
+  "repos": [
+    {
+      "key": "/abs/path/to/repo",
+      "health": "armed",
+      "reason": null,
+      "worktreeEpoch": 0,
+      "refsEpoch": 0,
+      "lastEventMs": null,
+      "registeredWatches": 0
+    }
+  ]
+}
+```
+
+`health` is one of `armed`, `degraded`, or `unarmed`; `reason` is set only for
+`degraded` (for example an over-budget directory count or an unsupported
+mount) and is otherwise `null`. `worktreeEpoch`/`refsEpoch` are the cache
+invalidation counters described above — a caller comparing two reads a known
+interval apart can tell whether either axis changed, and `registeredWatches`
+is a rough sizing signal, not a correctness guarantee. This array reports
+watcher state, not Git spawn activity, so a pane that only re-renders from
+already-armed watcher events (no new poll ticks) does not grow `totalSpawns`.
+
+`failures` already includes `timeouts`, so a consumer must not add them. The
+counters cover Git invocations that go through the shared execution path — the
+toolbar, discovery, and Activity projection paths above — and do not include the
+worktree add and remove flows, which invoke Git directly. Two reads taken a
+known interval apart yield the daemon's Git invocation rate, which is the
+intended use.
+
+## Shared Git Probe Memo And Per-WorkRoot Git Context {#260726-dashboard-shared-git-probe-memo-and-per-root-git-context}
+
+One memoized Git probe per work root answers three questions for every consumer:
+whether the directory is a Git work tree, whether it is a primary root or a
+linked worktree, and which canonical worktree and common root the WorkRoot
+Activity projection reads its per-project state under. Resource discovery, the
+Git toolbar routes, and the Activity projection share that one answer, so
+whichever of them runs first pays for it and the others read it for free until
+it expires. `WS_DASHBOARD_GIT_PROBE_TTL_MS` (default `30000`) bounds how long the
+answer is reused.
+
+Two consequences follow from sharing, and both are intended:
+
+- A directory that becomes a repository — or a repository whose topology changes
+  — is reflected in the toolbar, the sidebar classification, and the Activity
+  pane **together**, within the memo's lifetime rather than immediately. The
+  three surfaces cannot disagree about whether a work root is a repository.
+- A probe that fails to answer at all, such as one that exceeds the Git
+  invocation budget, is remembered as "not a repository" for the same lifetime.
+  A work root whose Git probe times out therefore reads as non-Git, and its
+  Activity pane as empty, until the memo expires. This is bounded and
+  self-healing, and it replaces re-running a full-budget Git invocation on every
+  poll tick.
+
+Resolving a single work root's Git context reads the registry and the
+filesystem directly rather than enumerating every known work root, so the cost
+of answering a Git toolbar request does not grow with the number of open work
+roots. The Git toolbar routes are pure reads with respect to the registry: they
+no longer register newly discovered linked worktrees as a side effect. Newly
+created linked worktrees still appear through the canonical resource endpoint's
+polling refresh, and immediately after a dashboard-initiated worktree add.
+
+An online work root whose directory has become unreadable answers the Git
+toolbar routes with the bounded unavailable response described under
+[Git-Aware WorkRoot Toolbar](#260524-ws-dashboard-git-aware-workroot-toolbar).
+That response is what the caller observes only until the next canonical resource
+refresh: that refresh removes work roots it can no longer see from the registry,
+after which the same id is no longer known and the routes answer not-found
+instead. Both answers are bounded and path-free; a caller must not treat either
+one as a durable classification of the same work root.
+
+> [!note] Implementation Gap · 2026-07-26
+> Missing behavior: the registry removal above discards a work root the user
+> explicitly opened, on the strength of one failed availability read, with no
+> affordance to recover it. Recovering the work root currently requires opening
+> it again by path.
 
 ## Worktree Removal Confirmation And Hide UX {#260722-ws-dashboard-worktree-removal-hide-ux}
 

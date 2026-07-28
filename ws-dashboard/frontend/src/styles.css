@@ -2699,19 +2699,40 @@ button {
 }
 
 .server-nav-toolbar {
-  display: grid;
+  display: flex;
   flex: 0 0 auto;
   min-height: 30px;
-  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--ws-space-03);
+  gap: var(--ws-space-04);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
   background: var(--ws-color-surface-nav-header);
-  padding: var(--ws-space-02) var(--ws-space-05) var(--ws-space-02)
-    var(--ws-space-07);
+  padding: var(--ws-space-02) var(--ws-space-05);
+}
+
+/* Settings gear repurposed as a top-left square brand/logo affordance. Filled
+   accent square so it reads as a distinct anchor rather than one more toolbar
+   icon; the glyph is a placeholder until a real logo replaces it. */
+.nav-brand-button.icon-button {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  border-color: transparent;
+  background: var(--ws-color-action);
+  color: #fff;
+}
+
+.nav-brand-button.icon-button:hover:not(:disabled),
+.nav-brand-button.icon-button:focus-visible {
+  background: var(--ws-color-action);
+  border-color: transparent;
+  color: #fff;
+  filter: brightness(1.12);
 }
 
 .server-nav-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--ws-color-text-secondary);
@@ -3925,6 +3946,116 @@ button {
   color: var(--ws-color-text-tertiary);
   font-size: var(--ws-font-size-01);
   margin: 0;
+}
+
+/* Advanced settings section: build provenance + danger zone. */
+.settings-advanced {
+  display: grid;
+  gap: var(--ws-space-08);
+  max-width: 420px;
+}
+
+.settings-buildinfo {
+  display: grid;
+  gap: var(--ws-space-03);
+  margin: 0;
+}
+
+.settings-buildinfo-row {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: var(--ws-space-04);
+  align-items: baseline;
+}
+
+.settings-buildinfo-row dt {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+}
+
+.settings-buildinfo-row dd {
+  margin: 0;
+  color: var(--ws-color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-advanced-danger {
+  display: grid;
+  gap: var(--ws-space-04);
+  padding: var(--ws-space-05);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-status-danger, #c0392b);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ws-color-status-danger, #c0392b) 8%, transparent);
+}
+
+.settings-advanced-danger-row {
+  display: flex;
+  gap: var(--ws-space-05);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-advanced-danger-copy {
+  display: grid;
+  gap: var(--ws-space-01);
+  min-width: 0;
+}
+
+.settings-advanced-danger-copy strong {
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-02);
+}
+
+.settings-advanced-muted {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+}
+
+.settings-advanced-status {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+}
+
+.settings-danger-button {
+  flex: 0 0 auto;
+  padding: var(--ws-space-02) var(--ws-space-05);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-status-danger, #c0392b);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-color-status-danger, #c0392b);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-danger-button:hover {
+  background: color-mix(in srgb, var(--ws-color-status-danger, #c0392b) 16%, transparent);
+}
+
+.settings-danger-button-armed {
+  background: var(--ws-color-status-danger, #c0392b);
+  color: #fff;
+}
+
+.settings-danger-confirm {
+  display: flex;
+  gap: var(--ws-space-03);
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.settings-danger-confirm-text {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+}
+
+.settings-ghost-button {
+  padding: var(--ws-space-02) var(--ws-space-04);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-color-text-secondary);
+  cursor: pointer;
 }
 
 .linked-server-modal {

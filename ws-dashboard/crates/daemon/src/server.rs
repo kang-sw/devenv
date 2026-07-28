@@ -201,10 +201,32 @@ where
         })
     });
 
+    // In-app "shut down dashboard" trigger: an HTTP handler fires this Notify,
+    // which the shutdown_task below selects on alongside the external signal.
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
+    // `epoch_source` and `git_spawn_stats` are shared with `watch_registry`
+    // below: a watcher-driven epoch bump must land through the exact same
+    // `Arc` `git_toolbar.rs`'s `AppState.epoch_source` reads, and the
+    // registry's own `git status`/walk spawns must count against the same
+    // `AppState.git_spawn_stats` diag totals as every other route (ticket
+    // step 8).
+    let epoch_source: Arc<dyn crate::git_state_cache::EpochSource> =
+        Arc::new(crate::git_state_cache::MutationEpochSource::default());
+    let git_spawn_stats = Arc::new(crate::git_exec::GitSpawnStats::default());
+    let watch_registry = crate::work_root_watch::WatchRegistry::new(
+        epoch_source.clone(),
+        git_spawn_stats.clone(),
+        crate::work_root_watch::WatchConfig::from_env(),
+    );
     let app = build_router(AppState {
         config,
         auth,
         opened_work_roots,
+        git_probe_cache: crate::discovery::GitProbeCache::default(),
+        git_spawn_stats,
+        git_state_cache: crate::git_state_cache::GitStateCache::default(),
+        epoch_source,
+        watch_registry,
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         // CONTRACT (260725 Phase 5): must be `terminals.attention()` - a
@@ -221,10 +243,14 @@ where
         linked_server_sessions: crate::servers::LinkedServerSessions::default(),
         linked_server_tunnels: crate::servers::LinkedServerTunnels::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
+        shutdown: shutdown_notify.clone(),
     });
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_task = tokio::spawn(async move {
-        shutdown.await;
+        tokio::select! {
+            () = shutdown => {}
+            () = shutdown_notify.notified() => {}
+        }
         let _ = shutdown_tx.send(true);
     });
     let server = axum::serve(listener, app)
