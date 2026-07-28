@@ -111,3 +111,42 @@ for the loopback `--no-auth` dogfood). Still open, tracked here:
   makes a terminal-preserving daemon restart correct.
 - `terminal.rs:170` `default_helper_binary` / `cli.rs` terminal-helper dispatch
   — the self-re-exec mechanism whose naming this feature works around.
+
+## Spec Impact
+
+This ticket's shipped v1 behavior (`## Implementation notes (dogfood v1,
+2026-07-25)`) has no spec anchor. Routed here from
+`260727-chore-merge-ws-dashboard-dev-into-goal-branch` Phase 5, which
+carried this behavior onto the goal branch by merge and deliberately did
+not author spec text on its behalf.
+
+Undocumented surfaces (all four, verified against the merged source at
+merge time):
+
+- The **Advanced** settings section (`id: "advanced"`,
+  `ws-dashboard/frontend/src/settingsSections.tsx`).
+- `GET /api/dashboard/build-info`.
+- `POST /api/dashboard/shutdown`.
+- `POST /api/dashboard/terminals/kill-all`.
+
+`{#260722-ws-dashboard-settings-panel}` in
+`ai-docs/spec/ws-web-dashboard/index.md` documents exactly two registered
+sections (Terminal style, Notifications) plus one planned, not-yet-registered
+hotkey-rebind section; it does not mention Advanced, build-info, shutdown,
+or kill-all.
+
+Related, and already resolved elsewhere — not part of this gap: the
+`kill-all` endpoint's callback-token contract is now spec'd. A callback
+token stops being accepted once its terminal is closed via **any of three
+paths**: `remove` (explicit close), `remove_for_work_roots` (owning
+workRoot/workspace removal), or `drain_all` (kill-all) — see
+`{#260516-ws-web-dashboard-token-free-pairing-landing}` in
+`ai-docs/spec/ws-web-dashboard/index.md`. A fourth path (`insert`'s
+eviction-on-cap retain) does not revoke the token; that is a known,
+separately tracked gap
+(`260728-bug-dashboard-terminal-eviction-leaks-callback-token`), not part
+of this ticket's undocumented-surface count.
+
+Writing the spec text for the four surfaces above is this ticket's own
+future work, against behavior its authors know and this one does not —
+not authored here.
