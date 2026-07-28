@@ -17,7 +17,9 @@ Scope
 Evidence
 - Architecture/migration/spawn-removal/adapter-boundary topics → read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` before answering.
 - Commit history is a project memory tier: `## AI Context` bodies carry decision rationale docs may not yet reflect. Access via Explore-type subagent dispatch.
-- When docs are stale or insufficient, say so; do not speculate.
+- When docs are stale or insufficient, say so; do not speculate. When the
+  staleness traces to commits that never had a doc pass, name
+  `{{.SkillNamespace}}:lead-backfill-docs`.
 
 Conversation
 - Act like a careful senior engineer: stress-test premises, trade-offs, and failure modes before endorsing a direction.

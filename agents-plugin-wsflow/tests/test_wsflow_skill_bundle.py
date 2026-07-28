@@ -15,6 +15,7 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 
 EXPECTED_SKILLS = {
     "lead-add-rule",
+    "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
     "lead-goal-step",
@@ -45,8 +46,9 @@ EXPECTED_INLINE_SKILLS = {
     "lead-goal-step",
     "mcp-server-repair",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-goal-fan-out-step"}
+EXPECTED_PARALLEL_INIT_SKILLS = {"lead-backfill-docs", "lead-discuss", "lead-goal-fan-out-step"}
 PARALLEL_INIT_TITLES = {
+    "lead-backfill-docs": "Backfill Docs",
     "lead-discuss": "Discuss",
     "lead-goal-fan-out-step": "Goal Fan-Out Step",
 }
@@ -183,11 +185,12 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_parallel_init_skill_files_are_playbook_shims(self):
-        # Both parallel-init skills gain the mcp-server-repair pointer
+        # Every parallel-init skill gains the mcp-server-repair pointer
         # after the existing final line. Explicit per-skill tails (not an
-        # optional regex group) so a missing pointer on either of them fails
+        # optional regex group) so a missing pointer on any of them fails
         # loudly instead of silently passing.
         pointer_tail = {
+            "lead-backfill-docs": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }

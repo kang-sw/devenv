@@ -239,6 +239,12 @@ commits the spec update.
 adds missing implemented entries, handles removed spec stems, verifies
 duplicate anchors, and commits all spec changes together.
 
+`lead-backfill-docs` is the retroactive entry point for both document kinds. It
+resolves an audit window from commit markers, groups the window into coherent
+behavior changes, then per group runs `lead-update-spec` inline and dispatches
+`mental-model-updater`. It exists because the in-flow documentation pass is
+reachable only by having gone through implementation, which ad-hoc work has not.
+
 `lead-write-ticket` creates or updates tickets. It applies the spec-address gate
 when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads
 ticket conventions, verifies existing stems or ticket-local `## Spec Impact`,

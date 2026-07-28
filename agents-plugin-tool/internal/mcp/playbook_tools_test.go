@@ -2308,6 +2308,37 @@ func TestSkillBodyGoldenLeadVerifyDiscussion(t *testing.T) {
 	}
 }
 
+// TestPlaybookPrintGoldenLeadBackfillDocs verifies lead-backfill-docs resolves
+// and keeps the two boundaries that make it correct: spec authoring stays with
+// the lead, and the mental-model range is extended through the spec commit.
+func TestPlaybookPrintGoldenLeadBackfillDocs(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-backfill-docs", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "judgment placed once") {
+		t.Errorf("body %q: expected doctrine text 'judgment placed once'", body)
+	}
+	if !strings.Contains(body, "never delegate spec authoring") {
+		t.Errorf("body %q: lost the invariant keeping spec authoring with the lead", body)
+	}
+	if !strings.Contains(body, "never once per group") {
+		t.Errorf("body %q: lost the single mental-model sweep; per-group dispatch re-reads the whole corpus N times and lets two delegates edit one domain doc from partial views", body)
+	}
+	// The discovery delegate must never be handed a lead playbook stem
+	// (idea/260626-research-playbook-print-lead-surface-leak).
+	discovery, _, err := printPlaybook(s, rsrcRoot, "doc-gap-discovery", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook doc-gap-discovery: %v", err)
+	}
+	if strings.Contains(discovery, "lead-update-spec") {
+		t.Error("doc-gap-discovery must not name a lead playbook stem")
+	}
+}
+
 // TestPlaybookPrintGoldenLeadUpdateSpec verifies lead-update-spec resolves
 // and contains the updated rsrc path reference.
 func TestPlaybookPrintGoldenLeadUpdateSpec(t *testing.T) {
