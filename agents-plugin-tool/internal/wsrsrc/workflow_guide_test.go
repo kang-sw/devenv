@@ -29,6 +29,39 @@ func workflowGuides() []string {
 // check asserting against the wrong text.
 var implementedOnlyRuleTokens = []string{"spec entries", "implemented behavior"}
 
+// carveOutSignalPhrases are alternate ways the bullet may state that the
+// Implementation Gap Callout is spared from the implemented-behavior-only
+// rule's normal delete-it outcome. The guard requires at least one of these
+// rather than the single literal word "exception", so an ordinary copy-edit
+// of the carve-out language (e.g. "is the exception" -> "stays exempt") does
+// not red the guard. Every phrase here still asserts the same substance: the
+// callout is kept, not deleted, despite the general rule. Known limitation:
+// this is still substring matching, so a negated form that happens to reuse
+// one of these phrases (e.g. "is no longer exempt") would not be caught;
+// that is accepted as out of scope for this pass.
+var carveOutSignalPhrases = []string{
+	"exception",
+	"exempt",
+	"carve-out",
+	"carved out",
+	"special case",
+	"rather than deleting",
+	"instead of deleting",
+	"without deleting",
+	"not deleted",
+	"isn't deleted",
+	"spared",
+}
+
+func containsAny(text string, phrases []string) bool {
+	for _, phrase := range phrases {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizedBullets splits markdown into top-level bullets, lowercased with
 // whitespace runs collapsed so a hard wrap inside a phrase does not hide it.
 // Bullets are split on "\n- ", so indented continuation lines stay with their
@@ -58,10 +91,12 @@ func containsAllTokens(text string, tokens []string) bool {
 // delete the very callouts the rule exists to protect, and nothing else in
 // either suite notices.
 //
-// Asserted on substance - the same bullet names the exception - rather than on
-// byte-exact text, and case-insensitively, so ordinary rewording does not break
-// it. This guard covers exactly this one sentence and says nothing about the
-// rest of the shared content; see 260728-research-parallel-workflow-guide-divergence.
+// Asserted on substance - the same bullet names Implementation Gap and states,
+// in any of several equivalent phrasings, that it is carved out from deletion
+// - rather than on byte-exact text, and case-insensitively, so ordinary
+// rewording does not break it. This guard covers exactly this one sentence and
+// says nothing about the rest of the shared content; see
+// 260728-research-parallel-workflow-guide-divergence.
 //
 // Every copy is checked in one pass: a simultaneous loss in two of the three
 // must not report only the first, or the operator fixes one file and reruns
@@ -89,8 +124,8 @@ func TestWorkflowGuidesKeepImplementationGapException(t *testing.T) {
 			t.Errorf("%s: the implemented-behavior-only rule does not name the Implementation Gap Callout as its exception: %q", path, bullet)
 			continue
 		}
-		if !strings.Contains(bullet, "exception") {
-			t.Errorf("%s: the implemented-behavior-only rule names Implementation Gap but not as an exception: %q", path, bullet)
+		if !containsAny(bullet, carveOutSignalPhrases) {
+			t.Errorf("%s: the implemented-behavior-only rule names Implementation Gap but does not carve it out from deletion (want one of %q): %q", path, carveOutSignalPhrases, bullet)
 		}
 	}
 }
