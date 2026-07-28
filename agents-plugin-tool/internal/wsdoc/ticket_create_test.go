@@ -66,6 +66,11 @@ func TestTicketCreateTodoStampsResolvedSageReviewDesignPosture(t *testing.T) {
 	}
 }
 
+// TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal
+// asserts the C4 fix: a ready-landing create stamps *both* required fields
+// (design and completeness), mirroring prepareSageReviewForUpwardMove /
+// TicketsMove, so create_empty(ready) and move(to: "ready") produce the same
+// posture shape.
 func TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -85,12 +90,11 @@ func TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal(t *t
 			if !strings.Contains(body, `title: ""`) {
 				t.Fatalf("ready stub missing title: %q", body)
 			}
-			wantLine := "sage-review-design: " + tc.wantReview
-			if !strings.Contains(body, wantLine) {
-				t.Fatalf("ready stub missing %s: %q", wantLine, body)
-			}
-			if strings.Contains(body, "sage-review-completeness:") {
-				t.Fatalf("ready stub must not stamp sage-review-completeness: %q", body)
+			for _, field := range []string{"sage-review-design", "sage-review-completeness"} {
+				wantLine := field + ": " + tc.wantReview
+				if !strings.Contains(body, wantLine) {
+					t.Fatalf("ready stub missing %s: %q", wantLine, body)
+				}
 			}
 			if !strings.Contains(res.Tip, tc.wantReview) {
 				t.Fatalf("Tip = %q, want resolved posture %q", res.Tip, tc.wantReview)
@@ -99,30 +103,49 @@ func TestTicketCreateReadyStampsResolvedSageReviewDesignPostureWhenTerminal(t *t
 	}
 }
 
-// TestTicketCreateReadyBlocksUnresolvedSageReviewDesignPosture asserts the
-// never-skippable design-review invariant at direct-to-ready creation: a
-// ticket created directly at ready/ with no prior "from" state has no
-// opportunity to have already run design review, so a freshly resolved
-// non-terminal posture (recommended/required) must block creation rather
-// than silently stamping and succeeding.
-func TestTicketCreateReadyBlocksUnresolvedSageReviewDesignPosture(t *testing.T) {
+// TestTicketCreateReadyWarnsOnUnresolvedSageReviewDesignPosture asserts the
+// de-blocked never-skippable design-review invariant at direct-to-ready
+// creation: a ticket created directly at ready/ with no prior "from" state
+// has no opportunity to have already run design review, so a freshly
+// resolved non-terminal posture (recommended/required) now succeeds and
+// carries the ready-sage-posture warning instead of blocking creation —
+// ws/git.commit's ready-sage-posture guardrail is the sole hard gate.
+func TestTicketCreateReadyWarnsOnUnresolvedSageReviewDesignPosture(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		config  string
-		wantErr string
+		name     string
+		config   string
+		wantWarn string
 	}{
-		{"ask", "ask", "run sage review or skip recommended review"},
-		{"auto", "auto", "run sage review"},
+		{"ask", "ask", "sage-review-design is unreviewed (posture recommended; review has not run yet)"},
+		{"auto", "auto", "sage-review-design is unreviewed (posture required; review has not run yet)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			if _, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: tc.config, Today: "260101"}); err == nil {
-				t.Fatal("TicketCreate ready: expected error for unresolved design posture, got nil")
-			} else if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: tc.config, Today: "260101"})
+			if err != nil {
+				t.Fatalf("TicketCreate ready: unexpected error for unresolved design posture: %v", err)
 			}
-			if _, statErr := os.Stat(filepath.Join(root, "ai-docs", "tickets", "ready", "260101-feat-foo.md")); !os.IsNotExist(statErr) {
-				t.Fatalf("ticket file should not have been created, stat err = %v", statErr)
+			if !strings.Contains(res.Tip, tc.wantWarn) {
+				t.Fatalf("Tip = %q, want it to contain %q", res.Tip, tc.wantWarn)
+			}
+			// TicketCreate can only ever produce the unreviewed variant (a
+			// brand-new ticket has no prior posture to be blocked from), so it
+			// must carry the sage_gate instruction clause, not the sage_stamp
+			// one the blocked variant uses.
+			if !strings.Contains(res.Tip, "Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it") {
+				t.Fatalf("Tip = %q, want the unreviewed variant's sage_gate instruction clause", res.Tip)
+			}
+			body := readCreatedTicket(t, root, res)
+			// C4: completeness must be stamped too (same resolved posture as
+			// design for a brand-new ticket), so the warning's silence about
+			// completeness matches an actually-terminal completeness field
+			// rather than an unstamped one that ws/git.commit would also
+			// reject.
+			if !strings.Contains(body, "sage-review-completeness: ") {
+				t.Fatalf("ready stub must stamp sage-review-completeness alongside design: %q", body)
+			}
+			if _, statErr := os.Stat(filepath.Join(root, "ai-docs", "tickets", "ready", "260101-feat-foo.md")); statErr != nil {
+				t.Fatalf("ticket file should have been created, stat err = %v", statErr)
 			}
 		})
 	}

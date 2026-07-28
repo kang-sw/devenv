@@ -9,7 +9,7 @@ Target: user request
 
 - Lead-driven - no subagent delegation.
 - Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before any write or read.
-- Only add entries for confirmed-implemented features - no `🚧` entries unless explicitly directed.
+- Only add entries for confirmed-implemented features.
 - Call `{{.McpNamespace}}/spec_index.verify()` after any file modification.
 - Commit all spec changes in a single `docs(spec): ...` commit.
 - Use `{{.McpNamespace}}/git.*` for commit range discovery, diff inspection, log audit, and commit.
@@ -38,17 +38,11 @@ For each spec-impact commit:
 2. Check whether an entry already covers the new or changed behavior.
 3. If missing: call `{{.McpNamespace}}/spec_stem.generate(slug: "<slug>")` and insert an entry following the `spec-format` template from the lead-write-spec playbook.
 
-### 5. Strip `🚧`
-
-For each `🚧` entry or `> [!note] Planned 🚧` callout:
-1. Extract the stem.
-2. Check the `{{.McpNamespace}}/git.log` result for the stem. If matching commits exist and the feature is confirmed implemented: strip `🚧 ` from the heading and remove any `> [!note] Planned 🚧` callout block beneath it.
-
-### 6. Handle removals
+### 5. Handle removals
 
 Scan `{{.McpNamespace}}/git.log(range: "<range>", include_body: true)` bodies for `removed: <stem>`. Remove each corresponding spec entry.
 
-### 7. Finalize
+### 6. Finalize
 
 If any spec file was modified:
 1. Call `{{.McpNamespace}}/spec_index.verify()`.
@@ -79,7 +73,7 @@ When borderline: err toward adding an entry. A false-positive entry is easier to
 ### Completion report
 
 ```
-Spec: <N entries added, M 🚧 stripped, K removed> | no changes
+Spec: <N entries added, K removed> | no changes
 ```
 
 ## Doctrine

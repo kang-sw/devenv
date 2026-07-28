@@ -32,6 +32,7 @@ Included:
 
 - `lead-workflow-manual`
 - `lead-discuss`
+- `lead-backfill-docs`
 - `lead-write-spec`
 - `lead-write-ticket`
 - `lead-proceed`
@@ -41,11 +42,11 @@ Included:
 - `lead-bootstrap`
 - `lead-add-rule`
 - `lead-ship`
-- `lead-sprint`
 - `lead-verify-discussion`
 - `lead-forge-spec`
 - `lead-forge-mental-model`
 - `lead-review`
+- `lead-tune`
 - `lead-prefer-subagent`
 - `lead-goal-step`
 - `lead-goal-fan-out-step`
@@ -56,8 +57,12 @@ Excluded:
 
 - `lead-write-code`
 - `lead-write-skeleton`
-- `lead-salvage`
-- `lead-skill-authoring`
+
+`lead-salvage` and `lead-skill-authoring` were on this list until 2026-07-28;
+`260726-chore-retire-sprint-salvage-relocate-skill-authoring` deleted the first
+and relocated the second out of the plugin surface entirely, so neither is an
+exclusion any more. Both names survive in the eligibility guard below, which is
+a separate mechanism — see the note there.
 
 ## wsflow Skill Rules
 
@@ -152,9 +157,13 @@ curated list in `agents-plugin-tool/internal/wsrsrc/skills_mirror_test.go`.
 - **Eligibility guard:** generation fails loudly if the source body contains
   anything beyond namespace-only tokens — the word "mercenary",
   `<!-- ws:full-only:... -->`/`<!-- ws:wsflow-only:... -->` markers, or literal
-  names of wsflow-excluded skills (`lead-write-code`, `lead-write-skeleton`,
+  names of denylisted skills (`lead-write-code`, `lead-write-skeleton`,
   `lead-salvage`, `lead-skill-authoring`). The guard is strict/conservative by
   design — there is no marker-exception or curated-allowlist path around it.
+  `lead-salvage` and `lead-skill-authoring` are no longer wsflow *exclusions* —
+  they left the plugin surface entirely on 2026-07-28 — but their denylist
+  entries are deliberately retained as inert guards, so that a future skill body
+  mentioning either name cannot be silently mirrored.
   Eligible sources must contain zero product-specific content pre-substitution.
 - **Generator:** `GenerateWsflowSkillBody` in
   `agents-plugin-tool/internal/wsrsrc/skills_mirror.go`. Standalone; does not
@@ -256,6 +265,7 @@ Forbidden distributed-skill references include:
 - `ws.mercenary.result`
 - `lead-write-code`
 - `lead-write-skeleton`
+- `lead-sprint`
 - `lead-salvage`
 - `lead-skill-authoring`
 

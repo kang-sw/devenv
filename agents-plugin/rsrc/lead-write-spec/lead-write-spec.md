@@ -11,7 +11,7 @@ Target: user request
 - Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before any write or update - conventions are canonical there.
 - Location follows `judge: directory-vs-flat`.
 - Call `{{.McpNamespace}}/spec_index.verify()` after every write or update.
-- Accuracy check: for every heading without `🚧`, confirm the feature exists. Spawn a host-native exploration worker directly with an accuracy-check prompt if uncertain.
+- Accuracy check: for every heading, confirm the feature exists. Spawn a host-native exploration worker directly with an accuracy-check prompt if uncertain.
 
 ## On: invoke
 
@@ -23,33 +23,23 @@ Target: user request
 2. Identify the target from `user request` - area name, file path, or description.
 3. If creating a new spec:
    a. Apply `judge: directory-vs-flat` to choose the file structure.
-   b. Write the spec body following the `spec-format` template. Apply `judge: contract-first-spec` before inserting any `🚧` entries.
+   b. Write the spec body following the `spec-format` template.
    c. Call `{{.McpNamespace}}/spec_index.verify()` for duplicate-anchor verification.
    d. Add the spec to the listing in `ai-docs/_index.md`.
 4. If updating an existing spec:
    a. Read the target file first.
    b. For each new anchor: call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` to get a collision-free `{#YYMMDD-slug}`.
    c. Insert the anchor - on a heading line or anywhere in body text (not heading-only).
-   d. Apply `judge: contract-first-spec` before adding any `> [!note] Planned 🚧` callouts. Remove `🚧` from confirmed-implemented features as needed.
-   e. Call `{{.McpNamespace}}/spec_index.verify()` for duplicate-anchor verification.
+   d. Call `{{.McpNamespace}}/spec_index.verify()` for duplicate-anchor verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-6. Accuracy check - confirm every heading without `🚧` exists in the codebase. Spawn a host-native exploration worker directly with an accuracy-check prompt if uncertain. Never remove `🚧` without confirmation.
-7. **Commit** - call `{{.McpNamespace}}/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
-8. **Output Handoff** - report changed spec path, changed stem, whether any `🚧` marker was added, and whether the caller should add `spec:` or keep ticket-local `## Spec Impact`.
+6. **Commit** - call `{{.McpNamespace}}/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
+7. **Output Handoff** - report changed spec path, changed stem, and whether the caller should add `spec:` or keep ticket-local `## Spec Impact`.
 
 ## Judgments
 
 ### judge: spec-impact
 
 Evaluate whether work introduces or modifies behavior observable outside the implementation. Internal restructuring, behavior-preserving refactors, and tooling with no public-facing surface do not qualify. Callable interfaces, user-visible output, and documented conventions qualify.
-
-### judge: contract-first-spec
-
-Yes: planned behavior must be visible and stable before implementation begins.
-Usually yes: externally consumed schemas, CLI/API contracts, file or wire formats, cross-skill routing contracts, or multi-ticket planned behavior.
-No: planned text mainly restates a ticket phase, final behavior will be refined during implementation, or a ticket-local `## Spec Impact` is enough for post-implementation closeout.
-When yes: write the marker, then emit "Session reminder: implementation `🚧` entries require a non-`epic`, non-`research`, non-`workset` `ready/` ticket; epic, research, or workset tickets may back only planned decomposition, investigation text, or operating context."
-When no: do not write `🚧`; suggest ticket-local `## Spec Impact` instead.
 
 ### judge: directory-vs-flat
 
@@ -58,7 +48,6 @@ Use a directory (`<area>/index.md` + child files) when the area has or will have
 ### judge: split-trigger
 
 Extract a section into its own file when it has:
-- Its own `🚧` markers with a distinct ticket lifecycle, OR
 - More than one `> [!note] Constraints` block, OR
 - A distinct audience from the parent doc
 
@@ -96,20 +85,13 @@ A specific sub-concept within a section can also carry an anchor. {#YYMMDD-sub-c
 
 > [!note] Constraints
 > - Intentional limitation or out-of-scope boundary.
-
-> [!note] Planned 🚧
-> Will gain X capability. Current behavior unchanged until implemented.
-
-## 🚧 New Feature {#YYMMDD-new-feature}
-
-Planned behavior description - what the caller will observe once implemented.
 ```
 
 Anchoring rules:
 - Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` to obtain a `{#YYMMDD-slug}` before inserting any anchor.
 - Anchors may appear on any line (heading or body text), not heading-only.
 - Slugs are clean identifiers: lowercase, hyphens, no spaces.
-- No ticket references (`[stem/pN]`) in headings or `🚧` markers - implementation traceability is via commits referencing spec-stems.
+- No ticket references (`[stem/pN]`) in headings - implementation traceability is via commits referencing spec-stems.
 - Rename: when a slug changes, the commit message must include `renamed-spec: <old-stem> -> <new-stem>`.
 
 Output handoff:
@@ -117,7 +99,6 @@ Output handoff:
 ```text
 Spec: <spec-stem> [new|updated|removed|renamed]
 Path: ai-docs/spec/<path>.md
-Planned marker: <added|none|removed>
 Ticket handoff: <add spec: <spec-stem> | keep ## Spec Impact | no ticket action>
 ```
 

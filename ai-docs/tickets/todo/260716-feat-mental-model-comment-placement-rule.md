@@ -76,7 +76,7 @@ reconciling the Document Format template as decided above) to: the
 mental-model convention (`ws/convention.read` source), the implementer
 playbook's capture guidance, the code-reviewer playbook, and the
 mental-model-updater playbook.
-Follow `lead-skill-authoring` invariant checks for every changed line; keep
+Follow the `ai-docs/ref/skill-authoring.md` invariant checks for every changed line; keep
 each addition to the one-line/one-row scale that the skill-diet epic's layer
 model prescribes (judgment rules belong in playbook bodies; no schema or
 rationale prose). Verification: fresh-reader pass over each changed playbook

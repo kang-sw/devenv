@@ -12,7 +12,8 @@ Target: user request
 - Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
 - All survey queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; ticket-association checks spawn a scoped exploration worker with a ticket-association prompt and cited evidence.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
-- Caller-visible status and implemented/planned classification for ambiguous items are decided autonomously using best judgment; each autonomously-classified ambiguous item carries an inline `<!-- AMBIGUOUS: <reason> -->` marker and is collected into the final summary report. Confirmation is still required for the archive gate and the once-per-run domain list.
+- The once-per-run domain list requires explicit user confirmation before the todo list is locked.
+- Ambiguous caller-visibility and implemented/planned calls are decided by best judgment and recorded with behavior name, chosen classification, and reason; every recorded item reaches the final summary, and those written to the spec also carry an inline `<!-- AMBIGUOUS: <reason> -->` marker.
 - Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `{{.McpNamespace}}/spec_index.verify()` after every spec file write or update.
 - Domain todo items use the key and title prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`); the key is derivable from the domain name for status mutation.
@@ -70,8 +71,8 @@ Query 3 — archived spec survey:
 ```text
 Survey the archived spec files in ai-docs/.old/spec/ (most recent YYMMDD subdirectory).
 
-Glob ai-docs/.old/spec/**/*.md. Extract title, summary, `##` headings, and
-`🚧` status. Return domain names and heading topics as reference candidates
+Glob ai-docs/.old/spec/**/*.md. Extract title, summary, and `##` headings.
+Return domain names and heading topics as reference candidates
 only; do not treat archived specs as authoritative.
 ```
 
@@ -141,7 +142,7 @@ Find tickets relevant to the <domain> domain.
 Module paths: <paths from the `Source paths:` segment of the todo item title>
 
 Use `{{.McpNamespace}}/tickets.find(query: "<domain>")`; filter by module paths when needed.
-Return features -> ticket status. Only contract-first ready implementation items, plus epic/research/workset planned decomposition, investigation text, or operating context, are `🚧` candidates; todo items are ticket-intent evidence.
+Return features -> ticket status; todo items are ticket-intent evidence.
 ```
 
 Query 3 — archived specs for this domain:
@@ -151,8 +152,8 @@ Survey the archived spec files for the <domain> domain.
 Archived location: ai-docs/.old/spec/ (most recent YYMMDD subdirectory)
 Old spec files for this domain: <files from the `old spec files:` segment of the todo item title, or scan all when `none`>
 
-Read relevant archived specs. For each `##` heading, note feature name,
-`🚧` status, and whether current source shows it.
+Read relevant archived specs. For each `##` heading, note feature name
+and whether current source shows it.
 Return features with archived status and current-source presence.
 ```
 
@@ -180,26 +181,26 @@ classification (implemented / planned), and uncertainty flags.
 For each item in the behavior brief, decide autonomously using best judgment:
 
 1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`.
-2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Contract-first planned implementation behavior -> `## 🚧 Feature {#slug}` only when backed by a non-`epic`, non-`research`, non-`workset` `ready/` ticket. Epic, research, or workset tickets may back only planned decomposition, investigation text, or operating context. Other planned work stays in ticket `## Spec Impact` or the survey report.
+2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned work is not written to the spec; it stays in the owning ticket's `## Spec Impact` or in the survey report.
 
-When an item is genuinely ambiguous on either axis, classify it with the best-judgment call and record a one-line reason; step 5 embeds this as an inline `<!-- AMBIGUOUS: <reason> -->` marker next to the affected entry, and step 5's writeup collects every such marker for the final summary report. Do not stop to ask per item. Collect the classified list before writing anything.
+When an item is genuinely ambiguous on either axis, classify it with the best-judgment call and record its behavior name, chosen classification, and a one-line reason in this run's ambiguity record. The wrap-up summary reports from that record, so it holds items excluded from the spec as internal-only or planned on the same terms as written ones. Do not stop to ask per item. Collect the classified list and the ambiguity record before writing anything.
 
 ### 5. Write spec entries
 
-1. Determine the target spec file path. Apply `judge: directory-vs-flat`.
-2. Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
-3. For each classified behavior:
+1. If step 4 left this domain with no behavior to write to the spec - every behavior classified planned, internal-only, or both - write no spec file: record the domain as producing no spec for the wrap-up summary and skip to step 6.
+2. Determine the target spec file path. Apply `judge: directory-vs-flat`.
+3. Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
+4. For each behavior step 4 classified implemented - planned items are not written here:
    a. Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
-   c. Place `🚧` after the heading marker if planned; omit if implemented.
-   d. If step 4's classification pass flagged this item ambiguous, add `<!-- AMBIGUOUS: <reason> -->` on the line directly beneath the entry heading, and record the stem + reason for the wrap-up summary.
-4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
-5. Call `{{.McpNamespace}}/spec_index.verify()`.
-6. Apply `judge: directory-vs-flat` - if the written file warrants a directory split, note it as a split candidate for a follow-up lead-write-spec procedure invocation. Do not perform the split inline.
+   c. If step 4's classification pass flagged this item ambiguous, add `<!-- AMBIGUOUS: <reason> -->` on the line directly beneath the entry heading, and add the generated stem to that item's ambiguity record entry.
+5. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
+6. Call `{{.McpNamespace}}/spec_index.verify()`.
+7. Apply `judge: directory-vs-flat` - if the written file warrants a directory split, note it as a split candidate for a follow-up lead-write-spec procedure invocation. Do not perform the split inline.
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `{{.McpNamespace}}/git.commit` and skip to step 7.
+1. If step 5 wrote no spec file for this domain, there are no stems to associate and nothing to commit - skip to step 7 without spawning the worker below. Otherwise collect all tickets in `ready/` status relevant to this domain from the step 2 survey output; if none, commit the spec file through `{{.McpNamespace}}/git.commit` and skip to step 7.
 2. Spawn a scoped exploration worker for the ticket-association check, using this block as the task prompt:
 
 ```text
@@ -222,7 +223,7 @@ For each ticket:
 ```
 
 3. Collect the subagent result; review the ticket-association report and resolve any open questions with the user before committing.
-4. Commit all domain changes in one commit: spec file + ticket association updates.
+4. Commit all domain changes in one commit: the spec file step 5 wrote, plus ticket association updates.
 
 ### 7. Complete domain
 
@@ -238,6 +239,10 @@ Call `{{.McpNamespace}}/spec_index.verify()` as an idempotent safety pass over a
 
 ### 2. Summary report
 
+Read the ambiguity list from step 4's ambiguity record - it is the authoritative source, and items classified internal-only or planned live there and carry no marker. Name each one by its generated stem when step 5 wrote one, otherwise by its behavior name.
+
+A resumed run holds no ambiguity record for domains classified in an earlier session. Reconstruct those entries from the `<!-- AMBIGUOUS: <reason> -->` markers under `ai-docs/spec/`, and label what the reconstruction cannot complete instead of emitting it as a finished count: append `(reconstructed from spec markers - items classified planned or internal-only carry no marker and are not recoverable)` to the ambiguity line, and `(not recorded in this session)` to the domains-with-no-spec-file line.
+
 Emit to the user:
 
 ```
@@ -245,11 +250,10 @@ Emit to the user:
 
 Domains covered: <N>
 Spec files created: <list of paths>
+Domains with no spec file written: <list, or none>
 Total stems generated: <count>
-  Implemented: <count>
-  🚧 Planned: <count>
 Ambiguous classifications (auto-decided, review recommended): <count>
-  <stem> - <reason>
+  <stem or behavior name> - <implemented|planned|internal-only> - <reason>
   ...
 ```
 
@@ -265,8 +269,6 @@ continue to step 4 without invoking it.
 
 ### 4. Suggested next steps
 
-- Spawn a scoped exploration worker with a spec-updater task prompt to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
-- Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.
 - Run the lead-write-spec procedure via `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` for any domain surfaces discovered after wrap-up.
 
 ## Judgments
@@ -276,7 +278,7 @@ continue to step 4 without invoking it.
 | Decision | When |
 |----------|------|
 | Flat file `ai-docs/spec/<area>.md` | Single, self-contained surface - none of the split conditions below apply |
-| Directory `ai-docs/spec/<area>/index.md` | Any one split condition is met: (1) a section has its own `🚧` markers with a distinct ticket lifecycle; (2) more than one `[!note] Constraints` block is present; (3) a section has a distinct audience from the parent doc |
+| Directory `ai-docs/spec/<area>/index.md` | Any one split condition is met: (1) more than one `[!note] Constraints` block is present; (2) a section has a distinct audience from the parent doc |
 
 When uncertain, start flat. Re-evaluate after writing - if a split condition fires, note the file for a follow-up lead-write-spec procedure invocation.
 
@@ -301,5 +303,5 @@ No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once 
 Forge-spec optimizes for **low-friction throughput per domain** while keeping the
 two high-leverage decisions - the archive gate and the once-per-run domain list -
 explicitly user-confirmed. Per-item caller-visibility and implementation-status
-classification is decided autonomously; ambiguous calls are marked inline and
-surfaced in the wrap-up summary for review rather than blocking on a per-item ask.
+classification is decided autonomously and surfaced for review afterward rather
+than spending a confirmation turn on each item.

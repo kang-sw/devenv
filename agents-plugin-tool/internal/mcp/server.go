@@ -556,10 +556,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleEnterImplement(req.ID, params.Arguments)
 	case "enter.proceed":
 		return s.handleEnterProceed(req.ID, params.Arguments)
-	case "enter.sprint":
-		return s.handleEnterSprint(req.ID, params.Arguments)
-	case "enter.salvage":
-		return s.handleEnterSalvage(req.ID, params.Arguments)
 	case "todo.append":
 		return s.handleTodoAppend(req.ID, params.Arguments)
 	case "todo.insert_before":
@@ -1394,19 +1390,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		commitHash := ""
-		if result.CommitTitle != "" {
-			commitRes, commitErr := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
-				Paths:     result.CommitPaths,
-				Title:     result.CommitTitle,
-				AIContext: result.AIContext,
-			})
-			if commitErr != nil {
-				return toolTextResponse(req.ID, "", commitErr)
-			}
-			commitHash = commitRes.Hash
-		}
-		return toolTextResponse(req.ID, formatSageGate(result, commitHash), nil)
+		// The ask-decline path (recommended posture + answer=="no") writes and
+		// persists the "skipped" posture inside wsdoc.SageGate itself and
+		// stops there. This case proposes no commit at all — not an automatic
+		// one, and not a suggested one: per 260725's tickets.sage_stamp
+		// precedent ({#260720-wsdoc-commit-boundary}), a separate
+		// canonically-titled commit for a posture flip swallows the ticket's
+		// co-located real edits under a message that describes only the flip.
+		// The write rides the caller's own next ordinary ws/git.commit, the
+		// same guarded chokepoint every other ticket commit uses.
+		return toolTextResponse(req.ID, formatSageGate(result), nil)
 	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2492,6 +2485,25 @@ func formatGitCommit(result wsgit.CommitResult) string {
 			b.WriteString("\n")
 		}
 	}
+	if len(result.Advisories) > 0 {
+		b.WriteString("advisories:\n")
+		for i, advisory := range result.Advisories {
+			// Advisories are separated by a blank line. Without it a
+			// multi-line block (a "## Parent Board" section) and the
+			// single-block advisory after it run together as one wall of
+			// text, which is only reachable now that Phase 2 puts both kinds
+			// on this channel at once.
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			// Each advisory may itself be multi-line; indent every line
+			// consistently rather than only the first, so a multi-line
+			// advisory does not lose its indentation on line 2+.
+			for _, line := range strings.Split(advisory, "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
+	}
 	return b.String()
 }
 
@@ -2523,17 +2535,45 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 		}
 		b.WriteString("\n")
 		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
-		writeIndentedLines(&b, "  marker: ", spec.MarkerContexts)
+		writeIndentedLines(&b, "  legacy-marker: ", []string{spec.LegacyMarkerAdvisory})
 	}
 	return b.String()
 }
 
+// formatSpecFind inherits nothing from formatSpecs: it delegates wholly to
+// formatDocumentFind, which knows nothing of SpecInfo. The legacy-marker
+// advisory therefore has to be appended here explicitly, or the specs.find
+// query path silently loses it while the no-query fallback keeps it. Each line
+// is prefixed with the spec path so the note stays attributable.
+//
+// The advisory loop is bounded by the same maxFindTextDocuments cut the
+// delegated body applies, so the note can never name a spec that was truncated
+// out of the response above it.
 func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
-	return formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
+	var b strings.Builder
+	b.WriteString(formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
 		for _, spec := range specs {
 			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
 		}
-	})
+	}))
+	rendered := specs
+	if len(rendered) > maxFindTextDocuments {
+		rendered = rendered[:maxFindTextDocuments]
+	}
+	separated := false
+	for _, spec := range rendered {
+		if strings.TrimSpace(spec.LegacyMarkerAdvisory) == "" {
+			continue
+		}
+		if !separated {
+			// Each document block is emitted with a leading "\n", so without
+			// this the first advisory runs flush against the last hit line.
+			b.WriteString("\n")
+			separated = true
+		}
+		fmt.Fprintf(&b, "legacy-marker: %s: %s\n", spec.Path, strings.TrimSpace(spec.LegacyMarkerAdvisory))
+	}
+	return b.String()
 }
 
 func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
@@ -2624,9 +2664,6 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 			if loc.Heading != "" {
 				fmt.Fprintf(&b, " %s", loc.Heading)
 			}
-			if loc.MarkerContext != "" {
-				fmt.Fprintf(&b, " # %s", loc.MarkerContext)
-			}
 			b.WriteString("\n")
 		}
 	}
@@ -2640,6 +2677,7 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 			b.WriteString("\n")
 		}
 	}
+	writeIndentedLines(&b, "legacy-marker: ", strings.Split(status.LegacyMarkerAdvisory, "\n"))
 	return b.String()
 }
 
@@ -2684,31 +2722,60 @@ func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) s
 }
 
 // verifyAdapter adapts wsdoc.TicketVerify's richer VerifyResult into the
-// plain-error shape wsgit.Client.Verifier expects, so wsgit.Commit can veto a
-// commit without importing internal/wsdoc directly (see
-// {#260720-wsdoc-commit-boundary}). Wired into both the git.commit dispatch
-// case below and the CLI gitCommit handler (via VerifyAdapter) so every
-// ws.git.commit entry point is gated identically.
-func verifyAdapter(root string, paths []string) error {
+// wsgit.Client.Verifier shape, so wsgit.Commit can veto a commit without
+// importing internal/wsdoc directly (see {#260720-wsdoc-commit-boundary}).
+// Wired into both the git.commit dispatch case below and the CLI gitCommit
+// handler (via VerifyAdapter) so every ws.git.commit entry point is gated
+// identically. On the pass branch, result.Warnings is formatted into the
+// advisories return value using the same "WARN [%s] %s: %s" text shape as
+// formatTicketVerify, so a warning reads identically whether seen via
+// tickets.verify or via git.commit.
+//
+// result.Advisories (the cross-file ticket-graph pass) rides the same channel
+// verbatim, with one commit-path-only presentation detail: an advisory whose
+// Kind is a mechanical remedy gets the amend recipe appended, because at this
+// layer the commit already exists. The recipe is deliberately not part of the
+// check text, so standalone ws/tickets.verify — where nothing has been
+// committed and an amend instruction would be nonsense — omits it. The verdict
+// and the advisory set are identical on both paths, which is what
+// {#260723-tickets-verify-tool}'s identical-verdict guarantee requires.
+func verifyAdapter(root string, paths []string) ([]string, error) {
 	result, err := wsdoc.TicketVerify(root, paths)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if result.OK {
-		return nil
+	if !result.OK {
+		var b strings.Builder
+		b.WriteString("ticket verify failed:\n")
+		for _, finding := range result.Findings {
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+		}
+		return nil, fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
 	}
-	var b strings.Builder
-	b.WriteString("ticket verify failed:\n")
-	for _, finding := range result.Findings {
-		fmt.Fprintf(&b, "- [%s] %s: %s\n", finding.Guardrail, finding.Path, finding.Message)
+	if len(result.Warnings) == 0 && len(result.Advisories) == 0 {
+		return nil, nil
 	}
-	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+	advisories := make([]string, 0, len(result.Warnings)+len(result.Advisories))
+	for _, warning := range result.Warnings {
+		advisories = append(advisories, fmt.Sprintf("WARN [%s] %s: %s", warning.Guardrail, warning.Path, warning.Message))
+	}
+	for _, advisory := range result.Advisories {
+		text := advisory.Text
+		if advisory.Kind == wsdoc.AdvisoryKindFix {
+			// 7-space continuation, matching the FIX:/CHECK: hanging indent.
+			text += "\n       Then git commit --amend --no-edit."
+		}
+		advisories = append(advisories, text)
+	}
+	return advisories, nil
 }
 
 // formatTicketVerify renders a wsdoc.VerifyResult for the standalone
 // tickets.verify tool: an overall PASS/FAIL line followed by one bullet per
 // finding (hard, hyphenated FAIL) and warning (soft, WARN) — mirroring
-// formatTicketMutate/formatSageGate's plain-text style.
+// formatTicketMutate/formatSageGate's plain-text style — then the ticket-graph
+// advisories, which render identically here and on the commit path except that
+// the commit path appends the amend recipe.
 func formatTicketVerify(result wsdoc.VerifyResult) string {
 	var b strings.Builder
 	if result.OK {
@@ -2722,6 +2789,14 @@ func formatTicketVerify(result wsdoc.VerifyResult) string {
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(&b, "  WARN [%s] %s: %s\n", warning.Guardrail, warning.Path, warning.Message)
 	}
+	// Advisories render verbatim: the board block carries its own 4-space row
+	// indent, and the commit path's formatGitCommit adds its own 2-space pass.
+	// They deliberately do not feed the next_instruction switch below — an
+	// ancestor note is explicitly no-action-needed, so "should be addressed or
+	// explicitly accepted" would be wrong.
+	for _, advisory := range result.Advisories {
+		fmt.Fprintf(&b, "\n%s\n", advisory.Text)
+	}
 	switch {
 	case !result.OK:
 		b.WriteString("next_instruction: Fix every FAIL finding above; these are the same hard guardrails git.commit enforces and will block a commit.\n")
@@ -2731,7 +2806,7 @@ func formatTicketVerify(result wsdoc.VerifyResult) string {
 	return b.String()
 }
 
-func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
+func formatSageGate(result wsdoc.SageGateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "action: %s\n", result.Action)
 	if result.AskPrompt != "" {
@@ -2743,23 +2818,56 @@ func formatSageGate(result wsdoc.SageGateResult, commitHash string) string {
 	if result.Mode != "" {
 		fmt.Fprintf(&b, "mode: %s\n", result.Mode)
 	}
-	if commitHash != "" {
-		fmt.Fprintf(&b, "commit: %s (%s)\n", commitHash, result.CommitTitle)
+	if result.Advisory != "" {
+		fmt.Fprintf(&b, "advisory: %s\n", capitalizeFirst(result.Advisory))
 	}
 	b.WriteString(sageGateNextInstruction(result))
 	return b.String()
 }
 
+// capitalizeFirst upper-cases only the first byte, matching the capitalized-
+// sentence convention formatSageGate's sibling fields use. It intentionally
+// leaves the shared sageReviewNonWaivableAdvisory constant itself lowercase
+// (tickets_mutate.go) so its other embedding — mid-sentence inside
+// readySagePostureWarning's Tip-channel text — stays grammatically correct;
+// only this display site capitalizes.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// sageGatePostureUncommittedNote is the single sentence every gate action
+// carries about the posture write. Sharing one sentence is the point: the
+// prior code said three different things about one condition ("skip" handed over
+// a ready-to-paste commit call, "run" appended the same call, "ask" said
+// nothing).
+const sageGatePostureUncommittedNote = " Any sage-review posture this call wrote is left uncommitted; it rides your next ordinary commit of the ticket path, so do not commit it separately."
+
+// sageGateNextInstruction names no commit title and hands the caller no
+// ws/git.commit call. Any posture this gate wrote (a config-fallback resolve, or
+// an ask-decline's "skipped") is left in the working tree for the caller's next
+// ordinary commit of the ticket path, so the posture lands in one commit with
+// the ticket's real edits and real ## AI Context instead of a separate
+// canonically-titled commit that would swallow them (260725,
+// {#260720-wsdoc-commit-boundary}).
 func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	switch result.Action {
 	case "skip":
-		return "next_instruction: Sage review gate resolved with no review required; proceed to handoff."
+		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
 	case "stop_blocked":
-		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker."
+		// stop_blocked carries the note too: sageGateCombined can persist a
+		// design posture (design recommended + answer "yes") before the
+		// completeness stage hits its blocked branch, so this action is not
+		// guaranteed to be write-free. The note's hedged "Any sage-review
+		// posture this call wrote" stays true on the branches that wrote
+		// nothing, which is why it can be attached unconditionally.
+		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker." + sageGatePostureUncommittedNote
 	case "ask":
-		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no."
+		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
-		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "."
+		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + sageGatePostureUncommittedNote
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
@@ -3485,34 +3593,6 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "enter.sprint",
-			"description": "Enter sprint-episode mode: store the typed payload as the 'sprint' agenda blob AND replace the todo list with the sprint episode lifecycle (Edit, Verify, Commit, Post-edit decision, Wrap episode).",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":          stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"episode_slug":         stringProperty("Short kebab-case slug identifying the sprint-edit episode."),
-					"episode_start":        stringProperty("Episode-start commit hash (parent of the first marked commit)."),
-					"current_edit_context": stringProperty("One-line description of the current edit context."),
-				},
-				"required": []string{"session_key"},
-			},
-		},
-		{
-			"name":        "enter.salvage",
-			"description": "Enter salvage mode: store the typed payload as the 'salvage' agenda blob AND replace the todo list with the salvage pipeline (Containment, Survey fanout, Premise interview, Classification, Capture).",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":        stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"failure_claim":      stringProperty("User-confirmed failure claim."),
-					"confirmed_premises": stringArrayProperty("Invalidated premises the user has confirmed."),
-					"survey_status":      stringProperty("Survey fanout status (e.g. pending, in-progress, complete)."),
-				},
-				"required": []string{"session_key"},
-			},
-		},
-		{
 			"name":        "todo.append",
 			"description": "Append a new pending todo item with a caller-provided key (unique within the active list) and title. Erased keys are reusable.",
 			"inputSchema": map[string]any{
@@ -3946,7 +4026,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "specs.list",
-			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, ticket refs, and marker metadata.",
+			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, and ticket refs.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

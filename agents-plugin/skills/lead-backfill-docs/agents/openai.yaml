@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backfill Docs"
+  short_description: "Reconcile spec and mental-model coverage for undocumented commits"
+  default_prompt: "Use $ws:lead-backfill-docs to bring spec and mental-model docs back in line with commits that never had a doc pass."

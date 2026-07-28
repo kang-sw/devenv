@@ -250,6 +250,119 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if strings.Contains(review, "fit") {
 		t.Fatalf("review instruction mentioned unselected fit partition: %q", review)
 	}
+	for _, want := range []string{
+		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
+		"the initial review is cycle 1, so relay at most twice",
+		"stop relaying and continue to the remaining todos",
+		"carrying each unresolved finding with its disposition into the final report",
+		"the budget ends relaying, not the run",
+		"[maintained]",
+		"[escalate: <reason>]",
+		"Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract",
+		"passing an empty string for the authority inputs the target kind does not use",
+		"Adjudication runs inside the current relay slot and consumes no review cycle",
+		"On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one",
+		"on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run",
+		"An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report",
+		"[out-of-scope: <reason>] leaves the relay list, costs no relay",
+		"carried into the final report as unresolved by decision",
+		"Adjudicate at most once per relay slot",
+	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("partitioned review instruction missing %q: %q", want, review)
+		}
+	}
+	for _, want := range implementElevatedRelayWants() {
+		if !strings.Contains(review, want) {
+			t.Fatalf("partitioned review instruction missing elevated-relay routing %q: %q", want, review)
+		}
+	}
+	for _, forbidden := range implementElevatedRelayForbidden() {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("partitioned review instruction retained superseded relay wording %q: %q", forbidden, review)
+		}
+	}
+}
+
+// implementElevatedRelayWants pins the routing rules that send a relay to
+// `implementer-elevated`. Each entry is load-bearing:
+//   - the capacity condition is stated positively on a [fixed]-then-[unresolved]
+//     finding, so settled dispositions do not trip it;
+//   - it fires after one failed relay, since the budget's last relay is the only
+//     slot the elevated delegate can still act in;
+//   - the root-cause condition is worded on newly surfaced findings, because
+//     recurrence of the same finding is already the capacity condition;
+//   - precedence dispatches one relay, not two, when both signals coincide.
+func implementElevatedRelayWants() []string {
+	return []string{
+		"Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]",
+		"the exclusion targets reviewer-invented churn, not unresolved carryover",
+		"Capacity: A finding the implementer reported [fixed] that the next review returns [unresolved] or still reports non-clean routes the next relay to `implementer-elevated` instead of `implementer-relay`",
+		"after one such failed relay rather than two, because the last relay is the only slot left to act in",
+		"Excluded: A finding carrying [won't fix], [deferred], [out-of-scope], or an open [escalate: <reason>] is a settled decision, not a failed fix attempt, and never triggers the capacity condition",
+		"Root-cause: A newly surfaced finding whose root cause matches an already-relayed finding routes the next relay to `implementer-elevated` too",
+		"independent of the cycle count and without waiting for the same finding to recur",
+		"Elevated inputs: Render `implementer-elevated` with the relay's declared inputs plus PriorFixCommits and PriorDispositions",
+		"Precedence: When an adjudicator override and a capacity or root-cause signal apply to the same relay, dispatch `implementer-elevated` once carrying the override list; never dispatch two relays for one cycle",
+	}
+}
+
+// implementElevatedRelayForbidden pins the superseded wording out of existence.
+// "only for genuinely new" read literally forbade the exact relay the capacity
+// condition exists to route, so its survival anywhere would re-close that route.
+func implementElevatedRelayForbidden() []string {
+	return []string{
+		"only for genuinely new non-clean Critical/Important findings",
+		"only for genuinely new",
+	}
+}
+
+func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "partitioned",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     false,
+	})
+	review := requireInstruction(t, todoByKey(t, got, "review"))
+	if !strings.Contains(review, "Dispatch the selected reviewers") {
+		t.Fatalf("bare partitioned alloc did not reach the fallback review instruction: %q", review)
+	}
+	for _, want := range []string{
+		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
+		"the initial review is cycle 1, so relay at most twice",
+		"stop relaying and continue to the remaining todos",
+		"carrying each unresolved finding with its disposition into the final report",
+		"the budget ends relaying, not the run",
+		"[maintained]",
+		"[escalate: <reason>]",
+		"Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract",
+		"passing an empty string for the authority inputs the target kind does not use",
+		"Adjudication runs inside the current relay slot and consumes no review cycle",
+		"On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one",
+		"on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run",
+		"An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report",
+		"[out-of-scope: <reason>] leaves the relay list, costs no relay",
+		"carried into the final report as unresolved by decision",
+		"Adjudicate at most once per relay slot",
+	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("fallback review instruction missing %q: %q", want, review)
+		}
+	}
+	for _, want := range implementElevatedRelayWants() {
+		if !strings.Contains(review, want) {
+			t.Fatalf("fallback review instruction missing elevated-relay routing %q: %q", want, review)
+		}
+	}
+	for _, forbidden := range implementElevatedRelayForbidden() {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("fallback review instruction retained superseded relay wording %q: %q", forbidden, review)
+		}
+	}
 }
 
 func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
@@ -402,12 +515,6 @@ func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
 func TestDeriveOtherEnterTodos(t *testing.T) {
 	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "resolve-verdict") {
 		t.Fatalf("proceed derivation mismatch: %v", keysOf(deriveProceedTodos()))
-	}
-	if !eqKeys(keysOf(deriveSprintTodos()), "edit", "verify", "commit", "post-edit", "wrap") {
-		t.Fatalf("sprint derivation mismatch: %v", keysOf(deriveSprintTodos()))
-	}
-	if !eqKeys(keysOf(deriveSalvageTodos()), "containment", "survey-fanout", "premise-interview", "classification", "capture") {
-		t.Fatalf("salvage derivation mismatch: %v", keysOf(deriveSalvageTodos()))
 	}
 }
 
@@ -1852,13 +1959,38 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 		t.Fatalf("bounded public/existing-test review = %q need=%v, want single true", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
 	}
 	review := readTodoInstruction(t, server, 3, key, "review")
-	for _, want := range []string{"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path", "Relay only new non-clean Critical/Important findings"} {
+	for _, want := range []string{
+		"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path",
+		"Relay only new non-clean Critical/Important findings",
+		"Budget 2 review cycles for this implementation slice",
+		"the initial review is cycle 1, so relay at most once",
+		"stop relaying and continue to the remaining todos",
+		"carrying each unresolved finding with its disposition into the final report",
+		"the budget ends relaying, not the run",
+		"With no adjudication slot at this budget",
+		"[escalate: <reason>] here is your own accept-or-defer call rather than a delegate dispatch",
+	} {
 		if !strings.Contains(review, want) {
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
 		}
 	}
 	if strings.Contains(review, "reviewers") {
 		t.Fatalf("single-review todo instruction = %q", review)
+	}
+	// The 2-cycle budget has no relay left to ship an override into, so the single
+	// branch names the [escalate] degradation instead of dispatching the delegate.
+	if strings.Contains(review, "review-adjudicator") {
+		t.Fatalf("single-review todo instruction dispatched the adjudicator delegate despite having no adjudication slot: %q", review)
+	}
+	// The 2-cycle budget affords one relay, so a [fixed]-then-[unresolved] finding is
+	// first observable at the terminal cycle-2 review, with no relay left to route to
+	// the elevated delegate. Naming the condition here would advertise an unreachable
+	// dispatch, so the single branch stays free of it.
+	for _, forbidden := range []string{"implementer-elevated", "Capacity:", "Root-cause:", "Elevated inputs:", "Precedence:"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("single-review todo instruction leaked elevated-relay routing %q: %q\n"+
+				"the single budget has no relay left after the failure becomes observable", forbidden, review)
+		}
 	}
 }
 
@@ -1893,6 +2025,29 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	review := readTodoInstruction(t, server, 4, key, "review")
 	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
 		t.Fatalf("lead-only review todo instruction not focused: %q", review)
+	}
+	for _, forbidden := range []string{"review cycles for this implementation slice", "the budget ends relaying, not the run"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked review-budget wording %q: %q\n"+
+				"lead-only dispatches no reviewers and never relays, so it must name neither a review-cycle budget nor the final-cycle behavior", forbidden, review)
+		}
+	}
+	// Same negative-pin shape for the adjudication vocabulary: lead-only produces no
+	// relay, so it can produce no dispute, so none of the arbitration tokens or the
+	// delegate name may appear on this branch.
+	for _, forbidden := range []string{"[maintained]", "[escalate: <reason>]", "review-adjudicator", "Adjudicate at most once per relay slot", "[out-of-scope: <reason>]"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked adjudication wording %q: %q\n"+
+				"lead-only relays nothing, so it has no contested finding to adjudicate", forbidden, review)
+		}
+	}
+	// Same shape for the elevated-relay routing: lead-only dispatches no relay, so it
+	// has no failed relay to escalate and no relay target to name.
+	for _, forbidden := range []string{"implementer-elevated", "Capacity:", "Root-cause:", "Elevated inputs:", "Precedence:", "[unresolved: <short reason>]"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("lead-only review todo instruction leaked elevated-relay routing %q: %q\n"+
+				"lead-only relays nothing, so no relay can be routed to the elevated implementer", forbidden, review)
+		}
 	}
 	complete := readTodoInstruction(t, server, 5, key, "complete")
 	for _, want := range []string{"retained branch", "commit range", "documentation not touched", "no-merge completion", "Do not push"} {
@@ -2299,6 +2454,180 @@ func TestServeStdioTicketsCloseUnresolvedPhaseStatesSoftWarnNextInstruction(t *t
 	}
 }
 
+// TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse is a C5
+// dispatch-level test: a todo/ -> ready/ move at the shipped default
+// (sage_review: auto -> required, never skipped) with an unresolved posture
+// must succeed and carry the ready-sage-posture warning text in the actual
+// tools/call response text, not just in wsdoc.TicketMutateResult.Tip.
+func TestServeStdioTicketsMoveToReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-ready-unresolved-warn"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Unresolved\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902608, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "ready",
+	})
+	if !strings.Contains(moveResp, "sage-review-design is unreviewed") {
+		t.Fatalf("tickets.move to ready response missing unresolved-posture warning: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
+		t.Fatalf("tickets.move to ready response missing consequence statement: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "ws/tickets.sage_gate") {
+		t.Fatalf("tickets.move to ready response missing resolving-call pointer: %s", moveResp)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "ready", stem+".md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("moved ticket should exist at ready/: matches=%v err=%v", matches, err)
+	}
+}
+
+// TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse is the
+// dispatch-level counterpart of the wsdoc-level
+// TestTicketsMoveUpwardNonReadyBlockedRejectsMove. C5 gave the ready-landing
+// *warning* paths dispatch-level coverage but left the non-ready *hard
+// rejection* (blockedUpwardMoveError) asserted only inside wsdoc, so a
+// dispatch-case edit that downgraded it to a soft Tip, swallowed it, or ran it
+// after atomicGitMove would pass every test. This asserts the rejection
+// actually reaches the tools/call response text and that the ticket does not
+// move.
+func TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-nonready-blocked-dispatch"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Blocked\nsage-review-design: blocked\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902610, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "sage-review-design: blocked") {
+		t.Fatalf("tickets.move idea->todo blocked response missing the rejection text: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "address blocked review before promoting") {
+		t.Fatalf("tickets.move idea->todo blocked response missing the action-oriented rejection: %s", moveResp)
+	}
+	// It must be a hard error, not a soft tip on a successful move.
+	if strings.Contains(moveResp, "moved") || strings.Contains(moveResp, "tip: ") {
+		t.Fatalf("blocked non-ready move must not report success: %s", moveResp)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); err == nil {
+		t.Fatalf("ticket moved to todo/ despite blocked rejection")
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "idea", stem+".md")); err != nil {
+		t.Fatalf("ticket should remain at idea/: %v", err)
+	}
+}
+
+// TestServeStdioTicketsMoveNonReadyBlockedSurfacesPartialMutationNotice
+// reproduces the 2026-07-13 scenario from
+// 260713-bug-tickets-move-error-mutates-frontmatter at the MCP tool-response
+// layer, scoped to the one path that still hard-blocks after 16c77241
+// relocated ready-landing sage-posture enforcement to ws/git.commit: a
+// legacy-schema ticket (single sage-review: field) blocked on a non-ready
+// upward move (idea -> todo). TicketsMove self-heals (migrates) the
+// frontmatter before the block, so the tool response text must carry an
+// explicit partial-mutation notice alongside the error, not the bare error
+// alone.
+func TestServeStdioTicketsMoveNonReadyBlockedSurfacesPartialMutationNotice(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-sage-move-nonready-blocked-partial"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Sage\nsage-review: blocked\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902611, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "sage-review-design: blocked") {
+		t.Fatalf("tickets.move blocked response missing the underlying error: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "partial-mutation:") {
+		t.Fatalf("tickets.move blocked response missing partial-mutation notice: %s", moveResp)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "ai-docs", "tickets", "idea", stem+".md"))
+	if err != nil {
+		t.Fatalf("read ticket after blocked move: %v", err)
+	}
+	if !strings.Contains(string(raw), "sage-review-design: blocked") {
+		t.Fatalf("ticket missing self-healed sage-review-design field after blocked move:\n%s", string(raw))
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); err == nil {
+		t.Fatalf("ticket moved to todo/ despite blocked rejection")
+	}
+}
+
+// TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse is
+// the tickets.create_empty counterpart of the above (C5): creating directly
+// at ready/ under the shipped default posture must succeed and surface the
+// same warning shape in the dispatch response.
+func TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902609, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create_empty", map[string]any{
+		"stem":          "feat-ready-create-unresolved-warn",
+		"initial_state": "ready",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/ready/") {
+		t.Fatalf("tickets.create_empty response missing created path: %s", createResp)
+	}
+	if !strings.Contains(createResp, "sage-review-design is unreviewed") {
+		t.Fatalf("tickets.create_empty ready response missing unresolved-posture warning: %s", createResp)
+	}
+	if !strings.Contains(createResp, "ws/git.commit will fail on guardrail ready-sage-posture") {
+		t.Fatalf("tickets.create_empty ready response missing consequence statement: %s", createResp)
+	}
+	if !strings.Contains(createResp, "ws/tickets.sage_gate") {
+		t.Fatalf("tickets.create_empty ready response missing resolving-call pointer: %s", createResp)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "ready", "*-feat-ready-create-unresolved-warn.md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("created ticket should exist at ready/: matches=%v err=%v", matches, err)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read created ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review-design: required") || !strings.Contains(body, "sage-review-completeness: required") {
+		t.Fatalf("created ticket missing both stamped required fields (C4 parity with tickets.move):\n%s", body)
+	}
+}
+
 func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -2398,47 +2727,6 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 	body := string(raw)
 	if !strings.Contains(body, "sage-review-design: recommended") {
 		t.Fatalf("moved ticket missing recommended posture (explicit project-scope override should win over builtin default):\n%s", body)
-	}
-}
-
-// TestServeStdioTicketsMoveBlockedSurfacesPartialMutationNotice reproduces
-// the 2026-07-13 scenario from
-// 260713-bug-tickets-move-error-mutates-frontmatter at the MCP tool-response
-// layer: a legacy-schema ticket (single sage-review: field) blocked on
-// promotion to ready. TicketsMove self-heals (migrates) the frontmatter
-// before the block, so the tool response text must carry an explicit
-// partial-mutation notice alongside the error, not the bare error alone.
-func TestServeStdioTicketsMoveBlockedSurfacesPartialMutationNotice(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-
-	stem := "260101-feat-sage-move-blocked-partial"
-	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
-		"---\ntitle: Sage\nsage-review: pending\n---\n\nBody.\n")
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 902604, root, nil))
-
-	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
-		"stem": stem,
-		"to":   "ready",
-	})
-	if !strings.Contains(moveResp, "sage-review-design") {
-		t.Fatalf("tickets.move blocked response missing the underlying error: %s", moveResp)
-	}
-	if !strings.Contains(moveResp, "partial-mutation:") {
-		t.Fatalf("tickets.move blocked response missing partial-mutation notice: %s", moveResp)
-	}
-
-	raw, err := os.ReadFile(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md"))
-	if err != nil {
-		t.Fatalf("read ticket after blocked move: %v", err)
-	}
-	if !strings.Contains(string(raw), "sage-review-design:") {
-		t.Fatalf("ticket missing self-healed sage-review-design field after blocked move:\n%s", string(raw))
 	}
 }
 

@@ -31,7 +31,9 @@ marketplaces and fails for `source_type = "local"`.
 
 Iterative local plugin testing uses UI uninstall/install or a fresh Codex session
 after editing the registered local source. Verified after UI uninstall/install:
-`$ws:lead-skill-authoring`, `$ws:lead-write-ticket`, and `$ws:lead-discuss` are visible.
+`$ws:lead-write-ticket` and `$ws:lead-discuss` are visible. The probe also
+covered `$ws:lead-skill-authoring` until 2026-07-28, when that skill was
+relocated out of the plugin surface to `ai-docs/ref/skill-authoring.md`.
 
 Skill invocation is namespaced as `$<plugin-name>:<skill-name>`; for this repo's
 candidate plugin the form is `$ws:<skill-name>`.

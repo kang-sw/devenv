@@ -6,5 +6,4 @@ description: Plan and, after required confirmation, reconstruct missing or drift
 # Forge Spec
 
 Call `wsflow/playbook.print(name: "lead-forge-spec")` and execute the returned procedure
-inline against the current user request. If the playbook cannot be loaded, stop
-and report that blocker.
+inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.

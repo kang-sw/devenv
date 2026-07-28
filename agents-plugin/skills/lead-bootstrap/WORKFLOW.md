@@ -57,10 +57,12 @@ template rather than relying on a project-local guide override.
   change without changing behavior.
 - Each behavior entry uses a stable `{#YYMMDD-slug}` anchor. The anchor stem is
   the identifier used in tickets, commits, and mental-model cross-references.
-- Contract-first planned behavior uses `🚧` markers on headings or planned
-  callouts. Other planned work stays in ticket `## Spec Impact` until
-  implementation closeout. Remove the marker only after verifying the behavior
-  is implemented.
+- Planned work stays in ticket `## Spec Impact` until implementation closeout;
+  spec entries describe implemented behavior only. Verify the behavior exists
+  before writing or keeping its entry. A known-but-unscheduled gap with no
+  ticket is the exception: it stays as a
+  `> [!note] Implementation Gap · YYYY-MM-DD` callout, and a verification pass
+  keeps it rather than deleting it.
 - If stem-generation or duplicate-anchor tools are unavailable, choose a clear
   date-prefixed stem manually, search the spec tree for duplicates, and verify
   with ws tooling when it becomes available.

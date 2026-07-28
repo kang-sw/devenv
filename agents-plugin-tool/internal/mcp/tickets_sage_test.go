@@ -46,23 +46,66 @@ func TestParseSageVerdicts(t *testing.T) {
 }
 
 func TestFormatSageGateRoundTrip(t *testing.T) {
-	// run action with a commit (ask-decline path that also runs the other stage).
+	// A combined-mode run (the state a completeness decline lands in: design
+	// still runs). formatSageGate must render only the gate decision — no
+	// commit title, no commit paths, no ws/git.commit call handed to the
+	// caller. The posture write rides the caller's own next ordinary commit.
 	out := formatSageGate(wsdoc.SageGateResult{
-		Action:      "run",
-		Reviewers:   []string{"design", "completeness"},
-		Mode:        "combined",
-		CommitTitle: "chore(sage): skip completeness review",
-	}, "abc123")
-	for _, want := range []string{"action: run", "reviewers: design, completeness", "mode: combined", "commit: abc123", "next_instruction:", "stage=combined"} {
+		Action:    "run",
+		Reviewers: []string{"design", "completeness"},
+		Mode:      "combined",
+	})
+	for _, want := range []string{
+		"action: run", "reviewers: design, completeness", "mode: combined",
+		"next_instruction:", "stage=combined",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("formatSageGate missing %q in:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "commit: ") {
+		t.Fatalf("formatSageGate must not claim a commit happened:\n%s", out)
+	}
 
 	// ask action carries the prompt and the relay instruction.
-	askOut := formatSageGate(wsdoc.SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?"}, "")
+	askOut := formatSageGate(wsdoc.SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?"})
 	if !strings.Contains(askOut, "ask_prompt: Run design review for this ticket?") || !strings.Contains(askOut, "answer=yes|no") {
 		t.Fatalf("formatSageGate ask output:\n%s", askOut)
+	}
+
+	// D1/D3/D4: no gate action may propose a commit for the posture flip, and
+	// every action must describe the uncommitted write the same way. A
+	// regression that reintroduces a canonical title, a pending_commit_* key
+	// family, or a ready-to-paste ws/git.commit call on any branch fails here.
+	// stop_blocked is included because sageGateCombined can persist a design
+	// posture before reaching the completeness blocked branch, so it is not a
+	// write-free action.
+	skipOut := formatSageGate(wsdoc.SageGateResult{Action: "skip"})
+	blockedOut := formatSageGate(wsdoc.SageGateResult{Action: "stop_blocked"})
+	for name, text := range map[string]string{"skip": skipOut, "ask": askOut, "run": out, "stop_blocked": blockedOut} {
+		if strings.Contains(text, "ws/git.commit") || strings.Contains(text, "git.commit(") {
+			t.Fatalf("formatSageGate %s must not hand the caller a commit call:\n%s", name, text)
+		}
+		if strings.Contains(text, "pending_commit") || strings.Contains(text, "chore(sage)") {
+			t.Fatalf("formatSageGate %s must not carry commit metadata:\n%s", name, text)
+		}
+		if !strings.Contains(text, sageGatePostureUncommittedNote) {
+			t.Fatalf("formatSageGate %s missing the shared uncommitted-posture note:\n%s", name, text)
+		}
+	}
+
+	// The advisory line renders as a capitalized sentence (C9), matching its
+	// sibling fields (ask_prompt/next_instruction), even though the shared
+	// sageReviewNonWaivableAdvisory constant itself stays lowercase-initial
+	// for its other embedding inside the mutation-time Tip warning.
+	runOut := formatSageGate(wsdoc.SageGateResult{
+		Action:    "run",
+		Reviewers: []string{"design"},
+		Mode:      "standalone",
+		Advisory:  "sage review is not waivable per ticket (see ws/config.show for the sage_review config); design review checks coherence.",
+	})
+	if !strings.Contains(runOut, "advisory: Sage review is not waivable") {
+		t.Fatalf("formatSageGate advisory must be capitalized:\n%s", runOut)
 	}
 }
 
@@ -122,6 +165,74 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	})
 	if !strings.Contains(resp, "action: run") || !strings.Contains(resp, "reviewers: design") || !strings.Contains(resp, "mode: standalone") {
 		t.Fatalf("sage_gate dispatch response:\n%s", resp)
+	}
+	// C5: the required->run advisory (non-waivable statement + review-scope
+	// line) must reach the actual MCP dispatch response, not just the
+	// wsdoc.SageGateResult struct field.
+	if !strings.Contains(resp, "advisory: Sage review is not waivable") {
+		t.Fatalf("sage_gate dispatch response missing advisory line:\n%s", resp)
+	}
+}
+
+// TestServeStdioSageGateDeclineDoesNotAutoCommit is the C2 regression test:
+// the ask-decline path (recommended posture + answer=="no") must write and
+// persist the "skipped" posture, then stop. It must neither commit it (the
+// original defect: a nil-Verifier wsgit.NewClient() commit bypassing the
+// ready-sage-posture guardrail chokepoint) nor propose a separate commit for
+// it (the cycle-1 relocation of the same defect: a canonically-titled
+// ws/git.commit call handed to the caller, whose `-A` staging sweeps the whole
+// uncommitted ticket into a commit describing only the posture flip).
+func TestServeStdioSageGateDeclineDoesNotAutoCommit(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	ticketRel := filepath.Join("ai-docs", "tickets", "todo", "260101-feat-decline.md")
+	mustWrite(t, root, ticketRel,
+		"---\ntitle: Sage\nsage-review-design: recommended\n---\n\nBody.\n")
+	initGit(t, root)
+	runGit(t, root, "add", ticketRel)
+	runGit(t, root, "commit", "-m", "initial ticket")
+	logBefore := runGitOutput(t, root, "log", "--oneline")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 9705, root, nil))
+
+	resp := callToolWithKey(t, server, 9706, key, "tickets.sage_gate", map[string]any{
+		"stem":    "260101-feat-decline",
+		"landing": "todo",
+		"answer":  "no",
+	})
+	if !strings.Contains(resp, "action: skip") {
+		t.Fatalf("sage_gate decline response should resolve to skip:\n%s", resp)
+	}
+	// The decline proposes no commit of its own — not an automatic one and not
+	// a suggested one. A canonical "chore(sage): skip ... review" title over a
+	// ticket file swallows the co-located real edits (260725,
+	// {#260720-wsdoc-commit-boundary}), so the whole payload is gone.
+	for _, forbidden := range []string{"pending_commit", "chore(sage)", "ws/git.commit", "git.commit("} {
+		if strings.Contains(resp, forbidden) {
+			t.Fatalf("sage_gate decline response must not carry %q:\n%s", forbidden, resp)
+		}
+	}
+	if strings.Contains(resp, "commit: ") {
+		t.Fatalf("sage_gate decline response must not claim a commit happened:\n%s", resp)
+	}
+
+	logAfter := runGitOutput(t, root, "log", "--oneline")
+	if string(logBefore) != string(logAfter) {
+		t.Fatalf("sage_gate decline dispatch must not create a commit: before=%q after=%q", logBefore, logAfter)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ticketRel))
+	if err != nil {
+		t.Fatalf("read ticket: %v", err)
+	}
+	if !strings.Contains(string(body), "sage-review-design: skipped") {
+		t.Fatalf("sage_gate decline must still write the skipped posture:\n%s", body)
+	}
+	status := strings.TrimRight(string(runGitOutput(t, root, "status", "--porcelain", ticketRel)), "\n")
+	if status != " M "+filepath.ToSlash(ticketRel) {
+		t.Fatalf("sage_gate decline dispatch should leave the ticket modified-but-unstaged, got status %q", status)
 	}
 }
 

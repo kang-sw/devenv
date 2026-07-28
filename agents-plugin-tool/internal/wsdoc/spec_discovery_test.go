@@ -35,6 +35,51 @@ func TestSpecsListHandlesNestedSpecsAndDuplicateFilenames(t *testing.T) {
 	}
 }
 
+// markerContext's looseness is a retained surface: its `planned` and `wip`
+// substring branches feed specs.find match scoring, and the emoji branch alone
+// is only a third of it. TestSpecsListHandlesNestedSpecsAndDuplicateFilenames
+// pins the emoji branch through MarkerContexts; this pins the other two, so a
+// later narrowing of the predicate cannot pass CI unnoticed.
+func TestMarkerContextRetainsLooseSubstringBranches(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"emoji", "  - 🚧 Root feature [260504-ticket-demo/p1]", "- 🚧 Root feature [260504-ticket-demo/p1]"},
+		{"planned lowercase", "  - planned work [260504-ticket-demo/p2]", "- planned work [260504-ticket-demo/p2]"},
+		{"planned mixed case", "Planned behavior arrives later.", "Planned behavior arrives later."},
+		{"wip lowercase", "  - wip work [260504-ticket-demo/p3]", "- wip work [260504-ticket-demo/p3]"},
+		{"wip mixed case", "WIP: registry pruning", "WIP: registry pruning"},
+		{"no marker token", "  - done [260504-other-ticket/p1]", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := markerContext(tc.line); got != tc.want {
+				t.Fatalf("markerContext(%q) = %q, want %q", tc.line, got, tc.want)
+			}
+		})
+	}
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/loose.md", "---\ntitle: Loose\nfeatures:\n  - planned work [260504-ticket-demo/p2]\n  - wip work [260504-ticket-demo/p3]\n---\n# Loose\n\n## Loose {#260504-loose}\n")
+	got, err := SpecsList(root)
+	if err != nil {
+		t.Fatalf("SpecsList returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("SpecsList = %#v", got)
+	}
+	if joined(got[0].MarkerContexts) != "- planned work [260504-ticket-demo/p2],- wip work [260504-ticket-demo/p3]" {
+		t.Fatalf("marker contexts = %#v", got[0].MarkerContexts)
+	}
+	// The looseness must stay out of the legacy-marker advisory: neither line is
+	// a marker shape at line start.
+	if got[0].LegacyMarkerAdvisory != "" {
+		t.Fatalf("loose marker context leaked into the advisory: %q", got[0].LegacyMarkerAdvisory)
+	}
+}
+
 func TestSpecsFindBySpecStemTicketStemAndQuery(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - planned work [260504-ticket-demo/p2]\n---\n# Demo\n\n## Feature {#260504-spec-demo}\n\nDeterministic spec discovery.\n")

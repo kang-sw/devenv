@@ -21,7 +21,7 @@ Board artifacts
 Scope
 - Read only ticket files selected as edit targets, graph tickets needed for binding-decision review, required conventions, focus updates, and explicitly routed spec/mental-model checks.
 - Review related-ticket decisions by default; cascade (`judge: cascade-ticket-edit`) only for broader board or multi-ticket propagation.
-- Ready promotion requires spec addressing (`judge: spec-address-gate`), not mandatory planned spec text.
+- Ready promotion requires spec addressing (`judge: spec-address-gate`).
 
 Movement
 - Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create_empty` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.
@@ -58,16 +58,16 @@ Movement
 1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
 2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check**.
 
-### 5. Commit
+### 5. Sage Review Gate
+
+1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
+2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)`. Both stamping tools write the sage-review posture into the ticket file and leave it uncommitted; any commit direction either tool returns does not apply inside this procedure. Commit nothing in this step — step 6 performs the single commit that carries the posture together with the ticket edits already held on the file, under real `## AI Context`.
+3. If a stamped verdict is `block` at a `ready/` landing, the promotion cannot proceed: move the ticket back to its pre-promotion status via `{{.McpNamespace}}/tickets.move`, skip step 6, and stop and report the blocker.
+
+### 6. Commit
 
 1. If no file changed because a requested move was refused, skip commit.
 2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
-
-### 6. Sage Review Gate
-
-1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
-2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)` and follow its returned next_instruction.
-3. `tickets.sage_stamp` writes the posture but does not commit: commit it with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`, carrying the posture change together with any other uncommitted edits already held on the ticket, under real `## AI Context`.
 
 ### 7. Handoff
 
@@ -92,7 +92,7 @@ For each reviewer named by `tickets.sage_gate`:
 1. If the user has not already approved persistence, ask whether to persist the discussion into tickets or specs; stop with no edits when they decline or do not answer.
 2. List every unresolved or unconfirmed item that could affect ticket text: mechanism decisions, rejected alternatives, future-scope hints, Result Forward notes, focus "Next" lines, and comment/note proposals.
 3. Create or refresh the visible Open Decision Queue using the task-list guidance appended to this playbook.
-4. Ask about one queue item at a time; after each answer, update the visible queue status before asking the next item.
+4. Ask about one queue item at a time by restating its full text in the response body, followed by a one-line status roll-up of the remaining items; after each answer, update the visible queue status before asking the next item.
 5. Continue only when every queue item is confirmed, rejected, or explicitly deferred.
 6. Write confirmed items only; omit rejected, deferred, or unanswered items unless the user explicitly approves recording their status.
 7. Never write draft decisions for later correction.
@@ -103,7 +103,7 @@ Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promoti
 
 1. For `todo/` (not promoting): existing `spec:` links are optional recovery hints only; implementation still routes through proceed.
 2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
-3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance. When `judge: contract-first-spec` is yes: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` inline, list the resulting stem in `spec:`, and drop redundant `## Spec Impact` text.
+3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance.
 4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/`; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
 
 ## On: Output Handoff
@@ -160,12 +160,6 @@ Mechanics: see **On: Spec-address Check**; stop condition is `judge: missing-spe
 `ready/`: already spec-addressed.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`. See the workflow manual's Ticket System Concepts section for what each status directory means.
-
-### judge: contract-first-spec
-
-Yes: planned behavior must be visible and stable before implementation begins.
-Usually yes: externally consumed schemas, CLI/API contracts, file or wire formats, cross-skill routing contracts, or multi-ticket planned behavior.
-No: ticket only needs a spec area for post-implementation closeout, final behavior will be refined during implementation, or planned text would mostly restate the ticket phase.
 
 ### judge: cascade-ticket-edit
 

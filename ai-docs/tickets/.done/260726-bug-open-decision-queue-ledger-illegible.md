@@ -1,0 +1,146 @@
+---
+title: The Open Decision Queue ledger can degrade to illegible while satisfying every stated rule
+related:
+  260726-feat-doc-organization-autonomy-odq-admission-filter: adjacent ODQ change — that one narrows what enters the queue, this one fixes how queued items are conveyed
+sage-review-design: completed
+sage-review-completeness: completed
+completed: 2026-07-27
+---
+
+# The Open Decision Queue ledger can degrade to illegible while satisfying every stated rule
+
+## Background
+
+Reported downstream (wsflow 0.36.1). The consent mechanism stopped functioning
+and recovered only because the human said so.
+
+`lead-write-ticket`'s **Included Guidance: Open Decision Queue Task List**
+(`agents-plugin/rsrc/lead-write-ticket/task-list.md`) mandates a visible task
+list and states: "Treat the list as the consent ledger; do not replace it with
+hidden notes." It says nothing about how a queue item should be composed.
+
+The downstream agent put decision content in the task `description` and short
+labels in `subject`. That harness truncates descriptions. The owner reported
+everything after item 3 was invisible. The ledger existed, satisfied the letter
+of every rule, and conveyed nothing. Recovery was ad hoc: move load-bearing
+content into `subject`, then re-serialize each item into chat prose.
+
+Nothing in the guidance instructs the agent to check that the ledger is legible,
+and nothing covers the subject/description split. The mechanism's correctness
+depends on a rendering property no rule mentions.
+
+This matters more than a formatting nit: the queue is the consent record.
+Downstream, seven items were queued and **none had been explicitly confirmed by
+the owner** even though the agent had internalized all seven as settled; two were
+materially revised on contact with the actual question. An illegible ledger turns
+that gate back into agent inference.
+
+## Decisions
+
+- **Queue item subjects must be self-describing.** The subject carries the
+  decision itself, not a label. `description` is optional detail that may not
+  render and must never be load-bearing.
+- **Restating each item in the response body is the documented default, not a
+  recovery.** This is the load-bearing half: it is harness-independent, so it
+  cannot silently degrade. The visible list is the record; prose is the channel.
+- **Do not mandate reprinting the whole queue every turn.** That is noise. The
+  shape is: full text of the item being asked, plus a one-line status roll-up of
+  the rest.
+- **The second copy is the Codex host variant, not `lead-discuss`.**
+  `includes: [task-list]` appears only in
+  `agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md`; `lead-discuss`
+  merely routes to it and includes nothing. The actual second copy is
+  `agents-plugin/rsrc/lead-write-ticket/task-list.codex.md`, which carries its
+  own consent-ledger claim and its own silence on item composition. Both host
+  variants must end up saying the same thing.
+
+## Constraints
+
+- Do not weaken the queue itself. Downstream's report explicitly names the ODQ as
+  the highest-value gate of the procedure; this ticket is about conveyance only.
+- The guidance already allows a Markdown checklist fallback when no task list
+  exists. Keep that path and apply the same self-describing rule to it.
+
+## Spec Impact
+
+- Target spec area: `ai-docs/spec/workflow-skills.md`. Confirmed, not
+  conditional — it already carries the ODQ conveyance contract ("builds a visible
+  Open Decision Queue, asks whether to persist …, resolves one queue item at a
+  time, updates the visible queue after each answer"), and the restate-in-body
+  obligation is a caller-visible amendment to that paragraph.
+- Expected caller-visible change: agents running the ODQ restate each queued item
+  in the response body and compose self-describing subjects.
+- Contract-first spec: no. This is guidance text whose exact wording should be
+  settled while editing it.
+
+## Phases
+
+### Phase 1: Make the ledger legible by construction
+
+- Amend `agents-plugin/rsrc/lead-write-ticket/task-list.md`: subjects
+  self-describing; `description` explicitly non-load-bearing; the same rule
+  applied to the Markdown-checklist fallback.
+- Apply the identical change to
+  `agents-plugin/rsrc/lead-write-ticket/task-list.codex.md`. These are the two
+  copies — named, not discoverable.
+- Amend `lead-write-ticket`'s **On: Open Decision Queue** step 4 so asking an item
+  includes restating it in the response body, with a one-line roll-up of the
+  remaining items.
+- Regenerate both derived artifacts, which is mandatory after any `rsrc/` edit
+  and is the recurring gap already recorded as
+  `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit` and
+  `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`:
+  `WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealManifest`
+  and
+  `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`.
+  `agents-plugin-wsflow/rsrc/` is a generated byte-identical mirror and must
+  never be hand-edited.
+
+Rejected alternatives: relying on the harness to render descriptions (the failure
+being fixed); reprinting the entire queue each turn (noise, and it buries the
+question being asked).
+
+Verification boundary — an artifact check, since this is a text-only change with
+no runtime probe:
+
+1. Both `task-list.md` and `task-list.codex.md` assert self-describing subjects,
+   mark `description` non-load-bearing, and apply both rules to the
+   Markdown-checklist fallback.
+2. `lead-write-ticket`'s ODQ step 4 carries the restate-in-body obligation.
+3. Both regen commands run clean and produce no diff on a second run.
+
+### Result (e2caca2b) - 2026-07-27
+
+Done. The ledger is now legible by construction on every rendering path.
+
+- `task-list.md` gained a fallback clause on the visible-list rule ("otherwise
+  print a concise Markdown checklist, applying the same item rules below to it"),
+  so the composition rules govern the fallback path explicitly rather than by
+  implication.
+- Both host variants now carry the same item-composition sentence: the item's
+  visible text is the decision itself, self-describing and not a label; any
+  secondary note or description field is optional detail that may not render and
+  must never carry load-bearing content.
+- `lead-write-ticket.md` "On: Open Decision Queue" step 4 now restates the asked
+  item's full text in the response body plus a one-line status roll-up of the
+  remaining items — the harness-independent half the ticket identified as
+  load-bearing.
+
+Deviation from the phase text, deliberate: the phase says "subjects
+self-describing" and "`description` explicitly non-load-bearing", naming two
+Claude Code `TaskCreate` field literals. Writing those literals into the
+host-neutral file would have reproduced the ticket's own defect one level up — a
+rule naming a field that has no referent on the Markdown-checklist path. Both
+files name the thing by its role instead ("the item's/task's visible text", "any
+secondary note or description field"), which preserves the hazard while staying
+valid on all three surfaces. A review round caught that the first pass had
+genericized only `description` and left `subject`; `504f811b` fixed the
+asymmetry.
+
+Verification: all three boundary conditions confirmed by artifact inspection.
+Both regen commands ran clean and produced no diff on a second run; the wsflow
+package tests pass (10 tests).
+
+Spec: `{#260727-odq-item-conveyance-restate-in-body}` states the conveyance
+contract — queue conveyance does not depend on host rendering, item text is the
+decision itself, restate-in-body plus roll-up when asking.

@@ -57,6 +57,18 @@ func TestTicketTemplate(t *testing.T) {
 		t.Error("TicketTemplate(\"feat\") does not contain \"## Phases\"")
 	}
 
+	// The actionable template still offers the `## Spec Impact` optional section
+	// and no longer instructs the author to write a `Contract-first spec` field,
+	// retired with the planned-marker mechanism by
+	// 260726-refactor-retire-spec-planned-marker-mechanism. Both directions are
+	// asserted: the negative alone would also pass if the bullet vanished.
+	if !strings.Contains(first, "`## Spec Impact`") {
+		t.Error("actionable TicketTemplate does not offer the \"## Spec Impact\" optional section")
+	}
+	if strings.Contains(first, "Contract-first spec") {
+		t.Error("actionable TicketTemplate reintroduced the retired \"Contract-first spec\" field")
+	}
+
 	// Unknown type returns an error with "unknown ticket type".
 	_, err := wsdoc.TicketTemplate("invalid")
 	if err == nil {

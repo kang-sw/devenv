@@ -27,7 +27,7 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 		"ai-docs/",
 		"  ref/",
 		"spec:",
-		"  demo.md  - Demo  [2f, WIP 1 -> 260503-feat-demo/p1]",
+		"  demo.md  - Demo  [2f]",
 		"tickets:",
 		"  [ready] 260503-feat-demo",
 		"      parent: 260503-epic-demo  # Epic demo",

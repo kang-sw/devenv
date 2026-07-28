@@ -54,3 +54,85 @@ tip against the working tree.
 - **Generality.** Does the same hazard apply to any parallel-agent stage that
   shares one working tree (e.g. concurrent implementers)? The reshape toward
   fresh/isolated subagents (`260605` pivot) may already point at the answer.
+
+## Recurrence evidence — 260726-refactor-retire-spec-planned-marker-mechanism
+
+The hazard recurred across **both phases** of the same ticket, which raises it
+from a one-off to a reproducible property of partitioned review in one checkout.
+
+Phase 2, cycle 1 (range `d8d03fdb..4722ceea`, three concurrent partitions):
+
+- The **test partition** ran seven mutation-test iterations, each applying an
+  uncommitted single-hunk edit and reverting it by hand. This is legitimate work
+  for that partition and it left the tree clean at the end.
+- The **correctness partition**, running concurrently in the same checkout,
+  observed those mutations appear and disappear under it in
+  `internal/wsdoc/spec_discovery.go`, `internal/wsdoc/legacy_marker.go`,
+  `internal/mcp/server.go`, and `internal/wsdoc/tickets_template.go`. Its first
+  targeted `go test -run …` runs reported failures caused by the injected
+  mutations rather than by the diff under review.
+- It needed **7 attempts** to obtain a single verification window with
+  `git status --porcelain` verified empty immediately before *and* immediately
+  after the run.
+- One mutation (an unused `fence` local in `legacy_marker.go`) was a **build
+  break**, so during that window a sibling partition's targeted runs could not
+  compile at all — a failure mode with no relation to the reviewed diff.
+
+Two things this adds to the open questions above:
+
+- The contaminating agent was **not** misbehaving. Mutation testing is the test
+  partition's assigned method, and it restored every edit. Read-only reviewer
+  profiles would therefore not fix this case; only per-agent isolation or
+  serialization would.
+- Recurrence across two phases of one ticket suggests the cost is not rare
+  enough to absorb: the visible price here was seven wasted verification
+  attempts plus one round of investigating failures that did not exist.
+
+Phase 2, cycle 2 (range `4722ceea..59d6a025`, three concurrent partitions):
+
+- Third consecutive review cycle, across two phases of the same ticket. The
+  contaminating work was again legitimate mutation testing by the test
+  partition, which left the tree clean at the end.
+- The **fit partition** started on a clean tree, then observed
+  `M agents-plugin-tool/internal/mcp/server.go` with the `  marker: ` render
+  re-inserted at `:2536`, and later
+  `M agents-plugin-tool/internal/wsdoc/spec_discovery.go`. It responded by
+  **restating every claim it made about Go source against `HEAD`** via
+  `git show` / `git grep HEAD` instead of against the working file, and said so
+  explicitly in its findings.
+- The **correctness partition** independently reported the same contamination
+  and had one measurement run start clean and finish with a mutation present,
+  invalidating it; it re-derived that conclusion statically.
+
+What this adds beyond the cycle-1 evidence: cycle 1's cost was **retries** —
+seven attempts to find a clean verification window. Cycle 2's cost is a
+**changed method**. A reviewer abandoned working-tree verification altogether
+and re-derived its conclusions from `HEAD`, which is a strictly weaker position:
+it cannot run anything, so every claim that would normally be measured becomes a
+static reading. The hazard is no longer only taxing review throughput; it is
+selecting which verification techniques reviewers are able to use.
+
+Phase 2, cycle 3 (range `59d6a025..4cf3aa77`, three concurrent partitions):
+
+- **Fourth consecutive cycle.** The fit partition hit it again — the tree was
+  clean at start, then showed
+  `M agents-plugin-wsflow/skills/lead-bootstrap/WORKFLOW.md`, a sibling's
+  mutation proof — and again fell back to stating every claim against `HEAD`
+  via `git show` / `git grep HEAD`. Same weaker position as cycle 2.
+- **Two partitions independently invented the same workaround, and it works.**
+  The correctness and test partitions avoided the hazard entirely by exporting
+  the commit under review with `git archive HEAD | tar -x -C /tmp/<dir>` and
+  running every build, test, mutation, and regen inside that export, touching
+  the shared checkout only for read-only `git show`/`grep` and for driving a
+  `HEAD`-built binary. Neither wrote anything to the shared checkout. Both
+  reported full mutation tables that cycle 2's `HEAD`-only fallback could not
+  have produced.
+
+Why this matters more than a fourth recurrence count: the export technique
+restores the capability cycle 2 recorded as lost. A reviewer working in a
+`/tmp` export can still *run* things, so mutation proof stays available under
+concurrency. Two independent agents converging on it in one cycle suggests it
+belongs in the reviewer prompt frame as standing method rather than being
+rediscovered per cycle — which is a cheaper answer than per-agent worktrees and
+does not require serializing partitions. That does not settle the open questions
+above; it changes what the fallback costs.

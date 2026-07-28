@@ -26,7 +26,7 @@ affected domains and apply minimal, accurate updates.
 
 1. Determine the scoped range from the last `mental-model-updated` checkpoint; if absent, use the caller-provided base.
 2. Read commit bodies with `{{.McpNamespace}}/git.log(include_body: true)`, extract `### Mental Model Notes` entries, then read `{{.McpNamespace}}/git.diff(mode: "stat")` and the scoped full diff.
-3. Inspect the scoped spec diff to identify spec headings or implemented marker changes that add assessment targets.
+3. Inspect the scoped spec diff to identify spec headings that add assessment targets.
 4. Read `ai-docs/mental-model.md`, then every file in `ai-docs/mental-model/`.
 5. Map changed files, spec changes, and notes to domains. A single file may affect multiple domains.
 6. For each affected domain, check changed contracts, new coupling, extension points, wrong-outcome risks, debt resolved, and cross-domain effects.

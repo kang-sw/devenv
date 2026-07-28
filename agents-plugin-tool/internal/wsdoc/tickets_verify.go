@@ -16,13 +16,41 @@ type VerifyFinding struct {
 	Message   string
 }
 
+// Advisory kinds carried by VerifyAdvisory.Kind. They separate the advisory's
+// contract from its rendered text: the commit path appends the amend recipe to
+// AdvisoryKindFix entries only, and must not have to re-parse the "FIX:"
+// prefix to decide, which would make the settled output format load-bearing
+// for behavior.
+const (
+	// AdvisoryKindFix marks an unambiguous defect with a mechanical remedy.
+	AdvisoryKindFix = "fix"
+	// AdvisoryKindCheck marks an observation whose resolution needs judgment.
+	AdvisoryKindCheck = "check"
+	// AdvisoryKindBoard marks the multi-line "## Parent Board" block, which is
+	// informational and attributable to no single verified path.
+	AdvisoryKindBoard = "board"
+)
+
+// VerifyAdvisory is a pre-formatted, non-blocking advisory produced by the
+// cross-file ticket-graph pass. Unlike VerifyFinding it is not a per-path
+// tuple: the "## Parent Board" block is multi-line, deduplicated per verify
+// call, and belongs to no single path. Advisories never affect OK and never
+// feed formatTicketVerify's "should be addressed or explicitly accepted"
+// next_instruction — an ancestor note is explicitly no-action-needed.
+type VerifyAdvisory struct {
+	Kind string
+	Text string
+}
+
 // VerifyResult aggregates every guardrail outcome across the paths passed to
 // TicketVerify. OK is true only when Findings is empty; Warnings never affect
-// OK (spec-address is soft-warn only, per the ticket's stated posture).
+// OK (spec-address is soft-warn only, per the ticket's stated posture), and
+// neither do Advisories.
 type VerifyResult struct {
-	OK       bool
-	Findings []VerifyFinding
-	Warnings []VerifyFinding
+	OK         bool
+	Findings   []VerifyFinding
+	Warnings   []VerifyFinding
+	Advisories []VerifyAdvisory
 }
 
 var (
@@ -44,12 +72,27 @@ func TicketVerify(root string, paths []string) (VerifyResult, error) {
 		return VerifyResult{}, fmt.Errorf("paths requires at least one path")
 	}
 	result := VerifyResult{}
+	var verified []verifiedTicket
 	for _, path := range paths {
 		status, stem, ok := ticketVerifyPathShape(path)
 		if !ok {
 			continue
 		}
+		// Canonical board-relative form, matching TicketInfo.Path, so the graph
+		// pass can identify the exact verified file rather than only its stem.
+		verified = append(verified, verifiedTicket{
+			Path:   "ai-docs/tickets/" + status + "/" + stem + ".md",
+			Status: status,
+			Stem:   stem,
+		})
 		verifyTicketFile(root, path, status, stem, &result)
+	}
+	// A whole-board graph load or spec-anchor scan can fail on a malformed file
+	// unrelated to this commit. Such a failure drops the advisories and lets the
+	// commit proceed; it must never become an error return, or the non-blocking
+	// invariant would be violated by the very code meant to honor it.
+	if advisories, err := ticketGraphAdvisories(root, verified); err == nil {
+		result.Advisories = advisories
 	}
 	result.OK = len(result.Findings) == 0
 	return result, nil

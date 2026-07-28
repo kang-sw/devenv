@@ -1,6 +1,6 @@
 {
   "name": "ws",
-  "version": "0.36.16",
+  "version": "0.36.29",
   "description": "Codex-first ws workflow plugin candidate for host-neutral skills and project context.",
   "author": {
     "name": "kang-sw"
@@ -25,8 +25,8 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Use $ws:lead-skill-authoring to draft a portable ws skill.",
-      "Use $ws:lead-skill-authoring to audit a skill or agent prompt."
+      "Use $ws:lead-discuss to explore a workflow or migration decision.",
+      "Use $ws:lead-proceed to route an accepted change into implementation."
     ]
   }
 }

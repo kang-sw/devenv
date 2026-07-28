@@ -6,5 +6,4 @@ description: Use when the user wants to review a pull request or merge request b
 # Review
 
 Call `wsflow/playbook.print(name: "lead-review")` and execute the returned procedure
-inline against the current user request. If the playbook cannot be loaded, stop
-and report that blocker.
+inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.

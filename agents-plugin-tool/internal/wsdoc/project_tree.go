@@ -5,14 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
-
-var ticketRefRE = regexp.MustCompile(`\[(\d{6}-[\w-]+/p\d+)\]`)
 
 func ProjectTree(root string) (string, error) {
 	aiDocs := filepath.Join(root, "ai-docs")
@@ -29,7 +26,7 @@ func ProjectTree(root string) (string, error) {
 	renderAIDocs(&b, aiDocs, ignored)
 	b.WriteString("\n\n")
 	if isDir(filepath.Join(aiDocs, "spec")) {
-		renderSpecs(&b, filepath.Join(aiDocs, "spec"))
+		renderSpecs(&b, root, filepath.Join(aiDocs, "spec"))
 		b.WriteString("\n\n")
 	}
 	if isDir(filepath.Join(aiDocs, "tickets")) {
@@ -120,18 +117,51 @@ func gitIgnoreMatcher(repoRoot string) func(string) bool {
 	}
 }
 
-func renderSpecs(b *strings.Builder, specRoot string) {
+// renderSpecs takes both the repository root and the spec directory: the legacy
+// planned-marker advisory resolves against live tickets, which live outside the
+// spec tree. A `needed` pre-pass runs first, matching applyLegacyMarkerAdvisories
+// in spec_discovery.go: project_tree is the session-bootstrap tool, so a project
+// with zero markers must not pay a full live-ticket scan on every session start.
+// When the pre-pass finds markers the resolver is built exactly once per call.
+func renderSpecs(b *strings.Builder, repoRoot, specRoot string) {
 	b.WriteString("spec:\n")
-	renderSpecDir(b, specRoot, 1)
+	markers := scanLegacyMarkersUnderSpecRoot(specRoot)
+	var resolver *legacyMarkerResolver
+	if len(markers) > 0 {
+		resolver = newLegacyMarkerResolver(repoRoot)
+	}
+	renderSpecDir(b, repoRoot, specRoot, 1, markers, resolver)
 }
 
-func renderSpecDir(b *strings.Builder, root string, indent int) {
+// scanLegacyMarkersUnderSpecRoot reads each spec document once and keys the
+// markers it carries by absolute path. Marker-free files are absent from the
+// map, so an empty map is the `needed == false` answer. Read failures are
+// skipped: the advisory never blocks tree rendering.
+func scanLegacyMarkersUnderSpecRoot(specRoot string) map[string][]legacyMarker {
+	out := map[string][]legacyMarker{}
+	_ = filepath.WalkDir(specRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			return nil //nolint:nilerr // advisory scan degrades to no-op
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if found := legacyMarkerLines(string(raw)); len(found) > 0 {
+			out[path] = found
+		}
+		return nil
+	})
+	return out
+}
+
+func renderSpecDir(b *strings.Builder, repoRoot, dir string, indent int, markers map[string][]legacyMarker, resolver *legacyMarkerResolver) {
 	prefix := strings.Repeat("  ", indent)
-	for _, entry := range sortedEntries(root) {
-		path := filepath.Join(root, entry.Name())
+	for _, entry := range sortedEntries(dir) {
+		path := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
 			fmt.Fprintf(b, "%s%s/\n", prefix, entry.Name())
-			renderSpecDir(b, path, indent+1)
+			renderSpecDir(b, repoRoot, path, indent+1, markers, resolver)
 			continue
 		}
 		if filepath.Ext(entry.Name()) != ".md" {
@@ -142,17 +172,9 @@ func renderSpecDir(b *strings.Builder, root string, indent int) {
 		if title == "" {
 			title, _ = fm["summary"].(string)
 		}
-		total, wip, refs := specStats(fm)
 		stats := []string{}
-		if total > 0 {
+		if total := specStats(fm); total > 0 {
 			stats = append(stats, fmt.Sprintf("%df", total))
-		}
-		if wip > 0 {
-			wipText := fmt.Sprintf("WIP %d", wip)
-			if len(refs) > 0 {
-				wipText += " -> " + strings.Join(refs, ", ")
-			}
-			stats = append(stats, wipText)
 		}
 		titlePart := ""
 		if title != "" {
@@ -163,23 +185,34 @@ func renderSpecDir(b *strings.Builder, root string, indent int) {
 			statsPart = "  [" + strings.Join(stats, ", ") + "]"
 		}
 		fmt.Fprintf(b, "%s%s%s%s\n", prefix, entry.Name(), titlePart, statsPart)
+		if advisory := legacyMarkerAdvisoryFor(repoRoot, path, markers[path], resolver); advisory != "" {
+			fmt.Fprintf(b, "%s  legacy-marker: %s\n", prefix, advisory)
+		}
 	}
 }
 
-func specStats(fm map[string]any) (int, int, []string) {
-	features, _ := fm["features"].([]string)
-	refs := []string{}
-	wip := 0
-	for _, feature := range features {
-		if strings.HasPrefix(feature, "🚧") {
-			wip++
-			matches := ticketRefRE.FindAllStringSubmatch(feature, -1)
-			for _, match := range matches {
-				refs = append(refs, match[1])
-			}
-		}
+// legacyMarkerAdvisoryFor uses the pre-pass's marker set rather than reusing
+// specStats: specStats reads `features:` frontmatter, which no spec file in
+// this corpus declares, so a frontmatter-only check detects nothing. A missing
+// resolver or an unresolvable relative path yields no advisory — the note never
+// blocks tree rendering.
+func legacyMarkerAdvisoryFor(repoRoot, path string, markers []legacyMarker, resolver *legacyMarkerResolver) string {
+	if resolver == nil || len(markers) == 0 {
+		return ""
 	}
-	return len(features), wip, refs
+	rel, err := filepath.Rel(repoRoot, path)
+	if err != nil {
+		return ""
+	}
+	return resolver.advise(filepath.ToSlash(rel), markers)
+}
+
+// specStats counts the `features:` frontmatter entries a spec declares. The
+// planned/WIP half was retired with the `🚧` marker mechanism; the plain count
+// stays because downstream projects still maintain `features:` frontmatter.
+func specStats(fm map[string]any) int {
+	features, _ := fm["features"].([]string)
+	return len(features)
 }
 
 func renderTickets(b *strings.Builder, ticketsRoot string) {

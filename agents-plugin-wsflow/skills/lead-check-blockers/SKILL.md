@@ -6,5 +6,4 @@ description: Check whether the active discussion is blocked; return either the b
 # Check Blockers
 
 Call `wsflow/playbook.print(name: "lead-check-blockers")` and execute the returned procedure
-inline against the current user request. If the playbook cannot be loaded, stop
-and report that blocker.
+inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.

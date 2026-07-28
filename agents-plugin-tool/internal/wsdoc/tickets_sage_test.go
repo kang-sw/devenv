@@ -106,14 +106,13 @@ func TestSageGateTodoPostures(t *testing.T) {
 		answer     string
 		wantAction string
 		wantMode   string
-		wantCommit string
 	}{
 		{name: "skipped", field: "skipped", wantAction: "skip"},
 		{name: "completed", field: "completed", wantAction: "skip"},
 		{name: "blocked", field: "blocked", wantAction: "stop_blocked"},
 		{name: "recommended-ask", field: "recommended", wantAction: "ask"},
 		{name: "recommended-accept", field: "recommended", answer: "yes", wantAction: "run", wantMode: "standalone"},
-		{name: "recommended-decline", field: "recommended", answer: "no", wantAction: "skip", wantCommit: "chore(sage): skip design review"},
+		{name: "recommended-decline", field: "recommended", answer: "no", wantAction: "skip"},
 		{name: "required", field: "required", wantAction: "run", wantMode: "standalone"},
 		{name: "missing-config-off", field: "", config: "off", wantAction: "skip"},
 		{name: "missing-config-ask", field: "", config: "ask", wantAction: "ask"},
@@ -140,11 +139,92 @@ func TestSageGateTodoPostures(t *testing.T) {
 			if tc.wantAction == "run" && (len(res.Reviewers) != 1 || res.Reviewers[0] != "design") {
 				t.Fatalf("reviewers = %v, want [design]", res.Reviewers)
 			}
-			if tc.wantCommit != "" && res.CommitTitle != tc.wantCommit {
-				t.Fatalf("commit title = %q, want %q", res.CommitTitle, tc.wantCommit)
-			}
 		})
 	}
+}
+
+// TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory covers
+// verification item 4: the non-waivable statement + review-scope line must
+// ride the ordinary path an agent actually reaches — posture `required`'s
+// `run` result, and posture `recommended`'s `ask` prompt — not only an
+// answer=="no" decline path (which `required` never reaches, since
+// `required` never asks). Also confirms the advisory reaches the combined
+// (both-stages) mode, not just the standalone path.
+func TestSageGateRequiredAndRecommendedCarryNonWaivableAdvisory(t *testing.T) {
+	stem := "260101-feat-sample"
+
+	t.Run("required-run-standalone", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "run" {
+			t.Fatalf("action = %q, want run", res.Action)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want the non-waivable statement on the ordinary required->run path")
+		}
+		if !strings.Contains(res.Advisory, "not waivable") {
+			t.Fatalf("Advisory = %q, want the non-waivable statement", res.Advisory)
+		}
+		if !strings.Contains(res.Advisory, "coherence") || !strings.Contains(res.Advisory, "structure, fields, and clarity") {
+			t.Fatalf("Advisory = %q, want the design-vs-completeness review-scope line", res.Advisory)
+		}
+	})
+
+	t.Run("recommended-ask-standalone", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "recommended"})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "ask")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "ask" {
+			t.Fatalf("action = %q, want ask", res.Action)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want it kept on the recommended ask prompt too (per ticket decision)")
+		}
+	})
+
+	// C8: resolveStage's `recommended` + answer=="yes" -> `run` branch must
+	// carry the advisory too, symmetric with sageGateCombined's equivalent
+	// accepted-recommended-design branch (which already attached it) — a
+	// "run" result is a run result regardless of which posture produced it.
+	t.Run("recommended-accept-run-standalone", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "recommended"})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo", Answer: "yes"}, "ask")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "run" {
+			t.Fatalf("action = %q, want run", res.Action)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want it carried on the accepted-recommended run result too (symmetric with sageGateCombined)")
+		}
+	})
+
+	t.Run("required-run-combined", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, stem, map[string]string{
+			"sage-review-design":       "required",
+			"sage-review-completeness": "required",
+		})
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "run" || res.Mode != "combined" {
+			t.Fatalf("action/mode = %q/%q, want run/combined", res.Action, res.Mode)
+		}
+		if res.Advisory == "" {
+			t.Fatalf("Advisory is empty, want it carried into combined mode too, not just the standalone path")
+		}
+	})
 }
 
 func TestSageGateCategoryMatrix(t *testing.T) {
@@ -263,8 +343,8 @@ func TestSageGateDeclinePersistsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SageGate decline: %v", err)
 	}
-	if res.Action != "skip" || res.CommitTitle != "chore(sage): skip design review" {
-		t.Fatalf("decline = %+v, want skip + skip-design commit", res)
+	if res.Action != "skip" {
+		t.Fatalf("decline = %+v, want skip", res)
 	}
 	body := readFileString(t, path)
 	if !strings.Contains(body, "sage-review-design: skipped") {
@@ -472,8 +552,9 @@ func TestSageGateCombinedSeparateAsks(t *testing.T) {
 		}
 	})
 
-	// Design declined: design persisted skipped + skip-design commit, and
-	// completeness is ASKED (not silently skipped) — the answer must not leak.
+	// Design declined: design persisted skipped (written, uncommitted, and with
+	// no proposed commit of its own), and completeness is ASKED (not silently
+	// skipped) — the answer must not leak.
 	t.Run("design-decline-then-completeness-ask", func(t *testing.T) {
 		root, path := newTicket(t)
 		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb", Landing: "ready", Answer: "no"}, "ask")
@@ -482,9 +563,6 @@ func TestSageGateCombinedSeparateAsks(t *testing.T) {
 		}
 		if res.Action != "ask" || res.AskPrompt != "Run completeness review for this ticket?" {
 			t.Fatalf("after design decline = %+v, want completeness ask", res)
-		}
-		if res.CommitTitle != "chore(sage): skip design review" {
-			t.Fatalf("design decline commit title = %q", res.CommitTitle)
 		}
 		body := readFileString(t, path)
 		if !strings.Contains(body, "sage-review-design: skipped") {
@@ -508,9 +586,6 @@ func TestSageGateCombinedSeparateAsks(t *testing.T) {
 		}
 		if res.Action != "ask" || res.AskPrompt != "Run completeness review for this ticket?" {
 			t.Fatalf("after design accept = %+v, want completeness ask", res)
-		}
-		if res.CommitTitle != "" {
-			t.Fatalf("accept should not commit, got %q", res.CommitTitle)
 		}
 		if !strings.Contains(readFileString(t, path), "sage-review-design: required") {
 			t.Fatalf("design accept not persisted as required:\n%s", readFileString(t, path))
@@ -550,11 +625,11 @@ func TestSageGateCombinedSeparateAsks(t *testing.T) {
 		}
 	})
 
-	// Completeness declined after design runs -> design runs standalone,
-	// completeness skip committed.
+	// Completeness declined after design runs -> design runs standalone and the
+	// completeness decline is persisted as skipped, uncommitted.
 	t.Run("completeness-decline-design-only", func(t *testing.T) {
 		root := t.TempDir()
-		writeSageTicket(t, root, "260101-feat-comb4", map[string]string{
+		path := writeSageTicket(t, root, "260101-feat-comb4", map[string]string{
 			"sage-review-design":       "required",
 			"sage-review-completeness": "recommended",
 		})
@@ -565,8 +640,8 @@ func TestSageGateCombinedSeparateAsks(t *testing.T) {
 		if res.Action != "run" || res.Mode != "standalone" || len(res.Reviewers) != 1 || res.Reviewers[0] != "design" {
 			t.Fatalf("= %+v, want run standalone [design]", res)
 		}
-		if res.CommitTitle != "chore(sage): skip completeness review" {
-			t.Fatalf("completeness decline commit = %q", res.CommitTitle)
+		if !strings.Contains(readFileString(t, path), "sage-review-completeness: skipped") {
+			t.Fatalf("completeness decline not persisted skipped:\n%s", readFileString(t, path))
 		}
 	})
 }
@@ -587,42 +662,6 @@ func TestSageGateCombinedDegradesToDesignStandalone(t *testing.T) {
 	}
 	if res.Action != "run" || res.Mode != "standalone" || len(res.Reviewers) != 1 || res.Reviewers[0] != "design" {
 		t.Fatalf("degraded = %+v, want run standalone [design]", res)
-	}
-}
-
-// TestMergeGateCommitDualDecline pins the defensive dual-decline merge branch of
-// mergeGateCommit (FIX 2) directly, since SageGate no longer reaches it.
-func TestMergeGateCommitDualDecline(t *testing.T) {
-	res := SageGateResult{
-		Action:      "run",
-		Reviewers:   []string{"design"},
-		Mode:        "standalone",
-		CommitTitle: "chore(sage): skip completeness review",
-		CommitPaths: []string{"ai-docs/tickets/todo/x.md"},
-		AIContext:   []string{"user declined completeness review in ask mode"},
-	}
-	extra := stageOutcome{
-		commitTitle: "chore(sage): skip design review",
-		commitPaths: []string{"ai-docs/tickets/todo/x.md"},
-		aiContext:   []string{"user declined design review in ask mode"},
-	}
-	merged := mergeGateCommit(res, extra)
-	if merged.CommitTitle != "chore(sage): skip sage review" {
-		t.Fatalf("dual-merge title = %q", merged.CommitTitle)
-	}
-	if len(merged.AIContext) != 2 ||
-		merged.AIContext[0] != "user declined design review in ask mode" ||
-		merged.AIContext[1] != "user declined completeness review in ask mode" {
-		t.Fatalf("dual-merge ai_context = %v", merged.AIContext)
-	}
-	if len(merged.CommitPaths) != 1 || merged.CommitPaths[0] != "ai-docs/tickets/todo/x.md" {
-		t.Fatalf("dual-merge paths = %v", merged.CommitPaths)
-	}
-
-	// Single-commit path: extra folded into an otherwise commit-free result.
-	single := mergeGateCommit(SageGateResult{Action: "ask", AskPrompt: "q"}, extra)
-	if single.CommitTitle != "chore(sage): skip design review" || len(single.AIContext) != 1 {
-		t.Fatalf("single-merge = %+v", single)
 	}
 }
 

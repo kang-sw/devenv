@@ -15,6 +15,7 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 
 EXPECTED_SKILLS = {
     "lead-add-rule",
+    "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
     "lead-goal-step",
@@ -26,7 +27,6 @@ EXPECTED_SKILLS = {
     "lead-proceed",
     "lead-review",
     "lead-ship",
-    "lead-sprint",
     "lead-tune",
     "lead-update-spec",
     "lead-verify-discussion",
@@ -46,11 +46,30 @@ EXPECTED_INLINE_SKILLS = {
     "lead-goal-step",
     "mcp-server-repair",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint", "lead-goal-fan-out-step"}
+EXPECTED_PARALLEL_INIT_SKILLS = {"lead-backfill-docs", "lead-discuss", "lead-goal-fan-out-step"}
 PARALLEL_INIT_TITLES = {
+    "lead-backfill-docs": "Backfill Docs",
     "lead-discuss": "Discuss",
-    "lead-sprint": "Sprint",
     "lead-goal-fan-out-step": "Goal Fan-Out Step",
+}
+
+# Single-call shims that carry the mcp-server-repair pointer tail instead of
+# the generic "stop and report that blocker" un-pointed form.
+POINTER_TAIL_TITLES = {
+    "lead-proceed": "Proceed",
+    "lead-write-ticket": "Write Ticket",
+    "lead-write-spec": "Write Spec",
+    "lead-add-rule": "Add Rule",
+    "lead-bootstrap": "Bootstrap",
+    "lead-forge-mental-model": "Forge Mental Model",
+    "lead-forge-spec": "Forge Spec",
+    "lead-review": "Review",
+    "lead-ship": "Ship",
+    "lead-tune": "Workflow Tuning",
+    "lead-implement": "Implement",
+    "lead-check-blockers": "Check Blockers",
+    "lead-update-spec": "Update Spec",
+    "lead-workflow-manual": "Workflow Manual",
 }
 
 FORBIDDEN_PATTERNS = {
@@ -61,7 +80,11 @@ FORBIDDEN_PATTERNS = {
     "full ws agent dotted tool": re.compile(r"\bagents\."),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    "excluded salvage skill": re.compile(r"\blead-salvage\b"),
+    # lead-sprint and lead-salvage were retired outright rather than merely
+    # excluded from wsflow, so these guard against a reintroduced reference to
+    # a skill that no longer exists in either lineage.
+    "retired sprint skill": re.compile(r"\blead-sprint\b"),
+    "retired salvage skill": re.compile(r"\blead-salvage\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 
@@ -104,16 +127,21 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_files_are_thin_playbook_shims(self):
-        # lead-proceed carries the mcp-server-repair pointer in place of the
-        # generic "stop and report that blocker" tail, so it is checked
-        # separately below with its own exact tail; the other 13 shims keep the
-        # strict un-pointed form unchanged.
+        # lead-proceed, lead-write-ticket, lead-write-spec, lead-add-rule,
+        # lead-bootstrap, lead-forge-mental-model, lead-forge-spec,
+        # lead-review, lead-ship, lead-tune, lead-implement,
+        # lead-check-blockers, lead-update-spec, and lead-workflow-manual all
+        # carry the mcp-server-repair pointer in place of the generic "stop
+        # and report that blocker" tail, so they are checked separately below
+        # (see POINTER_TAIL_TITLES) with their own exact tail. That accounts
+        # for every non-inline, non-parallel-init shim; none remain on the
+        # un-pointed form.
         offenders = []
         for skill in sorted(
             EXPECTED_SKILLS
             - EXPECTED_INLINE_SKILLS
             - EXPECTED_PARALLEL_INIT_SKILLS
-            - {"lead-proceed"}
+            - set(POINTER_TAIL_TITLES)
         ):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
@@ -132,32 +160,39 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 offenders.append(str(path.relative_to(PLUGIN_DIR)))
         self.assertEqual(offenders, [])
 
-    def test_lead_proceed_shim_carries_repair_pointer(self):
-        path = SKILLS_DIR / "lead-proceed" / "SKILL.md"
-        text = path.read_text(encoding="utf-8")
-        match = re.fullmatch(
-            r"---\n"
-            r"name: lead-proceed\n"
-            r"description: .+\n"
-            r"---\n\n"
-            r"# .+\n\n"
-            r"Call `wsflow/playbook\.print\(name: \"lead-proceed\"\)` and execute the returned procedure\n"
-            r"inline against the current user request\. "
-            r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
-            text,
-        )
-        self.assertIsNotNone(match, f"{path.relative_to(PLUGIN_DIR)} missing the mcp-server-repair pointer tail")
+    def test_single_call_shims_carry_repair_pointer(self):
+        # All single-call shims in POINTER_TAIL_TITLES share the identical
+        # joined-tail shape, differing only by skill name and title. A missing
+        # pointer on any of them must fail loudly rather than silently
+        # matching the generic un-pointed shim regex instead.
+        offenders = []
+        for skill, title in POINTER_TAIL_TITLES.items():
+            path = SKILLS_DIR / skill / "SKILL.md"
+            text = path.read_text(encoding="utf-8")
+            match = re.fullmatch(
+                r"---\n"
+                rf"name: {re.escape(skill)}\n"
+                r"description: .+\n"
+                r"---\n\n"
+                rf"# {re.escape(title)}\n\n"
+                rf"Call `wsflow/playbook\.print\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
+                r"inline against the current user request\. "
+                r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
+                text,
+            )
+            if match is None:
+                offenders.append(str(path.relative_to(PLUGIN_DIR)))
+        self.assertEqual(offenders, [])
 
     def test_parallel_init_skill_files_are_playbook_shims(self):
-        # lead-discuss and lead-sprint gain the mcp-server-repair pointer after
-        # the existing final line; lead-goal-fan-out-step keeps the un-suffixed
-        # form. Explicit per-skill tails (not an optional regex group) so a
-        # missing pointer on discuss/sprint fails loudly instead of silently
-        # passing.
+        # Every parallel-init skill gains the mcp-server-repair pointer
+        # after the existing final line. Explicit per-skill tails (not an
+        # optional regex group) so a missing pointer on any of them fails
+        # loudly instead of silently passing.
         pointer_tail = {
+            "lead-backfill-docs": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
             "lead-discuss": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-sprint": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
-            "lead-goal-fan-out-step": r"",
+            "lead-goal-fan-out-step": r"\nIf this call fails to connect, run `/wsflow:mcp-server-repair`\.",
         }
         offenders = []
         for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
@@ -193,10 +228,38 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
         text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version: v0005 -->", text)
+        self.assertIn("<!-- Template Version: v0006 -->", text)
         self.assertIn("This template has package-local version history", text)
-        self.assertNotIn("<!-- Template Version: v0038 -->", text)
-        self.assertNotIn("- v0038:", text)
+
+        # The forbidden markers are derived from the full-plugin lineage's
+        # *current* state rather than pinned to a literal version, so this
+        # guard keeps working as both lineages gain versions without a hand
+        # edit. A hardcoded literal (e.g. "v0038") only catches contamination
+        # from that one exact version and goes silent on every later one.
+        full_text = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(
+            encoding="utf-8"
+        )
+
+        full_tag_match = re.search(r"<!-- Template Version: v\d{4} -->", full_text)
+        self.assertIsNotNone(
+            full_tag_match, "full-plugin AGENTS.template.md is missing its version tag"
+        )
+        self.assertNotIn(full_tag_match.group(0), text)
+
+        # Compare on bullet *content*, not bullet number: both lineages number
+        # their changelogs independently starting at v0001, so wsflow's own
+        # v0001-v0006 bullets legitimately share numbers with (differently
+        # worded) full-plugin bullets. A number-only check would either miss
+        # real contamination or false-positive on the wsflow copy's own
+        # history. Matching full lines instead catches a leaked bullet from
+        # any full-plugin version - including the current highest one - while
+        # leaving wsflow's own same-numbered bullets untouched.
+        full_bullet_lines = re.findall(r"(?m)^- v\d{4}:.*$", full_text)
+        self.assertTrue(
+            full_bullet_lines, "full-plugin AGENTS.template.md has no changelog bullets to compare"
+        )
+        leaked_bullets = [line for line in full_bullet_lines if line in text]
+        self.assertEqual(leaked_bullets, [])
 
 
 if __name__ == "__main__":

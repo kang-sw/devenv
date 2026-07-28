@@ -1,6 +1,6 @@
 ---
 title: Workflow Skills
-summary: Codex-facing ws lead skills for planning, implementation routing, sprint work, reconstruction, utilities, and host-neutral workflow primitives.
+summary: Codex-facing ws lead skills for planning, implementation routing, documentation reconciliation, reconstruction, utilities, and host-neutral workflow primitives.
 ---
 
 # Workflow Skills
@@ -22,6 +22,7 @@ workflow-reference roles:
 
 ```text
 lead-add-rule
+lead-backfill-docs
 lead-bootstrap
 lead-discuss
 lead-forge-mental-model
@@ -32,10 +33,7 @@ lead-implement
 lead-check-blockers
 lead-proceed
 lead-review
-lead-salvage
 lead-ship
-lead-skill-authoring
-lead-sprint
 lead-tune
 lead-update-spec
 lead-verify-discussion
@@ -50,12 +48,12 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 15 entry skills the user invokes as
-`/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
-`lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
+The directly invocable surface is narrowed to 13 entry skills the user invokes as
+`/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
+`lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
-`lead-verify-discussion`, `lead-tune`, `lead-goal-step`, and
-`lead-goal-fan-out-step`. The remaining
+`lead-verify-discussion`, `lead-tune`, `lead-goal-step`,
+`lead-goal-fan-out-step`, and `lead-backfill-docs`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -65,7 +63,7 @@ classification axis is whether the user is meant to type `/ws:<name>` directly, 
 cross-skill invocation count. Each entry skill's own procedure body is likewise
 served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
 surface carries only the trigger description and delegates execution to its
-playbook. Context-heavy entry skills (lead-discuss and lead-sprint) are an
+playbook. Context-heavy entry skills (lead-discuss) are an
 exception: their SKILL.md carries a parallel init declaration —
 `playbook.print` plus `workflow_manual` called in parallel — rather than a pure
 routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel rounds.
@@ -196,6 +194,10 @@ when a handler exceeds four steps and mixes responsibilities. Sub-block names
 describe the responsibility they perform; single-purpose checklists are not
 split only because they are long. Compact checkpoint skills may stay prose or
 short lists when output and end state are obvious.
+These authoring rules are maintained as `ai-docs/ref/skill-authoring.md`, an
+upstream reference document read directly rather than a shipped invocable
+skill; the audit they describe covers `agents-plugin/skills/*/SKILL.md` and
+`agents-plugin/rsrc/lead-*/lead-*.md`.
 {#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
@@ -207,22 +209,11 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
-`lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
-`lead-forge-mental-model`, and `lead-review`.
+`lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
+`lead-forge-mental-model`, `lead-review`, and `lead-backfill-docs`.
 
-The wsflow `lead-sprint` skill mirrors the episode-oriented sprint shell: it
-coordinates discussion, exploration, `sprint-edit` micro-edit episodes, and
-normal workflow handoff without owning a sprint branch or final wrap-up.
-wsflow source execution is lead-owned: sprint-edit applies a lead-owned direct
-edit, and larger or subagent-worthy work routes through normal wsflow workflow
-gates, namely the converged `wsflow:lead-implement` spine
-(`#260529-wsflow-converged-implement-spine`). The former wsflow `lead-edit`
-skill was absorbed into that spine and removed from the wsflow skill set.
-{#260513-wsflow-sprint-skill}
-
-The wsflow package excludes skeleton flows, recovery orchestration, and
-upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
-`lead-skill-authoring`. Shipped wsflow `SKILL.md` files are thin entry shims:
+The wsflow package excludes skeleton flows: `lead-write-skeleton`.
+Shipped wsflow `SKILL.md` files are thin entry shims:
 they keep package-local bare `name: lead-*` frontmatter, call
 `wsflow/playbook.print(name: "<lead-name>")`, execute the returned procedure
 against the current user request, and report a blocker if the playbook cannot
@@ -261,7 +252,9 @@ their delegate prompts through wsflow-mode `playbook.render` for the five legacy
 render-eligible stems: the lead renders the chosen prompt to a path, hands it to
 a native subagent, and integrates the subagent's returned result.
 The five render-eligible prompts are `reference-discovery`, `plan-populator-survey`,
-`plan-populator-research`, `code-reviewer`, and `mental-model-updater`.
+`plan-populator-research`, `code-reviewer`, and `mental-model-updater`. The count
+is scoped to this implement spine; render-eligible prompts introduced by later
+non-spine flows, such as `doc-gap-discovery`, are additional to it.
 
 ws `lead-implement` and the ws named-agent delegation path are unchanged by this
 convergence; the change is wsflow-local.
@@ -307,22 +300,21 @@ to the nearest unresolved parent when the user delegates lower-level detail.
 {#260510-discuss-intent-frame-interview}
 
 `lead-write-spec` writes or updates behavioral spec entries for caller-visible
-behavior. It reads spec conventions, generates stable spec stems, writes planned
-or implemented entries according to the current behavior, verifies the spec
-index, and commits the spec update.
+behavior. It reads spec conventions, generates stable spec stems, writes
+implemented entries according to the current behavior, verifies the spec index,
+and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
-accepted backlog and `ready/` as the spec-addressed implementation-ready status. The
-spec-address gate runs only when a non-`epic`, non-`research`, non-`workset`
-action creates or moves a ticket into `ready/`; `todo/` tickets may carry
-optional `spec:` links as recovery hints. For `ready/` creation or promotion,
-`lead-write-ticket` accepts
-confirmed `spec:` or `spec-remove:` stems, or a ticket-local `## Spec Impact`
-section naming the target spec area, expected caller-visible change, and whether
-a contract-first planned spec is required. It invokes `lead-write-spec`
-autonomously only for contract-first planned spec entries, and stops when no
-stem or `## Spec Impact` can address the work, spec writing fails, or the
-behavior is too underspecified to spec.
+accepted backlog and `ready/` as the spec-addressed implementation-ready
+status. The spec-address gate runs only when a non-`epic`, non-`research`,
+non-`workset` action creates or moves a ticket into `ready/`; `todo/` tickets
+may carry optional `spec:` links as recovery hints. For `ready/` creation or
+promotion, `lead-write-ticket` accepts confirmed `spec:` or `spec-remove:`
+stems, or a ticket-local `## Spec Impact` section naming the target spec area
+and the expected caller-visible change. It never invokes `lead-write-spec`;
+spec addressing runs through `spec:`, `spec-remove:`, or `## Spec Impact`. It
+stops when no stem or `## Spec Impact` can address the work, or the behavior is
+too underspecified to spec.
 
 Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
 writes mechanism decisions, rejected alternatives, future-scope hints, Result
@@ -332,6 +324,16 @@ when persistence was not already approved, resolves one queue item at a time,
 updates the visible queue after each answer, and writes only user-confirmed
 items. Rejected, deferred, unanswered, or otherwise unconfirmed items are omitted
 unless the user explicitly approves recording their status.
+
+Queue conveyance does not depend on how a host renders the visible queue. Each
+queued item's visible text is the decision itself rather than a label, and any
+secondary note or description field is optional detail that may not render, so it
+never carries load-bearing content; the same rule applies to the Markdown
+checklist used when no task-list surface exists. Asking an item restates that
+item's full text in the response body, followed by a one-line status roll-up of
+the remaining items, so the question the user is answering stays legible even
+when the visible queue renders partially or not at all.
+{#260727-odq-item-conveyance-restate-in-body}
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or phase-specific decisions arise
@@ -397,23 +399,6 @@ Skill-authoring guidance treats local shorthand as trigger examples for a
 general intent, not as the concept name itself. New workflow shorthand should
 name the broad intent first and list the shorthand only where it prevents
 repeated routing failures.
-
-`lead-salvage` handles failed large implementations, sprints, branches, and
-agent runs where a wrong premise may require rollback or recovery. It freezes
-evidence before cleanup, interviews the user to confirm the failure claim and
-invalidated premises, fans out named-agent surveys for code blast
-radius, ticket graph contamination, spec and mental-model impact, and preserved
-evidence, then classifies artifacts as keep, rework, discard, or unknown. It
-classifies affected tickets as keep, rewrite, drop, absorb, or unknown before
-any ticket move. Destructive actions require explicit approval immediately
-before execution.
-
-The salvage output uses the existing ticket system: a research ticket records
-the salvage report, a recovery epic is created when multiple tickets,
-components, phases, or cross-child invariants are affected, and concrete repair
-work moves into child tickets. The skill routes all ticket creation, edits,
-drops, and status moves through `lead-write-ticket`; it does not perform source
-edits. {#260510-salvage-recovery-workflow-skill}
 
 `lead-verify-discussion` gives users an explicit lightweight verification and
 validation checkpoint during discussion. It checks the current assumptions or
@@ -659,7 +644,7 @@ existing `impl/*` or legacy `implement/*` branches retain the standard isolated 
 `yes` also emits a concise not-applicable warning without changing independently
 derived delegation, review, documentation, final-action, or merge behavior. A
 successful exception keeps focused verification, one logical explicit-path
-commit with `## AI Context`, lead-owned review, and a completion report naming
+commit with `## AI Context`, lead-owned review, and a final report naming
 the retained branch and commit range; it omits final-action and merge work and
 never pushes.
 Automatic direct-edit itself remains limited to single-file internal-only work
@@ -707,8 +692,32 @@ first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
 correctness `large`, fit and test `medium` — raised for unusually subtle risk.
 When a delegate playbook declares its own `tier:`, the `recommended-tier`
 returned by `playbook.render` is authoritative for that delegate and the table is
-the allocation default. Relay cap is 2 cycles for single-reviewer, 3 cycles for
-partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
+the allocation default. The review budget counts review cycles, not relays, and
+is per implementation slice: 2 cycles for single-reviewer, 3 cycles for
+partitioned, where the lead may arbitrate a contested finding through the
+`review-adjudicator` delegate. Adjudication runs inside a relay slot, consumes no
+review cycle, is bounded to one per slot, and returns one verdict per dispute:
+uphold the refusal, override it, or record it as a scope deferral carried into
+the final report. Overriding a maintained refusal ships the fix as the next relay
+and spends that cycle; overriding a mid-relay escalation returns the verdict
+inside the current slot and spends nothing. The single-reviewer budget has no
+adjudication slot. A relay routes to the `implementer-elevated` delegate —
+declared `tier: large`, and rendered with the relay inputs plus the prior cycles'
+fix commits and dispositions — instead of `implementer-relay` when a finding the
+implementer reported fixed is returned unresolved or still non-clean by the next
+review, or when a newly surfaced finding shares a root cause with an
+already-relayed one. The first condition fires after one such failed relay rather
+than two, because the budget's last relay is the only slot the elevated delegate
+can still act in, and a finding carrying a settled disposition (won't-fix,
+deferred, out-of-scope, or an open escalation) is a decision rather than a failed
+fix attempt and never triggers it. When an adjudicator override and either
+elevated-routing condition apply to the same relay, the lead dispatches
+`implementer-elevated` once carrying the override list, never two relays for one
+cycle. The initial review is cycle 1, so
+the budget permits one fewer relay than its cycle count. The last budgeted cycle
+completes the run rather than halting it: the lead stops relaying, proceeds to
+closeout, and carries unresolved findings with their dispositions into the
+final report.
 {#260612-reviewer-allocation-tier-default}
 
 Delegates in the review fix-loop are stateless by contract: each implementer and
@@ -727,9 +736,14 @@ dispositions, a findings output path, and the updated diff; the reviewer writes
 full findings, reports the severity verdict, reviews the current diff per its
 charter, and is not asked to classify regression-vs-preexisting. The lead
 enforces convergence by dedup against the durable disposition record — a settled
-finding is not re-relayed, only genuinely new Critical/Important findings are —
-layered over the relay cap as the backstop for the pathological case of a
-reviewer inventing new findings each cycle.
+finding is not re-relayed, while genuinely new Critical/Important findings and
+findings reported fixed that a re-review returns unresolved are — layered over
+the review-cycle budget as the backstop for the pathological case of a reviewer
+inventing new findings each cycle. Unresolved carryover is not a settled
+disposition: dedup bars re-litigating a decision the record already carries
+(won't-fix, deferred, out-of-scope, or an open escalation), and the budget
+separately bounds reviewer-invented churn, so neither rule suppresses the relay
+of a fix that did not hold.
 Delegated review-fix relay is file-first: the lead renders the
 `implementer-relay` playbook with declared inputs for plan path, review cycle,
 current commit range, non-clean review paths, disposition notes, verification
@@ -779,8 +793,7 @@ violated by the implementation as blocking findings within their assigned
 partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
-stages complete. `lead-sprint` runs documentation closure only for marked
-`sprint-edit` episodes when each episode wraps. For implementation-branch modes,
+stages complete. For implementation-branch modes,
 `lead-implement` also runs a post-documentation closeout compaction gate before
 merge readiness is reported: it inspects only the branch-tip suffix and compacts
 a contiguous run of safe documentation-only closeout commits into one closeout
@@ -815,8 +828,32 @@ also qualify for auto-delete once its structural guardrails pass.
 {#260707-implement-branch-cleanup-naming-gate}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
-adds or updates spec entries, strips planned markers when implementation lands,
-handles removed spec stems, verifies the spec index, and commits the spec pass.
+adds or updates spec entries, handles removed spec stems, verifies the spec
+index, and commits the spec pass. Two callers reach it: `lead-implement`'s
+in-flow documentation pass, and `lead-backfill-docs` retroactively. Both expect
+it to commit its own spec pass.
+
+`lead-backfill-docs` reconciles spec and mental-model coverage for commits that
+never received a documentation pass, including work that never routed through an
+implementation flow. It resolves an audit window from commit markers — the newest
+commit carrying `(mental-model-updated)` and the newest commit touching
+`ai-docs/spec/` — or from a caller-supplied range, then delegates discovery to
+`doc-gap-discovery`, which partitions the window into contiguous groups and
+reports per group what changed and what existing documentation already covers.
+Discovery returns candidates, not verdicts: caller-visibility judgment stays with
+the lead, which applies it by running `lead-update-spec` inline per group. Each
+group produces at most one `docs(spec):` commit. The two document kinds do not
+share a unit: spec entries map to discrete behaviors and so are reconciled per
+group, while mental-model domains are corpus-wide and are swept once over the
+whole window after every spec pass, which also places those spec commits inside
+the swept range. Undocumented commits are not contiguous, so the unit of work is the group rather
+than one wide range. A marker-derived audit window is bounded by high-water marks
+and therefore finds only drift newer than the last documentation pass; earlier
+gaps require a caller-supplied range, and the skill reports that bound with its
+result. `lead-discuss` names this skill when documentation staleness traces to
+commits that never had a doc pass, which distinguishes it from a spec entry
+nobody wrote in the first place.
+{#260728-retroactive-doc-backfill-entry}
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
@@ -933,27 +970,6 @@ proceed boundary without pre-applying `wsflow:lead-implement` branch or
 execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
-## Sprint Session Shell {#260505-sprint-session-container}
-
-`lead-sprint` is an episode-oriented workflow shell for sustained user sessions.
-It stays on the current branch, coordinates discussion and exploration, and
-routes larger implementation through `lead-proceed` or `lead-implement` instead
-of creating `sprint/` branches or running a final branch wrap-up.
-
-Small interactive edits may enter `sprint-edit` only when a single lead-owned
-context covers the whole change. Each sprint-edit commit carries recoverable
-commit-body markers, `Sprint-Edit: <episode-slug>` and
-`Sprint-Edit-Context: <one-line context>`. After each edit, the shell asks
-whether to keep refining the current context, wrap it up, or shift direction.
-
-Wrapping a sprint-edit episode runs documentation closure for that marked
-episode range: update specs, refresh mental models when needed, follow the
-executor document pipeline for episode-scoped docs, commit documentation changes,
-clear the active edit context, and return to the sprint loop. Public contracts,
-routing semantics, protocols, ticket phase completion, cross-module new patterns,
-plan or review allocation, and branch decisions route outside sprint-edit.
-{#260523-sprint-episode-workflow-shell}
-
 ## Review Workflow Skills {#260513-review-workflow-skills}
 
 `lead-review` reviews a pull request or merge request branch. It loads
@@ -991,12 +1007,22 @@ force or suppress the subagent inference step.
 current specs under `ai-docs/.old/spec/` after user confirmation, surveys
 source, tickets, archived specs, and commit history, asks the user to confirm
 the once-per-run behavioral domain list, then classifies per-item
-caller-visibility and implemented/planned status autonomously - ambiguous
-calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
-into the wrap-up summary rather than blocking on a per-item confirmation -
-writes anchor-keyed spec entries, verifies the index, and associates planned
-stems with active tickets when required.
+caller-visibility and implemented/planned status autonomously rather than
+blocking on a per-item confirmation, writes anchor-keyed spec entries, verifies
+the index, and associates spec stems with active tickets when required.
 {#260707-forge-spec-autoproceed-classification-2}
+
+Each autonomous classification call that was genuinely ambiguous is recorded
+with its behavior name, chosen classification, and a reason, and that record is
+what the wrap-up summary reports from. The record covers both axes, so items
+excluded from the spec as internal-only or planned appear on the same terms as
+written ones; entries actually written to a spec additionally carry an inline
+`<!-- AMBIGUOUS: <reason> -->` marker. A domain whose behaviors are all
+excluded produces no spec file and is named as such in the summary. A run
+resumed after the recording session reconstructs the list from the inline
+markers and labels what reconstruction cannot recover, rather than reporting a
+partial list as a complete count.
+{#260728-forge-spec-ambiguity-record}
 
 At wrap-up, `lead-forge-spec` asks whether to run `lead-forge-mental-model`
 next and invokes it on a yes answer, regardless of how the run was reached
