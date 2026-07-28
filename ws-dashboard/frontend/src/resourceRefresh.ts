@@ -7,6 +7,38 @@ export const resourceAvailabilityPollIntervalMs = 5_000;
 
 export type ResourceRefreshReason = "initial" | "explicit" | "poll" | "open";
 
+export type DaemonBuildInfo = {
+  version: string;
+  daemonBuildUnixSecs: number | null;
+  frontendBuildUnixSecs: number | null;
+};
+
+// Daemon-control calls for the settings Advanced panel. These act on the local
+// daemon that serves this dashboard (not a linked server), which is exactly the
+// "shut down THIS dashboard" intent, so they use fixed local routes.
+export async function requestDaemonBuildInfo(
+  fetchResource: ResourceFetch = fetchWithTimeout,
+): Promise<DaemonBuildInfo> {
+  const response = await fetchResource("/api/dashboard/build-info", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as DaemonBuildInfo;
+}
+
+export async function requestDaemonShutdown(): Promise<void> {
+  // The daemon acknowledges (202) and then exits within its shutdown grace
+  // window, so the response may not fully arrive. A post-dispatch network error
+  // means the process is already gone - the desired outcome - so swallow it.
+  try {
+    await fetch("/api/dashboard/shutdown", { method: "POST" });
+  } catch {
+    // daemon exited before flushing the response - expected
+  }
+}
+
 export type ResourceFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,

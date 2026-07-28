@@ -3244,6 +3244,17 @@ function ResourceNavigation({
   return (
     <div className="nav-stack">
       <div className="server-nav-toolbar">
+        <ChromeIconButton
+          className="nav-brand-button"
+          commandId="settings.open"
+          icon={SettingsIcon}
+          label="Settings"
+          onClick={() =>
+            onCommand(buildSettingsOpenCommand(), {
+              "settings.open": onOpenSettings,
+            })
+          }
+        />
         <div className="server-nav-title">Servers</div>
         <ChromeIconButton
           commandId="resource.action.server.add"
@@ -3261,16 +3272,6 @@ function ResourceNavigation({
               },
               { "resource.action.server.add": onOpenAddServer },
             )
-          }
-        />
-        <ChromeIconButton
-          commandId="settings.open"
-          icon={SettingsIcon}
-          label="Settings"
-          onClick={() =>
-            onCommand(buildSettingsOpenCommand(), {
-              "settings.open": onOpenSettings,
-            })
           }
         />
       </div>

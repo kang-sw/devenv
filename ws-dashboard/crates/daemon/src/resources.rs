@@ -1,10 +1,14 @@
+use std::sync::Arc;
+
 use axum::extract::State;
 use axum::Json;
 use ws_dashboard_core::{DashboardResourcesView, WorkRootId};
 
-use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
+use crate::discovery::{GitProbeCache, LocalDashboardResourcesProvider, LocalWorkRootCandidate};
+use crate::git_exec::GitSpawnStats;
 use crate::router::AppState;
 use crate::work_root_files::OpenedWorkRoots;
+use crate::work_root_watch::WatchRegistry;
 
 // CONTRACT: Provider seam shared by the live local provider and the mock
 // fixture provider. Implementations return the same public core view-model
@@ -27,10 +31,14 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
     // Live discovery runs synchronous filesystem and `git` subprocess work, so
     // keep it off the async worker threads.
     let opened = state.opened_work_roots.clone();
-    let (view, pruned_work_root_ids) =
-        tokio::task::spawn_blocking(move || live_dashboard_resources_with_sync(&opened))
-            .await
-            .expect("dashboard resources discovery task panicked");
+    let git_probes = state.git_probe_cache.clone();
+    let git_stats = state.git_spawn_stats.clone();
+    let watch_registry = state.watch_registry.clone();
+    let (view, pruned_work_root_ids) = tokio::task::spawn_blocking(move || {
+        live_dashboard_resources_with_sync(&opened, &git_probes, &git_stats, &watch_registry)
+    })
+    .await
+    .expect("dashboard resources discovery task panicked");
     if !pruned_work_root_ids.is_empty() {
         let pruned: std::collections::BTreeSet<_> = pruned_work_root_ids.into_iter().collect();
         // CONTRACT (260723 Phase 1 risk signal): see git_worktree.rs's
@@ -40,6 +48,7 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
         for session in state.terminals.remove_for_work_roots(&pruned) {
             session.terminate().await;
         }
+        state.codex_sessions.remove_for_work_roots(&pruned);
         state.claude_sessions.remove_for_work_roots(&pruned);
     }
     view
@@ -49,12 +58,24 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
 ///
 /// Shared by the canonical resources route and the open-workRoot route so the
 /// immediately-returned open response matches later canonical refreshes.
-pub fn live_dashboard_resources(opened: &OpenedWorkRoots) -> DashboardResourcesView {
-    live_dashboard_resources_with_sync(opened).0
+pub fn live_dashboard_resources(
+    opened: &OpenedWorkRoots,
+    git_probes: &GitProbeCache,
+    git_stats: &Arc<GitSpawnStats>,
+    watch_registry: &WatchRegistry,
+) -> DashboardResourcesView {
+    live_dashboard_resources_with_sync(opened, git_probes, git_stats, watch_registry).0
 }
 
+/// NOTE: this is not a pure read. The registry side effects below
+/// (`unregister` for pruned roots, `sync_discovered_roots`, `reconcile`) run
+/// on EVERY call; only the `git` probes inside discovery are memoized by
+/// `git_probes`.
 pub fn live_dashboard_resources_with_sync(
     opened: &OpenedWorkRoots,
+    git_probes: &GitProbeCache,
+    git_stats: &Arc<GitSpawnStats>,
+    watch_registry: &WatchRegistry,
 ) -> (DashboardResourcesView, Vec<WorkRootId>) {
     let sync = LocalDashboardResourcesProvider::with_registry_activations(
         opened
@@ -64,10 +85,18 @@ pub fn live_dashboard_resources_with_sync(
             .collect(),
         opened.activation_by_work_root_id(),
     )
+    .with_git_probe_cache(git_probes.clone())
+    .with_git_spawn_stats(git_stats.clone())
     .dashboard_resources_with_registry_sync();
     for work_root_id in &sync.pruned_work_root_ids {
         opened.unregister(work_root_id);
     }
     opened.sync_discovered_roots(sync.discovered_registry_roots);
+    // Ticket step 7: `reconcile` is the one hook every availability
+    // transition (including "this root disappeared entirely between polls")
+    // routes through, so it runs on every resources refresh - the same
+    // cadence the dashboard's 5s poll and the open-workRoot route already
+    // drive this function at.
+    watch_registry.reconcile(&sync.watch_reconcile_entries);
     (sync.view, sync.pruned_work_root_ids)
 }

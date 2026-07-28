@@ -1,10 +1,16 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { SettingsSectionDescriptor } from "./settingsStore.js";
 import {
   DEFAULT_TERMINAL_STYLE_PREFS,
   parseTerminalFontSizeInput,
   type TerminalStylePrefs,
 } from "./terminalPrefs.js";
+import {
+  requestDaemonBuildInfo,
+  requestDaemonShutdown,
+  type DaemonBuildInfo,
+} from "./resourceRefresh.js";
+import { killAllTerminals } from "./terminals.js";
 
 // Settings-scoped Terminal context. Unlike the read-only `TerminalPrefsContext`
 // in `App.tsx` (consumed by every open `TerminalPaneBody` to live-restyle its
@@ -219,6 +225,174 @@ export function NotificationSection() {
   );
 }
 
+function formatBuildTime(secs: number | null): string {
+  if (secs == null) {
+    return "unknown";
+  }
+  return new Date(secs * 1000).toLocaleString();
+}
+
+// A destructive action guarded by an inline arm/confirm step, so the settings
+// nesting (Advanced section) is not the only thing standing between a stray
+// click and an irreversible teardown.
+function ConfirmButton({
+  label,
+  confirmLabel,
+  onConfirm,
+}: {
+  label: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  if (!armed) {
+    return (
+      <button
+        className="settings-danger-button"
+        type="button"
+        onClick={() => setArmed(true)}
+      >
+        {label}
+      </button>
+    );
+  }
+  return (
+    <div className="settings-danger-confirm">
+      <span className="settings-danger-confirm-text">{confirmLabel}</span>
+      <button
+        className="settings-danger-button settings-danger-button-armed"
+        type="button"
+        onClick={() => {
+          setArmed(false);
+          onConfirm();
+        }}
+      >
+        Confirm
+      </button>
+      <button
+        className="settings-ghost-button"
+        type="button"
+        onClick={() => setArmed(false)}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+// Advanced settings: build provenance at the top (so a stale Windows dogfood
+// binary/bundle is visible at a glance), destructive daemon controls at the
+// bottom. The two controls mirror the two OS-level kill modes - a
+// terminal-preserving daemon stop vs a full terminal+helper teardown - as
+// explicit, guarded UI actions so operators never reach for taskkill.
+// See ticket 260725-feat-dashboard-graceful-shutdown-from-settings.
+export function AdvancedSection() {
+  const [buildInfo, setBuildInfo] = useState<DaemonBuildInfo | null>(null);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    requestDaemonBuildInfo()
+      .then((info) => {
+        if (alive) {
+          setBuildInfo(info);
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) {
+          setBuildError(error instanceof Error ? error.message : "request failed");
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const onShutdown = () => {
+    setStatus("Dashboard is shutting down. Relaunch the daemon to reconnect.");
+    void requestDaemonShutdown();
+  };
+  const onKillAll = () => {
+    killAllTerminals()
+      .then((closed) =>
+        setStatus(
+          `Closed ${closed} terminal${closed === 1 ? "" : "s"} (helpers included).`,
+        ),
+      )
+      .catch((error: unknown) =>
+        setStatus(
+          error instanceof Error ? error.message : "Failed to close terminals.",
+        ),
+      );
+  };
+
+  return (
+    <div className="settings-advanced">
+      <div className="settings-field">
+        <span className="settings-field-label">Build information</span>
+        {buildError ? (
+          <span className="settings-advanced-muted">
+            Unavailable: {buildError}
+          </span>
+        ) : buildInfo ? (
+          <dl className="settings-buildinfo">
+            <div className="settings-buildinfo-row">
+              <dt>Version</dt>
+              <dd>{buildInfo.version}</dd>
+            </div>
+            <div className="settings-buildinfo-row">
+              <dt>Daemon binary</dt>
+              <dd>{formatBuildTime(buildInfo.daemonBuildUnixSecs)}</dd>
+            </div>
+            <div className="settings-buildinfo-row">
+              <dt>Frontend bundle</dt>
+              <dd>{formatBuildTime(buildInfo.frontendBuildUnixSecs)}</dd>
+            </div>
+          </dl>
+        ) : (
+          <span className="settings-advanced-muted">Loading…</span>
+        )}
+      </div>
+
+      <div className="settings-advanced-danger">
+        <span className="settings-field-label">Danger zone</span>
+        <div className="settings-advanced-danger-row">
+          <div className="settings-advanced-danger-copy">
+            <strong>Shut down dashboard</strong>
+            <span className="settings-advanced-muted">
+              Stops the daemon. Open terminals keep running and reattach when the
+              daemon is relaunched.
+            </span>
+          </div>
+          <ConfirmButton
+            confirmLabel="Shut down the dashboard daemon?"
+            label="Shut down"
+            onConfirm={onShutdown}
+          />
+        </div>
+        <div className="settings-advanced-danger-row">
+          <div className="settings-advanced-danger-copy">
+            <strong>Close all terminal sessions</strong>
+            <span className="settings-advanced-muted">
+              Terminates every terminal and its helper process. This cannot be
+              undone.
+            </span>
+          </div>
+          <ConfirmButton
+            confirmLabel="Close every terminal and helper?"
+            label="Close all"
+            onConfirm={onKillAll}
+          />
+        </div>
+        {status ? (
+          <div className="settings-advanced-status">{status}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 // Module-scope section registry: a stable, ordered list of descriptors with
 // stable `Component` identities. The Settings modal shell receives this as an
 // injected `sections` prop and iterates it generically - it only ever consumes
@@ -233,4 +407,5 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDescriptor[] = [
     title: "Notifications",
     Component: NotificationSection,
   },
+  { id: "advanced", title: "Advanced", Component: AdvancedSection },
 ];

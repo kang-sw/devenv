@@ -14,6 +14,9 @@ use tokio::sync::Mutex;
 use crate::agent_attention::{attention_events, AttentionHub};
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
+use crate::discovery::GitProbeCache;
+use crate::git_exec::GitSpawnStats;
+use crate::git_state_cache::{EpochSource, GitStateCache};
 use crate::document_translation::{
     translate_document, translation_providers, DocumentTranslationService,
 };
@@ -82,6 +85,33 @@ pub struct AppState {
     pub config: ServeConfig,
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
+    /// Shared TTL memo for the `git` discovery probes. Must be shared across
+    /// routes (not rebuilt per request), so the concurrent status/branches/
+    /// resources refreshes collapse onto one `git` spawn per root per TTL.
+    pub git_probe_cache: GitProbeCache,
+    /// Shared counters for every `git` spawn routed through
+    /// `git_exec::capture`. Must be shared across routes (not rebuilt per
+    /// request) so `GET /api/dashboard/diag/git` reports the daemon's whole
+    /// spawn history, not a per-request-scoped count.
+    pub git_spawn_stats: Arc<GitSpawnStats>,
+    /// Result cache for `/git/status`/`/git/branches`, keyed by `WatchKey`.
+    /// Shared across routes (not rebuilt per request), so the two routes'
+    /// concurrent per-poll-tick fetch collapses onto one refs computation
+    /// (Phase 3 Lead Dispositions D1/D2).
+    pub git_state_cache: GitStateCache,
+    /// Per-key mutation-epoch counters gating `git_state_cache`'s TTL. Shared
+    /// across routes for the same reason. `Arc<dyn EpochSource>` (not a
+    /// generic `AppState<E>`, which would infect `build_router` and every
+    /// `State<AppState>` extractor) so Phase 4's FS-event-driven source can
+    /// replace the construction site in `server.rs` without touching a
+    /// route.
+    pub epoch_source: Arc<dyn EpochSource>,
+    /// Phase 4's FS-watch registry: arms/disarms per-repo `notify` watches
+    /// and drives `epoch_source` bumps off real filesystem events instead of
+    /// only mutating-route call sites. Shares the same `epoch_source` Arc as
+    /// the field above - a watcher-driven bump must be visible through the
+    /// exact instance `git_toolbar.rs` reads (ticket step 8).
+    pub watch_registry: crate::work_root_watch::WatchRegistry,
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
@@ -99,6 +129,10 @@ pub struct AppState {
     pub linked_server_sessions: LinkedServerSessions,
     pub linked_server_tunnels: LinkedServerTunnels,
     pub registry_persist_lock: Arc<Mutex<()>>,
+    /// Fired by the in-app "shut down dashboard" action to trigger the same
+    /// graceful (terminal-preserving) exit path as an external ctrl-c signal.
+    /// Detached terminal helpers survive and are re-adopted on next boot.
+    pub shutdown: Arc<tokio::sync::Notify>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -120,6 +154,9 @@ pub fn build_router(state: AppState) -> Router {
     // protected router so handlers remain oblivious to serving mode.
     let protected = Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/dashboard/build-info", get(dashboard_build_info))
+        .route("/api/dashboard/diag/git", get(dashboard_diag_git))
+        .route("/api/dashboard/shutdown", post(dashboard_shutdown))
         .route("/api/dashboard/resources", get(dashboard_resources))
         .route("/api/dashboard/servers", get(dashboard_servers))
         .route(
@@ -402,6 +439,10 @@ pub fn build_router(state: AppState) -> Router {
             get(terminal_websocket),
         )
         .route(
+            "/api/dashboard/terminals/kill-all",
+            post(crate::terminal::close_all_terminals),
+        )
+        .route(
             "/api/dashboard/terminals/{terminal_id}",
             axum::routing::delete(close_terminal),
         )
@@ -557,6 +598,98 @@ async fn require_owner_auth(
 
 async fn healthz() -> Response {
     (StatusCode::OK, "ok\n").into_response()
+}
+
+/// File-mtime (unix seconds) of a build artifact, if it can be stat'd.
+fn artifact_build_unix_secs(path: &std::path::Path) -> Option<u64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    Some(
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs(),
+    )
+}
+
+/// Reports the running daemon binary's build time and the served frontend
+/// bundle's build time, both derived by stat'ing the actual artifacts (the
+/// daemon exe and `<static-dir>/index.html`) rather than a compile-time stamp,
+/// so the numbers always reflect what is really running/served.
+async fn dashboard_build_info(State(state): State<AppState>) -> Response {
+    let daemon_build = std::env::current_exe()
+        .ok()
+        .and_then(|exe| artifact_build_unix_secs(&exe));
+    let frontend_build = state
+        .config
+        .static_dir
+        .as_deref()
+        .and_then(|dir| artifact_build_unix_secs(&dir.join("index.html")));
+    axum::Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "daemonBuildUnixSecs": daemon_build,
+        "frontendBuildUnixSecs": frontend_build,
+    }))
+    .into_response()
+}
+
+/// Reports the daemon's cumulative `git` spawn counters, broken down by
+/// subcommand. CONTRACT: these counters cover only spawns routed through
+/// `git_exec::capture` - i.e. the git-toolbar poll path and the discovery
+/// probes - and do NOT include `git_worktree.rs`'s direct
+/// `Command::new("git")` sites (worktree add/remove), which remain
+/// unconverted in this phase (see the ticket's Phase 1 rewrite-target list).
+/// A follow-up ticket tracks converting those; until then this route
+/// undercounts total daemon-wide git spawns and must not be read as a total.
+/// CONTRACT: `failures` already INCLUDES `timeouts` (a timeout increments
+/// both), so `timeouts` is a subset breakdown, not a disjoint bucket - a
+/// consumer must never sum the two.
+async fn dashboard_diag_git(State(state): State<AppState>) -> Response {
+    let snapshot = state.git_spawn_stats.snapshot();
+    let by_subcommand: serde_json::Map<String, serde_json::Value> = snapshot
+        .by_subcommand
+        .into_iter()
+        .map(|(subcommand, count)| (subcommand.as_str().to_owned(), serde_json::json!(count)))
+        .collect();
+    // Ticket step 9: `repos[]` reports the watcher's live per-repo state -
+    // `Degraded { reason }` must distinguish over-cap from foreign-filesystem
+    // from arm-error (see `WatchHealth::reason`), because reporting `Armed`,
+    // or an undifferentiated `Degraded`, for a watcher that structurally
+    // cannot fire is the failure mode this route exists to catch.
+    let repos: Vec<serde_json::Value> = state
+        .watch_registry
+        .diag_snapshot()
+        .into_iter()
+        .map(|entry| {
+            serde_json::json!({
+                "key": entry.key,
+                "health": entry.health.label(),
+                "reason": entry.health.reason(),
+                "worktreeEpoch": entry.worktree_epoch,
+                "refsEpoch": entry.refs_epoch,
+                "lastEventMs": entry.last_event_at_ms,
+                "registeredWatches": entry.registered_watches,
+            })
+        })
+        .collect();
+    axum::Json(serde_json::json!({
+        "totalSpawns": snapshot.total,
+        "timeouts": snapshot.timeouts,
+        "failures": snapshot.failures,
+        "bySubcommand": by_subcommand,
+        "uptimeMs": snapshot.uptime_ms,
+        "repos": repos,
+    }))
+    .into_response()
+}
+
+/// Triggers the same graceful, terminal-preserving shutdown as an external
+/// ctrl-c: only the daemon process exits; detached terminal helpers keep
+/// running and are re-adopted on the next daemon boot. Kept ungated in the
+/// loopback no-auth debug profile; real deployments gate this behind owner auth
+/// (see ticket 260725-feat-dashboard-graceful-shutdown-from-settings).
+async fn dashboard_shutdown(State(state): State<AppState>) -> Response {
+    state.shutdown.notify_one();
+    (StatusCode::ACCEPTED, "shutting down\n").into_response()
 }
 
 async fn index(State(state): State<AppState>) -> Response {

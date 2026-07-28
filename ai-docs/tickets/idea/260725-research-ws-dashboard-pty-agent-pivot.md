@@ -566,6 +566,18 @@ wrapper component — is called out below as an open design choice.
   historical alternative. The absorbed/not-absorbed boundary against
   `260725-feat-dashboard-pty-agent-attention-notification` Phase 1 is recorded
   there.
+- Whether the Activity Console itself should be retired once this pivot supplies
+  the attention signal. Owner raised it 2026-07-26 on cost grounds: the 200 ms
+  re-poll noted in `### Browser delivery` was measured on the Windows dogfood
+  daemon at +84.6 pp of one CPU core and +46,612 file-ops/s for a SINGLE
+  subscriber (12.0% -> 96.5% CPU). That cost is pane-gated
+  (`activityPaneOpenForSelected`), so it is latent rather than always-on, and
+  `260725-refactor-unwire-agents-activity-badge` (todo/) deliberately keeps the
+  pane working while cutting only the always-on badge fetch. Retiring the pane
+  is therefore a SEPARATE decision from the agent-GUI suspension, is not covered
+  by it, and would retire ~7 spec anchors (~5-6k lines FE+BE+tests) — so it
+  should be weighed only after this pivot pins what replaces the pane's role,
+  not before.
 - Scope boundary: how much of 260624 Phase 1 argv/env commonization is in-scope
   for the narrow pivot.
 

@@ -2,6 +2,9 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { CanvasAddon } from "@xterm/addon-canvas";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import {
   clampTerminalSize,
   terminalWebSocketCursor,
@@ -124,6 +127,18 @@ export function TerminalPaneBody({
   // `.serialize()` without re-creating it on every output frame. Nulled on
   // mount-effect cleanup so a stray fire cannot reach a disposed terminal.
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
+  // Active GPU renderer addon (WebGL preferred, 2D canvas as fallback) for
+  // this pane's terminal. Held so it can be disposed on unmount and swapped
+  // out on a WebGL context-loss event. `null` when only xterm's built-in DOM
+  // renderer is active (no GPU acceleration available). See the mount effect's
+  // load-after-open()/fallback chain below.
+  const rendererAddonRef = useRef<WebglAddon | CanvasAddon | null>(null);
+  // Unicode v11 width-table provider for this pane's terminal. Held so it can
+  // be disposed on unmount (which unregisters the provider). `null` when the
+  // provider could not be constructed and xterm's built-in v6 tables stay
+  // active. This is a character-width lookup change only; the output/data path
+  // is untouched.
+  const unicodeAddonRef = useRef<Unicode11Addon | null>(null);
   const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
@@ -182,6 +197,58 @@ export function TerminalPaneBody({
     serializeAddonRef.current = serializeAddon;
     terminal.open(container);
     terminalRef.current = terminal;
+
+    // Attach a GPU renderer AFTER open() so a canvas/WebGL context exists;
+    // without one xterm 5.x falls back to its slow DOM renderer, which
+    // dominates throughput when a full-screen TUI repaints many frames per
+    // second. Prefer WebGL, degrade to the 2D canvas renderer, and finally to
+    // the built-in DOM renderer, so an environment without GPU acceleration -
+    // or one that loses its GL context at runtime - still renders output
+    // unchanged. This only swaps the render backend; the output/data path is
+    // untouched.
+    const loadCanvasRenderer = () => {
+      try {
+        const canvasAddon = new CanvasAddon();
+        terminal.loadAddon(canvasAddon);
+        rendererAddonRef.current = canvasAddon;
+      } catch {
+        // No 2D canvas renderer either; leave the DOM renderer in place.
+        rendererAddonRef.current = null;
+      }
+    };
+    try {
+      const webglAddon = new WebglAddon();
+      // A lost GPU context would otherwise blank the terminal permanently;
+      // dispose the WebGL addon and drop to the canvas renderer so output
+      // keeps rendering.
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+        if (rendererAddonRef.current === webglAddon) {
+          rendererAddonRef.current = null;
+        }
+        loadCanvasRenderer();
+      });
+      terminal.loadAddon(webglAddon);
+      rendererAddonRef.current = webglAddon;
+    } catch {
+      // WebGL unavailable in this environment; try 2D canvas, then DOM.
+      loadCanvasRenderer();
+    }
+
+    // Swap xterm's default (Unicode v6) character-width tables for the v11
+    // tables so wide glyphs - notably emoji - occupy their correct two cells
+    // instead of one. This only changes width lookups used for cursor
+    // advancement/layout; the output/data path is untouched. If the provider
+    // fails to construct, xterm keeps its built-in v6 tables and rendering
+    // continues unchanged.
+    try {
+      const unicode11Addon = new Unicode11Addon();
+      terminal.loadAddon(unicode11Addon);
+      terminal.unicode.activeVersion = "11";
+      unicodeAddonRef.current = unicode11Addon;
+    } catch {
+      unicodeAddonRef.current = null;
+    }
     // `pane.outputTrimOffset` is always 0 at genuine mount time in practice
     // (this component only unmounts/remounts on a real terminal close/
     // reopen, never a mere visibility toggle - see the type-level comment on
@@ -497,6 +564,14 @@ export function TerminalPaneBody({
         window.clearTimeout(visualCaptureTimerRef.current);
         visualCaptureTimerRef.current = null;
       }
+      // Release the GPU renderer's GL/2D context and buffers before disposing
+      // the terminal; a no-op when only the DOM renderer was active.
+      rendererAddonRef.current?.dispose();
+      rendererAddonRef.current = null;
+      // Unregister the v11 Unicode provider before disposing the terminal; a
+      // no-op when the built-in v6 tables were left active.
+      unicodeAddonRef.current?.dispose();
+      unicodeAddonRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       serializeAddonRef.current = null;

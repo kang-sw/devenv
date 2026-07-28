@@ -1096,6 +1096,38 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
   });
 
+  // --- Advanced settings section (260727 Phase 2: the section arrived with ----
+  // --- the ws-dashboard-dev merge with no browser-level coverage - the unit ---
+  // --- test pins only the registry descriptor, never that the panel mounts) ---
+  await test.step("Advanced settings section lists and mounts build info", async () => {
+    await page.locator('[data-command-id="settings.open"]').click();
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await expect(dialog).toBeVisible();
+    const advancedNav = dialog.locator(".settings-section-nav-button", {
+      hasText: "Advanced",
+    });
+    await expect(advancedNav).toBeVisible();
+    await advancedNav.click();
+
+    // Build info arrives over HTTP after mount, so this also proves the panel's
+    // `/api/dashboard/build-info` call reaches the daemon through the merged
+    // router - a registry-only assertion could not see that. Deliberately reads
+    // the build-info half only: the same panel's danger zone can shut this
+    // daemon down or kill every terminal, and both would break every later step
+    // of this serial test.
+    const buildInfo = dialog.locator(".settings-buildinfo");
+    await expect(buildInfo).toBeVisible();
+    await expect(buildInfo.locator("dt").first()).toHaveText("Version");
+
+    await dialog.locator('[data-command-id="settings.close"]').click();
+    await expect(
+      page.locator('[role="dialog"][aria-label="Settings"]'),
+    ).toHaveCount(0);
+    note(
+      "advanced settings: the section nav lists an Advanced entry and activating it mounts the daemon build-info list",
+    );
+  });
+
   // --- Add-server modal open/validate/cancel (260722 blocker-2: previously ----
   // --- human-smoke only, no automated coverage) ------------------------------
   await test.step("add-server modal opens, validates, and cancels", async () => {
@@ -1267,6 +1299,79 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       "git worktree remove/hide: clean modal hid the data-loss banner, an untracked file surfaced the red banner, and the hide -> hidden-worktrees-submenu -> unhide round trip restored the row",
     );
+  });
+
+  // 260726-refactor-ws-dashboard-git-fs-watch-invalidation Phase 2: the
+  // git-toolbar routes' 404->409 convergence
+  // (`resolve_online_available_work_root`'s existing `Unavailable` gate,
+  // reused instead of a full-registry discovery scan) is visible-behavior:
+  // `refreshGit` in gitToolbar.ts throws the daemon's `error` string
+  // verbatim, and `WorkRootGitToolbar` only renders `.git-error-chip` while
+  // `gitCapable` is still true. A dedicated, disposable fixture (not
+  // `gitWorkRoot`, which later steps still depend on) proves the daemon's
+  // live "workRoot unavailable" 409 reaches that chip.
+  //
+  // DOGFOOD FINDING (captured while authoring this step): the first attempt
+  // forced a remount via `selectWorkRootInBrowser`, which internally does its
+  // own raw `fetch("/api/dashboard/resources")` lookup
+  // (`resourceIdsForWorkRootLabel`). That GET runs the daemon's full
+  // discovery-with-registry-sync and unregisters an unavailable-with-no-
+  // active-child workspace's opened workRoot entirely, so the follow-up
+  // `/git/status` call observed 404 "unknown workRoot", not the live 409
+  // this step targets - the resources route's own prune is faster and more
+  // reachable than the 5s poll this phase's plan assumed as the only path to
+  // divergence. `page.route` blocks `/api/dashboard/resources` for the
+  // duration of this step so that prune never fires, and the git toolbar's
+  // own `focus`-triggered refresh (`startGitRefreshScheduler`, independent of
+  // the resources poll) is used instead of a remount to force the refetch.
+  await test.step("moved git workRoot surfaces the daemon's live 409 through the git toolbar error chip", async () => {
+    const movedRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-git-moved-"));
+    initGitFixture(movedRoot);
+    try {
+      await openWorkRootInBrowser(page, movedRoot);
+      await expect(page.locator(".git-toolbar")).toBeVisible();
+
+      // Block the resources route for the rest of this step: it is the only
+      // path (background poll or an incidental lookup fetch) that would
+      // otherwise prune the now-unavailable opened workRoot from the
+      // registry before the targeted /git/status call below observes it.
+      await page.route("**/api/dashboard/resources", (route) => route.abort());
+
+      // Remove the directory without telling the client: the browser's
+      // cached resources snapshot still reports this root "available", so
+      // `gitCapable` stays true and the refetch below actually reaches the
+      // daemon instead of being short-circuited client-side.
+      rmSync(movedRoot, { recursive: true, force: true });
+
+      const statusResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/git/status") &&
+          response.request().method() === "GET",
+      );
+      // The git toolbar's refresh scheduler re-fetches on a `focus` event,
+      // independent of resources - dispatching it forces a fresh
+      // /git/status request against the still-registered, now-removed-on-
+      // disk root, without remounting through a resources-fetching helper.
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      const response = await statusResponse;
+      expect(response.status()).toBe(409);
+      const body = (await response.json()) as { error?: string };
+      expect(body.error).toBe("workRoot unavailable");
+      await expect(page.locator(".git-error-chip")).toContainText(
+        "workRoot unavailable",
+      );
+      note(
+        "moved git workRoot: removing the opened root's directory on disk surfaced the daemon's live 409 \"workRoot unavailable\" through the git toolbar error chip, via a focus-triggered refetch kept isolated from the resources route's own registry-pruning discovery",
+      );
+    } finally {
+      await page.unroute("**/api/dashboard/resources");
+      rmSync(movedRoot, { recursive: true, force: true });
+    }
+    // Restore the primary workRoot as the active workbench selection so
+    // later steps (which assume `workRoot` is selected) are unaffected by
+    // this step's disposable fixture. Runs after unroute so this pass
+    // through the resources route is a normal, unblocked one.
+    await selectWorkRootInBrowser(page, workRoot);
   });
 
   await test.step("activation controls are command-routed and update visible state", async () => {
