@@ -34,6 +34,24 @@ type TicketMutateResult struct {
 	OldPath string
 	NewPath string
 	Tip     string
+
+	// PartialMutationNotice is populated only on TicketsMove's non-ready
+	// upward-move error path (idea -> todo, or a demote/re-promote round
+	// trip re-entering todo), where blockedUpwardMoveError rejects a
+	// required stage left in the "blocked" posture. prepareSageReviewForUpwardMove
+	// already persisted the resolved sage-review-design/-completeness
+	// frontmatter (self-healing legacy migration or posture normalization)
+	// before that rejection runs, so the file on disk has changed even
+	// though the call errors. A caller that sees a non-empty error AND a
+	// non-empty PartialMutationNotice must not treat the file as
+	// unchanged: a retry will not find the pre-call frontmatter.
+	//
+	// The ready-landing path (to == "ready") never populates this field:
+	// its posture rejection was relocated to ws/git.commit's
+	// ready-sage-posture guardrail (see blockedUpwardMoveError's doc
+	// comment), so TicketsMove only emits a soft warning there and never
+	// blocks — there is no write-then-reject window to report.
+	PartialMutationNotice string
 }
 
 // statusDirs maps a status token to its tickets-relative directory name.
@@ -148,7 +166,14 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 			// the pre-existing hard block for a blocked required stage stays
 			// here, unlike the ready-landing case (de-blocked, soft warning
 			// only, per the single-chokepoint decision).
-			return TicketMutateResult{}, err
+			//
+			// prepareSageReviewForUpwardMove already wrote the resolved
+			// postures to disk above (self-healing legacy migration or
+			// posture-normalization write), so this rejection is a
+			// write-then-reject, not a no-op-then-reject: report it via
+			// PartialMutationNotice so the caller knows a retry will not
+			// find an unchanged file.
+			return TicketMutateResult{PartialMutationNotice: sageReviewPostureTip(postures)}, err
 		}
 	}
 

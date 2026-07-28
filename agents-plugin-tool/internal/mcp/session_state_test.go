@@ -2543,6 +2543,53 @@ func TestServeStdioTicketsMoveNonReadyBlockedRejectsInResponse(t *testing.T) {
 	}
 }
 
+// TestServeStdioTicketsMoveNonReadyBlockedSurfacesPartialMutationNotice
+// reproduces the 2026-07-13 scenario from
+// 260713-bug-tickets-move-error-mutates-frontmatter at the MCP tool-response
+// layer, scoped to the one path that still hard-blocks after 16c77241
+// relocated ready-landing sage-posture enforcement to ws/git.commit: a
+// legacy-schema ticket (single sage-review: field) blocked on a non-ready
+// upward move (idea -> todo). TicketsMove self-heals (migrates) the
+// frontmatter before the block, so the tool response text must carry an
+// explicit partial-mutation notice alongside the error, not the bare error
+// alone.
+func TestServeStdioTicketsMoveNonReadyBlockedSurfacesPartialMutationNotice(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-sage-move-nonready-blocked-partial"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Sage\nsage-review: blocked\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902611, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "sage-review-design: blocked") {
+		t.Fatalf("tickets.move blocked response missing the underlying error: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "partial-mutation:") {
+		t.Fatalf("tickets.move blocked response missing partial-mutation notice: %s", moveResp)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "ai-docs", "tickets", "idea", stem+".md"))
+	if err != nil {
+		t.Fatalf("read ticket after blocked move: %v", err)
+	}
+	if !strings.Contains(string(raw), "sage-review-design: blocked") {
+		t.Fatalf("ticket missing self-healed sage-review-design field after blocked move:\n%s", string(raw))
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md")); err == nil {
+		t.Fatalf("ticket moved to todo/ despite blocked rejection")
+	}
+}
+
 // TestServeStdioTicketsCreateEmptyReadyUnresolvedPostureWarnsInResponse is
 // the tickets.create_empty counterpart of the above (C5): creating directly
 // at ready/ under the shipped default posture must succeed and surface the

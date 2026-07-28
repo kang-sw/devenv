@@ -297,6 +297,55 @@ func TestTicketsMoveUpwardNonReadyBlockedRejectsMove(t *testing.T) {
 	}
 }
 
+// TestTicketsMoveUpwardNonReadyBlockedReturnsPartialMutationNotice reproduces
+// the 2026-07-13 260713-bug-tickets-move-error-mutates-frontmatter scenario
+// on the one path that still hard-blocks after 16c77241 relocated
+// ready-landing sage-posture enforcement to ws/git.commit: a non-ready
+// upward move (idea -> todo) whose legacy `sage-review: blocked` frontmatter
+// gets self-healed into sage-review-design/sage-review-completeness by
+// prepareSageReviewForUpwardMove before blockedUpwardMoveError rejects the
+// move. The returned TicketMutateResult must surface a non-empty
+// PartialMutationNotice alongside the error — a retrying caller must not
+// mistake this for an unchanged file.
+func TestTicketsMoveUpwardNonReadyBlockedReturnsPartialMutationNotice(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-sage-legacy-nonready-blocked"
+	oldRel := filepath.Join("ai-docs", "tickets", "idea", stem+".md")
+	oldAbs := filepath.Join(root, oldRel)
+	mustWrite(t, root, oldRel, "---\ntitle: Sage\nsage-review: blocked\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "todo",
+		SageReview: "auto",
+	})
+	if err == nil {
+		t.Fatal("TicketsMove idea->todo promoted a blocked legacy sage-review state")
+	}
+	if !strings.Contains(err.Error(), "sage-review-design: blocked") {
+		t.Fatalf("error = %v, want design-blocked rejection", err)
+	}
+	if result.PartialMutationNotice == "" {
+		t.Fatalf("PartialMutationNotice = %q, want non-empty notice since frontmatter was self-healed before the block", result.PartialMutationNotice)
+	}
+	if !strings.Contains(result.PartialMutationNotice, "design blocked") {
+		t.Fatalf("PartialMutationNotice = %q, want it to mention the persisted design posture", result.PartialMutationNotice)
+	}
+
+	// Confirm the notice isn't a no-op: the frontmatter file itself was
+	// self-healed (migrated from the legacy single field) before the block.
+	after := readFileString(t, oldAbs)
+	for _, wantLine := range []string{"sage-review-design: blocked", "sage-review-completeness: blocked"} {
+		if !strings.Contains(after, wantLine) {
+			t.Fatalf("ticket missing %s after self-healing migration write:\n%s", wantLine, after)
+		}
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("git called on guard failure: %#v", runner.calls)
+	}
+}
+
 func TestTicketsMoveDownwardReadyToTodoReturnsTip(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-down"
