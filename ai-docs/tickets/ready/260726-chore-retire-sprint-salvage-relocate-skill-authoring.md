@@ -15,6 +15,7 @@ spec-remove:
   - 260510-salvage-recovery-workflow-skill
 related-mental-model:
   - workflow-skills
+sage-review-completeness: completed
 ---
 
 # Retire lead-sprint and lead-salvage; relocate lead-skill-authoring out of the distribution surface
