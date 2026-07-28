@@ -81,7 +81,7 @@ Policy rules:
 
 - After doc-closeout compaction, verify final tree equivalence, or report skipped.
 - `{final-action-gate}` report: changes, branch, merge target, docs, ticket Result hash, review, tests, deviations, disputes, skipped closeout.
-- Stop for the user's choice: merge, new slice, sprint, or stop.
+- Stop for the user's choice: merge, new slice, or stop.
 
 ### 7. Merge
 

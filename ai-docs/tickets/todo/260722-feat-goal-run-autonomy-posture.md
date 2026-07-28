@@ -148,7 +148,7 @@ line; do not wait for confirmation; stop only on critical
 (irreversible / destructive / scope-expanding / premise-breaking) decisions.
 Wording must not contradict `lead-implement`'s genuine hard gates.
 
-Follow `agents-plugin/skills/lead-skill-authoring/SKILL.md` invariant checklist
+Follow the `ai-docs/ref/skill-authoring.md` invariant checklist
 for the changed lines. Spec documentation of the posture moves to Phase 2 (see
 `## Spec Impact`); this phase ships the behavior only.
 

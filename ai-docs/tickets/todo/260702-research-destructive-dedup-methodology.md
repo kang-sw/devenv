@@ -17,7 +17,7 @@ dedup. But pursuing the hypothetical surfaced a repeatable methodology worth
 naming and testing against other skills before this epic's remaining Phase 3/4
 targets.
 
-The core move used throughout: apply `lead-skill-authoring`'s destructive-first
+The core move used throughout: apply the skill-authoring manual's destructive-first
 test ("would a model following only Layer 3 + MCP schemas reach the same
 execution outcome? uncertain → delete") not sentence-by-sentence, but at
 section/checklist scope — asking whether an entire parallel checklist or
@@ -80,7 +80,7 @@ ad hoc, twice, only because the user caught both misses after the fact.
 ## Open questions
 
 - Should this per-merge audit become an explicit step in
-  `lead-skill-authoring.md`'s destructive-first stance (a checklist run before
+  `ai-docs/ref/skill-authoring.md`'s destructive-first stance (a checklist run before
   any section-scope merge is applied), rather than relying on the user to
   catch misses in review? If so, what is the minimal wording that avoids
   turning it into its own restatement-heavy ceremony?
@@ -89,7 +89,7 @@ ad hoc, twice, only because the user caught both misses after the fact.
   `lead-write-ticket`)? Worth testing against a differently-shaped skill before
   generalizing.
 - Should the remaining Phase 3/4 diet targets (`lead-write-spec`,
-  `lead-add-rule`, `lead-workflow-manual`, `lead-sprint`) be diet-ed under this
+  `lead-add-rule`, `lead-workflow-manual`) be diet-ed under this
   audit discipline from the start, or should one of them first be used as a
   deliberate test case to see whether the audit catches misses in a fresh
   skill (rather than only retrospectively explaining misses already found in

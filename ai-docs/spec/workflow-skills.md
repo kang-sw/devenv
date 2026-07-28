@@ -32,10 +32,7 @@ lead-implement
 lead-check-blockers
 lead-proceed
 lead-review
-lead-salvage
 lead-ship
-lead-skill-authoring
-lead-sprint
 lead-tune
 lead-update-spec
 lead-verify-discussion
@@ -50,9 +47,9 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 15 entry skills the user invokes as
-`/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
-`lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
+The directly invocable surface is narrowed to 12 entry skills the user invokes as
+`/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
+`lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
 `lead-verify-discussion`, `lead-tune`, `lead-goal-step`, and
 `lead-goal-fan-out-step`. The remaining
@@ -65,7 +62,7 @@ classification axis is whether the user is meant to type `/ws:<name>` directly, 
 cross-skill invocation count. Each entry skill's own procedure body is likewise
 served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
 surface carries only the trigger description and delegates execution to its
-playbook. Context-heavy entry skills (lead-discuss and lead-sprint) are an
+playbook. Context-heavy entry skills (lead-discuss) are an
 exception: their SKILL.md carries a parallel init declaration —
 `playbook.print` plus `workflow_manual` called in parallel — rather than a pure
 routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel rounds.
@@ -196,6 +193,10 @@ when a handler exceeds four steps and mixes responsibilities. Sub-block names
 describe the responsibility they perform; single-purpose checklists are not
 split only because they are long. Compact checkpoint skills may stay prose or
 short lists when output and end state are obvious.
+These authoring rules are maintained as `ai-docs/ref/skill-authoring.md`, an
+upstream reference document read directly rather than a shipped invocable
+skill; the audit they describe covers `agents-plugin/skills/*/SKILL.md` and
+`agents-plugin/rsrc/lead-*/lead-*.md`.
 {#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
@@ -207,22 +208,11 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
-`lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
+`lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
-The wsflow `lead-sprint` skill mirrors the episode-oriented sprint shell: it
-coordinates discussion, exploration, `sprint-edit` micro-edit episodes, and
-normal workflow handoff without owning a sprint branch or final wrap-up.
-wsflow source execution is lead-owned: sprint-edit applies a lead-owned direct
-edit, and larger or subagent-worthy work routes through normal wsflow workflow
-gates, namely the converged `wsflow:lead-implement` spine
-(`#260529-wsflow-converged-implement-spine`). The former wsflow `lead-edit`
-skill was absorbed into that spine and removed from the wsflow skill set.
-{#260513-wsflow-sprint-skill}
-
-The wsflow package excludes skeleton flows, recovery orchestration, and
-upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
-`lead-skill-authoring`. Shipped wsflow `SKILL.md` files are thin entry shims:
+The wsflow package excludes skeleton flows: `lead-write-skeleton`.
+Shipped wsflow `SKILL.md` files are thin entry shims:
 they keep package-local bare `name: lead-*` frontmatter, call
 `wsflow/playbook.print(name: "<lead-name>")`, execute the returned procedure
 against the current user request, and report a blocker if the playbook cannot
@@ -406,23 +396,6 @@ Skill-authoring guidance treats local shorthand as trigger examples for a
 general intent, not as the concept name itself. New workflow shorthand should
 name the broad intent first and list the shorthand only where it prevents
 repeated routing failures.
-
-`lead-salvage` handles failed large implementations, sprints, branches, and
-agent runs where a wrong premise may require rollback or recovery. It freezes
-evidence before cleanup, interviews the user to confirm the failure claim and
-invalidated premises, fans out named-agent surveys for code blast
-radius, ticket graph contamination, spec and mental-model impact, and preserved
-evidence, then classifies artifacts as keep, rework, discard, or unknown. It
-classifies affected tickets as keep, rewrite, drop, absorb, or unknown before
-any ticket move. Destructive actions require explicit approval immediately
-before execution.
-
-The salvage output uses the existing ticket system: a research ticket records
-the salvage report, a recovery epic is created when multiple tickets,
-components, phases, or cross-child invariants are affected, and concrete repair
-work moves into child tickets. The skill routes all ticket creation, edits,
-drops, and status moves through `lead-write-ticket`; it does not perform source
-edits. {#260510-salvage-recovery-workflow-skill}
 
 `lead-verify-discussion` gives users an explicit lightweight verification and
 validation checkpoint during discussion. It checks the current assumptions or
@@ -817,8 +790,7 @@ violated by the implementation as blocking findings within their assigned
 partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
-stages complete. `lead-sprint` runs documentation closure only for marked
-`sprint-edit` episodes when each episode wraps. For implementation-branch modes,
+stages complete. For implementation-branch modes,
 `lead-implement` also runs a post-documentation closeout compaction gate before
 merge readiness is reported: it inspects only the branch-tip suffix and compacts
 a contiguous run of safe documentation-only closeout commits into one closeout
@@ -970,27 +942,6 @@ source.
 proceed boundary without pre-applying `wsflow:lead-implement` branch or
 execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
-
-## Sprint Session Shell {#260505-sprint-session-container}
-
-`lead-sprint` is an episode-oriented workflow shell for sustained user sessions.
-It stays on the current branch, coordinates discussion and exploration, and
-routes larger implementation through `lead-proceed` or `lead-implement` instead
-of creating `sprint/` branches or running a final branch wrap-up.
-
-Small interactive edits may enter `sprint-edit` only when a single lead-owned
-context covers the whole change. Each sprint-edit commit carries recoverable
-commit-body markers, `Sprint-Edit: <episode-slug>` and
-`Sprint-Edit-Context: <one-line context>`. After each edit, the shell asks
-whether to keep refining the current context, wrap it up, or shift direction.
-
-Wrapping a sprint-edit episode runs documentation closure for that marked
-episode range: update specs, refresh mental models when needed, follow the
-executor document pipeline for episode-scoped docs, commit documentation changes,
-clear the active edit context, and return to the sprint loop. Public contracts,
-routing semantics, protocols, ticket phase completion, cross-module new patterns,
-plan or review allocation, and branch decisions route outside sprint-edit.
-{#260523-sprint-episode-workflow-shell}
 
 ## Review Workflow Skills {#260513-review-workflow-skills}
 

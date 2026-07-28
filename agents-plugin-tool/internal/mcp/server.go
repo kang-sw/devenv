@@ -556,10 +556,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleEnterImplement(req.ID, params.Arguments)
 	case "enter.proceed":
 		return s.handleEnterProceed(req.ID, params.Arguments)
-	case "enter.sprint":
-		return s.handleEnterSprint(req.ID, params.Arguments)
-	case "enter.salvage":
-		return s.handleEnterSalvage(req.ID, params.Arguments)
 	case "todo.append":
 		return s.handleTodoAppend(req.ID, params.Arguments)
 	case "todo.insert_before":
@@ -3594,34 +3590,6 @@ func tools() []map[string]any {
 					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
 				},
 				"required": []string{"session_key", "target"},
-			},
-		},
-		{
-			"name":        "enter.sprint",
-			"description": "Enter sprint-episode mode: store the typed payload as the 'sprint' agenda blob AND replace the todo list with the sprint episode lifecycle (Edit, Verify, Commit, Post-edit decision, Wrap episode).",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":          stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"episode_slug":         stringProperty("Short kebab-case slug identifying the sprint-edit episode."),
-					"episode_start":        stringProperty("Episode-start commit hash (parent of the first marked commit)."),
-					"current_edit_context": stringProperty("One-line description of the current edit context."),
-				},
-				"required": []string{"session_key"},
-			},
-		},
-		{
-			"name":        "enter.salvage",
-			"description": "Enter salvage mode: store the typed payload as the 'salvage' agenda blob AND replace the todo list with the salvage pipeline (Containment, Survey fanout, Premise interview, Classification, Capture).",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":        stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"failure_claim":      stringProperty("User-confirmed failure claim."),
-					"confirmed_premises": stringArrayProperty("Invalidated premises the user has confirmed."),
-					"survey_status":      stringProperty("Survey fanout status (e.g. pending, in-progress, complete)."),
-				},
-				"required": []string{"session_key"},
 			},
 		},
 		{

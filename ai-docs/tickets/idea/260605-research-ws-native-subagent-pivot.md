@@ -390,6 +390,17 @@ was off-by-one / counted the `reference-discovery` prompt-stem). Settled split:
   not cross-skill invocation count (which mixes pure-internal references like
   `lead-workflow-manual` with dual-use writers).
 
+#### Superseded in part (2026-07-28)
+
+`260726-chore-retire-sprint-salvage-relocate-skill-authoring` removes three
+names from the entry-shim list above. `lead-sprint` and `lead-salvage` are
+deleted outright, not reclassified. `lead-skill-authoring` is relocated to
+`ai-docs/ref/skill-authoring.md` — the "stays entry" call below is reversed:
+it is now read directly as an upstream reference rather than invoked, which is
+the same conclusion the side-effect note under Decisions anticipated, reached
+by removing the skill instead of repointing it. The entry-shim count drops from
+11 to 8; the internal-playbook split is unchanged.
+
 ### Implement entry routing (new decision)
 
 `lead-implement` is NOT exposed as a user entry. `lead-proceed` stays the

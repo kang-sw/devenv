@@ -55,7 +55,7 @@ every render regardless of host language:
   from any human-facing channel — delegates have none; they return data to the
   lead, not prose to the user.
 - Edits touch rsrc delegate prompt text / orientation, so they run under
-  `lead-skill-authoring`; regen the `agents-plugin-wsflow/rsrc` mirror.
+  `ai-docs/ref/skill-authoring.md`; regen the `agents-plugin-wsflow/rsrc` mirror.
 
 ## Open questions
 

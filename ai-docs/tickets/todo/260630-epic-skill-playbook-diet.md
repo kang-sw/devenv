@@ -12,7 +12,7 @@ Lead playbooks carry three kinds of content that need to be separated:
 3. **Unnecessary** — restatements of MCP schemas, duplicate fact guidance, rationale prose
 
 Currently all three are mixed. This epic defines a golden rule distinguishing them,
-encodes it in `lead-skill-authoring`, and uses it to diet all remaining skills.
+encodes it in the skill-authoring manual, and uses it to diet all remaining skills.
 
 ## Two Optimization Levers
 
@@ -31,7 +31,7 @@ playbook collapses to: gather inputs → call tool → follow output.
 `enter.proceed` and `enter.implement`, so their diet is mainly Lever A.
 Skills without `enter.*` support may need Lever B work before they can be fully dieted.
 
-## Golden Rule (to encode in lead-skill-authoring)
+## Golden Rule (to encode in the skill-authoring manual)
 
 | Content | Where it lives |
 |---------|---------------|
@@ -77,14 +77,15 @@ Skills without `enter.*` support may need Lever B work before they can be fully 
   restatement of MCP-generated todo `Instruction` text — collapsed to gates
   and ownership boundaries only. This second-pass method (confirm against
   actual generated tool output, not schema-inferred guesswork) is now encoded
-  in `lead-skill-authoring`'s destructive-first stance and is the required
+  in the skill-authoring manual's destructive-first stance and is the required
   method for any remaining `enter.*`-backed target below.
 
 ## Phases
 
 ### Phase 1: Encode golden rule in lead-skill-authoring — Done
 
-Encoded in `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md`:
+Encoded in `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md`
+(relocated 2026-07-28 to `ai-docs/ref/skill-authoring.md`):
 Layer Model table, two-lever framing, destructive-first stance (generalized
 to bind to any MCP post-call output, not just `Next:`), Templates/delegate-
 payload exemption.
@@ -95,18 +96,23 @@ Superseded by direct-contact evidence-checking (see `lead-implement` note
 above) rather than a separate up-front audit pass. Remaining targets are
 classified inline, at diet time, against actual MCP tool source.
 
-### Phase 3/4 curated targets (2026-07-01 curation)
+### Phase 3: Curated diet targets (2026-07-01 curation)
 
-Merged; lever type (A vs B) is determined per-skill at diet time rather than
-pre-assigned, since `lead-implement` showed the split can only be confirmed
-by reading the tool's actual generated output.
+Absorbs the former Phase 4; lever type (A vs B) is determined per-skill at diet
+time rather than pre-assigned, since `lead-implement` showed the split can only
+be confirmed by reading the tool's actual generated output.
 
 - `lead-write-spec` (129 lines)
 - `lead-add-rule` (167 lines)
 - `lead-workflow-manual` (162 lines)
-- `lead-sprint` (155 lines) — `enter.sprint`-backed; apply the same
-  generated-instruction-text verification method used for `lead-implement`
-  before assuming any section is Layer 3.
+- `lead-sprint` — superseded 2026-07-28. The skill was retired outright by
+  `260726-chore-retire-sprint-salvage-relocate-skill-authoring` rather than
+  dieted; there is nothing left to shrink.
+
+### Phase 4: [dropped] Merged into Phase 3
+
+Phase numbers are stable, so the merge recorded above is marked here rather than
+renumbered away.
 
 ### Deletion candidate (not diet)
 
@@ -127,9 +133,12 @@ by reading the tool's actual generated output.
 - Changing MCP tool behavior or schemas unless serving a Lever B migration.
 - Removing lead-owned judgment tables.
 - Removing non-obvious edge-case guardrails.
-- `lead-bootstrap`, `lead-forge-mental-model`, `lead-review`, `lead-salvage` —
+- `lead-bootstrap`, `lead-forge-mental-model`, `lead-review` —
   rarely invoked; spec clarity outweighs diet benefit for infrequently-called
   skills. Excluded from this epic's curated target list (2026-07-01).
+  `lead-salvage` was also on this exclusion list until 2026-07-28, when
+  `260726-chore-retire-sprint-salvage-relocate-skill-authoring` retired it
+  outright; the exclusion is superseded rather than still standing.
 - `lead-forge-spec` (290 lines) — was a Phase 3 candidate in the original
   scoping; not carried into the 2026-07-01 curated target list. Deferred, not
   ruled out — revisit in a separate pass if it resurfaces as a target.

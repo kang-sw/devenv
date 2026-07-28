@@ -2692,25 +2692,6 @@ func TestPlaybookPrintGoldenLeadAddRule(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadSprint verifies lead-sprint resolves from the
-// real rsrc tree and is delegates:true (tip must appear).
-func TestPlaybookPrintGoldenLeadSprint(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-sprint", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "session continuity across exploratory workflow turns") {
-		t.Errorf("body %q: expected doctrine text 'session continuity across exploratory workflow turns'", body)
-	}
-	// delegates:true (native exploration-worker dispatch + ws.mercenary.register) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
-	}
-}
-
 // TestPlaybookPrintGoldenLeadDiscuss verifies lead-discuss resolves from the
 // real rsrc tree and is delegates:true (reference-discovery spawn — tip must appear).
 func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
@@ -2749,41 +2730,33 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadSalvage verifies lead-salvage resolves from the
-// real rsrc tree and is delegates:true (native exploration-worker dispatch + ws.mercenary.register — tip must appear).
-func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
+// TestSkillAuthoringRelocatedOutOfRsrc replaces the former
+// TestPlaybookPrintGoldenLeadSkillAuthoring golden. The authoring manual is no
+// longer a shipped playbook: it moved to ai-docs/ref/skill-authoring.md, which
+// AGENTS.md binds as a mandatory pre-edit read. The relocation is only safe
+// while the content actually survives at the new path, so this asserts the
+// destination carries the doctrine text the old golden checked, and that the
+// playbook name stays unresolvable so a reintroduction fails loudly.
+func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-salvage", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
+	if _, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil); err == nil {
+		t.Error("lead-skill-authoring must no longer resolve as an rsrc playbook")
 	}
-	if !strings.Contains(body, "evidence-preserving loss containment") {
-		t.Errorf("body %q: expected doctrine text 'evidence-preserving loss containment'", body)
-	}
-	// delegates:true (native exploration-worker dispatch + named agent registration) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
-	}
-}
 
-// TestPlaybookPrintGoldenLeadSkillAuthoring verifies lead-skill-authoring resolves
-// from the real rsrc tree and contains procedure body text. delegates:false — no tip.
-func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil)
+	relocated := filepath.Join("..", "..", "..", "ai-docs", "ref", "skill-authoring.md")
+	raw, err := os.ReadFile(relocated)
 	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
+		t.Fatalf("relocated authoring manual missing: %v", err)
 	}
+	body := string(raw)
 	if !strings.Contains(body, "executability under pressure") {
-		t.Errorf("body %q: expected doctrine text 'executability under pressure'", body)
+		t.Error("relocated manual lost the doctrine text 'executability under pressure'")
 	}
-	// delegates:false — continuity tip must NOT appear.
-	if strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	// The playbook-serving frontmatter has no meaning outside rsrc and must be gone.
+	if strings.HasPrefix(body, "---") {
+		t.Error("relocated manual still carries playbook frontmatter")
 	}
 }
 
@@ -2848,14 +2821,6 @@ func TestSkillsCallEnterTools(t *testing.T) {
 			wantAll:  []string{"enter.proceed", "Follow `Next:` from `enter.proceed` exactly", "Follow `Next:` exactly"},
 			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
-		{
-			skill:   "lead-sprint",
-			wantAll: []string{"enter.sprint"},
-		},
-		{
-			skill:   "lead-salvage",
-			wantAll: []string{"enter.salvage", "agenda.set"},
-		},
 	}
 
 	for _, tc := range cases {
@@ -2888,9 +2853,10 @@ func TestPhase3bSkillRepoint(t *testing.T) {
 	wsflowSkillsRoot := filepath.Join("..", "..", "..", "agents-plugin-wsflow", "skills")
 	s := newTestServerWithHarness(t, "claude")
 
-	// Verify the four repointed skills call workflow_manual and lead-revive,
-	// and no longer contain the removed playbook.print self-load call.
-	repointed := []string{"lead-proceed", "lead-discuss", "lead-sprint", "lead-salvage"}
+	// Verify the surviving repointed skills call workflow_manual and lead-revive,
+	// and no longer contain the removed playbook.print self-load call. The
+	// original four included lead-sprint and lead-salvage, both since retired.
+	repointed := []string{"lead-proceed", "lead-discuss"}
 	for _, skill := range repointed {
 		t.Run(skill, func(t *testing.T) {
 			body, _, err := printPlaybook(s, rsrcRoot, skill, nil, wsconfig.Options{}, "", nil)

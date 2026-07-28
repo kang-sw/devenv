@@ -144,9 +144,11 @@ Still open before implementation:
   - `ai-docs/mental-model/mcp-runtime.md` and
     `ai-docs/mental-model/workflow-skills.md`.
   - `ai-docs/_index.md`.
-  - The six rsrc skill-prose files that mention it: `lead-proceed`,
-    `lead-discuss`, `lead-salvage`, `lead-sprint`, `lead-forge-mental-model`,
-    `lead-forge-spec`.
+  - The four rsrc skill-prose files that mention it: `lead-proceed`,
+    `lead-discuss`, `lead-forge-mental-model`, `lead-forge-spec`. The list was
+    six until 2026-07-28, when
+    `260726-chore-retire-sprint-salvage-relocate-skill-authoring` deleted
+    `lead-salvage` and `lead-sprint`.
   - Run a final `grep -ri lead-revive` sweep across the repo before closing
     this phase to confirm no reference site was missed.
 - Verify: trigger `/compact` in a live session and confirm the hook's

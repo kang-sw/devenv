@@ -39,7 +39,9 @@ Full original `kind:print, delegates:true` roster (pre-inlining):
 `lead-discuss`, `lead-forge-mental-model`, `lead-forge-spec`, `lead-implement`,
 `lead-salvage`, `lead-sprint`, `lead-verify-design`, `lead-verify-discussion`
 (now false/inlined-without-tip per the linked ticket's Phase 2),
-`lead-write-spec`. There is also a `kind:render` set (subagent-injection
+`lead-write-spec`. This is the historical roster; `lead-verify-design`,
+`lead-salvage`, and `lead-sprint` have since been deleted, so only the
+remaining stems are classifiable targets. There is also a `kind:render` set (subagent-injection
 prompts like `code-review-*`/`explore`/`reviewer`/`ticket-reviewer-*`) whose
 `delegates:true` meaning may be entirely different and likely out of scope for
 this review.

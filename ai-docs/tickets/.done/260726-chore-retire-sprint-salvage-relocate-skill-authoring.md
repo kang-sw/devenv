@@ -16,6 +16,7 @@ spec-remove:
 related-mental-model:
   - workflow-skills
 sage-review-completeness: completed
+completed: 2026-07-28
 ---
 
 # Retire lead-sprint and lead-salvage; relocate lead-skill-authoring out of the distribution surface
@@ -256,6 +257,38 @@ loophole — each class is scheduled elsewhere or deliberately retained:
 4. The retained `skills_mirror.go:36-37` guards and the `wsflow-mirroring.md`
    text documenting them — see Phase 3 for the per-site split.
 
+### Result (1a96ba1e) - 2026-07-28
+
+Phase 1 complete. Both skills removed from every distribution surface: the two
+`agents-plugin/skills/` directories, the three `rsrc/` bodies across both
+lineages, the wsflow `skills/lead-sprint/`, and all three manifests via the
+env-gated regen tests (no hand-edited hashes). `playbook_tools_test.go` lost
+`TestPlaybookPrintGoldenLeadSprint` and `TestPlaybookPrintGoldenLeadSalvage`
+plus their table cases, and `repointed` reduced to `lead-proceed`/`lead-discuss`.
+`test_wsflow_skill_bundle.py` lost both `EXPECTED_SKILLS` entries, the
+`lead-sprint` title and pointer-tail entries, and `EXPECTED_PARALLEL_INIT_SKILLS`
+reduced to `lead-discuss`/`lead-goal-fan-out-step`; two new forbidden-reference
+patterns guard against reintroduction, since these skills were retired outright
+rather than merely excluded from wsflow.
+
+Spec `workflow-skills.md`: four anchored stems removed, entry-skill count
+15 -> 13, the parallel-init exception reduced to `lead-discuss`, the wsflow
+shipped list and exclusion sentence reduced, and the doc-closure sentence
+stripped of its `lead-sprint` clause. Mental model: all six scheduled bullets
+handled with the split the plan called for -- `:75` mark-removed as a tombstone
+per the `lead-verify-design` precedent, `:104` plainly deleted as unanchored,
+and `:17` rewritten to defer to the spec enumeration rather than restate a count
+that drifts on every skill change.
+
+Deviation: `:76` was worded as "`enter.sprint` and `enter.salvage` are
+caller-less until they are removed" rather than asserting the tools were gone.
+The first draft claimed retirement that had not happened yet at this commit;
+Phase 4 settles the sentence.
+
+Verification: full Go suite (12 packages, `-count=1`), 10 wsflow tests, three
+regens, `spec_index_verify: ok`, and the closing grep within the four-class
+allowlist.
+
 ### Phase 2: Relocate lead-skill-authoring to ai-docs/ref/
 
 Move the content out of the distribution surface without losing it.
@@ -300,6 +333,36 @@ Move the content out of the distribution surface without losing it.
 Verification: same test set as Phase 1, plus a check that no live file references
 the old plugin path.
 
+### Result (726cfde4) - 2026-07-28
+
+Phase 2 complete. `git mv` moved the manual to `ai-docs/ref/skill-authoring.md`
+with the `kind: print` frontmatter stripped and the body otherwise verbatim;
+the `agents-plugin/skills/lead-skill-authoring/` and both `rsrc/` directories
+are gone, along with the two `defaultPrompt` strings in
+`.codex-plugin/plugin.json` (replaced with `lead-discuss` / `lead-proceed`
+suggestions) and all three manifest entries. All three `AGENTS.md` sites and all
+four `_index.md` sites repointed in the same commit, with the "Read Before
+Editing" row retitled toward auditing so the pointer states when to read rather
+than what to invoke. Both copies of `{#260514-skill-authoring-carried-context}`
+now name the relocated document; the spec copy additionally records that these
+rules are an upstream reference read directly, not a shipped invocable skill.
+Entry-skill count 13 -> 12 and the wsflow exclusion sentence reduced to
+`lead-write-skeleton`.
+
+`TestPlaybookPrintGoldenLeadSkillAuthoring` was replaced rather than deleted:
+`TestSkillAuthoringRelocatedOutOfRsrc` asserts the name no longer resolves as an
+rsrc playbook, that the relocated file exists and still carries its doctrine
+text, and that it no longer starts with playbook frontmatter. Vacuity-checked by
+moving the file aside -- the test failed with "relocated authoring manual
+missing" -- then restored by manual edit.
+
+Deviation: `session_state.go:574`'s doc comment referenced the
+`lead-skill-authoring` reader model and was repointed on contact. The ticket did
+not schedule this site.
+
+Verification: same set as Phase 1, plus a grep confirming no live file
+references the old plugin path.
+
 ### Phase 3: Ticket-graph cascade and closing sweep
 
 Update every live ticket that names a retired skill, then verify globally.
@@ -337,6 +400,40 @@ wsflow test runs, and a final grep using the same four-class allowlist Phase 1
 defines — minus class 2, since this phase clears the ticket graph, and minus
 class 3 if Phase 4 has already run.
 
+### Result (cd84927d) - 2026-07-28
+
+Phase 3 complete. Each cascade site was adjudicated as forward-looking plan
+versus historical narrative rather than swept: plan text was corrected, and
+narrative recording what happened at the time was left alone. The
+`wsflow-mirroring.md` per-site split was followed as written -- `:44` and the
+two `Excluded:` entries removed, the `skills_mirror.go` denylist paragraph kept
+and relabeled with a note that the entries are deliberately retained as inert
+guards, and `lead-sprint` added to the forbidden-distributed-reference list.
+`codex-integration.md:34`'s probe record moved to `$ws:lead-write-ticket` /
+`$ws:lead-discuss` with a dated relocation note.
+
+Two findings worth carrying forward:
+
+- `ready/260726-bug-inline-playbook-invocation-commit-ownership` has its
+  decisive blocker dissolved by this retirement. Its `## Blocked` argues a
+  callee-side rule cannot work because "the same callee, `lead-update-spec`,
+  needs opposite behavior from two different callers" -- and `lead-sprint.md:97`
+  was the only Category C caller. One caller survives, so the stated reason no
+  longer holds. Recorded on that ticket.
+- `todo/260630-epic-skill-playbook-diet.md:99` carried a malformed phase heading
+  that predates this work (confirmed via `git show HEAD:`) and would have blocked
+  any commit touching the file. Fixed on contact by splitting into Phase 3 plus a
+  `[dropped]` Phase 4, honoring the stable-numbering rule rather than renumbering.
+
+`idea/260605-research-ws-native-subagent-pivot` gained a
+`#### Superseded in part` note reversing its "lead-skill-authoring stays entry"
+decision and dropping the entry-shim count 11 -> 8.
+
+Verification: `references_trace`, `spec_index_verify: ok`, `tickets.verify: PASS`,
+full Go and wsflow runs, and the closing grep with `--exclude-dir` for
+`.claude/worktrees/` and `.worktree/`, which are other checkouts of this same
+repo and polluted the first sweep.
+
 ### Phase 4: Retire the enter.sprint and enter.salvage MCP tools
 
 The served tool set is asserted for exact equality against two hand-maintained
@@ -366,6 +463,27 @@ tool-set comparisons in `agents-plugin-tool/cmd/ws-mcp/main_test.go` — the
 `slices.Equal` assertions at `:91` (full ws) and `:178` (wsflow), which are what
 catch a half-finished edit. Do not mistake `:159` and `:653` for the tripwire;
 those are the contract-*read* helper call sites, not the comparisons.
+
+### Result (3dc87a56) - 2026-07-28
+
+Phase 4 complete, in one commit as the phase required. Removed: both dispatch
+cases and both schema blocks in `server.go`; `handleEnterSprint` /
+`handleEnterSalvage` and the now-unreferenced `deriveSprintTodos` /
+`deriveSalvageTodos` with their doc comments in `session_state.go`; the derive
+assertions in `session_state_test.go` (the unrelated agenda-key hits left
+alone); the capability entries in both `runtime.json` files, tool-name keys only;
+and the spec enumeration in `mcp-tools.md`, which now names `enter.implement` and
+`enter.proceed` and drops the two mode bullets. The mental-model sentence Phase 1
+left provisional is settled to record the tools as retired with their callers.
+
+The `main_test.go` tripwire was mutation-checked rather than trusted: re-adding a
+lone `enter.sprint` entry to `agents-plugin/runtime.json` made
+`TestRuntimeCapabilitiesCommandReportsLauncherContractSurface` fail with the
+exact served-versus-contract diff, confirming the assertion is load-bearing.
+Restored by manual edit.
+
+Verification: `go test ./... -count=1` green across all 12 packages, three
+regens clean with no manifest drift, 10 wsflow tests OK, `spec_index_verify: ok`.
 
 ## Out of Scope
 
@@ -429,3 +547,15 @@ resolved by the user's 2026-07-26 confirmation, recorded under **Decisions**.
 | 8 | Spec Impact line references for the wsflow exclusion sentence are wrong | minor | autonomous |
 | 9 | Phase 1 leaves the spec asserting wsflow excludes a skill that no longer exists | minor | autonomous |
 | 10 | Phase 2 does not name the relocation target filename | minor | autonomous |
+
+
+## Resolution (2026-07-28)
+
+All four phases landed on `impl/retire-sprint-salvage`: 1a96ba1e (skill retirement), 726cfde4 (skill-authoring relocation to `ai-docs/ref/skill-authoring.md`), cd84927d (ticket-graph cascade), 3dc87a56 (MCP tool retirement).
+
+`lead-sprint` and `lead-salvage` no longer exist in either lineage, and neither do the `enter.sprint` / `enter.salvage` tools that served them. The skill-authoring manual is now an upstream reference document read directly rather than a shipped invocable skill; the entry-skill surface went 15 -> 12.
+
+Two follow-ups this work created rather than closed:
+
+- `ready/260726-bug-inline-playbook-invocation-commit-ownership` lost the blocker it called decisive. Its Category C had exactly one entry (`lead-sprint.md:97`), and the stated reason a callee-side rule could not work -- two callers needing opposite behavior from `lead-update-spec` -- no longer holds with one caller left.
+- No successor entry point was named for ad-hoc documentation reconciliation. `lead-sprint`'s wrap-episode was one of only two doors to `lead-update-spec` and `mental-model-updater`, and it refused without a `Sprint-Edit:` marker -- which is precisely the ad-hoc case. `lead-implement`'s `{doc-pre-pass}` is now the only door, and it requires having gone through implement. This ticket deliberately declines to name a successor; the gap is real and unaddressed.

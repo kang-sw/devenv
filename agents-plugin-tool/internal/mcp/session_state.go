@@ -571,7 +571,7 @@ const implementReviewFinalCycleClause = "After the last budgeted cycle returns, 
 // has no remaining relay, and lead-only never relays at all.
 //
 // One rule per sentence behind a leading token label. The unbroken-paragraph form this
-// replaced was skipped under attention pressure (`lead-skill-authoring` reader model),
+// replaced was skipped under attention pressure (the `ai-docs/ref/skill-authoring.md` reader model),
 // and the clause now carries enough rules that the labels are the only index into them.
 const implementReviewAdjudicationClause = "Trigger: When a re-review answers [maintained] on a contested won't-fix, or the implementer answers [escalate: <reason>] mid-relay, adjudicate before the next review; skip this step when neither answer appeared. Dispatch: Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract; supply every one, passing an empty string for the authority inputs the target kind does not use, then dispatch the rendered prompt and parse its one verdict line per dispute. Cost: Adjudication runs inside the current relay slot and consumes no review cycle. Override: On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one; on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run. Accept: An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report. Out-of-scope: An [out-of-scope: <reason>] leaves the relay list, costs no relay, and is carried into the final report as unresolved by decision with its stated reason. Bound: Adjudicate at most once per relay slot: a second escalation in the same slot is not re-adjudicated and reaches the next review as-is."
 
@@ -711,30 +711,6 @@ func deriveProceedTodos() []todoItem {
 	return withPendingStatus([]todoItem{
 		{Key: "route-context", Title: "Build route context"},
 		{Key: "resolve-verdict", Title: "Resolve MCP verdict"},
-	})
-}
-
-// deriveSprintTodos mirrors the lead-sprint episode lifecycle (On: sprint-edit
-// plus On: wrap episode).
-func deriveSprintTodos() []todoItem {
-	return withPendingStatus([]todoItem{
-		{Key: "edit", Title: "Edit (lead-owned, in-context)"},
-		{Key: "verify", Title: "Verify (focused)"},
-		{Key: "commit", Title: "Commit (Sprint-Edit markers)"},
-		{Key: "post-edit", Title: "Post-edit decision (keep / wrap / shift)"},
-		{Key: "wrap", Title: "Wrap episode (spec + mental-model + doc closure)"},
-	})
-}
-
-// deriveSalvageTodos mirrors the lead-salvage states: containment, survey
-// fanout, premise interview, classification, capture.
-func deriveSalvageTodos() []todoItem {
-	return withPendingStatus([]todoItem{
-		{Key: "containment", Title: "Containment (freeze evidence, confirm failure claim)"},
-		{Key: "survey-fanout", Title: "Survey fanout"},
-		{Key: "premise-interview", Title: "Premise interview"},
-		{Key: "classification", Title: "Classification (salvage report + recovery plan)"},
-		{Key: "capture", Title: "Capture (recovery tickets after approval)"},
 	})
 }
 
@@ -1156,14 +1132,6 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 		return toolTextResponse(id, text, err)
 	}
 	return toolTextResponse(id, result.Raw, nil)
-}
-
-func (s *Server) handleEnterSprint(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "enter.sprint", "sprint", args, deriveSprintTodos())
-}
-
-func (s *Server) handleEnterSalvage(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "enter.salvage", "salvage", args, deriveSalvageTodos())
 }
 
 func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) response {

@@ -516,12 +516,6 @@ func TestDeriveOtherEnterTodos(t *testing.T) {
 	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "resolve-verdict") {
 		t.Fatalf("proceed derivation mismatch: %v", keysOf(deriveProceedTodos()))
 	}
-	if !eqKeys(keysOf(deriveSprintTodos()), "edit", "verify", "commit", "post-edit", "wrap") {
-		t.Fatalf("sprint derivation mismatch: %v", keysOf(deriveSprintTodos()))
-	}
-	if !eqKeys(keysOf(deriveSalvageTodos()), "containment", "survey-fanout", "premise-interview", "classification", "capture") {
-		t.Fatalf("salvage derivation mismatch: %v", keysOf(deriveSalvageTodos()))
-	}
 }
 
 func TestTodoKeyUniquenessAndReuse(t *testing.T) {
