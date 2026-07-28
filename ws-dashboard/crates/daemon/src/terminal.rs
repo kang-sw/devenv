@@ -16,6 +16,7 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{watch, Mutex as AsyncMutex};
+use tokio::time::interval;
 use ws_dashboard_core::WorkRootId;
 
 use crate::router::AppState;
@@ -73,6 +74,30 @@ const EVICTION_BACKSTOP_GRACE: Duration = Duration::from_secs(30);
 // realistic insert-path scheduling delay, small relative to the 10s sweep
 // interval and 30s grace window.
 const STALE_ENTRY_SWEEP_MARGIN: Duration = Duration::from_secs(2);
+
+// CONTRACT (260726 Phase 3): the browser-facing terminal WS has no
+// server-initiated liveness probe, so a half-open connection (e.g. the
+// client's machine sleeps/loses network without a clean TCP close) is
+// otherwise invisible to `terminal_socket_task` - the loop only reacts to
+// inbound frames, and a half-open peer never sends one. This is distinct
+// from the `DAEMON_GRACE_WINDOW_MS` attach-grace contract above: that grace
+// window governs eviction of the `Exited` *session* from the registry; this
+// heartbeat only detects and tears down a dead *browser* connection on a
+// session that otherwise still admits attach. A ~2-3 missed-beat tolerance
+// keeps this well clear of ordinary scheduling jitter.
+//
+// Coverage scope (review cycle-1 correctness finding): this only detects an
+// *idle* half-open peer - no inbound activity while the `select!` loop is
+// between sends, including a Pong reply to our own Ping. `tokio::select!`
+// does not poll other branches while parked inside an already-selected
+// branch's own `.await` (e.g. `send_output_backfill`'s write blocking on a
+// full socket send buffer against a dead peer), so a peer that goes dead
+// mid-write is not caught by this heartbeat; that shape still falls back to
+// the kernel's TCP retransmit timeout. The ticket's finding scopes
+// explicitly to the idle case, so this is an intentional scope limit, not a
+// gap in this mechanism.
+const WS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const WS_HEARTBEAT_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPlatform {
@@ -1485,10 +1510,21 @@ async fn terminal_socket_task(
         return;
     }
 
+    let mut heartbeat = interval(WS_HEARTBEAT_INTERVAL);
+    // Default `MissedTickBehavior::Burst` would fire every accumulated tick
+    // back-to-back after the loop is blocked longer than one interval (slow
+    // backfill, contended runtime), emitting several Pings in immediate
+    // succession. `Delay` keeps this to one liveness probe per interval,
+    // matching the stated one-probe-per-15s intent.
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    heartbeat.tick().await; // first tick fires immediately; consume it so the interval starts counting from "now"
+    let mut last_activity = Instant::now();
+
     loop {
         tokio::select! {
             maybe_message = receiver.next() => {
                 let Some(Ok(message)) = maybe_message else { break; };
+                last_activity = Instant::now();
                 match message {
                     Message::Text(text) => {
                         if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
@@ -1529,6 +1565,16 @@ async fn terminal_socket_task(
                     break;
                 }
                 if !session.admits_attach() {
+                    break;
+                }
+            }
+            _ = heartbeat.tick() => {
+                if last_activity.elapsed() > WS_HEARTBEAT_IDLE_TIMEOUT {
+                    // Half-open peer: no inbound frame (including a Pong
+                    // reply to our own Ping) within the idle timeout.
+                    break;
+                }
+                if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
                     break;
                 }
             }

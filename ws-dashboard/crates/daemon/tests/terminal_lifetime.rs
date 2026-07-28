@@ -1090,3 +1090,83 @@ async fn terminal_helper_self_exits_when_no_handshake_ever_completes() {
 
     let _ = std::fs::remove_dir_all(&registry_dir);
 }
+
+// CONTRACT (260726 Phase 3): the browser-facing terminal WS must
+// server-initiate a heartbeat Ping so a half-open connection (dead browser,
+// no TCP FIN) becomes observable - before this phase `terminal_socket_task`'s
+// select loop only reacted to inbound frames and would sit open forever
+// against a peer that never sends anything. This drives a REAL daemon
+// process and a REAL WebSocket client and asserts a `Ping` frame arrives
+// within `terminal::WS_HEARTBEAT_INTERVAL` (15s) plus generous scheduling
+// margin.
+//
+// Note: `tungstenite`'s frame reader auto-replies to an inbound `Ping` with
+// a `Pong` at the protocol layer while still surfacing the `Ping` itself to
+// the caller via `.next()` (verified against
+// `tungstenite-0.29.0/src/protocol/mod.rs:668-674`), so a client that keeps
+// polling can never be driven into the true "idle half-open, never reads"
+// state the daemon-side idle-timeout branch tears down. This test therefore
+// only proves the ping-sent half of "detected and torn down"; the
+// idle-timeout teardown branch is verified by code inspection only (see the
+// Phase 3 plan's Verification Plan for that boundary).
+#[tokio::test]
+async fn terminal_socket_sends_a_server_initiated_heartbeat_ping() {
+    let client = reqwest::Client::new();
+    let state_home = temp_fixture_path("heartbeat-state");
+    std::fs::create_dir_all(&state_home).expect("create state home dir");
+    let work_root = temp_fixture_path("heartbeat-root");
+    std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    let daemon = spawn_real_daemon(&state_home).await;
+    let work_root_id = open_work_root(&client, &daemon.base_url, &work_root).await;
+    let terminal_id = create_terminal(&client, &daemon.base_url, &work_root_id).await;
+
+    let mut request = format!(
+        "ws://{}/api/dashboard/terminals/{terminal_id}/socket?after=0",
+        daemon
+            .base_url
+            .strip_prefix("http://")
+            .expect("daemon base url is http")
+    )
+    .into_client_request()
+    .expect("heartbeat websocket request");
+    request
+        .headers_mut()
+        .insert(axum::http::header::HOST, "127.0.0.1".parse().unwrap());
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("heartbeat websocket upgrades");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::SWITCHING_PROTOCOLS,
+        "heartbeat websocket upgrade"
+    );
+
+    // Never send anything on this connection - the point is to observe the
+    // daemon-initiated Ping, not to respond to it. `WS_HEARTBEAT_INTERVAL`
+    // is 15s; bound the wait generously past that to stay robust under CPU
+    // contention from other tests/daemons running concurrently.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+    let mut saw_ping = false;
+    while tokio::time::Instant::now() < deadline {
+        let Some(message) = tokio::time::timeout(Duration::from_millis(500), socket.next())
+            .await
+            .unwrap_or(None)
+        else {
+            continue;
+        };
+        let message = message.expect("heartbeat websocket message");
+        if matches!(message, TungsteniteMessage::Ping(_)) {
+            saw_ping = true;
+            break;
+        }
+    }
+    assert!(
+        saw_ping,
+        "daemon never sent a server-initiated Ping within WS_HEARTBEAT_INTERVAL + margin"
+    );
+
+    daemon.kill_hard().await;
+    let _ = std::fs::remove_dir_all(&state_home);
+    let _ = std::fs::remove_dir_all(&work_root);
+}

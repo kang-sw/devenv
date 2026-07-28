@@ -403,6 +403,117 @@ Verification boundary: `DocumentWriteLocks` does not grow monotonically across
 repeated writes to many files; an idle half-open terminal WS is detected and torn
 down; a hung upstream SSE forward times out.
 
+### Result (1920575d) - 2026-07-28
+
+All three items landed as specified. `DocumentWriteLocks` gained
+`evict_for_work_roots(&BTreeSet<WorkRootId>)` (`work_root_files.rs`), using
+the ticket's preferred prune-on-work-root-unregister strategy — the
+strong-count-returns-to-1 alternative was not implemented. Wired into all
+three real removal sites (`resources.rs`, `git_worktree.rs`,
+`root_picker.rs`), reshaped mid-review from a per-id method into a batch
+method to match the codebase's existing `remove_for_work_roots` convention
+already used by `TerminalRegistry`/`CodexSessions`/`ClaudeSessions` for the
+same pruned-work-roots operation. The two rollback-only `unregister` sites
+(`git_worktree.rs:279`, `root_picker.rs:276`) are correctly skipped — no
+write route can have reached those ids yet. Accepted, documented residual:
+this bounds the map across work-root churn only, not per-file churn within a
+long-lived, stable work root — the ticket's own stated preference for this
+strategy over the alternative implies accepting that boundary.
+
+The terminal WebSocket gained a server-initiated heartbeat
+(`terminal_socket_task`, `terminal.rs`): a 15s Ping interval with a 45s idle
+timeout (~2-3 missed-beat tolerance), independent of the existing 30s
+attach-grace contract. Coverage is scoped to an *idle* half-open peer —
+`tokio::select!` does not poll other arms while parked inside an
+already-selected arm's own `.await`, so a peer that goes dead mid-write
+(blocked inside `send_output_backfill`) is not caught and falls back to
+kernel TCP retransmit detection; this is the ticket's own stated scope, not a
+gap in the mechanism, and is now stated explicitly in the code's CONTRACT
+comment rather than implied.
+
+The four `reqwest::Client::new()` forward call sites (`servers.rs`) now share
+two process-wide `OnceLock` clients instead of one: `streaming_http_client()`
+(connect + read timeout, used only by `request_remote_sse`) and
+`operation_http_client()` (connect timeout only, used by
+`request_remote_dashboard_operation`/`request_remote_link_token`/
+`request_remote_resources`). The plan's original design was one shared
+client with `read_timeout` everywhere; cycle-1 correctness review caught that
+this would break legitimately long forwarded operations with no daemon-side
+deadline today (`git-worktree-add`'s handler spawns an unbounded `git
+worktree add` outside the `git_exec` seam — a documented Phase 2 residual;
+`/api/dashboard/work-roots/open` triggers full live discovery on the
+remote), turning a slow-but-successful remote operation into a user-visible
+forward failure. Split into two clients on relay, closing that regression.
+`operation_http_client()`'s lack of any read/total timeout is itself an
+accepted, documented residual, unchanged from the pre-Phase-3
+`reqwest::Client::new()` behavior for those three call sites: a genuinely
+unreachable remote is still bounded by `connect_timeout`, but a remote that
+accepts the connection and then hangs mid-operation blocks the forward
+indefinitely.
+
+Partitioned review (correctness, fit, test) surfaced 2 Important correctness
+findings, 1 Important fit finding, and 2 Important test findings in cycle 1,
+all fixed in one relay (`1920575d`) and confirmed clean (2 non-gating minors
+remaining) on re-review:
+
+- The shared-client design's `read_timeout` on `request_remote_dashboard_operation`
+  was the functional regression described above — fixed by splitting into
+  `streaming_http_client()`/`operation_http_client()`.
+- The stated verification boundary ("does not grow monotonically") is only
+  satisfied across work-root churn, not per-file churn — dispositioned as an
+  accepted, documented residual (doc-note added to the eviction method), not
+  a code change, consistent with the ticket's own strategy preference.
+- `evict_for_work_root` broke from the codebase's `remove_for_work_roots`
+  batch convention — fixed by reshaping to `evict_for_work_roots(&BTreeSet)`,
+  matching the sibling registries and letting all three call sites reuse
+  their already-in-scope `BTreeSet` instead of looping.
+- Zero test coverage of the three real wiring call sites (only the isolated
+  map method was tested) — fixed by adding
+  `git_worktree_remove_clears_document_write_locks_for_removed_root` in
+  `tests/routes.rs`, mirroring the existing sibling-cleanup test pattern;
+  verified non-tautological by temporarily reverting the eviction call and
+  confirming the new test fails.
+- No test exercised actual timeout enforcement (only an identity/caching
+  test existed) — fixed by adding `WS_DASHBOARD_REMOTE_SSE_READ_TIMEOUT_MS`
+  (mirroring `git_exec.rs`'s `git_timeout_from_env` test-shrinkable
+  convention) plus a real-hung-listener test asserting the streaming client's
+  `read_timeout` actually fires within a bounded budget.
+
+Two Minor findings were also fixed in the same relay: the CONTRACT comment
+narrowed to state idle-only heartbeat coverage (see above); `tokio::time::interval`
+switched to `MissedTickBehavior::Delay` so a stall doesn't fire a burst of
+queued Pings back-to-back. Two Minor findings were dispositioned
+won't-fix/accepted with a doc-only note: a narrow race window where eviction
+can drop a lock a concurrent in-flight write still holds, combined with a
+same-path work-root re-open reusing the same deterministic `WorkRootId`,
+losing serialization for that narrow window (cross-referenced to
+`{#260524-ws-dashboard-document-edit-save-fanout}` in the doc comment); the
+`reqwest` manifest version constraint not reflecting the actual minimum
+needed for `read_timeout` (`Cargo.lock` already pins a compatible version, a
+workspace-wide manifest bump is out of this phase's surgical scope).
+Re-review (cycle 2) confirmed every fix and closed all Important findings,
+surfacing 2 new non-gating Minors accepted without further action: the new
+`WS_DASHBOARD_REMOTE_SSE_READ_TIMEOUT_MS` env var's `0`-means-"use default"
+semantics (deliberately the inverse of sibling `WS_DASHBOARD_GIT_TIMEOUT_MS`'s
+`0`-means-"no timeout") has no spec entry; `operation_http_client()`'s fully
+unbounded-after-connect behavior is correct as a trade but wasn't named in
+its own doc comment before this Result recorded it.
+
+Verification: `cargo build -p ws-dashboard-daemon` clean; `--lib
+work_root_files` 10 passed; `--lib terminal` 53 passed; `--test
+terminal_lifetime` 6 passed; `--lib servers` 6 passed; `--test routes` 174
+passed; `cargo clippy -p ws-dashboard-daemon --tests` no new warnings. Spec
+updated ({#260728-terminal-websocket-heartbeat},
+{#260728-remote-forward-timeout-and-client-sharing} in
+`ai-docs/spec/ws-web-dashboard/index.md`, commit `ffdd4ef7`) — no spec entry
+for `DocumentWriteLocks` eviction itself, since it has no externally
+observable API surface (unlike Phase 2's `outstandingReaders` diag field).
+Mental model updated (`ai-docs/mental-model/ws-web-dashboard/index.md`,
+commit `76b7a2e1`) — records the reqwest total-vs-read-timeout footgun, the
+heartbeat's `tokio::select!` mid-await blind spot, and the
+prune-on-unregister-bounds-churn-not-files tradeoff as Common Mistakes /
+Domain Rule entries.
+
 ## Spec Impact
 
 Target spec area: none in the workflow spec set — downstream ws-dashboard daemon
