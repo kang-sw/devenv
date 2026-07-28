@@ -1006,3 +1006,87 @@ async fn terminal_past_grace_is_swept_and_its_helper_process_is_reaped() {
     let _ = std::fs::remove_dir_all(&state_home);
     let _ = std::fs::remove_dir_all(&work_root);
 }
+
+// CONTRACT (260726 Phase 1 sub-fix 2, test-partition finding #1): sub-fix 2
+// is the ticket's answer to "even with the daemon down" - a helper that is
+// spawned but never once completes a handshake must self-exit on its own,
+// with zero daemon involvement, within `NO_HANDSHAKE_TIMEOUT`
+// (`terminal_helper_process.rs`, currently 10s). No test anywhere in the
+// diff drove this branch; this test invokes the REAL `terminal-helper`
+// re-exec subcommand directly as its own process (never through
+// `create_terminal`, never through any daemon) and never connects to the
+// socket it binds - the only thing that can end this process is sub-fix 2's
+// own bounded accept-loop wait.
+#[tokio::test]
+async fn terminal_helper_self_exits_when_no_handshake_ever_completes() {
+    let registry_dir = temp_fixture_path("no-handshake-registry");
+    std::fs::create_dir_all(&registry_dir).expect("create registry dir");
+    let registry_json = registry_dir.join("term_no_handshake.json");
+    let socket_path = registry_dir.join("term_no_handshake.sock");
+    let cwd = std::env::temp_dir();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ws-dashboard"))
+        .arg("terminal-helper")
+        .arg("--registry-dir")
+        .arg(&registry_dir)
+        .arg("--terminal-id")
+        .arg("term_no_handshake")
+        .arg("--work-root-id")
+        .arg("fake-work-root")
+        .arg("--cwd")
+        .arg(&cwd)
+        .arg("--title")
+        .arg("No Handshake")
+        .arg("--columns")
+        .arg("80")
+        .arg("--rows")
+        .arg("24")
+        .arg("--socket-path")
+        .arg(&socket_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn real terminal-helper subprocess directly, with no daemon involved");
+
+    // The registry entry must appear quickly (helper-side startup, before
+    // the socket is even bound) - proving this genuinely reached the accept
+    // loop rather than failing to start at all.
+    let write_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if registry_json.exists() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < write_deadline,
+            "helper never wrote its registry entry"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // NEVER connect to `socket_path` - that is the entire point of this
+    // test. Wait past `NO_HANDSHAKE_TIMEOUT` (10s) with generous margin and
+    // assert the process exits ON ITS OWN: no daemon, no SIGKILL from this
+    // test, nothing but sub-fix 2's own bounded wait.
+    let exit_status = timeout(Duration::from_secs(20), child.wait())
+        .await
+        .expect("helper must self-exit within NO_HANDSHAKE_TIMEOUT without ever handshaking")
+        .expect("wait on self-exited helper process");
+    assert!(
+        exit_status.success(),
+        "a clean self-exit (no handshake ever occurred) must not be reported as a process \
+         error: {exit_status:?}"
+    );
+
+    assert!(
+        !registry_json.exists(),
+        "the self-exited helper must prune its own registry entry"
+    );
+    assert!(
+        !socket_path.exists(),
+        "the self-exited helper must prune its own socket file"
+    );
+
+    let _ = std::fs::remove_dir_all(&registry_dir);
+}

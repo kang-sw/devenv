@@ -116,7 +116,14 @@ where
     // itself moves into `AppState` below, and `TerminalRegistry` is cheaply
     // `Clone` (an `Arc`-backed handle to the same shared session map), so the
     // reaper task and the router observe exactly the same live sessions.
-    let reaper_task = crate::terminal_reaper::spawn(terminals.clone(), TERMINAL_REAPER_INTERVAL);
+    // CONTRACT (260726 Phase 1 correctness review M1): `Arc`-wrapped so both
+    // `shutdown_task` (aborts it as soon as shutdown begins) and the
+    // `tokio::select!` below (safety-net abort - see `shutdown_task`'s own
+    // comment) can hold it; `JoinHandle::abort` only needs `&self`.
+    let reaper_task = Arc::new(crate::terminal_reaper::spawn(
+        terminals.clone(),
+        TERMINAL_REAPER_INTERVAL,
+    ));
     // In-app "shut down dashboard" trigger: an HTTP handler fires this Notify,
     // which the shutdown_task below selects on alongside the external signal.
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
@@ -157,13 +164,29 @@ where
         shutdown: shutdown_notify.clone(),
     });
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let shutdown_task = tokio::spawn(async move {
-        tokio::select! {
-            () = shutdown => {}
-            () = shutdown_notify.notified() => {}
-        }
-        let _ = shutdown_tx.send(true);
-    });
+    let shutdown_task = {
+        let reaper_task = reaper_task.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                () = shutdown => {}
+                () = shutdown_notify.notified() => {}
+            }
+            let _ = shutdown_tx.send(true);
+            // CONTRACT (260726 Phase 1 correctness review M1): abort the
+            // reaper as soon as shutdown begins, not only after the
+            // graceful drain (or the forced grace period) finishes below -
+            // the ticket requires the sweep cancelled "as part of (or
+            // strictly before)" the shutdown path, and the reaper must
+            // never tick against a partially torn-down `TerminalRegistry`
+            // mid-shutdown. The two `abort()` calls below remain as a
+            // safety net (idempotent - aborting an already-aborted/
+            // finished task is a harmless no-op): this task and the
+            // `tokio::select!` below run concurrently, so without them a
+            // scheduling race could abort `shutdown_task` itself before
+            // this line ever runs, leaking the reaper entirely.
+            reaper_task.abort();
+        })
+    };
     let server = axum::serve(listener, app)
         .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
         .into_future();
