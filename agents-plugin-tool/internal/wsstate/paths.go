@@ -258,8 +258,13 @@ func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err e
 	superprojectRoot, probeErr := git(abs, "rev-parse", "--show-superproject-working-tree")
 	if probeErr != nil || superprojectRoot == "" {
 		// Not a submodule, or the probe itself failed: preserve the original
-		// fail-loud error. This still covers worktrees created inside a
-		// submodule, which report no superproject.
+		// fail-loud error. A worktree created inside a submodule normally lands
+		// here, because git reports no superproject for a checkout the parent
+		// does not track. The exception is a submodule worktree placed at a path
+		// the superproject records as a gitlink: git does report a superproject
+		// for it, so it resolves as an independent project instead of failing
+		// loud. That is accepted — the superproject genuinely tracks that
+		// checkout — but it is not the blanket fail-loud the non-goal implies.
 		return "", "", err
 	}
 	return root, root, nil

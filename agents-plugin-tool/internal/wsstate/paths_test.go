@@ -320,10 +320,13 @@ func TestResolveTreatsSubmoduleWorkingTreesAsIndependentProjects(t *testing.T) {
 	}
 }
 
-// Worktrees created inside a submodule are an explicitly unsupported layout.
-// They reach commonRootFromGitDir's guard and must keep failing loudly rather
-// than being silently reclassified by the submodule probe: git reports no
-// superproject for them, so the probe declines and the original error stands.
+// A worktree created inside a submodule, at a path the superproject does not
+// track, is an explicitly unsupported layout. It reaches commonRootFromGitDir's
+// guard and must keep failing loudly rather than being silently reclassified by
+// the submodule probe: git reports no superproject for an untracked checkout, so
+// the probe declines and the original error stands. A submodule worktree the
+// superproject does record as a gitlink is the documented exception and resolves
+// instead of failing; see the probe-decline comment in gitIdentity.
 func TestResolveRejectsWorktreeCreatedInsideSubmodule(t *testing.T) {
 	_, mainSubPath := initSubmoduleSuperproject(t)
 	subWorktreePath := filepath.Join(t.TempDir(), "sub-feature")
