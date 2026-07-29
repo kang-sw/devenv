@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -912,16 +913,13 @@ func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
 	}
 	text := string(raw)
 
-	const gateHeading = "### 5. Sage Review Gate"
-	const commitHeading = "### 6. Commit"
+	// Match the headings by name, not by step number: inserting a stage ahead of
+	// the gate renumbers both and would fail this test for a reason that has
+	// nothing to do with the ordering invariant it exists to protect.
+	gateHeading := headingByName(t, text, "Sage Review Gate")
+	commitHeading := headingByName(t, text, "Commit")
 	gateIdx := strings.Index(text, gateHeading)
 	commitIdx := strings.Index(text, commitHeading)
-	if gateIdx == -1 {
-		t.Fatalf("lead-write-ticket.md missing %q", gateHeading)
-	}
-	if commitIdx == -1 {
-		t.Fatalf("lead-write-ticket.md missing %q", commitHeading)
-	}
 	if gateIdx > commitIdx {
 		t.Fatalf("Sage Review Gate (offset %d) must precede Commit (offset %d) in ## On: invoke; re-inversion detected", gateIdx, commitIdx)
 	}
@@ -940,15 +938,28 @@ func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
 	// And it must positively state that the stamping tools' own commit
 	// direction does not apply here, so the step-5/step-6 conflict that made
 	// the fix depend on the agent preferring the later line cannot come back.
+	commitStep := strings.TrimSuffix(strings.TrimPrefix(commitHeading, "### "), ". Commit")
 	for _, required := range []string{
 		"leave it uncommitted",
 		"does not apply inside this procedure",
-		"step 6 performs the single commit",
+		"step " + commitStep + " performs the single commit",
 	} {
 		if !strings.Contains(section, required) {
 			t.Fatalf("the Sage Review Gate section must state %q:\n%s", required, section)
 		}
 	}
+}
+
+// headingByName returns the full `### <N>. <name>` heading line for a named
+// numbered step, so ordering assertions survive renumbering.
+func headingByName(t *testing.T, text, name string) string {
+	t.Helper()
+	re := regexp.MustCompile(`(?m)^### \d+\. ` + regexp.QuoteMeta(name) + `$`)
+	found := re.FindString(text)
+	if found == "" {
+		t.Fatalf("lead-write-ticket.md has no numbered step heading named %q", name)
+	}
+	return found
 }
 
 // TestGenerateRealManifest regenerates agents-plugin/rsrc/manifest.json from

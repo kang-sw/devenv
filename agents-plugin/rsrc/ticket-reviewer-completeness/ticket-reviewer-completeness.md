@@ -88,8 +88,8 @@ Verdict thresholds:
 - `concern`: one or more `important` issues.
 - `pass`: no `critical` or `important` issues; `minor` issues do not lower the verdict.
 
-`resolution: autonomous` — the lead or implementer can resolve this without a user decision.
-`resolution: missing` — a user decision or design input the lead or implementer cannot supply is required.
+`resolution: autonomous` — the planning or implementation stage can settle this. Discovery cost never makes an issue `missing`.
+`resolution: missing` — a policy choice those stages cannot make: what the system should do, what contract it commits to, or which of several defensible shapes is correct.
 
 ## Doctrine
 

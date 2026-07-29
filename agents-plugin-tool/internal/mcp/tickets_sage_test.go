@@ -145,6 +145,75 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 	if !strings.Contains(passOut, "recorded but not committed") || !strings.Contains(passOut, "ws/git.commit") {
 		t.Fatalf("formatSageRecord pass output should route to ws/git.commit:\n%s", passOut)
 	}
+	// A clean pass carries no issues, so it must not grow a routing clause.
+	if strings.Contains(passOut, "autonomous_issues:") || strings.Contains(passOut, "Open Decision Queue") {
+		t.Fatalf("formatSageRecord clean pass must stay terse:\n%s", passOut)
+	}
+}
+
+// TestFormatSageRecordBlockRecovery pins the block branch's recovery route. It
+// previously emitted the pass text ("commit, then proceed to handoff"), which
+// silently dropped a block at a todo/ landing: the caller's only block branch
+// covers the ready/ landing.
+func TestFormatSageRecordBlockRecovery(t *testing.T) {
+	out := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict:        "block",
+		Posture:        map[string]string{"sage-review-design": "blocked"},
+		BlockedSection: "## Blocked (2026-07-29)",
+		Missing:        1,
+	})
+	for _, want := range []string{
+		"ws/tickets.sage_gate cannot clear a blocked posture",
+		"call ws/tickets.sage_stamp again with fresh verdicts",
+		"Do not land this ticket in ready/",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("formatSageRecord block output missing %q in:\n%s", want, out)
+		}
+	}
+	// The ready/ landing reverts instead of committing, so the block branch must
+	// not prescribe a commit the caller may have to skip.
+	if strings.Contains(out, "commit this change via ws/git.commit") {
+		t.Fatalf("formatSageRecord block output must leave the commit decision to the caller:\n%s", out)
+	}
+}
+
+// TestFormatSageRecordIssueRouting covers the consumer of the reviewers'
+// `resolution` field. Both reviewer playbooks emit autonomous/missing, but until
+// now nothing routed on it and the caller improvised.
+func TestFormatSageRecordIssueRouting(t *testing.T) {
+	both := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict:    "concern",
+		Posture:    map[string]string{"sage-review-design": "completed"},
+		Autonomous: 2,
+		Missing:    1,
+	})
+	for _, want := range []string{"autonomous_issues: 2", "missing_issues: 1", "fix the 2 autonomous issue(s) in the ticket yourself", "take the 1 missing issue(s) through the Open Decision Queue"} {
+		if !strings.Contains(both, want) {
+			t.Fatalf("formatSageRecord mixed routing missing %q in:\n%s", want, both)
+		}
+	}
+
+	autonomousOnly := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict:    "pass",
+		Posture:    map[string]string{"sage-review-completeness": "completed"},
+		Autonomous: 3,
+	})
+	if !strings.Contains(autonomousOnly, "none of them need a user decision") {
+		t.Fatalf("formatSageRecord autonomous-only routing:\n%s", autonomousOnly)
+	}
+	if strings.Contains(autonomousOnly, "Open Decision Queue") {
+		t.Fatalf("formatSageRecord must not route autonomous-only issues to the user:\n%s", autonomousOnly)
+	}
+
+	missingOnly := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict: "concern",
+		Posture: map[string]string{"sage-review-design": "completed"},
+		Missing: 1,
+	})
+	if !strings.Contains(missingOnly, "Take the 1 missing issue(s) through the Open Decision Queue") {
+		t.Fatalf("formatSageRecord missing-only routing:\n%s", missingOnly)
+	}
 }
 
 func TestServeStdioSageGateDispatch(t *testing.T) {

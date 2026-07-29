@@ -1217,6 +1217,25 @@ new, code-enforced gating as of 260723 Phase 2: the pre-rename
 key could reach it even though no reviewer playbook ever called it.
 Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
 
+`tickets.sage_stamp` also counts the recorded issues by their `resolution`
+field and routes them in its `next_instruction`: `autonomous` issues are fixed
+by the caller in the ticket, `missing` issues are taken through the caller's
+Open Decision Queue because they need a user decision the caller cannot supply.
+Both reviewer playbooks have always emitted `resolution`, but nothing consumed
+it — the caller's procedure never branched on the field, so the split was
+produced and discarded and the caller improvised. The counts surface as
+`autonomous_issues` / `missing_issues` and the routing clause is omitted
+entirely when a stage records no issues. A `block` verdict returns a recovery
+route rather than the pass text it previously shared: `tickets.sage_gate`
+cannot clear a blocked posture, so the caller resolves the issues in the
+appended `## Blocked` section and calls `tickets.sage_stamp` again with fresh
+verdicts. That branch deliberately prescribes no commit, because whether the
+blocked posture is committed or reverted is landing-dependent and the caller
+owns it. Before this, a `block` at a `todo/` landing received "commit, then
+proceed to handoff" and was recorded and then dropped, since the caller's only
+block branch covers the `ready/` landing.
+{#260729-sage-stamp-resolution-routing}
+
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
 `mental_models.list` returns available mental-model documents with domain,

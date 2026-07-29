@@ -89,6 +89,18 @@ type SageRecordResult struct {
 	Verdict        string            // aggregate: "pass" | "concern" | "block"
 	Posture        map[string]string // frontmatter fields written
 	BlockedSection string            // rendered Blocked section, empty when not blocked
+
+	// Autonomous/Missing count the recorded issues by their `resolution` field
+	// across the verdicts this stage actually consumed. Both reviewer playbooks
+	// emit `resolution` precisely so the lead can split "I fix this myself" from
+	// "a user has to decide this", but nothing consumed the field: the caller's
+	// procedure never branched on it and the only prior reader was
+	// anyIssueResolutionMissing's pass->concern escalation. Surfacing the counts
+	// here lets the dispatch layer's next_instruction route them, which is where
+	// post-call branch handling belongs (ai-docs/ref/skill-authoring.md Layer 2)
+	// rather than in restated playbook prose.
+	Autonomous int
+	Missing    int
 }
 
 // stageOutcome is the internal per-stage resolution used to compose the gate.
@@ -371,6 +383,7 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 	}
 	verdict := normalizeVerdict(v.Verdict)
 	res := SageRecordResult{Verdict: verdict, Posture: map[string]string{}}
+	res.Autonomous, res.Missing = countIssueResolutions(v)
 
 	if verdict == "block" {
 		section := renderBlockedSection(today, []blockedReviewerSection{
@@ -420,6 +433,7 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 	}
 
 	res := SageRecordResult{Verdict: final, Posture: map[string]string{}}
+	res.Autonomous, res.Missing = countIssueResolutions(d, c)
 
 	if final == "block" {
 		section := renderBlockedSection(today, []blockedReviewerSection{
@@ -476,6 +490,23 @@ func anyIssueResolutionMissing(issues []SageIssue) bool {
 		}
 	}
 	return false
+}
+
+// countIssueResolutions tallies issues by `resolution` across the verdicts a
+// stage consumed. An issue whose resolution is absent or unrecognized counts as
+// autonomous: the lead attempting a fix it cannot make is recoverable, whereas
+// silently dropping the issue from both buckets would hide it from routing.
+func countIssueResolutions(verdicts ...SageVerdict) (autonomous, missing int) {
+	for _, v := range verdicts {
+		for _, issue := range v.Issues {
+			if strings.EqualFold(strings.TrimSpace(issue.Resolution), "missing") {
+				missing++
+				continue
+			}
+			autonomous++
+		}
+	}
+	return autonomous, missing
 }
 
 // blockedReviewerSection is one reviewer subsection of a Blocked section.

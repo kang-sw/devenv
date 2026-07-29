@@ -22,6 +22,9 @@ verdict text only.
   the spec area named in the ticket's `## Spec Impact` section, mental-model docs in
   `related-mental-model:` frontmatter, and related tickets listed in `related:`
   frontmatter that have explicit constraint relevance.
+- Read a source file only at a path the ticket itself cites, and only to check a claim
+  the ticket makes about it. Searching the codebase for anything the ticket does not
+  cite is out of scope.
 - For spec-territory conflict scanning, read `## Spec Impact` sections of `ready/`
   tickets only. Do not scan `todo/` or `idea/`; those are not committed to landing.
 - Do not load conversation history or session context.
@@ -54,8 +57,11 @@ verdict text only.
    addressing root cause?
 3. **Right-problem check**: Is the ticket solving the right problem, or is it a
    solution in search of a problem?
-4. **Autonomous-vs-missing gap**: Can an implementer complete this without user
-   decisions? Flag decisions the implementer would need but that aren't captured.
+4. **Policy-gap check**: For each gap, ask whether the planning or implementation stage
+   could settle it by reading the tree or by ordinary engineering judgment. If it could,
+   the gap is `autonomous` however expensive that lookup is. Only a policy choice — what
+   the system should do, what contract it commits to, or which of several defensible
+   shapes is correct — is `missing`.
 5. **Spec territory conflict**: Does the ticket's planned behavior contradict what the
    target spec currently states, or collide with another `ready/` ticket's `## Spec
    Impact`? Two tickets touching the same spec is not itself a finding — report it only
@@ -99,8 +105,8 @@ Verdict thresholds:
 - `concern`: one or more `important` issues.
 - `pass`: no `critical` or `important` issues; `minor` issues do not lower the verdict.
 
-`resolution: autonomous` — the lead or implementer can resolve this without a user decision.
-`resolution: missing` — a user decision or design input the lead or implementer cannot supply is required.
+`resolution: autonomous` — the planning or implementation stage can settle this. Discovery cost never makes an issue `missing`.
+`resolution: missing` — a policy choice those stages cannot make: what the system should do, what contract it commits to, or which of several defensible shapes is correct.
 
 ## Doctrine
 

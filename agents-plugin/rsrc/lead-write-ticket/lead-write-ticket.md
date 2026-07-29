@@ -12,6 +12,7 @@ Target: user request
 Capture
 - Preserve settled decisions, contracts, agreed API/type/event/UI sketches, rejected alternatives, constraints, forward-compatibility guardrails, and verification expectations — enough for a fresh implementation session to recover intent without inventing missing product, workflow, API, or verification decisions.
 - Persist only user-confirmed decisions; resolve the Open Decision Queue before writing any discussion-derived content.
+- Write every ticket edit from this session; delegates return corrections and findings, never ticket text.
 
 Board artifacts
 - Epic and workset bodies stay within their `tickets.template` skeleton's board-level sections; implementation detail moves to a separate `lead-write-ticket` invocation scoped to the child/included ticket.
@@ -40,7 +41,7 @@ Movement
 
 ### 2. Consent Gate
 
-1. Apply `judge: needs-open-decision-queue`; if it fires, run **Open Decision Queue** before editing ticket text.
+1. Apply `judge: needs-open-decision-queue`; if it fires, run **Open Decision Queue** before editing ticket text. Re-enter this handler whenever a later step surfaces a decision the user has not settled.
 
 ### 3. Populate
 
@@ -58,20 +59,32 @@ Movement
 1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
 2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check**.
 
-### 5. Sage Review Gate
+### 5. Ground
+
+1. Apply `judge: needs-fact-population`; if it fires, run **Fact Population** before the review gate.
+
+### 6. Sage Review Gate
 
 1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow its returned next_instruction (spawning reviewers via **Reviewer Spawn** when it says `run`).
-2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)`. Both stamping tools write the sage-review posture into the ticket file and leave it uncommitted; any commit direction either tool returns does not apply inside this procedure. Commit nothing in this step — step 6 performs the single commit that carries the posture together with the ticket edits already held on the file, under real `## AI Context`.
-3. If a stamped verdict is `block` at a `ready/` landing, the promotion cannot proceed: move the ticket back to its pre-promotion status via `{{.McpNamespace}}/tickets.move`, skip step 6, and stop and report the blocker.
+2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_stamp(stem, stage, verdicts)`. Both stamping tools write the sage-review posture into the ticket file and leave it uncommitted; any commit direction either tool returns does not apply inside this procedure. Commit nothing in this step — step 7 performs the single commit that carries the posture together with the ticket edits already held on the file, under real `## AI Context`.
+3. If a stamped verdict is `block` at a `ready/` landing, the promotion cannot proceed: move the ticket back to its pre-promotion status via `{{.McpNamespace}}/tickets.move`, skip step 7, and stop and report the blocker.
 
-### 6. Commit
+### 7. Commit
 
 1. If no file changed because a requested move was refused, skip commit.
 2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
-### 7. Handoff
+### 8. Handoff
 
 1. Run **Output Handoff**.
+
+## On: Fact Population
+
+1. Call `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator")`; it returns a file path. Do not read the rendered file in the lead context.
+2. Spawn a native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
+3. Apply each returned correction to the ticket yourself; the populator returns corrections and never writes.
+4. Send each returned decision gap to **Open Decision Queue**; never resolve one from the populator's evidence alone.
+5. Continue the same populator's session when an applied correction proves wrong or a claim it left unverified becomes checkable; stop and decide yourself when a round returns no fewer corrections than the round before it.
 
 ## On: Reviewer Spawn
 
@@ -90,7 +103,7 @@ For each reviewer named by `tickets.sage_gate`:
 ## On: Open Decision Queue
 
 1. If the user has not already approved persistence, ask whether to persist the discussion into tickets or specs; stop with no edits when they decline or do not answer.
-2. List every unresolved or unconfirmed item that could affect ticket text: mechanism decisions, rejected alternatives, future-scope hints, Result Forward notes, focus "Next" lines, and comment/note proposals.
+2. List every unresolved or unconfirmed item that could affect ticket text: mechanism decisions, rejected alternatives, future-scope hints, Result Forward notes, focus "Next" lines, comment/note proposals, and any sage-review issue whose `resolution` is `missing`.
 3. Create or refresh the visible Open Decision Queue using the task-list guidance appended to this playbook.
 4. Ask about one queue item at a time by restating its full text in the response body, followed by a one-line status roll-up of the remaining items; after each answer, update the visible queue status before asking the next item.
 5. Continue only when every queue item is confirmed, rejected, or explicitly deferred.
@@ -170,7 +183,13 @@ Do not trigger: a ticket merely has `related:` links or default cross-ticket dec
 
 Trigger: discussion-derived persistence or ticket cleanup would write any mechanism decision, rejected alternative, future-scope hint, Result Forward note, focus "Next" line, or note/comment proposal not already explicitly confirmed by the user.
 Trigger: the user asks to persist a discussion whose open items are mixed with confirmed decisions.
+Trigger: a sage-review stage recorded an issue with `resolution: missing`, whatever the ticket's other residue.
 Do not trigger: mechanical status moves, already-confirmed ticket edits, or creation from a fully specified user request with no unresolved discussion residue.
+
+### judge: needs-fact-population
+
+Trigger: the ticket body asserts anything a reader of the tree can check — a path, symbol, anchor, count, present behavior, existing mechanism, command name, or quotation.
+Do not trigger: an `idea/` landing, a pure status move, or a board edit whose body asserts no tree facts.
 
 ### judge: ticket-shape
 
