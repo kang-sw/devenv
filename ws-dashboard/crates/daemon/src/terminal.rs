@@ -27,7 +27,8 @@ use crate::terminal_helper_protocol::{
 };
 use crate::terminal_ipc_transport::{IpcReadHalf, IpcWriteHalf};
 use crate::terminal_reconcile::{
-    boot_identity_verified, classify, IdentityStatus, IpcStatus, ReconcileRow,
+    boot_identity_verified, classify, probe_authorizes_reclaim, probe_verdict_from_report,
+    IdentityStatus, IpcStatus, ProbeVerdict, ReconcileRow, UNATTACHED_GRACE,
 };
 use crate::terminal_registry_file::{
     delete_registry_entry, read_registry_entry, registry_entry_path, scan_registry_dir,
@@ -394,19 +395,41 @@ impl TerminalRegistry {
             return;
         }
 
-        let connected = connect_and_handshake(&entry.socket_path, self.connect_timeout).await;
-        let ipc_status = match &connected {
-            Some(connected) if connected.status == TerminalStatus::Running => {
-                IpcStatus::ReachableShellAlive
+        let outcome = connect_and_handshake(&entry.socket_path, self.connect_timeout).await;
+        let (ipc_status, connected) = match outcome {
+            HandshakeOutcome::Connected(connected) => {
+                let status = if connected.status == TerminalStatus::Running {
+                    IpcStatus::ReachableShellAlive
+                } else {
+                    IpcStatus::ReachableShellExited
+                };
+                (status, Some(connected))
             }
-            Some(_) => IpcStatus::ReachableShellExited,
-            None => IpcStatus::Unreachable,
+            HandshakeOutcome::NoListener => (IpcStatus::NoListener, None),
+            HandshakeOutcome::ConnectedButSilent => (IpcStatus::ConnectedButSilent, None),
         };
 
-        match classify(identity, ipc_status) {
+        // CONTRACT (260729): the probe is only opened for the one signal that
+        // cannot decide on its own. It is deliberately NOT part of the
+        // adoption path above - the adopt rows already have handshake-proven
+        // reachability, and putting anything extra on that wire would break
+        // the one case that works today for every pre-upgrade helper.
+        let probe = match ipc_status {
+            IpcStatus::ConnectedButSilent => Some(
+                probe_helper(
+                    &entry.socket_path,
+                    entry.supports_liveness_probe,
+                    self.connect_timeout,
+                )
+                .await,
+            ),
+            _ => None,
+        };
+
+        match classify(identity, ipc_status, probe) {
             ReconcileRow::AdoptLive | ReconcileRow::AdoptGrace => {
                 let connected =
-                    connected.expect("adopt rows are only reachable with a live connection");
+                    *connected.expect("adopt rows are only reachable with a live connection");
                 let callback_token = self.recover_callback_token(&entry.terminal_id);
                 let profile_id = self.recover_profile_id(&entry.terminal_id);
                 let session = TerminalSession::from_connection(
@@ -460,6 +483,21 @@ impl TerminalRegistry {
                     entry.boot_id.as_deref(),
                 )
                 .await;
+            }
+            // CONTRACT (260729): entry untouched, process untouched -
+            // deliberately NOT folded into the drop rows below. Deleting the
+            // entry here would spare the helper and simultaneously make it
+            // unadoptable by the daemon that actually owns it, turning a live
+            // terminal into a permanent orphan holding a PTY and a shell.
+            ReconcileRow::Leave => {
+                tracing::info!(
+                    terminal_id = %entry.terminal_id,
+                    pid = entry.pid,
+                    supports_liveness_probe = entry.supports_liveness_probe,
+                    "leaving a reachable helper alone at boot reconcile: it answered that it is \
+                     in use (or predates the liveness probe and cannot answer at all), so this \
+                     daemon has no positive evidence it is unreachable"
+                );
             }
             ReconcileRow::DropNoSuchProcess
             | ReconcileRow::DropPidReused
@@ -915,6 +953,29 @@ impl TerminalRegistry {
     // `reconcile_entry`, a runtime sweep only ever kills, it never adopts -
     // attempting a handshake here would silently reintroduce an
     // adopt-shaped code path the ticket explicitly forbids for the sweep.
+    //
+    // CONTRACT REWRITTEN (260729 helper liveness probe). The "never adopts"
+    // property above STANDS, and `probe_helper` preserves it: a probe writes
+    // no `HandshakeAck` and can adopt nothing. What this CONTRACT used to
+    // also claim - "never calls `connect_and_handshake`" read as "never asks
+    // anything at all" - was the defect. With no check whatsoever, the sole
+    // kill predicate was "absent from THIS daemon's session map + identity
+    // verified", and another daemon's healthy, in-use helper satisfies both
+    // by construction: it is absent from a session map it was never in, and
+    // its pid/start-time/boot-id all genuinely match, because they are real.
+    // The boot-identity gate cannot help - two concurrent daemons are on the
+    // same boot, so the boot id matches by construction. This was the
+    // fastest and broadest destructive path in the tree.
+    //
+    // The sweep now PROBES before it signals. It kills only on positive
+    // evidence of unreachability: no listener behind the socket, or (only
+    // for a helper whose entry declares `supportsLivenessProbe`) a probe
+    // that went unanswered or reported nobody attached for longer than
+    // `UNATTACHED_GRACE`. A helper that answers "attached", a helper
+    // unattached for less than the grace (its daemon is restarting), and a
+    // helper that predates the probe entirely are all LEFT ALONE - entry and
+    // process both, since deleting the entry of a surviving helper makes it
+    // unadoptable and is worse than the kill it replaces.
     // The liveness set is `live_terminal_ids()` (`sessions` UNIONED with
     // `pending_profile_ids`), never `sessions.keys()` alone: an id that
     // `TerminalSession::spawn` has marked pending but not yet inserted is
@@ -970,6 +1031,29 @@ impl TerminalRegistry {
             }
             match identity_status(entry.pid, entry.start_time, entry.boot_id.as_deref()) {
                 IdentityStatus::VerifiedOurs => {
+                    // CONTRACT (260729): identity says "this pid really is the
+                    // helper this entry describes". It says NOTHING about
+                    // whether that helper is dead - which is the whole reason
+                    // this sweep used to destroy another daemon's live
+                    // terminals. Ask the helper before signalling it.
+                    let probe = probe_helper(
+                        &entry.socket_path,
+                        entry.supports_liveness_probe,
+                        self.connect_timeout,
+                    )
+                    .await;
+                    if !probe_authorizes_reclaim(probe) {
+                        // Leave: entry AND process untouched. Falling through
+                        // to the delete below would spare the helper and
+                        // orphan it in the same breath.
+                        tracing::debug!(
+                            terminal_id = %entry.terminal_id,
+                            pid = entry.pid,
+                            ?probe,
+                            "registry backstop leaving a reachable helper alone"
+                        );
+                        continue;
+                    }
                     kill_verified_and_delete_entry(
                         &self.registry_dir,
                         &entry.terminal_id,
@@ -994,6 +1078,41 @@ impl TerminalRegistry {
                 }
             }
         }
+    }
+
+    // CONTRACT (260729 helper liveness probe, step 4): `agent_profile_gc` is
+    // NOT one of the kill sites - it never calls `kill_verified` - but it
+    // destroys `agent-profiles/<id>/` and `terminal-tokens/<id>.json` off the
+    // SAME wrong signal, `live_terminal_ids()` read directly. Fixing
+    // `classify` and the sweep does not reach it: another daemon's terminals
+    // stay absent from this daemon's session map even after they correctly
+    // survive Sites A and B, so without this gate the helper processes live
+    // and their state is deleted anyway - which is the original symptom this
+    // ticket is named after.
+    //
+    // It has no socket path of its own (profile directories are named by bare
+    // terminal id), so the registry entry is what supplies one.
+    //
+    // THE NO-ENTRY RULE IS LOAD-BEARING IN THE OPPOSITE DIRECTION: no
+    // registry entry at all means no helper, so reclaim. Omitting it would
+    // stop the GC reclaiming genuine orphans - a leak, not a safety margin.
+    pub(crate) async fn profile_gc_may_reclaim(&self, terminal_id: &str) -> bool {
+        let registry_dir = self.registry_dir.clone();
+        let id = terminal_id.to_owned();
+        let entry = tokio::task::spawn_blocking(move || read_registry_entry(&registry_dir, &id))
+            .await
+            .unwrap_or(None);
+        let Some(entry) = entry else {
+            return true;
+        };
+        probe_authorizes_reclaim(
+            probe_helper(
+                &entry.socket_path,
+                entry.supports_liveness_probe,
+                self.connect_timeout,
+            )
+            .await,
+        )
     }
 
     // Single entry point the periodic reaper task drives: evict every
@@ -1119,7 +1238,137 @@ struct HandshakeConnection {
     next_sequence: u64,
 }
 
-async fn connect_and_handshake(socket_path: &Path, timeout: Duration) -> Option<HandshakeConnection> {
+/// CONTRACT (260729): replaces `connect_and_handshake`'s former bare
+/// `Option`. The old return type folded six distinct failure paths into one
+/// `None`, and `reconcile_entry` then folded that into
+/// `IpcStatus::Unreachable` and killed - so "the socket file is gone" and
+/// "connected fine, the helper is busy serving another daemon" were the same
+/// value. The `io::Error` that distinguishes them was available at the
+/// connect site all along and simply discarded.
+enum HandshakeOutcome {
+    Connected(Box<HandshakeConnection>),
+    /// `connect` never succeeded before the deadline: positive absence.
+    NoListener,
+    /// The connection was accepted, but the handshake did not arrive (or was
+    /// not what the protocol requires). Undecidable on its own - see
+    /// `IpcStatus::ConnectedButSilent`.
+    ConnectedButSilent,
+}
+
+// CONTRACT (260729): the adoption sequence this function drives is the one
+// path every helper alive across the upgrade depends on, and it must stay
+// byte-identical: it writes ONLY `HandshakeAck` and reads ONLY `Handshake`
+// followed by `Status`/`Exit`. Nothing about the probe belongs in here -
+// the probe is a separate connection (`probe_helper`), only ever opened
+// after this function has already reported `ConnectedButSilent`, and only
+// against a helper whose registry entry declares it can answer.
+async fn connect_and_handshake(socket_path: &Path, timeout: Duration) -> HandshakeOutcome {
+    let deadline = Instant::now() + timeout;
+    let stream = loop {
+        match crate::terminal_ipc_transport::connect(socket_path).await {
+            Ok(stream) => break stream,
+            Err(error) => {
+                if Instant::now() >= deadline {
+                    // The error is no longer discarded: its kind is the
+                    // whole difference between "nothing is listening here,
+                    // reclaim it" and every other outcome.
+                    tracing::debug!(
+                        socket_path = %socket_path.display(),
+                        kind = ?error.kind(),
+                        %error,
+                        "helper IPC connect never succeeded within the budget; treating the \
+                         listener as absent"
+                    );
+                    return HandshakeOutcome::NoListener;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
+    let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
+    let mut reader = NdjsonReader::new(read_half);
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let handshake = match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
+        Ok(Ok(Some(message))) => message,
+        _ => return HandshakeOutcome::ConnectedButSilent,
+    };
+    let HelperToDaemonMessage::Handshake { pid, start_time } = handshake else {
+        return HandshakeOutcome::ConnectedButSilent;
+    };
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let status_message = match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
+        Ok(Ok(Some(message))) => message,
+        _ => return HandshakeOutcome::ConnectedButSilent,
+    };
+    let (status, next_sequence) = match status_message {
+        HelperToDaemonMessage::Status {
+            status,
+            next_sequence,
+        } => (status.into(), next_sequence),
+        HelperToDaemonMessage::Exit {
+            status,
+            next_sequence,
+        } => (status.into(), next_sequence),
+        _ => return HandshakeOutcome::ConnectedButSilent,
+    };
+
+    if write_ndjson(&mut write_half, &DaemonToHelperMessage::HandshakeAck)
+        .await
+        .is_err()
+    {
+        return HandshakeOutcome::ConnectedButSilent;
+    }
+
+    HandshakeOutcome::Connected(Box::new(HandshakeConnection {
+        reader,
+        writer: write_half,
+        pid,
+        start_time,
+        status,
+        next_sequence,
+    }))
+}
+
+// CONTRACT (260729 helper liveness probe, daemon side): asks a helper whether
+// anyone is attached to it, on a connection of its own. Used by every site
+// that has to decide about a helper it has NOT handshaked with - the
+// boot-reconcile `ConnectedButSilent` row, the periodic sweep, and the
+// profile GC.
+//
+// HARD GATE, and the reason `supports_liveness_probe` is a parameter rather
+// than something read inside: `LivenessProbe` is NEVER put on the wire unless
+// the helper's own registry entry declares it can parse it. A helper that
+// predates the variant turns it into an `io::Error`, propagates it, and its
+// exit path then SIGKILLs the user's shell and erases its registry entry -
+// strictly worse than the daemon-side kill this ticket removes, because it
+// leaves nothing behind to diagnose with. For such a helper this function
+// connects (to distinguish "no listener" from "listening but old") and
+// returns `Unsupported` without writing a byte.
+//
+// This is NOT an adopt: no `HandshakeAck` is ever written here, so the sweep
+// keeps its "never adopts" property while gaining the check it lacked.
+async fn probe_helper(
+    socket_path: &Path,
+    supports_liveness_probe: bool,
+    timeout: Duration,
+) -> ProbeVerdict {
+    match probe_helper_reachability(socket_path, supports_liveness_probe, timeout).await {
+        Some(verdict) => verdict,
+        // No listener at all is positive absence, which the shared predicate
+        // spells as "reclaim". Expressed through `Unanswered` so
+        // `probe_authorizes_reclaim` stays the single decision surface.
+        None => ProbeVerdict::Unanswered,
+    }
+}
+
+/// `None` when there is no listener behind `socket_path` at all.
+async fn probe_helper_reachability(
+    socket_path: &Path,
+    supports_liveness_probe: bool,
+    timeout: Duration,
+) -> Option<ProbeVerdict> {
     let deadline = Instant::now() + timeout;
     let stream = loop {
         match crate::terminal_ipc_transport::connect(socket_path).await {
@@ -1132,47 +1381,44 @@ async fn connect_and_handshake(socket_path: &Path, timeout: Duration) -> Option<
             }
         }
     };
+    if !supports_liveness_probe {
+        return Some(ProbeVerdict::Unsupported);
+    }
+
     let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
     let mut reader = NdjsonReader::new(read_half);
-
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let handshake = match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
-        Ok(Ok(Some(message))) => message,
-        _ => return None,
-    };
-    let HelperToDaemonMessage::Handshake { pid, start_time } = handshake else {
-        return None;
-    };
-
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let status_message = match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
-        Ok(Ok(Some(message))) => message,
-        _ => return None,
-    };
-    let (status, next_sequence) = match status_message {
-        HelperToDaemonMessage::Status {
-            status,
-            next_sequence,
-        } => (status.into(), next_sequence),
-        HelperToDaemonMessage::Exit {
-            status,
-            next_sequence,
-        } => (status.into(), next_sequence),
-        _ => return None,
-    };
-
-    write_ndjson(&mut write_half, &DaemonToHelperMessage::HandshakeAck)
+    if write_ndjson(&mut write_half, &DaemonToHelperMessage::LivenessProbe)
         .await
-        .ok()?;
+        .is_err()
+    {
+        return Some(ProbeVerdict::Unanswered);
+    }
 
-    Some(HandshakeConnection {
-        reader,
-        writer: write_half,
-        pid,
-        start_time,
-        status,
-        next_sequence,
-    })
+    let grace_ms = UNATTACHED_GRACE.as_millis() as u64;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
+            Ok(Ok(Some(HelperToDaemonMessage::LivenessProbeResponse {
+                attached,
+                unattached_for_ms,
+            }))) => {
+                return Some(probe_verdict_from_report(
+                    attached,
+                    unattached_for_ms,
+                    grace_ms,
+                ))
+            }
+            // An UNATTACHED helper answers a probe from inside its ordinary
+            // session dispatch (there is no attached session for the
+            // concurrent probe arm to run alongside), so the reply is
+            // preceded by that path's `Handshake`/`Status` and whatever the
+            // retained ring flushes. Skip past them rather than mistaking
+            // them for a non-answer - this is the leg that makes a genuine
+            // orphan reclaimable at all.
+            Ok(Ok(Some(_))) => continue,
+            _ => return Some(ProbeVerdict::Unanswered),
+        }
+    }
 }
 
 pub struct TerminalSession {
@@ -2136,7 +2382,16 @@ impl TerminalSession {
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
 
-        let Some(connected) = connect_and_handshake(&socket_path, connect_timeout).await else {
+        // CONTRACT (260729, Site C unchanged): this cleanup path is
+        // deliberately NOT probe-gated. It kills a helper this daemon just
+        // spawned under a freshly generated id, so it cannot be another
+        // daemon's busy helper and ownership is not in question - the
+        // misjudgment this ticket fixes does not exist here. The only change
+        // is the shape of the value being matched: every non-`Connected`
+        // outcome takes exactly the branch the former `None` did.
+        let HandshakeOutcome::Connected(connected) =
+            connect_and_handshake(&socket_path, connect_timeout).await
+        else {
             // CONTRACT (260725 Phase 4 review cycle 1, finding A): same
             // reasoning as the spawn-failure branch above - this function
             // returns `Err` below without ever reaching `insert`, so this is
@@ -2213,7 +2468,7 @@ impl TerminalSession {
             title,
             normalized_cwd_hint,
             now_ms(),
-            connected,
+            *connected,
             columns,
             rows,
             profile_id,
@@ -2527,6 +2782,15 @@ fn spawn_ipc_reader_task(
                     // mechanism (see `TerminalSessionInner::output`'s
                     // CONTRACT comment) already covers the adopt/reattach
                     // bootstrap case this would otherwise serve.
+                }
+                Ok(Some(HelperToDaemonMessage::LivenessProbeResponse { .. })) => {
+                    // CONTRACT (260729): unreachable on an ATTACHED
+                    // connection - the probe is request-gated and this
+                    // session connection never sends `LivenessProbe` (probes
+                    // always open their own connection, see `probe_helper`).
+                    // Ignored rather than treated as a protocol desync
+                    // precisely so a stray one can never take this session's
+                    // IPC down and trigger the eviction/kill path.
                 }
                 Ok(None) | Err(_) => {
                     session.mark_ipc_closed();
@@ -3505,6 +3769,7 @@ mod terminal_portability_skeleton_tests {
             pid,
             start_time,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_kill_and_delete.sock"),
             created_at_ms: now_ms(),
             title: "Kill And Delete".to_owned(),
@@ -3649,6 +3914,7 @@ mod terminal_portability_skeleton_tests {
             pid: 0x7fff_fffe,
             start_time: 123,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_row3_no_such_process.sock"),
             created_at_ms: now_ms(),
             title: "Row 3".to_owned(),
@@ -3712,6 +3978,7 @@ mod terminal_portability_skeleton_tests {
             pid: foreign_pid,
             start_time: 1,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_row5_pid_reused.sock"),
             created_at_ms: now_ms(),
             title: "Row 5".to_owned(),
@@ -3888,6 +4155,7 @@ mod terminal_portability_skeleton_tests {
             pid,
             start_time,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join(format!("{terminal_id}.sock")),
             // Old enough to already exceed connect_timeout + margin the
             // instant the backstop checks it - exactly what makes the I1
@@ -3977,6 +4245,7 @@ mod terminal_portability_skeleton_tests {
             pid: orphan_pid,
             start_time: orphan_start_time,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_backstop_orphan.sock"),
             created_at_ms: stale_created_at_ms,
             title: "Orphan".to_owned(),
@@ -3995,6 +4264,7 @@ mod terminal_portability_skeleton_tests {
             pid: 0x7fff_fffe,
             start_time: 123,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_backstop_unverified.sock"),
             created_at_ms: stale_created_at_ms,
             title: "Unverified".to_owned(),
@@ -4018,6 +4288,7 @@ mod terminal_portability_skeleton_tests {
             pid: orphan_pid,
             start_time: orphan_start_time,
             boot_id: crate::terminal_platform::boot_identity(),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_backstop_live.sock"),
             created_at_ms: stale_created_at_ms,
             title: "Live".to_owned(),
@@ -4122,6 +4393,7 @@ mod terminal_portability_skeleton_tests {
             pid,
             start_time,
             boot_id: Some("00000000-0000-0000-0000-000000000000".to_owned()),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_foreign_boot.sock"),
             created_at_ms: now_ms().saturating_sub(60_000),
             title: "Foreign Boot".to_owned(),
@@ -4203,6 +4475,7 @@ mod terminal_portability_skeleton_tests {
             pid,
             start_time,
             boot_id: None,
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_legacy_boot.sock"),
             created_at_ms: now_ms().saturating_sub(60_000),
             title: "Legacy Boot".to_owned(),
@@ -4266,6 +4539,7 @@ mod terminal_portability_skeleton_tests {
             pid,
             start_time,
             boot_id: Some("00000000-0000-0000-0000-000000000000".to_owned()),
+            supports_liveness_probe: true,
             socket_path: registry_dir.join("term_choke_point.sock"),
             created_at_ms: now_ms(),
             title: "Choke Point".to_owned(),
@@ -5375,6 +5649,757 @@ exec sleep 30
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // ================================================================
+    // 260729 helper liveness probe - "kill only on positive evidence of
+    // unreachability".
+    //
+    // FIXTURE FIDELITY NOTE, stated once for every test below. A helper is
+    // two things the daemon looks at separately: an OS PROCESS (identified by
+    // `pid`/`start_time` in its registry entry, which is what
+    // `kill_verified` signals) and an IPC LISTENER at `socket_path` (which is
+    // what reachability is decided from). These fixtures supply the two
+    // independently - a real `sleep 30` child for the process, so "was it
+    // actually signalled?" is a real observation rather than a mock's
+    // recorded call, and an in-process scripted listener for the socket, so
+    // each leg of the predicate can be produced deterministically instead of
+    // waited for. Neither half is a stub of the code under test: the daemon
+    // runs its real `connect_and_handshake`, real `probe_helper`, real
+    // `classify`, real sweep and real GC against them.
+    //
+    // The scripted listener deliberately never completes a handshake in the
+    // probe-answering variants. That is exactly the wire signature this
+    // ticket is about - `serve_connections` serves one session at a time, so
+    // a helper busy with another daemon accepts the connection and answers no
+    // handshake - and it is also what keeps the probe, rather than an adopt,
+    // the thing being tested at both Site A and Site B.
+    // ================================================================
+
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug)]
+    enum FakeHelperBehaviour {
+        /// Accepts and never says anything at all. Models a helper that
+        /// PREDATES the probe while it is busy: connect succeeds, the
+        /// handshake never arrives, and nothing can answer a probe.
+        SilentForever,
+        /// Accepts, never handshakes, but answers `LivenessProbe` with this
+        /// self-report - the signature of a probe-capable helper whose single
+        /// session belongs to somebody else.
+        AnswersProbe {
+            attached: bool,
+            unattached_for_ms: Option<u64>,
+        },
+        /// Completes a full adoption handshake (`Handshake` + `Status`) and
+        /// then keeps recording. Used to pin the adoption sequence.
+        Adoptable,
+    }
+
+    #[cfg(unix)]
+    struct FakeHelper {
+        /// Every NDJSON line the DAEMON wrote, in order. The upgrade-safety
+        /// assertions are made against this: a `livenessProbe` line reaching
+        /// a helper that never declared the capability is the failure that
+        /// SIGKILLs the user's shell.
+        received: Arc<Mutex<Vec<String>>>,
+        accept_task: tokio::task::JoinHandle<()>,
+    }
+
+    #[cfg(unix)]
+    impl FakeHelper {
+        fn received(&self) -> Vec<String> {
+            self.received.lock().expect("fake helper lock poisoned").clone()
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for FakeHelper {
+        fn drop(&mut self) {
+            self.accept_task.abort();
+        }
+    }
+
+    #[cfg(unix)]
+    fn spawn_fake_helper(socket_path: &Path, behaviour: FakeHelperBehaviour) -> FakeHelper {
+        // Bound synchronously, before this function returns, so a daemon path
+        // that connects immediately afterwards can never race the bind and
+        // see a spurious `NoListener`.
+        let mut listener = crate::terminal_ipc_transport::IpcListener::bind(socket_path)
+            .expect("bind fake helper listener");
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_for_task = received.clone();
+        let accept_task = tokio::spawn(async move {
+            loop {
+                let Ok(stream) = listener.accept().await else {
+                    return;
+                };
+                let received = received_for_task.clone();
+                tokio::spawn(async move {
+                    serve_fake_helper_connection(stream, behaviour, received).await;
+                });
+            }
+        });
+        FakeHelper {
+            received,
+            accept_task,
+        }
+    }
+
+    #[cfg(unix)]
+    async fn serve_fake_helper_connection(
+        stream: crate::terminal_ipc_transport::BoxedIpcStream,
+        behaviour: FakeHelperBehaviour,
+        received: Arc<Mutex<Vec<String>>>,
+    ) {
+        use tokio::io::AsyncBufReadExt;
+
+        let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
+        if matches!(behaviour, FakeHelperBehaviour::Adoptable) {
+            let _ = write_ndjson(
+                &mut write_half,
+                &HelperToDaemonMessage::Handshake {
+                    // Identity is not what these tests exercise; the daemon
+                    // verifies identity from the registry entry's pid against
+                    // the real `sleep` child, not from this message.
+                    pid: std::process::id(),
+                    start_time: 0,
+                },
+            )
+            .await;
+            let _ = write_ndjson(
+                &mut write_half,
+                &HelperToDaemonMessage::Status {
+                    status: TerminalHelperStatus::Running,
+                    next_sequence: 1,
+                },
+            )
+            .await;
+        }
+
+        // Raw lines, not decoded messages: the point of `received` is to
+        // record what the daemon actually put on the wire, including anything
+        // this fixture's own types would not understand.
+        let mut lines = tokio::io::BufReader::new(read_half).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if line.trim().is_empty() {
+                continue;
+            }
+            received
+                .lock()
+                .expect("fake helper lock poisoned")
+                .push(line.clone());
+            let Ok(message) = serde_json::from_str::<DaemonToHelperMessage>(&line) else {
+                continue;
+            };
+            if let (
+                DaemonToHelperMessage::LivenessProbe,
+                FakeHelperBehaviour::AnswersProbe {
+                    attached,
+                    unattached_for_ms,
+                },
+            ) = (&message, behaviour)
+            {
+                let _ = write_ndjson(
+                    &mut write_half,
+                    &HelperToDaemonMessage::LivenessProbeResponse {
+                        attached,
+                        unattached_for_ms,
+                    },
+                )
+                .await;
+            }
+        }
+    }
+
+    /// One helper's worth of on-disk state under a single shared state dir:
+    /// a real process to signal, a registry entry, a profile directory and a
+    /// token - i.e. everything the four destructive paths can destroy.
+    #[cfg(unix)]
+    struct ProbeFixture {
+        state_dir: PathBuf,
+        registry_dir: PathBuf,
+        terminal_id: String,
+        process: std::process::Child,
+        helper: Option<FakeHelper>,
+    }
+
+    #[cfg(unix)]
+    impl ProbeFixture {
+        /// `listener` = `None` means no listener behind the socket at all
+        /// (positive absence). `declare_probe_capability = false` writes the
+        /// entry BY HAND without the field, so the assertion is about the
+        /// absent-field decode rather than about a default the writer
+        /// happened to supply.
+        async fn new(
+            label: &str,
+            listener: Option<FakeHelperBehaviour>,
+            declare_probe_capability: bool,
+        ) -> Self {
+            // Deliberately terse: `socket_path` below is bound as a real
+            // Unix domain socket, whose sun_path is capped at ~108 bytes.
+            // The usual `ws-dashboard-<test>-<pid>-<nanos>` temp-dir shape
+            // used elsewhere in this file overruns that once the
+            // `terminals/<terminal_id>.sock` tail is appended.
+            static FIXTURE_COUNTER: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
+            let unique = FIXTURE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let state_dir = std::env::temp_dir().join(format!(
+                "wsd-{label}-{}-{unique}",
+                std::process::id()
+            ));
+            let registry_dir = state_dir.join("terminals");
+            std::fs::create_dir_all(&registry_dir).expect("create registry dir");
+            let terminal_id = format!("term_{label}");
+            let socket_path = registry_dir.join(format!("{terminal_id}.sock"));
+
+            let process = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn the real process a kill would have to terminate");
+            let pid = process.id();
+            let start_time = crate::terminal_platform::process_start_time(pid)
+                .expect("real process must report a start time");
+
+            if declare_probe_capability {
+                let entry = TerminalRegistryEntry {
+                    terminal_id: terminal_id.clone(),
+                    work_root_id: "root-probe".to_owned(),
+                    pid,
+                    start_time,
+                    boot_id: crate::terminal_platform::boot_identity(),
+                    supports_liveness_probe: true,
+                    socket_path: socket_path.clone(),
+                    // Comfortably past `connect_timeout + STALE_ENTRY_SWEEP_
+                    // MARGIN`, so the sweep's age gate can never be what
+                    // spares this entry.
+                    created_at_ms: now_ms().saturating_sub(60_000),
+                    title: "Probe".to_owned(),
+                    cwd_hint: None,
+                    columns: 80,
+                    rows: 24,
+                };
+                crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+                    .expect("write registry entry");
+            } else {
+                // Hand-written, in the exact shape a pre-probe helper left on
+                // disk: `supportsLivenessProbe` is ABSENT, not `false`.
+                let boot_id = match crate::terminal_platform::boot_identity() {
+                    Some(boot_id) => format!("{boot_id:?}"),
+                    None => "null".to_owned(),
+                };
+                let raw = format!(
+                    r#"{{"terminalId":"{terminal_id}","workRootId":"root-probe","pid":{pid},"startTime":{start_time},"bootId":{boot_id},"socketPath":"{socket}","createdAtMs":{created},"title":"Probe","cwdHint":null,"columns":80,"rows":24}}"#,
+                    socket = socket_path.display(),
+                    created = now_ms().saturating_sub(60_000),
+                );
+                std::fs::write(
+                    crate::terminal_registry_file::registry_entry_path(&registry_dir, &terminal_id),
+                    raw,
+                )
+                .expect("write legacy registry entry");
+                assert!(
+                    !crate::terminal_registry_file::read_registry_entry(
+                        &registry_dir,
+                        &terminal_id
+                    )
+                    .expect("hand-written legacy entry must parse")
+                    .supports_liveness_probe,
+                    "fixture precondition: the hand-written entry must decode as \
+                     capability-absent, or this stops testing the upgrade case"
+                );
+            }
+
+            let profile_dir = state_dir.join("agent-profiles").join(&terminal_id);
+            std::fs::create_dir_all(&profile_dir).expect("create profile dir");
+            std::fs::write(profile_dir.join("settings.json"), "{}").expect("write settings.json");
+            crate::agent_token_store::write_token(&state_dir, &terminal_id, "secret")
+                .expect("write token");
+
+            let helper = listener.map(|behaviour| spawn_fake_helper(&socket_path, behaviour));
+
+            Self {
+                state_dir,
+                registry_dir,
+                terminal_id,
+                process,
+                helper,
+            }
+        }
+
+        /// A second daemon over the SAME state dir - the concurrent-daemon
+        /// shape this ticket exists for. Nothing partitions the directory;
+        /// this registry sees the other daemon's entries in full.
+        fn second_registry(&self) -> TerminalRegistry {
+            TerminalRegistry::new(
+                PathBuf::from("/nonexistent-unused-helper-binary"),
+                self.registry_dir.clone(),
+                Duration::from_millis(150),
+                Some(self.state_dir.clone()),
+                String::new(),
+            )
+        }
+
+        async fn second_registry_boot_reconcile(&self) -> TerminalRegistry {
+            TerminalRegistry::boot_reconcile(
+                PathBuf::from("/nonexistent-unused-helper-binary"),
+                self.registry_dir.clone(),
+                Duration::from_millis(150),
+                Some(self.state_dir.clone()),
+                String::new(),
+            )
+            .await
+        }
+
+        async fn run_profile_gc(&self, registry: &TerminalRegistry) {
+            crate::agent_profile_gc::sweep_agent_profiles(
+                &self.state_dir,
+                registry,
+                &mut crate::notify_failure::NotifyFailureWatch::default(),
+                crate::server::AGENT_PROFILE_GC_SWEEP_PERIOD,
+            )
+            .await;
+        }
+
+        /// Gives any mis-fired SIGKILL every chance to land before an
+        /// absence is asserted - a bare poll could otherwise pass by racing
+        /// it.
+        async fn process_is_alive(&mut self) -> bool {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            self.process.try_wait().expect("poll fixture process").is_none()
+        }
+
+        async fn process_was_killed(&mut self) -> bool {
+            for _ in 0..50 {
+                if self.process.try_wait().expect("poll fixture process").is_some() {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            false
+        }
+
+        fn entry_exists(&self) -> bool {
+            crate::terminal_registry_file::registry_entry_path(
+                &self.registry_dir,
+                &self.terminal_id,
+            )
+            .exists()
+        }
+
+        fn profile_exists(&self) -> bool {
+            self.state_dir
+                .join("agent-profiles")
+                .join(&self.terminal_id)
+                .exists()
+        }
+
+        fn token_exists(&self) -> bool {
+            crate::agent_token_store::read_token(&self.state_dir, &self.terminal_id).is_some()
+        }
+
+        fn cleanup(mut self) {
+            let _ = self.process.kill();
+            let _ = self.process.wait();
+            let _ = std::fs::remove_dir_all(&self.state_dir);
+        }
+    }
+
+    // CONTRACT (260729, the headline case): a helper attached to a SECOND
+    // daemon must survive this daemon's `boot_reconcile` AND its 10s sweep,
+    // with its registry entry intact. Both halves are load-bearing and fail
+    // independently: sparing the process while deleting the entry passes a
+    // process-only assertion and still destroys the terminal, because the
+    // owning daemon can no longer adopt it at its next `boot_reconcile`.
+    //
+    // Before this ticket BOTH paths killed it. `reconcile_entry` folded
+    // "connected, helper busy" into `IpcStatus::Unreachable` and `classify`
+    // mapped that straight to `KillVerified`; the sweep had no liveness check
+    // at all. The boot-identity gate cannot help - both daemons are on the
+    // same boot, so the boot id matches by construction.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_helper_attached_to_another_daemon_survives_boot_reconcile_and_the_sweep() {
+        let mut fixture = ProbeFixture::new(
+            "attached",
+            Some(FakeHelperBehaviour::AnswersProbe {
+                attached: true,
+                unattached_for_ms: None,
+            }),
+            true,
+        )
+        .await;
+
+        let registry = fixture.second_registry_boot_reconcile().await;
+        assert!(
+            registry.get(&fixture.terminal_id).is_none(),
+            "a busy helper is not adoptable by this daemon - leaving it alone must not be \
+             confused with adopting it"
+        );
+        assert!(
+            fixture.entry_exists(),
+            "boot reconcile must not delete the registry entry of a helper that answered it is \
+             in use - deleting it makes the surviving helper unadoptable by its real owner"
+        );
+
+        registry.sweep_registry_backstop().await;
+
+        assert!(
+            fixture.process_is_alive().await,
+            "neither boot reconcile nor the backstop sweep may signal a helper that reports \
+             itself attached to another daemon"
+        );
+        assert!(
+            fixture.entry_exists(),
+            "the backstop sweep must leave the entry alone too, not merely withhold the signal"
+        );
+
+        fixture.cleanup();
+    }
+
+    // CONTRACT (260729, step 4): a SEPARATE assertion from the one above, and
+    // it fails independently. `agent_profile_gc` is not a kill site and never
+    // routes through `classify`, so steps 1-3 do not reach it: it reads
+    // `live_terminal_ids()` directly, and another daemon's terminals are
+    // absent from this daemon's session map no matter how healthy they are.
+    // Without the probe gate the helper survives and its state is deleted
+    // anyway - the original symptom this ticket is named after.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_profile_gc_spares_a_helper_that_is_attached_to_another_daemon() {
+        let fixture = ProbeFixture::new(
+            "attached-gc",
+            Some(FakeHelperBehaviour::AnswersProbe {
+                attached: true,
+                unattached_for_ms: None,
+            }),
+            true,
+        )
+        .await;
+
+        let registry = fixture.second_registry();
+        fixture.run_profile_gc(&registry).await;
+
+        assert!(
+            fixture.profile_exists(),
+            "agent-profiles/<id>/ must survive a GC run by a daemon that does not own the \
+             terminal but can see that its helper is in use"
+        );
+        assert!(
+            fixture.token_exists(),
+            "terminal-tokens/<id>.json must survive too - losing it makes the terminal's \
+             callback auth unrecoverable across a restart"
+        );
+
+        fixture.cleanup();
+    }
+
+    // CONTRACT (260729, the predicate leg easiest to get wrong): a helper
+    // that ANSWERS but reports unattached for LESS than the grace is a helper
+    // whose own daemon is restarting - possibly still inside its
+    // `boot_reconcile`, before it has re-adopted anything. Every path must
+    // leave it alone. Without this case a two-way predicate ("answers or
+    // not") satisfies every other bullet in this file while reintroducing
+    // this ticket's bug in its narrower form: another daemon's 10s sweep
+    // reaping live terminals during their owner's restart.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_helper_whose_daemon_is_restarting_survives_every_path() {
+        let mut fixture = ProbeFixture::new(
+            "restarting",
+            Some(FakeHelperBehaviour::AnswersProbe {
+                attached: false,
+                // Just disconnected: far inside the grace.
+                unattached_for_ms: Some(50),
+            }),
+            true,
+        )
+        .await;
+
+        let registry = fixture.second_registry_boot_reconcile().await;
+        registry.sweep_registry_backstop().await;
+        fixture.run_profile_gc(&registry).await;
+
+        assert!(
+            fixture.process_is_alive().await,
+            "a helper unattached for less than the grace must never be signalled - its daemon \
+             is coming back for it"
+        );
+        assert!(fixture.entry_exists(), "its registry entry must survive too");
+        assert!(
+            fixture.profile_exists(),
+            "its profile directory must survive the GC"
+        );
+        assert!(fixture.token_exists(), "its token must survive the GC");
+
+        fixture.cleanup();
+    }
+
+    // NON-VACUITY 1: positive absence still kills, on all three paths.
+    // Without this, "spare everything" would pass every test above.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_helper_with_no_listener_behind_it_is_still_reclaimed_everywhere() {
+        // Three independent fixtures: the first two paths DELETE the entry,
+        // so one fixture cannot be driven through all three.
+        let mut boot = ProbeFixture::new("no-listener-boot", None, true).await;
+        let registry = boot.second_registry_boot_reconcile().await;
+        assert!(
+            boot.process_was_killed().await,
+            "boot reconcile must still kill a verified-ours helper with nothing listening"
+        );
+        assert!(
+            !boot.entry_exists(),
+            "and must still prune its registry entry"
+        );
+        drop(registry);
+        boot.cleanup();
+
+        let mut sweep = ProbeFixture::new("no-listener-sweep", None, true).await;
+        let registry = sweep.second_registry();
+        registry.sweep_registry_backstop().await;
+        assert!(
+            sweep.process_was_killed().await,
+            "the backstop sweep must still kill a verified-ours helper with nothing listening"
+        );
+        assert!(!sweep.entry_exists(), "and must still prune its entry");
+        sweep.cleanup();
+
+        let gc = ProbeFixture::new("no-listener-gc", None, true).await;
+        let registry = gc.second_registry();
+        gc.run_profile_gc(&registry).await;
+        assert!(
+            !gc.profile_exists(),
+            "the GC must still reclaim the profile directory of a helper with no listener"
+        );
+        assert!(!gc.token_exists(), "and its token");
+        gc.cleanup();
+    }
+
+    // NON-VACUITY 2, and the one an earlier draft of this phase was missing.
+    // A REAL orphan - live shell, no daemon coming back - keeps its listener
+    // bound and sits in its idle accept loop forever, so it ANSWERS the
+    // probe. Under the naive "kill only when the probe does not answer" rule
+    // it becomes unreclaimable and its shell and PTY leak permanently and
+    // silently. Without this case that exact regression passes the suite by
+    // construction, because the orphan it leaks is precisely the one that
+    // answers.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_helper_that_answers_but_is_unattached_past_the_grace_is_still_reclaimed() {
+        let past_grace = Some(UNATTACHED_GRACE.as_millis() as u64 + 60_000);
+
+        let mut sweep = ProbeFixture::new(
+            "past-grace-sweep",
+            Some(FakeHelperBehaviour::AnswersProbe {
+                attached: false,
+                unattached_for_ms: past_grace,
+            }),
+            true,
+        )
+        .await;
+        let registry = sweep.second_registry();
+        registry.sweep_registry_backstop().await;
+        assert!(
+            sweep.process_was_killed().await,
+            "a helper that answers the probe but has been unattached past the grace is a real \
+             orphan and MUST still be reclaimed - sparing it leaks its shell and PTY forever"
+        );
+        assert!(!sweep.entry_exists(), "and its entry must be pruned");
+        sweep.cleanup();
+
+        let gc = ProbeFixture::new(
+            "past-grace-gc",
+            Some(FakeHelperBehaviour::AnswersProbe {
+                attached: false,
+                unattached_for_ms: past_grace,
+            }),
+            true,
+        )
+        .await;
+        let registry = gc.second_registry();
+        gc.run_profile_gc(&registry).await;
+        assert!(
+            !gc.profile_exists(),
+            "the GC must still reclaim a past-grace orphan's profile directory"
+        );
+        assert!(!gc.token_exists(), "and its token");
+        gc.cleanup();
+    }
+
+    // CONTRACT (260729, THE UPGRADE CASE - the one the user is standing in).
+    // Helpers outlive their daemon by design, so a daemon carrying the probe
+    // WILL meet helpers spawned by a binary that has never heard of it. Such
+    // a helper has no concurrent accept arm: while it is attached, its
+    // listener queues the probe and it answers nothing - which is the "no
+    // answer" leg, i.e. kill. Left unhandled, the fix reproduces the exact
+    // defect it was written to remove, for every helper alive across the
+    // upgrade.
+    //
+    // Two independent failure modes are asserted here:
+    //   1. the helper must survive all three paths with entry, profile and
+    //      token intact, because "connected but silent" is undecidable for a
+    //      peer that cannot speak the probe;
+    //   2. NOTHING may be put on its wire. This is not hygiene - `read_message`
+    //      turns an unknown variant into an `io::Error`, the helper's read
+    //      site propagates it, and `run_terminal_helper`'s exit path then runs
+    //      `kill_shell_if_running()` + `delete_registry_entry()`. Sending the
+    //      probe here would SIGKILL the user's shell and erase the evidence,
+    //      which is strictly worse than the daemon-side kill this ticket
+    //      exists to remove.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_helper_that_predates_the_probe_is_left_alone_and_never_sent_one() {
+        let mut fixture = ProbeFixture::new(
+            "pre-upgrade",
+            Some(FakeHelperBehaviour::SilentForever),
+            // The registry entry is hand-written WITHOUT the capability field.
+            false,
+        )
+        .await;
+
+        let registry = fixture.second_registry_boot_reconcile().await;
+        registry.sweep_registry_backstop().await;
+        fixture.run_profile_gc(&registry).await;
+
+        assert!(
+            fixture.process_is_alive().await,
+            "a helper whose entry declares no probe capability must never be signalled for \
+             staying silent - kill only on positive absence"
+        );
+        assert!(fixture.entry_exists(), "its registry entry must survive");
+        assert!(fixture.profile_exists(), "its profile directory must survive");
+        assert!(fixture.token_exists(), "its token must survive");
+
+        let received = fixture
+            .helper
+            .as_ref()
+            .expect("fixture has a listener")
+            .received();
+        assert!(
+            received.is_empty(),
+            "NOTHING may be written to a helper that predates the probe - it would parse the \
+             unknown variant as a transport failure and SIGKILL the user's shell. Got: \
+             {received:?}"
+        );
+
+        fixture.cleanup();
+    }
+
+    // CONTRACT (260729): the adoption sequence is the one path every live
+    // helper depends on across the upgrade, and it is the one an implementer
+    // is most likely to "tidy" while adding the probe. Adopting must put
+    // NOTHING on the wire beyond `HandshakeAck`, and must complete against a
+    // helper that sends nothing beyond `Handshake` + `Status`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn adopting_a_helper_still_puts_only_a_handshake_ack_on_the_wire() {
+        let mut fixture =
+            ProbeFixture::new("adopt", Some(FakeHelperBehaviour::Adoptable), true).await;
+
+        let registry = fixture.second_registry_boot_reconcile().await;
+
+        assert!(
+            registry.get(&fixture.terminal_id).is_some(),
+            "a helper that completes the pre-probe handshake sequence must still be adopted"
+        );
+
+        // The adopted session's reader task holds the connection open, so
+        // give any extra write this path might have gained a chance to land
+        // before asserting its absence.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let received = fixture
+            .helper
+            .as_ref()
+            .expect("fixture has a listener")
+            .received();
+        assert_eq!(
+            received,
+            vec![r#"{"type":"handshakeAck"}"#.to_owned()],
+            "the adoption sequence must stay byte-identical: exactly one HandshakeAck, nothing \
+             else - no probe, no version negotiation, no backfill request"
+        );
+        assert!(
+            fixture.process_is_alive().await,
+            "an adopted helper is obviously never signalled"
+        );
+
+        fixture.cleanup();
+    }
+
+    // Direct coverage of the socket-level probe, independent of any kill
+    // site: the capability gate must be enforced HERE, at the one function
+    // that writes `LivenessProbe`, so a future caller cannot reintroduce the
+    // unguarded send by forgetting to check the entry first.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_helper_writes_nothing_to_a_peer_that_does_not_declare_the_capability() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-probe-gate-{}-{}.sock",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&socket_path);
+        let helper = spawn_fake_helper(&socket_path, FakeHelperBehaviour::SilentForever);
+
+        let verdict = probe_helper(&socket_path, false, Duration::from_millis(150)).await;
+
+        assert_eq!(
+            verdict,
+            ProbeVerdict::Unsupported,
+            "a connected peer that declares no capability is undecidable, not unreachable"
+        );
+        assert!(
+            !probe_authorizes_reclaim(verdict),
+            "and undecidable must never authorize reclaim"
+        );
+        assert!(
+            helper.received().is_empty(),
+            "probe_helper must connect but write NOTHING when the capability is not declared"
+        );
+
+        // Non-vacuity for the gate: the same listener, probed WITH the
+        // capability declared, does receive the request - so the emptiness
+        // above is the gate working, not the fixture failing to record.
+        let verdict = probe_helper(&socket_path, true, Duration::from_millis(150)).await;
+        assert_eq!(
+            verdict,
+            ProbeVerdict::Unanswered,
+            "a capable-but-silent peer is the wedged case, which does authorize reclaim"
+        );
+        assert!(probe_authorizes_reclaim(verdict));
+        assert!(
+            helper
+                .received()
+                .iter()
+                .any(|line| line.contains("livenessProbe")),
+            "the probe must actually be sent once the entry declares the capability: {:?}",
+            helper.received()
+        );
+
+        drop(helper);
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // Positive absence, at the same seam: nothing bound behind the path.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_helper_reports_a_reclaimable_verdict_when_nothing_is_listening() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-probe-absent-{}-{}.sock",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&socket_path);
+
+        for declares_capability in [true, false] {
+            let verdict = probe_helper(&socket_path, declares_capability, Duration::from_millis(80))
+                .await;
+            assert!(
+                probe_authorizes_reclaim(verdict),
+                "no listener is positive absence and must authorize reclaim regardless of what \
+                 the entry declared (declares_capability={declares_capability}, got {verdict:?})"
+            );
+        }
     }
 }
 

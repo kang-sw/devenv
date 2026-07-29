@@ -41,6 +41,15 @@ const IDLE_ACCEPT_POLL: Duration = Duration::from_secs(2);
 // pre-handshake wait - once `shell_started` flips true, the existing
 // `IDLE_ACCEPT_POLL` idle-reconnect behavior is unchanged.
 const NO_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+// CONTRACT (260729 helper liveness probe): bounds how long a CONCURRENT
+// probe connection may occupy a task before it is dropped. A probe is
+// strictly request/response - one line in, one line out - so anything slower
+// than this is a peer that connected and then said nothing, which is not the
+// helper's problem to wait on. Deliberately generous relative to a local
+// socket round trip and irrelevant to the attached session's latency, since
+// probe connections are served on their own tasks and never block
+// `handle_connection`.
+const PROBE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct RingState {
     output: VecDeque<TerminalHelperOutputChunk>,
@@ -92,6 +101,23 @@ struct SharedState {
     writer_tx: Mutex<Option<std_mpsc::Sender<WriterCommand>>>,
     shell_started: AtomicBool,
     exited_at: Mutex<Option<Instant>>,
+    // CONTRACT (260729 helper liveness probe): when the LAST daemon
+    // disconnected, or `Some(process start)` if none ever attached. `None`
+    // means a daemon is attached right now.
+    //
+    // This is genuinely new state, not a rename of `exited_at`: `exited_at`
+    // is set ONLY when the shell exits (`transition`), and the read loop's
+    // daemon-disconnect arm previously stored nothing at all. Without it the
+    // probe has no duration to report and the daemon-side predicate collapses
+    // back to two-way ("answers or not"), which cannot tell a healthy helper
+    // whose daemon is restarting from a real orphan whose daemon is never
+    // coming back.
+    //
+    // Only an ATTACHED connection (one that received `HandshakeAck`) moves
+    // this: probe connections deliberately never touch it, or a daemon
+    // probing an orphan every 10s would keep resetting its unattached clock
+    // and the orphan would become unreclaimable.
+    unattached_since: Mutex<Option<Instant>>,
     // CONTRACT (260723 Phase-1 review finding I2, Windows Job-Object
     // wiring): must be kept alive for the helper's whole lifetime (see
     // `terminal_platform::windows::create_kill_on_close_job`'s doc comment)
@@ -185,9 +211,83 @@ impl SharedState {
         *self.exited_at.lock().expect("exited_at lock poisoned")
     }
 
+    /// Called exactly once per connection, on the `HandshakeAck` that makes
+    /// that connection an ATTACHED session. Never called from the probe path.
+    fn mark_attached(&self) {
+        *self
+            .unattached_since
+            .lock()
+            .expect("unattached_since lock poisoned") = None;
+    }
+
+    /// Called when an attached connection ends, by whatever route (clean
+    /// disconnect, transport error, graceful shutdown) - see
+    /// `AttachmentGuard`, which is what makes "by whatever route" true.
+    fn mark_unattached(&self) {
+        *self
+            .unattached_since
+            .lock()
+            .expect("unattached_since lock poisoned") = Some(Instant::now());
+    }
+
+    /// `(attached, unattached_for_ms)` exactly as the probe response carries
+    /// them. `attached` is authoritative; the duration is `None` while
+    /// attached because there is nothing to measure.
+    fn liveness_report(&self) -> (bool, Option<u64>) {
+        match *self
+            .unattached_since
+            .lock()
+            .expect("unattached_since lock poisoned")
+        {
+            None => (true, None),
+            Some(since) => (false, Some(since.elapsed().as_millis() as u64)),
+        }
+    }
+
     fn status_and_next_sequence(&self) -> (TerminalHelperStatus, u64) {
         let ring = self.ring.lock().expect("ring lock poisoned");
         (ring.status, ring.next_sequence)
+    }
+}
+
+// Pure builder for the entry `run_terminal_helper` durably writes before it
+// binds its listener. Extracted so the two facts a daemon reads off disk
+// BEFORE it ever puts a byte on this helper's wire - the boot identity and
+// (260729) the liveness-probe capability - are unit-testable without spawning
+// a helper process.
+fn startup_registry_entry(
+    args: &TerminalHelperArgs,
+    pid: u32,
+    start_time: u64,
+) -> TerminalRegistryEntry {
+    TerminalRegistryEntry {
+        terminal_id: args.terminal_id.clone(),
+        work_root_id: args.work_root_id.clone(),
+        pid,
+        start_time,
+        // CONTRACT (boot-identity gate): recorded in the same breath as
+        // `start_time`, because on a boot-relative platform the two are only
+        // meaningful together. Deliberately NOT fatal when it comes back
+        // `None` (unlike `start_time`, which hard-errors in the caller): the
+        // daemon side treats a missing boot id as unverifiable, i.e. this
+        // helper becomes un-reapable rather than the terminal failing to
+        // start at all. Degrading a rare kernel/procfs oddity into "this one
+        // helper must self-exit on its own timers" is the conservative trade;
+        // a hard error would take down terminal creation outright.
+        boot_id: crate::terminal_platform::boot_identity(),
+        // CONTRACT (260729 helper liveness probe): this binary answers
+        // `DaemonToHelperMessage::LivenessProbe`, so say so HERE, where every
+        // daemon-side kill site can read it before connecting. A helper that
+        // does not declare it is never sent a probe (which would SIGKILL its
+        // shell) and is never reaped merely for staying silent - see
+        // `TerminalRegistryEntry::supports_liveness_probe`.
+        supports_liveness_probe: true,
+        socket_path: args.socket_path.clone(),
+        created_at_ms: now_ms(),
+        title: args.title.clone(),
+        cwd_hint: args.cwd_hint.clone(),
+        columns: args.columns,
+        rows: args.rows,
     }
 }
 
@@ -197,28 +297,7 @@ pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()>
         anyhow::anyhow!("failed to read own process start time for identity registration (pid {pid})")
     })?;
 
-    let entry = TerminalRegistryEntry {
-        terminal_id: args.terminal_id.clone(),
-        work_root_id: args.work_root_id.clone(),
-        pid,
-        start_time,
-        // CONTRACT (boot-identity gate): recorded in the same breath as
-        // `start_time`, because on a boot-relative platform the two are only
-        // meaningful together. Deliberately NOT fatal when it comes back
-        // `None` (unlike `start_time` above, which hard-errors): the daemon
-        // side treats a missing boot id as unverifiable, i.e. this helper
-        // becomes un-reapable rather than the terminal failing to start at
-        // all. Degrading a rare kernel/procfs oddity into "this one helper
-        // must self-exit on its own timers" is the conservative trade; a
-        // hard error would take down terminal creation outright.
-        boot_id: crate::terminal_platform::boot_identity(),
-        socket_path: args.socket_path.clone(),
-        created_at_ms: now_ms(),
-        title: args.title.clone(),
-        cwd_hint: args.cwd_hint.clone(),
-        columns: args.columns,
-        rows: args.rows,
-    };
+    let entry = startup_registry_entry(&args, pid, start_time);
     // CONTRACT (ticket "Registry-write ordering"): the entry is durably
     // written BEFORE the IPC listener even binds, and the shell is spawned
     // only after a daemon has connected AND handshaked (see
@@ -239,6 +318,11 @@ pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()>
         writer_tx: Mutex::new(None),
         shell_started: AtomicBool::new(false),
         exited_at: Mutex::new(None),
+        // A helper starts life unattached: the clock runs from process
+        // start, so a helper whose daemon never connects at all still
+        // reports a growing unattached duration rather than a bare "not
+        // attached" with nothing to compare against.
+        unattached_since: Mutex::new(Some(Instant::now())),
         #[cfg(windows)]
         job: Mutex::new(None),
     });
@@ -284,16 +368,27 @@ async fn serve_connections(
         };
         match tokio::time::timeout(wait, listener.accept()).await {
             Ok(Ok(stream)) => {
-                let keep_serving = handle_connection(args, stream, shared).await?;
-                if !keep_serving {
-                    break;
-                }
-                // One reattach after the shell has exited is the grace
-                // window's whole purpose - deliver the exit + trailing
-                // output once, then self-exit rather than lingering for the
-                // rest of the 30s.
-                if shared.exited_at().is_some() {
-                    break;
+                match serve_session(args, stream, shared, listener).await? {
+                    ConnectionOutcome::Shutdown => break,
+                    // One reattach after the shell has exited is the grace
+                    // window's whole purpose - deliver the exit + trailing
+                    // output once, then self-exit rather than lingering for
+                    // the rest of the 30s.
+                    //
+                    // CONTRACT (260729 helper liveness probe): gated on
+                    // `attached`, i.e. on a connection that actually sent
+                    // `HandshakeAck`. A daemon that merely PROBED this helper
+                    // (which reaches `handle_connection` when no session is
+                    // attached, since there is no session future to run the
+                    // concurrent arm alongside) must not consume the one
+                    // grace-window reattach its real owner is coming back
+                    // for - that would let another daemon's 10s sweep end a
+                    // terminal it is forbidden from killing.
+                    ConnectionOutcome::Disconnected { attached } => {
+                        if attached && shared.exited_at().is_some() {
+                            break;
+                        }
+                    }
                 }
             }
             Ok(Err(error)) => return Err(error.into()),
@@ -303,14 +398,131 @@ async fn serve_connections(
     Ok(())
 }
 
-/// Serves a single accepted connection until it closes. Returns `Ok(true)`
-/// to keep accepting further connections, `Ok(false)` when the daemon
-/// requested a full graceful shutdown (helper should stop entirely).
+/// How a single accepted session connection ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionOutcome {
+    /// The daemon went away (clean disconnect). `attached` records whether
+    /// this connection ever became a real session, i.e. whether it sent
+    /// `HandshakeAck` - a probe-only connection did not.
+    Disconnected { attached: bool },
+    /// The daemon requested a full graceful shutdown; the helper stops.
+    Shutdown,
+}
+
+// CONTRACT (260729 helper liveness probe, the load-bearing half): a new
+// message kind ALONE would not have worked. `serve_connections` awaits the
+// session inline and never polls `accept()` while a session is attached, so
+// a probe would sit unread in the listener backlog - which is exactly
+// today's failure, where "connect succeeded, nobody answered" is read as
+// death. This function adds the concurrent accept arm that makes the probe
+// answerable while a session is attached.
+//
+// FORBIDDEN, and the reason this is not simply "spawn every connection":
+// the probe arm must never dispatch `handle_connection`. Doing so would make
+// it a second full attach path (shell spawn, input, resize, backfill,
+// graceful shutdown) and break the one-session-at-a-time guarantee the rest
+// of this module is built on. Probe-only accept, probe-only response - the
+// spawned task is `serve_probe_connection`, which cannot spawn a shell,
+// cannot flip `shell_started`, and cannot touch `unattached_since`.
+async fn serve_session(
+    args: &TerminalHelperArgs,
+    stream: BoxedIpcStream,
+    shared: &Arc<SharedState>,
+    listener: &mut IpcListener,
+) -> anyhow::Result<ConnectionOutcome> {
+    let mut session = std::pin::pin!(handle_connection(args, stream, shared));
+    loop {
+        tokio::select! {
+            // Biased so an available session event is always taken first:
+            // the attached daemon's traffic must never lose priority to a
+            // stream of probes.
+            biased;
+            outcome = &mut session => return outcome,
+            accepted = listener.accept() => match accepted {
+                Ok(probe_stream) => {
+                    tokio::spawn(serve_probe_connection(shared.clone(), probe_stream));
+                }
+                Err(error) => return Err(error.into()),
+            },
+        }
+    }
+}
+
+// The whole of the probe-only accept arm's behaviour. Reads at most one
+// `LivenessProbe` (bounded by `PROBE_CONNECTION_TIMEOUT`), answers it, and
+// drops the connection.
+//
+// CONTRACT: strictly request-gated - nothing is written until a
+// `LivenessProbe` has been read, so a helper never emits
+// `LivenessProbeResponse` to a daemon that did not ask for one (an old
+// daemon receiving an unknown variant would escalate it to a kill).
+// Deliberately swallows every error rather than propagating with `?`: a
+// malformed or half-open probe connection is a stranger's problem, and
+// letting it reach `run_terminal_helper`'s exit path would kill the user's
+// shell over a stray byte from a process that is not even attached.
+async fn serve_probe_connection(shared: Arc<SharedState>, stream: BoxedIpcStream) {
+    let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
+    let mut reader = NdjsonReader::new(read_half);
+    let _ = tokio::time::timeout(PROBE_CONNECTION_TIMEOUT, async move {
+        loop {
+            match reader.read_message::<DaemonToHelperMessage>().await {
+                Ok(Some(DaemonToHelperMessage::LivenessProbe)) => {
+                    let (attached, unattached_for_ms) = shared.liveness_report();
+                    let _ = write_ndjson(
+                        &mut write_half,
+                        &HelperToDaemonMessage::LivenessProbeResponse {
+                            attached,
+                            unattached_for_ms,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+                // Probe-only: a session message arriving on a concurrent
+                // connection is ignored, never acted on. Acting on it here
+                // is precisely the "second attach path" this arm forbids.
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => return,
+            }
+        }
+    })
+    .await;
+}
+
+/// Restarts the unattached clock when an attached connection ends, on every
+/// exit route out of `handle_connection` including the `?` ones. See that
+/// function's own comment for why this is a guard and not a call site.
+struct AttachmentGuard<'a> {
+    shared: &'a Arc<SharedState>,
+    attached: bool,
+}
+
+impl Drop for AttachmentGuard<'_> {
+    fn drop(&mut self) {
+        if self.attached {
+            self.shared.mark_unattached();
+        }
+    }
+}
+
+/// Serves a single accepted connection until it closes.
 async fn handle_connection(
     args: &TerminalHelperArgs,
     stream: BoxedIpcStream,
     shared: &Arc<SharedState>,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<ConnectionOutcome> {
+    // CONTRACT (260729 helper liveness probe): the unattached clock must
+    // restart when an attached connection ends BY WHATEVER ROUTE - clean
+    // disconnect, transport error propagated with `?`, or graceful shutdown.
+    // A guard rather than a line at each `return` is what makes that true;
+    // the `?`s below are exactly the routes a hand-placed call would miss,
+    // and a missed one leaves the helper reporting "attached" forever, which
+    // makes it unreclaimable by every daemon-side path.
+    let mut attachment = AttachmentGuard {
+        shared,
+        attached: false,
+    };
+
     let (read_half, write_half) = crate::terminal_ipc_transport::split(stream);
     let mut reader = NdjsonReader::new(read_half);
     let write_half = Arc::new(tokio::sync::Mutex::new(write_half));
@@ -364,8 +576,22 @@ async fn handle_connection(
         tokio::select! {
             incoming = reader.read_message::<DaemonToHelperMessage>() => {
                 match incoming? {
-                    None => return Ok(true), // daemon disconnected; outer loop decides what's next
+                    // daemon disconnected; outer loop decides what's next
+                    None => {
+                        return Ok(ConnectionOutcome::Disconnected {
+                            attached: attachment.attached,
+                        })
+                    }
                     Some(DaemonToHelperMessage::HandshakeAck) => {
+                        // CONTRACT (260729): `HandshakeAck` - not merely
+                        // accepting a connection - is what makes this an
+                        // ATTACHED session. A probe connection never sends
+                        // one, so probing can never reset an orphan's
+                        // unattached clock.
+                        if !attachment.attached {
+                            attachment.attached = true;
+                            shared.mark_attached();
+                        }
                         if shared
                             .shell_started
                             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -405,9 +631,30 @@ async fn handle_connection(
                         )
                         .await?;
                     }
+                    // CONTRACT (260729 helper liveness probe): answered here
+                    // too, not only on the concurrent probe arm. When NO
+                    // session is attached the helper is parked in
+                    // `serve_connections`' own `accept()`, so a probe lands
+                    // as an ordinary connection and reaches this dispatch -
+                    // and that is exactly the case the "unattached past the
+                    // grace" leg of the daemon-side predicate depends on
+                    // being answerable. Answering costs nothing here: it
+                    // never spawns a shell and never marks this connection
+                    // attached, so it does not disturb `unattached_since`.
+                    Some(DaemonToHelperMessage::LivenessProbe) => {
+                        let (attached, unattached_for_ms) = shared.liveness_report();
+                        write_ndjson(
+                            &mut *write_half.lock().await,
+                            &HelperToDaemonMessage::LivenessProbeResponse {
+                                attached,
+                                unattached_for_ms,
+                            },
+                        )
+                        .await?;
+                    }
                     Some(DaemonToHelperMessage::GracefulShutdown) => {
                         shared.kill_shell_if_running();
-                        return Ok(false);
+                        return Ok(ConnectionOutcome::Shutdown);
                     }
                 }
             }
@@ -921,6 +1168,7 @@ mod kill_path_guard_tests {
             writer_tx: Mutex::new(None),
             shell_started: AtomicBool::new(false),
             exited_at: Mutex::new(None),
+            unattached_since: Mutex::new(Some(Instant::now())),
             #[cfg(windows)]
             job: Mutex::new(None),
         }
@@ -1043,6 +1291,7 @@ mod reader_thread_utf8_tests {
             writer_tx: Mutex::new(None),
             shell_started: AtomicBool::new(false),
             exited_at: Mutex::new(None),
+            unattached_since: Mutex::new(Some(Instant::now())),
             #[cfg(windows)]
             job: Mutex::new(None),
         }
@@ -1398,5 +1647,282 @@ mod spawn_shell_command_tests {
             command.get_env("PATH").map(|value| value.to_string_lossy().into_owned()),
             Some("/usr/bin:/bin".to_owned())
         );
+    }
+}
+
+// Regression coverage for 260729 (helper liveness probe). These drive the
+// REAL `serve_connections` accept loop over a REAL Unix domain socket, not a
+// scripted stand-in: the load-bearing claim of this phase is that a probe is
+// answerable WHILE A SESSION IS ATTACHED, and nothing short of running the
+// actual loop can show that. A new message kind alone would not have been
+// enough - the loop awaited `handle_connection` inline and never polled
+// `accept()` while a session was attached, so a probe would have sat unread
+// in the backlog, which is precisely today's failure.
+#[cfg(all(test, unix))]
+mod liveness_probe_tests {
+    use super::*;
+    use crate::terminal_helper_ipc::write_ndjson;
+    use std::path::PathBuf;
+
+    fn shared_state_for_test() -> SharedState {
+        SharedState {
+            pid: 0,
+            start_time: 0,
+            ring: Mutex::new(RingState::new()),
+            notify: Notify::new(),
+            child: Mutex::new(None),
+            master: Mutex::new(None),
+            writer_tx: Mutex::new(None),
+            shell_started: AtomicBool::new(false),
+            exited_at: Mutex::new(None),
+            unattached_since: Mutex::new(Some(Instant::now())),
+            #[cfg(windows)]
+            job: Mutex::new(None),
+        }
+    }
+
+    /// Short by necessity: a Unix domain socket's sun_path is capped at ~108
+    /// bytes, and these paths are bound for real.
+    fn socket_path_for_test(label: &str) -> PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("wsd-hp-{label}-{}-{unique}.sock", std::process::id()))
+    }
+
+    fn args_for_test(socket_path: &std::path::Path) -> TerminalHelperArgs {
+        TerminalHelperArgs {
+            registry_dir: std::env::temp_dir().join("wsd-hp-registry-unused"),
+            terminal_id: "term_probe".to_owned(),
+            work_root_id: "wr1".to_owned(),
+            cwd: std::env::temp_dir(),
+            cwd_hint: None,
+            title: "probe".to_owned(),
+            columns: 80,
+            rows: 24,
+            socket_path: socket_path.to_path_buf(),
+            command: None,
+            command_args: Vec::new(),
+            env_overlay: Vec::new(),
+            scrub_marker: Vec::new(),
+        }
+    }
+
+    /// Opens a daemon-side connection, sends one `LivenessProbe`, and returns
+    /// the helper's report. Skips past anything the helper writes first: an
+    /// UNATTACHED helper answers from inside its ordinary session dispatch,
+    /// which opens with `Handshake` + `Status`, exactly as the daemon-side
+    /// `probe_helper` has to cope with.
+    async fn probe(socket_path: &std::path::Path) -> (bool, Option<u64>) {
+        let stream = crate::terminal_ipc_transport::connect(socket_path)
+            .await
+            .expect("probe connect");
+        let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
+        let mut reader = NdjsonReader::new(read_half);
+        write_ndjson(&mut write_half, &DaemonToHelperMessage::LivenessProbe)
+            .await
+            .expect("write probe");
+        loop {
+            let message = tokio::time::timeout(
+                Duration::from_secs(5),
+                reader.read_message::<HelperToDaemonMessage>(),
+            )
+            .await
+            .expect("probe must be answered without hanging")
+            .expect("probe read must not error")
+            .expect("probe must be answered before EOF");
+            if let HelperToDaemonMessage::LivenessProbeResponse {
+                attached,
+                unattached_for_ms,
+            } = message
+            {
+                return (attached, unattached_for_ms);
+            }
+        }
+    }
+
+    // The load-bearing test of the whole helper-side change: a probe arriving
+    // while a session is attached must be answered. Revert the concurrent
+    // accept arm (`serve_session`) and this hangs on `probe`'s own timeout,
+    // because the probe connection sits in the listener backlog until the
+    // attached daemon disconnects - which is the exact behaviour that made a
+    // healthy, busy helper look dead.
+    #[tokio::test]
+    async fn a_probe_is_answered_while_a_session_is_attached() {
+        let socket_path = socket_path_for_test("attached");
+        let _ = std::fs::remove_file(&socket_path);
+        let mut listener = IpcListener::bind(&socket_path).expect("bind helper listener");
+        let shared = Arc::new(shared_state_for_test());
+        // Pre-flip `shell_started` so the `HandshakeAck` below marks this
+        // connection attached WITHOUT spawning a real shell - the attach
+        // bookkeeping is what is under test here, not the PTY.
+        shared.shell_started.store(true, Ordering::SeqCst);
+        let args = args_for_test(&socket_path);
+
+        let serve_shared = shared.clone();
+        let serve = tokio::spawn(async move {
+            let _ = serve_connections(&args, &mut listener, &serve_shared).await;
+        });
+
+        // Connection 1: a daemon attaches and STAYS attached.
+        let stream = crate::terminal_ipc_transport::connect(&socket_path)
+            .await
+            .expect("session connect");
+        let (read_half, mut session_write) = crate::terminal_ipc_transport::split(stream);
+        let mut session_reader = NdjsonReader::new(read_half);
+        for _ in 0..2 {
+            session_reader
+                .read_message::<HelperToDaemonMessage>()
+                .await
+                .expect("handshake read")
+                .expect("handshake present");
+        }
+        write_ndjson(&mut session_write, &DaemonToHelperMessage::HandshakeAck)
+            .await
+            .expect("write handshake ack");
+        // Let the helper process the ack before probing, so `attached: true`
+        // is a real observation rather than a race.
+        for _ in 0..100 {
+            if shared.liveness_report().0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // Connection 2, CONCURRENT with the still-open session above.
+        let (attached, unattached_for_ms) = probe(&socket_path).await;
+        assert!(
+            attached,
+            "a helper whose session is held by another daemon must answer that it is IN USE - \
+             this is the fact that stops a second daemon killing it"
+        );
+        assert_eq!(
+            unattached_for_ms, None,
+            "there is no unattached duration to report while attached"
+        );
+
+        // And the session it was serving must be undisturbed by the probe.
+        drop(session_write);
+        drop(session_reader);
+        serve.abort();
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // The other half of the three-way predicate, and the leg a naive
+    // "kill only when the probe does not answer" rule leaks forever: an
+    // UNATTACHED helper still answers, and must report how long it has been
+    // unattached so the daemon can tell a restart from a real orphan.
+    #[tokio::test]
+    async fn a_probe_on_an_unattached_helper_reports_its_unattached_duration() {
+        let socket_path = socket_path_for_test("idle");
+        let _ = std::fs::remove_file(&socket_path);
+        let mut listener = IpcListener::bind(&socket_path).expect("bind helper listener");
+        let shared = Arc::new(shared_state_for_test());
+        shared.shell_started.store(true, Ordering::SeqCst);
+        let args = args_for_test(&socket_path);
+
+        let serve_shared = shared.clone();
+        let serve = tokio::spawn(async move {
+            let _ = serve_connections(&args, &mut listener, &serve_shared).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let (attached, unattached_for_ms) = probe(&socket_path).await;
+
+        assert!(!attached, "nobody has attached to this helper");
+        let elapsed = unattached_for_ms.expect("an unattached helper must report a duration");
+        assert!(
+            elapsed >= 50,
+            "the duration must be measured from the helper's own clock, not reported as zero: \
+             {elapsed}ms"
+        );
+
+        serve.abort();
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // CONTRACT (260729): a PROBE must never reset the unattached clock. If it
+    // did, a daemon probing an orphan every 10s would keep the orphan
+    // permanently within grace and it would become unreclaimable - the
+    // opposite failure to the one this ticket fixes, and a silent one.
+    #[tokio::test]
+    async fn probing_never_resets_the_unattached_clock() {
+        let socket_path = socket_path_for_test("noreset");
+        let _ = std::fs::remove_file(&socket_path);
+        let mut listener = IpcListener::bind(&socket_path).expect("bind helper listener");
+        let shared = Arc::new(shared_state_for_test());
+        shared.shell_started.store(true, Ordering::SeqCst);
+        let args = args_for_test(&socket_path);
+
+        let serve_shared = shared.clone();
+        let serve = tokio::spawn(async move {
+            let _ = serve_connections(&args, &mut listener, &serve_shared).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let (_, first) = probe(&socket_path).await;
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let (_, second) = probe(&socket_path).await;
+
+        let first = first.expect("first probe reports a duration");
+        let second = second.expect("second probe reports a duration");
+        assert!(
+            second > first,
+            "the unattached clock must keep running across probes ({first}ms then {second}ms) - \
+             a probe that resets it makes every orphan permanently unreclaimable"
+        );
+
+        serve.abort();
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // CONTRACT (260729): the clock RESTARTS when an attached daemon goes
+    // away. `exited_at` cannot serve this purpose - it is set only when the
+    // SHELL exits - and before this ticket the daemon-disconnect arm of the
+    // read loop stored nothing at all, which is why the predicate had no
+    // duration to work with.
+    #[tokio::test]
+    async fn the_unattached_clock_restarts_when_an_attached_daemon_disconnects() {
+        let shared = Arc::new(shared_state_for_test());
+        assert!(
+            !shared.liveness_report().0,
+            "a helper starts life unattached"
+        );
+
+        shared.mark_attached();
+        assert_eq!(
+            shared.liveness_report(),
+            (true, None),
+            "an attached helper reports no unattached duration"
+        );
+
+        shared.mark_unattached();
+        let (attached, elapsed) = shared.liveness_report();
+        assert!(!attached, "the helper is unattached again once its daemon left");
+        assert!(
+            elapsed.is_some(),
+            "and the clock must be running from the disconnect, not left at None"
+        );
+    }
+
+    // CONTRACT (260729): the capability declaration is what every daemon-side
+    // kill site reads BEFORE it puts a byte on this helper's wire. Reverting
+    // it to `false`/absent silently disables the entire three-way predicate:
+    // every kill site would then treat this helper as one that predates the
+    // probe and leave it alone forever, including when it is a genuine
+    // orphan.
+    #[test]
+    fn the_startup_registry_entry_declares_the_liveness_probe_capability() {
+        let args = args_for_test(std::path::Path::new("/tmp/wsd-hp-decl.sock"));
+        let entry = startup_registry_entry(&args, 4242, 99);
+
+        assert!(
+            entry.supports_liveness_probe,
+            "this binary answers LivenessProbe, so its registry entry must say so - otherwise \
+             no daemon will ever probe it and it can never be reclaimed"
+        );
+        assert_eq!(entry.pid, 4242);
+        assert_eq!(entry.start_time, 99);
+        assert_eq!(entry.terminal_id, args.terminal_id);
+        assert_eq!(entry.socket_path, args.socket_path);
     }
 }

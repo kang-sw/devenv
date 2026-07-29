@@ -59,6 +59,28 @@ pub enum HelperToDaemonMessage {
         next_sequence: u64,
         status: TerminalHelperStatus,
     },
+    // CONTRACT (260729 helper liveness probe): the ONLY reply to
+    // `DaemonToHelperMessage::LivenessProbe`, and STRICTLY request-gated -
+    // this variant is never emitted unsolicited. That rule is what keeps a
+    // rollback safe in the other direction: an old daemon never sends
+    // `LivenessProbe`, so it can never receive this variant, which its
+    // `read_message` would turn into an `io::Error` and escalate all the way
+    // to `kill_verified` (see `terminal_helper_ipc.rs`'s malformed-peer
+    // CONTRACT).
+    //
+    // `attached` is what makes the daemon-side predicate three-way rather
+    // than two-way: a helper that answers at all is alive, but only a helper
+    // that answers *and* reports nobody attached for longer than the grace is
+    // a genuine orphan. `unattached_for_ms` is measured BY THE HELPER (from
+    // its own last daemon disconnect), because only the helper knows when
+    // that was - a daemon-side timer cannot tell "unattached for an hour"
+    // from "I just started and have not adopted it yet". `None` means
+    // "attached" (nothing to measure); a `None` alongside `attached: false`
+    // is read conservatively daemon-side as within-grace, never as an orphan.
+    LivenessProbeResponse {
+        attached: bool,
+        unattached_for_ms: Option<u64>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -83,6 +105,23 @@ pub enum DaemonToHelperMessage {
         after: u64,
     },
     GracefulShutdown,
+    // CONTRACT (260729 helper liveness probe): a lightweight request the
+    // helper answers CONCURRENTLY with an attached session (see
+    // `terminal_helper_process.rs::serve_session`'s probe-only accept arm),
+    // so "connect succeeded but nobody answered the handshake" stops being
+    // read as death. It is NOT an attach: the helper never spawns a shell,
+    // never flips `shell_started`, and never resets its unattached clock in
+    // response to one.
+    //
+    // HARD RULE: the daemon may only send this to a helper whose registry
+    // entry declares `supportsLivenessProbe` (see
+    // `terminal_registry_file.rs`). Sending it to a helper that predates the
+    // variant makes that helper's `read_message` fail, which its read site
+    // propagates with `?`, which makes `run_terminal_helper` run
+    // `kill_shell_if_running()` + `delete_registry_entry()` - i.e. it
+    // SIGKILLs the user's shell. Appending the variant is safe; sending it
+    // unguarded is not.
+    LivenessProbe,
 }
 
 #[cfg(test)]
@@ -117,6 +156,14 @@ mod tests {
                 next_sequence: 2,
                 status: TerminalHelperStatus::Running,
             },
+            HelperToDaemonMessage::LivenessProbeResponse {
+                attached: true,
+                unattached_for_ms: None,
+            },
+            HelperToDaemonMessage::LivenessProbeResponse {
+                attached: false,
+                unattached_for_ms: Some(1234),
+            },
         ];
         for message in messages {
             let json = serde_json::to_string(&message).expect("serialize helper message");
@@ -142,12 +189,67 @@ mod tests {
                 after: 5,
             },
             DaemonToHelperMessage::GracefulShutdown,
+            DaemonToHelperMessage::LivenessProbe,
         ];
         for message in messages {
             let json = serde_json::to_string(&message).expect("serialize daemon message");
             let decoded: DaemonToHelperMessage =
                 serde_json::from_str(&json).expect("deserialize daemon message");
             assert_eq!(decoded, message);
+        }
+    }
+
+    // CONTRACT (260729 helper liveness probe, wire-format compatibility):
+    // both enums are `#[serde(tag = "type")]`, so variant tags are NAMES, not
+    // ordinals - appending (or inserting) a variant must never renumber or
+    // rename an existing one. Every pre-probe variant's on-the-wire tag is
+    // pinned here literally, so a rename/reorder that would make an existing
+    // helper or daemon fail to parse a message it used to understand fails
+    // loudly rather than silently escalating to a SIGKILL of the user's shell.
+    #[test]
+    fn pre_probe_variant_tags_are_unchanged_by_the_appended_probe_variants() {
+        let expected: [(String, &str); 5] = [
+            (
+                serde_json::to_string(&DaemonToHelperMessage::HandshakeAck)
+                    .expect("serialize"),
+                r#"{"type":"handshakeAck"}"#,
+            ),
+            (
+                serde_json::to_string(&DaemonToHelperMessage::GracefulShutdown)
+                    .expect("serialize"),
+                r#"{"type":"gracefulShutdown"}"#,
+            ),
+            (
+                serde_json::to_string(&HelperToDaemonMessage::Handshake {
+                    pid: 1,
+                    start_time: 2,
+                })
+                .expect("serialize"),
+                r#"{"type":"handshake","pid":1,"start_time":2}"#,
+            ),
+            (
+                serde_json::to_string(&HelperToDaemonMessage::Status {
+                    status: TerminalHelperStatus::Running,
+                    next_sequence: 3,
+                })
+                .expect("serialize"),
+                r#"{"type":"status","status":"running","next_sequence":3}"#,
+            ),
+            (
+                serde_json::to_string(&HelperToDaemonMessage::Exit {
+                    status: TerminalHelperStatus::Exited,
+                    next_sequence: 4,
+                })
+                .expect("serialize"),
+                r#"{"type":"exit","status":"exited","next_sequence":4}"#,
+            ),
+        ];
+        for (actual, expected) in expected {
+            assert_eq!(
+                actual, expected,
+                "a pre-probe variant's wire form changed; every helper alive across the \
+                 upgrade depends on these bytes"
+            );
         }
     }
 }

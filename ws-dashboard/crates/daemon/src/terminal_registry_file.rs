@@ -38,6 +38,33 @@ pub struct TerminalRegistryEntry {
     /// arbitrary-process SIGKILL this field exists to prevent.
     #[serde(default)]
     pub boot_id: Option<String>,
+    /// CONTRACT (260729 helper liveness probe): declares that the helper
+    /// which wrote this entry understands
+    /// `DaemonToHelperMessage::LivenessProbe`. Recorded HERE, in the registry
+    /// file, rather than only in the IPC handshake, because the site that
+    /// needs it most has no handshake to read a version out of: the periodic
+    /// sweep probes helpers it never handshaked with, and a *busy* helper
+    /// answers no handshake at all. All four daemon-side kill sites already
+    /// read `<registry_dir>/<id>.json`, so this is the one fact every one of
+    /// them can consult BEFORE putting a byte on the wire.
+    ///
+    /// `#[serde(default)]` (i.e. absent decodes as `false`) is a HARD
+    /// backward-compatibility requirement, exactly like `boot_id` above and
+    /// for a strictly worse failure mode: entries written by helpers that
+    /// predate the probe are on disk in live registry dirs right now, and
+    /// sending `LivenessProbe` to one of those helpers does not merely
+    /// disconnect it - `read_message` turns the unknown variant into an
+    /// `io::Error`, the helper's read site propagates it, and
+    /// `run_terminal_helper`'s exit path then SIGKILLs the user's shell and
+    /// erases its own registry entry. Absent therefore means "assume it
+    /// cannot answer, and never ask".
+    ///
+    /// The daemon-side consequence is deliberate and stated in the ticket: a
+    /// helper that declares no capability is LEFT ALONE on silence rather
+    /// than reaped, because "connected but unanswered" is undecidable for it
+    /// by construction. Only positive absence (no listener) may kill it.
+    #[serde(default)]
+    pub supports_liveness_probe: bool,
     pub socket_path: PathBuf,
     pub created_at_ms: u64,
     pub title: String,
@@ -174,6 +201,7 @@ mod tests {
             pid: 4242,
             start_time: 100,
             boot_id: Some("boot-uuid-sample".to_owned()),
+            supports_liveness_probe: true,
             socket_path: PathBuf::from("/tmp/term.sock"),
             created_at_ms: 1,
             title: "Terminal".to_owned(),
@@ -242,6 +270,66 @@ mod tests {
             scan_registry_dir(&dir).len(),
             1,
             "the directory scan must keep legacy entries too, not drop them"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // CONTRACT (260729 helper liveness probe, compatibility): the field must
+    // decode as ABSENT-means-false from a hand-written legacy payload, not
+    // merely round-trip through a struct the writer already populated. This
+    // is the exact byte shape a pre-probe helper left on disk, and the whole
+    // upgrade-safety argument rests on it: `false` here is what stops the
+    // daemon ever putting `LivenessProbe` on that helper's wire (which would
+    // SIGKILL its shell) and what makes "connected but silent" resolve to
+    // leave-alone rather than kill.
+    #[test]
+    fn a_legacy_entry_written_without_the_probe_capability_decodes_as_unsupported() {
+        let dir = temp_dir("legacy-no-probe-capability");
+        fs::create_dir_all(&dir).expect("create dir");
+        let legacy = r#"{
+  "terminalId": "term_legacy_probe",
+  "workRootId": "root-1",
+  "pid": 4242,
+  "startTime": 100,
+  "bootId": "boot-uuid-sample",
+  "socketPath": "/tmp/term.sock",
+  "createdAtMs": 1,
+  "title": "Terminal",
+  "cwdHint": null,
+  "columns": 80,
+  "rows": 24
+}"#;
+        fs::write(registry_entry_path(&dir, "term_legacy_probe"), legacy)
+            .expect("write legacy entry");
+
+        let entry = read_registry_entry(&dir, "term_legacy_probe")
+            .expect("a pre-probe registry entry must still parse, not be skipped as malformed");
+        assert!(
+            !entry.supports_liveness_probe,
+            "an absent `supportsLivenessProbe` must decode as false - the daemon must never \
+             send a probe to a helper that predates the variant"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // CONTRACT (260729 helper liveness probe): the declaration must actually
+    // reach disk under the camelCase name the rest of this file family uses.
+    // A `#[serde(skip)]` or a rename would make every freshly written entry
+    // read back as "predates the probe", silently disabling the whole
+    // three-way predicate while every round-trip test stayed green.
+    #[test]
+    fn a_written_entry_persists_its_probe_capability_as_camel_case_json() {
+        let dir = temp_dir("probe-capability-on-disk");
+        write_registry_entry(&dir, &sample_entry("term_probe")).expect("write entry");
+
+        let raw = fs::read_to_string(registry_entry_path(&dir, "term_probe")).expect("read raw json");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse raw json");
+        assert_eq!(
+            value.get("supportsLivenessProbe").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "the probe capability must be persisted as `supportsLivenessProbe`"
         );
 
         let _ = fs::remove_dir_all(&dir);

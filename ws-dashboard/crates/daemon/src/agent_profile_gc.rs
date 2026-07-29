@@ -95,10 +95,49 @@ pub async fn sweep_agent_profiles(
     grace: Duration,
 ) {
     let live_ids = registry.live_terminal_ids();
-    let live_ids_for_blocking = live_ids.clone();
     let state_dir = state_dir.to_path_buf();
+    let listing_dir = state_dir.clone();
+    let names = match tokio::task::spawn_blocking(move || profile_directory_names(&listing_dir))
+        .await
+    {
+        Ok(names) => names,
+        Err(error) => {
+            tracing::warn!(%error, "agent-profiles GC listing task panicked");
+            Vec::new()
+        }
+    };
+
+    // CONTRACT (260729 helper liveness probe, step 4): `live_ids` alone was
+    // the whole liveness test here, and it is the same wrong signal the kill
+    // sites had - another daemon's terminals are absent from THIS daemon's
+    // session map no matter how healthy they are. Every candidate the
+    // directory-name pass produces is now re-checked against the helper
+    // itself before anything is deleted; only candidates the probe positively
+    // clears reach the reclaim list. Candidate ORDER is preserved from
+    // `orphaned_profile_ids` (this filter never reorders), because the
+    // reclaim loop's iteration order is depended on by
+    // `terminal_notify_callback_restart.rs`'s ordering regression test.
+    let mut reclaimable = Vec::new();
+    for candidate in orphaned_profile_ids(names.iter().cloned(), &live_ids) {
+        if registry.profile_gc_may_reclaim(&candidate).await {
+            reclaimable.push(candidate);
+        } else {
+            tracing::debug!(
+                terminal_id = %candidate,
+                "agent-profiles GC sweep: sparing a profile whose helper is still reachable"
+            );
+        }
+    }
+
+    let live_ids_for_blocking = live_ids.clone();
+    let blocking_state_dir = state_dir.clone();
     let observations = match tokio::task::spawn_blocking(move || {
-        sweep_agent_profiles_blocking(&state_dir, &live_ids_for_blocking)
+        reclaim_and_observe_blocking(
+            &blocking_state_dir,
+            names,
+            reclaimable,
+            &live_ids_for_blocking,
+        )
     })
     .await
     {
@@ -135,10 +174,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn sweep_agent_profiles_blocking(
-    state_dir: &Path,
-    live_ids: &HashSet<String>,
-) -> Vec<LiveProfileObservation> {
+/// Blocking directory listing, split out of the former single-pass sweep so
+/// the probe gate between candidate selection and deletion can be async
+/// without dragging the whole pass onto the runtime thread.
+fn profile_directory_names(state_dir: &Path) -> Vec<String> {
     let profile_root = state_dir.join("agent-profiles");
     let read_dir = match std::fs::read_dir(&profile_root) {
         Ok(read_dir) => read_dir,
@@ -153,17 +192,26 @@ fn sweep_agent_profiles_blocking(
         }
     };
 
-    // Materialized rather than left lazy: the orphan-reclaim loop below and
-    // the live-directory observation pass after it each walk this list once.
-    let names: Vec<String> = read_dir
+    // Materialized rather than left lazy: the orphan-reclaim loop and the
+    // live-directory observation pass each walk this list once.
+    read_dir
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let is_dir = entry.file_type().ok()?.is_dir();
             is_dir.then(|| entry.file_name().to_string_lossy().into_owned())
         })
-        .collect();
+        .collect()
+}
 
-    for orphaned in orphaned_profile_ids(names.iter().cloned(), live_ids) {
+fn reclaim_and_observe_blocking(
+    state_dir: &Path,
+    names: Vec<String>,
+    reclaimable: Vec<String>,
+    live_ids: &HashSet<String>,
+) -> Vec<LiveProfileObservation> {
+    let profile_root = state_dir.join("agent-profiles");
+
+    for orphaned in reclaimable {
         let dir = profile_root.join(&orphaned);
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => {
