@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.37.1 - 2026-07-29
+
+### Fixed
+- **A git submodule now resolves as its own ws project instead of failing
+  outright.** `wsstate` derived a project's identity from `--git-common-dir` and
+  required that path to end in `.git`. A submodule's common dir is
+  `<parent>/.git/modules/<path>`, so resolution errored, and because
+  `playbook.render` resolves paths unconditionally, a submodule session would
+  open normally — `ferrule`, `workflow_manual`, and the doc, ticket, and git
+  tools all worked — and then die the moment any delegate prompt was rendered.
+  A submodule now resolves to its own `projectKey` with no `@` suffix, sharing
+  no cache state with its superproject. Detection is hooked on the existing
+  guard's failure path rather than ahead of it, so no layout that resolved
+  before can be reclassified. Worktrees created inside a submodule remain
+  unsupported and still fail loudly, except at a path the superproject itself
+  records as a gitlink.
+- **The statusline's last-update pill no longer breaks on macOS or during an
+  active turn.** Reading the transcript in reverse depended on `tac`, which
+  macOS lacks, and newest-line-first meant a single partially written line —
+  routine while the transcript is being appended — aborted the read before any
+  timestamp was emitted. Reading forward degrades to the last good timestamp
+  instead. The pill also counted tool-result entries, which are typed `user`,
+  so it reported activity recency rather than the output-token recency it is
+  labelled with. Transcript paths are normalized at the point of use for
+  Windows, and the cache-hit `awk` no longer trips gawk's constant folding of
+  `0 / 0` on a fresh session.
+
+### Changed
+- **`workflow_manual` now names `impl/*` and `goal/*` as workflow-owned
+  branches that merge with `--no-ff` by default.** The manual previously said
+  only to use native git for merge execution and never mentioned either branch
+  prefix, so leads occasionally fast-forwarded an implementation branch and
+  flattened its plan, review, and doc-closeout history. This states the default
+  and the squash case; it does not change the merge rules in
+  `workflow-skills.md`, which already specified them.
+- **The statusline's L3 row drops agent think-time and output tokens/sec.**
+  Cache hit rate moves next to the total-session-runtime pill, and the freed
+  pill now shows when output tokens last changed, derived from the transcript
+  the status JSON already points at rather than from new persisted state. The
+  indicator reports absolute `HH:MM` only — the relative age cost up to 11
+  columns on a row that already competes for width.
+
 ## v0.36.16 - 2026-07-26
 
 ### Changed
