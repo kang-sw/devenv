@@ -1257,6 +1257,21 @@ async fn terminal_close_kills_verified_process_via_fallback_kill() {
         "helper pid {pid} identity must match the registry's startTime before SIGSTOP-ing it"
     );
 
+    // CONTRACT (boot-identity gate): the only end-to-end check that a REAL
+    // helper process actually persists its boot identity. Every unit test of
+    // the gate constructs its `TerminalRegistryEntry` by hand, so a helper
+    // that silently stopped writing `bootId` would pass all of them - while
+    // in production every entry it wrote would become permanently
+    // unverifiable, and the daemon would quietly lose the ability to reap
+    // orphaned helpers at all (drop-only forever). `startTime` is captured
+    // just above from the same entry, so this asserts on the exact pair the
+    // daemon-side gate consumes together.
+    assert_eq!(
+        entry["bootId"].as_str().map(str::to_owned),
+        ws_dashboard_daemon::terminal_platform::boot_identity(),
+        "a real helper's registry entry must record this boot's identity alongside its startTime"
+    );
+
     // Freeze the helper so it cannot service `GracefulShutdown` before
     // `terminate()`'s 200ms fallback timer fires. Poll `ps` until the kernel
     // actually reports the stopped state (`T`) rather than assuming the

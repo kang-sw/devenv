@@ -18,6 +18,26 @@ pub struct TerminalRegistryEntry {
     pub work_root_id: String,
     pub pid: u32,
     pub start_time: u64,
+    /// CONTRACT (boot-identity gate): qualifies `start_time` with the boot it
+    /// was measured in, because on some platforms (Linux) `start_time` is
+    /// ticks SINCE BOOT and therefore names a different instant on every
+    /// boot - see `terminal_platform.rs`'s file-header "boot-identity gate"
+    /// CONTRACT for the per-platform reasoning, and
+    /// `terminal_reconcile::boot_identity_verified` for the decision itself.
+    ///
+    /// `#[serde(default)]` + `Option` is a HARD backward-compatibility
+    /// requirement, not a convenience: entries written before this field
+    /// existed are still on disk in live `<registry_dir>`s and must keep
+    /// parsing rather than being discarded as malformed. The conservative
+    /// reading of the resulting `None` is deliberate and asymmetric - on a
+    /// boot-relative platform a `None` boot identity is UNVERIFIABLE, so it
+    /// is drop-only and can never authorize a kill. The cost is that one
+    /// legacy entry per pre-upgrade helper is dropped instead of reaped
+    /// (a leaked helper process, self-exiting on its own idle/grace timers);
+    /// the alternative - treating `None` as "trust the pid" - is exactly the
+    /// arbitrary-process SIGKILL this field exists to prevent.
+    #[serde(default)]
+    pub boot_id: Option<String>,
     pub socket_path: PathBuf,
     pub created_at_ms: u64,
     pub title: String,
@@ -153,6 +173,7 @@ mod tests {
             work_root_id: "root-1".to_owned(),
             pid: 4242,
             start_time: 100,
+            boot_id: Some("boot-uuid-sample".to_owned()),
             socket_path: PathBuf::from("/tmp/term.sock"),
             created_at_ms: 1,
             title: "Terminal".to_owned(),
@@ -178,6 +199,70 @@ mod tests {
             let mode = fs::metadata(&path).expect("entry metadata").permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // CONTRACT (boot-identity gate, backward compatibility): entries written
+    // before `bootId` existed are still on disk in live registry dirs. They
+    // MUST keep parsing - `#[serde(default)]` on an `Option` - rather than
+    // being rejected as malformed and silently discarded by
+    // `scan_registry_dir`. This is a byte-for-byte legacy payload (the exact
+    // field set `write_registry_entry` produced before this change), so it
+    // fails if anyone drops the `#[serde(default)]` or makes the field
+    // non-optional.
+    #[test]
+    fn a_legacy_entry_written_without_boot_id_still_parses_with_none() {
+        let dir = temp_dir("legacy-no-boot-id");
+        fs::create_dir_all(&dir).expect("create dir");
+        let legacy = r#"{
+  "terminalId": "term_legacy",
+  "workRootId": "root-1",
+  "pid": 4242,
+  "startTime": 100,
+  "socketPath": "/tmp/term.sock",
+  "createdAtMs": 1,
+  "title": "Terminal",
+  "cwdHint": null,
+  "columns": 80,
+  "rows": 24
+}"#;
+        fs::write(registry_entry_path(&dir, "term_legacy"), legacy).expect("write legacy entry");
+
+        let entry = read_registry_entry(&dir, "term_legacy")
+            .expect("a pre-boot-id registry entry must still parse, not be skipped as malformed");
+        assert_eq!(entry.terminal_id, "term_legacy");
+        assert_eq!(entry.pid, 4242);
+        assert_eq!(
+            entry.boot_id, None,
+            "a legacy entry must read back as an ABSENT boot identity, which the daemon-side gate \
+             treats as unverifiable (drop-only, never killable) on a boot-relative platform"
+        );
+        assert_eq!(
+            scan_registry_dir(&dir).len(),
+            1,
+            "the directory scan must keep legacy entries too, not drop them"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // CONTRACT (boot-identity gate): the field must actually reach disk under
+    // the camelCase name the rest of the file family uses. A `#[serde(skip)]`
+    // or a rename would leave every freshly written entry unverifiable, which
+    // no round-trip-through-serde test would catch.
+    #[test]
+    fn a_written_entry_persists_its_boot_id_as_camel_case_json() {
+        let dir = temp_dir("boot-id-on-disk");
+        write_registry_entry(&dir, &sample_entry("term_boot")).expect("write entry");
+
+        let raw = fs::read_to_string(registry_entry_path(&dir, "term_boot")).expect("read raw json");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse raw json");
+        assert_eq!(
+            value.get("bootId").and_then(serde_json::Value::as_str),
+            Some("boot-uuid-sample"),
+            "the recorded boot identity must be persisted as `bootId`"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

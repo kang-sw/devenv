@@ -26,7 +26,9 @@ use crate::terminal_helper_protocol::{
     DaemonToHelperMessage, HelperToDaemonMessage, TerminalHelperOutputChunk, TerminalHelperStatus,
 };
 use crate::terminal_ipc_transport::{IpcReadHalf, IpcWriteHalf};
-use crate::terminal_reconcile::{classify, IdentityStatus, IpcStatus, ReconcileRow};
+use crate::terminal_reconcile::{
+    boot_identity_verified, classify, IdentityStatus, IpcStatus, ReconcileRow,
+};
 use crate::terminal_registry_file::{
     delete_registry_entry, read_registry_entry, registry_entry_path, scan_registry_dir,
     TerminalRegistryEntry,
@@ -386,7 +388,7 @@ impl TerminalRegistry {
         // alone a kill - `classify` encodes this short-circuit, but the
         // check is duplicated here explicitly so no connect attempt can
         // slip in before it (see `terminal_reconcile.rs` rows 3/5).
-        let identity = identity_status(entry.pid, entry.start_time);
+        let identity = identity_status(entry.pid, entry.start_time, entry.boot_id.as_deref());
         if !matches!(identity, IdentityStatus::VerifiedOurs) {
             delete_registry_entry(&self.registry_dir, &entry.terminal_id);
             return;
@@ -455,10 +457,13 @@ impl TerminalRegistry {
                     &entry.terminal_id,
                     entry.pid,
                     entry.start_time,
+                    entry.boot_id.as_deref(),
                 )
                 .await;
             }
-            ReconcileRow::DropNoSuchProcess | ReconcileRow::DropPidReused => {
+            ReconcileRow::DropNoSuchProcess
+            | ReconcileRow::DropPidReused
+            | ReconcileRow::DropUnverifiableBoot => {
                 unreachable!("identity already verified above; classify cannot return this row")
             }
         }
@@ -963,19 +968,28 @@ impl TerminalRegistry {
             ) {
                 continue;
             }
-            match identity_status(entry.pid, entry.start_time) {
+            match identity_status(entry.pid, entry.start_time, entry.boot_id.as_deref()) {
                 IdentityStatus::VerifiedOurs => {
                     kill_verified_and_delete_entry(
                         &self.registry_dir,
                         &entry.terminal_id,
                         entry.pid,
                         entry.start_time,
+                        entry.boot_id.as_deref(),
                     )
                     .await;
                 }
-                IdentityStatus::NoSuchProcess | IdentityStatus::PidReused => {
+                IdentityStatus::NoSuchProcess
+                | IdentityStatus::PidReused
+                | IdentityStatus::UnverifiableBoot => {
                     // Same never-kill invariant as `reconcile_entry`: an
                     // unverified identity is dropped only, never signaled.
+                    // `UnverifiableBoot` matters most HERE: this sweep re-runs
+                    // every 10s at runtime, so a stale cross-boot entry that
+                    // survived a hard reboot would otherwise be re-evaluated
+                    // thousands of times a day, each one a fresh chance for
+                    // the recorded pid+tick-offset pair to coincide with some
+                    // unrelated process on the new boot.
                     delete_registry_entry(&self.registry_dir, &entry.terminal_id);
                 }
             }
@@ -1000,7 +1014,25 @@ impl TerminalRegistry {
     }
 }
 
-fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
+// CONTRACT (boot-identity gate): the boot check runs BEFORE the start-time
+// comparison and before `/proc` (or its per-platform equivalent) is touched
+// at all. On a boot-relative platform a `start_time` from another boot - or
+// one with no boot qualifier recorded - is not a weaker match, it is not a
+// match at all: the very same tick offset names a different instant on the
+// new boot, so comparing it can manufacture a `VerifiedOurs` for an
+// arbitrary unrelated process. Ordering the check first is what keeps
+// "unverifiable" from ever being able to fall through into `VerifiedOurs`.
+// See `terminal_reconcile::boot_identity_verified` for the per-platform
+// semantics and `terminal_platform.rs`'s file-header CONTRACT for why only
+// Linux is boot-relative.
+fn identity_status(pid: u32, start_time: u64, recorded_boot_id: Option<&str>) -> IdentityStatus {
+    if !boot_identity_verified(
+        crate::terminal_platform::START_TIME_IS_BOOT_RELATIVE,
+        recorded_boot_id,
+        crate::terminal_platform::boot_identity().as_deref(),
+    ) {
+        return IdentityStatus::UnverifiableBoot;
+    }
     match crate::terminal_platform::process_start_time(pid) {
         Some(observed) if observed == start_time => IdentityStatus::VerifiedOurs,
         Some(_) => IdentityStatus::PidReused,
@@ -1016,15 +1048,43 @@ fn identity_status(pid: u32, start_time: u64) -> IdentityStatus {
 // one implementation. Mirrors `reconcile_entry`'s original inline shape:
 // verified kill first (best-effort - an already-gone process makes this a
 // harmless no-op), then unconditionally prune both registry files.
+//
+// CONTRACT (boot-identity gate, choke point): because this is the ONE place
+// a registry entry's pid is ever signaled, the boot gate is re-applied here
+// rather than trusted from the caller. Two of the three callers
+// (`reconcile_entry`, `sweep_registry_backstop`) already ran `identity_status`
+// and cannot reach this with an unverifiable boot; the third
+// (`TerminalSession::spawn`'s handshake-failure cleanup) reads its entry
+// straight off disk and never calls `identity_status` at all, so without this
+// re-check that path would be the last remaining way a stale cross-boot
+// `start_time` could authorize a SIGKILL. On mismatch the entry is still
+// pruned - drop-only is the outcome, exactly as in `classify`'s
+// `DropUnverifiableBoot` row - only the signal is withheld.
 async fn kill_verified_and_delete_entry(
     registry_dir: &Path,
     terminal_id: &str,
     pid: u32,
     start_time: u64,
+    recorded_boot_id: Option<&str>,
 ) {
-    let _ =
-        tokio::task::spawn_blocking(move || crate::terminal_platform::kill_verified(pid, start_time))
-            .await;
+    if boot_identity_verified(
+        crate::terminal_platform::START_TIME_IS_BOOT_RELATIVE,
+        recorded_boot_id,
+        crate::terminal_platform::boot_identity().as_deref(),
+    ) {
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::terminal_platform::kill_verified(pid, start_time)
+        })
+        .await;
+    } else {
+        tracing::warn!(
+            terminal_id,
+            pid,
+            "refusing to signal a registry entry whose boot identity does not match this boot - \
+             its start time is not comparable, so the pid may belong to an unrelated process; \
+             dropping the entry only"
+        );
+    }
     delete_registry_entry(registry_dir, terminal_id);
 }
 
@@ -2133,8 +2193,14 @@ impl TerminalSession {
             .unwrap_or(None);
             match entry {
                 Some(entry) => {
-                    kill_verified_and_delete_entry(registry_dir, &id, entry.pid, entry.start_time)
-                        .await;
+                    kill_verified_and_delete_entry(
+                        registry_dir,
+                        &id,
+                        entry.pid,
+                        entry.start_time,
+                        entry.boot_id.as_deref(),
+                    )
+                    .await;
                 }
                 None => delete_registry_entry(registry_dir, &id),
             }
@@ -2328,6 +2394,16 @@ impl TerminalSession {
     // helper can accept the write into its socket buffer without ever
     // processing it, and an already-gone helper simply makes the verified
     // kill a harmless no-op (identity will not verify).
+    //
+    // CONTRACT (boot-identity gate, deliberately NOT applied here): unlike
+    // the registry-entry kill path (`kill_verified_and_delete_entry`), this
+    // one's `pid`/`start_time` do not come from a file that can outlive a
+    // reboot - they come from a `HandshakeConnection` this daemon process
+    // completed over live IPC (`from_connection`, the only constructor of a
+    // `TerminalSession`). A completed handshake is positive proof the helper
+    // was running in THIS boot, so the recorded start time is by construction
+    // same-boot and comparable. Adding a boot gate here would guard nothing;
+    // do not "unify" the two paths on that basis.
     pub(crate) async fn terminate(&self) {
         let next_sequence = {
             let mut inner = self.inner.lock().expect("terminal session lock poisoned");
@@ -3428,6 +3504,7 @@ mod terminal_portability_skeleton_tests {
             work_root_id: "root-kill".to_owned(),
             pid,
             start_time,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join("term_kill_and_delete.sock"),
             created_at_ms: now_ms(),
             title: "Kill And Delete".to_owned(),
@@ -3440,8 +3517,14 @@ mod terminal_portability_skeleton_tests {
         std::fs::write(&entry.socket_path, b"stand-in socket file")
             .expect("write stand-in socket file");
 
-        kill_verified_and_delete_entry(&registry_dir, &entry.terminal_id, entry.pid, entry.start_time)
-            .await;
+        kill_verified_and_delete_entry(
+            &registry_dir,
+            &entry.terminal_id,
+            entry.pid,
+            entry.start_time,
+            entry.boot_id.as_deref(),
+        )
+        .await;
 
         let mut exited = false;
         for _ in 0..50 {
@@ -3565,6 +3648,7 @@ mod terminal_portability_skeleton_tests {
             // (2^22 default ceiling), so no real process can ever hold it.
             pid: 0x7fff_fffe,
             start_time: 123,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join("term_row3_no_such_process.sock"),
             created_at_ms: now_ms(),
             title: "Row 3".to_owned(),
@@ -3627,6 +3711,7 @@ mod terminal_portability_skeleton_tests {
             work_root_id: "root-row5".to_owned(),
             pid: foreign_pid,
             start_time: 1,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join("term_row5_pid_reused.sock"),
             created_at_ms: now_ms(),
             title: "Row 5".to_owned(),
@@ -3802,6 +3887,7 @@ mod terminal_portability_skeleton_tests {
             work_root_id: "root-sweep-i1".to_owned(),
             pid,
             start_time,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join(format!("{terminal_id}.sock")),
             // Old enough to already exceed connect_timeout + margin the
             // instant the backstop checks it - exactly what makes the I1
@@ -3890,6 +3976,7 @@ mod terminal_portability_skeleton_tests {
             work_root_id: "root-backstop".to_owned(),
             pid: orphan_pid,
             start_time: orphan_start_time,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join("term_backstop_orphan.sock"),
             created_at_ms: stale_created_at_ms,
             title: "Orphan".to_owned(),
@@ -3907,6 +3994,7 @@ mod terminal_portability_skeleton_tests {
             work_root_id: "root-backstop".to_owned(),
             pid: 0x7fff_fffe,
             start_time: 123,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join("term_backstop_unverified.sock"),
             created_at_ms: stale_created_at_ms,
             title: "Unverified".to_owned(),
@@ -3929,6 +4017,7 @@ mod terminal_portability_skeleton_tests {
             work_root_id: "root-backstop".to_owned(),
             pid: orphan_pid,
             start_time: orphan_start_time,
+            boot_id: crate::terminal_platform::boot_identity(),
             socket_path: registry_dir.join("term_backstop_live.sock"),
             created_at_ms: stale_created_at_ms,
             title: "Live".to_owned(),
@@ -3972,6 +4061,252 @@ mod terminal_portability_skeleton_tests {
             "an entry with a live in-memory session must be left untouched by the backstop"
         );
 
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (boot-identity gate): the headline hazard this guard exists
+    // for, reproduced end-to-end against a REAL live process. A hard reboot
+    // SIGKILLs helpers before their delete-on-exit cleanup runs, so stale
+    // `<id>.json` entries survive it. On a boot-relative platform (Linux)
+    // the recorded `start_time` is ticks-since-boot, so an unrelated process
+    // on the NEW boot can hold the recorded pid AND report the very same
+    // tick offset - `process_start_time` then agrees and, before this fix,
+    // `identity_status` returned `VerifiedOurs` and the entry was SIGKILLed.
+    //
+    // This test constructs exactly that coincidence deterministically rather
+    // than waiting for it: `pid`/`start_time` are read from a real live
+    // process so the start-time comparison is GUARANTEED to match, and only
+    // the recorded boot identity differs. Revert the boot check in
+    // `identity_status` (or in `kill_verified_and_delete_entry`) and this
+    // test kills `sleep 30` and fails. It is also the runtime-frequency case:
+    // `sweep_registry_backstop` re-runs this decision every sweep tick, not
+    // once per daemon start.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sweep_never_kills_a_matching_pid_and_start_time_recorded_under_a_different_boot() {
+        if !crate::terminal_platform::START_TIME_IS_BOOT_RELATIVE {
+            // macOS/Windows record an ABSOLUTE start time, so there is no
+            // cross-boot re-minting hazard and the gate is inert by design
+            // (see `terminal_platform.rs`'s file-header CONTRACT). Asserting
+            // "must not kill" there would assert the opposite of those
+            // platforms' intended behavior.
+            return;
+        }
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-sweep-foreign-boot-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(50),
+            None,
+            String::new(),
+        );
+
+        let mut bystander = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn the unrelated process a stale cross-boot entry would mis-target");
+        let pid = bystander.id();
+        let start_time = crate::terminal_platform::process_start_time(pid)
+            .expect("bystander must report a start time");
+
+        let entry = TerminalRegistryEntry {
+            terminal_id: "term_foreign_boot".to_owned(),
+            work_root_id: "root-foreign-boot".to_owned(),
+            // Real pid + real start time: the start-time comparison alone
+            // WILL verify. The boot identity is the only thing standing
+            // between this entry and a SIGKILL of an arbitrary process.
+            pid,
+            start_time,
+            boot_id: Some("00000000-0000-0000-0000-000000000000".to_owned()),
+            socket_path: registry_dir.join("term_foreign_boot.sock"),
+            created_at_ms: now_ms().saturating_sub(60_000),
+            title: "Foreign Boot".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write cross-boot entry");
+
+        assert_eq!(
+            identity_status(entry.pid, entry.start_time, entry.boot_id.as_deref()),
+            IdentityStatus::UnverifiableBoot,
+            "a pid+start-time pair recorded under a different boot must classify as \
+             unverifiable, never as VerifiedOurs"
+        );
+
+        registry.sweep_registry_backstop().await;
+
+        // Give a mis-fired SIGKILL every chance to land before asserting the
+        // absence - a bare post-sweep poll could pass simply by racing it.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            bystander
+                .try_wait()
+                .expect("poll the bystander process")
+                .is_none(),
+            "a stale entry from a previous boot must NEVER SIGKILL the unrelated process now \
+             holding its pid, even when the recorded start time coincidentally matches"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "the stale cross-boot entry must still be pruned - the outcome is drop-only, not \
+             leave-it-alone"
+        );
+
+        let _ = bystander.kill();
+        let _ = bystander.wait();
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (boot-identity gate, backward compatibility): the same hazard
+    // as the test above, but for an entry written BEFORE `bootId` existed -
+    // `boot_id: None`. On a boot-relative platform that entry is
+    // unverifiable, NOT trusted: a boot-relative start time with no boot
+    // qualifier is exactly the value a reboot can silently re-mint. Reverting
+    // the `None` leg of `boot_identity_verified` (e.g. to "absent means
+    // trust the pid" for compatibility) kills the bystander here.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_legacy_entry_with_no_recorded_boot_identity_is_dropped_not_killed() {
+        if !crate::terminal_platform::START_TIME_IS_BOOT_RELATIVE {
+            return;
+        }
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-sweep-legacy-boot-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let registry = TerminalRegistry::new(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(50),
+            None,
+            String::new(),
+        );
+
+        let mut bystander = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn the unrelated process a legacy entry would mis-target");
+        let pid = bystander.id();
+        let start_time = crate::terminal_platform::process_start_time(pid)
+            .expect("bystander must report a start time");
+
+        let entry = TerminalRegistryEntry {
+            terminal_id: "term_legacy_boot".to_owned(),
+            work_root_id: "root-legacy-boot".to_owned(),
+            pid,
+            start_time,
+            boot_id: None,
+            socket_path: registry_dir.join("term_legacy_boot.sock"),
+            created_at_ms: now_ms().saturating_sub(60_000),
+            title: "Legacy Boot".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write legacy entry");
+
+        registry.sweep_registry_backstop().await;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            bystander
+                .try_wait()
+                .expect("poll the bystander process")
+                .is_none(),
+            "an entry with no recorded boot identity must never authorize a kill on a \
+             boot-relative platform"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "the legacy entry must still be pruned"
+        );
+
+        let _ = bystander.kill();
+        let _ = bystander.wait();
+        let _ = std::fs::remove_dir_all(&registry_dir);
+    }
+
+    // CONTRACT (boot-identity gate, choke point): `kill_verified_and_delete_
+    // entry` re-applies the gate itself rather than trusting callers, because
+    // `TerminalSession::spawn`'s handshake-failure cleanup reaches it without
+    // ever calling `identity_status`. Driving the helper DIRECTLY is what
+    // distinguishes this from the sweep tests above - remove only the
+    // in-function check and the sweep tests still pass while this one kills
+    // the bystander.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_verified_and_delete_entry_withholds_the_signal_on_a_foreign_boot_identity() {
+        if !crate::terminal_platform::START_TIME_IS_BOOT_RELATIVE {
+            return;
+        }
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-kill-foreign-boot-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut bystander = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn bystander process");
+        let pid = bystander.id();
+        let start_time = crate::terminal_platform::process_start_time(pid)
+            .expect("bystander must report a start time");
+
+        let entry = TerminalRegistryEntry {
+            terminal_id: "term_choke_point".to_owned(),
+            work_root_id: "root-choke-point".to_owned(),
+            pid,
+            start_time,
+            boot_id: Some("00000000-0000-0000-0000-000000000000".to_owned()),
+            socket_path: registry_dir.join("term_choke_point.sock"),
+            created_at_ms: now_ms(),
+            title: "Choke Point".to_owned(),
+            cwd_hint: None,
+            columns: 80,
+            rows: 24,
+        };
+        crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+            .expect("write entry");
+        std::fs::write(&entry.socket_path, b"stand-in socket file")
+            .expect("write stand-in socket file");
+
+        kill_verified_and_delete_entry(
+            &registry_dir,
+            &entry.terminal_id,
+            entry.pid,
+            entry.start_time,
+            entry.boot_id.as_deref(),
+        )
+        .await;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            bystander
+                .try_wait()
+                .expect("poll the bystander process")
+                .is_none(),
+            "the shared kill+delete choke point must withhold the signal when the entry's boot \
+             identity does not match this boot"
+        );
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "the entry must still be pruned even though the signal was withheld"
+        );
+        assert!(
+            !entry.socket_path.exists(),
+            "the stray .sock file must be pruned alongside the .json entry"
+        );
+
+        let _ = bystander.kill();
+        let _ = bystander.wait();
         let _ = std::fs::remove_dir_all(&registry_dir);
     }
 
@@ -4034,8 +4369,17 @@ mkdir -p "$registry_dir"
 after_comm=$(sed 's/.*)//' /proc/$$/stat)
 start_time=$(printf '%s' "$after_comm" | awk '{{print $20}}')
 printf '%s %s' "$$" "$start_time" > {identity_path}
+# Boot identity, mirroring `terminal_platform::boot_identity()`: the daemon
+# refuses to signal an entry whose recorded boot does not match this one, so
+# this fixture must record the real current boot id or the test would stop
+# exercising the kill path at all (it would silently become a drop-only test).
+if [ -r /proc/sys/kernel/random/boot_id ]; then
+  boot_id="\"$(cat /proc/sys/kernel/random/boot_id)\""
+else
+  boot_id=null
+fi
 cat > "$registry_dir/$terminal_id.json.tmp" <<JSON
-{{"terminalId":"$terminal_id","workRootId":"fake-work-root","pid":$$,"startTime":$start_time,"socketPath":"$socket_path","createdAtMs":0,"title":"never-handshakes","cwdHint":null,"columns":80,"rows":24}}
+{{"terminalId":"$terminal_id","workRootId":"fake-work-root","pid":$$,"startTime":$start_time,"bootId":$boot_id,"socketPath":"$socket_path","createdAtMs":0,"title":"never-handshakes","cwdHint":null,"columns":80,"rows":24}}
 JSON
 mv "$registry_dir/$terminal_id.json.tmp" "$registry_dir/$terminal_id.json"
 touch "$socket_path"

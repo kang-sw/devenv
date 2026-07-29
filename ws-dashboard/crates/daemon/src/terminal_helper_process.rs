@@ -202,6 +202,16 @@ pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()>
         work_root_id: args.work_root_id.clone(),
         pid,
         start_time,
+        // CONTRACT (boot-identity gate): recorded in the same breath as
+        // `start_time`, because on a boot-relative platform the two are only
+        // meaningful together. Deliberately NOT fatal when it comes back
+        // `None` (unlike `start_time` above, which hard-errors): the daemon
+        // side treats a missing boot id as unverifiable, i.e. this helper
+        // becomes un-reapable rather than the terminal failing to start at
+        // all. Degrading a rare kernel/procfs oddity into "this one helper
+        // must self-exit on its own timers" is the conservative trade; a
+        // hard error would take down terminal creation outright.
+        boot_id: crate::terminal_platform::boot_identity(),
         socket_path: args.socket_path.clone(),
         created_at_ms: now_ms(),
         title: args.title.clone(),

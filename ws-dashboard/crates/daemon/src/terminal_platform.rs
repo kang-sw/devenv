@@ -13,6 +13,37 @@
 // decision has to be made. `verify_process_identity` re-derives start-time
 // from the OS and compares against the registry-recorded value.
 //
+// CONTRACT (boot-identity gate): `process_start_time`'s unit is NOT the same
+// kind of value on every platform, and the difference is safety-critical
+// because a start-time match is the ONLY kill precondition (above). Each
+// platform leaf therefore also publishes two companion items that the
+// daemon-side identity check consumes:
+//
+// - `START_TIME_IS_BOOT_RELATIVE`: whether the value is only meaningful
+//   within a single boot.
+// - `boot_identity()`: an identifier that changes on every boot, `None` when
+//   the platform does not need one.
+//
+// Per-platform reasoning (do not "simplify" these to one uniform leg):
+// - Linux: `START_TIME_IS_BOOT_RELATIVE = true`. `/proc/<pid>/stat` field 22
+//   is clock ticks SINCE BOOT, so the same numeric value names a different
+//   instant on every boot. After a hard reboot (which SIGKILLs helpers before
+//   their delete-on-exit cleanup, leaving stale `<id>.json` entries behind),
+//   an unrelated process that merely happens to hold the recorded pid AND to
+//   have started at the same tick offset on the NEW boot would otherwise
+//   verify as ours and be SIGKILLed. `boot_identity()` reads
+//   `/proc/sys/kernel/random/boot_id`, which the kernel regenerates per boot.
+// - macOS: `START_TIME_IS_BOOT_RELATIVE = false`. `pbi_start_tvsec`/
+//   `pbi_start_tvusec` are absolute wall-clock (epoch) values, so a recorded
+//   start time cannot be re-minted by a later boot's tick counter. There is
+//   nothing for a boot identity to protect here, so `boot_identity()` is
+//   `None` and the recorded field is deliberately NOT consulted - adding a
+//   gate would only turn today's correctly-verified entries into
+//   unverifiable ones (a regression), not close any hole.
+// - Windows: `START_TIME_IS_BOOT_RELATIVE = false`. `GetProcessTimes`'
+//   `lpCreationTime` is a `FILETIME` - 100-ns intervals since 1601-01-01 UTC,
+//   absolute like macOS, not boot-relative. Same conclusion as macOS.
+//
 // `kill_verified`'s TOCTOU guarantee is PLATFORM-TIERED - do not read either
 // bullet below as a whole-file invariant:
 // - Linux/Windows: `kill_verified` captures a *stable* OS handle (Linux
@@ -75,6 +106,21 @@ pub mod unix {
 pub mod linux {
     use super::*;
 
+    /// See the file-header "boot-identity gate" CONTRACT: Linux start times
+    /// are ticks since boot, so they are only comparable within one boot.
+    pub const START_TIME_IS_BOOT_RELATIVE: bool = true;
+
+    /// The kernel's per-boot random UUID (`/proc/sys/kernel/random/boot_id`),
+    /// regenerated on every boot. `None` when `/proc` is unreadable or the
+    /// file is empty - which the daemon-side gate treats as "cannot verify",
+    /// never as "verified" (see `terminal_reconcile::boot_identity_verified`).
+    pub fn boot_identity() -> Option<String> {
+        std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .ok()
+            .map(|raw| raw.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
     /// Process start time in clock ticks since boot, read from
     /// `/proc/<pid>/stat` field 22 (`starttime`). `None` if the process does
     /// not exist or `/proc` is unreadable. The process name field (`comm`)
@@ -135,6 +181,21 @@ pub mod linux {
 #[cfg(target_os = "macos")]
 pub mod macos {
     use super::*;
+
+    /// See the file-header "boot-identity gate" CONTRACT: macOS start times
+    /// are absolute epoch values, so they stay comparable across boots and
+    /// need no boot qualifier.
+    pub const START_TIME_IS_BOOT_RELATIVE: bool = false;
+
+    /// Always `None` on macOS. macOS *does* expose a per-boot UUID
+    /// (`sysctl kern.bootsessionuuid`), but reading it here would be
+    /// actively harmful rather than merely unused: the gate would then
+    /// reject every entry written before this field existed, converting
+    /// today's correctly-verified orphan kills into silent drops on a
+    /// platform that has no boot-relative hazard to begin with.
+    pub fn boot_identity() -> Option<String> {
+        None
+    }
 
     /// Reads `PROC_PIDTBSDINFO` for `pid` via `proc_pidinfo(3)`. `None` if
     /// the process does not exist, is not visible to us (e.g. owned by
@@ -488,6 +549,20 @@ pub mod windows {
         }
     }
 
+    /// See the file-header "boot-identity gate" CONTRACT: `GetProcessTimes`'
+    /// creation time is a `FILETIME` (100-ns intervals since 1601-01-01 UTC),
+    /// an absolute wall-clock value like macOS's - not a boot-relative
+    /// counter like Linux's `/proc/<pid>/stat` field 22.
+    pub const START_TIME_IS_BOOT_RELATIVE: bool = false;
+
+    /// Always `None` on Windows, for the same reason as the macOS leg: the
+    /// recorded start time is already absolute, so a boot qualifier would add
+    /// no safety and would strand every pre-existing registry entry as
+    /// unverifiable.
+    pub fn boot_identity() -> Option<String> {
+        None
+    }
+
     pub fn process_start_time(pid: u32) -> Option<u64> {
         let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
         if handle.is_null() {
@@ -550,11 +625,20 @@ pub mod windows {
 #[cfg(unix)]
 pub use unix::spawn_detached;
 #[cfg(target_os = "linux")]
-pub use linux::{kill_verified, process_start_time, verify_process_identity};
+pub use linux::{
+    boot_identity, kill_verified, process_start_time, verify_process_identity,
+    START_TIME_IS_BOOT_RELATIVE,
+};
 #[cfg(target_os = "macos")]
-pub use macos::{kill_verified, process_start_time, verify_process_identity};
+pub use macos::{
+    boot_identity, kill_verified, process_start_time, verify_process_identity,
+    START_TIME_IS_BOOT_RELATIVE,
+};
 #[cfg(windows)]
-pub use windows::{kill_verified, process_start_time, spawn_detached, verify_process_identity};
+pub use windows::{
+    boot_identity, kill_verified, process_start_time, spawn_detached, verify_process_identity,
+    START_TIME_IS_BOOT_RELATIVE,
+};
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 compile_error!(
     "ws-dashboard-daemon terminal_platform: unsupported target (only linux, macos, windows are implemented)"
@@ -562,8 +646,59 @@ compile_error!(
 
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod platform_identity_tests {
-    use super::{kill_verified, process_start_time, verify_process_identity};
+    use super::{
+        boot_identity, kill_verified, process_start_time, verify_process_identity,
+        START_TIME_IS_BOOT_RELATIVE,
+    };
     use std::process::Command;
+
+    // CONTRACT (boot-identity gate): a platform whose start time is
+    // boot-relative MUST be able to produce a boot identity - otherwise every
+    // registry entry it writes is permanently unverifiable and the daemon
+    // silently loses its ability to reap orphaned helpers at all. Fails if
+    // `START_TIME_IS_BOOT_RELATIVE` is flipped on for a platform whose
+    // `boot_identity()` still returns `None` (or vice versa).
+    #[test]
+    fn boot_relative_platforms_publish_a_boot_identity_and_absolute_ones_do_not() {
+        let identity = boot_identity();
+        if START_TIME_IS_BOOT_RELATIVE {
+            let identity = identity.expect(
+                "a boot-relative start-time platform must publish a boot identity, or the \
+                 daemon-side gate can never verify any entry",
+            );
+            assert!(
+                !identity.trim().is_empty(),
+                "boot identity must not be blank/whitespace - the gate treats an empty value as \
+                 unverifiable"
+            );
+            assert_eq!(
+                Some(identity),
+                boot_identity(),
+                "the boot identity must be stable within a single boot"
+            );
+        } else {
+            assert_eq!(
+                identity, None,
+                "an absolute-start-time platform must not publish a boot identity - see the \
+                 file-header CONTRACT for why gating it would be a regression, not a fix"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_boot_identity_matches_the_kernels_per_boot_uuid_file() {
+        // Read the ground-truth file directly rather than through the leg
+        // under test: a bug that pointed `boot_identity` at some other
+        // (stable-across-boots) file would still pass a self-comparison.
+        let raw = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .expect("/proc/sys/kernel/random/boot_id must be readable on Linux");
+        assert_eq!(
+            boot_identity(),
+            Some(raw.trim().to_owned()),
+            "linux boot identity must be the kernel's per-boot random UUID, trimmed"
+        );
+    }
 
     #[test]
     fn process_start_time_is_stable_for_the_same_live_process() {
