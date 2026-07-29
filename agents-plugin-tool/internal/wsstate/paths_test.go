@@ -320,6 +320,27 @@ func TestResolveTreatsSubmoduleWorkingTreesAsIndependentProjects(t *testing.T) {
 	}
 }
 
+// Worktrees created inside a submodule are an explicitly unsupported layout.
+// They reach commonRootFromGitDir's guard and must keep failing loudly rather
+// than being silently reclassified by the submodule probe: git reports no
+// superproject for them, so the probe declines and the original error stands.
+func TestResolveRejectsWorktreeCreatedInsideSubmodule(t *testing.T) {
+	_, mainSubPath := initSubmoduleSuperproject(t)
+	subWorktreePath := filepath.Join(t.TempDir(), "sub-feature")
+	runGit(t, mainSubPath, "worktree", "add", "-b", "feature/inside-submodule", subWorktreePath, "HEAD")
+
+	_, _, _, err := NewManager(Options{
+		CacheHome: filepath.Join(t.TempDir(), "cache"),
+		Now:       func() time.Time { return fixedNow },
+	}).Resolve(subWorktreePath)
+	if err == nil {
+		t.Fatal("Resolve(worktree inside submodule) unexpectedly succeeded; this layout must stay fail-loud")
+	}
+	if !strings.Contains(err.Error(), "unsupported git common dir") {
+		t.Fatalf("Resolve(worktree inside submodule) error = %v, want the unsupported git common dir guard", err)
+	}
+}
+
 func TestResolveDoesNotRequireOriginRemote(t *testing.T) {
 	repo := initRepo(t)
 	if out := runGit(t, repo, "remote"); strings.TrimSpace(out) != "" {

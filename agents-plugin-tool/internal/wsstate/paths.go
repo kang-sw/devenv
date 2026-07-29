@@ -240,27 +240,29 @@ func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err e
 	if err != nil {
 		return "", "", err
 	}
-	superprojectRoot, err := git(abs, "rev-parse", "--show-superproject-working-tree")
-	if err != nil {
-		return "", "", err
-	}
-	if superprojectRoot != "" {
-		// abs resolves inside a submodule's own working tree: treat the
-		// submodule as an independent single-worktree project (root ==
-		// commonRoot) rather than resolving its git-common-dir, which for a
-		// submodule lives under the parent's .git/modules tree and would
-		// otherwise fail commonRootFromGitDir's non-bare-.git guard.
-		return root, root, nil
-	}
 	commonGitDir, err := git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", "", err
 	}
 	commonRoot, err = commonRootFromGitDir(commonGitDir)
-	if err != nil {
+	if err == nil {
+		return root, commonRoot, nil
+	}
+	// commonRootFromGitDir rejected the git-common-dir. An absorbed submodule's
+	// common dir lives under the superproject's .git/modules tree, so it lands
+	// here by design; probe for that shape and, when confirmed, treat the
+	// submodule as an independent single-worktree project (root == commonRoot).
+	// Probing only on this error path is deliberate: every layout that resolves
+	// today still takes its original code path, so submodule support cannot
+	// reclassify it, and ordinary roots pay no extra git process.
+	superprojectRoot, probeErr := git(abs, "rev-parse", "--show-superproject-working-tree")
+	if probeErr != nil || superprojectRoot == "" {
+		// Not a submodule, or the probe itself failed: preserve the original
+		// fail-loud error. This still covers worktrees created inside a
+		// submodule, which report no superproject.
 		return "", "", err
 	}
-	return root, commonRoot, nil
+	return root, root, nil
 }
 
 func commonRootFromGitDir(gitDir string) (string, error) {
