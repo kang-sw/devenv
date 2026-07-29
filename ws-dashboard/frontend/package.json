@@ -21,13 +21,17 @@
     "test:agent-chat-capabilities": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/activitySessionStub.test.js && node ./node_modules/.tmp/route-tests/agentChatCapabilities.test.js",
     "test:agent-chat-client": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/activitySessionClient.test.js",
     "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminalCommandPlan.test.js && node ./node_modules/.tmp/route-tests/terminals.test.js && node ./node_modules/.tmp/route-tests/workbench/terminalVisualRestore.test.js && tsc -p tsconfig.e2e-tests.json && node ./node_modules/.tmp/e2e-tests/e2e/daemonHarness.test.js",
+    "test:agent-attention": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/agentAttention.test.js",
+    "test:browser-attention-cue": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/browserAttentionCue.test.js",
+    "test:notification-prefs": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/notificationPrefs.test.js",
     "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test",
     "test:open-work-root": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/openWorkRoot.test.js",
     "test:document-viewer": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/documentViewer.test.js && node ./node_modules/.tmp/route-tests/documentRawEditor.test.js",
     "test:git": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/gitToolbar.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeAdd.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeRemove.test.js",
     "test:keydown-suppression": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/keydownSuppression.test.js",
     "test:hotkeys": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/hotkeys.test.js",
-    "test:settings": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/settingsStore.test.js && node ./node_modules/.tmp/route-tests/terminalPrefs.test.js && node ./node_modules/.tmp/route-tests/settingsSections.test.js"
+    "test:settings": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/settingsStore.test.js && node ./node_modules/.tmp/route-tests/terminalPrefs.test.js && node ./node_modules/.tmp/route-tests/settingsSections.test.js",
+    "test:resource-presentation": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourcePresentation.test.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

@@ -16,6 +16,8 @@ import type {
 } from "react";
 import {
   Activity,
+  Bell,
+  Bot,
   CirclePower,
   Eye,
   EyeOff,
@@ -25,6 +27,7 @@ import {
   FolderOpen,
   GitBranch,
   KeyRound,
+  LoaderCircle,
   MessageSquarePlus,
   Plus,
   PlugZap,
@@ -71,6 +74,7 @@ import {
   buildRootPickerUnpinDirectoryCommand,
   buildAgentChatCreateCommand,
   buildSettingsOpenCommand,
+  buildTerminalCreateAgentCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildServerOffCommand,
@@ -152,6 +156,7 @@ import {
   workRootActivityPlacementState,
   initialWorkbenchGroups,
   buildWorkbenchEditorGroups,
+  terminalAttentionKey,
   type WorkbenchEditorGroupModel,
   type WorkbenchPaneOrder,
   type DockviewTabCloseRequest,
@@ -220,6 +225,22 @@ import {
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
 } from "./terminals";
+import {
+  acknowledgeAttentionEntry,
+  aggregateNavAttentionCounts,
+  aggregateNavAttentionTone,
+  attentionEventsEndpoint,
+  navAttentionCountsSignature,
+  navAttentionTone,
+  parseAgentAttentionEntry,
+  parseAgentAttentionSnapshot,
+  shouldReplaceAttentionSourceOnError,
+  type AgentAttentionAcknowledgements,
+  type AgentAttentionEntry,
+  type NavAttentionCounts,
+  type NavAttentionInput,
+  type NavAttentionPane,
+} from "./agentAttention";
 import {
   appendUserTranscriptBlock,
   attachAgentChatSession,
@@ -361,8 +382,20 @@ import {
 } from "./terminalPrefs";
 import {
   SETTINGS_SECTIONS,
+  SettingsNotificationContext,
   SettingsTerminalContext,
 } from "./settingsSections";
+import {
+  attentionTitleFor,
+  buildAttentionFaviconHref,
+  shouldFireAttentionNotification,
+  type AttentionTone,
+} from "./browserAttentionCue.js";
+import {
+  loadNotificationPrefs,
+  saveNotificationPrefs,
+  type NotificationPrefs,
+} from "./notificationPrefs.js";
 import {
   DetailItem,
   StateLine,
@@ -373,6 +406,8 @@ import {
   resourcePresentationLabel,
   resourceRowTone,
   kindLabel,
+  countByRootKey,
+  formatOpenSurfaceCounts,
 } from "./resourcePresentation.js";
 import {
   ChromeIconButton,
@@ -464,6 +499,39 @@ export function App() {
   const [serversView, setServersView] = useState<DashboardServersView | null>(
     null,
   );
+  // Per-terminal attention (turn-state) entries, merged across every
+  // eligible linked server's own stream, keyed by
+  // `serverScopedIdentity(serverRoute, terminalId)` the same way
+  // `resourcesByServer`/Activity Console state key by `(serverRoute,
+  // workRootId)`. Lifted at this level (not owned by any pane) so Phase 6's
+  // tab-label indicator can read it without new plumbing - this phase
+  // renders nothing from it.
+  const [attentionByKey, setAttentionByKey] = useState<
+    Record<string, AgentAttentionEntry>
+  >({});
+  // Tab-click acknowledgement watermark for the Phase 6 indicator: same key
+  // space as `attentionByKey`, valued by the last acknowledged
+  // `updatedAtMs`. Deliberately NOT persisted and NOT merged into
+  // `attentionByKey` - it is browser-local, per-session UI state (the
+  // `ActivityConsole.tsx` precedent keeps its own ack map as plain
+  // component state too), and keeping it separate is what lets a NEW
+  // turn-state at a later `updatedAtMs` re-raise an indicator the user
+  // already dismissed once.
+  //
+  // DELIBERATELY NOT PRUNED (review cycle 1, Minor 1): unlike
+  // `attentionByKey`, entries here are never dropped when a terminal closes,
+  // a snapshot replaces a route's entries, or a route becomes ineligible.
+  // Pruning was considered and rejected, not overlooked. Daemon terminal ids
+  // are opaque and never reused (`opaque_terminal_id`), so a stale watermark
+  // cannot collide with a future terminal; and a watermark that SURVIVES a
+  // route disconnect/reconnect is what preserves "the user already
+  // acknowledged this" across the reconnect snapshot that re-delivers the
+  // same entry - pruning would re-raise an already-dismissed indicator. The
+  // cost is one number per agent terminal ever selected, for the page's
+  // lifetime.
+  const [attentionAcknowledgements, setAttentionAcknowledgements] = useState<
+    AgentAttentionAcknowledgements
+  >({});
   const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [gitWorktreeTarget, setGitWorktreeTarget] = useState<{
@@ -479,6 +547,11 @@ export function App() {
   const [terminalPrefs, setTerminalPrefs] = useState<TerminalStylePrefs>(() =>
     loadTerminalStylePrefs(),
   );
+  // Settings > Notifications section's persisted opt-in (260725 Phase 8). See
+  // `notificationPrefs.ts` - this is the ONLY persisted field; live
+  // `Notification.permission` is read where needed, never cached here.
+  const [notificationPrefs, setNotificationPrefs] =
+    useState<NotificationPrefs>(() => loadNotificationPrefs());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -501,6 +574,33 @@ export function App() {
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
   >({});
+  // 260725 nav-row-two-line-open-state Phase 1: per-root open-terminal count,
+  // pushed up from WorkbenchShell (terminalPanes is WorkbenchShell-local -
+  // see onTerminalCountByRootChange below and its signature-gated push
+  // effect) so the nav row's reserved second line can render it without a
+  // new plumbing path for readOnlyFilePanes-shaped state.
+  const [terminalCountByRoot, setTerminalCountByRoot] = useState<
+    Record<string, number>
+  >({});
+  // 260725 Phase 7 (nav-row agent counter): per-root agent/working/ready
+  // triple, pushed up from WorkbenchShell by the same signature-gated effect
+  // shape as terminalCountByRoot above and for the same reason. Derived from
+  // the PANES (see aggregateNavAttentionCounts' contract), never from
+  // attentionByKey - which is why this is pushed up from where the panes live
+  // rather than computed here beside the two attention maps.
+  const [agentAttentionByRoot, setAgentAttentionByRoot] = useState<
+    Record<string, NavAttentionCounts>
+  >({});
+  // Document counts need no cross-component plumbing: readOnlyFilePanes
+  // already lives here, so this is a plain memo, not an upward-pushed state
+  // like the terminal count above.
+  const documentCountByRoot = useMemo(
+    () =>
+      countByRootKey(Object.values(readOnlyFilePanes), (pane) =>
+        serverScopedIdentity(pane.serverRoute, pane.workRootId),
+      ),
+    [readOnlyFilePanes],
+  );
   // Browser-local SIBLING work-nav display order (workspace rows under a
   // server; worktree rows under a workspace), drag-reordered by the user.
   // Purely a render-time ordering overlay applied via `applySiblingOrder` -
@@ -1767,6 +1867,129 @@ export function App() {
     saveWorkNavOrderSnapshot(workNavOrder);
   }, [workNavOrder]);
 
+  // Per-terminal attention stream: unlike the Activity Console and document
+  // streams (each a single subscription tied to the current pane
+  // selection), this one is selection-independent - one `EventSource` per
+  // eligible entry in `serversView.servers`, opened/closed as THAT list
+  // changes rather than as any pane opens/closes. A linked server with
+  // nothing reachable to subscribe to (`unreachable`/`authRequired`/
+  // `staleEndpoint`/`tunnelRequired`) is skipped so it never retry-loops an
+  // `EventSource` against a dead link.
+  const attentionSourcesRef = useRef<Map<string, EventSource>>(new Map());
+  useEffect(() => {
+    const servers = serversView?.servers ?? [];
+    const eligibleRoutes = new Set(
+      servers
+        .filter(
+          (server) => server.kind === "local" || server.status === "connected",
+        )
+        .map((server) => server.id),
+    );
+    const sources = attentionSourcesRef.current;
+
+    for (const [serverRoute, source] of sources) {
+      if (eligibleRoutes.has(serverRoute)) {
+        continue;
+      }
+      source.close();
+      sources.delete(serverRoute);
+      setAttentionByKey((current) => {
+        const prefix = `${serverScopedIdentity(serverRoute)}/`;
+        const next: Record<string, AgentAttentionEntry> = {};
+        let changed = false;
+        for (const [key, entry] of Object.entries(current)) {
+          if (key.startsWith(prefix)) {
+            changed = true;
+            continue;
+          }
+          next[key] = entry;
+        }
+        return changed ? next : current;
+      });
+    }
+
+    for (const serverRoute of eligibleRoutes) {
+      if (sources.has(serverRoute)) {
+        continue;
+      }
+      const source = new EventSource(attentionEventsEndpoint(serverRoute));
+      const handleAttentionMessage = (message: MessageEvent) => {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(message.data);
+        } catch {
+          return;
+        }
+        const snapshot = parseAgentAttentionSnapshot(payload);
+        if (snapshot) {
+          setAttentionByKey((current) => {
+            const prefix = `${serverScopedIdentity(serverRoute)}/`;
+            const next: Record<string, AgentAttentionEntry> = {};
+            for (const [key, entry] of Object.entries(current)) {
+              if (!key.startsWith(prefix)) {
+                next[key] = entry;
+              }
+            }
+            for (const entry of snapshot) {
+              next[serverScopedIdentity(serverRoute, entry.terminalId)] = entry;
+            }
+            return next;
+          });
+          return;
+        }
+        const entry = parseAgentAttentionEntry(payload);
+        if (!entry) {
+          return;
+        }
+        setAttentionByKey((current) => ({
+          ...current,
+          [serverScopedIdentity(serverRoute, entry.terminalId)]: entry,
+        }));
+      };
+      source.addEventListener("attentionSnapshot", handleAttentionMessage);
+      source.addEventListener("attention", handleAttentionMessage);
+      source.onmessage = handleAttentionMessage;
+      // CONTRACT (260725 Phase 5 review cycle 1, finding C): a non-2xx
+      // response (401 session expiry, the forwarder's bounded 502 for an
+      // unreachable linked server) fails this `EventSource` PERMANENTLY per
+      // the WHATWG spec - `readyState` goes to `CLOSED` and the browser
+      // never retries on its own, unlike a clean stream end (the `Lagged`
+      // case), which auto-reconnects and is what makes this design's
+      // resync-via-reconnect work at all. Without this handler the dead
+      // source stayed in `sources` forever, since the `sources.has(...)`
+      // guard above then skips re-creating it on every future poll-driven
+      // effect re-run. `shouldReplaceAttentionSourceOnError` (see its own
+      // CONTRACT) filters out the transient `CONNECTING` case, where
+      // `EventSource` is already retrying with its own backoff - only a
+      // genuinely `CLOSED` source is torn down here, and only ever
+      // recreated on the NEXT `serversView` poll tick
+      // (`resourceAvailabilityPollIntervalMs`, 5s), never synchronously in
+      // this handler - a natural bound against hammering a persistently
+      // failing server.
+      source.onerror = () => {
+        if (!shouldReplaceAttentionSourceOnError(source.readyState)) {
+          return;
+        }
+        source.close();
+        sources.delete(serverRoute);
+      };
+      sources.set(serverRoute, source);
+    }
+  }, [serversView?.servers]);
+
+  // Unmount-only teardown: close every still-open attention `EventSource`
+  // when the app itself unmounts, independent of the per-route diffing
+  // effect above (which only closes sources for routes that drop out of the
+  // eligible set while the app stays mounted).
+  useEffect(() => {
+    return () => {
+      for (const source of attentionSourcesRef.current.values()) {
+        source.close();
+      }
+      attentionSourcesRef.current.clear();
+    };
+  }, []);
+
   const handleWorkspaceReorder = useCallback(
     (serverId: string, sourceId: string, beforeId: string | undefined) => {
       setWorkNavOrder((current) => {
@@ -1850,9 +2073,206 @@ export function App() {
     [terminalPrefs, handleTerminalPrefsChange],
   );
 
+  // Settings > Notifications section's single write path (260725 Phase 8),
+  // wired the same way as `handleTerminalPrefsChange`/
+  // `settingsTerminalContextValue` above: set the live state, persist, in
+  // that order, then a memoized context value so the Provider only changes
+  // when `enabled` actually changes.
+  const handleNotificationPrefsChange = useCallback((nextEnabled: boolean) => {
+    const next: NotificationPrefs = { enabled: nextEnabled };
+    setNotificationPrefs(next);
+    saveNotificationPrefs(next);
+  }, []);
+
+  const settingsNotificationContextValue = useMemo(
+    () => ({
+      enabled: notificationPrefs.enabled,
+      onChange: handleNotificationPrefsChange,
+    }),
+    [notificationPrefs.enabled, handleNotificationPrefsChange],
+  );
+
+  // 260725 Phase 8: the browser-level (title/favicon/OS notification) tone,
+  // flattened across EVERY connected server rather than the selected one.
+  // Built the same way `ServerRows` builds one server's root-key list
+  // (`aggregateNavAttentionTone` fed `navAttentionWorkRootIds`'s already
+  // hidden-worktree-filtered output), just unioned across every server.
+  // Reusing these two functions - rather than a new predicate - is what keeps
+  // this tone unable to disagree with the nav tree: a hidden worktree's agent
+  // contributes to neither, because it never enters
+  // `navAttentionWorkRootIds`'s output in the first place (the `App.tsx`
+  // `CONTRACT:` comment above that function pins this same set for the nav
+  // tree). Reads `agentAttentionByRoot` from THIS component's own state
+  // (populated by `WorkbenchShell`'s `onAgentAttentionByRootChange` callback)
+  // rather than recomputing anything - this is the exact value
+  // `ResourceNavigation`/`ServerRows`/`WorkspaceRows` already render from, so
+  // the global tone structurally cannot disagree with the nav tree it is
+  // unioned from.
+  //
+  // Server enumeration (review cycle 1, Minor 3; comment corrected in cycle
+  // 2, fit Important 1): iterates `serverConnections` and looks up
+  // `resourcesByServer[server.id]` per server, exactly as `ServerRows`'s
+  // caller does (`:3255-3261`), rather than `Object.entries(resourcesByServer)`.
+  // The "Off" gesture (260714 Phase 2, `:1572-1578`) IS an existing, already-
+  // handled removal path - it clears `resourcesByServer` and
+  // `lastNonNullResourcesByServerRef` together via `removeResourcesByServer`
+  // (`resourceModel.ts:215`), so a grep for a remove call site will find it.
+  // The gap this closes is narrower: a server vanishing from `serversView`
+  // WITHOUT going through that explicit deallocation gesture (e.g. the
+  // server list refreshing to a shorter set out-of-band) would, keyed off
+  // `resourcesByServer` directly, keep contributing roots to the global tone
+  // with no nav row rendering anything to attribute it to - the exact
+  // failure Phase 7's Result already had to fix once for the nav. Deriving
+  // from `serverConnections` closes that structurally.
+  //
+  // DEVIATION from the plan's stated placement (Codebase Findings /
+  // Implementation Plan step 1 cited `App.tsx:4356-4379` as "the existing
+  // `agentAttentionByRoot` derivation"): that line span is the LOCAL
+  // `useMemo` inside `WorkbenchShell` that computes this value from
+  // `terminalPanes` and pushes it up via `onAgentAttentionByRootChange`, not
+  // an App()-level derivation - `WorkbenchShell` has no `resourcesByServer`/
+  // `workNavOrder`/`notificationPrefs` in scope, so this tone (and the two
+  // effects below) live in `App()` itself, against `App()`'s own
+  // `agentAttentionByRoot` STATE (declared near `resourcesByServer`), which is
+  // populated from that same WorkbenchShell computation and is what every
+  // other nav consumer already reads. Cosmetic relocation only - the actual
+  // required inputs (`resourcesByServer`, `workNavOrder.hiddenWorktreesByWorkspace`,
+  // `agentAttentionByRoot`, `aggregateNavAttentionTone`, `navAttentionWorkRootIds`)
+  // are unchanged and all satisfied here.
+  const globalAttentionTone = useMemo<AttentionTone>(() => {
+    const rootKeys: string[] = [];
+    for (const server of serverConnections) {
+      const resources = resourcesByServer[server.id];
+      if (!resources) {
+        continue;
+      }
+      for (const workspace of resources.workspaces) {
+        const hiddenIds =
+          workNavOrder.hiddenWorktreesByWorkspace[
+            serverScopedIdentity(server.id, workspace.id)
+          ];
+        for (const rootId of navAttentionWorkRootIds(workspace, hiddenIds)) {
+          rootKeys.push(serverScopedIdentity(server.id, rootId));
+        }
+      }
+    }
+    return aggregateNavAttentionTone(agentAttentionByRoot, rootKeys);
+  }, [
+    serverConnections,
+    resourcesByServer,
+    workNavOrder.hiddenWorktreesByWorkspace,
+    agentAttentionByRoot,
+  ]);
+
+  // Captured ONCE, at this component's first render, before this effect (the
+  // only `document.title`/favicon-href writer in the whole frontend - see the
+  // plan's Codebase Findings, confirmed via `grep -rn "document.title"
+  // frontend/src`) ever runs. Single-sourced from `index.html`'s own
+  // `<title>`/`<link rel="icon">` markup rather than a duplicated string
+  // literal, so the base title/icon can never drift from what `index.html`
+  // actually declares.
+  const baseDocumentTitleRef = useRef<string>(document.title);
+  const baseFaviconHrefRef = useRef<string>(
+    document.querySelector('link[rel="icon"]')?.getAttribute("href") ?? "",
+  );
+
+  // Tier 1 (default, zero-permission) cue: `document.title` flashing plus a
+  // favicon badge. Level-driven off `globalAttentionTone`, not an
+  // independently timed or persisted state (Phase 7's pinned rule this cue
+  // must extend, `## Constraints`) - the flash keeps running regardless of
+  // tab focus/visibility, stopping only when the tone itself returns to
+  // `null`.
+  //
+  // TIMER HYGIENE (hard requirement): the `setInterval` below is created only
+  // in the branch where `globalAttentionTone !== null`, and this effect's own
+  // cleanup - which always runs before the next invocation AND on unmount -
+  // is the only place that clears it. There is exactly one `setInterval` call
+  // in this effect, guarded by the same early return that skips the rest of
+  // the body, so no code path can create a second, orphaned interval: every
+  // tone change (including into `null`) tears down the previous run's
+  // interval before anything new is set up, and the `null` branch creates no
+  // interval at all. The dependency array is `[globalAttentionTone]` alone - a
+  // stable primitive (`"ready" | "working" | null`), so this effect does not
+  // re-run (and therefore does not recreate the interval) on unrelated App()
+  // re-renders; it only re-runs when the tone value itself changes.
+  useEffect(() => {
+    if (globalAttentionTone === null) {
+      return;
+    }
+    const faviconLink = document.querySelector<HTMLLinkElement>(
+      'link[rel="icon"]',
+    );
+    let flashOn = false;
+    const tick = () => {
+      flashOn = !flashOn;
+      document.title = attentionTitleFor(
+        baseDocumentTitleRef.current,
+        true,
+        flashOn,
+      );
+    };
+    tick();
+    if (faviconLink) {
+      faviconLink.href = buildAttentionFaviconHref(true);
+    }
+    const intervalId = window.setInterval(tick, 1_000);
+    return () => {
+      window.clearInterval(intervalId);
+      document.title = baseDocumentTitleRef.current;
+      if (faviconLink) {
+        faviconLink.href = baseFaviconHrefRef.current;
+      }
+    };
+  }, [globalAttentionTone]);
+
+  // Tier 2 (explicit opt-in) cue: a real OS `Notification`, fired only on the
+  // edge into `ready` (Implementation Plan step 3 - `working` is background
+  // progress, not an actionable interruption). `previousGlobalAttentionToneRef`
+  // is the ENTIRE state this needs - no second acknowledgement watermark, per
+  // the binding carry-forward from Phase 7's Result: it is driven by the exact
+  // same derived tone the tab/nav badges already read in the exact same
+  // render, so it cannot disagree with them. Never requests permission itself
+  // - that only ever happens from the Settings toggle's own click handler
+  // (`settingsSections.tsx`'s `NotificationSection`).
+  const previousGlobalAttentionToneRef = useRef<AttentionTone>(null);
+  useEffect(() => {
+    if (
+      shouldFireAttentionNotification(
+        previousGlobalAttentionToneRef.current,
+        globalAttentionTone,
+      ) &&
+      notificationPrefs.enabled &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      try {
+        new Notification("ws dashboard", {
+          body: "An agent is ready for your input.",
+        });
+      } catch {
+        // Android Chrome (and possibly other mobile browsers) can report
+        // `Notification.permission === "granted"` while still throwing
+        // `TypeError: Illegal constructor` here, because those browsers
+        // require `ServiceWorkerRegistration.showNotification` instead of
+        // the plain constructor - and service-worker push is explicitly out
+        // of scope for this ticket. There is no ErrorBoundary anywhere in
+        // this app (`main.tsx` mounts a plain `createRoot`), so an
+        // uncaught throw from this effect would blank the whole dashboard
+        // and re-blank it on every subsequent `ready` edge. Swallowing here
+        // confines the failure to the one tier that cannot work on that
+        // platform anyway - do NOT remove this catch as "dead code", it is
+        // load-bearing for exactly that browser class.
+      }
+    }
+    previousGlobalAttentionToneRef.current = globalAttentionTone;
+  }, [globalAttentionTone, notificationPrefs.enabled]);
+
   return (
     <TerminalPrefsContext.Provider value={terminalPrefs}>
     <SettingsTerminalContext.Provider value={settingsTerminalContextValue}>
+    <SettingsNotificationContext.Provider
+      value={settingsNotificationContextValue}
+    >
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
         <aside
@@ -1869,6 +2289,9 @@ export function App() {
             selectedId={selectedId}
             selectedWorkRoot={workbenchSelection?.root ?? null}
             openWorkRootKeys={openWorkRootKeysSet}
+            terminalCountByRoot={terminalCountByRoot}
+            documentCountByRoot={documentCountByRoot}
+            agentAttentionByRoot={agentAttentionByRoot}
             onOpenWorkRoot={handleWorkRootOpened}
             onOpenAddServer={() => setServerModal({ mode: "add" })}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -1957,6 +2380,9 @@ export function App() {
             selectedServerId={selectedServerId}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
+            attentionByKey={attentionByKey}
+            attentionAcknowledgements={attentionAcknowledgements}
+            onAttentionAcknowledgementsChange={setAttentionAcknowledgements}
             workbenchGroupsByRoot={workbenchGroupsByRoot}
             paneOrderByRoot={paneOrderByRoot}
             openWorkRootKeys={openWorkRootKeys}
@@ -1967,6 +2393,8 @@ export function App() {
             onCommand={executeCommand}
             onOpenWorkRoot={handleWorkRootOpened}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
+            onTerminalCountByRootChange={setTerminalCountByRoot}
+            onAgentAttentionByRootChange={setAgentAttentionByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
             onOpenWorkRootKeysChange={setOpenWorkRootKeys}
             onOpenWorkRootRefsChange={setOpenWorkRootRefs}
@@ -1983,6 +2411,7 @@ export function App() {
       </div>
       <WhichKeyOverlay leaderState={leaderUiState} />
     </main>
+    </SettingsNotificationContext.Provider>
     </SettingsTerminalContext.Provider>
     </TerminalPrefsContext.Provider>
   );
@@ -2745,6 +3174,9 @@ function ResourceNavigation({
   selectedId,
   selectedWorkRoot,
   openWorkRootKeys,
+  terminalCountByRoot,
+  documentCountByRoot,
+  agentAttentionByRoot,
   onOpenWorkRoot,
   onOpenAddServer,
   onOpenSettings,
@@ -2766,6 +3198,14 @@ function ResourceNavigation({
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
   openWorkRootKeys: ReadonlySet<string>;
+  // 260725 nav-row-two-line-open-state Phase 1: open-terminal/open-document
+  // counts by serverScopedIdentity(serverId, rootId), same key shape as
+  // openWorkRootKeys. `terminalCountByRoot` counts NON-agent terminals only
+  // (260725 Phase 7); agent panes are counted by `agentAttentionByRoot`
+  // instead, so no pane is ever reported by both.
+  terminalCountByRoot: Record<string, number>;
+  documentCountByRoot: Record<string, number>;
+  agentAttentionByRoot: Record<string, NavAttentionCounts>;
   onOpenWorkRoot: (
     view: DashboardResourcesView,
     requestedWorkRootId?: string,
@@ -2862,6 +3302,9 @@ function ResourceNavigation({
               Boolean(resourcesByServer[server.id])
             }
             openWorkRootKeys={openWorkRootKeys}
+            terminalCountByRoot={terminalCountByRoot}
+            documentCountByRoot={documentCountByRoot}
+            agentAttentionByRoot={agentAttentionByRoot}
             onCommand={onCommand}
             onOpenWorkRoot={onOpenWorkRoot}
             onOpenServerAuth={onOpenServerAuth}
@@ -2899,6 +3342,9 @@ function ServerRows({
   selectedId,
   resources,
   openWorkRootKeys,
+  terminalCountByRoot,
+  documentCountByRoot,
+  agentAttentionByRoot,
   onCommand,
   onOpenWorkRoot,
   onOpenServerAuth,
@@ -2914,6 +3360,9 @@ function ServerRows({
   selectedId: string | null;
   resources: DashboardResourcesView | null;
   openWorkRootKeys: ReadonlySet<string>;
+  terminalCountByRoot: Record<string, number>;
+  documentCountByRoot: Record<string, number>;
+  agentAttentionByRoot: Record<string, NavAttentionCounts>;
   onCommand: DashboardCommandDispatcher;
   onOpenWorkRoot: (
     view: DashboardResourcesView,
@@ -2937,12 +3386,40 @@ function ServerRows({
 }) {
   const actions = server.actions.length > 0 ? server.actions : [];
   const isLocalServer = server.id === LOCAL_DASHBOARD_SERVER_ROUTE;
+  // 260725 Phase 7, PINNED aggregation rule: a server row shows the
+  // highest-priority state among its OWN work roots (`ready` > `working` >
+  // none), and carries no counts of its own - it has no second line. The
+  // root-key list is built from this server's resource tree rather than by
+  // prefix-matching `agentAttentionByRoot`, so one server route being a
+  // string prefix of another can never leak a neighbour's state onto this
+  // row. Rows for roots the browser has closed contribute nothing because
+  // the counts map is pane-derived in the first place.
+  //
+  // Scoped to roots that ACTUALLY GET A ROW (review cycle 1, Minor 3).
+  // Walking `workspace.workRoots` wholesale also swept in the base root of a
+  // multi-root workspace (represented by the `workspace`-presentation row,
+  // which per Decision 4 carries no agent counts) and worktrees the user has
+  // hidden - so an agent finishing a turn in the primary root of a repo with
+  // linked worktrees flashed this row orange while no visible descendant row
+  // showed anything to attribute it to.
+  const serverAttentionTone = aggregateNavAttentionTone(
+    agentAttentionByRoot,
+    (resources?.workspaces ?? []).flatMap((workspace) =>
+      navAttentionWorkRootIds(
+        workspace,
+        workNavOrder.hiddenWorktreesByWorkspace[
+          serverScopedIdentity(server.id, workspace.id)
+        ],
+      ).map((rootId) => serverScopedIdentity(server.id, rootId)),
+    ),
+  );
   return (
     <div className="server-group">
       <div
         className={`server-row ws-row${selected ? " server-row-selected ws-row-selected" : ""}`}
         data-server-kind={server.kind}
         data-server-status={server.status}
+        data-row-attention={serverAttentionTone ?? "none"}
         title={[
           server.label,
           server.kind,
@@ -3016,6 +3493,9 @@ function ServerRows({
               serverId={server.id}
               selectedId={selectedId}
               openWorkRootKeys={openWorkRootKeys}
+              terminalCountByRoot={terminalCountByRoot}
+              documentCountByRoot={documentCountByRoot}
+              agentAttentionByRoot={agentAttentionByRoot}
               onCommand={onCommand}
               worktreeOrderByWorkspace={workNavOrder.worktreeOrderByWorkspace}
               hiddenWorktreesByWorkspace={workNavOrder.hiddenWorktreesByWorkspace}
@@ -3509,6 +3989,23 @@ function initialExplorerSnapshot(): WorkRootExplorerSnapshot {
   };
 }
 
+// Flattens `terminalPanes` into the minimal structural shape
+// `aggregateNavAttentionCounts` consumes (260725 Phase 7). The adapter lives
+// here rather than in `agentAttention.ts` so that module never has to know
+// about `TerminalPaneState` - see its `NavAttentionPane` import-direction
+// contract.
+function navAttentionPanesOf(
+  terminalPanes: Record<string, TerminalPaneState>,
+): NavAttentionPane[] {
+  return Object.values(terminalPanes).map((pane) => ({
+    serverRoute: pane.session.serverRoute,
+    terminalId: pane.session.terminalId,
+    workRootId: pane.session.workRootId,
+    status: pane.session.status,
+    profileId: pane.session.profileId,
+  }));
+}
+
 function WorkbenchShell({
   resources,
   resourcesByServer,
@@ -3516,6 +4013,9 @@ function WorkbenchShell({
   selectedServerId,
   selection,
   selectedEntity,
+  attentionByKey,
+  attentionAcknowledgements,
+  onAttentionAcknowledgementsChange,
   commandLog,
   loading,
   error,
@@ -3532,6 +4032,8 @@ function WorkbenchShell({
   workbenchLayoutRestoreRef,
   terminalVisualRestoreRef,
   onWorkbenchGroupsByRootChange,
+  onTerminalCountByRootChange,
+  onAgentAttentionByRootChange,
   onPaneOrderByRootChange,
   onOpenWorkRootKeysChange,
   onOpenWorkRootRefsChange,
@@ -3549,6 +4051,19 @@ function WorkbenchShell({
   selectedServerId: string;
   selection: WorkbenchSelection | null;
   selectedEntity: ResourceEntity | null;
+  // 260725 Phase 6 (tab-label indicator): the attention stream itself is
+  // owned by `App()` (it is selection-independent, one EventSource per
+  // eligible server), but the only surface that RENDERS it is the terminal
+  // tab, which lives under this shell - so both the live entries and the
+  // click-to-acknowledge watermark are threaded down as props rather than
+  // duplicating stream state here. The watermark setter follows this
+  // component's existing `on...Change: Dispatch<SetStateAction<...>>`
+  // idiom.
+  attentionByKey: Record<string, AgentAttentionEntry>;
+  attentionAcknowledgements: AgentAttentionAcknowledgements;
+  onAttentionAcknowledgementsChange: Dispatch<
+    SetStateAction<AgentAttentionAcknowledgements>
+  >;
   commandLog: CommandEntry[];
   loading: boolean;
   error: string | null;
@@ -3581,6 +4096,19 @@ function WorkbenchShell({
   terminalVisualRestoreRef: RefObject<TerminalVisualRestoreSnapshot>;
   onWorkbenchGroupsByRootChange: Dispatch<
     SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
+  >;
+  // 260725 nav-row-two-line-open-state Phase 1, Decision 1: pushed from a
+  // signature-gated effect below (not on every terminalPanes change) so this
+  // does not regress App()'s re-render cadence to WorkbenchShell's
+  // per-output-chunk rate - see the effect's own comment.
+  onTerminalCountByRootChange: Dispatch<SetStateAction<Record<string, number>>>;
+  // 260725 Phase 7: the agent half of the same second line, pushed up by the
+  // same signature-gated effect. It is computed HERE, not in `App()`, because
+  // the pinned carrier is the profile recorded on the PANE and `terminalPanes`
+  // is this component's state - the attention maps travel down, the derived
+  // counts travel back up, and no new state location is invented.
+  onAgentAttentionByRootChange: Dispatch<
+    SetStateAction<Record<string, NavAttentionCounts>>
   >;
   onPaneOrderByRootChange: Dispatch<
     SetStateAction<Record<string, WorkbenchPaneOrder>>
@@ -3983,6 +4511,94 @@ function WorkbenchShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [agentChatPaneIdentitySignature],
   );
+  // 260725 nav-row-two-line-open-state Phase 1, Decision 1: per-root open-
+  // terminal counts for the nav row's reserved second line. Same
+  // signature-gate technique as terminalPaneIdentitySignature/-Identities
+  // above, for the same reason - terminalPanes churns on every batched
+  // output-cursor flush, but the per-root *count* almost never changes on an
+  // output-only commit, so the map (and the App()-level setState/re-render it
+  // triggers via the effect below) must only be rebuilt when a pane is
+  // actually added/removed for some root.
+  //
+  // 260725 Phase 7, PINNED no-double-count rule: agent panes are excluded
+  // HERE, at the one site that produces this count, and reported by
+  // `agentAttentionByRoot` below instead. `profileId != null` is the agent
+  // predicate - the Phase 2 pane-recorded spawn profile, NOT `hook_config`
+  // presence and NOT "has posted a hook event" (which reads zero for a
+  // freshly spawned agent that has not finished a turn). Adding the agent map
+  // while leaving this one counting agents too would double-count the same
+  // pane across this ticket and 260725-feat-dashboard-nav-row-two-line-open-state.
+  // A daemon-restart-ADOPTED agent session normally keeps its `profileId` and
+  // so keeps counting as an agent: the daemon persists the spawn profile in a
+  // per-terminal sidecar and restores it during boot reconciliation
+  // (260726-bug-dashboard-agent-profile-provenance-lost-on-restart). It can
+  // still come back null when no readable sidecar survives to adopt time
+  // (spawned before the sidecar existed, no daemon state dir, a failed write,
+  // an unreadable file) - such a pane counts as a plain terminal, the pre-fix
+  // behavior. No frontend compensation is needed or wanted here - this
+  // predicate is a pure function of the one bit the daemon supplies.
+  const nonAgentTerminalPanes = Object.values(terminalPanes).filter(
+    (pane) => pane.session.profileId == null,
+  );
+  const terminalCountByRootSignature = Object.entries(
+    countByRootKey(nonAgentTerminalPanes, (pane) =>
+      serverScopedIdentity(pane.session.serverRoute, pane.session.workRootId),
+    ),
+  )
+    .map(([key, count]) => `${key}:${count}`)
+    .sort()
+    .join(",");
+  const terminalCountByRoot = useMemo(
+    () =>
+      countByRootKey(
+        Object.values(terminalPanes).filter(
+          (pane) => pane.session.profileId == null,
+        ),
+        (pane) =>
+          serverScopedIdentity(
+            pane.session.serverRoute,
+            pane.session.workRootId,
+          ),
+      ),
+    // Deliberately keyed on the count signature (change-detector), not
+    // terminalPanes itself - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [terminalCountByRootSignature],
+  );
+  useEffect(() => {
+    onTerminalCountByRootChange(terminalCountByRoot);
+  }, [terminalCountByRoot, onTerminalCountByRootChange]);
+  // 260725 Phase 7: the agent half. Same signature-gate technique and the same
+  // reason as the terminal count above, with one addition - the signature is
+  // built from the DERIVED agents/working/ready triples, not from
+  // `attentionByKey`/`attentionAcknowledgements`, so an attention write or an
+  // ack that changes no visible count never re-renders the nav tree, while a
+  // turn-state change or the ack that clears the last pending tab always does.
+  const agentAttentionInput: NavAttentionInput = {
+    attentionByKey,
+    acknowledgements: attentionAcknowledgements,
+  };
+  const agentAttentionByRootSignature = navAttentionCountsSignature(
+    aggregateNavAttentionCounts(
+      navAttentionPanesOf(terminalPanes),
+      agentAttentionInput,
+    ),
+  );
+  const agentAttentionByRoot = useMemo(
+    () =>
+      aggregateNavAttentionCounts(
+        navAttentionPanesOf(terminalPanes),
+        agentAttentionInput,
+      ),
+    // Deliberately keyed on the derived-count signature (change-detector),
+    // not terminalPanes/attentionByKey - see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentAttentionByRootSignature],
+  );
+  useEffect(() => {
+    onAgentAttentionByRootChange(agentAttentionByRoot);
+  }, [agentAttentionByRoot, onAgentAttentionByRootChange]);
+
   useEffect(() => {
     for (const rootKey of openWorkRootKeys) {
       const ref = openWorkRootRefs[rootKey];
@@ -4340,6 +4956,10 @@ function WorkbenchShell({
               );
           },
         },
+        {
+          attentionByKey,
+          acknowledgements: attentionAcknowledgements,
+        },
         Object.values(agentChatPanes),
         agentChatPaneOrderByGroup,
         {
@@ -4484,9 +5104,21 @@ function WorkbenchShell({
           for (const intent of restoreIntents) {
             onCommand(buildTerminalCreateCommand(rootId, serverRoute), {
               "terminal.create": () =>
+                // CONTRACT (review cycle 1, finding C2): forward the
+                // persisted intent's `profileId` so a restore-intent
+                // respawn (fires when the daemon lost the live helper -
+                // e.g. a restart - but the browser still remembers the
+                // tab) recreates the SAME kind of terminal that was
+                // closed, rather than silently downgrading an agent
+                // terminal to a plain default shell under its unchanged
+                // title. `createTerminalPane` already forwards `profileId`
+                // to `createTerminal` unconditionally (see
+                // `createAgentTerminalPane` above), so an absent/`null`
+                // intent profile keeps today's shell-respawn behavior.
                 createTerminalPane({
                   title: intent.title,
                   cwdHint: intent.cwdHint,
+                  profileId: intent.profileId ?? undefined,
                 }),
             });
           }
@@ -5322,6 +5954,17 @@ function WorkbenchShell({
       .catch(() => undefined);
   }
 
+  // CONTRACT (260725 Phase 2, browser spawn profile): thin wrapper over
+  // `createTerminalPane` with a fixed `profileId: "claude"` - the toolbar
+  // button's spawn goes through the SAME `terminal.create`-family plumbing
+  // as an ordinary shell terminal (`persistentTerminal` surface, same
+  // `createTerminal`/`terminalPaneFromSession`/`placeTerminalSessions`
+  // path), never through `registerNewAgentChatPane` or any of the other two
+  // `AGENT_GUI_SUSPENDED` guard depths (`agentGuiSuspended.ts`).
+  function createAgentTerminalPane() {
+    createTerminalPane({ profileId: "claude" });
+  }
+
   // CONTRACT: mirrors `createTerminalPane`'s multi-instance registration
   // pattern, but the pane itself is created synchronously and empty - the
   // "open new agent tab" button never blocks on a harness/session picker.
@@ -6080,6 +6723,35 @@ function WorkbenchShell({
     setActivePaneByGroupForSelected(result.activePaneByGroup);
   };
 
+  // Click-to-acknowledge (260725 Phase 6), mirroring `ActivityConsole.tsx`'s
+  // `acknowledgeSelected`: touching a terminal tab records that terminal's
+  // CURRENT attention revision (`updatedAtMs`) as seen, so the indicator
+  // clears now but re-raises on the next turn boundary.
+  //
+  // CONTRACT (review cycle 1, Critical): called from BOTH triggers - the
+  // Dockview active-panel change (`selectPane`, for a click that switches
+  // tabs) and `DockviewWorkbenchLayout`'s per-tab `onAcknowledgePane` (for a
+  // click on the tab that is ALREADY active, which emits no change event and
+  // is the feature's primary flow: the agent finishes in the tab the user
+  // left focused). Idempotent by construction - `acknowledgeAttentionEntry`
+  // returns the same object identity when the revision is already recorded -
+  // so a genuine tab switch running both paths costs nothing.
+  //
+  // `terminalPanes` is keyed by logical key, not pane id, so the pane is
+  // resolved by its `paneId` field rather than a map lookup.
+  const acknowledgePaneAttention = (paneId: string) => {
+    const terminalPane = Object.values(terminalPanes).find(
+      (candidate) => candidate.paneId === paneId,
+    );
+    if (!terminalPane) {
+      return;
+    }
+    const key = terminalAttentionKey(terminalPane);
+    onAttentionAcknowledgementsChange((current) =>
+      acknowledgeAttentionEntry(current, key, attentionByKey[key]),
+    );
+  };
+
   const selectPane = (groupId: string, paneId: string) => {
     const pane = editorGroups
       .flatMap((group) => group.panes)
@@ -6087,6 +6759,9 @@ function WorkbenchShell({
     setFocusedTerminalPaneId(
       pane?.kind === "persistentTerminal" ? paneId : null,
     );
+    if (pane?.kind === "persistentTerminal") {
+      acknowledgePaneAttention(paneId);
+    }
     setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(current, groupId, paneId),
     );
@@ -6213,6 +6888,7 @@ function WorkbenchShell({
               onCommand={onCommand}
               onOpenActivity={openWorkRootActivityPane}
               onCreateTerminal={createTerminalPane}
+              onCreateAgentTerminal={createAgentTerminalPane}
               onCreateAgentChat={createAgentChatPane}
             />
             {error ? (
@@ -6282,6 +6958,7 @@ function WorkbenchShell({
                 workbenchLayoutRestoreRef.current[rootKey]?.groupSizeById
               }
               onMovePane={movePane}
+              onAcknowledgePane={acknowledgePaneAttention}
               onRequestClosePane={requestWorkbenchPaneClose}
               onSelectPane={selectPane}
               onLayoutSnapshot={(sizeByWorkbenchGroupId) => {
@@ -6367,6 +7044,7 @@ function WorkbenchToolbar({
   onCommand,
   onOpenActivity,
   onCreateTerminal,
+  onCreateAgentTerminal,
   onCreateAgentChat,
 }: {
   server: ServerView;
@@ -6378,6 +7056,7 @@ function WorkbenchToolbar({
   onCommand: DashboardCommandDispatcher;
   onOpenActivity: () => void;
   onCreateTerminal: () => void;
+  onCreateAgentTerminal: () => void;
   onCreateAgentChat: () => void;
 }) {
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -6512,6 +7191,33 @@ function WorkbenchToolbar({
               buildTerminalCreateCommand(root.id, root.resourcePath.serverId),
               {
                 "terminal.create": onCreateTerminal,
+              },
+            );
+          }}
+        />
+        {/* CONTRACT (260725 Phase 2, browser spawn profile): this button is
+            NOT gated by AGENT_GUI_SUSPENDED - it is a parallel path through
+            `terminal.create`-family plumbing (an ordinary
+            `persistentTerminal` pane spawned with a resolved vendor
+            profile), not the suspended agent-chat GUI surface. It must
+            render regardless of AGENT_GUI_SUSPENDED and must never call
+            `registerNewAgentChatPane`/`createAgentChatPane` or dispatch
+            `agentChat.create`. */}
+        <ChromeIconButton
+          commandId="terminal.create.agent"
+          disabled={
+            root.activation !== "online" || root.availability !== "available"
+          }
+          icon={Bot}
+          label="New agent terminal"
+          onClick={() => {
+            onCommand(
+              buildTerminalCreateAgentCommand(
+                root.id,
+                root.resourcePath.serverId,
+              ),
+              {
+                "terminal.create.agent": onCreateAgentTerminal,
               },
             );
           }}
@@ -7104,11 +7810,51 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
   );
 }
 
+// The work roots under one workspace that actually get a nav ROW carrying
+// agent counts (260725 Phase 7, review cycle 1, Minor 3). Used by `ServerRows`
+// for the pinned server roll-up, so the server row can only ever flash for a
+// state some visible descendant row is also showing.
+//
+// CONTRACT: this must select the same SET as `WorkspaceRows` below renders
+// with an `agentCounts` prop, and it is built from the same primitives that
+// component uses (`compactWorkspaceWorkRoot`, `workspaceBaseWorkRoot`,
+// `isWorkspaceNavChildWorkRoot`, `applyHiddenWorktrees`) so the two cannot
+// drift apart. The one step it omits, `applySiblingOrder`, is a pure
+// reordering and cannot change set membership.
+//
+// The multi-root case includes the BASE root (review cycle 2): it has no row
+// of its own, but the `workspace`-presentation row stands in for it - that row
+// receives the base root's `agentCounts` and renders them as TONE ONLY, since
+// `ResourceRow` gates the count text (not the tone attribute) off
+// `presentation !== "workspace"`. Excluding it here would restore the
+// under-flash where an agent finishing a turn in the primary root of a repo
+// with linked worktrees raised no nav signal anywhere.
+function navAttentionWorkRootIds(
+  workspace: WorkspaceView,
+  hiddenIds: readonly string[] | undefined,
+): string[] {
+  const compactRoot = compactWorkspaceWorkRoot(workspace);
+  if (compactRoot) {
+    return [compactRoot.id];
+  }
+  const baseRoot = workspaceBaseWorkRoot(workspace);
+  return [
+    ...(baseRoot ? [baseRoot.id] : []),
+    ...applyHiddenWorktrees(
+      workspace.workRoots.filter(isWorkspaceNavChildWorkRoot),
+      hiddenIds,
+    ).map((root) => root.id),
+  ];
+}
+
 function WorkspaceRows({
   workspace,
   serverId,
   selectedId,
   openWorkRootKeys,
+  terminalCountByRoot,
+  documentCountByRoot,
+  agentAttentionByRoot,
   onCommand,
   worktreeOrderByWorkspace,
   hiddenWorktreesByWorkspace,
@@ -7119,6 +7865,9 @@ function WorkspaceRows({
   serverId: string;
   selectedId: string | null;
   openWorkRootKeys: ReadonlySet<string>;
+  terminalCountByRoot: Record<string, number>;
+  documentCountByRoot: Record<string, number>;
+  agentAttentionByRoot: Record<string, NavAttentionCounts>;
   onCommand: DashboardCommandDispatcher;
   worktreeOrderByWorkspace: Readonly<Record<string, readonly string[]>>;
   hiddenWorktreesByWorkspace: Readonly<Record<string, readonly string[]>>;
@@ -7138,6 +7887,8 @@ function WorkspaceRows({
   const baseRoot = workspaceBaseWorkRoot(workspace);
   const worktreeScopeKey = serverScopedIdentity(serverId, workspace.id);
   const hiddenIds = hiddenWorktreesByWorkspace[worktreeScopeKey];
+  // Set membership here is mirrored by `navAttentionWorkRootIds` above (the
+  // server-row roll-up) - keep the two in step if this filter changes.
   const navChildWorkRoots = workspace.workRoots.filter(
     isWorkspaceNavChildWorkRoot,
   );
@@ -7160,6 +7911,7 @@ function WorkspaceRows({
     );
 
   if (compactRoot) {
+    const compactRootKey = serverScopedIdentity(serverId, compactRoot.id);
     return (
       <div className="resource-group">
         <ResourceRow
@@ -7180,9 +7932,10 @@ function WorkspaceRows({
             compactRoot.kind === "gitPrimaryRoot" ||
             compactRoot.kind === "gitLinkedWorktree"
           }
-          isOpenWorkRoot={openWorkRootKeys.has(
-            serverScopedIdentity(serverId, compactRoot.id),
-          )}
+          isOpenWorkRoot={openWorkRootKeys.has(compactRootKey)}
+          terminalCount={terminalCountByRoot[compactRootKey] ?? 0}
+          documentCount={documentCountByRoot[compactRootKey] ?? 0}
+          agentCounts={agentAttentionByRoot[compactRootKey]}
           debugMeta={[
             "compact workRoot",
             kindLabel(compactRoot.kind),
@@ -7222,6 +7975,29 @@ function WorkspaceRows({
           baseRoot != null &&
           openWorkRootKeys.has(serverScopedIdentity(serverId, baseRoot.id))
         }
+        // 260725 Phase 7, review cycle 2: the workspace row is the ONLY nav
+        // representation of a multi-root workspace's BASE root - a first-class
+        // open root (it is what `closeWorkRootId`/`isOpenWorkRoot` above act
+        // on), but one with no row of its own. Passing its counts here gives
+        // that root a nav-level signal again; without it, an agent finishing a
+        // turn in the primary root of any repo with linked worktrees produced
+        // no row tone and no server tone at all, only the Phase 6 tab badge,
+        // which requires that root to already be selected to be seen. That
+        // under-flash is worse than the over-flash the roll-up narrowing
+        // removed: a silently missing badge beats an unattributable one only
+        // when the badge is genuinely not needed.
+        //
+        // This does NOT put a count line on a workspace row (Decision 4).
+        // `ResourceRow` gates the second line and `data-resource-open` off
+        // `showOpenSurfaceCounts = presentation !== "workspace"`, while
+        // `data-row-attention` is computed and emitted unconditionally - so
+        // this yields TONE WITHOUT COUNT TEXT, which honours Decision 4 and
+        // the pinned server-aggregation rule at the same time.
+        agentCounts={
+          baseRoot
+            ? agentAttentionByRoot[serverScopedIdentity(serverId, baseRoot.id)]
+            : undefined
+        }
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
         dragScopeKey={serverId}
@@ -7229,45 +8005,49 @@ function WorkspaceRows({
           onWorkspaceReorder(serverId, sourceId, beforeId)
         }
       />
-      {childWorkRoots.map((root) => (
-        <div key={root.id}>
-          <ResourceRow
-            id={root.id}
-            title={root.label}
-            presentation="workRoot"
-            state={root.state}
-            depth={1}
-            selected={selectedId === root.id}
-            actions={root.actions}
-            actionEntityId={root.id}
-            actionServerId={serverId}
-            workspaceId={workspace.id}
-            kind={root.kind}
-            availability={root.availability}
-            activation={root.activation}
-            isOpenWorkRoot={openWorkRootKeys.has(
-              serverScopedIdentity(serverId, root.id),
-            )}
-            debugMeta={[
-              "workRoot",
-              kindLabel(root.kind),
-              `availability: ${root.availability}`,
-              `activation: ${root.activation}`,
-            ]}
-            onCommand={onCommand}
-            dragScopeKey={worktreeScopeKey}
-            onSiblingReorder={(sourceId, beforeId) =>
-              onWorktreeReorder(serverId, workspace.id, sourceId, beforeId)
-            }
-          />
-          {root.mainInstances.length > 0 ? (
-            <div className="nav-secondary-context">
-              {root.mainInstances.length} pinned main surface
-              {root.mainInstances.length === 1 ? "" : "s"}
-            </div>
-          ) : null}
-        </div>
-      ))}
+      {childWorkRoots.map((root) => {
+        const rootKey = serverScopedIdentity(serverId, root.id);
+        return (
+          <div key={root.id}>
+            <ResourceRow
+              id={root.id}
+              title={root.label}
+              presentation="workRoot"
+              state={root.state}
+              depth={1}
+              selected={selectedId === root.id}
+              actions={root.actions}
+              actionEntityId={root.id}
+              actionServerId={serverId}
+              workspaceId={workspace.id}
+              kind={root.kind}
+              availability={root.availability}
+              activation={root.activation}
+              isOpenWorkRoot={openWorkRootKeys.has(rootKey)}
+              terminalCount={terminalCountByRoot[rootKey] ?? 0}
+              documentCount={documentCountByRoot[rootKey] ?? 0}
+              agentCounts={agentAttentionByRoot[rootKey]}
+              debugMeta={[
+                "workRoot",
+                kindLabel(root.kind),
+                `availability: ${root.availability}`,
+                `activation: ${root.activation}`,
+              ]}
+              onCommand={onCommand}
+              dragScopeKey={worktreeScopeKey}
+              onSiblingReorder={(sourceId, beforeId) =>
+                onWorktreeReorder(serverId, workspace.id, sourceId, beforeId)
+              }
+            />
+            {root.mainInstances.length > 0 ? (
+              <div className="nav-secondary-context">
+                {root.mainInstances.length} pinned main surface
+                {root.mainInstances.length === 1 ? "" : "s"}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -7339,6 +8119,9 @@ function ResourceRow({
   canAddWorktree = false,
   isOpenWorkRoot = false,
   closeWorkRootId = id,
+  terminalCount,
+  documentCount,
+  agentCounts,
   debugMeta,
   onCommand,
   dragScopeKey,
@@ -7366,6 +8149,21 @@ function ResourceRow({
   canAddWorktree?: boolean;
   isOpenWorkRoot?: boolean;
   closeWorkRootId?: string;
+  // 260725 nav-row-two-line-open-state Phase 1: open-terminal/open-document
+  // counts for the row's reserved second line. Only meaningful for
+  // workRoot/compactWorkRoot presentations - undefined for workspace rows
+  // (Decision 4: workspace has no single rootKey, so the caller never passes
+  // these and the row never renders the second line for that presentation).
+  //
+  // 260725 Phase 7: `terminalCount` excludes agent terminals, which are
+  // reported by `agentCounts` instead - no pane is ever counted twice.
+  // `agentCounts` is undefined when the root has no agent terminal at all,
+  // which reads the same as an all-zero triple; workspace rows never receive
+  // it (the pinned aggregation rule names server rows and work-root rows
+  // only).
+  terminalCount?: number;
+  documentCount?: number;
+  agentCounts?: NavAttentionCounts;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
   // SIBLING drag-reorder scope key (server.id for a workspace row, including
@@ -7427,15 +8225,44 @@ function ResourceRow({
   );
   const draggable = Boolean(dragScopeKey && onSiblingReorder);
   const siblingId = dragEntityId ?? id;
+  // 260725 nav-row-two-line-open-state Phase 1, Decision 4: the second line
+  // and the open/closed data attribute are meaningful only for workRoot and
+  // compactWorkRoot rows - a workspace row represents N child roots with no
+  // single rootKey, so its counts are undefined and its isOpenWorkRoot only
+  // ever reflects baseRoot, not the workspace as a whole. Gate in JS (not a
+  // CSS-only :not() selector) since the count data itself is undefined here.
+  const showOpenSurfaceCounts = presentation !== "workspace";
+  // 260725 Phase 7: the row's aggregate attention level. DERIVED - it has no
+  // acknowledgement of its own and no timer of its own; it is a pure function
+  // of the counts, which are themselves already filtered through the tab
+  // indicator's single ack watermark. The flash is driven off this attribute
+  // by CSS (level-driven, following the `activity-cue-breathe` precedent), so
+  // acknowledging the last pending child tab clears the flash with no
+  // separate nav-row action.
+  //
+  // NAMING (review cycle 1, Minor 5): `data-row-attention` here and Phase 6's
+  // `data-attention-state` on the terminal tab
+  // (`workbench/dockviewLayout.tsx`) are deliberately different names for
+  // different GRAIN, not two spellings of one attribute. The tab's carries
+  // ONE terminal's own pending state; this one carries a whole row's
+  // AGGREGATE over its child terminals (`ready` > `working` > none) and so
+  // can read `ready` while no single tab does. Values overlap by design
+  // (`working`/`ready`/`none`) because both render the same vocabulary; a
+  // future reader must not merge them into one attribute name.
+  const rowAttentionTone = navAttentionTone(agentCounts) ?? "none";
   return (
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}${draggable ? " resource-row-draggable" : ""}${dragOver ? " resource-row-drag-over" : ""}`}
       data-command-id="resource.select"
       data-resource-id={id}
+      data-row-attention={rowAttentionTone}
       data-resource-presentation={presentation}
       data-resource-kind={kind ?? presentation}
       data-resource-activation={activation ?? ""}
       data-resource-availability={availability ?? ""}
+      data-resource-open={
+        showOpenSurfaceCounts ? (isOpenWorkRoot ? "true" : "false") : undefined
+      }
       style={{ "--depth": depth } as CSSProperties}
       title={metadataTitle}
       draggable={draggable}
@@ -7522,6 +8349,38 @@ function ResourceRow({
             </span>
           ) : null}
         </span>
+        {showOpenSurfaceCounts ? (
+          <span className="resource-row-counts">
+            {/* Glyph halves for the agent split, each gated on its own
+                non-zero count. Both are lucide SVGs, so they contribute no
+                text - the counts line's textContent stays exactly
+                `formatOpenSurfaceCounts`' output, which is what
+                dashboard-acceptance.spec.ts compares against. */}
+            {agentCounts && agentCounts.working > 0 ? (
+              <span
+                className="resource-row-agent-glyph"
+                data-row-agent-glyph="working"
+                aria-hidden="true"
+              >
+                <LoaderCircle size={11} strokeWidth={2} />
+              </span>
+            ) : null}
+            {agentCounts && agentCounts.ready > 0 ? (
+              <span
+                className="resource-row-agent-glyph"
+                data-row-agent-glyph="ready"
+                aria-hidden="true"
+              >
+                <Bell size={11} strokeWidth={2} />
+              </span>
+            ) : null}
+            {formatOpenSurfaceCounts(
+              terminalCount ?? 0,
+              documentCount ?? 0,
+              agentCounts,
+            )}
+          </span>
+        ) : null}
       </button>
       {hasWorkspaceRemove ||
       hasWorktreeRemove ||

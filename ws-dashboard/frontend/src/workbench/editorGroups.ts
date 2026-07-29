@@ -13,6 +13,7 @@ import type { TerminalPaneActions } from "../terminalPaneBody.js";
 import type { AgentChatPaneState } from "../agentChatSessions.js";
 import type { AgentChatPaneActions } from "../agentChatPaneBody.js";
 import type { WorkRootActivityBadgeInput } from "../workRootActivity.js";
+import type { AgentAttentionState } from "../agentAttention.js";
 import type {
   WorkbenchPaneCategory,
   WorkbenchPaneOrder,
@@ -24,7 +25,10 @@ import {
   type ActivityTranscriptRefreshSignal,
 } from "./activityPlacement.js";
 import { readOnlyWorkbenchPanesByGroup } from "./readOnlyWorkbenchPane.js";
-import { terminalWorkbenchPanesByGroup } from "./terminalWorkbenchPane.js";
+import {
+  terminalWorkbenchPanesByGroup,
+  type TerminalAttentionInput,
+} from "./terminalWorkbenchPane.js";
 import { agentChatWorkbenchPanesByGroup } from "./agentChatWorkbenchPane.js";
 
 export type WorkbenchPane = {
@@ -37,6 +41,12 @@ export type WorkbenchPane = {
   readonly meta: readonly string[];
   readonly contentRevision?: string;
   readonly body?: ReactNode;
+  // Derived per render from `attentionByKey` + the ack watermark (260725
+  // Phase 6), never persisted: this type is a purely presentational,
+  // rebuilt-every-render view object, distinct from the durable
+  // `TerminalPaneState.session`/`TerminalSessionView`/`TerminalRegistryEntry`
+  // model the ticket forbids adding an `attention` field to.
+  readonly attentionState?: AgentAttentionState;
 };
 
 export type WorkbenchEditorGroupModel = {
@@ -62,6 +72,11 @@ export function buildWorkbenchEditorGroups(
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
+  // Per-terminal attention entries plus the tab-click ack watermark (260725
+  // Phase 6). Passed as one bundle rather than two more positional
+  // parameters, and threaded no further than the terminal pane builder -
+  // no other surface kind has an attention affordance.
+  terminalAttention: TerminalAttentionInput,
   agentChatPanes: AgentChatPaneState[],
   agentChatPaneOrderByGroup: WorkbenchPaneOrder,
   agentChatActions: AgentChatPaneActions,
@@ -96,6 +111,7 @@ export function buildWorkbenchEditorGroups(
     terminalPaneOrderByGroup,
     terminalActions,
     dashboardGroups,
+    terminalAttention,
   );
   const agentChatPanesByGroup = agentChatWorkbenchPanesByGroup(
     root,

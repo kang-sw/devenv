@@ -26,9 +26,27 @@ const POLL_TIMEOUT: Duration = Duration::from_secs(8);
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+// CONTRACT (macOS Unix-domain-socket path-length ceiling, surfaced running
+// this target natively on macOS for the first time - 260725 Phase 1, same
+// root cause as `routes.rs::terminal_registry_temp_dir`): `state_home` here
+// becomes `WS_DASHBOARD_STATE_HOME`, which the real daemon subprocess joins
+// with `terminals/<opaque_terminal_id>.sock` for the live IPC socket. Under
+// macOS's long per-session `$TMPDIR` (e.g. `/var/folders/<hash>/T/`,
+// 40-60 bytes on its own), that full path alone can exceed the 104-byte
+// `sockaddr_un.sun_path` ceiling before the `.sock` filename is even
+// appended, so `UnixListener::bind` fails inside the detached helper and
+// `create_terminal` observes a generic 400 instead of 200. `/tmp` (which
+// macOS symlinks to the short `/private/tmp`) stays comfortably under the
+// limit. Scoped to macOS only: Linux's 108-byte `sun_path` has no equivalent
+// headroom problem with `$TMPDIR`, so Linux keeps `std::env::temp_dir()`
+// unchanged.
 fn temp_fixture_path(name: &str) -> PathBuf {
     let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
+    #[cfg(target_os = "macos")]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(target_os = "macos"))]
+    let base = std::env::temp_dir();
+    base.join(format!(
         "ws-dashboard-terminal-lifetime-{name}-{}-{unique}",
         std::process::id()
     ))
@@ -587,12 +605,14 @@ async fn terminal_boot_reconcile_adopts_grace_row_and_delivers_final_output_on_r
 // `<terminal_id>.json` registry entry (written under the `terminals/`
 // subdirectory of `WS_DASHBOARD_STATE_HOME`, i.e. `<state_home>/terminals/`)
 // carries the helper's real `pid` and `startTime`. It verifies the PID's
-// `/proc` start-time matches before signalling, so a recycled PID is never
-// killed. Then it removes the temp dirs.
+// start-time (via the crate's cfg-independent `terminal_platform::
+// process_start_time` re-export - `/proc/<pid>/stat` on Linux, `proc_pidinfo`
+// on macOS) matches before signalling, so a recycled PID is never killed.
+// Then it removes the temp dirs.
 //
-// CONTRACT: the identity-verified reap (pid + /proc start-time match) closes the
-// PID-reuse window entirely. The only residual risk is a panic in the razor-thin
-// window after `create_terminal` returns but before the helper has flushed its
+// CONTRACT: the identity-verified reap (pid + OS-reported start-time match)
+// closes the PID-reuse window entirely. The only residual risk is a panic in
+// the razor-thin window after `create_terminal` returns but before the helper has flushed its
 // registry `.json`; such an untracked helper is left to the OS, which EOF-exits
 // it once its orphaned PTY master is dropped. Fix #1 (the marker handshake)
 // makes the panic path rare regardless, so this guard is defense in depth.
@@ -628,7 +648,9 @@ impl Drop for HelperReaper {
                 ) else {
                     continue;
                 };
-                if proc_start_time(pid) != Some(start_time) {
+                if ws_dashboard_daemon::terminal_platform::process_start_time(pid as u32)
+                    != Some(start_time)
+                {
                     // PID gone or recycled for another process - never signal a stranger.
                     continue;
                 }
@@ -641,16 +663,6 @@ impl Drop for HelperReaper {
         let _ = std::fs::remove_dir_all(&self.state_home);
         let _ = std::fs::remove_dir_all(&self.work_root);
     }
-}
-
-// Mirror of `terminal_platform::unix::process_start_time`: `/proc/<pid>/stat`
-// field 22 (`starttime`), read after the `)` that closes the (possibly
-// space-containing) comm field. `None` if the process is gone.
-#[cfg(unix)]
-fn proc_start_time(pid: u64) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_comm = stat.rsplit_once(')')?.1;
-    after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 // CONTRACT (260724 dead-shell Phase 3, Unix-regression leg): guard the LIVE,
@@ -836,6 +848,155 @@ async fn terminal_live_pty_eof_exit_flips_status_to_exited() {
         "close live-eof terminal: unexpected status {}",
         close_response.status()
     );
+
+    daemon.kill_hard().await;
+    let _ = std::fs::remove_dir_all(&state_home);
+    let _ = std::fs::remove_dir_all(&work_root);
+}
+
+// CONTRACT (260725 Phase 2, fourth lifecycle leg - identity-verified close):
+// `TerminalSession::terminate` (`terminal.rs`) is unconditionally 2-tier: it
+// writes `GracefulShutdown` over IPC, sleeps 200ms, then ALWAYS calls
+// `terminal_platform::kill_verified(pid, start_time)` regardless of whether
+// the graceful path appeared to succeed. Under normal healthy load the
+// helper's `GracefulShutdown` handler (`terminal_helper_process.rs`) kills
+// its own shell and self-exits well inside that 200ms window, which makes
+// the fallback `kill_verified` call a structural no-op (the pid is already
+// gone by the time it runs, so `read_bsdinfo`/`process_start_time` returns
+// `None` and it is a harmless `Ok(false)`). A black-box "is the process gone
+// after DELETE" check alone cannot distinguish "the graceful path did it"
+// from "the identity-verified `kill_verified` SIGKILL path did it" - this
+// test forces the latter by `SIGSTOP`-ing the helper before issuing the
+// close, so it genuinely cannot service its IPC socket (the write still
+// lands in the kernel socket buffer, but nothing reads it) before the
+// fallback timer fires. `SIGKILL` is not maskable by `SIGSTOP`, so
+// `kill_verified`'s signal still reaches and terminates the frozen helper.
+//
+// Unix-only: this test shells out to `kill -STOP` and `ps -o state=`, neither
+// of which exists on Windows. The Windows verified-kill path has its own
+// `#[cfg(windows)]` acceptance target, so gating this test to `unix` loses no
+// coverage.
+#[cfg(unix)]
+#[tokio::test]
+async fn terminal_close_kills_verified_process_via_fallback_kill() {
+    let client = reqwest::Client::new();
+    let state_home = temp_fixture_path("state-close-kill");
+    std::fs::create_dir_all(&state_home).expect("create state home dir");
+    let work_root = temp_fixture_path("root-close-kill");
+    std::fs::create_dir_all(&work_root).expect("create work root dir");
+
+    // Leak-safe cleanup: if anything below panics after the SIGSTOP but
+    // before the daemon's kill_verified reaches the helper, this guard's
+    // identity-verified `kill -KILL` still reaps a stopped process (SIGKILL
+    // is not maskable, so it terminates a `T`-state process immediately
+    // without first requiring a SIGCONT). See `HelperReaper` above.
+    let _reaper = HelperReaper {
+        state_home: state_home.clone(),
+        work_root: work_root.clone(),
+    };
+
+    let daemon = spawn_real_daemon(&state_home).await;
+    let work_root_id = open_work_root(&client, &daemon.base_url, &work_root).await;
+    let terminal_id = create_terminal(&client, &daemon.base_url, &work_root_id).await;
+
+    // Read the terminal's registry entry directly (mirrors `HelperReaper`'s
+    // parse, not a fresh implementation) to capture the helper's real
+    // `pid`/`startTime` before closing.
+    let registry_path = state_home
+        .join("terminals")
+        .join(format!("{terminal_id}.json"));
+    let raw =
+        std::fs::read_to_string(&registry_path).expect("read terminal registry entry before close");
+    let entry: serde_json::Value =
+        serde_json::from_str(&raw).expect("parse terminal registry entry JSON");
+    let pid = entry["pid"].as_u64().expect("registry pid") as u32;
+    let start_time = entry["startTime"].as_u64().expect("registry startTime");
+
+    // Verify the pid we are about to SIGSTOP is still the helper this test
+    // just created, not a recycled pid, BEFORE signalling it - this is the
+    // exact identity invariant the whole ticket exists to protect (see
+    // `HelperReaper` above: "PID gone or recycled for another process -
+    // never signal a stranger"). If the helper already died and its pid was
+    // reused, `SIGSTOP`-ing it would freeze an unrelated process
+    // indefinitely (the reaper would then correctly refuse to `SIGKILL` it
+    // on identity mismatch, so it would never be thawed).
+    assert_eq!(
+        ws_dashboard_daemon::terminal_platform::process_start_time(pid),
+        Some(start_time),
+        "helper pid {pid} identity must match the registry's startTime before SIGSTOP-ing it"
+    );
+
+    // Freeze the helper so it cannot service `GracefulShutdown` before
+    // `terminate()`'s 200ms fallback timer fires. Poll `ps` until the kernel
+    // actually reports the stopped state (`T`) rather than assuming the
+    // signal has been fully applied the instant `kill` returns.
+    let stop_status = std::process::Command::new("kill")
+        .arg("-STOP")
+        .arg(pid.to_string())
+        .status()
+        .expect("run kill -STOP on helper pid");
+    assert!(stop_status.success(), "SIGSTOP delivery to helper must succeed");
+
+    let stop_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let output = std::process::Command::new("ps")
+            .arg("-o")
+            .arg("state=")
+            .arg("-p")
+            .arg(pid.to_string())
+            .output()
+            .expect("run ps to observe helper state");
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if state.starts_with('T') {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < stop_deadline,
+            "helper pid {pid} never reached the SIGSTOP'd `T` state; last ps state: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // `close_terminal` `.await`s `terminate()` (including the fallback
+    // `kill_verified` call) before responding, so by the time this returns
+    // the identity-verified SIGKILL has already been issued.
+    let close_response = client
+        .delete(format!(
+            "{}/api/dashboard/terminals/{terminal_id}",
+            daemon.base_url
+        ))
+        .send()
+        .await
+        .expect("close terminal request");
+    assert_eq!(
+        close_response.status(),
+        reqwest::StatusCode::NO_CONTENT,
+        "close terminal"
+    );
+
+    // Poll (generous, bounded deadline - consistent with this file's "err
+    // generous" margin philosophy) until the OS confirms this identity is
+    // gone. This is the actual "OS process was verified-killed" evidence: a
+    // plain `GracefulShutdown` could never have reached the frozen helper, so
+    // only the fallback `kill_verified` SIGKILL path can account for this.
+    // Reusing `start_time` here (rather than testing pid existence alone)
+    // widens the accepting set from `{None}` to `{None} ∪ {Some(other)}` -
+    // a strict superset. A recycled pid now reads as "identity gone" and
+    // breaks the loop immediately, instead of reading as `Some(other)`,
+    // failing the old `is_none()` check, and stalling the poll until the
+    // deadline - a spurious timeout, not a false pass either way.
+    let death_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if ws_dashboard_daemon::terminal_platform::process_start_time(pid) != Some(start_time) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < death_deadline,
+            "helper pid {pid} was not killed by terminate()'s fallback kill_verified path \
+             within the deadline"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     daemon.kill_hard().await;
     let _ = std::fs::remove_dir_all(&state_home);

@@ -144,11 +144,67 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Cargo-provided real compiled binary. Each call gets its own isolated
 // registry directory so concurrent tests never share terminal socket paths.
 fn test_terminal_registry() -> TerminalRegistry {
-    TerminalRegistry::new(
+    test_terminal_registry_with_state_dir().0
+}
+
+// CONTRACT (260725 Phase 4): pairs a real `TerminalRegistry` with the
+// `state_dir` it was constructed against, so a test can read back
+// daemon-private files (`terminal-tokens/<id>.json`,
+// `agent-profiles/<id>/callback.json`) written under that SAME path after
+// creating a real terminal through the HTTP surface - mirrors the pattern
+// `daemonHarness.ts` already uses at the Playwright layer (Codebase Findings:
+// "a Playwright spec can also read daemon-private files under that same
+// state home directly from Node"). Deliberately a SEPARATE temp path from
+// `terminal_registry_temp_dir()` (which stays scoped to socket-length-
+// sensitive `registry_dir`/`.sock` paths on macOS) - `state_dir` never holds
+// a socket file, so it has no equivalent path-length constraint.
+fn test_terminal_registry_with_state_dir() -> (TerminalRegistry, PathBuf) {
+    let state_dir = terminal_registry_state_dir();
+    let registry = TerminalRegistry::new(
         PathBuf::from(env!("CARGO_BIN_EXE_ws-dashboard")),
-        temp_fixture_path("terminal-registry"),
+        terminal_registry_temp_dir(),
         Duration::from_secs(5),
-    )
+        Some(state_dir.clone()),
+        "http://127.0.0.1:0".to_owned(),
+    );
+    (registry, state_dir)
+}
+
+fn terminal_registry_state_dir() -> PathBuf {
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "ws-dashboard-terminal-registry-state-{}-{unique}",
+        std::process::id()
+    ))
+}
+
+// CONTRACT (macOS Unix-domain-socket path-length ceiling, surfaced running
+// this crate's tests natively on macOS for the first time - 260725 phase 1):
+// `sockaddr_un.sun_path` caps out at 104 bytes on macOS vs. 108 on Linux, and
+// `std::env::temp_dir()` (what `temp_fixture_path` uses) resolves to a long
+// per-session `$TMPDIR` path on macOS (e.g.
+// `/var/folders/<hash>/T/`), which alone can consume 40-60 bytes - too little
+// headroom left for this fixture's directory name plus a terminal id plus
+// `.sock` before `UnixListener::bind` fails with "path must be shorter than
+// SUN_LEN". `/tmp` (which macOS symlinks to the short `/private/tmp`) stays
+// comfortably under the limit, so the terminal-registry fixture - the only
+// fixture that binds real sockets under its temp path - uses it directly on
+// macOS instead of going through the shared `temp_fixture_path` helper
+// (which many non-socket fixtures also use and must not be perturbed by a
+// socket-specific constraint). The override is scoped to
+// `target_os = "macos"` only: Linux's 108-byte `sun_path` has no equivalent
+// headroom problem with `$TMPDIR`, so Linux keeps `std::env::temp_dir()`
+// unchanged rather than moving to `/tmp` gratuitously.
+fn terminal_registry_temp_dir() -> PathBuf {
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    #[cfg(target_os = "macos")]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(target_os = "macos"))]
+    let base = std::env::temp_dir();
+    base.join(format!(
+        "ws-dashboard-terminal-registry-{}-{unique}",
+        std::process::id()
+    ))
 }
 
 // `Off`: unrelated route tests must not pick up Phase 4's arm-on-reconcile
@@ -183,6 +239,7 @@ fn app_state_with_opened_and_store(
     opened_work_roots: OpenedWorkRoots,
     dashboard_state: DashboardStateStore,
 ) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
@@ -194,7 +251,11 @@ fn app_state_with_opened_and_store(
         opened_work_roots,
         dashboard_state,
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        // CONTRACT (260725 Phase 5): must be `terminals.attention()`, a clone
+        // of the SAME hub `terminals` holds - see
+        // `TerminalRegistry::attention`'s CONTRACT.
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -208,6 +269,7 @@ fn app_state_with_opened_and_store(
 }
 
 fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig {
             static_dir: Some(static_dir),
@@ -222,7 +284,8 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -443,6 +506,7 @@ async fn invalid_missing_and_reused_pairing_tokens_do_not_install_sessions() {
 #[tokio::test]
 async fn expired_pairing_tokens_do_not_install_sessions() {
     // CONTRACT: A zero TTL is the deterministic expired-token fixture.
+    let expired_terminals = test_terminal_registry();
     let expired_state = AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
@@ -454,7 +518,8 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        attention: expired_terminals.attention(),
+        terminals: expired_terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -5998,6 +6063,7 @@ async fn linked_server_git_and_worktree_forwarding_rewrites_resources_to_server_
         remote_server,
         remote_root,
         state_file_root,
+        ..
     } = fixture;
 
     // Read forwarding: git status through the linked server returns the remote
@@ -6178,6 +6244,13 @@ struct LinkedRemoteGitFixture {
     remote_server: tokio::task::JoinHandle<()>,
     remote_root: PathBuf,
     state_file_root: PathBuf,
+    // CONTRACT (260725 Phase 5): added for the attention server-scoping
+    // test, which needs to drive the remote daemon's OWN routes directly
+    // (create a terminal, POST its turn-state) rather than only through
+    // `local_app`'s forwarding - see `link_and_open_remote_root_at`'s own
+    // CONTRACT comment.
+    remote_app: axum::Router,
+    remote_state_dir: PathBuf,
 }
 
 async fn link_and_open_remote_git_root(tag: &str) -> LinkedRemoteGitFixture {
@@ -6197,17 +6270,30 @@ async fn link_and_open_remote_git_root_plain(tag: &str) -> LinkedRemoteGitFixtur
 }
 
 async fn link_and_open_remote_root_at(tag: &str, remote_root: PathBuf) -> LinkedRemoteGitFixture {
-    let remote_state = app_state_with_opened_and_store(
-        OpenedWorkRoots::default(),
-        DashboardStateStore::disabled(),
-    );
+    // CONTRACT (260725 Phase 5, attention server-scoping test): unlike the
+    // default `app_state_with_opened_and_store` this fixture used before,
+    // this pairs the remote's `TerminalRegistry` with the `state_dir` it was
+    // constructed against - `260725-attention-server-scoping` needs to read
+    // the REMOTE daemon's own callback-token file directly, the same way
+    // `read_callback_token_from_disk` already does for the local daemon in
+    // the turn-state tests.
+    let (remote_terminal_registry, remote_state_dir) = test_terminal_registry_with_state_dir();
+    let remote_state = app_state_with_terminal_registry(remote_terminal_registry);
     let passphrase = remote_state
         .auth
         .link_passphrase()
         .expose_for_owner_record()
         .to_owned();
     let remote_app = build_router(remote_state);
-    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+    // CONTRACT: kept alongside the spawned TCP server, not instead of it -
+    // `spawn_test_server`'s real network round trip is what the FORWARDING
+    // path (`local_app` -> linked server) actually exercises, while this
+    // clone lets a test drive the remote daemon's own routes directly
+    // in-process (no network hop) to set up state ON the remote without
+    // going through forwarding at all. Both share the same underlying
+    // `AppState` (Router::clone is a cheap Arc-style clone), so a write
+    // through either is visible through the other.
+    let (remote_addr, remote_server) = spawn_test_server(remote_app.clone()).await;
 
     let state_file_root = temp_fixture_path(&format!("linked-remote-{tag}-state"));
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
@@ -6289,6 +6375,8 @@ async fn link_and_open_remote_root_at(tag: &str, remote_root: PathBuf) -> Linked
         remote_server,
         remote_root,
         state_file_root,
+        remote_app,
+        remote_state_dir,
     }
 }
 
@@ -8965,6 +9053,7 @@ fn app_state_with_activity_cache_and_codex_home(
     cache_home: PathBuf,
     codex_home: Option<PathBuf>,
 ) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
@@ -8976,7 +9065,8 @@ fn app_state_with_activity_cache_and_codex_home(
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
-        terminals: test_terminal_registry(),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         document_events: DocumentEventHub::default(),
@@ -14733,6 +14823,7 @@ async fn daemon_security_smoke_covers_auth_and_health_boundary() {
 }
 
 fn app_state_with_translation_provider(base_url: String, default_model: Option<&str>) -> AppState {
+    let terminals = test_terminal_registry();
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
@@ -14751,7 +14842,8 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
             default_model: default_model.map(str::to_owned),
             timeout_ms: 5_000,
         })),
-        terminals: test_terminal_registry(),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
@@ -16509,4 +16601,941 @@ async fn work_root_activity_route_merges_claude_session_into_items() {
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+// ---------------------------------------------------------------------------
+// 260725 Phase 4: per-terminal turn-state callback route (token auth, NOT
+// owner-session auth - see `router.rs::build_router`'s CONTRACT and
+// `terminal.rs::post_terminal_turn_state`).
+//
+// CONTRACT: every test below runs with owner auth ENABLED (`app_state()`'s
+// `ServeConfig::default_loopback()` already sets `owner_auth_enabled: true` -
+// asserted explicitly in the first test) and deliberately never sends an
+// owner session cookie on the turn-state request itself - that absence is
+// what proves the route sits outside `require_owner_auth` structurally
+// rather than merely because auth happened to be disabled for the test.
+// ---------------------------------------------------------------------------
+
+fn app_state_with_terminal_registry(registry: TerminalRegistry) -> AppState {
+    let mut state = app_state();
+    // CONTRACT (260725 Phase 5): `attention` must be re-pointed at the
+    // INCOMING registry's hub, not left aimed at `app_state()`'s own
+    // (now-discarded) registry - otherwise a turn-state POST against this
+    // `registry` would publish into a hub these tests' SSE requests (built
+    // against this same `state`) never read from, and this registry's own
+    // `remove`/`remove_for_work_roots` would forget entries in a hub nobody
+    // else observes either.
+    state.attention = registry.attention();
+    state.terminals = registry;
+    state
+}
+
+// CONTRACT: unlike `create_terminal_for_test`, this passes an explicit
+// `profileId` so the spawn path's `hook_config` branch runs and materializes
+// a real callback token + `callback.json` (see
+// `terminal.rs::TerminalSession::spawn`'s hook-config branch) - a plain
+// shell terminal never gets a token at all. `"claude"` resolves to a real
+// argv (`resolve_create_command`) even though the `claude` binary itself is
+// not expected to exist on the test machine; per the ticket's own restart-
+// harness finding, `create_terminal`'s HTTP response completes before the
+// helper ever attempts to spawn the resolved command, so this costs nothing.
+async fn create_terminal_with_profile_for_test(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+    profile_id: &str,
+) -> String {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "columns": 80,
+                        "rows": 24,
+                        "title": "Turn-state test terminal",
+                        "profileId": profile_id,
+                    })
+                    .to_string(),
+                ))
+                .expect("create terminal request"),
+        )
+        .await
+        .expect("create terminal response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
+    value["terminalId"]
+        .as_str()
+        .expect("terminal id")
+        .to_owned()
+}
+
+// CONTRACT: reads the daemon-private token store directly off disk (same
+// pattern `daemonHarness.ts` uses at the Playwright layer) - there is no
+// public API surface that exposes a callback token, by design (hard
+// constraint: never in a response body, URL, or `TerminalRegistryEntry`).
+fn read_callback_token_from_disk(state_dir: &Path, terminal_id: &str) -> String {
+    let raw = fs::read_to_string(
+        state_dir
+            .join("terminal-tokens")
+            .join(format!("{terminal_id}.json")),
+    )
+    .expect("read terminal token file");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("parse terminal token file");
+    value["token"]
+        .as_str()
+        .expect("token field")
+        .to_owned()
+}
+
+async fn turn_state_request(
+    app: axum::Router,
+    terminal_id: &str,
+    token: &str,
+    state: &str,
+) -> StatusCode {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/turn-state"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "token": token, "state": state }).to_string(),
+                ))
+                .expect("turn-state request"),
+        )
+        .await
+        .expect("turn-state response");
+    response.status()
+}
+
+#[tokio::test]
+async fn turn_state_route_accepts_a_valid_token_with_owner_auth_enabled_and_no_cookie() {
+    let root = temp_fixture_path("turn-state-valid");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    assert!(
+        state.config.owner_auth_enabled,
+        "this route's whole point is only proven when owner auth is ENABLED"
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    let status = turn_state_request(app, &terminal_id, &terminal_token, "working").await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_a_wrong_token() {
+    let root = temp_fixture_path("turn-state-wrong");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+
+    let status = turn_state_request(app, &terminal_id, "definitely-not-the-real-token", "working").await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_an_empty_token() {
+    let root = temp_fixture_path("turn-state-empty");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+
+    let status = turn_state_request(app, &terminal_id, "", "working").await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_an_unknown_terminal_id_the_same_way_as_a_wrong_token() {
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let app = build_router(state);
+
+    let status = turn_state_request(app, "term_does_not_exist", "any-token", "working").await;
+
+    // CONTRACT (Design Answer 3): unknown terminal id and wrong token must
+    // be indistinguishable to the caller.
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (MANDATORY per plan Verification Plan): a token minted for one
+// terminal must never authenticate a turn-state POST for a DIFFERENT
+// terminal, even when both are live in the same registry at once.
+#[tokio::test]
+async fn turn_state_route_rejects_terminal_a_token_used_for_terminal_b() {
+    let root = temp_fixture_path("turn-state-cross-terminal");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let terminal_a =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_b =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    assert_ne!(terminal_a, terminal_b);
+    let token_a = read_callback_token_from_disk(&state_dir, &terminal_a);
+
+    // Terminal A's own token must accept for terminal A...
+    let status_a = turn_state_request(app.clone(), &terminal_a, &token_a, "working").await;
+    assert_eq!(status_a, StatusCode::NO_CONTENT);
+
+    // ...but must NEVER authenticate a POST naming terminal B instead.
+    let status_cross = turn_state_request(app, &terminal_b, &token_a, "working").await;
+    assert_eq!(
+        status_cross,
+        StatusCode::UNAUTHORIZED,
+        "terminal A's token must not accept for terminal B"
+    );
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (260727 Phase 3): the kill-all sweep is the THIRD terminal-close
+// path (alongside explicit close and workRoot/workspace removal) and owes the
+// same two removal obligations - `TerminalRegistry::drain_all` must
+// `forget_token` (in-memory entry AND the on-disk
+// `terminal-tokens/<id>.json`) and `attention.forget` every session it drops.
+// This test covers the token half through the real HTTP surface; the
+// attention half is covered as a unit test at the choke point
+// (`terminal.rs::drain_all_forgets_the_attention_entry`).
+//
+// Two structural details this test depends on, both load-bearing:
+//   1. The pre-kill 204 is a NON-VACUITY CONTROL, not a courtesy. It proves
+//      the very token the post-kill assertion expects to be REJECTED was
+//      genuinely accepted a moment earlier. Without it, a fixture that never
+//      minted a usable token would satisfy the 401 for entirely the wrong
+//      reason and read forever after as proof the defect is fixed.
+//   2. Cookie asymmetry: the kill-all route is registered inside `protected`
+//      and therefore sits BEHIND `require_owner_auth`, so its POST carries the
+//      owner cookie - while the turn-state POSTs on either side of it must NOT
+//      carry one, since that route is deliberately registered outside
+//      `require_owner_auth` (see `router.rs::build_router`'s CONTRACT and this
+//      module's header). Sending the cookie on the turn-state POSTs, or
+//      omitting it on kill-all, makes the test fail at the wrong step and
+//      prove nothing.
+//
+// (review cycle 1, finding 2) Also asserts the `{"closed": N}` response body
+// itself - the route's own statement of how many sessions it drained - since
+// nothing previously checked it.
+#[tokio::test]
+async fn close_all_terminals_revokes_callback_tokens() {
+    let root = temp_fixture_path("kill-all-revokes-token");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    assert!(
+        state.config.owner_auth_enabled,
+        "the cookie asymmetry this test relies on is only meaningful with \
+         owner auth ENABLED"
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+    let token_path =
+        ws_dashboard_daemon::agent_token_store::token_store_path(&state_dir, &terminal_id);
+    assert!(
+        token_path.exists(),
+        "non-vacuity control: the on-disk token file must EXIST before the \
+         kill-all sweep, or its later absence proves nothing"
+    );
+
+    // Non-vacuity control: this exact token authenticates BEFORE the kill.
+    let before = turn_state_request(app.clone(), &terminal_id, &terminal_token, "working").await;
+    assert_eq!(
+        before, StatusCode::NO_CONTENT,
+        "non-vacuity control: the token must be accepted BEFORE the kill-all \
+         sweep, or the post-kill 401 proves nothing"
+    );
+
+    // Kill-all sits behind `require_owner_auth`, so this POST DOES carry the
+    // owner cookie - unlike the turn-state POSTs on either side of it.
+    let kill_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/terminals/kill-all")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("kill-all request"),
+        )
+        .await
+        .expect("kill-all response");
+    assert_eq!(kill_all.status(), StatusCode::OK);
+    let kill_all_body = axum::body::to_bytes(kill_all.into_body(), 4096)
+        .await
+        .expect("kill-all body");
+    let kill_all_value: serde_json::Value =
+        serde_json::from_slice(&kill_all_body).expect("kill-all JSON");
+    assert_eq!(
+        kill_all_value["closed"], 1,
+        "kill-all's own response must report exactly the one terminal it drained"
+    );
+
+    let after = turn_state_request(app, &terminal_id, &terminal_token, "working").await;
+    assert_eq!(
+        after,
+        StatusCode::UNAUTHORIZED,
+        "a callback token must stop authenticating once its terminal has been \
+         swept by kill-all"
+    );
+    assert!(
+        !token_path.exists(),
+        "kill-all must delete the on-disk callback-token file, not merely \
+         drop the in-memory entry"
+    );
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+#[tokio::test]
+async fn turn_state_route_rejects_an_invalid_state_value_only_after_a_valid_token() {
+    let root = temp_fixture_path("turn-state-invalid-state");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    // An unrecognized state value with the CORRECT token is a 400, only
+    // reachable once the token check has already passed.
+    let invalid_state_status =
+        turn_state_request(app.clone(), &terminal_id, &terminal_token, "not-a-real-state").await;
+    assert_eq!(invalid_state_status, StatusCode::BAD_REQUEST);
+
+    // The SAME invalid state value with a WRONG token must still be 401, not
+    // 400 - proving the token check runs first and short-circuits before
+    // `state` is ever parsed (Design Answer 3's ordering).
+    let wrong_token_status =
+        turn_state_request(app, &terminal_id, "wrong-token", "not-a-real-state").await;
+    assert_eq!(wrong_token_status, StatusCode::UNAUTHORIZED);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// ---------------------------------------------------------------------------
+// 260725 Phase 5: server-scoped attention event stream
+// (`agent_attention.rs::attention_events` / `servers.rs::
+// server_scoped_attention_events`). Builds on the Phase 4 turn-state route
+// tests above for terminal/token setup.
+// ---------------------------------------------------------------------------
+
+struct AttentionSseFrame {
+    event: String,
+    data: serde_json::Value,
+}
+
+fn drain_attention_sse_frames(buffer: &mut String, frames: &mut Vec<AttentionSseFrame>) {
+    while let Some(boundary) = buffer.find("\n\n") {
+        let frame = buffer[..boundary].to_owned();
+        *buffer = buffer[(boundary + 2)..].to_owned();
+        let event = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("event: "))
+            .expect("attention SSE frame event field")
+            .to_owned();
+        let data = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("attention SSE frame data field");
+        frames.push(AttentionSseFrame {
+            event,
+            data: serde_json::from_str(data).expect("attention SSE frame data JSON"),
+        });
+    }
+}
+
+// CONTRACT (ticket verification line (a)): a state transition for a
+// NON-selected work root must reach the client with NO Activity Console
+// pane/request open for it at all - this test never touches any
+// `.../activity` route.
+#[tokio::test]
+async fn attention_events_local_stream_delivers_a_transition_with_no_activity_console_pane_open() {
+    let root = temp_fixture_path("attention-local-scoping");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    // Stream opened BEFORE the turn-state POST, so the transition below must
+    // arrive as a live `event: attention` frame, not merely be visible via
+    // the reconnect snapshot (that path has its own dedicated test below).
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("attention events request"),
+        )
+        .await
+        .expect("attention events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    assert_eq!(
+        events
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("text/event-stream")),
+        Some(true)
+    );
+    let mut stream = events.into_body().into_data_stream();
+
+    let status = turn_state_request(app, &terminal_id, &terminal_token, "ready").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let mut buffer = String::new();
+    let mut frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while !frames.iter().any(|frame: &AttentionSseFrame| {
+            frame.event == "attention" && frame.data["terminalId"] == terminal_id
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("attention SSE chunk before timeout")
+                .expect("attention SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("attention SSE UTF-8"));
+            drain_attention_sse_frames(&mut buffer, &mut frames);
+        }
+    })
+    .await
+    .expect("attention transition event for the non-selected work root's terminal");
+
+    let event = frames
+        .iter()
+        .find(|frame| frame.event == "attention" && frame.data["terminalId"] == terminal_id)
+        .expect("attention event for the transitioned terminal");
+    assert_eq!(event.data["state"], "ready");
+    assert_eq!(event.data["workRootId"], work_root_id);
+    assert_eq!(event.data["type"], "terminal.attentionChanged");
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (ticket verification line (b)): a reconnect (a NEW connection,
+// simulating a browser refresh) must receive any pending state via the
+// snapshot, since a `broadcast` channel alone has no history for a
+// connection that was never open when the event fired.
+#[tokio::test]
+async fn attention_events_reconnect_receives_pending_state_via_the_snapshot() {
+    let root = temp_fixture_path("attention-reconnect-snapshot");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    // Record a pending transition with NO stream ever open yet - simulating
+    // a state change that happened before the browser tab (re)loaded.
+    let status = turn_state_request(app.clone(), &terminal_id, &terminal_token, "working").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A FRESH connection - never the one that would have seen a live event,
+    // since none was ever opened - simulating the browser refresh/reconnect.
+    let events = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("attention reconnect request"),
+        )
+        .await
+        .expect("attention reconnect response");
+    assert_eq!(events.status(), StatusCode::OK);
+    let mut stream = events.into_body().into_data_stream();
+
+    let mut buffer = String::new();
+    let mut frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while frames.is_empty() {
+            let chunk = stream
+                .next()
+                .await
+                .expect("attention snapshot chunk before timeout")
+                .expect("attention snapshot body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("attention snapshot UTF-8"));
+            drain_attention_sse_frames(&mut buffer, &mut frames);
+        }
+    })
+    .await
+    .expect("attention snapshot frame");
+
+    assert_eq!(
+        frames[0].event, "attentionSnapshot",
+        "the very first frame on a fresh connection must be the snapshot, not a live event"
+    );
+    let items = frames[0].data["items"]
+        .as_array()
+        .expect("attention snapshot items array");
+    let item = items
+        .iter()
+        .find(|item| item["terminalId"] == terminal_id)
+        .expect("the pending terminal must appear in the reconnect snapshot");
+    assert_eq!(item["state"], "working");
+    assert_eq!(item["workRootId"], work_root_id);
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (design question 3's concrete answer, plan step 5): a lagged
+// receiver must END the stream rather than silently skip forward - the
+// deliberate divergence from `document_events`'s `continue`. This is the
+// guard the lag-path mutation experiment targets: reverting the `Lagged`
+// arm to `continue` (matching `document_events`) makes this test fail.
+#[tokio::test]
+async fn attention_events_ends_the_stream_on_a_lagged_receiver() {
+    let root = temp_fixture_path("attention-lag-guard");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id =
+        create_terminal_with_profile_for_test(app.clone(), cookie.as_str(), &work_root_id, "claude")
+            .await;
+    let terminal_token = read_callback_token_from_disk(&state_dir, &terminal_id);
+
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("attention events request"),
+        )
+        .await
+        .expect("attention events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    let mut stream = events.into_body().into_data_stream();
+
+    // Consume exactly the initial snapshot frame. The subscriber's broadcast
+    // receiver has NOT yet called `recv()` at this point - `initial`
+    // resolves without touching `rx` at all (see `attention_events`'s own
+    // CONTRACT comment).
+    let snapshot_chunk = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("attention snapshot chunk before timeout")
+        .expect("attention snapshot stream item")
+        .expect("attention snapshot body chunk");
+    assert!(
+        std::str::from_utf8(&snapshot_chunk)
+            .expect("attention snapshot UTF-8")
+            .contains("event: attentionSnapshot"),
+        "first chunk must be the snapshot frame, before this receiver's first recv()"
+    );
+
+    // Flood the broadcast channel (capacity 64, `AttentionHub::default`)
+    // with MORE transitions than its capacity, WITHOUT the stream ever
+    // reading any of them - the subscriber falls behind by more than
+    // capacity, so its first real `recv()` (triggered by the poll below)
+    // must observe `RecvError::Lagged`.
+    for index in 0..80u32 {
+        let state = if index % 2 == 0 { "working" } else { "ready" };
+        let status = turn_state_request(app.clone(), &terminal_id, &terminal_token, state).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    let after_lag = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("attention stream poll after flooding must not hang");
+    assert!(
+        after_lag.is_none(),
+        "a lagged receiver must end the SSE stream, not silently skip forward or keep serving \
+         a full backlog: got {after_lag:?}"
+    );
+
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+}
+
+// CONTRACT (MANDATORY per plan/ticket): proves server-scoping is REAL, not
+// accidental - modeled directly on
+// `linked_server_activity_events_forwarding_preserves_sse` above. The
+// POSITIVE half (forwarding relays the remote's own state) is equally true
+// of a correct per-server design AND of a single global hub; only the
+// NEGATIVE half (the LOCAL stream never sees the remote terminal's entry)
+// tells them apart - the ticket records that an earlier "dashboard-scope"
+// draft would have silently merged every linked server's attention state
+// into one hub, dropping remote-agent identity. Both halves live in this
+// ONE test so they always run against the exact same recorded transition.
+#[tokio::test]
+async fn linked_server_attention_events_are_scoped_per_server_not_globally_shared() {
+    let fixture = link_and_open_remote_git_root_plain("attention-scoping").await;
+    let LinkedRemoteGitFixture {
+        local_app,
+        cookie,
+        work_root_id,
+        remote_server,
+        remote_root,
+        state_file_root,
+        remote_app,
+        remote_state_dir,
+        ..
+    } = fixture;
+
+    // Create the terminal ON THE REMOTE through the LOCAL app's existing
+    // server-scoped forwarding path - already proven by
+    // `linked_server_activity_events_forwarding_preserves_sse` et al, so this
+    // test's own subject stays the ATTENTION stream's scoping, not terminal-
+    // creation forwarding.
+    let create = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "columns": 80,
+                        "rows": 24,
+                        "title": "Attention scoping test terminal",
+                        "profileId": "claude",
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped create terminal request"),
+        )
+        .await
+        .expect("server scoped create terminal response");
+    assert_eq!(create.status(), StatusCode::OK);
+    let create_body = axum::body::to_bytes(create.into_body(), 4096)
+        .await
+        .expect("server scoped create terminal body");
+    let create_value: serde_json::Value =
+        serde_json::from_slice(&create_body).expect("server scoped create terminal JSON");
+    let terminal_id = create_value["terminalId"]
+        .as_str()
+        .expect("remote terminal id")
+        .to_owned();
+    let terminal_token = read_callback_token_from_disk(&remote_state_dir, &terminal_id);
+
+    // POST the turn-state DIRECTLY to the REMOTE daemon's OWN route - not
+    // through `local_app`'s forwarding - so the state asserted on below was
+    // genuinely recorded by the remote daemon's own `AttentionHub`.
+    let turn_state_status =
+        turn_state_request(remote_app, &terminal_id, &terminal_token, "working").await;
+    assert_eq!(turn_state_status, StatusCode::NO_CONTENT);
+
+    // (1) POSITIVE: the forwarded server-scoped stream must carry the remote
+    // terminal's pending state in its snapshot - proves forwarding actually
+    // relays the real remote daemon's state end-to-end, not a mocked
+    // shortcut.
+    let forwarded = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("forwarded attention events request"),
+        )
+        .await
+        .expect("forwarded attention events response");
+    assert_eq!(forwarded.status(), StatusCode::OK);
+    let mut forwarded_stream = forwarded.into_body().into_data_stream();
+    let mut forwarded_buffer = String::new();
+    let mut forwarded_frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while forwarded_frames.is_empty() {
+            let chunk = forwarded_stream
+                .next()
+                .await
+                .expect("forwarded attention snapshot chunk before timeout")
+                .expect("forwarded attention snapshot body chunk");
+            forwarded_buffer
+                .push_str(std::str::from_utf8(&chunk).expect("forwarded attention SSE UTF-8"));
+            drain_attention_sse_frames(&mut forwarded_buffer, &mut forwarded_frames);
+        }
+    })
+    .await
+    .expect("forwarded attention snapshot frame");
+    assert_eq!(forwarded_frames[0].event, "attentionSnapshot");
+    let forwarded_items = forwarded_frames[0].data["items"]
+        .as_array()
+        .expect("forwarded attention snapshot items array");
+    assert!(
+        forwarded_items
+            .iter()
+            .any(|item| item["terminalId"] == terminal_id && item["state"] == "working"),
+        "the forwarded server-scoped stream must carry the remote terminal's pending state \
+         through the real forward path: {forwarded_items:?}"
+    );
+
+    // (2) NEGATIVE - the load-bearing half: the LOCAL, non-forwarded stream
+    // must NOT see the remote terminal's entry. A single dashboard-global
+    // hub would pass assertion (1) above just as easily as a correct
+    // per-server design; only this half distinguishes them.
+    let local = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/terminals/attention/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("local attention events request"),
+        )
+        .await
+        .expect("local attention events response");
+    assert_eq!(local.status(), StatusCode::OK);
+    let mut local_stream = local.into_body().into_data_stream();
+    let mut local_buffer = String::new();
+    let mut local_frames = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while local_frames.is_empty() {
+            let chunk = local_stream
+                .next()
+                .await
+                .expect("local attention snapshot chunk before timeout")
+                .expect("local attention snapshot body chunk");
+            local_buffer.push_str(std::str::from_utf8(&chunk).expect("local attention SSE UTF-8"));
+            drain_attention_sse_frames(&mut local_buffer, &mut local_frames);
+        }
+    })
+    .await
+    .expect("local attention snapshot frame");
+    assert_eq!(local_frames[0].event, "attentionSnapshot");
+    let local_items = local_frames[0].data["items"]
+        .as_array()
+        .expect("local attention snapshot items array");
+    assert!(
+        !local_items
+            .iter()
+            .any(|item| item["terminalId"] == terminal_id),
+        "the LOCAL stream must never see the remote terminal's attention entry - a shared/global \
+         hub would leak it here even though forwarding assertion (1) above also passes: \
+         {local_items:?}"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+// CONTRACT (260726-bug-dashboard-agent-profile-provenance-lost-on-restart,
+// hookless spawn-side coverage): `dummy-echo` is the registered profile with
+// `hook_config: None` (`agent_profile_registry.rs`'s
+// `dummy_echo_profile_has_no_hook_config`). Before this fix, a hookless
+// profile created NO `agent-profiles/<terminal_id>/` directory at all -
+// everything under that path lived inside `spawn`'s `hook_config.is_some()`
+// branch - so this is the genuinely new behavior the widened
+// `profile_id.is_some()` gate introduces, and the reason the pending mark had
+// to be hoisted out of that branch.
+//
+// The two negative assertions are as load-bearing as the positive one: a
+// hookless profile must still mint no callback token and no `callback.json`,
+// because merging provenance into the credential lane is exactly what the
+// ticket's settled design rejects.
+#[tokio::test]
+async fn spawning_a_hookless_profile_writes_the_provenance_sidecar_and_no_credential() {
+    let root = temp_fixture_path("hookless-profile-sidecar");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_with_profile_for_test(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "dummy-echo",
+    )
+    .await;
+
+    // Every observation is CAPTURED before the close and asserted after it:
+    // the helper is a real detached OS process, and a panic between spawn and
+    // `close_terminal_for_test` would leak it permanently (the close is
+    // success-path only, so it never runs during unwind).
+    let profile_dir = state_dir.join("agent-profiles").join(&terminal_id);
+    let sidecar = profile_dir.join("profile.json");
+    let raw = fs::read_to_string(&sidecar);
+    let callback_target_exists = profile_dir.join("callback.json").exists();
+    let token_exists = state_dir
+        .join("terminal-tokens")
+        .join(format!("{terminal_id}.json"))
+        .exists();
+
+    close_terminal_for_test(app, cookie.as_str(), &terminal_id).await;
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+
+    let raw = raw.unwrap_or_else(|error| panic!("hookless spawn must write {sidecar:?}: {error}"));
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("profile sidecar JSON");
+    assert_eq!(parsed["profileId"], "dummy-echo");
+
+    assert!(
+        !callback_target_exists,
+        "a hookless profile must never get a callback target: {profile_dir:?}"
+    );
+    assert!(
+        !token_exists,
+        "a hookless profile must never get a callback token minted for it"
+    );
+}
+
+// A default-shell spawn (no `profileId` in the request) must take no new
+// branch at all - the ticket's "unchanged byte for byte from a request that
+// names no profile" contract. Guards the widened gate against being widened
+// one step too far, to "always write a sidecar".
+#[tokio::test]
+async fn spawning_without_a_profile_writes_no_provenance_sidecar() {
+    let root = temp_fixture_path("no-profile-no-sidecar");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let (registry, state_dir) = test_terminal_registry_with_state_dir();
+    let state = app_state_with_terminal_registry(registry);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24 }).to_string(),
+                ))
+                .expect("create default-shell terminal request"),
+        )
+        .await
+        .expect("create default-shell terminal response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
+    // Same capture-close-assert order as the test above: the terminal id is
+    // read out FIRST so every later observation can be asserted after the
+    // real helper process has been closed, instead of leaking it on a panic.
+    let terminal_id = value["terminalId"].as_str().expect("terminal id").to_owned();
+    let profile_id_is_null = value["profileId"].is_null();
+    let profile_dir = state_dir.join("agent-profiles").join(&terminal_id);
+    let profile_dir_exists = profile_dir.exists();
+
+    close_terminal_for_test(app, cookie.as_str(), &terminal_id).await;
+    remove_static_fixture(&root);
+    let _ = fs::remove_dir_all(&state_dir);
+
+    assert!(profile_id_is_null);
+    assert!(
+        !profile_dir_exists,
+        "a request that names no profile must create no agent-profiles directory"
+    );
+}
+
+// Test hygiene only: the helper is a real detached OS process (see
+// `ws-web-dashboard/terminal.md`'s "Leaving a test-created terminal
+// unclosed" note), so the tests above close their terminal through the real
+// DELETE route rather than leaving a `dummy-echo` shell running for its full
+// sleep.
+async fn close_terminal_for_test(app: axum::Router, cookie: &str, terminal_id: &str) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("close terminal request"),
+        )
+        .await
+        .expect("close terminal response");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }

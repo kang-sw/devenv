@@ -70,6 +70,31 @@ fn init_git_repo(dir: &Path) {
     run_git(dir, &["commit", "-q", "-m", "seed"]);
 }
 
+/// `init_git_repo`, then the fixture root in the SAME spelling production
+/// registers - i.e. canonicalized.
+///
+/// Production routes every `WatchTargets` field, and `watch_key` itself,
+/// through `discovery::canonical_or_normalized` (see
+/// `watch_reconcile_entry_for`'s doc comment). A fixture that registers
+/// targets built straight from `std::env::temp_dir()` is therefore NOT
+/// reproducing production, and on macOS that difference is fatal:
+/// `std::env::temp_dir()` is `/var/folders/<...>/T`, a symlink to
+/// `/private/var/folders/<...>/T`, and `notify` canonicalizes a watched root
+/// internally before reporting event paths. The registry would hold
+/// `/var/...` as the owning root while every delivered event path reads
+/// `/private/var/...`, so `owners_for_path`'s `starts_with` prefix scan
+/// matches no owner, no epoch is bumped, and every positive-bump assertion
+/// times out. (The negative-assertion and spawn-count cases keep "passing"
+/// under the same miss - vacuously.) Canonicalizing the root once, here at
+/// creation, puts every path derived from it into the one spelling
+/// production uses. `watch_key` canonicalizes internally either way, so the
+/// key is unaffected; the targets are what needed this.
+fn init_git_repo_at_canonical_path(dir: &Path) -> PathBuf {
+    init_git_repo(dir);
+    dir.canonicalize()
+        .unwrap_or_else(|error| panic!("canonicalize fixture root {}: {error}", dir.display()))
+}
+
 /// Deadline-polling helper (never a fixed sleep standing in for an
 /// assertion): re-checks `condition` every 20ms until it returns `true` or
 /// `deadline` elapses, then returns whichever happened.
@@ -136,8 +161,7 @@ async fn armed_fixture(name: &str) -> ArmedFixture {
 }
 
 async fn armed_fixture_with_config(name: &str, config: WatchConfig) -> ArmedFixture {
-    let dir = temp_fixture_path(name);
-    init_git_repo(&dir);
+    let dir = init_git_repo_at_canonical_path(&temp_fixture_path(name));
     let git_dir = dir.join(".git");
     let targets = WatchTargets {
         worktree: dir.clone(),
@@ -194,8 +218,11 @@ async fn writing_inside_a_gitignored_directory_never_bumps_either_epoch() {
     // is pinning). So: `.gitignore` AND a first ignored file both go in
     // BEFORE the one arm below, so the derived set actually contains
     // `target/` by the time arming's `git status` spawn runs.
-    let dir = temp_fixture_path("gitignored-write");
-    init_git_repo(&dir);
+    // Canonical root (see `init_git_repo_at_canonical_path`): without it this
+    // case's two negative assertions hold vacuously on macOS - no event ever
+    // finds an owner, so "never bumps" is trivially true whether or not the
+    // `IgnoreSet` works at all.
+    let dir = init_git_repo_at_canonical_path(&temp_fixture_path("gitignored-write"));
     std::fs::write(dir.join(".gitignore"), "target/\n").expect("write .gitignore before arming");
     std::fs::create_dir_all(dir.join("target/debug")).expect("create ignored dir before arming");
     std::fs::write(dir.join("target/debug/first.o"), b"\0").expect("seed an already-ignored file");
@@ -311,8 +338,7 @@ async fn rewriting_gitignore_fifty_times_schedules_at_most_one_extra_spawn() {
 
 #[tokio::test]
 async fn availability_flapping_ten_times_bounds_arm_attempts_by_the_flat_interval_not_one_per_tick() {
-    let dir = temp_fixture_path("availability-flap");
-    init_git_repo(&dir);
+    let dir = init_git_repo_at_canonical_path(&temp_fixture_path("availability-flap"));
     let git_dir = dir.join(".git");
     let targets = WatchTargets {
         worktree: dir.clone(),
@@ -354,8 +380,7 @@ async fn availability_flapping_ten_times_bounds_arm_attempts_by_the_flat_interva
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn max_dirs_one_degrades_with_zero_registrations_on_linux() {
-    let dir = temp_fixture_path("max-dirs-one");
-    init_git_repo(&dir);
+    let dir = init_git_repo_at_canonical_path(&temp_fixture_path("max-dirs-one"));
     let git_dir = dir.join(".git");
     let targets = WatchTargets {
         worktree: dir.clone(),
@@ -414,6 +439,23 @@ fn full_router_app_state() -> AppState {
         git_spawn_stats.clone(),
         WatchConfig::default(),
     );
+    // Merge companion (260727 Phase 2): this file arrived from
+    // `ws-dashboard-dev` against the pre-merge 3-argument
+    // `TerminalRegistry::new` and an `AppState` with no `attention` field -
+    // neither side conflicted textually, so both had to be repaired here by
+    // hand. This file never spawns a terminal (its cases drive git/watch
+    // routes only), hence `None` state dir and an empty callback base URL:
+    // that reproduces exactly the behavior the 3-argument constructor gave it.
+    // `attention` must be taken from THIS registry instance and bound before
+    // `terminals` is moved into the struct - see `TerminalRegistry::attention`'s
+    // own CONTRACT.
+    let terminals = TerminalRegistry::new(
+        PathBuf::from(env!("CARGO_BIN_EXE_ws-dashboard")),
+        temp_fixture_path("terminal-registry"),
+        Duration::from_secs(5),
+        None,
+        String::new(),
+    );
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
@@ -425,11 +467,8 @@ fn full_router_app_state() -> AppState {
         watch_registry,
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: ws_dashboard_daemon::document_translation::DocumentTranslationService::default(),
-        terminals: TerminalRegistry::new(
-            PathBuf::from(env!("CARGO_BIN_EXE_ws-dashboard")),
-            temp_fixture_path("terminal-registry"),
-            Duration::from_secs(5),
-        ),
+        attention: terminals.attention(),
+        terminals,
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
         claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),

@@ -41,6 +41,21 @@ token, installs an HTTP-only owner session cookie with `SameSite=Lax`, and
 redirects browser callers to a token-free stable app URL. Missing, invalid,
 reused, or expired pairing tokens fail without installing a session cookie and
 without redirecting into an authenticated-looking app route.
+
+A second, distinct entrypoint class also sits outside the owner-session
+boundary: the per-terminal turn-state callback route
+(`POST /api/dashboard/terminals/{terminal_id}/turn-state`) is authorized per
+request by an opaque, daemon-generated callback token instead of the owner
+session cookie. It is never reachable from a browser context, never issues or
+consumes the owner session cookie, and is the one route in this surface a
+spawned agent terminal's own hook process calls directly. The pairing route
+remains the only unauthenticated *browser* entrypoint; this callback route is
+a non-browser, token-authed exception to that browser-facing rule, not a
+second hole in it. That per-terminal callback token is revoked whenever its
+terminal closes through explicit close, owning workRoot/workspace removal, or
+a kill-all sweep that tears down every terminal at once. A hook process that
+still POSTs against the token afterward is rejected rather than authorized,
+because the token no longer resolves to any terminal.
 {#260516-ws-web-dashboard-token-free-pairing-landing}
 
 Authenticated owner sessions have broad host-control authority for dashboard
@@ -1116,6 +1131,35 @@ construction time.
 > (`terminalPrefs.test.ts`) and the section-registry contract
 > (`settingsSections.test.ts`, `settingsStore.test.ts`) only.
 
+The second registered section, Notifications
+(`260725-feat-dashboard-pty-agent-attention-notification` Phase 8), persists a
+single opt-in boolean (`ws-dashboard.settings.notifications.v1`, `{ enabled:
+boolean }`) through the same namespaced preferences-store helper — no other
+notification state is cached client-side. Enabling the toggle also requests
+the browser's `Notification` permission, but ONLY from the checkbox's own
+`onChange` handler — a real user gesture — never from a mount-time effect,
+mirroring the pattern the codebase already avoids for `sw.js` registration
+(`main.tsx`). The section's copy states plainly that OS-level notification
+requires a secure context (`localhost` or a TLS origin): a plain-http LAN
+page's `Notification` API is un-permissioned and ungrantable there, not
+absent — the global itself may still be defined — so the section reads
+`window.isSecureContext` before `typeof Notification`, and (both readable with
+no permission prompt of their own) shows the current state, including an
+explicit "unavailable - this page is not a secure context" message, rather
+than only surprising the user after an unresponsive click. On an insecure
+context the checkbox itself is also disabled, since no click there can ever
+change the permission.
+If the owner grants the permission, the section reflects that as soon as the
+prompt settles rather than at the next unrelated repaint. If the owner denies
+it, the toggle does not stay on: an enabled preference guarding a tier the
+browser will never allow is a control that lies about its own effect, so the
+denial turns the preference back off and the section shows the denied state.
+
+This preference is the sole gate the
+[Browser-Level Attention Cue](#260726-dashboard-browser-level-attention-cue)
+checks before raising an OS notification; it is not itself responsible for
+deciding *when* to notify.
+
 > [!note] Planned 🚧
 > A future hotkey-rebind editor section will register into this panel to
 > edit bindings from the hotkey binding registry directly, and is expected
@@ -1139,6 +1183,58 @@ rather than default recursive left-nav rows. Sibling workspace rows within a
 server and sibling worktree rows within a workspace are user-reorderable by
 drag, with the resulting order persisted browser-locally per scope rather than
 changing server-reported order.
+
+Work-root left-nav rows carry a second, smaller information line beneath the
+row title reporting how many surfaces that root currently has open, counted
+separately for terminals and documents and phrased in place of a count when
+nothing is open. The counts describe live workbench state — surfaces mounted
+for that root right now — so they change as terminals and documents are opened
+and closed, and a root with no open surfaces says so rather than showing
+nothing. The counting scope is per root: a row never reports another root's
+surfaces. The same line also reports the root's agent terminals: how many the
+root has, and how many of those are signalling working or waiting states the
+user has not yet acknowledged — so a state the user has already looked at
+stops being reported even while that agent is still mid-turn. The agent report
+appears whenever the root has any agent terminal at all, including one just
+spawned that has not yet reported a turn, and it leads the line ahead of the
+terminal and document counts so it stays readable when the line is too long
+for the sidebar. A root whose only open surfaces are agent terminals reports
+those agents rather than describing itself as having nothing open. An agent
+terminal is reported by the agent counts only and is never also included in
+the terminal count, so no open surface is counted twice. Every work-root row
+reserves the vertical space for the second line whether or not it currently
+has counts to show, so opening or closing a root changes what a row says
+without changing how tall it is and without reflowing the rows around it.
+
+A work-root row also encodes open-versus-closed state visually, not only
+through the presence of its close affordance: a root that is not currently
+open is drawn with reduced emphasis while staying listed, selectable, and
+hoverable with the same hover feedback as any other row. A row that is
+reporting an error keeps its error appearance regardless of open state. Both
+the second line and the open-state emphasis apply to work-root rows —
+including the compact single-work-root form — and not to workspace rows, which
+carry neither.
+
+A row whose agents are working or waiting also carries an attention level,
+with waiting outranking working. Every open work root the nav shows is
+reported by exactly one row for this purpose: its own row where it has one,
+and otherwise the row that stands for it — a workspace's base root has no row
+of its own, so its agents raise the level on the workspace row, which takes
+the level without taking the second line or any counts. A hidden worktree is
+the deliberate exception: it is reported by no row at all, neither its own nor
+any row standing above it, because the user asked not to see that root and
+silence about its agents is part of what was asked for. A server row carries
+the highest such level among the roots reported beneath it, while carrying no
+counts of its own, so no shown root's agents go unreported and no level
+appears that no row below would account for. That level is presented as an animated overlay layered over the row rather than as
+a change to the row's own background, so it never competes with the row's
+open-state, hover, selection, or error appearance, and it is suppressed to a
+static tint for viewers who ask for reduced motion. The level is derived, not
+separately dismissed: it is raised and cleared entirely by the acknowledgement
+state of the root's own agent terminals, so acknowledging the last still-
+pending terminal clears the row and its server row with no separate row-level
+action, and a row keeps reporting its agents while another root is selected.
+{#260725-nav-row-open-surface-counts-and-open-state}
 
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route
@@ -1222,6 +1318,14 @@ cursor-near `Yes`/`No` confirmation popover; reversible views such as read-only
 editor previews, diagnostics, and resource views close immediately and use the
 same deterministic focus handoff as ordinary tab close. Opened workRoots do
 not show mock or default panes when no live or user-opened surface exists.
+
+Tab lifecycle affordances stay live independently of Dockview parameter
+refresh timing and independently of whether the tab has ever been the active
+pane. A tab restored by a page refresh and never activated must respond to its
+close and acknowledge affordances on the first interaction, with no preceding
+tab-body click required. A tab's attention indicator must not change the tab's
+close-affordance geometry when it appears or clears, because the indicator can
+clear during the same pointer gesture that presses the close affordance.
 
 ### WorkRoot Activity Projection {#260517-ws-dashboard-workroot-activity-projection}
 
@@ -1735,10 +1839,25 @@ opening a real workRoot, browsing files, creating terminals, switching terminal
 tabs, sending terminal input, observing terminal output, and checking pane
 layout at recorded viewport sizes.
 
-The frontend package exposes this gate through `npm run test:browser`. The gate
-builds the production frontend, serves it through the dashboard daemon, pairs
-as owner through the startup pairing URL, and records textual evidence plus
-regenerable screenshot artifacts outside tracked source.
+The frontend package exposes this gate through `npm run test:browser`. Building
+the production frontend is a property of the gate run itself, not of that one
+script: every Playwright invocation path builds the frontend before the daemon
+is started - except where the gate does not construct the served directory
+itself, described below - so a bare `npx playwright test`, a single-spec run, or
+an IDE runner cannot serve a bundle older than the current frontend source when
+the harness builds that directory. The gate serves
+that build through the dashboard daemon, pairs as owner through the startup
+pairing URL, and records textual evidence plus regenerable screenshot artifacts
+outside tracked source. A build failure ends the run instead of falling back to
+the previous bundle.
+
+The gate skips that build, announcing which condition fired on the run's own
+output, only where it does not construct the served static directory itself: a
+caller-supplied `WS_DASHBOARD_STATIC_DIR`, or external daemon mode
+(`WS_DASHBOARD_DAEMON_MODE=external`, `WS_DASHBOARD_DAEMON_BASE_URL`, or
+`WS_DASHBOARD_DAEMON_PAIRING_URL`). Neither condition proves the built output is
+unused, so on those two paths keeping the served bundle current stays the
+caller's responsibility.
 
 The gate includes viewport containment checks for long file explorer content:
 expanding a large tree must not make the top-level document scroll or push the
@@ -1770,7 +1889,13 @@ Workbench tab polish evidence is browser-level Playwright evidence against the
 daemon-served frontend. It covers hover-only close affordances, terminal and
 agent close confirmation popover cancel/confirm paths, immediate close for
 reversible panes, pinned/opened badge or chip presentation, preview-to-pinned
-file behavior, and default spawned-daemon agent close coverage. The
+file behavior, and default spawned-daemon agent close coverage. The covered
+close paths include a refresh-restored tab that has never been activated: the
+gate closes such a tab on its first close-affordance click, both while it
+carries a pending attention indicator and while it carries none, and asserts
+that the close affordance does not move between the press and the release of
+that click. Evidence that clicks the tab body before the close affordance does
+not satisfy this clause. The
 implementation workflow also runs a post-implementation frontend-design
 verification and autonomous tweak pass before ordinary implementation review,
 then reruns the relevant browser evidence.
@@ -1829,6 +1954,126 @@ Native Windows evidence may use a machine-local SSH host recorded outside
 tracked source. If native Windows evidence cannot run, the evidence states the
 exact blocker and records the result as an explicit gap instead of treating a
 POSIX local gate as native-Windows coverage.
+
+Native macOS evidence to date (260725 Phase 1) covers a native
+`cargo build -p ws-dashboard-daemon --all-targets` pass on aarch64-apple-darwin
+plus per-target `cargo test -p ws-dashboard-daemon` results, run and read
+individually rather than trusted from a single fail-fast invocation:
+
+- `--lib`: 124 passed, 0 failed, 2 ignored (includes the four
+  `terminal_platform::platform_identity_tests`, covering `process_start_time`,
+  `verify_process_identity`, and both `kill_verified` outcomes on the macOS
+  leg).
+- `--test server`: 15 passed, 0 failed.
+- `--test terminal_lifetime`: 3 passed, 0 failed (real two-daemon-process
+  restart/reattach/dead-shell-detection lifecycle, run against real OS
+  processes and a real Unix-domain-socket IPC channel).
+- `--test terminal_windows_reaper_acceptance`: 0 tests collected — this
+  target's content is entirely `#[cfg(windows)]`-gated, so it compiles clean
+  on macOS but contributes no macOS coverage.
+- `--test routes`: 164 passed, 2 failed. Both failures
+  (`dashboard_resources_refresh_prunes_workspace_without_available_work_roots`,
+  `online_missing_work_root_returns_bounded_unavailable_without_path_leak`)
+  are attributed to the pre-existing, diff-untouched
+  `discovery.rs::canonical_or_normalized` work-root-id instability captured in
+  ticket `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails`,
+  not to this port; `discovery.rs` and `work_root_files.rs` are unmodified by
+  this phase.
+
+Linux non-regression evidence: native `cargo check --target
+x86_64-unknown-linux-gnu -p ws-dashboard-daemon` cannot run in this
+environment — `ring` and `libsqlite3-sys` both invoke `cc-rs` at build-script
+time even for `cargo check`, and the environment has no
+`x86_64-linux-gnu-gcc` cross C toolchain. Verified instead with a native
+x86_64 Linux container:
+
+```
+docker run --rm --platform linux/amd64 \
+  -v <repo>/ws-dashboard:/workspace:ro \
+  -e CARGO_TARGET_DIR=/tmp/target -w /workspace rust:latest \
+  cargo check --locked -p ws-dashboard-daemon --all-targets
+...
+Checking ws-dashboard-daemon v0.1.0 (/workspace/crates/daemon)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 44.07s
+(exit code 0)
+```
+
+Run against a clean working tree at each Phase 1 implementation tip in turn —
+including the final one, `1aca7993` — so it type-checked the reviewed source
+with test targets included. Documentation-only commits after that point do not
+affect the result, because the Linux leg compiles no macOS-gated code. This is
+produced Linux evidence, not a deferral.
+
+Native macOS evidence (260725 Phase 2) closes the process/socket-level half of
+the live-lifecycle gap: all four lifecycle legs verified on native
+aarch64-apple-darwin via `cargo test -p ws-dashboard-daemon --test
+terminal_lifetime` (4 passed, 0 failed), each with a non-vacuity mutation
+proving its assertion can actually fail — mutated, run to a confirmed FAIL,
+reverted via `git checkout --`, re-run to a confirmed PASS, with `git status`/
+`git diff` on `crates/daemon/src/` clean after every revert:
+
+- Spawn (`unix::spawn_detached`, `terminal_platform.rs`): forcing the
+  `pre_exec` closure to `return Err(...)` immediately failed
+  `create_terminal`'s `assert_eq!(response.status(), OK, "create terminal")`
+  with `left: 400, right: 200`.
+- Daemon-restart re-adopt (`reconcile_entry`'s adopt arm, `terminal.rs`):
+  commenting out `self.insert_unchecked(session);` failed both restart-adopt
+  tests at their "adopted terminal missing from list: []" panics.
+- Dead-shell detection (PTY-EOF reader path, `terminal_helper_process.rs`):
+  commenting out `shared.transition(TerminalHelperStatus::Exited);` in
+  `spawn_reader_thread`'s EOF branch failed
+  `terminal_live_pty_eof_exit_flips_status_to_exited`'s `saw_exited` assertion
+  after its 5s drain deadline. This is a **confirmed observation**, not an
+  assumption carried over from prior phases' prose: macOS PTYs deliver EOF on
+  shell exit the same way Linux does, so the reader-thread path (not a
+  Windows-style process-handle reaper, which stays `#[cfg(windows)]`-gated and
+  contributes no macOS coverage) is what flips status to `exited` on this
+  platform too.
+- Identity-verified close (`TerminalSession::terminate`'s fallback
+  `kill_verified` call, `terminal.rs`): the new
+  `terminal_close_kills_verified_process_via_fallback_kill` test `SIGSTOP`s
+  the helper before issuing `DELETE` so it cannot service the graceful
+  `GracefulShutdown` IPC path within `terminate()`'s 200ms window (`SIGKILL`
+  is not maskable by `SIGSTOP`), forcing the fallback `kill_verified` SIGKILL
+  to be the mechanism that actually terminates it. Inserting an early
+  `return Ok(false);` in `macos::kill_verified` right after its `pid == 0`
+  guard reproduced the leg's non-vacuity failure: the test's process-death
+  poll timed out with the `SIGSTOP`'d helper still alive. This mutation
+  leaves a frozen process if the test fails between the `SIGSTOP` and the
+  daemon's kill; the test's own `HelperReaper` drop guard (identity-verified
+  `kill -KILL`, independent of `kill_verified`) was confirmed to reap it
+  automatically during the panic unwind, since `SIGKILL` still terminates a
+  stopped (`T`-state) process.
+
+Pid-mismatch/pid-reuse negative coverage is deliberately **not** added at the
+integration level — reproducing genuine OS pid reuse deterministically would
+require racing OS pid allocation and would be flaky by construction. This case
+stays covered only at the unit level:
+`terminal_platform::platform_identity_tests::kill_verified_refuses_to_kill_on_start_time_mismatch`,
+part of the `--lib` 124/0/2 result re-confirmed in this phase.
+
+`--lib` (124 passed, 0 failed, 2 ignored) and `--test server` (15 passed, 0
+failed) were re-run alongside `--test terminal_lifetime` to confirm no
+regression; both match the Phase 1 baseline exactly. This phase's own tests
+were confirmed to leak nothing at the process level: live `terminal-helper`
+process counts (`pgrep -f terminal-helper`) were compared before and after
+every run, including each mutation round-trip, and returned to the same
+baseline every time, and no `T`-state strays remained, independent of the
+already-tracked `tests/routes.rs` detached-helper leak
+(`260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper`).
+
+The browser-facing UI gate remains an explicit gap on macOS, deferred to a
+later phase, and must not be read as covered by this process/socket-level
+result — `terminal_lifetime` exercises the real lifecycle through real OS
+processes and a real Unix-domain-socket IPC channel, including a real
+`tokio_tungstenite` client attached to the daemon's terminal WebSocket route
+in three of its four lifecycle legs (restart reattach, boot-reconcile
+grace-row adoption, and dead-shell detection — only the close-kill leg has
+no socket), with bidirectional traffic (terminal input written back over the
+socket, not merely output read), asserted `101` upgrade responses on every
+attach, and the restart leg's client attaching with a real `?after=` resume
+cursor, so the WS protocol surface itself is exercised thoroughly — but not
+through the browser-facing UI.
 
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
@@ -2047,10 +2292,33 @@ create and list live terminal sessions by opaque terminal ids. Spawns run in
 the selected workRoot directory and terminal ids are not process ids or host
 paths.
 
+Terminal creation optionally names a vendor profile id, resolved against a
+small daemon-side profile registry (spawn argv, env scrub list, hook config
+shape). An absent profile id keeps the default interactive-shell spawn
+unchanged, byte for byte, from a request that names no profile at all. The
+resolved profile — if any — is recorded read-only on the session for
+provenance, and that provenance survives a daemon restart: the daemon records
+the resolved profile id in daemon-owned per-terminal state at spawn time and
+restores it when boot reconciliation reattaches the session, so a reattached
+agent terminal keeps reporting the profile it was spawned with. The on-disk
+terminal registry still never carries a profile id — it is written by the
+helper process, not the daemon. A session reattaches without provenance
+whenever no readable per-terminal record survives to reattach time — cases
+include a terminal spawned before this behavior existed (there is no backfill),
+a daemon with no resolvable state directory, which records nothing at spawn, a
+record whose write failed at spawn, and a record missing or unreadable at
+restore time. Every such case reports no profile, which is the behavior before
+this provenance existed; none of them reports a different profile.
+{#260725-ws-web-dashboard-terminal-spawn-profile}
+
 Each helper records its identity — process id and process start-time — in a
 per-terminal registry file, so the daemon can distinguish a still-live helper
 from a stale entry whose pid has since been reused by an unrelated process
-rather than trusting a bare pid.
+rather than trusting a bare pid. The start-time value's *source* is
+platform-specific (`/proc/<pid>/stat` on Linux, `GetProcessTimes` on Windows,
+`proc_pidinfo`/`PROC_PIDTBSDINFO` on macOS); the recorded registry value
+itself stays an opaque number end-to-end and is never interpreted outside the
+platform module that produced it.
 
 Live terminal sessions persist across browser refresh, and across a daemon
 restart, because the PTY's lifetime belongs to the detached helper process,
@@ -2104,8 +2372,12 @@ lists. Clearing or closing an already-retired or already-gone pane is
 idempotent: it resolves as success without surfacing a terminal-close error.
 {#260724-terminal-pane-dead-session-retire}
 
-The terminal pane is a shell terminal substrate only; it does not hardcode
-Codex, Claude, or other agent presets.
+The terminal pane substrate is shell-neutral: it does not hardcode a
+specific agent preset, but MAY be spawned with a resolved vendor profile
+(command argv, env scrub, provenance) over the same single-sourced PTY
+plumbing — no second helper kind, no parallel PTY implementation. See
+[Terminal Registry And PTY Spawn](#260516-ws-web-dashboard-terminal-registry-pty-spawn)
+for the profile registry.
 
 Terminal tab labels behave as selectable workbench tabs for every visible
 terminal session. Opening a real workRoot shows an explicit empty workbench
@@ -2198,6 +2470,203 @@ session after inline `Yes`/`No` confirmation near the close action. Cancel
 leaves the terminal open and focus coherent; confirm preserves the
 close-as-terminate behavior. Hidden detached restore UX remains absent.
 
+## Terminal Attention Event Stream {#260726-dashboard-terminal-attention-event-stream}
+
+The daemon exposes a server-wide, work-root-independent SSE stream of
+per-terminal turn-state ("attention") transitions, so the browser can learn
+that a terminal has gone from `working` to `ready` (or `idle`) even when no
+Activity Console pane for that terminal's workRoot is open. The local route is
+`GET /api/dashboard/terminals/attention/events`; the server-scoped sibling is
+`GET /api/dashboard/servers/{serverRoute}/terminals/attention/events`, forwarded
+transparently to the linked daemon the same way the Activity Console watch
+stream and document-content-changed stream are. Unlike those two streams, this
+one is not scoped to a `{workRootId}` path segment: attention state is keyed by
+terminal id across the whole daemon, independent of which workRoot (or
+Activity Console pane) is currently selected in the browser.
+
+On connect, the stream first emits one `event: attentionSnapshot` frame
+carrying every currently-pending attention state (`{ items: [...] }`), so a
+browser refresh or a fresh reconnect after a network interruption does not
+lose a state transition that happened while no stream was open. Subsequent
+transitions arrive as `event: attention` frames, one per terminal-id/state
+change, wire-shaped as
+`{ type: "terminal.attentionChanged", terminalId, workRootId, state, updatedAtMs }`
+where `state` is one of `working` / `ready` / `idle` — the same three-value
+vocabulary the daemon's per-terminal turn-state callback route accepts, not a
+parallel enum. A terminal's attention entry is removed from the snapshot the
+moment its underlying terminal session closes (explicit close, owning
+workRoot/workspace removal, or a kill-all sweep that tears down every
+terminal at once), so a reconnect never reports state for a terminal that no
+longer exists.
+
+If the stream falls behind its buffered event backlog, the daemon ends the
+SSE response rather than silently skipping forward: attention state is not
+safely re-derivable from a later event the way a document's content is from a
+re-read, so the browser's native reconnect (which re-enters this route and
+receives a fresh, complete snapshot) is the resync path, not an in-place skip.
+
+This stream is independent of the Activity Console read model and watch
+stream ([Activity Console Read Model](#260521-ws-dashboard-activity-console-read-model),
+[Activity Console Watch Stream](#260521-ws-dashboard-activity-console-watch-stream)):
+it carries no Activity Console item data and does not affect that projection.
+
+## Turn-State Hook Delivery Failure Visibility {#260727-dashboard-terminal-notify-failure-visibility}
+
+The turn-state transitions the
+[Terminal Attention Event Stream](#260726-dashboard-terminal-attention-event-stream)
+carries originate outside the daemon: the agent CLI's own hook runner fires the
+`ws-dashboard terminal-notify` command at every turn boundary, and that command
+POSTs the new state back to the daemon. That hook process is **permanently
+silent**: whatever happens — the callback file is missing, unreadable, or
+carries no credential; the daemon's port has moved; the token is stale; the
+POST is refused or rejected — it prints nothing to stdout or stderr and always
+exits `0`. The silence is deliberate and load-bearing, because a non-zero exit
+or any stderr output makes the agent CLI surface a hook-error line and a
+persistent error indicator inside the owner's live session on *every* turn
+boundary, for as long as the breakage lasts. This spec entry describes what an
+operator can observe instead.
+
+Two artifacts carry that observability, both written by the hook process itself:
+
+- **A rotated failure log.** Every failed delivery appends one line naming the
+  turn state, the callback path, and the error text to
+  `logs/terminal-notify.log.<date>` under the daemon's state directory, subject
+  to the same daily rotation and retention policy as the daemon's own log.
+- **A per-terminal failure record.** Beside the terminal's `callback.json`, the
+  hook process maintains `notify-failures.json` carrying the consecutive
+  failure count, the timestamp of the most recent failure, and that failure's
+  error text (the same text the log line carries, capped in length). A
+  successful delivery deletes the record, so its presence always means "the
+  most recent delivery attempt failed". The record is keyed by the callback
+  file's own location rather than by a terminal id parsed out of that file,
+  because an unparseable callback file is itself one of the failure modes it
+  must report. The hook process never creates the profile directory to write
+  it: once a terminal's directory has been reclaimed, a late hook fire records
+  nothing rather than resurrecting it.
+
+Failing to write either artifact is itself swallowed silently. Observability
+never comes at the cost of the stdio silence above.
+
+The daemon reads the record for every live terminal on the same periodic sweep
+that reclaims orphaned agent profile directories, and emits **one** warning to
+its own log per terminal when a failure looks genuinely stuck rather than
+transient — that is, when a record exists, its most recent failure is at least
+one full sweep period old, and the terminal's `callback.json` has not been
+rewritten since that failure (a rewrite means the target may have just been
+re-pointed, so the next hook fire settles it; an unreadable or absent
+`callback.json` is *not* treated as a repair). The warning names the terminal,
+the failure count, and the last error. It does not repeat on later sweeps while
+the same failure persists; the terminal becomes eligible to warn again once its
+record is observed cleared (a delivery succeeded) or once its id leaves and
+re-enters the live terminal set. Reading these records never influences which
+directories that sweep reclaims.
+
+Two non-goals are explicit. Attention state has no wall-clock expiry — a
+`ready` badge is not aged out because deliveries stopped arriving, since
+"stopped arriving" is indistinguishable from "the agent is idle". And there is
+no user-facing "hook delivery is broken" affordance in the browser; the
+audience for this signal is the operator reading `daemon.log`, not the owner
+watching a terminal tab.
+
+## Terminal Tab Attention Indicator {#260726-dashboard-terminal-tab-attention-indicator}
+
+A workbench terminal tab label carries a state affordance driven by the
+[Terminal Attention Event Stream](#260726-dashboard-terminal-attention-event-stream),
+so an agent that has finished its turn is visible on the tab itself without
+opening the pane. The affordance reuses the stream's three-value vocabulary
+rather than introducing a parallel one: `working` and `ready` each render a
+distinct badge, and `idle` — like the absence of an entry — renders nothing.
+
+The indicator is suppressed unless the terminal session's daemon-reported
+status is live. The daemon reclaims a dead terminal's attention entry lazily,
+so an entry can outlive the session it describes; gating the render on live
+status is what keeps a retired or exited pane from showing a badge for a turn
+that ended with the process. This is a presentation gate, not a daemon
+guarantee, and it remains the only defense the badge itself has: nothing else
+ever clears a stale badge, and this gate only applies once the session is dead,
+so a badge stranded on a **live** session by a failed turn-state delivery stays
+stranded indefinitely. What
+[Turn-State Hook Delivery Failure Visibility](#260727-dashboard-terminal-notify-failure-visibility)
+adds is a signal for the *operator* in the daemon's log, not a defense for the
+badge — see [Terminal Pane](#260516-ws-web-dashboard-terminal-pane) for
+retirement.
+
+Acknowledgement clears the badge and is **revision-keyed, not sticky**:
+acknowledging records the acknowledged transition's own revision against the
+same server-scoped terminal identity the stream is keyed by, so a *later* turn
+boundary on the same terminal raises the badge again. Acknowledgement state is
+browser-local presentation state — it is not persisted and stays outside the
+[WorkRoot IO Restore Model](#260516-ws-web-dashboard-workroot-io-restore-model),
+the same way Activity acknowledgement state does.
+
+Acknowledgement has two triggers, and the second is load-bearing rather than
+redundant: activating the terminal's pane, **and** clicking the tab that is
+already active. The feature's primary flow is an agent left running in the
+active tab while the owner is away from the browser, so the badge routinely
+appears on a tab that never changes activation; a trigger that fires only on
+activation *change* can never clear it, and `ready` is terminal. Both triggers
+are idempotent.
+
+For the same reason, a state transition repaints a terminal tab that is
+already mounted, active, and connected. Terminal tabs otherwise suppress
+presentation refreshes while their session is connected, to keep the emulator
+from being disturbed mid-keystroke; the attention state is an explicit
+exception to that suppression, and one that only shows up on the *second*
+transition of a session.
+
+## Browser-Level Attention Cue {#260726-dashboard-browser-level-attention-cue}
+
+The [Terminal Tab Attention Indicator](#260726-dashboard-terminal-tab-attention-indicator)
+is only visible to an owner already looking at the dashboard. A second cue
+carries the same state out to the browser chrome, for the case the whole
+feature exists for: the owner has switched to another tab or another window
+while an agent works.
+
+The cue has two tiers, and the zero-permission one is the default rather than
+a fallback. The dashboard is routinely reached over plain http on a LAN, where
+the page is not a secure context. The browser's `Notification` API is
+un-permissioned and ungrantable there, not absent entirely: on Chromium the
+global itself is still defined, and `window.isSecureContext` is the property
+that distinguishes this case from a granted or denied secure context, and a
+browser that genuinely omits the global on that same insecure origin (Safari
+and Firefox may) reaches the identical ungrantable outcome for the identical
+reason: the origin, not the missing global. Tier 2 cannot work on this class
+of origin either way. Tier 1 therefore uses only what any page may do unasked:
+it alternates `document.title` between the page's own
+title and an attention-labelled variant, and swaps the favicon for a badged
+one. Tier 2 is a real OS notification, and it is opt-in through the
+[Dashboard Settings Panel](#260722-ws-dashboard-settings-panel).
+
+Both tiers read one document-level attention level, aggregated over every work
+root the navigation tree currently shows, across every connected server, using
+the same `ready` outranks `working` outranks none priority a server row uses.
+Two consequences follow from *shows*, and both are deliberate. A hidden
+worktree contributes nothing here, exactly as it contributes nothing to any
+navigation row — a root the owner asked not to see stays silent in the browser
+chrome too. And the cue cannot disagree with the tab or navigation badges,
+because it is derived from the same per-terminal pending state rather than
+tracking its own.
+
+That derivation is also why the cue needs no acknowledgement of its own.
+Acknowledging the last pending terminal — by the ordinary tab triggers — drops
+the aggregate level to none, and the title and favicon return to the values
+the page loaded with. There is no separate dismiss action, and no second
+acknowledgement watermark that could disagree with the first.
+
+Tier 1 is level-driven: it is present while the level is non-none and absent
+otherwise. Tier 2 is edge-driven instead, and fires only on entry into
+`ready` — `working` is ordinary background progress, not something worth
+interrupting an owner for. Two observable consequences of an aggregate edge:
+reloading the page while an agent is already waiting notifies again, since the
+level rises from none on load; and a second agent reaching `ready` while
+another already is fires nothing, since the aggregate never left `ready`. The
+per-tab badges still distinguish both cases.
+
+A browser that exposes `Notification` may still refuse to construct one — some
+mobile browsers require notifications to go through a service worker, which
+this dashboard does not use — so a failure to raise the OS notification is
+contained to that tier and never disturbs the page.
+
 ## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 
 The dashboard combines daemon-owned live terminal state, read-only file pane
@@ -2252,12 +2721,20 @@ Only two events terminate a helper process: an explicit terminal-close
 request, or removal of the owning workRoot/workspace root. Termination is
 graceful-then-verified: the daemon first sends the helper a graceful-shutdown
 request over the IPC channel, then falls back to an identity-verified kill of
-the helper's recorded pid — never a bare-pid re-resolve, so a pid reused by
-an unrelated process after the helper already exited is never mistakenly
-killed. On Windows, the helper additionally places its spawned shell into a
-kill-on-close job object so the fallback kill tears down the whole shell
-subtree; on Unix, the helper detaches from the daemon at spawn time so it
-keeps running independent of the daemon process.
+the helper's recorded pid. On Linux and Windows this guarantee is
+structurally closed and never a bare-pid re-resolve: the fallback kill
+captures a stable OS handle (Linux pidfd / Windows process handle) at
+verification time and signals through that handle, so a pid reused by an
+unrelated process after the helper already exited is never mistakenly
+killed. On macOS the fallback kill instead verifies identity immediately
+before signalling and then signals through the bare recorded pid (`kill(2)`;
+macOS has no pidfd-equivalent stable handle to signal through instead),
+followed by a best-effort, non-guaranteed post-kill re-check — this narrows,
+but does not close, the same verify-to-kill race; it must not be read as a
+reliable mis-kill detector. On Windows, the helper additionally places its
+spawned shell into a kill-on-close job object so the fallback kill tears down
+the whole shell subtree; on Unix, the helper detaches from the daemon at
+spawn time so it keeps running independent of the daemon process.
 
 When the frontend instead reattaches to a still-alive daemon terminal by id on
 reload, it restores that pane's visual appearance rather than replaying only

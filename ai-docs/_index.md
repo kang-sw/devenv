@@ -28,6 +28,26 @@ history.
 - No branch-specific spec or mental-model freeze is active.
 - Keep `.codex` untracked unless the user explicitly asks to stage it.
 
+## Dashboard Test Hygiene
+
+Run the daemon suite with `--no-fail-fast`; without it `cargo test -p
+ws-dashboard-daemon` aborts at the failing `routes` target and never reaches the
+later integration targets. Terminal-creating tests strand a detached
+`terminal-helper` per terminal by design, so sweep after every run:
+
+```sh
+pgrep -f "ws-dashboard/target/debug/ws-dashboard terminal-helper" > /tmp/leaked.pids
+xargs kill -TERM < /tmp/leaked.pids
+find /private/tmp -maxdepth 1 -name 'ws-dash*' -type d -exec rm -rf {} +
+```
+
+`/tmp` is a symlink `find` will not descend, so the `/tmp` spelling reports
+success having swept nothing; never sweep by the name `claude`, which matches
+the session running the sweep. Leaked helpers sit idle — they are process-table
+and `/tmp` pressure, never load, so a slow or flaky run is not evidence of them.
+Cause, cost, and fix options:
+`260723-bug-dashboard-terminal-detached-helper-leaks-in-tests`.
+
 ## Plugin Topology
 
 - `./install.sh update` handles first-time install and settings patching on a
@@ -153,8 +173,8 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260725-bug-dashboard-terminal-platform-macos-unsupported` | ready | Dashboard daemon does not build on macOS: the `#[cfg(unix)]` terminal platform layer is Linux-only (pidfd syscalls + `/proc` start-time) |
-| `260725-feat-dashboard-nav-row-two-line-open-state` | ready | Left-nav work-root rows: two-line layout with open-surface counts, plus open-vs-closed de-emphasis |
+| `260725-feat-dashboard-terminal-steady-state-stream-throughput` | ready | Harden four remaining per-output-chunk costs on the open, actively-streaming terminal path; deliberately behavior-preserving, no retention/replay-on-open changes |
+| `260726-chore-dashboard-verify-notification-permission-tier-manually` | ready | Tier 2 notification: both phases landed (browser gate + insecure-context guard fix); now carries a `## Blocked` note — only the human-only permission-prompt / OS-banner residue remains, so a selection pass should skip it |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-bug-implement-merge-target-discovery` | todo | Investigate safer merge-target discovery for nested implement branches |
@@ -197,6 +217,19 @@ dropped tickets live in hidden archive dirs and git history.
 | `260716-feat-ws-doc-condition-diagnostics` | todo | Hidden doc-condition diagnostics: verification crawl, consumption counters, workflow health metrics |
 | `260722-feat-dashboard-hint-click-fast-jump` | todo | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-refactor-dashboard-app-tsx-state-decomposition` | todo | Decompose App.tsx: untangle the WorkbenchShell/App() state core (design-gated) |
+| `260725-bug-dashboard-e2e-harness-destroys-daemon-diagnostics` | todo | e2e browser-acceptance harness drains and discards the daemon's stdout/stderr instead of preserving diagnostics for failure analysis |
+| `260725-bug-dashboard-fitnow-short-viewport-shrink` | todo | macOS short-viewport regression gate fails: `fitNow()` shrinks the terminal to 47 rows instead of holding 120 |
+| `260725-bug-dashboard-terminal-create-failure-silent` | todo | Terminal creation failure is invisible in the UI: a failed `create_terminal` call is swallowed with no toast, console error, or state change |
+| `260725-epic-ws-dashboard-git-panel` | todo | New git panel epic: `Files \| Git` tabbar with a log graph (UI 1), a GitHub/GitLab-style diff view (UI 2), and local review comments, also birthing the dashboard-local design guide |
+| `260725-feat-workspace-workroot-alias` | todo | Add a client-side, user-editable alias overriding workspace/workroot nav labels, introducing the scope-tagged prefs registry other client prefs stores will fold into |
+| `260725-feat-ws-dashboard-design-guide` | todo | Establish a dashboard-local design guide (typography, spacing, color roles, primitives), seeded by the git panel epic's widgets and replacing the IBM Carbon-derived `ai-docs/ref/design.md` |
+| `260725-feat-ws-dashboard-git-diff-view` | todo | Git panel epic: build the diff view (UI 2) — GitHub/GitLab-style single-commit and commit-range diffs on `@codemirror/merge` — in the right pane |
+| `260725-feat-ws-dashboard-git-review-comments` | todo | Git panel epic: local, file-backed code-review comments layered on the diff view (UI 2), with a clipboard copy-to-agent payload |
+| `260725-feat-ws-dashboard-git-tab-log-graph` | todo | Git panel epic: `Files \| Git` tabbar and the git log graph panel (UI 1) over the bottom-left file browser |
+| `260725-feat-xterm-ligatures` | todo | Add xterm.js font ligature (`->`, `=>`, `!=` etc.) rendering support to the dashboard terminal |
+| `260725-refactor-unwire-agents-activity-badge` | todo | Cut the always-on workroot activity ("agents") badge fetch while leaving its rendering/projection logic dormant in the tree for possible future revival |
+| `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` | todo | Route `git_worktree.rs`'s 8 direct git spawns through the `git_exec` seam so they are bounded and counted, the deferred remainder of the fs-watch invalidation Phase 1 seam |
+| `260726-refactor-ws-dashboard-long-uptime-leak-hardening` | todo | Harden long-uptime resource leaks (terminal reaper, git-invocation policy, bounded maps) found in a four-surface handle/process/subscriber audit |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -245,32 +278,143 @@ dropped tickets live in hidden archive dirs and git history.
 | `260724-idea-dashboard-daemon-terminal-lifetime-test-interactive-shell-timing` | idea | Daemon `terminal_lifetime` tests are not robust to interactive-shell startup timing and fail on interactive-zsh hosts |
 | `260724-idea-dashboard-hotkey-leader-dispatch-gap` | idea | Global leader-key `executeCommand` call has no registered handler for `terminal.create` and most other default leaf commandIds, so leader-sub dispatch silently no-ops for them |
 | `260724-idea-dashboard-hotkey-rebind-editor-settings-section` | idea | Dashboard hotkey-rebind editor settings section, split from `260722-feat-dashboard-settings-panel` Phase 2 |
+| `260725-bug-agent-synthetic-load-cleanup-guard` | idea | Agent-generated synthetic CPU load must record PIDs at spawn and self-limit; a review subagent's load experiment leaked 70 orphaned busy loops |
+| `260725-bug-dashboard-routes-test-terminal-helper-leak-no-reaper` | idea | Integration tests in `tests/routes.rs` leak detached helper processes with no reaper (platform-independent, found during macOS Phase 1 port) |
+| `260725-bug-dashboard-terminal-lifetime-load-fragility` | idea | Two pre-existing `terminal_lifetime` tests fail reproducibly under CPU-saturation load (found during macOS Phase 2 acceptance) |
+| `260725-bug-dashboard-terminal-registry-schema-evolution-orphans-helpers` | idea | Terminal registry entries have no schema versioning, so adding a field would orphan live helpers permanently |
+| `260725-bug-dashboard-terminal-socket-path-length-unguarded` | idea | Production terminal helper socket path has no guard against the macOS 104-byte `sockaddr_un` ceiling |
+| `260725-bug-dashboard-terminal-utf8-residual-multibyte-corruption` | idea | Residual UTF-8 multibyte corruption in terminal output persists at low frequency after the `260724` read-boundary carry fix, ruling out a stale daemon binary as the cause |
+| `260725-bug-dashboard-workroot-id-unstable-when-path-canonicalize-fails` | idea | `discovery.rs::canonical_or_normalized` hashes a resolved vs. unresolved path depending on whether the workRoot exists, so `WorkRootId` flips across directory removal/recreation when a path segment is a symlink |
+| `260725-feat-dashboard-graceful-shutdown-from-settings` | idea | Add in-app daemon shutdown/restart and kill-all-terminals actions to the settings panel, sidestepping the blanket `taskkill`/self-re-exec footgun |
+| `260725-feat-prefs-portability` | idea | Export/import dashboard prefs (terminal style, nav order, aliases) to file and web sync, built on the scope-tagged prefs registry |
+| `260725-idea-ws-git-commit-rename-and-payload-rejections` | idea | `ws/git.commit` cannot commit a staged ticket rename and rejects large `ai_context` payloads with a misleading error |
+| `260725-perf-dashboard-daemon-workroot-fanout-concurrency` | idea | Daemon per-work-root filesystem/git fan-out is serial, so resource-discovery latency scales with work-root count and starves overall responsiveness on slow filesystems |
 | `260725-refactor-dashboard-agent-gui-physical-module-isolation` | idea | Tier 2 wire-out: physically extract the suspended agent-GUI modules (FE+BE) from the live dashboard build; needs sage design gating before `ready` |
+| `260725-research-dashboard-terminal-serverside-screen-emulation-diff-transport` | idea | Research server-side terminal screen emulation (mosh-style throttled diffs) to cut TUI transmission cost, complementing the raw-byte-forwarding throughput work |
 | `260725-research-ws-dashboard-pty-agent-pivot` | idea | Owner-directed pivot: replace the structured agent-GUI with a thin decorative layer over a vendor agent CLI running in the existing PTY/terminal substrate |
+| `260726-bug-dashboard-git-watch-probe-cache-evict-and-foreign-mount-gaps` | idea | Three narrow, accepted-deferred gaps in the git FS-watch invalidation work: a pre-existing `GitProbeCache::evict` key mismatch, and two Phase 4 foreign-mount / late-created-directory edge cases |
+| `260726-bug-dashboard-opened-workroots-mixed-path-separators` | idea | `opened-workroots.json` persists mixed path separators, so one root can hash to two `WorkRootId`s |
+| `260726-bug-lead-implement-lost-review-relay-cycle-cap` | idea | `lead-implement` lost the review-relay cycle cap, so a fix loop has no numeric backstop and no defined escalation point |
+| `260726-idea-dashboard-moved-workroot-red-with-no-recovery-affordance` | idea | A work-root whose directory was deleted goes red with no explanation and no usable recovery action; `moved` is also mis-toned as error instead of the muted tone its own classifier intends |
+| `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots` | idea | `/api/dashboard/resources` eagerly unregisters an unavailable, no-active-child work root on every poll, which a caller expecting a stable 409 does not expect |
+| `260727-bug-dashboard-notification-toggle-enabled-without-api` | idea | Notifications toggle stays enabled and never reconciles in a SECURE context whose browser has no `Notification` global; deferred sibling of `260726` Phase 2, whose disable decision was scoped to insecure origins only |
+| `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` | idea | Deferred sibling of `260726`: tab-strip scroll on activation may swallow the close click on an overflowing workbench tab strip; verified in dockview source, never reproduced in a browser |
+| `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` | idea | A vestigial loop in the attention SSE stream keeps `cargo clippy -p ws-dashboard-daemon --all-targets` permanently red, so clippy cannot gate any phase |
+| `260727-chore-dashboard-e2e-helper-modules-never-type-checked` | idea | `tsconfig.e2e-tests.json` includes only `daemonHarness.*`, so shared e2e helper modules and every `*.spec.ts` are type-checked by no script in `package.json` |
+| `260728-bug-dashboard-acceptance-xterm-rows-assertions-blind-under-webgl-renderer` | idea | Dashboard e2e: the acceptance suite's `.xterm-rows` assertions cannot see terminal text once the WebGL/canvas renderer is active |
+| `260728-bug-dashboard-terminal-eviction-leaks-callback-token` | idea | `TerminalRegistry::insert`'s eviction path leaks the evicted terminal's callback token |
 
 ## Ticket Focus
 
-- `260725-bug-dashboard-terminal-platform-macos-unsupported` (ready, bug) —
-  **priority target (owner: macOS must be feature-complete, 2026-07-25).**
-  The daemon does not compile on macOS: `terminal_platform.rs`'s
-  `#[cfg(unix)]` module is Linux-only (pidfd syscalls, `/proc` start-time),
-  so `260723`'s "both platforms" claim really means Linux + Windows. Kill
-  mechanism is pinned (verify → `kill(2)` → best-effort post-kill re-read via
-  `proc_pidinfo`/`PROC_PIDTBSDINFO`; kqueue and `task_for_pid` rejected with
-  reasons in the ticket). Phase 1 build/identity, Phase 2 native macOS
-  lifecycle acceptance. Spec addressing via `## Spec Impact`
-  (`ws-web-dashboard/index.md`, Contract-first: no) — includes amending the
-  currently-absolute never-kill-a-recycled-pid guarantee into a platform
-  tier. Sage combined = passed.
-- `260725-feat-dashboard-nav-row-two-line-open-state` (ready, feat) —
-  owner UX request: left-nav work-root rows get a second line showing open
-  terminal/document counts, plus open-vs-closed de-emphasis by saturation.
-  Agent counter deliberately deferred until the PTY pivot settles what an
-  agent pane is. The substantial part is data plumbing, not CSS:
-  `terminalPanes` is `WorkbenchShell`-local while the nav renders from
-  `App()`. Spec addressing via `## Spec Impact`
-  (`#260516-ws-web-dashboard-inspectable-navigation-shell`, Contract-first:
-  no). Sage combined = passed.
+- `260727-chore-merge-ws-dashboard-dev-into-goal-branch` — CLOSED (`.done/`,
+  Phase 5 `ffdf4d37`). All five phases landed; Results hold detail, not
+  restated. Open: `260728-bug-dashboard-terminal-eviction-leaks-callback-token`,
+  `260728-bug-dashboard-acceptance-xterm-rows-assertions-blind-under-webgl-renderer`,
+  `260725-feat-dashboard-graceful-shutdown-from-settings` (spec-gap note).
+  Test reds / fmt-clippy debt remain.
+
+- `260725-feat-dashboard-pty-agent-attention-notification` — CLOSED
+  (`.done/`, Phase 8 `bd32b10c`). All eight phases landed: the vendor
+  turn-boundary hook injected at spawn, the token-authed callback endpoint, the
+  server-scoped SSE stream, and the three surfaces it feeds — tab label, nav
+  row, and browser chrome. Detail lives in the ticket's per-phase Results and in
+  the `ws-web-dashboard` spec/mental-model entries; do not re-derive it here.
+  One thread stays open and is NOT discharged by the close: the OS notification
+  permission tier is manual-by-design and has never been driven by a human
+  (`260726-chore-dashboard-verify-notification-permission-tier-manually`).
+  Priced debt left behind: the daemon-side `attention.forget` leak. The
+  rebuild-before-Playwright hazard is discharged
+  (`260726-chore-e2e-playwright-serves-stale-frontend-dist`, `.done/`,
+  `951b0f27`): Playwright `globalSetup` now builds the frontend unconditionally
+  on every invocation path, skipping only under `WS_DASHBOARD_STATIC_DIR` or
+  external daemon mode and announcing the skip. The daemon-binary half of the
+  same hazard is deliberately still open: `cargo build -p ws-dashboard-daemon`
+  lives only in `test:browser`.
+
+- `260726-bug-dashboard-restored-tab-close-inert-until-activated` — CLOSED
+  (`.done/`, 2026-07-27). Fixed one member of a lost-`click` family on
+  terminal tab close buttons: on a reload-restored, never-activated tab, the
+  attention badge's presence in the tab's layout flow slid the close button
+  under the pointer between press and release, so the `click` landed on the
+  tab body instead and was silently swallowed. Taking the badge out of
+  layout flow fixed it (measured shift `-11.0px` -> `0.0px`). Deliberately
+  NOT discharged by this closure: a second, distinct trigger for the same
+  lost-click symptom — tab-strip scroll on activation shifting an
+  overflowing tab strip under the pointer — is verified in dockview source
+  but has never been reproduced in a browser. That is tracked separately at
+  `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` (`idea/`; not
+  promoted to `ready` because it lacks a reproduction).
+
+- `260726-bug-dashboard-terminal-notify-silent-failure-no-expiry` — CLOSED
+  (`.done/`, 2026-07-27). Single phase, `91b7a6ba` plus remediation `02a6cd2e`.
+  `terminal-notify` now writes a per-terminal `notify-failures.json` record on
+  every failed delivery and clears it on success; the existing
+  `sweep_agent_profiles` pass reads it and emits one `tracing::warn!` per
+  terminal for a failure that survived a grace window and was not superseded by
+  a callback-target rewrite. The `terminal_notify.rs` stdio-silence CONTRACT is
+  intact and guarded by a CLI test. Deliberately NOT fixed, and stated in the
+  ticket: the stranded `working` badge on a live session stays stranded — the
+  only new signal is operator-facing, in `daemon.log`. Two things the closure
+  does not discharge: the end-to-end manual reproduction (a ~10 minute
+  two-sweep-period wait with a live agent and a browser) was never run, so the
+  escalation rule is proven as pure logic and at the CLI writer level only; and
+  `cargo clippy -p ws-dashboard-daemon --all-targets` is still red for an
+  unrelated pre-existing reason, tracked at
+  `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` (`idea/`).
+  The daemon suite's `--no-fail-fast` requirement was learned here; it is stated
+  once, under `## Dashboard Test Hygiene`.
+
+- `260726-chore-dashboard-terminal-hop1-env-clear-guard-fragile` — CLOSED
+  (`.done/`, 2026-07-27). Single phase, one commit `28aaf8b6`, no remediation
+  Edition: both review partitions came back with no Critical and no Important
+  findings. The hop-1 default-spawn env guard no longer reads a rendering of
+  the decision — `build_helper_command` now computes a `HelperEnvPlan` through a
+  pure `helper_env_plan`, applies it at exactly one `env_clear()` site, and the
+  test asserts the plan value itself, so the primary guard runs identically on
+  Windows. Mutation evidence M1-M4 is in the ticket's Result and was
+  independently reproduced by the test reviewer; do not re-derive it. Two things
+  worth not re-deriving elsewhere: the ticket's own recorded verification
+  baseline was already stale when the phase ran (true branch-point baseline at
+  `b7f524f7` is lib 236 / routes 176, same two known failure sites), and the
+  ticket's ~17 source citations had drifted (+42 lines in
+  `build_helper_command`, +97..+101 in the test block, two citations outright
+  wrong) — the Result records the corrections.
+
+- `260726-chore-dashboard-verify-notification-permission-tier-manually`
+  (`ready/`) — still the ONLY ticket in `ready/`, but no longer a goal-run
+  target: it now carries a `## Blocked (2026-07-27)` note and a selection pass
+  should SKIP it. BOTH PHASES ARE LANDED. Phase 1 (`87259c93`, review fix
+  `4acbdc98`): the Tier 2 browser gate exists as a sibling
+  `e2e/agent-attention-notification.spec.ts` under `channel: "chromium"`, 4
+  tests, all 7 assertions proven non-vacuous by per-assertion mutation runs.
+  Phase 2 (`2da1731d`, spec `b805623c`, review fixes `b0ee16a8` and `e05875aa`):
+  `currentNotificationAvailability()` now reads `isSecureContext` before
+  `typeof Notification`, the decision is extracted as the exported pure
+  `notificationAvailability(...)` with a unit assertion per state, the checkbox
+  is disabled on an insecure origin (caller-visible, so a spec sentence in
+  `#260722-ws-dashboard-settings-panel` now states it), and both spec anchors
+  carrying the false "the `Notification` global is absent on a non-secure
+  context" claim are corrected. Both Results hold the mutation evidence — do not
+  re-derive it. WHAT REMAINS IS HUMAN-ONLY: the six `## Human verification
+  residue` steps need a person watching a native permission prompt and an OS
+  banner, and `## Done when` forbids any agent from recording them, inferring
+  them from a green Playwright run, or writing an `#### Edition` on their
+  behalf. So no further agent pass can move this ticket; it stays in `ready/`
+  until a human records those steps as an `#### Edition` on
+  `260725-feat-dashboard-pty-agent-attention-notification`'s Phase 8 Result.
+  Deferred out of Phase 2 rather than fixed in it:
+  `260727-bug-dashboard-notification-toggle-enabled-without-api` (`idea/`) — the
+  same toggle stays enabled and unreconciled in a SECURE context whose browser
+  lacks the `Notification` global, which Phase 2's insecure-origin-scoped
+  decision deliberately did not cover. Also recorded in the Phase 1 Result and
+  worth not re-deriving: this ticket's own Constraints text claiming only
+  `npm run test:browser` chains the frontend build is FALSE (Playwright
+  `globalSetup` builds unconditionally on every invocation path); the
+  `ws-web-dashboard` mental-model entry on the same subject was checked and is
+  correct, so the staleness is the ticket's alone. One number not in evidence
+  and not to be assumed: the full `npm run test:browser` suite was NOT re-run at
+  Phase 2's tip.
+
 - `260725-feat-dashboard-terminal-steady-state-stream-throughput` (ready, feat)
   — open-state terminal streaming throughput: four independent,
   behavior-preserving per-output-chunk fixes remaining after the `260723`
@@ -298,6 +442,27 @@ dropped tickets live in hidden archive dirs and git history.
   (todo), `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots`
   (idea).
 
+**Ordering (owner, 2026-07-25):** macOS first. Discharged: both phases of
+`260725-bug-dashboard-terminal-platform-macos-unsupported` are done and the
+ticket closed (`ai-docs/tickets/.done/`) — the daemon builds and
+unit/integration-tests natively on macOS (Phase 1), and all four terminal
+lifecycle legs (spawn, daemon-restart re-adopt, dead-shell detection,
+identity-verified close) pass native runtime acceptance with non-vacuity
+proofs (Phase 2). The browser-facing UI/WebSocket gate remains an explicit,
+separately tracked gap (see that ticket's Phase 2 Result). The other two ready
+tickets and dashboard dogfooding are no longer build-blocked. The one
+exception worth taking early — now moot as a special case, but recorded for
+history — was the turn-start hook spike inside the attention ticket's Phase 3,
+which touches no daemon code and decides whether the `working` state and the
+nav spinner exist at all. That spike has since RUN and answered POSITIVE
+(2026-07-25): `UserPromptSubmit` fires at human turn submission for the vendor
+CLI under an interactive PTY, verified with `Stop` as a same-run positive
+control, so the first slice keeps the three-state `working`/`ready`/`idle`
+vocabulary and the nav spinner is not deferred. Evidence is inlined in that
+ticket's Phase 3 step-1 record. Phase 3 itself is still open — its steps 2-3,
+the `0600` hook-config materialization and the daemon-to-helper delivery seam,
+remain unverified.
+
 **Live direction (owner-directed, 2026-07-25):** pivot the dashboard's agent
 surface away from the structured provider-adapter chat GUI and back to a thin
 decorative layer over a vendor agent CLI running in the existing
@@ -311,7 +476,10 @@ follows the already-landed Tier 1 suspension (`AGENT_GUI_SUSPENDED` flag,
 `c3f5b42b`) and turns away from the structured-adapter track
 (`260620-feat-ws-dashboard-agent-client-activity-sources` and related
 agent-GUI tickets, now suspended). `260624-feat-ws-dashboard-managed-cli-terminal`
-is the pre-written PTY-agent substrate design for this pivot.
+is the pre-written PTY-agent substrate design for this pivot; its 2026-07-11
+priority supersession was formally REVERSED 2026-07-25 (owner framed the pivot
+as "the revival of the PTY agent itself"), recorded by editing that ticket's
+Background rather than superseding it.
 
 - `260710-bug-project-index-ticket-focus-stale-status` (todo, bug) — this
   ticket. The mechanical reconciliation half is done as of this pass; the

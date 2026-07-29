@@ -16,6 +16,15 @@ export type TerminalSessionView = {
   rows: number;
   createdAtMs: number;
   cwdHint: string | null;
+  // Which registry profile (e.g. "claude") produced this session, `null`
+  // for the unchanged default-shell path - mirrors the daemon's
+  // `TerminalSessionView.profileId` (260725 Phase 2, browser spawn profile).
+  // An adopted (post-daemon-restart) session reports its spawn profile like
+  // any other; the daemon restores it from a per-terminal sidecar during boot
+  // reconciliation (260726-bug-dashboard-agent-profile-provenance-lost-on-restart),
+  // and reads back `null` only for a terminal spawned before that sidecar
+  // existed or a daemon with no resolvable state directory.
+  profileId: string | null;
 };
 
 export type TerminalOutputChunk = {
@@ -82,6 +91,9 @@ export type TerminalPaneState = {
 export type TerminalCreateOptions = {
   title?: string;
   cwdHint?: string | null;
+  // Opaque daemon-side vendor profile id (e.g. "claude"). Omitted keeps
+  // today's default-shell spawn behavior unchanged (260725 Phase 2).
+  profileId?: string;
 };
 
 export type TerminalRestoreIntent = {
@@ -90,6 +102,23 @@ export type TerminalRestoreIntent = {
   title: string;
   cwdHint: string | null;
   updatedAtMs: number;
+  // CONTRACT (review cycle 1, finding C2): carries `session.profileId`
+  // through a browser-side restore-intent respawn (the reload-time path
+  // that fires when `listTerminals` returns zero sessions but a persisted
+  // intent exists - `App.tsx`'s `useEffect` around
+  // `restoredTerminalIntentRoots`). Without this, an agent terminal that
+  // vanished under a daemon restart came back as a plain default-shell
+  // spawn under its unchanged "Terminal" title, with nothing to tell the
+  // user the wrong process is now running. This path is unrelated to
+  // `reconcile_entry`'s profile provenance, which is no longer lost on
+  // adoption
+  // (`260726-bug-dashboard-agent-profile-provenance-lost-on-restart`) and in
+  // any case never reaches this code: a restore intent only fires when
+  // `listTerminals` returns ZERO sessions, whereas an adopted session is
+  // returned. An
+  // opaque profile id is already judged safe to carry in a loggable command
+  // payload by this same phase (`commands.ts`'s `terminal.create.agent`).
+  profileId?: string | null;
 };
 
 // PTY logical size contract, mirrored from the daemon terminal registry
@@ -220,6 +249,7 @@ export async function createTerminal(
         rows: defaultPtyLogicalSize.rows,
         title: options.title ?? "Terminal",
         cwdHint: options.cwdHint ?? null,
+        profileId: options.profileId ?? null,
       }),
     },
   );
@@ -434,6 +464,7 @@ export function terminalRestoreIntentsFromPanes(
       title: pane.session.title,
       cwdHint: pane.session.cwdHint,
       updatedAtMs: nowMs,
+      profileId: pane.session.profileId,
     }));
 }
 
@@ -509,6 +540,17 @@ export function loadTerminalRestoreIntents(
       if (cwdHint === undefined) {
         return [];
       }
+      // A persisted intent from before this field existed (or a malformed
+      // value) tolerates missing/`null`/non-string the same way `cwdHint`
+      // does, except `undefined` here means "not recorded" rather than a
+      // parse failure - an older stored intent must not be dropped wholesale
+      // just because it predates profile-carrying restore intents.
+      const profileId =
+        typeof record.profileId === "string"
+          ? record.profileId.trim() || null
+          : record.profileId === null
+            ? null
+            : undefined;
       return [
         {
           serverRoute:
@@ -523,6 +565,7 @@ export function loadTerminalRestoreIntents(
             Number.isFinite(record.updatedAtMs)
               ? record.updatedAtMs
               : 0,
+          profileId,
         },
       ];
     });
