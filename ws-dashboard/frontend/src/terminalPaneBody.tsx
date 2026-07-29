@@ -168,6 +168,26 @@ export function TerminalPaneBody({
   // while already hidden briefly opens then closes on the first watchdog
   // tick, an accepted minor inefficiency, not a correctness issue.
   const [paneVisible, setPaneVisible] = useState(true);
+  // Daemon-owned PTY logical size as last established by THIS pane: seeded
+  // from the session view at mount (the creation size, or the daemon's
+  // current size for a reattach after reload) and advanced by `forwardSize`
+  // below on each accepted forward, over either transport.
+  //
+  // Component-local state rather than a read of `pane.session.{columns,rows}`
+  // in the JSX, which would be permanently stale: for a CONNECTED
+  // `persistentTerminal`, `shouldUpdateDockviewWorkbenchPanelParams`
+  // (workbench/dockviewLayoutModel.ts) deliberately suppresses Dockview
+  // `updateParameters` pushes, so the `pane` prop reaching this component -
+  // and with it `pane.session` - stops advancing entirely once the socket is
+  // up. Everything else here is prop-independent (output streams straight
+  // into the emulator from the socket listener), which is why that freeze is
+  // otherwise invisible. Verified empirically: rendering the prop's columns
+  // held at the 80-column creation size across a 1440px -> 480px viewport
+  // narrowing that visibly refit the emulator.
+  const [forwardedPtySize, setForwardedPtySize] = useState(() => ({
+    columns: pane.session.columns,
+    rows: pane.session.rows,
+  }));
   // Live terminal-style prefs (font family/size, background) for the mount
   // effect's construction-time read below and the post-mount subscription
   // effect further down (see that effect for the live-apply path).
@@ -589,6 +609,16 @@ export function TerminalPaneBody({
       ) {
         return;
       }
+      // Keeps the rendered `data-terminal-{columns,rows}` projection in step
+      // with what was actually forwarded. Functional + equality-guarded so a
+      // repeat forward of an unchanged size does not re-render the pane.
+      const recordForwardedPtySize = () => {
+        setForwardedPtySize((current) =>
+          current.columns === next.columns && current.rows === next.rows
+            ? current
+            : { columns: next.columns, rows: next.rows },
+        );
+      };
       // Record the forwarded size only after the daemon accepts it; a rejected
       // resize must stay retryable rather than being suppressed as a no-op.
       const socket = socketRef.current;
@@ -606,12 +636,14 @@ export function TerminalPaneBody({
           next.rows,
         );
         lastForwardedSizeRef.current = { ...next, transport: "socket" };
+        recordForwardedPtySize();
         return;
       }
       void liveRef.current.actions
         .onResize(liveRef.current.pane, next.columns, next.rows)
         .then(() => {
           lastForwardedSizeRef.current = { ...next, transport: "http" };
+          recordForwardedPtySize();
         })
         .catch(() => {
           /* leave lastForwardedSizeRef unchanged so the next fit retries */
@@ -1133,6 +1165,21 @@ export function TerminalPaneBody({
       // default-shell path, matching `TerminalSessionView.profileId`'s
       // `null`.
       data-profile-id={pane.session.profileId ?? ""}
+      // CONTRACT (260728, replaces the `<cols>x<rows>` half of the removed
+      // `.terminal-status-line`): browser-visible projection of the PTY
+      // logical size this pane last forwarded to the daemon, same
+      // provenance-hook pattern as `data-terminal-id`/`data-profile-id`
+      // above. The acceptance gate's PTY-resize assertions read this;
+      // without a DOM projection they have no non-emulator source for the
+      // forwarded size at all (`.xterm-rows > div` only measures the
+      // emulator's own grid, and is deliberately kept as the independent
+      // second signal). Sourced from `forwardedPtySize`, NOT from
+      // `pane.session` - see that state's declaration for why the prop is
+      // frozen for a connected terminal. Unlike the removed status bar's
+      // `displaySession` mirror, which only observed the socket path, this
+      // covers both resize transports.
+      data-terminal-columns={forwardedPtySize.columns}
+      data-terminal-rows={forwardedPtySize.rows}
     >
       <div
         className="terminal-surface"

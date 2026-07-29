@@ -778,26 +778,41 @@ async function workRootIdForLabel(page: Page, label: string): Promise<string | n
   }, label);
 }
 
-// The terminal pane footer renders `<status> · <columns>x<rows>` from the
-// daemon-confirmed session size, so it reflects forwarded PTY resizes.
+// The in-pane `<status> · <columns>x<rows>` footer these helpers used to
+// parse was removed with the bottom status bar; the daemon-owned PTY logical
+// size is now projected onto the pane root as
+// `data-terminal-columns`/`data-terminal-rows` (see the CONTRACT comment in
+// `src/terminalPaneBody.tsx`). Scoped to the active workbench root so a
+// background root's still-mounted panes can never answer instead; `.first()`
+// preserves the previous helper's "first terminal pane in DOM order"
+// semantics for the multi-tab steps, which select tab 0 before asserting.
+function terminalPaneForSize(page: Page) {
+  return page
+    .locator('[data-workbench-root-active="true"] .terminal-pane')
+    .first();
+}
+
+async function terminalPaneSizeAttribute(
+  page: Page,
+  attribute: "data-terminal-columns" | "data-terminal-rows",
+): Promise<number> {
+  const raw = await terminalPaneForSize(page).getAttribute(attribute);
+  // NaN only when the attribute is genuinely absent - i.e. the contract
+  // above regressed - which fails every numeric assertion below rather than
+  // passing them vacuously.
+  return raw === null || raw.trim() === "" ? Number.NaN : Number(raw);
+}
+
 async function terminalColumns(page: Page): Promise<number> {
-  const text =
-    (await page.locator(".terminal-status-line").first().textContent()) ?? "";
-  const match = text.match(/(\d+)x(\d+)/i);
-  return match ? Number(match[1]) : Number.NaN;
+  return terminalPaneSizeAttribute(page, "data-terminal-columns");
 }
 
-// Sibling of `terminalColumns` above, parsing the daemon-confirmed row count
-// from the same `<status> · <columns>x<rows>` footer text.
 async function terminalRows(page: Page): Promise<number> {
-  const text =
-    (await page.locator(".terminal-status-line").first().textContent()) ?? "";
-  const match = text.match(/(\d+)x(\d+)/i);
-  return match ? Number(match[2]) : Number.NaN;
+  return terminalPaneSizeAttribute(page, "data-terminal-rows");
 }
 
-// Independent-of-the-daemon-footer proxy for the emulator's own row count:
-// one `.xterm-rows > div` per rendered emulator row.
+// Independent-of-the-daemon-size-attribute proxy for the emulator's own row
+// count: one `.xterm-rows > div` per rendered emulator row.
 async function emulatorRowCount(page: Page): Promise<number> {
   return page.locator(".xterm-rows > div").count();
 }
@@ -985,6 +1000,31 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     if (new URL(url).pathname === "/api/dashboard/resources") {
       resourceRefreshRequests += 1;
     }
+  });
+  // Force the DOM renderer (`gpuAcceleration: false`) for every navigation in
+  // this test, mirroring `altScreenRootSwitch.spec.ts`. Every terminal
+  // assertion below reads the emulator grid as real DOM
+  // (`.xterm-rows`/`.xterm-rows > div`), which only the built-in DOM renderer
+  // produces - once `WebglAddon`/`CanvasAddon` is attached (the shipped
+  // default since `gpuAcceleration` defaults to `true`) the grid is opaque
+  // canvas pixels and `.xterm-rows` does not exist at all, so those
+  // assertions fail with "element(s) not found" rather than on content. This
+  // pins the gate's *inspection* backend only; renderer selection itself is
+  // covered by the settings toggles' own coverage.
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "ws-dashboard.settings.terminal.v1",
+      JSON.stringify({
+        version: 1,
+        value: {
+          fontFamilyOverride: "",
+          fontSize: 12,
+          themeBackground: "#0b0d10",
+          gpuAcceleration: false,
+          ligaturesEnabled: false,
+        },
+      }),
+    );
   });
   // --- Owner pairing against the daemon-served production frontend ---------
   await test.step("owner pairing", async () => {
@@ -2784,9 +2824,27 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(terminalTabs(page)).toHaveCount(1);
     await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
     await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
-    await expect(
-      page.locator('[data-command-id="terminal.close"]'),
-    ).toBeVisible();
+    // The in-pane `terminal.close` button was removed together with the
+    // bottom status bar; the tab strip's hover-only close (x) is the
+    // affordance that replaced it, routing to the same close action (and
+    // through the same confirmation policy - see the tab-close steps below,
+    // which drive it end to end). Assert that replacement rather than the
+    // retired control. The button is always in the DOM but `opacity: 0`
+    // until its tab is hovered, and Playwright counts an opacity-0 element
+    // as visible, so `toBeVisible()` alone would not prove the affordance
+    // actually surfaces - hover and check the computed opacity.
+    const firstTerminalTab = terminalTabs(page).first();
+    await expect(firstTerminalTab).toHaveAttribute(
+      "data-workbench-tab-close-affordance",
+      "hover-only",
+    );
+    const firstTerminalTabClose = firstTerminalTab.locator(
+      '[data-command-id="workbench.tab.close"]',
+    );
+    await expect(firstTerminalTabClose).toHaveCount(1);
+    await firstTerminalTab.hover();
+    await expect(firstTerminalTabClose).toBeVisible();
+    await expect(firstTerminalTabClose).toHaveCSS("opacity", "1");
     await expect
       .poll(() => terminalSocketUrls.length, { timeout: 10_000 })
       .toBeGreaterThan(0);
@@ -3738,32 +3796,34 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     const terminalPane = page.locator(".terminal-pane");
     const surface = page.locator(".terminal-surface");
-    const controls = page.locator(".terminal-controls");
     const bodyBox = await paneBody.boundingBox();
     const terminalBox = await terminalPane.boundingBox();
     const surfaceBox = await surface.boundingBox();
-    const controlsBox = await controls.boundingBox();
     expect(bodyBox).not.toBeNull();
     expect(terminalBox).not.toBeNull();
     expect(surfaceBox).not.toBeNull();
-    expect(controlsBox).not.toBeNull();
-
-    const filledHeight = surfaceBox!.height + controlsBox!.height;
+    // The bottom `.terminal-controls` status bar was removed, so the emulator
+    // surface is now the pane's ONLY chrome and must fill the body outright -
+    // a stricter assertion than the previous `surface + controls` sum, and it
+    // still bottoms out flush against the containing pane body.
+    await expect(page.locator(".terminal-controls")).toHaveCount(0);
     expect(Math.abs(terminalBox!.height - bodyBox!.height)).toBeLessThanOrEqual(
       1,
     );
-    expect(Math.abs(filledHeight - bodyBox!.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(surfaceBox!.height - bodyBox!.height)).toBeLessThanOrEqual(
+      1,
+    );
     expect(Math.abs(terminalBox!.width - bodyBox!.width)).toBeLessThanOrEqual(
       1,
     );
     expect(Math.abs(surfaceBox!.width - bodyBox!.width)).toBeLessThanOrEqual(1);
     expect(
       Math.abs(
-        controlsBox!.y + controlsBox!.height - (bodyBox!.y + bodyBox!.height),
+        surfaceBox!.y + surfaceBox!.height - (bodyBox!.y + bodyBox!.height),
       ),
     ).toBeLessThanOrEqual(1);
     note(
-      `pane fill: terminal surface+controls ${Math.round(filledHeight)}px of ` +
+      `pane fill: terminal surface ${Math.round(surfaceBox!.height)}px of ` +
         `${Math.round(bodyBox!.height)}px containing pane body`,
     );
   });
