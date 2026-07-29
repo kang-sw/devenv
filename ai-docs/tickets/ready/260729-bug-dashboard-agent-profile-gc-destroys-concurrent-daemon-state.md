@@ -1,0 +1,409 @@
+---
+title: The daemon SIGKILLs live helpers because it cannot tell a busy helper from a dead one
+sage-review-design: completed
+sage-review-completeness: completed
+spec:
+  - 260516-ws-web-dashboard-workroot-io-restore-model
+  - 260727-dashboard-terminal-notify-failure-visibility
+  - 260728-terminal-helper-periodic-reap
+---
+
+# The daemon SIGKILLs live helpers because it cannot tell a busy helper from a dead one
+
+> The file stem says `agent-profile-gc` because that is where the first symptom
+> was found. Two rounds of review moved the diagnosis twice: first from the 300 s
+> profile GC to the 10 s registry sweep, then from "shared state dir" to the
+> liveness test both of them get wrong. Stem left unrenamed; the title carries
+> the real scope.
+
+## Background
+
+Found by code review of PR #4 (`goal/ws-dashboard-dev/velvet-arbor-quill`, merged
+as `1b41a37b`). Every claim below was verified against source.
+
+### The invariant being violated
+
+Helper lifecycle is deliberately decoupled from daemon lifecycle: helpers outlive
+their daemon, daemon exit must never kill them, and `boot_reconcile` adopts them
+back on the next start. Reclamation is supposed to apply to **dead** terminals
+only.
+
+The daemon violates this. It kills helpers that are alive and healthily serving
+another daemon — not because the kill policy is wrong, but because its test for
+"dead" is wrong. This is a defect in the predicate, not in the intent.
+
+### Why a live helper looks dead
+
+`serve_connections` (`terminal_helper_process.rs`) awaits `handle_connection`
+inline in its accept loop, so a helper serves **one connection at a time**. A
+healthy helper's single connection is held by its owning daemon for the
+terminal's lifetime.
+
+A second daemon probing that helper gets:
+
+- `connect` **succeeds** — the listener is bound once before the loop and stays
+  listening while `handle_connection` runs. On Linux `listen(fd, -1)` gives the
+  kernel maximum backlog, so the connection is queued, not refused. The Windows
+  named-pipe leg arms the next instance before returning the current one, so it
+  behaves the same.
+- the handshake **never arrives** — the helper is busy and will not reach
+  `accept()` until the first daemon disconnects.
+
+So *connect succeeded but nobody answered* is the signature of a **healthy, busy**
+helper. The code reads it as death.
+
+### Where the misjudgment turns into a SIGKILL
+
+Two of the four kill sites are defective. The other two are sound and must not be
+touched (see below).
+
+**Site A — `sweep_registry_backstop` (`terminal.rs`), every 10 s.** Kills on
+`terminal_id ∉ self.live_terminal_ids()` plus `identity_status == VerifiedOurs`,
+with **no liveness probe at all** — its CONTRACT says so deliberately
+("Deliberately never calls `connect_and_handshake`"). Another daemon's live
+helper is absent from this daemon's session map and its pid, start-time and boot
+id all genuinely match, so it is killed. The boot-identity gate landed in
+`e6caac0d` cannot help: both daemons are on the same boot, so the boot id matches
+by construction. This is the fastest and broadest destructive path.
+
+**Site B — `reconcile_entry` at daemon start (`terminal.rs`).** Does probe, but
+throws the answer away. `connect_and_handshake` has six distinct failure paths
+and returns a bare `None` from all of them; the `Err(_)` arm discards the
+`io::Error` entirely. `reconcile_entry` folds every `None` into
+`IpcStatus::Unreachable`, and `classify` maps `VerifiedOurs + Unreachable`
+straight to `KillVerified`. "Socket file is gone" and "connected fine, helper
+busy" become the same value.
+
+The transport does surface the distinction — `terminal_ipc_transport::connect`
+returns `io::Result`, so `NotFound` and `ConnectionRefused` are available at the
+point where they are dropped. Nothing downstream can recover it, and `IpcStatus`
+has no variant to express it.
+
+Site B is why the destruction happens *at daemon start*, not 10 s later. In this
+repo's own workflow that is the likely trigger: an agent starts a test daemon
+without `WS_DASHBOARD_STATE_HOME` and the user's live terminals die immediately.
+
+There are **four** sites that decide to kill, not five. The other two are sound:
+
+- **Site C** — `TerminalSession::spawn`'s handshake-failure cleanup. Kills a
+  helper this daemon *just spawned* under a freshly generated id, so it cannot be
+  another daemon's busy helper. Ownership is not in question.
+- **Site D** — `TerminalSession::terminate`. Writes `GracefulShutdown`, waits
+  200 ms, then kills unconditionally. Identity is handshake-proven and the caller
+  explicitly asked for the terminal to end.
+
+`kill_verified_and_delete_entry` is **not** a fifth site — it is the shared
+callee of A, B and C, re-applying the boot-identity gate and withholding the
+signal on mismatch. It is a guard, not a decision. Counting it as a peer of its
+own callers is what made an earlier draft say "five".
+
+### The fourth destructive path: `agent_profile_gc` does not go through any of them
+
+`agent_profile_gc` never calls `kill_verified`, so it is not one of the four kill
+sites — but it destroys state using the **same wrong signal**. It derives
+liveness from `registry.live_terminal_ids()` directly, so fixing `classify` and
+the sweep does not fix it: another daemon's terminals stay absent from this
+daemon's session map even after they correctly survive Sites A and B. It must be
+gated on the same probe, or Phase 1 leaves the state-destruction half open while
+appearing to close the ticket.
+
+### Why the kill path cannot simply be removed
+
+Verified, and it corrects an earlier assumption in this ticket: **an orphaned
+helper whose shell is still running never self-exits.**
+
+The helper has two clocks. `NO_HANDSHAKE_TIMEOUT` (10 s) only applies before
+`shell_started` flips. `GRACE_WINDOW` (30 s) counts from `exited_at`, which
+`SharedState::transition` sets **only when the shell exits** — never on daemon
+disconnect. A helper whose daemon crashed while its shell lives has
+`exited_at == None` and `shell_started == true`, so it falls through to an
+unbounded `IDLE_ACCEPT_POLL` loop forever.
+
+So the daemon-side kill genuinely covers cases nothing else does:
+
+- a wedged helper with a live shell — socket removed, runtime deadlocked, or
+  `SIGSTOP`ped: it can never be adopted and never self-exits;
+- a hung-but-connected helper that buffers `GracefulShutdown` without processing
+  it (`terminate()`'s own comment names this);
+- a live-shell helper whose daemon-side IPC broke and was evicted.
+
+**This also falsifies a CONTRACT in the tree.** `terminal.rs` states the helper
+"is the authoritative timer … and self-exits/deletes its registry entry
+independently of whatever the daemon believes here". That holds only for the
+shell-exited case. The sweep's own rationale leans on the same overstatement.
+
+### The slow path, and why it is silent
+
+`agent_profile_gc` derives liveness from the same `live_terminal_ids()`, so its
+300 s sweep `remove_dir_all`s another daemon's `agent-profiles/<id>/` and deletes
+`terminal-tokens/<id>.json`. In practice the terminals are already dead by then;
+what this adds is that the state is unrecoverable across a restart, because
+`recover_callback_token` returns `None`.
+
+Nothing is logged on the victim. `notify_failure::record_failure` no-ops when the
+profile directory is absent, and an absent profile directory is precisely the
+failure state.
+
+## Decisions
+
+**The fix is to make "is this helper reachable?" answerable, not to partition the
+state directory.** Three candidates were carried in an earlier draft —
+per-instance namespacing, an owner stamp, and startup refusal. All three are
+withdrawn as workarounds: each partitions state so that one daemon never sees
+another's entries, which hides the wrong predicate instead of correcting it, and
+each carried an unclosed trap (namespacing breaks ordinary single-daemon restart
+adoption, since `recover_profile_id`/`recover_callback_token` resolve fixed
+paths; an owner stamp not re-stamped at adopt stops the sweep reclaiming real
+orphans; startup refusal needs an instance lock and a stale-lock rule that do not
+exist today).
+
+### Why splitting the connect error is necessary but not sufficient
+
+Distinguishing "no listener" from "connected, unanswered" stops the *false*
+kills only if the two populations are separable, and they are not. A **wedged**
+helper also accepts into the backlog and never answers. Its signature is
+identical to a healthy-but-busy helper's. Error-splitting alone therefore either
+keeps killing live helpers or stops reclaiming wedged ones.
+
+Only the helper can break the tie, because only it knows whether it is serving
+someone.
+
+### The mechanism
+
+Give the helper a concurrent liveness probe: a lightweight request it can answer
+**while a session is attached**, reporting that it is alive, whether it is
+currently attached, and — if not — **how long it has been unattached**.
+
+The kill predicate is then three-way, not two-way. Getting this wrong in the
+obvious direction is why an earlier draft of this section was rejected:
+
+| probe result | outcome | why |
+| --- | --- | --- |
+| no answer within the timeout | **kill** | wedged, deadlocked, or gone; nothing else reclaims it |
+| answers, attached | **never kill** | someone owns it and is using it |
+| answers, unattached < grace | **leave** | its daemon is restarting, or is mid-`boot_reconcile` |
+| answers, unattached ≥ grace | **kill** | a real orphan: live shell, no daemon coming back |
+
+**The naive predicate "kill only when the probe does not answer" is wrong**, and
+it fails on the exact case the Background says nothing else covers. An orphaned
+helper with a live shell keeps its listener bound and sits in `IDLE_ACCEPT_POLL`
+forever, so it *answers*. Under the naive rule it becomes unreclaimable and its
+shell and PTY leak permanently and silently. The attached bit is not decoration;
+it is the predicate.
+
+### "Leave" must become a real outcome, not the absence of a kill
+
+`ReconcileRow` has no leave-alone variant today: every row either adopts or
+deletes, `kill_verified_and_delete_entry` deletes the entry unconditionally even
+when it withholds the signal, and the sweep's non-`VerifiedOurs` arm deletes too.
+
+So "do not kill" cannot be expressed by picking an existing row. Mapping it onto
+a drop-only row spares the helper **and deletes its registry entry**, which is
+worse than the bug: the helper keeps running, but its owning daemon can no longer
+adopt it at the next `boot_reconcile`, so it becomes a permanent orphan holding a
+PTY and a shell. Phase 1 must add an explicit `Leave` outcome — entry untouched,
+process untouched — and the sweep must skip rather than fall through to a delete.
+
+**The unattached grace must be measured by the helper, not the daemon.** The
+helper is the only party that knows when its last daemon disconnected; a
+daemon-side timer cannot distinguish "unattached for an hour" from "I just
+started and have not adopted it yet". This is the same principle the existing
+design already applies to the post-shell-exit grace. The grace must comfortably
+exceed a daemon restart, including the window during which daemon A's own
+`boot_reconcile` has not yet re-adopted its helpers — otherwise daemon B's 10 s
+sweep reaps A's terminals during A's restart, which is this ticket's bug in a
+narrower form.
+
+This is correct by construction for the concurrent-daemon case without any
+namespacing: a helper attached to daemon A answers daemon B's probe, so B never
+kills it. It also repairs Site A, which today has no probe at all.
+
+The predicate must reach `agent_profile_gc` too, which is not a kill site but destroys
+state off the same signal and does not route through `classify`. It needs the
+probe wired in explicitly or it will keep deleting a live terminal's profile and
+token after the terminal itself has been correctly spared.
+
+**A new message kind alone is not enough, and this is easy to under-scope.**
+`serve_connections` awaits `handle_connection` inline and never polls `accept()`
+while a session is attached, so a probe message would sit unread in the backlog —
+exactly today's failure. The accept loop must gain a **concurrent accept arm**
+(e.g. `select!` over `listener.accept()`) that serves probe connections only.
+
+What is forbidden is promoting that arm into a general dispatch: do not
+implement it by spawning `handle_connection` as a task, which *is* a second full
+attach path and breaks the one-session-at-a-time guarantee this mechanism
+otherwise leaves intact. Probe-only accept, probe-only response.
+
+### Two consequences, accepted deliberately
+
+- **A helper that wedges *while attached* becomes unreclaimable by Sites A and
+  B.** If the helper is the wedged side and never observes the daemon's EOF, it
+  reports itself attached forever. This narrows one of the three cases the kill
+  path was justified by. Explicit `terminate()` (Site D) still reclaims it, and
+  the alternative — killing on a self-reported attached state — is the bug this
+  ticket exists to remove. State this in the phase result rather than discovering
+  it later.
+- **The unattached grace supersedes `EVICTION_BACKSTOP_GRACE` (30 s).** Any grace
+  large enough to clear a daemon restart is longer, so an evicted helper that
+  fails to self-exit lingers for the new grace instead of 30 s. That is the cost
+  of not reaping during a restart; do not "fix" it by shortening the grace below
+  a restart window.
+
+### The `record_failure` question is deliberately not in Phase 1
+
+`record_failure`'s no-op-when-absent behaviour bounds silence exactly where
+silence is most dangerous, but it is **spec-stated** behaviour
+(`{#260727-dashboard-terminal-notify-failure-visibility}`: "The hook process
+never creates the profile directory to write it"), so changing it is a protocol
+change under this repo's always-ask class. Its replacement is also undesigned:
+the obvious candidate — let the hook create the profile directory — is the one
+the spec explicitly rejected. It is Phase 3 and blocked; Phases 1 and 2 do not
+depend on it.
+
+### Convention, as hygiene rather than defence
+
+Independently of the fix, agent-spawned daemons should set a session-scoped
+`WS_DASHBOARD_STATE_HOME`. That is cheap and worth doing, but it is **not** the
+remedy: it asks an AI agent to remember something whose forfeit is the user's
+entire live session, and it does nothing for the wedged-helper misjudgment that
+exists with a single daemon. Record it as workflow guidance, not as the close-out
+of this ticket.
+
+## Constraints
+
+Sites C and D must keep killing unchanged, and the identity gate inside
+`kill_verified_and_delete_entry` must stay. Only Sites A and B have the wrong
+predicate. A change that makes reclamation conditional everywhere would reopen
+the leaks the kill path exists to bound.
+
+Every daemon-initiated kill must continue to route through
+`terminal_platform::kill_verified`; never a bare pid kill.
+
+## Spec Impact
+
+Target area: `ai-docs/spec/ws-web-dashboard/index.md`.
+
+- **New anchor needed.** No existing stem states when a helper may be signalled.
+  The caller-visible rule this ticket establishes is: *a helper is killed only on
+  positive evidence that it cannot be reached — never merely because this daemon
+  does not have it in its session map, and never because a probe went
+  unanswered while the socket accepted the connection.* Nearest existing
+  neighbours are `{#260516-ws-web-dashboard-workroot-io-restore-model}` (owns
+  boot-reconcile outcomes) and `{#260728-terminal-helper-periodic-reap}` (owns
+  the periodic sweep).
+- **`{#260728-terminal-helper-periodic-reap}` must be amended, not just
+  supplemented.** It currently says the daemon, "if no daemon-side connection to
+  it remains, kills it directly" — which is exactly the kill Phase 1 forbids,
+  since *this* daemon having no connection says nothing about whether another
+  daemon does. Replace that condition with the three-way predicate: unreachable,
+  or attached to nobody for longer than the helper-measured grace.
+
+  **Coordinate:** this anchor is also touched by ready/
+  `260729-bug-dashboard-macos-terminal-socket-path-and-eperm-gaps` Phase 2, which
+  restates the reap predicate as "verified-ours + IPC-dead". That restatement
+  becomes stale the moment this phase lands. Whichever lands second owns
+  reconciling both.
+- **`{#260727-dashboard-terminal-notify-failure-visibility}`** needs a qualifying
+  sentence: the bounded-silence guarantee does not hold when the profile
+  directory is absent. This lands with Phase 3, not Phase 1.
+
+Note the restore-model sentence "kill a helper whose identity cannot be verified
+…" is already claimed by
+`260729-bug-dashboard-macos-terminal-socket-path-and-eperm-gaps` Phase 2. Do not
+edit it here; coordinate if both land together.
+
+## Phases
+
+### Phase 1: Kill only on positive evidence of unreachability
+
+Three changes, in order:
+
+1. **Helper-side probe.** A new message kind, answered ahead of the session
+   dispatch so it works while a session is attached, reporting alive,
+   attached-or-not, and unattached-duration. Not a second attach path — see
+   Decisions.
+2. **Split the connect failure.** Stop discarding the `io::Error` in
+   `connect_and_handshake`, and give `IpcStatus` a variant that distinguishes
+   "no listener / socket gone" from "connected, unanswered". Feed the probe
+   result into `classify` so `KillVerified` requires the three-way predicate from
+   Decisions, not `None`-of-any-kind.
+3. **Give Site A a probe.** `sweep_registry_backstop` must probe before
+   signalling. Its CONTRACT's "never adopts" property stays — probing is not
+   adopting — but "never checks" must go, and the CONTRACT text must be rewritten
+   to say so rather than left contradicting the code.
+4. **Gate `agent_profile_gc` on the same probe.** It bypasses every kill site and
+   reads `live_terminal_ids()` directly, so steps 1-3 do not reach it. Without
+   this step the helper processes survive but their `agent-profiles/<id>/` and
+   `terminal-tokens/<id>.json` are still deleted, which is the original symptom
+   this file is named after.
+
+   It has no socket path to probe with — profile directories are named by bare
+   terminal id. It must look up `<registry_dir>/<id>.json` to find one, **and it
+   needs an explicit rule for the no-entry case: no registry entry at all means
+   no helper, so reclaim.** Omitting that rule stops the GC reclaiming genuine
+   orphans, which is the opposite failure.
+
+Done when all four legs of the predicate hold:
+
+- a helper attached to a second daemon survives that daemon's `boot_reconcile`
+  and its 10 s sweep **with its registry entry, profile directory and token file
+  all intact** — the registry entry matters as much as the process, because
+  deleting it makes the surviving helper unadoptable;
+- a helper unattached for less than the grace likewise survives all three paths,
+  so a daemon restart does not lose its own terminals to another daemon's sweep;
+- a helper unattached past the grace is reclaimed;
+- a helper with no listener behind it is reclaimed.
+
+Verification, in order of load-bearing weight:
+
+- Two registries over one state dir, one live helper attached to registry A; run
+  registry B's `boot_reconcile` **and** its backstop sweep; assert the **helper
+  process is still alive** afterwards **and that `<registry_dir>/<id>.json` still
+  exists**. Both halves are load-bearing and fail independently: sparing the
+  process while deleting the entry passes a process-only assertion and still
+  destroys the terminal, because daemon A can no longer adopt it.
+- The same fixture, run through B's `agent_profile_gc`: assert
+  `agent-profiles/<id>/` and `terminal-tokens/<id>.json` still exist. This is a
+  separate assertion from the one above and fails independently if step 4 is
+  skipped.
+- **The daemon-restart case, which is the predicate leg easiest to get wrong.** A
+  helper that answers but reports unattached for *less* than the grace must
+  survive every path — both kill sites and the GC. Build it as: attach a helper,
+  drop the daemon-side connection, immediately run a second registry's
+  `boot_reconcile`, sweep and `agent_profile_gc`, and assert the helper, its
+  profile and its token all survive. Without this the implementer can satisfy
+  every other bullet with a two-way predicate and reintroduce this ticket's bug
+  in its narrower form — reaping another daemon's terminals during that daemon's
+  own restart.
+- **Two** non-vacuity guards, and the second is the one an earlier draft of this
+  phase was missing:
+  - a helper with no listener behind it is still killed by both kill paths, and
+    its profile and token still reclaimed by the GC;
+  - a helper that **answers the probe but reports unattached past the grace** is
+    also still killed. Without this case the "kill only when the probe fails"
+    regression passes the suite by construction, because the orphan it leaks is
+    precisely the one that answers.
+- Reverting each of the four changes independently must turn one of the tests
+  above red. A change that can be reverted with the suite still green is not
+  covered.
+
+### Phase 2: Correct the two CONTRACTs this ticket falsified
+
+Doc-only, no behaviour change.
+
+1. `terminal.rs`'s "the helper is the authoritative timer … self-exits
+   independently" CONTRACT: state that this holds only after the shell exits, and
+   that a helper whose daemon vanished while its shell lives loops indefinitely.
+   That is the fact the daemon-side kill exists for, and the current text denies
+   it.
+2. The sweep's rationale, which leans on the same overstatement to argue the
+   eviction path is safe.
+
+Verification: existing suite still passes. No new test.
+
+### Phase 3: Decide what replaces `record_failure`'s no-op-when-absent
+
+**Blocked — do not start.** Per Decisions, this is an always-ask contract change
+with an undesigned replacement. Phases 1 and 2 are independent of it and may land
+first. Once decided, this phase also carries the qualifying sentence on
+`{#260727-dashboard-terminal-notify-failure-visibility}`.
