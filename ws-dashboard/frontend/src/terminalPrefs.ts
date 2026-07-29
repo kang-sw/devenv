@@ -128,6 +128,38 @@ export function buildEffectiveTerminalFontFamily(override: string): string {
   return `${trimmed}, ${TERMINAL_FONT_FALLBACK_STACK}`;
 }
 
+// xterm's option setter is equality-guarded: `OptionsService` only fires
+// `onOptionChange` when `rawOptions[key] !== value`, and cell-metric
+// re-measurement hangs off exactly that event
+// (`CharSizeService` subscribes via
+// `onMultipleOptionChange(["fontFamily", "fontSize"], () => this.measure())`,
+// and the renderer's atlas/refresh handler subscribes to a superset list).
+// So plainly re-assigning an UNCHANGED family string is a provable no-op -
+// which is precisely the webfont race this exists for: a `fontFamilyOverride`
+// persisted at boot is re-fetched by `reregisterDownloadedFonts()` AFTER the
+// terminal already measured its glyph cell against the substituted fallback,
+// and the family string never changes across that download, so nothing
+// re-measures and the stale fallback cell metrics survive.
+//
+// Returns the assignment sequence that forces the change event to fire while
+// still ending on `target`. The nudge value appends the generic `monospace`
+// keyword, which `TERMINAL_FONT_FALLBACK_STACK` already ends with, so the
+// intermediate assignment resolves to the identical face: the re-measure it
+// triggers is already the correct one, and the final assignment restores the
+// exact target string (and fires a second change event, so the renderer's
+// glyph atlas - cached against the fallback face - is cleared too). Both
+// assignments happen inside one synchronous task, so no frame is ever painted
+// against the intermediate string.
+export function terminalFontFamilyReapplySequence(
+  current: string,
+  target: string,
+): string[] {
+  if (current !== target) {
+    return [target];
+  }
+  return [`${target}, monospace`, target];
+}
+
 // Pure validation for the Terminal settings section's font-size <input>:
 // accepts the raw input string, returns a usable positive finite point size,
 // or null when the entry is empty / NaN / zero / negative. Extracted from the

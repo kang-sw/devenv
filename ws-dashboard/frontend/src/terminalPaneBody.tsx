@@ -15,6 +15,7 @@ import {
 } from "./terminals.js";
 import {
   buildEffectiveTerminalFontFamily,
+  terminalFontFamilyReapplySequence,
   TerminalPrefsContext,
 } from "./terminalPrefs.js";
 import {
@@ -714,14 +715,29 @@ export function TerminalPaneBody({
     // that fetch registers a pending load. Listening for `loadingdone`
     // instead catches every load batch that completes for the life of this
     // mount, regardless of when it started relative to this effect.
+    //
+    // The re-apply itself goes through `terminalFontFamilyReapplySequence`
+    // rather than a bare `terminal.options.fontFamily = ...` assignment: in
+    // this exact race the effective family string is UNCHANGED across the
+    // download, and xterm's option setter is equality-guarded, so a bare
+    // assignment fires no option-change event and therefore re-measures
+    // nothing - leaving in place the very stale fallback cell metrics this
+    // listener exists to correct (and which the alt-screen `fitNow` branch
+    // below would then read). See that helper for the mechanism.
     const onFontsLoadingDone = () => {
       if (terminalRef.current !== terminal) {
         // Pane unmounted/remounted since this listener was registered.
         return;
       }
-      terminal.options.fontFamily = buildEffectiveTerminalFontFamily(
+      const effectiveFontFamily = buildEffectiveTerminalFontFamily(
         liveRef.current.terminalPrefs.fontFamilyOverride,
       );
+      for (const value of terminalFontFamilyReapplySequence(
+        terminal.options.fontFamily ?? "",
+        effectiveFontFamily,
+      )) {
+        terminal.options.fontFamily = value;
+      }
       // A font swap can change glyph cell width, so fit() may resize with a
       // changed column count, which reflows the buffer. On a normal buffer
       // with real scrollback that remaps ydisp/ybase and visibly jumps the

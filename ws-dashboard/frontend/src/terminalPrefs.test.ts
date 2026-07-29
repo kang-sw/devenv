@@ -4,6 +4,7 @@ import {
   loadTerminalStylePrefs,
   parseTerminalFontSizeInput,
   saveTerminalStylePrefs,
+  terminalFontFamilyReapplySequence,
   TERMINAL_FONT_FALLBACK_STACK,
   type TerminalStylePrefs,
 } from "./terminalPrefs.js";
@@ -200,6 +201,93 @@ assertEqual(
   parseTerminalFontSizeInput("-4"),
   null,
   "a negative size is rejected",
+);
+
+// --- terminalFontFamilyReapplySequence --------------------------------------
+//
+// Driven against a faithful stand-in for xterm's `OptionsService` setter,
+// whose real (minified) body is
+// `this.rawOptions[e] !== i && (this.rawOptions[e] = i, this._onOptionChange.fire(e))`
+// - i.e. an equality guard in front of the one event that
+// `CharSizeService.measure()` (and the renderer's atlas invalidation) hangs
+// off. The point of these cases is to prove the re-apply actually re-measures,
+// not merely that it assigns.
+
+function makeEqualityGuardedFontFamilyOption(initial: string) {
+  const state = { value: initial, changeEvents: 0 };
+  return {
+    state,
+    set(next: string) {
+      if (state.value !== next) {
+        state.value = next;
+        state.changeEvents += 1;
+      }
+    },
+  };
+}
+
+function applyReapplySequence(
+  option: ReturnType<typeof makeEqualityGuardedFontFamilyOption>,
+  target: string,
+) {
+  for (const value of terminalFontFamilyReapplySequence(
+    option.state.value,
+    target,
+  )) {
+    option.set(value);
+  }
+}
+
+const unchangedStack = buildEffectiveTerminalFontFamily("Fira Code");
+
+// The defect this replaces: a bare re-assignment of the unchanged string.
+const bareReassign = makeEqualityGuardedFontFamilyOption(unchangedStack);
+bareReassign.set(unchangedStack);
+assertEqual(
+  bareReassign.state.changeEvents,
+  0,
+  "baseline: re-assigning the unchanged family string fires no option-change event (so nothing re-measures)",
+);
+
+const reapplied = makeEqualityGuardedFontFamilyOption(unchangedStack);
+applyReapplySequence(reapplied, unchangedStack);
+assertEqual(
+  reapplied.state.changeEvents > 0,
+  true,
+  "re-applying the unchanged family string forces at least one option-change event",
+);
+assertEqual(
+  reapplied.state.value,
+  unchangedStack,
+  "the re-apply sequence ends on the exact target family string",
+);
+
+assertDeepEqual(
+  terminalFontFamilyReapplySequence(unchangedStack, unchangedStack),
+  [`${unchangedStack}, monospace`, unchangedStack],
+  "an unchanged target nudges through an equivalent stack before restoring the exact string",
+);
+
+assertEqual(
+  terminalFontFamilyReapplySequence(unchangedStack, unchangedStack)[0].endsWith(
+    ", monospace",
+  ) && unchangedStack.endsWith("monospace"),
+  true,
+  "the nudge only appends a generic keyword the stack already ends with, so it resolves to the same face",
+);
+
+assertDeepEqual(
+  terminalFontFamilyReapplySequence("old-stack, monospace", unchangedStack),
+  [unchangedStack],
+  "a genuinely changed target needs no nudge - the plain assignment already fires the change event",
+);
+
+const changedTarget = makeEqualityGuardedFontFamilyOption("old-stack, monospace");
+applyReapplySequence(changedTarget, unchangedStack);
+assertEqual(
+  changedTarget.state.changeEvents,
+  1,
+  "a genuinely changed target fires exactly one option-change event",
 );
 
 assertEqual(true, true, "terminalPrefs tests completed");
