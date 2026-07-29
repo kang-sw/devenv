@@ -13,6 +13,27 @@
 - Verification boundary: `go test ./...` in `agents-plugin-tool` must pass; the wsflow python suite (if it covers this skill) must pass; `git diff` must show the wsflow mirror + manifest.json changed only as regen output.
 - Report-only (do not implement): `ai-docs/mental-model/workflow-skills.md` line ~38 goes stale with this change ("every delegated task routes to a fresh spawn" and "The sole inline-execution carve-out") — flag for the doc pass, do not edit in this commit.
 
+## Exact Required Edits
+
+Edits 1 and 2 are user-approved verbatim text. Copy them character-for-character,
+including the bold markers and the `…` ellipsis character.
+
+**Edit 1** — in `agents-plugin/skills/lead-prefer-subagent/SKILL.md`, replace the
+whole paragraph currently beginning "Route every delegated task to a fresh spawn
+built from named artifacts" with exactly:
+
+> Route every **new** delegated task to a fresh spawn built from named artifacts plus general constraints, never from a copy of this conversation. A standing role (implementer, reviewer, …) **opens with** a fresh spawn — this is unconditional — and captures the conversation's decisions into its spec so the fresh spawn stays self-contained.
+
+**Edit 2** — in the same file, insert immediately after that paragraph (blank line
+between, before the existing "Central authoring/mutation whitelist" paragraph)
+exactly:
+
+> Continue an existing delegate's session when the instruction is the same work item that delegate already owns — a review finding relayed back to its implementer, a widened query to the explorer that ran it, a gap filled by the survey agent that produced it. Open a fresh spawn instead when the work item is new, or when the judgment must not inherit the prior agent's conclusion — an independent review verdict, or a re-check of a claim that agent itself made.
+
+**Edit 3** — the spec sentence rewrite described in "Relevant Ticket Contract"
+item 3 and "Implementation Plan" step 3. This one is content-specified, not
+verbatim-mandated; word it consistently with Edits 1-2 in spec prose style.
+
 ## Out of Scope
 
 - `ai-docs/mental-model/workflow-skills.md` — staleness noted for doc pass, not edited here (explicit contract instruction: report, don't fix now).
