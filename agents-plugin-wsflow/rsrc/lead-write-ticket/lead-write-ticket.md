@@ -51,7 +51,7 @@ Movement
 3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.append` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
 4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
 5. For actionable tickets, apply `judge: ticket-shape` for phase count and granularity.
-6. For epic/workset detail that belongs to a child or included ticket: stop this invocation; start a separate `lead-write-ticket` invocation scoped to that ticket.
+6. For epic/workset detail that belongs to a child or included ticket: stop this invocation; start a separate `lead-write-ticket` invocation scoped to that ticket. When that child does not exist yet, record it as the skeleton's `- Planned:` entry carrying the constraint and continue.
 7. For workset: list not-yet-created work in `## Planned References` with a provisional label, intended role, and creation condition — no status/path/`parent:` until a real ticket exists. If the user also requested included actionable creation or edits, record planned references unless explicit cascade owns those edits; for cascade, create or edit the actionable tickets in separate commits, then update the workset to reference final paths/statuses.
 8. For a status move, see **Move**.
 
@@ -173,6 +173,7 @@ Mechanics: see **On: Spec-address Check**; stop condition is `judge: missing-spe
 `idea/`: exploratory or underspecified.
 `todo/`: accepted actionable backlog, or a non-actionable coordination artifact.
 `ready/`: already spec-addressed.
+Blocked on unlanded work: not `ready/` when the earliest unfinished phase waits on a ticket that has not landed, however complete the spec addressing; name the blocking stem in the ticket.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`. See the workflow manual's Ticket System Concepts section for what each status directory means.
 

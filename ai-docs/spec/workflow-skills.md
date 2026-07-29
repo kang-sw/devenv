@@ -619,6 +619,27 @@ ticket makes about it, so it can spot-check the populator's citations without
 becoming a second surveyor.
 {#260729-ticket-reviewer-policy-resolution}
 
+Two authoring rules follow from the corpus checks having something to report.
+`judge: initial-status` refuses `ready/` when the earliest unfinished phase waits
+on a ticket that has not landed, however complete the spec addressing, and names
+the blocking stem — `ready/` means direct implementation target, so a ticket that
+cannot be started is not one. It is cut on the earliest unfinished phase rather
+than the ticket as a whole, because a ticket whose first phase is independent is
+startable regardless of what a later phase waits on. The judge fires before the
+Ground stage runs, so it decides from what the lead has already read; the
+populator's dependency-status decision gap is the backstop for what the lead
+missed, and reaches the user through the Open Decision Queue. This is a separate
+layer from `lead-goal-step`'s dispatch-time blocker skip: that filter reads the
+`## Blocked (` record a sage stamp writes, keeps a ticket out of a selection, and
+neither depends on nor repairs this rule.
+
+Epic detail belonging to a child that does not exist yet is recorded as the epic
+skeleton's `- Planned:` entry rather than deferred to a separate invocation.
+Without the branch, creating a new epic — where no child exists by construction —
+either stops the invocation inside the Populate step, leaving the epic's own body
+edits unverified and uncommitted, or drops the constraint.
+{#260729-write-ticket-unlanded-dependency-status}
+
 ### Check Blockers Checkpoint {#260513-check-blockers-skill}
 
 `lead-check-blockers` gives users a frequent spoken checkpoint for deciding
