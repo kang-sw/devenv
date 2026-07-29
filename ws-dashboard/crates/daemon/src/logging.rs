@@ -118,7 +118,13 @@ fn resolve_log_target(log_file_override: Option<PathBuf>) -> Option<(PathBuf, St
     }
 }
 
-fn build_file_appender(
+// CONTRACT (review cycle 1, finding C - 260725 Phase 3 step 3): also reused
+// by `terminal_notify::log_failure` so the hidden `terminal-notify`
+// subcommand's failure log shares this SAME bounded rolling-file convention
+// (`Rotation::DAILY` + `MAX_LOG_FILES`) rather than hand-rolling a second,
+// unbounded append-only writer in the same `logs/` directory this pruner
+// already owns.
+pub(crate) fn build_file_appender(
     dir: &Path,
     filename_prefix: &str,
 ) -> Result<RollingFileAppender, tracing_appender::rolling::InitError> {

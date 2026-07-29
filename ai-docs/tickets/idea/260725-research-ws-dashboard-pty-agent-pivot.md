@@ -557,6 +557,15 @@ wrapper component — is called out below as an open design choice.
   aggregate attention from its work roots, and does acknowledging a tab clear
   the nav badge? The ack-watermark precedent exists
   (`initializeActivityDirtyItems`) but the propagation rule is unpinned.
+- RESOLVED 2026-07-25 (owner) — was "whether/how 260624's 2026-07-11
+  supersession is formally reversed (edit 260624 vs supersede-by-this-ticket)".
+  Answer: EDIT 260624. Its Background now carries a "Supersession REVERSED"
+  paragraph. `260624` is not superseded by this research ticket — the owner
+  framed this pivot as "the revival of the PTY agent itself", which makes
+  `260624` the substrate design back on the direction path rather than a
+  historical alternative. The absorbed/not-absorbed boundary against
+  `260725-feat-dashboard-pty-agent-attention-notification` Phase 1 is recorded
+  there.
 - Whether the Activity Console itself should be retired once this pivot supplies
   the attention signal. Owner raised it 2026-07-26 on cost grounds: the 200 ms
   re-poll noted in `### Browser delivery` was measured on the Windows dogfood
@@ -569,8 +578,6 @@ wrapper component — is called out below as an open design choice.
   by it, and would retire ~7 spec anchors (~5-6k lines FE+BE+tests) — so it
   should be weighed only after this pivot pins what replaces the pane's role,
   not before.
-- Whether/how 260624's 2026-07-11 supersession is formally reversed (edit
-  260624 vs supersede-by-this-ticket).
 - Scope boundary: how much of 260624 Phase 1 argv/env commonization is in-scope
   for the narrow pivot.
 

@@ -39,6 +39,7 @@ use crate::git_worktree::{
     AddGitWorktreeResponse, GitWorktreeAddPreviewRequest, RemoveGitWorktreeRequest,
     RemoveGitWorktreeResponse,
 };
+use crate::agent_attention::attention_events;
 use crate::persistent_state::PersistedLinkedServer;
 use crate::resources::local_dashboard_resources_view;
 use crate::root_picker::{
@@ -611,6 +612,19 @@ impl ServerScopedForwardOperation {
         }
     }
 
+    // CONTRACT: unlike every other constructor in this impl, this operation
+    // takes NO parameters - no `work_root_id`, no query string to preserve -
+    // because the attention stream is server-wide, not per-work-root, and
+    // carries no `after`/cursor query param (see `agent_attention.rs`'s own
+    // CONTRACT for why).
+    fn attention_events() -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: "/api/dashboard/terminals/attention/events".to_owned(),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
     fn remove_workspace(workspace_id: &str) -> Self {
         Self {
             method: Method::DELETE,
@@ -1033,6 +1047,25 @@ pub async fn server_scoped_write_work_root_file(
         };
     }
     forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+// CONTRACT (260725 Phase 5): unlike every other `server_scoped_*` dispatcher
+// in this file, this one takes ONLY `server_route` from the path - no
+// `work_root_id` - because the attention stream is server-wide (see
+// `agent_attention.rs`'s CONTRACT). Still one subscription PER LINKED SERVER
+// (never a single dashboard-global subscription): each linked server's own
+// daemon owns its own `AttentionHub`, and this dispatcher either serves the
+// LOCAL one directly or forwards to the named linked server's - it never
+// merges the two.
+pub async fn server_scoped_attention_events(
+    State(state): State<AppState>,
+    AxumPath(server_route): AxumPath<String>,
+) -> Response {
+    let operation = ServerScopedForwardOperation::attention_events();
+    if server_route == LOCAL_SERVER_ID {
+        return attention_events(State(state)).await;
+    }
+    forward_server_scoped_attention_events(state, server_route, operation).await
 }
 
 pub async fn server_scoped_document_events(
@@ -1842,6 +1875,20 @@ fn tungstenite_to_axum_message(message: TungsteniteMessage) -> Option<Message> {
         // rather than treating it as an error so the relay keeps running.
         TungsteniteMessage::Frame(_) => None,
     }
+}
+
+async fn forward_server_scoped_attention_events(
+    state: AppState,
+    server_route: String,
+    operation: ServerScopedForwardOperation,
+) -> Response {
+    forward_server_scoped_sse(
+        state,
+        server_route,
+        operation,
+        "linked server attention events stream unavailable",
+    )
+    .await
 }
 
 async fn forward_server_scoped_document_events(

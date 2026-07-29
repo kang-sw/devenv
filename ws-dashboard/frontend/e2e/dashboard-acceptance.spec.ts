@@ -9,6 +9,7 @@ import {
   terminalCommandPlanForPlatform,
   type TerminalCommandPlan,
 } from "../src/terminalCommandPlan.js";
+import { formatOpenSurfaceCounts } from "../src/resourcePresentation.js";
 // mirrors src/agentGuiSuspended.ts - agent GUI suspended 2026-07-25 (260713
 // family). While true, the agent-GUI acceptance steps below are quarantined.
 import { AGENT_GUI_SUSPENDED } from "../src/agentGuiSuspended.js";
@@ -29,6 +30,25 @@ import type { TerminalPortabilityEvidence } from "./terminalPortabilityEvidence.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const artifactsDir = path.join(here, ".artifacts");
+
+// CONTRACT (macOS Unix-domain-socket path-length ceiling - 260725): the
+// daemon binds the terminal helper's IPC socket at
+// `WS_DASHBOARD_STATE_HOME/terminals/<terminal_id>.sock`
+// (`crates/daemon/src/terminal.rs::default_registry_dir`), and
+// `sockaddr_un.sun_path` caps out at 104 bytes on macOS (108 on Linux).
+// macOS's `os.tmpdir()`/`$TMPDIR` resolves to a long per-session
+// `/var/folders/<hash>/T/` path that alone can consume most of that budget,
+// pushing the full socket path over the ceiling and failing
+// `IpcListener::bind` with a silent HTTP 400 from `create_terminal`. `/tmp`
+// (which macOS symlinks to the short `/private/tmp`) stays comfortably
+// under the limit. Mirrors the same scoped workaround already applied to
+// the Rust test fixtures (`crates/daemon/tests/terminal_lifetime.rs::temp_fixture_path`,
+// `crates/daemon/tests/routes.rs::terminal_registry_temp_dir`) - do not
+// widen this to Linux (no equivalent headroom problem) or to unrelated
+// fixture dirs that never feed a socket path.
+function socketSafeTempBase(): string {
+  return process.platform === "darwin" ? "/tmp" : os.tmpdir();
+}
 
 let daemon: DaemonHandle;
 let workRoot: string;
@@ -146,7 +166,7 @@ test.beforeAll(async () => {
   }
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
   if (!externalDaemon) {
-    stateHome = mkdtempSync(path.join(os.tmpdir(), "ws-dash-state-"));
+    stateHome = mkdtempSync(path.join(socketSafeTempBase(), "ws-dash-state-"));
     ownsStateHome = true;
     process.env.WS_DASHBOARD_STATE_HOME = stateHome;
   }
@@ -1025,6 +1045,86 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     ).toHaveCount(0);
     note(
       "settings modal: Settings nav button opened the dialog with its section nav and Terminal section, and Close dismissed it",
+    );
+  });
+
+  // --- Insecure-context Notifications guard (260726 Phase 2: the shipped guard -
+  // --- tested `typeof Notification` first, so on a plain-http LAN page - where -
+  // --- Chromium still defines the global - the insecure copy was unreachable, --
+  // --- the note read "denied", and the checkbox was still offered) ------------
+  await test.step("insecure context disables the Notifications toggle", async () => {
+    // Own-property shadowing of the `isSecureContext` prototype getter. Playwright
+    // serves this page over http://127.0.0.1, which IS a secure context by spec,
+    // so the insecure branch is otherwise unreachable without a real LAN origin.
+    await page.evaluate(() => {
+      Object.defineProperty(window, "isSecureContext", {
+        configurable: true,
+        value: false,
+      });
+    });
+    try {
+      await page.locator('[data-command-id="settings.open"]').click();
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+      await expect(dialog).toBeVisible();
+      await dialog
+        .locator(".settings-section-nav-button", { hasText: "Notifications" })
+        .click();
+      const checkbox = dialog.locator(
+        '.settings-notification-toggle input[type="checkbox"]',
+      );
+      await expect(checkbox).toBeDisabled();
+      await expect(dialog.locator(".settings-field-note")).toContainText(
+        "not a secure context",
+      );
+
+      await dialog.locator('[data-command-id="settings.close"]').click();
+      await expect(
+        page.locator('[role="dialog"][aria-label="Settings"]'),
+      ).toHaveCount(0);
+      note(
+        "notifications settings: a faked insecure context disables the OS-notification checkbox and states the insecure-context reason in the note",
+      );
+    } finally {
+      // Restore: every later step of this giant serial test shares this same
+      // document, and must not silently run under a faked insecure context.
+      await page.evaluate(() => {
+        Object.defineProperty(window, "isSecureContext", {
+          configurable: true,
+          value: true,
+        });
+      });
+    }
+  });
+
+  // --- Advanced settings section (260727 Phase 2: the section arrived with ----
+  // --- the ws-dashboard-dev merge with no browser-level coverage - the unit ---
+  // --- test pins only the registry descriptor, never that the panel mounts) ---
+  await test.step("Advanced settings section lists and mounts build info", async () => {
+    await page.locator('[data-command-id="settings.open"]').click();
+    const dialog = page.locator('[role="dialog"][aria-label="Settings"]');
+    await expect(dialog).toBeVisible();
+    const advancedNav = dialog.locator(".settings-section-nav-button", {
+      hasText: "Advanced",
+    });
+    await expect(advancedNav).toBeVisible();
+    await advancedNav.click();
+
+    // Build info arrives over HTTP after mount, so this also proves the panel's
+    // `/api/dashboard/build-info` call reaches the daemon through the merged
+    // router - a registry-only assertion could not see that. Deliberately reads
+    // the build-info half only: the same panel's danger zone can shut this
+    // daemon down or kill every terminal, and both would break every later step
+    // of this serial test.
+    const buildInfo = dialog.locator(".settings-buildinfo");
+    await expect(buildInfo).toBeVisible();
+    await expect(buildInfo.locator("dt").first()).toHaveText("Version");
+
+    await dialog.locator('[data-command-id="settings.close"]').click();
+    await expect(
+      page.locator('[role="dialog"][aria-label="Settings"]'),
+    ).toHaveCount(0);
+    note(
+      "advanced settings: the section nav lists an Advanced entry and activating it mounts the daemon build-info list",
     );
   });
 
@@ -2875,6 +2975,182 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
         `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
         "Ctrl-C, ctrl-u, ctrl-w, clear-screen control rendering/recovery, paste, committed Hangul input, IME composition guard, and no document scroll",
+    );
+  });
+
+  // --- 260725 nav-row-two-line-open-state Phase 1: reserved second line and
+  // --- open/closed de-emphasis. Runs after both "preview, close, and pin
+  // --- read-only file tabs" and "create terminal and run a command" so
+  // --- `workRoot` already has a known nonzero terminal count and a known
+  // --- nonzero document count with no new fixture setup. The count text is
+  // --- cross-checked against the currently-mounted Dockview tabs (not a
+  // --- hardcoded number): both the nav row and the workbench tabs are
+  // --- driven by the same terminalPanes/readOnlyFilePanes state, so this
+  // --- also catches a wiring bug between the two render paths, not just a
+  // --- text-formatting bug. ---------------------------------------------
+  await test.step("nav row shows open-surface counts and openness de-emphasis", async () => {
+    const activeContainer = page.locator('[data-workbench-root-active="true"]');
+    const liveTerminalCount = await activeContainer
+      .locator('.dockview-workbench-tab[data-workbench-pane-id^="terminal:"]')
+      .count();
+    const livePinnedDocCount = await activeContainer
+      .locator('.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]')
+      .count();
+    const livePreviewDocCount = await activeContainer
+      .locator(
+        '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+      )
+      .count();
+    const liveDocCount = livePinnedDocCount + livePreviewDocCount;
+    expect(liveTerminalCount).toBeGreaterThan(0);
+    expect(liveDocCount).toBeGreaterThan(0);
+
+    const openRow = page
+      .locator('.resource-row[data-resource-presentation="compactWorkRoot"]', {
+        hasText: workRootDisplayName(workRoot),
+      })
+      .first();
+    await expect(openRow).toHaveAttribute("data-resource-open", "true");
+    await expect(openRow.locator(".resource-row-counts")).toHaveText(
+      formatOpenSurfaceCounts(liveTerminalCount, liveDocCount),
+    );
+    const openRowHeight = (await openRow.boundingBox())?.height ?? 0;
+    // Review fix: `toBeGreaterThan(34)` only proved the row grew past the
+    // one-line floor, not that it landed exactly on the reserved two-line
+    // floor (styles.css `[data-resource-presentation="workRoot"]`,
+    // min-height: 52px) with no extra slack or shortfall - a partial jump
+    // would still pass `toBeGreaterThan(34)`. Compare against the row's own
+    // computed min-height (not a hardcoded literal) so this keeps tracking
+    // correctly if that CSS value changes; `.row-title`/`.resource-row-counts`
+    // are both single-line `white-space: nowrap` with ellipsis overflow, so
+    // content can never push the row taller than the reserved floor.
+    const openRowMinHeight = await openRow.evaluate((node) =>
+      parseFloat(getComputedStyle(node).minHeight),
+    );
+    expect(openRowHeight).toBe(openRowMinHeight);
+    note(
+      `nav row height (compactWorkRoot, open, two-line): ${openRowHeight}px (== reserved min-height ${openRowMinHeight}px)`,
+    );
+
+    // Reuse the git-linked worktree row created in "git workspace overflow
+    // adds linked worktree" to get a still-listed workRoot-presentation row
+    // to flip open->closed, without adding a new fixture root. That row's
+    // resource-tree entry survives the `page.reload()` above (the tree comes
+    // from the daemon), but `openWorkRootKeys` (App.tsx) is bare in-memory
+    // `useState` with no persistence, so the reload silently drops it back
+    // to closed. This step therefore establishes its own openness
+    // precondition - selecting the row here, the same `resource.select` path
+    // `openWorkRootInBrowser`/`selectWorkRootInBrowser` use, is what the
+    // App.tsx:1093 effect actually keys the "open" write on - rather than
+    // (falsely) assuming residue from the earlier step survives the reload.
+    //
+    // This `if` branch is the ONLY place the open->closed transition, the
+    // closed-row hover affordance, and the workspace-presentation exclusion
+    // (Decision 4) get exercised. On a run without `gitWorkRoot` all three
+    // degrade to a note() below - loudly, since that means this run carries
+    // NO evidence for any of them, not merely a skipped nicety.
+    if (gitWorkRoot) {
+      const worktreeDir = path.join(
+        gitWorkRoot,
+        ".ws-dashboard",
+        "worktrees",
+        "Browser-Gate-Branch",
+      );
+      await selectWorkRootInBrowser(page, worktreeDir);
+      const closedRow = page
+        .locator('.resource-row[data-resource-presentation="workRoot"]', {
+          hasText: "Browser-Gate-Branch",
+        })
+        .first();
+      await expect(closedRow).toHaveAttribute("data-resource-open", "true");
+      await expect(closedRow.locator(".resource-row-counts")).toHaveText(
+        formatOpenSurfaceCounts(0, 0),
+      );
+      // Review fix: measure this SAME row's height before and after its own
+      // close, not `openRow` (a different compactWorkRoot row that never
+      // closes in this step) before this row's own close - two different
+      // rows measured at 52px each proves nothing about the transition.
+      // Strict equality mirrors the short-viewport precedent at :3696: a
+      // partway shift must fail here too, not just a floor-to-zero collapse.
+      const closedRowHeightBeforeClose =
+        (await closedRow.boundingBox())?.height ?? 0;
+      await closedRow.locator('[data-command-id="workRoot.close"]').click();
+      await expect(closedRow).toHaveAttribute("data-resource-open", "false");
+      await expect(closedRow.locator(".resource-row-counts")).toHaveText(
+        formatOpenSurfaceCounts(0, 0),
+      );
+      const closedRowHeightAfterClose =
+        (await closedRow.boundingBox())?.height ?? 0;
+      expect(closedRowHeightAfterClose).toBe(closedRowHeightBeforeClose);
+      note(
+        `nav row height (workRoot, open->closed, two-line): ${closedRowHeightBeforeClose}px -> ${closedRowHeightAfterClose}px (unchanged across the actual transition)`,
+      );
+
+      // Review fix: closed rows are the ones a user hovers *in order to*
+      // open them, so they must keep hover feedback like every other row
+      // (styles.css `[data-resource-open="false"]:not(.resource-row-error)
+      // :hover`). Assert the computed value, not the cascade on paper - a
+      // specificity argument is a hypothesis, the computed style is the
+      // evidence. Move the pointer away first: the preceding
+      // `workRoot.close` click above left the cursor resting on this same
+      // row, so reading "idle" background without moving away first would
+      // silently capture the already-hovered state and make this assertion
+      // pass or fail for the wrong reason.
+      await page.mouse.move(0, 0);
+      const closedRowBackgroundIdle = await closedRow.evaluate(
+        (node) => getComputedStyle(node).backgroundColor,
+      );
+      await closedRow.hover();
+      const closedRowBackgroundHovered = await closedRow.evaluate(
+        (node) => getComputedStyle(node).backgroundColor,
+      );
+      await page.mouse.move(0, 0);
+      expect(closedRowBackgroundHovered).not.toBe(closedRowBackgroundIdle);
+      note(
+        `nav row hover (workRoot, closed): background ${closedRowBackgroundIdle} -> ${closedRowBackgroundHovered} on hover`,
+      );
+
+      // Decision 4 coverage: the workspace-presentation row for this same
+      // git workspace (still uncompacted here - both worktree-removal
+      // attempts above were cancelled through the modal, so the linked
+      // worktree, and therefore the 2-workRoot workspace, still exists) must
+      // omit BOTH the openness attribute entirely (App.tsx emits
+      // `showOpenSurfaceCounts ? (...) : undefined`, i.e. no attribute at
+      // all - not `data-resource-open="false"`) and the counts line.
+      const workspaceRow = page
+        .locator('.resource-row[data-resource-presentation="workspace"]', {
+          hasText: workRootDisplayName(gitWorkRoot),
+        })
+        .first();
+      if (await workspaceRow.count()) {
+        expect(
+          await workspaceRow.getAttribute("data-resource-open"),
+        ).toBeNull();
+        await expect(
+          workspaceRow.locator(".resource-row-counts"),
+        ).toHaveCount(0);
+        note(
+          "nav row workspace-presentation exclusion (Decision 4): data-resource-open attribute is absent entirely and .resource-row-counts is absent",
+        );
+      } else {
+        note(
+          'LOAD-BEARING ASSERTION SKIPPED: workspace-presentation exclusion (Decision 4) did NOT run - no uncompacted .resource-row[data-resource-presentation="workspace"] row was found for the git workspace fixture, so this run provides NO evidence for that behavior',
+        );
+      }
+
+      // Closing the currently-selected root re-selects the next open root
+      // (App.tsx workRoot.close handler); with only `workRoot` left open
+      // that lands back on it automatically, but reselect explicitly so
+      // later steps never depend on that fold-through staying true.
+      await selectWorkRootInBrowser(page, workRoot);
+    } else {
+      note(
+        "LOAD-BEARING ASSERTIONS SKIPPED: nav row closed-state, the open->closed height-stability check, the closed-row hover-feedback check, and the workspace-presentation exclusion check (Decision 4) did NOT run - no daemon-host Git workRoot is configured, so this run provides NO evidence for any of those behaviors",
+      );
+    }
+
+    note(
+      "nav row: reserved second line renders live terminal/document counts for the open root, matching the mounted workbench tabs, and data-resource-open flips true/false with the row staying listed either way",
     );
   });
 

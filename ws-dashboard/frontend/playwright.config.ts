@@ -8,6 +8,13 @@ import { defineConfig } from "@playwright/test";
 // themselves close UI-facing dashboard work.
 export default defineConfig({
   testDir: "./e2e",
+  // Builds the production frontend before any test starts, so every
+  // invocation path - `npm run test:browser`, a bare `npx playwright test`, a
+  // single-spec run, an IDE runner - serves the current `frontend/src` rather
+  // than whatever bundle happens to sit in `dist/`. It skips the build, saying
+  // so on stdout, only where the harness does not construct the served
+  // directory itself (`WS_DASHBOARD_STATIC_DIR`, or external daemon mode).
+  globalSetup: "./e2e/globalSetup.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,

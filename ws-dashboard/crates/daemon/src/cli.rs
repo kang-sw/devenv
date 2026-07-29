@@ -25,6 +25,14 @@ pub enum Command {
     // by a human or the remote-deployment guide.
     #[command(hide = true)]
     TerminalHelper(TerminalHelperArgs),
+    // CONTRACT (260725 Phase 3 step 3): the hidden hook-fired subcommand a
+    // materialized vendor `settings.json` invokes (`agent_hook_config.rs`).
+    // Same hidden-subcommand precedent as `TerminalHelper` above: never
+    // documented in `--help`, never invoked directly by a human in normal
+    // operation (though it is a legitimate, deliberately loud-on-failure
+    // manual debugging entry point - see its dispatch in `main.rs`).
+    #[command(hide = true)]
+    TerminalNotify(TerminalNotifyArgs),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -47,6 +55,92 @@ pub struct TerminalHelperArgs {
     pub rows: u16,
     #[arg(long)]
     pub socket_path: std::path::PathBuf,
+    // CONTRACT (260725 Phase 1, pty-agent spawn-seam argv/env scrub):
+    // explicit command + env overlay passthrough. `command` absent (the
+    // default) means "spawn `default_shell()`, unchanged from today" -
+    // `command_args`/`env_overlay` are only meaningful when `command` is
+    // `Some`. All three default to absent/empty so existing manual-argv
+    // fixtures that never pass these flags keep parsing unmodified.
+    //
+    // `requires = "command"` on the two dependent flags (review cycle 1,
+    // finding C2) turns "command-arg/env-overlay passed without --command"
+    // into a hard parse failure instead of a silent no-op: both fields
+    // previously fed code paths gated on `command.is_some()`, so an absent
+    // `command` meant the caller's flags were accepted and then quietly
+    // discarded with no error and no log - a natural mistake for a future
+    // caller (e.g. Phase 2's profile selector) to make.
+    #[arg(long)]
+    pub command: Option<String>,
+    // `allow_hyphen_values`: forwarded argv commonly includes the target
+    // command's own flags (e.g. `--command-arg --flag`), which clap would
+    // otherwise reject as an unexpected option rather than accept as this
+    // flag's value.
+    #[arg(long = "command-arg", allow_hyphen_values = true, requires = "command")]
+    pub command_args: Vec<String>,
+    // CONTRACT (review cycle 1, finding C3): overlay VALUES land verbatim in
+    // the helper's argv, which - like every other `TerminalHelperArgs` field
+    // - is world-readable to any local process via `ps`. This flag exists
+    // for non-secret overlay values only (e.g. a vendor CLI's base-URL
+    // override); it must never carry a credential or token. In particular,
+    // the parent ticket's Phase 4 daemon-owned callback token is designed to
+    // never touch the helper or the registry precisely because helper argv
+    // is world-readable - `--env-overlay` must NOT become the channel that
+    // routes it there. See also `terminal.rs`'s `build_helper_command` for
+    // the argv-forwarding call site this flag feeds.
+    #[arg(long = "env-overlay", value_parser = parse_env_overlay, requires = "command")]
+    pub env_overlay: Vec<(String, String)>,
+    // CONTRACT (review cycle 1, finding C1): carries the resolved profile's
+    // scrub deny-list from hop 1 (`terminal.rs::build_helper_command`) to
+    // hop 2 (this process's own `apply_scrub_and_overlay`) so both hops
+    // honour the SAME list instead of hop 2 independently hardcoding
+    // `agent_env_profile::CLAUDE`. Marker names are not secrets (they are
+    // env-var key names, never values), so a repeated argv flag alongside
+    // `--command-arg`/`--env-overlay` does not turn argv into a secret
+    // channel - see the `env_overlay` CONTRACT above for the channel this
+    // must NOT become.
+    #[arg(long = "scrub-marker", requires = "command")]
+    pub scrub_marker: Vec<String>,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct TerminalNotifyArgs {
+    // CONTRACT (ticket "The token never touches the helper or the
+    // registry"): this argv carries a file PATH only, never config content
+    // and never the callback token itself - the token lives inside the file
+    // this path points at, read at fire time, not passed on the command
+    // line (which is world-readable via `ps`).
+    #[arg(long)]
+    pub callback: std::path::PathBuf,
+    #[arg(long, value_enum)]
+    pub state: TurnStateArg,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TurnStateArg {
+    Working,
+    Ready,
+    Idle,
+}
+
+impl TurnStateArg {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TurnStateArg::Working => "working",
+            TurnStateArg::Ready => "ready",
+            TurnStateArg::Idle => "idle",
+        }
+    }
+}
+
+// CONTRACT: pure `KEY=VALUE` split on the first `=`; used as the clap
+// `value_parser` for `--env-overlay` so malformed overlay flags fail fast at
+// argument parsing rather than surfacing later as a silently-dropped or
+// misinterpreted env var.
+fn parse_env_overlay(raw: &str) -> Result<(String, String), String> {
+    match raw.split_once('=') {
+        Some((key, value)) => Ok((key.to_owned(), value.to_owned())),
+        None => Err(format!("expected KEY=VALUE, got `{raw}` (missing `=`)")),
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -124,6 +218,15 @@ impl Cli {
         }
     }
 
+    // CONTRACT: Non-consuming, checked before `into_serve_config` consumes
+    // `self.command` - mirrors `terminal_helper_args`'s accessor shape.
+    pub fn terminal_notify_args(&self) -> Option<&TerminalNotifyArgs> {
+        match self.command.as_ref() {
+            Some(Command::TerminalNotify(args)) => Some(args),
+            _ => None,
+        }
+    }
+
     pub fn remote_deployment_guide() -> &'static str {
         REMOTE_DEPLOYMENT_GUIDE
     }
@@ -133,6 +236,9 @@ impl Cli {
             Some(Command::Serve(args)) => ServeConfig::from_args(args),
             Some(Command::TerminalHelper(_)) => {
                 anyhow::bail!("terminal-helper is an internal re-exec target, not a serve command")
+            }
+            Some(Command::TerminalNotify(_)) => {
+                anyhow::bail!("terminal-notify is an internal hook target, not a serve command")
             }
             None => {
                 let mut command = Self::command();
@@ -254,6 +360,176 @@ mod tests {
         let cli = Cli::parse_from(["ws-dashboard", "--remote-guide"]);
 
         assert!(cli.wants_remote_guide());
+    }
+
+    #[test]
+    fn terminal_helper_args_parse_command_argv_and_env_overlay_flags() {
+        let cli = Cli::parse_from([
+            "ws-dashboard",
+            "terminal-helper",
+            "--registry-dir",
+            "/tmp/registry",
+            "--terminal-id",
+            "t1",
+            "--work-root-id",
+            "wr1",
+            "--cwd",
+            "/tmp/cwd",
+            "--title",
+            "test",
+            "--columns",
+            "80",
+            "--rows",
+            "24",
+            "--socket-path",
+            "/tmp/t1.sock",
+            "--command",
+            "agent-cli",
+            "--command-arg",
+            "--flag",
+            "--command-arg",
+            "value",
+            "--env-overlay",
+            "FOO=bar",
+            "--env-overlay",
+            "BASE_URL=http://x",
+        ]);
+
+        let args = cli.terminal_helper_args().expect("terminal-helper args");
+        assert_eq!(args.command.as_deref(), Some("agent-cli"));
+        assert_eq!(args.command_args, vec!["--flag".to_owned(), "value".to_owned()]);
+        assert_eq!(
+            args.env_overlay,
+            vec![
+                ("FOO".to_owned(), "bar".to_owned()),
+                ("BASE_URL".to_owned(), "http://x".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn terminal_helper_args_command_argv_and_env_overlay_default_absent() {
+        let cli = Cli::parse_from([
+            "ws-dashboard",
+            "terminal-helper",
+            "--registry-dir",
+            "/tmp/registry",
+            "--terminal-id",
+            "t1",
+            "--work-root-id",
+            "wr1",
+            "--cwd",
+            "/tmp/cwd",
+            "--title",
+            "test",
+            "--columns",
+            "80",
+            "--rows",
+            "24",
+            "--socket-path",
+            "/tmp/t1.sock",
+        ]);
+
+        let args = cli.terminal_helper_args().expect("terminal-helper args");
+        assert_eq!(args.command, None);
+        assert!(args.command_args.is_empty());
+        assert!(args.env_overlay.is_empty());
+    }
+
+    // CONTRACT (review cycle 1, finding C2): base args shared by the two
+    // rejection tests below, deliberately omitting `--command`.
+    fn base_terminal_helper_args() -> Vec<&'static str> {
+        vec![
+            "ws-dashboard",
+            "terminal-helper",
+            "--registry-dir",
+            "/tmp/registry",
+            "--terminal-id",
+            "t1",
+            "--work-root-id",
+            "wr1",
+            "--cwd",
+            "/tmp/cwd",
+            "--title",
+            "test",
+            "--columns",
+            "80",
+            "--rows",
+            "24",
+            "--socket-path",
+            "/tmp/t1.sock",
+        ]
+    }
+
+    #[test]
+    fn terminal_helper_args_command_arg_without_command_is_rejected() {
+        let mut args = base_terminal_helper_args();
+        args.extend(["--command-arg", "--flag"]);
+
+        assert!(
+            Cli::try_parse_from(args).is_err(),
+            "--command-arg without --command must fail to parse, not silently no-op"
+        );
+    }
+
+    #[test]
+    fn terminal_helper_args_env_overlay_without_command_is_rejected() {
+        let mut args = base_terminal_helper_args();
+        args.extend(["--env-overlay", "FOO=bar"]);
+
+        assert!(
+            Cli::try_parse_from(args).is_err(),
+            "--env-overlay without --command must fail to parse, not silently no-op"
+        );
+    }
+
+    #[test]
+    fn terminal_notify_args_parse_callback_and_state() {
+        let cli = Cli::parse_from([
+            "ws-dashboard",
+            "terminal-notify",
+            "--callback",
+            "/tmp/callback.json",
+            "--state",
+            "ready",
+        ]);
+
+        let args = cli.terminal_notify_args().expect("terminal-notify args");
+        assert_eq!(args.callback, std::path::PathBuf::from("/tmp/callback.json"));
+        assert_eq!(args.state, TurnStateArg::Ready);
+        assert_eq!(args.state.as_str(), "ready");
+    }
+
+    #[test]
+    fn terminal_notify_args_accessor_is_none_for_other_commands() {
+        let cli = Cli::parse_from(["ws-dashboard", "serve"]);
+        assert!(cli.terminal_notify_args().is_none());
+    }
+
+    #[test]
+    fn terminal_notify_args_rejects_an_unknown_state_value() {
+        let result = Cli::try_parse_from([
+            "ws-dashboard",
+            "terminal-notify",
+            "--callback",
+            "/tmp/callback.json",
+            "--state",
+            "not-a-real-state",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_env_overlay_splits_on_first_equals() {
+        assert_eq!(
+            parse_env_overlay("KEY=value=with=equals"),
+            Ok(("KEY".to_owned(), "value=with=equals".to_owned()))
+        );
+    }
+
+    #[test]
+    fn parse_env_overlay_rejects_missing_equals() {
+        assert!(parse_env_overlay("NOEQUALSSIGN").is_err());
     }
 
     #[test]

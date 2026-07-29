@@ -57,6 +57,29 @@ by process/scope exit.
   repeated local `cargo test -p ws-dashboard-daemon` runs accumulate
   orphaned shell processes over time with no automatic reaper.
 
+## Field evidence (2026-07-27)
+
+The accumulation this ticket predicted was measured on a dev box after three
+days of unswept runs, and it is larger than "several" survivors per pass:
+
+- 489 orphaned `terminal-helper` processes, all reparented to PID 1, plus
+  roughly 490 shell children — about 980 of the machine's 1941 processes.
+- Accrual rate by start day: 102 (Jul 25), 192 (Jul 26), 195 (Jul 27). Oldest
+  survivor had been up 2d 9h 34m.
+- 1550 stale `/private/tmp/ws-dash*` registry directories, 1510 of them
+  `ws-dashboard-terminal-registry-*`, totalling 2.1M.
+- Zero of them were real instances: every registry path was a test temp dir,
+  and no surviving process used the real state home.
+
+Two facts worth not re-deriving. First, the cost is **not** load: all 489 sat
+at 0.0% CPU and 0.0% memory, with the machine at load 4.67 on 16 cores, 92%
+memory free and zero swap. The hazard is process-table and `/tmp` occupancy —
+stale-pid detection and registry scans can see all of it — so flaky or slow
+runs must not be attributed to this leak, and this leak must not be inferred
+from a slow machine. Second, SIGTERM is sufficient: 489/489 exited on TERM
+with no SIGKILL needed, so the helper's graceful path is intact in the leaked
+state and a sweeper does not need force.
+
 ## Fix direction (not decided)
 
 - Test-side: add a small test-only teardown fixture (e.g. a `Drop` guard
@@ -77,4 +100,9 @@ by process/scope exit.
   process/session cleanup (e.g. logout, reboot) — likely insufficient for
   long-running dev boxes and CI runners that never reboot between runs.
 
-None of the above is decided; this ticket captures the finding for triage.
+The stopgap is now half-taken, and only half: `_index.md` gained a
+`## Dashboard Test Hygiene` section carrying the sweep commands and the
+not-load caveat, so the risk is written down where a session sees it before
+running the suite. That is documentation plus a manual sweep, not a fix — it
+depends on every session remembering, which is the discipline that already
+failed for three days. The three fix directions above stay undecided.

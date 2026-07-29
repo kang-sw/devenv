@@ -11,6 +11,7 @@ use axum::Router;
 use tokio::fs;
 use tokio::sync::Mutex;
 
+use crate::agent_attention::{attention_events, AttentionHub};
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::discovery::GitProbeCache;
@@ -36,7 +37,8 @@ use crate::root_picker::{
 };
 use crate::servers::{
     dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
-    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_close_terminal,
+    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_attention_events,
+    server_scoped_close_terminal,
     server_scoped_create_empty_directory, server_scoped_document_events,
     server_scoped_git_branches, server_scoped_git_fetch, server_scoped_git_pull_ff_only,
     server_scoped_git_push, server_scoped_git_status, server_scoped_git_switch_branch,
@@ -66,8 +68,8 @@ use crate::codex_routes::{
     codex_session_transcript, create_codex_session, list_codex_sessions,
 };
 use crate::terminal::{
-    close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_output_batch, terminal_resize, terminal_websocket, TerminalRegistry,
+    close_terminal, create_terminal, list_terminals, post_terminal_turn_state, terminal_input,
+    terminal_output, terminal_output_batch, terminal_resize, terminal_websocket, TerminalRegistry,
 };
 use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
@@ -113,6 +115,12 @@ pub struct AppState {
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
+    // CONTRACT (260725 Phase 5): must be the SAME instance `terminals`
+    // internally holds (obtain via `terminals.attention()`, never a fresh
+    // `AttentionHub::default()`) - see `TerminalRegistry::attention`'s own
+    // CONTRACT for why a disconnected clone would silently break
+    // forget-on-close.
+    pub attention: AttentionHub,
     pub codex_sessions: crate::codex_app_server::CodexProviderRegistry,
     pub claude_sessions: crate::claude_cli::ClaudeProviderRegistry,
     pub work_root_activity: WorkRootActivityProjector,
@@ -128,8 +136,18 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
-    // CONTRACT: `/pair` and daemon-to-daemon link auth stay outside the
-    // protected browser router.
+    // CONTRACT: three route classes stay outside the protected browser
+    // router, each for a different reason: `/pair` (one-time browser
+    // pairing, issues the owner session cookie), `/api/dashboard/link-auth`
+    // (daemon-to-daemon link auth, a distinct credential entirely), and
+    // (260725 Phase 4) `/api/dashboard/terminals/{terminal_id}/turn-state`
+    // (a non-browser, per-terminal callback route authorized by an opaque
+    // token the handler itself checks - see `terminal.rs::
+    // post_terminal_turn_state`'s own CONTRACT). The turn-state route is
+    // registered here, in this SAME outer chain before `.merge(protected)`,
+    // so it sits outside `require_owner_auth` structurally rather than via a
+    // runtime flag - it never issues or consumes the owner session cookie
+    // and is never reachable from a browser context.
     // CONTRACT: `/healthz`, `/`, static UI, and WebSocket upgrade routes are
     // nested behind one central auth boundary when owner auth is enabled. The
     // loopback-only no-auth debug profile omits that layer for the whole
@@ -319,6 +337,10 @@ pub fn build_router(state: AppState) -> Router {
             delete(server_scoped_close_terminal),
         )
         .route(
+            "/api/dashboard/servers/{server_route}/terminals/attention/events",
+            get(server_scoped_attention_events),
+        )
+        .route(
             "/api/dashboard/document-translation/providers",
             get(translation_providers),
         )
@@ -425,6 +447,10 @@ pub fn build_router(state: AppState) -> Router {
             axum::routing::delete(close_terminal),
         )
         .route(
+            "/api/dashboard/terminals/attention/events",
+            get(attention_events),
+        )
+        .route(
             "/api/dashboard/work-roots/{work_root_id}/files",
             get(list_work_root_files),
         )
@@ -507,6 +533,10 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/pair", get(pair))
         .route("/api/dashboard/link-auth", post(remote_link_auth))
+        .route(
+            "/api/dashboard/terminals/{terminal_id}/turn-state",
+            post(post_terminal_turn_state),
+        )
         .merge(protected)
         .with_state(state)
 }

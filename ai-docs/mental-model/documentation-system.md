@@ -51,6 +51,7 @@ related:
 - **Add a convention**: add Markdown under `internal/wsdoc/conventions/`, then update any compatibility copy that remains authoritative for Claude fallbacks.
 - **Add a ticket status**: update status normalization, rank, scan defaults, project tree rendering, conventions, Git move detection, MCP schemas, prompts, and skills.
 - **Add doc discovery tools**: update MCP dispatch, tool schema, parameter validation, tests, and docs; reuse shared query matching/evidence helpers when the tool accepts broad human `query` text. {#260505-documentation-authoring-workflows}
+- **Refresh the `## Tickets` inventory table in `_index.md`**: source rows only from `ready/`, `todo/`, `idea/` (`.done/`/`.dropped/` excluded by design); Status is the file's status directory; Summary is authored, not copied - no `description`/`summary` frontmatter field exists anywhere in this ticket system, so build it from `title` (near-verbatim if already a clause, rewritten as one clause if a noun phrase) with a qualifying detail pulled from the body (`## Decisions` included) when the title alone is ambiguous; order status-grouped `ready` -> `todo` -> `idea`, ascending by stem per block, but leave pre-existing rows that already sit outside that order in place rather than re-sorting them to make the rule clean; verify by matching file count to row count and diffing the two stem sets in both directions.
 
 ## Common Mistakes
 
