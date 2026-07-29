@@ -35,34 +35,54 @@ export class FontDownloadError extends Error {
   }
 }
 
+// Keyed by font id. Holds the in-flight OR already-resolved injection for
+// that font, and is cleared again on failure. Replaces the previous
+// "is a matching <link> in the DOM?" marker check, which answered `true` the
+// instant the element was appended - i.e. before it had loaded, and even
+// after it had failed, since the failed element was never removed. Both
+// short-circuited every later retry into a spurious `load-failed`
+// (`document.fonts.load()` finds no face for a stylesheet that never
+// arrived) until a full page reload, and the in-flight case reported the
+// same failure for a download that was merely still running.
+const googleFontsLinkInjections = new Map<string, Promise<void>>();
+
 // Injects a `<link rel="stylesheet">` pointing at the Google Fonts css2 API
 // rather than manually `fetch()`-ing + building a `FontFace(ArrayBuffer)`.
 // This sidesteps any CORS uncertainty on Google's CSS endpoint entirely,
 // since `<link>` subresource loading isn't subject to the same-origin fetch
 // restrictions the way `fetch()` reads are.
 function injectGoogleFontsLink(entry: DownloadableFontEntry): Promise<void> {
-  const existing = document.querySelector(
-    `link[data-downloadable-font="${entry.id}"]`,
-  );
-  if (existing) {
-    return Promise.resolve();
+  const started = googleFontsLinkInjections.get(entry.id);
+  if (started) {
+    // Resolved: the stylesheet is already loaded. Still pending: share the
+    // same load rather than appending a duplicate <link> and racing it.
+    return started;
   }
-  return new Promise((resolve, reject) => {
+  const injection = new Promise<void>((resolve, reject) => {
     const link = document.createElement("link");
     link.rel = "stylesheet";
     const familyParam = entry.googleFontsFamily.split(" ").join("+");
     link.href = `https://fonts.googleapis.com/css2?family=${familyParam}&display=swap`;
     link.dataset.downloadableFont = entry.id;
     link.onload = () => resolve();
-    link.onerror = () =>
+    link.onerror = () => {
+      // Drop the dead element so a retry re-requests the stylesheet from a
+      // clean slate instead of inheriting a permanently failed one.
+      link.remove();
       reject(
         new FontDownloadError(
           "network",
           `Could not reach the font stylesheet for "${entry.label}"`,
         ),
       );
+    };
     document.head.appendChild(link);
+  }).catch((error: unknown) => {
+    googleFontsLinkInjections.delete(entry.id);
+    throw error;
   });
+  googleFontsLinkInjections.set(entry.id, injection);
+  return injection;
 }
 
 // Fetches and registers a downloadable font's `@font-face` so it becomes
