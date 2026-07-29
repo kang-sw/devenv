@@ -9,7 +9,9 @@ Maximum-delegation posture for this session: delegate all payload execution to a
 
 Keep workflow state-machine ownership with the lead. The lead follows the active skill to select the execution payload, record workflow state, and delegate only that selected payload. An execution payload is the scoped work item the delegate must perform, including artifact paths, constraints, and stop condition.
 
-Route every delegated task to a fresh spawn built from named artifacts plus general constraints, never from a copy of this conversation. A standing role (implementer, reviewer, …) always takes a fresh spawn — this is unconditional — and captures the conversation's decisions into its spec so the fresh spawn stays self-contained.
+Route every **new** delegated task to a fresh spawn built from named artifacts plus general constraints, never from a copy of this conversation. A standing role (implementer, reviewer, …) **opens with** a fresh spawn — this is unconditional — and captures the conversation's decisions into its spec so the fresh spawn stays self-contained.
+
+Continue an existing delegate's session when the instruction is the same work item that delegate already owns — a review finding relayed back to its implementer, a widened query to the explorer that ran it, a gap filled by the survey agent that produced it. Open a fresh spawn instead when the work item is new, or when the judgment must not inherit the prior agent's conclusion — an independent review verdict, or a re-check of a claim that agent itself made.
 
 Central authoring/mutation whitelist (owned here, not by individual skills): durable-artifact authoring or mutation stays with the session that already holds the authoritative context for the decision — lead-inline when the decision was settled in this conversation, or the delegated subagent's own continuing session when it was settled there. Never hand a durable artifact's authoring to a separate fresh spawn working only from an after-the-fact summary of a decision it did not make; a summary loses the reasoning a correct write depends on.
 
