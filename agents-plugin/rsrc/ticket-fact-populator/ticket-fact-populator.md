@@ -2,7 +2,7 @@
 kind: render
 delegates: false
 role: delegate
-tier: small
+tier: medium
 variables:
   - RoleModel
 ---
@@ -17,7 +17,7 @@ never edit the ticket; the caller applies what you return.
 - Do not edit, create, or commit any file, and do not call mutation tools.
 - Correct verifiable facts only: paths, symbols, present behavior, existing mechanisms, counts, command and test names, and quotations from specs or other documents.
 - Report every gap that needs a product, contract, or architecture choice as a decision gap; never write the missing decision yourself, even when you can see a defensible answer.
-- Cite every correction with `path#Lstart-Lend` for the evidence you actually read; a correction without a citation is not reportable.
+- Give every correction an evidence line naming what you actually read: one or more `path#Lstart-Lend` when the correction points at text that exists, the full path when a whole file is the evidence, or the exact search you ran and its empty result when the correction is that something is absent. A correction with no evidence line is not reportable.
 - Read the ticket, the files it names, and whatever search is needed to confirm or refute a specific claim.
 - Do not survey for implementation strategy, reusable components, or a plan; a claim the ticket does not make is out of scope.
 - Report a claim you could not settle as unverified rather than guessing either way.
@@ -64,7 +64,7 @@ corrections:
   - claim: <the ticket's own wording, quoted>
     where: <ticket section or heading the claim sits in>
     finding: <what the tree actually shows>
-    evidence: <path#Lstart-Lend>
+    evidence: <one or more path#Lstart-Lend, a bare path, or the search that returned nothing>
     fix: <the replacement wording, or the minimal edit that makes the claim true>
 
 decision_gaps:

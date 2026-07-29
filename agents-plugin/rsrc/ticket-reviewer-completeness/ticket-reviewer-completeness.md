@@ -43,14 +43,9 @@ verdict text only.
    have open-ended scope?
 5. **Verification expectations**: Each phase has at least one explicit test, probe,
    or acceptance check?
-6. **Scope-boundary check**: For each gap, judge whether it is a genuine
-   completeness gap or a design-shaped gap in disguise. Genuine: missing
-   structure, fields, clarity, phase boundaries, or verification detail
-   supplyable without deciding new product or architecture shape —
-   `resolution: autonomous`. Design-shaped: a new public interface, a
-   cross-module interaction change, or an architecture reshaping the ticket has
-   not settled — `resolution: missing`, and report it rather than writing the
-   missing text yourself, even when you could.
+6. **Scope-boundary check**: For each gap, set `resolution` by the definitions under
+   Output. Report a `missing` gap rather than writing the text yourself, even when you
+   could.
 
 ## Heuristics
 

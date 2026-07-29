@@ -894,9 +894,11 @@ func TestValidateRealTree(t *testing.T) {
 
 // TestLeadWriteTicketSageGatePrecedesCommit pins the step order established
 // by 260726-bug-sage-ready-enforcement-single-chokepoint: "Sage Review Gate"
-// must render as step 5 and "Commit" as step 6 in lead-write-ticket's
-// "## On: invoke" section. tickets.sage_stamp writes the posture uncommitted
-// and relies on step 6 to commit it together with the rest of the ticket
+// must render before "Commit" in lead-write-ticket's "## On: invoke" section.
+// Headings resolve by name, not by step number — 260729 inserted a Ground stage
+// ahead of the gate and renumbered both.
+// tickets.sage_stamp writes the posture uncommitted
+// and relies on the Commit step to commit it together with the rest of the ticket
 // edit; a silent re-inversion (or reintroducing a conditional instead of the
 // required unconditional order) reproduces the "no staged changes in
 // requested paths" bug the reorder fixed, and no other test in this repo
@@ -928,15 +930,15 @@ func TestLeadWriteTicketSageGatePrecedesCommit(t *testing.T) {
 	// a second commit performed inside the gate section; a future edit could
 	// keep the headings in the right order and still reintroduce a commit
 	// instruction there, reproducing "no staged changes in requested paths" at
-	// step 6. Pin the gate section's content too.
+	// the Commit step. Pin the gate section's content too.
 	section := text[gateIdx:commitIdx]
 	for _, forbidden := range []string{"git.commit", "chore(sage)"} {
 		if strings.Contains(section, forbidden) {
-			t.Fatalf("the Sage Review Gate section must not instruct a commit (found %q); step 6 owns the single commit:\n%s", forbidden, section)
+			t.Fatalf("the Sage Review Gate section must not instruct a commit (found %q); %q owns the single commit:\n%s", forbidden, commitHeading, section)
 		}
 	}
 	// And it must positively state that the stamping tools' own commit
-	// direction does not apply here, so the step-5/step-6 conflict that made
+	// direction does not apply here, so the gate-vs-commit conflict that made
 	// the fix depend on the agent preferring the later line cannot come back.
 	commitStep := strings.TrimSuffix(strings.TrimPrefix(commitHeading, "### "), ". Commit")
 	for _, required := range []string{

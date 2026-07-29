@@ -57,11 +57,8 @@ verdict text only.
    addressing root cause?
 3. **Right-problem check**: Is the ticket solving the right problem, or is it a
    solution in search of a problem?
-4. **Policy-gap check**: For each gap, ask whether the planning or implementation stage
-   could settle it by reading the tree or by ordinary engineering judgment. If it could,
-   the gap is `autonomous` however expensive that lookup is. Only a policy choice — what
-   the system should do, what contract it commits to, or which of several defensible
-   shapes is correct — is `missing`.
+4. **Policy-gap check**: For each gap, set `resolution` by the definitions under Output;
+   discovery cost is never what makes a gap `missing`.
 5. **Spec territory conflict**: Does the ticket's planned behavior contradict what the
    target spec currently states, or collide with another `ready/` ticket's `## Spec
    Impact`? Two tickets touching the same spec is not itself a finding — report it only

@@ -125,10 +125,13 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 	}
 
 	// concern surfaces the manual-escalation instruction and routes the lead to
-	// its own commit rather than claiming one happened.
+	// its own commit rather than claiming one happened. The escalation sentence
+	// is about a missing decision, so it is gated on one being present —
+	// TestFormatSageRecordConcernWithoutMissing pins the other side of the gate.
 	concernOut := formatSageRecord(wsdoc.SageRecordResult{
 		Verdict: "concern",
 		Posture: map[string]string{"sage-review-design": "completed"},
+		Missing: 1,
 	})
 	if !strings.Contains(concernOut, "verdict: concern") || !strings.Contains(concernOut, "escalate to block manually") {
 		t.Fatalf("formatSageRecord concern output:\n%s", concernOut)
@@ -162,19 +165,58 @@ func TestFormatSageRecordBlockRecovery(t *testing.T) {
 		BlockedSection: "## Blocked (2026-07-29)",
 		Missing:        1,
 	})
-	for _, want := range []string{
-		"ws/tickets.sage_gate cannot clear a blocked posture",
-		"call ws/tickets.sage_stamp again with fresh verdicts",
-		"Do not land this ticket in ready/",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("formatSageRecord block output missing %q in:\n%s", want, out)
-		}
+	if !strings.Contains(out, "stop and report the blocker") {
+		t.Fatalf("formatSageRecord block output must tell the caller to stop:\n%s", out)
 	}
 	// The ready/ landing reverts instead of committing, so the block branch must
 	// not prescribe a commit the caller may have to skip.
 	if strings.Contains(out, "commit this change via ws/git.commit") {
 		t.Fatalf("formatSageRecord block output must leave the commit decision to the caller:\n%s", out)
+	}
+	// resolveStage returns stop_blocked for a blocked posture forever, so
+	// sage_gate never names a reviewer again. A recovery loop stated here would
+	// be unexecutable and would contradict both sageGateNextInstruction's
+	// stop_blocked branch and the caller's own ready/ branch.
+	for _, forbidden := range []string{"resolve the issues in the appended Blocked section", "Do not land this ticket in ready/"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("formatSageRecord block output must not prescribe an unexecutable recovery loop or a landing-specific action (found %q):\n%s", forbidden, out)
+		}
+	}
+}
+
+// TestFormatSageRecordConcernWithoutMissing pins the gate on the
+// missing-decision sentence. A standalone stage records `concern` straight from
+// the reviewer verdict with no missing issue required, so the ungated text asked
+// the caller to weigh a decision the same message reported as absent.
+func TestFormatSageRecordConcernWithoutMissing(t *testing.T) {
+	out := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict:    "concern",
+		Posture:    map[string]string{"sage-review-design": "completed"},
+		Autonomous: 2,
+	})
+	if strings.Contains(out, "missing decision") {
+		t.Fatalf("concern with no missing issue must not mention a missing decision:\n%s", out)
+	}
+	if !strings.Contains(out, "Fix the 2 autonomous issue(s)") {
+		t.Fatalf("concern must still route its autonomous issues:\n%s", out)
+	}
+}
+
+// TestFormatSageRecordRoutingPrecedesCommit pins the clause order: fixes are
+// stated before the commit direction, not after it.
+func TestFormatSageRecordRoutingPrecedesCommit(t *testing.T) {
+	out := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict:    "pass",
+		Posture:    map[string]string{"sage-review-design": "completed"},
+		Autonomous: 1,
+	})
+	fixIdx := strings.Index(out, "Fix the 1 autonomous issue(s)")
+	commitIdx := strings.Index(out, "commit this change via ws/git.commit")
+	if fixIdx == -1 || commitIdx == -1 {
+		t.Fatalf("formatSageRecord pass-with-issues output:\n%s", out)
+	}
+	if fixIdx > commitIdx {
+		t.Fatalf("issue routing (offset %d) must precede the commit direction (offset %d):\n%s", fixIdx, commitIdx, out)
 	}
 }
 

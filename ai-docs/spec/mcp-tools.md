@@ -1221,19 +1221,26 @@ Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
 field and routes them in its `next_instruction`: `autonomous` issues are fixed
 by the caller in the ticket, `missing` issues are taken through the caller's
 Open Decision Queue because they need a user decision the caller cannot supply.
-Both reviewer playbooks have always emitted `resolution`, but nothing consumed
-it — the caller's procedure never branched on the field, so the split was
-produced and discarded and the caller improvised. The counts surface as
-`autonomous_issues` / `missing_issues` and the routing clause is omitted
-entirely when a stage records no issues. A `block` verdict returns a recovery
-route rather than the pass text it previously shared: `tickets.sage_gate`
-cannot clear a blocked posture, so the caller resolves the issues in the
-appended `## Blocked` section and calls `tickets.sage_stamp` again with fresh
-verdicts. That branch deliberately prescribes no commit, because whether the
-blocked posture is committed or reverted is landing-dependent and the caller
-owns it. Before this, a `block` at a `todo/` landing received "commit, then
-proceed to handoff" and was recorded and then dropped, since the caller's only
-block branch covers the `ready/` landing.
+The routing clause leads the instruction, ahead of any commit direction, and is
+omitted entirely when a stage records no issues. An absent or unrecognized
+`resolution` counts as `autonomous`, so no issue falls out of both buckets. The
+counts surface as `autonomous_issues` / `missing_issues`. Before this, the only
+reader of `resolution` was the aggregation's `pass`-to-`concern` escalation on a
+combined stage; the caller's own procedure never branched on the field, so the
+split reached the caller and was discarded. The `concern` text that weighs a
+missing decision's criticality is gated on a missing issue actually being
+present, because a standalone stage records `concern` straight from the reviewer
+verdict with no missing issue required.
+
+A `block` verdict returns a stop rather than the pass text it previously shared:
+a blocked sage review is reported as a blocker instead of proceeding to commit or
+handoff. It prescribes no recovery loop, because `SageGate` returns
+`stop_blocked` for a blocked posture and never names a reviewer again — no fresh
+verdict can be produced from inside the calling procedure, so only a later
+`tickets.sage_stamp` clears the posture. It is also silent on committing or
+reverting, which is landing-dependent and the caller's. Before this, a `block` at
+a `todo/` landing received "commit, then proceed to handoff" and was recorded and
+then dropped, since the caller's only block branch covers the `ready/` landing.
 {#260729-sage-stamp-resolution-routing}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}

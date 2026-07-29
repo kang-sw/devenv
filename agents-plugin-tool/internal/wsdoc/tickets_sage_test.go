@@ -364,6 +364,78 @@ func TestSageGateMissingPersistsResolvedPosture(t *testing.T) {
 	}
 }
 
+// TestSageRecordCountsIssueResolutions pins the autonomous/missing tally that
+// feeds the dispatch layer's issue routing. The dispatch-layer tests build a
+// SageRecordResult by hand, so without this the counting could be wrong in
+// either direction and the suite would stay green.
+func TestSageRecordCountsIssueResolutions(t *testing.T) {
+	// Standalone counts only the resolved stage's verdict. A stray verdict for
+	// the other reviewer must not leak into the tally.
+	root := t.TempDir()
+	writeSageTicket(t, root, "260101-feat-c1", map[string]string{"sage-review-design": "required"})
+	res, err := SageRecord(root, SageRecordOptions{
+		TicketStem: "260101-feat-c1",
+		Stage:      "design",
+		Today:      "2026-07-29",
+		Verdicts: []SageVerdict{
+			{Reviewer: "design", Verdict: "concern", Issues: []SageIssue{
+				{Title: "A", Severity: "important", Resolution: "autonomous"},
+				{Title: "B", Severity: "minor", Resolution: "MISSING"},
+				// Absent resolution counts as autonomous: an unroutable issue is
+				// worse than one the lead tries and fails to fix itself.
+				{Title: "C", Severity: "minor"},
+			}},
+			{Reviewer: "completeness", Verdict: "block", Issues: []SageIssue{
+				{Title: "leak", Severity: "critical", Resolution: "missing"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SageRecord standalone: %v", err)
+	}
+	if res.Autonomous != 2 || res.Missing != 1 {
+		t.Fatalf("standalone tally = %d autonomous / %d missing, want 2/1 (the completeness verdict must not count)", res.Autonomous, res.Missing)
+	}
+
+	// Combined counts both consumed verdicts and nothing else.
+	root2 := t.TempDir()
+	writeSageTicket(t, root2, "260101-feat-c2", map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"})
+	res2, err := SageRecord(root2, SageRecordOptions{
+		TicketStem: "260101-feat-c2",
+		Stage:      "combined",
+		Today:      "2026-07-29",
+		Verdicts: []SageVerdict{
+			{Reviewer: "design", Verdict: "pass", Issues: []SageIssue{{Title: "A", Severity: "minor", Resolution: "autonomous"}}},
+			{Reviewer: "completeness", Verdict: "concern", Issues: []SageIssue{
+				{Title: "B", Severity: "important", Resolution: "autonomous"},
+				{Title: "C", Severity: "important", Resolution: "missing"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SageRecord combined: %v", err)
+	}
+	if res2.Autonomous != 2 || res2.Missing != 1 {
+		t.Fatalf("combined tally = %d autonomous / %d missing, want 2/1", res2.Autonomous, res2.Missing)
+	}
+
+	// A clean pass records no issues, so the routing clause stays absent.
+	root3 := t.TempDir()
+	writeSageTicket(t, root3, "260101-feat-c3", map[string]string{"sage-review-design": "required"})
+	res3, err := SageRecord(root3, SageRecordOptions{
+		TicketStem: "260101-feat-c3",
+		Stage:      "design",
+		Today:      "2026-07-29",
+		Verdicts:   []SageVerdict{{Reviewer: "design", Verdict: "pass"}},
+	})
+	if err != nil {
+		t.Fatalf("SageRecord clean pass: %v", err)
+	}
+	if res3.Autonomous != 0 || res3.Missing != 0 {
+		t.Fatalf("clean-pass tally = %d/%d, want 0/0", res3.Autonomous, res3.Missing)
+	}
+}
+
 func TestSageRecordDesignStandalone(t *testing.T) {
 	// block: writes blocked, appends Blocked section, block commit title.
 	root := t.TempDir()

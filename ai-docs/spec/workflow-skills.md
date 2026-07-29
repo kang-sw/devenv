@@ -575,6 +575,34 @@ conditional independent-judgment step added to `lead-verify-discussion`. Do
 not route new work through it.
 {#260524-design-verification-skill}
 
+`lead-write-ticket` runs a Ground stage between its intent-verification step and
+the Sage Review Gate, gated on the ticket body asserting anything a reader of the
+tree can check. It dispatches `ticket-fact-populator`, a read-only delegate that
+checks the ticket's claims against the tree and returns corrections, decision
+gaps, and unverified claims — every correction carrying the evidence it read.
+The delegate never writes the ticket and never settles a decision: the lead
+applies the corrections itself, and routes decision gaps to the Open Decision
+Queue rather than resolving them from the delegate's evidence. The stage exists
+because the authoring step reads only tickets, conventions, and routed
+spec/mental-model checks, while the design reviewer sketches an implementation
+from that text — an asymmetry that made design review the first stage to touch
+the tree, and made unverified authoring claims arrive there as blocking findings
+the lead then had to research by hand. `idea/` landings and pure status moves
+skip the stage, matching the Sage Review Gate's own `idea/` skip.
+{#260729-write-ticket-ground-stage}
+
+Both ticket reviewers cut `resolution` on policy, not on discovery cost: a gap
+planning or implementation can settle is `autonomous` however expensive the
+lookup, and only a policy choice — what the system should do, what contract it
+commits to, or which of several defensible shapes is correct — is `missing`. A
+severity floor on the block threshold was rejected as the alternative; it is a
+proxy that would leak genuine minor-severity policy gaps through while still
+blocking on cheap lookups. `ticket-reviewer-design` may additionally read a
+source file at a path the ticket itself cites, and only to check a claim the
+ticket makes about it, so it can spot-check the populator's citations without
+becoming a second surveyor.
+{#260729-ticket-reviewer-policy-resolution}
+
 ### Check Blockers Checkpoint {#260513-check-blockers-skill}
 
 `lead-check-blockers` gives users a frequent spoken checkpoint for deciding

@@ -2897,40 +2897,52 @@ func formatSageRecord(result wsdoc.SageRecordResult) string {
 	if result.Autonomous > 0 || result.Missing > 0 {
 		fmt.Fprintf(&b, "autonomous_issues: %d\nmissing_issues: %d\n", result.Autonomous, result.Missing)
 	}
+	// Issue routing is emitted before the verdict's own direction so the caller
+	// reads "fix these, then commit" in that order; appending it after "commit,
+	// then proceed to handoff" put the fixes behind the commit.
+	b.WriteString("next_instruction:")
+	b.WriteString(sageRecordIssueRouting(result))
 	switch result.Verdict {
 	case "block":
 		// A blocked posture previously returned the same "commit, then proceed to
 		// handoff" text as a pass, so a block at a todo/ landing was recorded and
-		// then dropped: the playbook's only block branch covers the ready/ landing.
-		// The recovery route is stated here because tickets.sage_gate refuses to
-		// clear a blocked posture (see sageReviewPostureInstruction) and nothing
-		// else told the caller what does.
-		// Deliberately silent on committing: whether the blocked posture is
-		// committed or reverted is landing-dependent (a ready/ landing moves the
-		// ticket back and skips the commit), and that branch is the caller's.
-		b.WriteString("next_instruction: Blocked posture recorded but not committed. ws/tickets.sage_gate cannot clear a blocked posture — resolve the issues in the appended Blocked section, then call ws/tickets.sage_stamp again with fresh verdicts. Do not land this ticket in ready/ while the posture is blocked.")
+		// then dropped: the caller's only block branch covers the ready/ landing.
+		// This says stop, matching sageGateNextInstruction's stop_blocked branch
+		// and the caller's ready/ branch. It deliberately prescribes no recovery
+		// loop: resolveStage returns stop_blocked for a blocked posture forever,
+		// so sage_gate never names a reviewer again and no fresh verdict can be
+		// produced from inside this procedure. It is also silent on committing or
+		// reverting, which is landing-dependent and the caller's.
+		b.WriteString(" Blocked posture recorded but not committed. A blocked sage review must be addressed before promotion: stop and report the blocker instead of proceeding to commit or handoff. ws/tickets.sage_gate returns stop_blocked while the posture is blocked and will not name a reviewer again, so only a later ws/tickets.sage_stamp carrying fresh verdicts clears it.")
 	case "concern":
-		b.WriteString("next_instruction: Recorded but not committed; commit this posture change via ws/git.commit before proceeding. The concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
+		// The missing-decision sentence is gated on an actual missing issue. A
+		// standalone stage records `concern` straight from the reviewer verdict
+		// with no missing issue required, so the ungated text told the caller to
+		// weigh the criticality of a decision the same message reported as absent.
+		if result.Missing > 0 {
+			b.WriteString(" Recorded but not committed; commit this posture change via ws/git.commit before proceeding. The concern with a missing decision is surfaced — escalate to block manually only if the missing decision is judged critical.")
+		} else {
+			b.WriteString(" Recorded but not committed; commit this posture change via ws/git.commit before proceeding.")
+		}
 	default:
-		b.WriteString("next_instruction: Sage review posture recorded but not committed; commit this change via ws/git.commit, then proceed to handoff.")
+		b.WriteString(" Sage review posture recorded but not committed; commit this change via ws/git.commit, then proceed to handoff.")
 	}
-	b.WriteString(sageRecordIssueRouting(result))
 	return b.String()
 }
 
-// sageRecordIssueRouting renders the per-resolution routing clause appended to
-// every next_instruction that carries issues. Both reviewer playbooks classify
-// each issue as `autonomous` (the lead or implementer can resolve it) or
-// `missing` (a user decision is required); this is the consumer of that split.
-// Empty when the stage recorded no issues, so a clean pass stays terse.
+// sageRecordIssueRouting renders the per-resolution routing clause that leads
+// every next_instruction carrying issues. Both reviewer playbooks classify each
+// issue as `autonomous` (planning or implementation can settle it) or `missing`
+// (a policy choice those stages cannot make); this is the consumer of that
+// split. Empty when the stage recorded no issues, so a clean pass stays terse.
 func sageRecordIssueRouting(result wsdoc.SageRecordResult) string {
 	switch {
 	case result.Autonomous > 0 && result.Missing > 0:
-		return fmt.Sprintf(" Route the recorded issues: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.", result.Autonomous, result.Missing)
+		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.", result.Autonomous, result.Missing)
 	case result.Autonomous > 0:
-		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself; none of them need a user decision.", result.Autonomous)
+		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.", result.Autonomous)
 	case result.Missing > 0:
-		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue — they need a user decision you cannot supply.", result.Missing)
+		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first — they need a user decision you cannot supply.", result.Missing)
 	}
 	return ""
 }
