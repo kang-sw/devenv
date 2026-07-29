@@ -107,8 +107,11 @@ that already holds the authoritative context for the decision — the lead when
 it was settled in the lead conversation, or the delegated subagent's own
 continuing session when settled there — never a separate fresh spawn working
 only from an after-the-fact summary. The earlier context-inheriting fork
-delegate and its Codex `spawn_agent` fork-fallback wording were removed, leaving
-two clean delegation poles: the fresh spawn and this context-holder carve-out.
+delegate and its Codex `spawn_agent` fork-fallback wording were removed. What
+remains is narrower: continuing an already-spawned delegate's own session when
+the instruction is the same work item it already owns, and a fresh spawn for a
+new work item or a judgment that must not inherit the prior agent's
+conclusion.
 {#260724-prefer-subagent-fresh-spawn-delegation-posture}
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
