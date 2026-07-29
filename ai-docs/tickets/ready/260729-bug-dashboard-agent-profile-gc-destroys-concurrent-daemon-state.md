@@ -234,7 +234,68 @@ implement it by spawning `handle_connection` as a task, which *is* a second full
 attach path and breaks the one-session-at-a-time guarantee this mechanism
 otherwise leaves intact. Probe-only accept, probe-only response.
 
-### Two consequences, accepted deliberately
+### The new message kinds must never reach a helper that predates them
+
+Helpers outlive their daemon by design, so a daemon carrying the probe will meet
+helpers spawned by a binary that has never heard of it. This was verified against
+source, and the failure mode is worse than it looks.
+
+The wire format is NDJSON with `#[serde(tag = "type", rename_all = "camelCase")]`
+on both enums, so variant tags are **names, not ordinals**. Appending — or even
+inserting — a variant never renumbers anything. As a type change this is safe.
+
+Sending one is not. `read_message` converts a parse failure into an `io::Error`
+by deliberate contract ("a malformed peer is treated as a transport failure, not
+silently skipped"); the helper's read site propagates it with `?`; and
+`run_terminal_helper`'s exit path then runs `kill_shell_if_running()` **and**
+`delete_registry_entry()`. An unknown variant does not disconnect the helper — it
+makes the helper **SIGKILL the user's shell and erase its own registry entry**.
+That is strictly worse than the daemon-side kill this ticket exists to remove,
+because it leaves nothing behind to diagnose it with.
+
+There are no forward-compat affordances on these enums: no protocol version, no
+`#[serde(other)]`, and `HandshakeAck` is a payload-less unit variant with nowhere
+to put one. The tree does practise this discipline elsewhere —
+`terminal_registry_file.rs` carries `#[serde(default)] boot_id: Option<String>`
+under a "HARD backward-compatibility requirement" comment — it was simply never
+applied to IPC.
+
+Two rules follow, and Phase 1 must satisfy both:
+
+- **Declare the capability in the registry file, not only in the handshake.**
+  Adding a `#[serde(default)]` field to `Handshake` is compatible, but it arrives
+  too late for the site that needs it most: the sweep probes a helper it has
+  never handshaked with, and a *busy* helper answers nothing at all — so there is
+  no handshake to read a version out of. All four sites already read
+  `<registry_dir>/<id>.json`; the helper must record its probe capability there
+  at startup, so any daemon knows before it connects whether a probe is
+  answerable. Absent field = predates the probe. This mirrors `boot_id` exactly.
+- **New variants are strictly request/response-gated and never sent unsolicited.**
+  This is what keeps rollback safe: a new helper emits the probe response only in
+  reply to a probe request, and an old daemon never sends one. Without this rule
+  the reverse direction is fatal too — an unknown variant reaching an old daemon
+  at boot lands on the `None` path and escalates all the way to `kill_verified`.
+
+**Today's restart is unaffected, and must stay that way.** A new daemon adopting
+an old helper sends only `HandshakeAck` and reads only `Handshake` plus
+`Status`/`Exit` — all of which every existing helper knows. Appending variants
+does not perturb this path. Any implementation that changes what the *adoption*
+sequence puts on the wire has broken the one case that works today.
+
+### An old helper cannot answer the probe, and must not be killed for it
+
+This is the leg that closes the loop back onto the original bug. An old helper
+has no concurrent accept arm, so while it is attached its listener queues the
+probe and answers nothing — which is predicate leg (a), *kill*. Left unhandled,
+the fix reproduces the exact defect it was written to remove, for every helper
+alive across the upgrade.
+
+So the three-way table applies **only when the peer is known to speak the probe**.
+When the registry entry declares no probe capability, "connected but silent" is
+undecidable by construction and the outcome is **`Leave`**. Kill only on positive
+absence — no listener, connect refused, socket gone.
+
+### Three consequences, accepted deliberately
 
 - **A helper that wedges *while attached* becomes unreclaimable by Sites A and
   B.** If the helper is the wedged side and never observes the daemon's EOF, it
@@ -248,6 +309,14 @@ otherwise leaves intact. Probe-only accept, probe-only response.
   fails to self-exit lingers for the new grace instead of 30 s. That is the cost
   of not reaping during a restart; do not "fix" it by shortening the grace below
   a restart window.
+- **Pre-upgrade helpers become unreclaimable by Sites A and B while attached, and
+  this does not time out.** A helper that predates the probe never restarts on
+  its own, so the `Leave` rule above has no expiry. The exposure is bounded by
+  what it replaces, not by a clock: before this ticket those helpers were killed
+  *wrongly*, and afterwards they are spared *unconditionally*. Explicit
+  `terminate()` (Site D) still reclaims them, and they clear naturally as
+  terminals end. Do not add a version-based kill to close this — "old, therefore
+  dead" is the same unsound inference in a new costume.
 
 ### The `record_failure` question is deliberately not in Phase 1
 
@@ -303,6 +372,12 @@ Target area: `ai-docs/spec/ws-web-dashboard/index.md`.
   restates the reap predicate as "verified-ours + IPC-dead". That restatement
   becomes stale the moment this phase lands. Whichever lands second owns
   reconciling both.
+- **The same amendment must carry the compatibility qualifier.** The predicate is
+  not universal: it holds for helpers that can answer a probe, and a helper that
+  predates the probe is left alone on silence rather than reaped. A reader who
+  takes the three-way predicate as unconditional will conclude the daemon reaps
+  unreachable helpers when in fact it declines to. State the exception where the
+  predicate is stated.
 - **`{#260727-dashboard-terminal-notify-failure-visibility}`** needs a qualifying
   sentence: the bounded-silence guarantee does not hold when the profile
   directory is absent. This lands with Phase 3, not Phase 1.
@@ -318,15 +393,31 @@ edit it here; coordinate if both land together.
 
 Three changes, in order:
 
-1. **Helper-side probe.** A new message kind, answered ahead of the session
-   dispatch so it works while a session is attached, reporting alive,
-   attached-or-not, and unattached-duration. Not a second attach path — see
-   Decisions.
+1. **Helper-side probe, plus the capability declaration that gates it.** A new
+   message kind, answered ahead of the session dispatch so it works while a
+   session is attached, reporting alive, attached-or-not, and
+   unattached-duration. Not a second attach path — see Decisions.
+
+   The helper must also track **when its last daemon disconnected**, which no
+   state records today: `exited_at` is set only on shell exit, and the
+   daemon-disconnect arm of the read loop stores nothing. Without a new
+   `unattached_since`, the probe has no duration to report and the predicate
+   collapses to two-way.
+
+   And it must record its probe capability in `<registry_dir>/<id>.json` at
+   startup, `#[serde(default)]`, absent = predates the probe. Both directions of
+   this are load-bearing: the sweep has no handshake to read a version from, and
+   sending the probe to a helper that cannot parse it makes that helper kill the
+   user's shell.
 2. **Split the connect failure.** Stop discarding the `io::Error` in
    `connect_and_handshake`, and give `IpcStatus` a variant that distinguishes
    "no listener / socket gone" from "connected, unanswered". Feed the probe
    result into `classify` so `KillVerified` requires the three-way predicate from
    Decisions, not `None`-of-any-kind.
+
+   The three-way predicate applies only to helpers whose registry entry declares
+   the probe capability. For every other helper, "connected, unanswered" resolves
+   to `Leave`; only positive absence kills.
 3. **Give Site A a probe.** `sweep_registry_backstop` must probe before
    signalling. Its CONTRACT's "never adopts" property stays — probing is not
    adopting — but "never checks" must go, and the CONTRACT text must be rewritten
@@ -352,7 +443,10 @@ Done when all four legs of the predicate hold:
 - a helper unattached for less than the grace likewise survives all three paths,
   so a daemon restart does not lose its own terminals to another daemon's sweep;
 - a helper unattached past the grace is reclaimed;
-- a helper with no listener behind it is reclaimed.
+- a helper with no listener behind it is reclaimed;
+- a helper whose registry entry declares no probe capability is **never
+  signalled on silence** by Sites A or B, and its shell is never killed by
+  anything this phase puts on the wire.
 
 Verification, in order of load-bearing weight:
 
@@ -383,6 +477,18 @@ Verification, in order of load-bearing weight:
     also still killed. Without this case the "kill only when the probe fails"
     regression passes the suite by construction, because the orphan it leaks is
     precisely the one that answers.
+- **The upgrade case, which is the one the user is standing in.** A registry
+  entry written *without* the capability field, backed by a listener that accepts
+  and never answers, must survive `boot_reconcile`, the sweep and the GC with its
+  process, entry, profile and token intact. Build the fixture from a
+  hand-written `<id>.json` that omits the field rather than from a
+  round-tripped struct, so the assertion is about the absent-field decode and not
+  about a default the writer supplied.
+- **The adoption sequence must stay byte-compatible.** Assert that adopting a
+  helper puts nothing on the wire beyond `HandshakeAck` and reads nothing beyond
+  `Handshake` + `Status`/`Exit`. This is the path every live helper depends on
+  across the upgrade, and it is the one an implementer is most likely to "tidy"
+  while adding the probe.
 - Reverting each of the four changes independently must turn one of the tests
   above red. A change that can be reverted with the suite still green is not
   covered.
