@@ -33,7 +33,7 @@
     "lead-workflow-manual/native-spawn-binding.codex.md": "d89b7c7f6f59d8d1cd50b3fe15e1fb1c689aafa55a1f81e56b8c200c97a3edb7",
     "lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "lead-write-spec/lead-write-spec.md": "a210dd8258a55a07795da2d2d40e7c402c2c2be975195250002490e194956a3c",
-    "lead-write-ticket/lead-write-ticket.md": "3e76b5b565d27c5980904482a81db7b13fc8dc6e4c49304722c1ff835d6cdbd6",
+    "lead-write-ticket/lead-write-ticket.md": "bb32b1c086906fa27c810e5195cdaea516d0e61ae350d72058bdcea643e0f967",
     "lead-write-ticket/task-list.codex.md": "037734c56f6ab6ccd24a4c78ae88e5ae79581a3ef14202108c517651b7521bf0",
     "lead-write-ticket/task-list.md": "1e1597a1bfa8ca4a5b2aac0cba9d2f250310c9b54268312649d0ae2358d341e0",
     "mental-model-updater/mental-model-updater.md": "f104f4711fbce7b9076786eb25d9ae7e7ab64bb1b98127186bf5fe7148af2a5f",
@@ -46,8 +46,8 @@
     "sample-playbook/sample-playbook.codex.md": "ce77a56088246fcaf1996e0fb45c5a4da2d1f7122653862fe6742fc4f5cf1df5",
     "sample-playbook/sample-playbook.md": "f813e57e9c3af21a911072c992f19afa7e8fd63b085d7527c315665543762673",
     "subagent-rules.md": "ef426a9d54e63ac8325c6ab7d3f65b1a57ef0174239df9fcb9c28c081135d2c5",
-    "ticket-fact-populator/ticket-fact-populator.md": "0aa4f5d191ed3c41a18e4f7a1fc0a3957a50e658ff35449941d16fc912eed603",
-    "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "d561fcda9b515941deda420b0a10a7077f6ba7d23cdef62e220b97ef60b0273d",
-    "ticket-reviewer-design/ticket-reviewer-design.md": "f7f8237519030d1ad823699ad5f490fac05faa4aa834215ef8eb005487c3a462"
+    "ticket-fact-populator/ticket-fact-populator.md": "b930318b7e645e0a7894a837f9ef45a44f0ca1ca1451af8752aee09c98ee0fa9",
+    "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "4e2400ad0a1e8b7eae219506bd591d5ae4a1dba79773ce1193dd44281597d3e7",
+    "ticket-reviewer-design/ticket-reviewer-design.md": "8d54f268de8b31175458cf50acbdf51593b45d08d9571aa41ead4187ab58969b"
   }
 }

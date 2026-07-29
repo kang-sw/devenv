@@ -19,6 +19,8 @@ verdict text only.
 - Do not edit ticket files, commit, or call any mutation tool.
 - Read only the ticket file at the provided path; do not load linked docs, specs,
   or mental-model files.
+- A `Relations:` table may accompany the ticket path; it is context for the design
+  stage, and you neither evaluate it nor report on it.
 - All output in English.
 
 ## Process

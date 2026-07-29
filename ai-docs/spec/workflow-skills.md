@@ -582,7 +582,23 @@ checks the ticket's claims against the tree and returns corrections, decision
 gaps, and unverified claims — every correction carrying the evidence it read.
 The delegate never writes the ticket and never settles a decision: the lead
 applies the corrections itself, and routes decision gaps to the Open Decision
-Queue rather than resolving them from the delegate's evidence. The stage exists
+Queue rather than resolving them from the delegate's evidence.
+
+The same delegate carries the corpus checks, because it is the cheapest point in
+the procedure that can make them without loading tickets into the lead's context:
+one `tickets.list` call shortlists tickets whose title or unresolved phase titles
+cover work this ticket also claims, and supplies the current status of every
+ticket this one names as a blocker, predecessor, or landing-order constraint. A
+real overlap and a dependency sitting behind this ticket's landing status are both
+decision gaps. It returns those statuses as a `relations` fact table that stays
+complete even when nothing about it is wrong; the lead passes the table to the
+design reviewer, which takes each entry as landed. That inverts what the reviewer
+does with an unlanded premise: one the table accounts for is a sequencing fact,
+and only one it does not account for is a design defect the ticket failed to
+declare. A claim about state that a named unlanded ticket or an unfinished earlier
+phase will create is never a correction, however clearly the tree contradicts it —
+applying such a correction would damage a ticket that is right about its own
+future. The stage exists
 because the authoring step reads only tickets, conventions, and routed
 spec/mental-model checks, while the design reviewer sketches an implementation
 from that text — an asymmetry that made design review the first stage to touch

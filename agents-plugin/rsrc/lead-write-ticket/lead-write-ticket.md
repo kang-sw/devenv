@@ -83,15 +83,16 @@ Movement
 
 1. Call `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator")`; it returns a file path. Do not read the rendered file in the lead context.
 2. Spawn a native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
-3. Apply each returned correction to the ticket.
+3. Apply each returned correction to the ticket; for each unverified claim naming an unlanded dependency, state that dependency in the ticket where the claim sits.
 4. Send each returned decision gap to **Open Decision Queue**.
-5. Apply `judge: populator-round-limit`; continue the same populator's session while it says continue.
+5. Keep the returned relation table for **Reviewer Spawn**.
+6. Apply `judge: populator-round-limit`; continue the same populator's session while it says continue.
 
 ## On: Reviewer Spawn
 
-For each reviewer named by `tickets.sage_gate`:
+For each reviewer named by `tickets.sage_gate`, and for each stage the gate reports blocked whose blocker this invocation's edits address:
 1. Call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")` or `"ticket-reviewer-completeness")`; it returns a file path. Do not read the rendered file in the lead context.
-2. Spawn a native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
+2. Spawn a native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>. Relations: <the relation table from **Fact Population**, or "none">`.
 3. Parse `verdict:` (`pass`, `concern`, or `block`) from the result; return it to `tickets.sage_stamp`.
 
 ## On: Move
