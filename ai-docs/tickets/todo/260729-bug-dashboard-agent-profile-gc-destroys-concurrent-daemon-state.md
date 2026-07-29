@@ -1,11 +1,10 @@
 ---
 title: Two daemons sharing a state dir destroy each other's live terminals every 10s
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: blocked
+sage-review-completeness: blocked
 spec:
   - 260727-dashboard-terminal-notify-failure-visibility
-related:
-  260725-ws-web-dashboard-terminal-spawn-profile: adjacent-registry-identity-contract
+  - 260725-ws-web-dashboard-terminal-spawn-profile
 ---
 
 # Two daemons sharing a state dir destroy each other's live terminals every 10s
@@ -24,7 +23,15 @@ Neither daemon namespaces its state. `agent-profiles/`, `terminal-tokens/` and
 the pre-existing `terminals/` registry dir all live directly under the
 process-global `persistent_state::default_state_dir()`. Two daemons started
 without distinct `WS_DASHBOARD_STATE_HOME` values therefore share all three, and
-each treats the shared contents as exclusively its own.
+each treats the shared contents as exclusively its own. Call them **A** and **B**
+throughout; the roles are symmetric, so everything below runs in both directions
+at once.
+
+The trigger needs no unusual setup: a developer has `ws-dashboard serve` running,
+then starts a second instance in another window without setting
+`WS_DASHBOARD_STATE_HOME`. Every terminal spawned in B after A's
+`boot_reconcile` is absent from A's live set, and vice versa. Both paths below
+follow from that alone.
 
 ### The fast path: a 10-second sweep SIGKILLs the other daemon's live helpers
 
@@ -76,31 +83,9 @@ The escalation built to surface exactly this class of breakage cannot fire:
 an absent profile directory is precisely the failure state. Nothing is logged on
 the victim daemon.
 
-`agent_profile_gc` derives liveness solely from its own registry
-(`registry.live_terminal_ids()`), while `agent-profiles/` and `terminal-tokens/`
-live under the process-global `persistent_state::default_state_dir()` with no
-per-daemon namespacing. The PR itself already named this scenario when it fixed a
-shared temp-file race in `agent_callback.rs` ("two daemons sharing a
-`WS_DASHBOARD_STATE_HOME`"), so the hazard is recognised elsewhere in the same
-change but not closed here.
-
-Failure scenario:
-
-1. A developer has `ws-dashboard serve` running, then starts a second instance in
-   another window without setting `WS_DASHBOARD_STATE_HOME`.
-2. Every terminal spawned in window B *after* window A's `boot_reconcile` is
-   absent from A's live set.
-3. A's 300 s sweep `remove_dir_all`s `agent-profiles/<id>/` and deletes
-   `terminal-tokens/<id>.json` for those ids.
-4. B's hooks break immediately — `callback.json` is gone, so every
-   `terminal-notify` fire fails with "callback file not found".
-5. On B's next restart `recover_callback_token` returns `None`, so those adopted
-   terminals never authenticate again.
-
-The escalation designed to surface exactly this class of breakage cannot fire:
-`notify_failure::record_failure` no-ops when the profile directory is absent, and
-the profile directory being absent is precisely the failure state. Nothing is
-logged on B.
+The PR itself already named this scenario when it fixed a shared temp-file race
+in `agent_callback.rs` ("two daemons sharing a `WS_DASHBOARD_STATE_HOME`"), so
+the hazard is recognised elsewhere in the same change but not closed here.
 
 The pre-existing shared `terminals/` registry dir already makes a two-daemon
 shared-state-dir setup partly ill-defined; this change is what makes the conflict
@@ -150,11 +135,20 @@ observable behaviour change for anyone deliberately running two daemons today.
 
 Do not pick by cost alone.
 
-Independently of the branch chosen: `record_failure`'s no-op-when-absent
-behaviour must be revisited, because a mechanism whose stated job is to bound
-silence cannot report its own worst case. Note this is a deliberate,
-spec-stated behaviour today ("The hook process never creates the profile
-directory to write it"), so changing it is a contract change, not a cleanup.
+**Second open decision, independent of the branch:** `record_failure`'s
+no-op-when-absent behaviour must be revisited, because a mechanism whose stated
+job is to bound silence cannot report its own worst case. This one is **not**
+autonomous either. The behaviour is deliberate and spec-stated today
+(`{#260727-dashboard-terminal-notify-failure-visibility}`: "The hook process
+never creates the profile directory to write it"), so it falls under this repo's
+"always ask" approval class — changing protocol semantics.
+
+What replaces it is also unspecified, and the obvious candidate is the one the
+spec deliberately rejected: having the hook create the profile directory. If that
+is off the table, the failure has to surface somewhere the hook can reach without
+the profile dir — a daemon-side log, a process exit signal the caller can see, or
+a separate always-present failure sink. Naming which is part of the decision, not
+of the implementation.
 
 ## Spec Impact
 
@@ -215,3 +209,18 @@ Verification depends on the branch, so it cannot be fixed here:
 
 In every branch, prove the mutation fails: revert the guard and confirm the test
 goes red. A test that passes either way does not cover this defect.
+
+## Blocked (2026-07-29)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Whether two daemons on one state dir are supported is an open product decision the implementer cannot supply, yet it selects the mechanism, the spec contract, and the test shape | critical | missing |
+| 2 | record_failure's replacement behavior is in scope but unspecified, and changing it edits a spec-stated contract (always-ask class) | important | missing |
+| 3 | Each surviving candidate still has an unclosed sub-design (namespace key + adopt-time behavior for 1 and 2; instance lock + stale-lock rule for 3) | important | missing |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|

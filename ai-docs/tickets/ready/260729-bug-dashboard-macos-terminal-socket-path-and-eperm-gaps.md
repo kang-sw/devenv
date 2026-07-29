@@ -1,14 +1,16 @@
 ---
-title: macOS terminal socket path is unguarded, and the EPERM CONTRACT overstates its own risk
-sage-review-design: required
+title: macOS terminal socket path is unguarded, and the EPERM CONTRACT asserts its conclusion without its reasoning
+sage-review-design: completed
 spec:
   - 260516-ws-web-dashboard-workroot-io-restore-model
   - 260728-terminal-helper-periodic-reap
+  - 260725-ws-web-dashboard-terminal-spawn-profile
 related:
   260726-refactor-ws-dashboard-long-uptime-leak-hardening: landed-UnverifiableBoot-and-the-handshake-failure-cleanup-this-ticket-defers-to
+sage-review-completeness: completed
 ---
 
-# macOS terminal socket path is unguarded, and the EPERM CONTRACT overstates its own risk
+# macOS terminal socket path is unguarded, and the EPERM CONTRACT asserts its conclusion without its reasoning
 
 Found by code review of PR #4's macOS terminal-platform port
 (`goal/ws-dashboard-dev/velvet-arbor-quill`, merged as `1b41a37b`), then
@@ -32,10 +34,20 @@ plus the username, and the `$TMPDIR` fallback about 88 — but
 user-supplied and unbounded.
 
 Failure scenario: a macOS user sets a deep `WS_DASHBOARD_STATE_HOME`.
-`IpcListener::bind` fails with `EINVAL` inside the detached helper, and the
-daemon reports "helper wrote a registry entry but the daemon could not connect or
-complete the handshake" — pointing at handshake timing rather than a path-length
-limit. Every terminal fails, permanently, with no actionable diagnostic.
+`IpcListener::bind` fails inside the detached helper — precisely, std's
+`sockaddr_un()` returns `ErrorKind::InvalidInput` ("path must be shorter than
+SUN_LEN") *before any syscall is issued*, so this is a Rust-level rejection and
+not a kernel `EINVAL`; an earlier draft said `EINVAL` and that was imprecise. The
+daemon then reports "helper wrote a registry entry but the daemon could not
+connect or complete the handshake" — pointing at handshake timing rather than a
+path-length limit. Every terminal fails, permanently, with no actionable
+diagnostic.
+
+The misattribution is structural, not incidental: `run_terminal_helper` calls
+`write_registry_entry` *before* `IpcListener::bind`, so the entry genuinely
+exists by the time the bind fails. That is why the operator gets the
+"wrote an entry but could not connect" message rather than the "never wrote an
+entry" one.
 
 **Correction from design review:** an earlier draft of this ticket claimed the
 failure also strands a `<id>.json` behind. It does not — the daemon's
@@ -46,7 +58,12 @@ and prunes both files, and the periodic backstop would drop it as
 and that is what this fix must be justified by. Do not re-introduce the
 stale-entry framing.
 
-### 2. The EPERM branch is safe; its CONTRACT comment is what is wrong
+### 2. The EPERM branch is safe, and so is its stated conclusion — the reasoning is what is missing
+
+Note the title's second clause was itself corrected: an earlier version said the
+CONTRACT "overstates its own risk". It does not. The comment's conclusion
+("harmless") is **right**; what it omits is why. It was this ticket's withdrawn
+draft that overstated the risk, not the code comment.
 
 `terminal_platform.rs` documents that `proc_pidinfo` returns `EPERM` for a
 cross-user pid — yielding `None`, hence `NoSuchProcess` — where Linux would
@@ -88,9 +105,16 @@ diagnose-and-fail, which leaves terminals non-functional on an affected host,
 just with a better message. The alternative is to decouple the socket path from
 the user-supplied state home — a short socket dir with the `.json` still in the
 state home — which is what the test suite already does as a workaround. That
-removes the failure mode instead of reporting it. Weigh this before implementing;
-the guard is still needed either way as a backstop, but it should not be the
-whole answer if the decoupling is cheap.
+removes the failure mode instead of reporting it.
+
+**This is implementer latitude, not a gate.** Phase 1's done-when is the guard
+and its diagnostic, and that stands whether or not the decoupling is also done —
+the guard is required either way as a backstop. Take the decoupling only if it is
+genuinely incidental; otherwise split it into its own ticket rather than widening
+Phase 1. Two things it would drag along that are *not* designed here, and which
+are the reason the safe reading is guard-only: where a short socket dir would
+live, and how both `delete_registry_entry`'s `registry_socket_path(registry_dir,
+id)` prune and the persisted `socketPath` field would follow it.
 
 ## Constraints
 
@@ -153,6 +177,13 @@ by a constructed path rather than a real bind so it runs on Linux CI. Reverting
 the guard must fail the boundary case specifically — a test that only covers an
 obviously-too-long path would still pass against the 104/108 mistake.
 
+For that to be possible at all, **the pure function must take the ceiling as a
+parameter**, not read it from a `cfg` constant. Exercising the Darwin boundary on
+Linux CI is the whole point of extracting the function; a `cfg`-resolved constant
+makes the macOS case unreachable from CI and quietly reduces this to a
+single-platform test. The `cfg` gate belongs at the caller, which supplies 103 or
+107.
+
 ### Phase 2: Correct the EPERM CONTRACT and the restore-model spec sentence
 
 Doc-only, per Decisions. Two edits:
@@ -162,9 +193,17 @@ Doc-only, per Decisions. Two edits:
    change, so `EPERM` implies the pid is no longer ours and dropping the entry is
    correct. Replace the bare "harmless today" conclusion with that reasoning.
 2. `{#260516-ws-web-dashboard-workroot-io-restore-model}`: correct the "kill a
-   helper whose identity cannot be verified" sentence to match the code — kill
-   applies to verified-ours with a dead IPC channel; an unverified or
-   undeterminable identity is dropped, never signalled.
+   helper whose identity cannot be verified against the recorded pid and
+   process-start-time (for example after pid reuse)" sentence to match the code —
+   kill applies to verified-ours with a dead IPC channel; an unverified or
+   undeterminable identity is dropped, never signalled. The pid-reuse example is
+   wrong too: `PidReused` routes to drop, not kill.
+
+   **Correct both clauses of that sentence, not just the kill one.** Its drop
+   clause reads "drop a stale registry entry that has no live process behind it",
+   which does not describe `PidReused` — a pid-reused entry *does* have a live
+   process behind it, just an unrelated one. Fixing only the kill clause leaves
+   the outcome list incomplete in the opposite direction.
 
 No behavior change, no new identity state, no test beyond confirming the existing
 suite still passes.

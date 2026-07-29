@@ -1,8 +1,9 @@
 ---
 title: Agent callback base URL uses the bound interface instead of loopback
-sage-review-design: required
+sage-review-design: blocked
 spec:
   - 260516-ws-web-dashboard-token-free-pairing-landing
+sage-review-completeness: blocked
 ---
 
 # Agent callback base URL uses the bound interface instead of loopback
@@ -41,7 +42,10 @@ review caught it; the correction is recorded here so it is not re-proposed.
 
 The daemon opens exactly one socket — `TcpListener::bind(config.bind_addr)` in
 `server.rs`, where `bind_addr` is `SocketAddr::new(parse_bind_host(--host),
---port)`. Verified: that is the only production `TcpListener::bind` in the tree.
+--port)`. Verified: that is the only production `TcpListener::bind` that *serves*
+— the one other production bind, `allocate_loopback_port` in `servers.rs`, is a
+throwaway port probe that is dropped immediately. It is also the in-repo
+precedent for allocating a loopback port, so it is worth reading under option (c).
 So the two motivating cases are *not* one case:
 
 - **Wildcard bind (`0.0.0.0` / `::`)** — loopback is genuinely included in what
@@ -82,6 +86,44 @@ that matches the actual requirement rather than trading one failure for another.
 it means consciously accepting the cleartext token on LAN binds — record that if
 it is chosen.
 
+**(c) is conditional, and that is not a weakness — it is why it works.** Design
+review raised that `127.0.0.1:PORT` collides with a wildcard `0.0.0.0:PORT` bind
+(`EADDRINUSE`), concluding (c) collapses into (a)-plus-a-socket with an
+unpredictable port. The collision is real in the abstract but **never arises
+here**, because the second socket is needed in exactly the case where it cannot
+collide:
+
+| primary bind | second listener | why |
+| --- | --- | --- |
+| `0.0.0.0:P` / `[::]:P` | **none needed** | the wildcard socket already accepts loopback; just emit a loopback URL |
+| `192.168.x.y:P` | `127.0.0.1:P` | a specific-address bind reserves only that `(addr, port)` pair, so loopback on the same port is free |
+| `127.0.0.1:P` | **none needed** | already loopback |
+
+So (c) keeps the **same port** in every case, and Phase 1's
+`127.0.0.1:<same-port>` assertion stays satisfiable. What the implementer must
+not do is attempt the second bind unconditionally — under a wildcard primary that
+is the `EADDRINUSE` the review predicted.
+
+Obligations (c) carries that (a) and (b) do not, all visible at the existing call
+site and none of them optional:
+
+1. Apply `terminal_platform::windows::mark_socket_non_inheritable` to the new
+   listener. Omitting it re-opens the Windows port-pinning regression closed by
+   `260723`.
+2. Wire both `axum::serve` futures into the existing single-server
+   `tokio::select!` graceful-shutdown path, not alongside it.
+3. Decide whether the loopback socket serves the full cloned `Router` — which
+   republishes the entire dashboard and pairing surface on a second port — or a
+   callback-only router. Prefer callback-only; state the choice either way.
+4. **The per-terminal token check stays mandatory.** "Local-only by construction"
+   bounds who can reach the socket to local users, which is not the same as
+   trusting them. The turn-state route is registered outside `require_owner_auth`
+   and authorized by the token inside the handler; that must not change.
+
+Existing coverage to update, not just add:
+`tests/terminal_notify_end_to_end.rs` asserts `callback.json`'s `baseUrl` equals
+the daemon's own bound URL. Any option that changes the emitted URL breaks it.
+
 Secondary, resolvable without asking:
 
 - The IPv6 rule is on the address family — `[::1]` when `bound_addr.is_ipv6()`,
@@ -103,14 +145,25 @@ Target area: `ai-docs/spec/ws-web-dashboard/index.md`,
 That stem already carves the per-terminal turn-state callback route out of the
 browser-facing auth rule as "a non-browser, token-authed exception". It says
 nothing about where the callback token travels. This change makes that explicit
-and caller-visible:
+and caller-visible.
 
-- The callback base URL is loopback-derived, not bind-derived, so the
-  per-terminal token never leaves the host regardless of `--bind-mode` or
-  `--host`.
-- State the consequence that follows: the hook is required to run on the same
-  host as the daemon. Today that is an unstated assumption the code happens to
-  satisfy; after this change it becomes a contract the URL construction enforces.
+**What the spec must state depends on which option is chosen — the three do not
+share a guarantee.** Do not write the wording below before the decision is made:
+
+- Under **(b)** or **(c)**, the spec can state the strong form: the callback base
+  URL is loopback-derived, so the per-terminal token never leaves the host
+  regardless of `--bind-mode` or `--host`. (b) must additionally state that an
+  explicit non-loopback `--host` loses turn-state notification, and where the
+  operator is told so.
+- Under **(a)**, that strong form is **false** — an explicit non-loopback
+  `--host` still puts the token on the wire on every turn boundary. The spec must
+  instead state the conditional rule (loopback only for wildcard/loopback binds)
+  and name the residual exposure as accepted, so it is not mistaken for closed.
+
+Common to all three: state the consequence that the hook is required to run on
+the same host as the daemon. Today that is an unstated assumption the code
+happens to satisfy; after this change it becomes a contract the URL construction
+enforces.
 
 The `0.0.0.0` case is worth naming in the spec rather than only in code, because
 its current failure is platform-split (accepted as loopback on Linux/macOS,
@@ -132,10 +185,16 @@ Whichever is chosen, keep the port from the actual bind, and cover both
 Verification — the point of this phase is that the failure mode *cannot regress
 silently*, so a manual check does not discharge it:
 
-- A unit test over the URL-construction function asserting that a bind on a
-  non-loopback address (a LAN-style `SocketAddr` and `0.0.0.0:PORT`) still yields
-  a `127.0.0.1:<same-port>` base URL. This is the one that would have caught the
-  original defect.
+- A unit test over the URL-construction function. **The expected value differs by
+  option, so write the test after the decision, not before:**
+  - Under **(b)/(c)**: both a LAN-style `SocketAddr` and `0.0.0.0:PORT` yield
+    `127.0.0.1:<same-port>`.
+  - Under **(a)**: `0.0.0.0:PORT` yields `127.0.0.1:<same-port>`, but a LAN-style
+    bind deliberately yields the bound IP unchanged. Asserting loopback there
+    would encode a guarantee (a) does not make.
+
+  Either way this is the test that would have caught the original defect, because
+  the `0.0.0.0` case is common to all three.
 - An assertion that the port is taken from the actual bind, not a default —
   otherwise a loopback-hardcoding fix silently breaks every non-default-port
   deployment.
@@ -150,3 +209,16 @@ While in this code, consider `.redirect(Policy::none())` on the
 `terminal_notify.rs` client — it currently carries a bearer token under reqwest's
 default 10-hop redirect policy. Not reachable today (the base URL comes from a
 `0600` daemon-written file), but it costs nothing.
+
+## Blocked (2026-07-29)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Phase 1 self-declares a blocking (a)/(b)/(c) decision that trades security against a spec-supported deployment; not derivable by an implementer | critical | missing |
+
+### Completeness Reviewer — concern
+
+| # | Title | Severity |
+|---|-------|----------|
