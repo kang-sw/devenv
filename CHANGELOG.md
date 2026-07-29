@@ -42,6 +42,141 @@
   indicator reports absolute `HH:MM` only — the relative age cost up to 11
   columns on a row that already competes for width.
 
+## v0.37.0 - 2026-07-28
+
+### Added
+- **A new `lead-backfill-docs` skill reconciles documentation for commits that
+  never went through an implementation doc pass.** It groups undocumented
+  commits, dispatches a read-only `doc-gap-discovery` delegate per group to find
+  spec and mental-model gaps, then runs the existing spec and mental-model update
+  passes against them. Mental-model coverage is swept once across the whole audit
+  window rather than once per group, so two dispatches can no longer edit the
+  same document from partial views. `lead-discuss` names the skill whenever a
+  stale-docs observation traces back to specific undocumented commits, so it is
+  reachable without already knowing it exists.
+- **A `review-adjudicator` delegate settles contested review findings.** When an
+  implementer disputed a finding, the dispute had no owner — neither side could
+  settle it, and the relay loop stalled. The adjudicator judges only whether the
+  implementer's stated defense holds and never re-reviews the diff for
+  correctness, and `implementer-relay` gained an `[escalate: <reason>]` token so
+  a lead can hand a contested finding over instead of looping.
+- **`lead-implement` escalates to an elevated implementer after a fix relay fails
+  once, or when several findings share a root cause.** Re-review now uses
+  symmetric `[resolved]` / `[unresolved: <reason>]` tokens, so a `[fixed]`
+  finding that comes back `[unresolved]` is a structural signal rather than prose
+  the lead had to infer. The previous relay wording — "only for genuinely new
+  findings" — literally forbade re-relaying that carryover case, leaving a failed
+  fix nowhere to go but a repeat dispatch of the same approach. The elevated
+  implementer reads the prior fix commits and dispositions, names each finding's
+  root cause before editing, and must try a different in-plan approach or
+  escalate for a plan update rather than shrink the fix to fit.
+- **`ws/tickets.verify` and `ws/git.commit` run a cross-file ticket-graph pass.**
+  For a verified ticket with a `parent:`, the response shows the ancestor chain,
+  each ancestor's status, and an `ACTION:` closure nudge when every child of an
+  ancestor epic is closed or only `idea/` children remain; an already-closed
+  ancestor gets a plain `NOTE:`. Four cross-reference checks catch problems no
+  guardrail previously looked for — a `parent:` or `related:` stem resolving to
+  nothing, a `parent:` cycle, and a `parent:` pointing at a non-`epic` ticket —
+  reported as `FIX:` or `CHECK:` and capped at 5 per ticket. None of it blocks
+  the commit; on the commit path a `FIX:` also carries a
+  `git commit --amend --no-edit` recipe.
+- **`ws/git.commit` surfaces ticket-verify's non-blocking warnings instead of
+  discarding them.** Soft warnings such as `unresolved-phases` on a `.done`
+  commit or `spec-address` on a `ready/` ticket were computed correctly but only
+  ever visible through a direct `ws/tickets.verify` call. They now render as an
+  `advisories:` block in the text-mode response; `OK` and JSON-mode output are
+  unchanged, matching the todo-reinjection precedent.
+- **Spec tools flag files that still carry a legacy `🚧` planned marker.**
+  `specs.list`, `specs.find`, `specs.status`, and `project_tree` emit a
+  non-blocking advisory naming the live tickets that reference the marked spec,
+  or reporting the marker as orphaned when no ticket claims it. The bootstrap
+  migration checklist (v0045 canonical, v0006 wsflow) gained a matching item that
+  walks a downstream project off the convention, covering all three marker forms
+  the detector recognizes: any heading level, any alphabetic callout keyword with
+  no required bracket suffix, and the `features:` list form.
+
+### Changed
+- **Spec entries describe only implemented, verified behavior; the `🚧 Planned`
+  marker convention is retired.** A spec entry could previously carry a marker
+  meaning "not built yet", which `lead-write-spec`, `lead-update-spec`, and
+  `lead-forge-spec` all wrote and read, and which gated a ticket-side
+  `judge: contract-first-spec` check. The playbook instructions, the
+  contract-first gate, and the `## 🚧 Markers` convention section are all gone,
+  replaced by an unqualified implemented-behavior-only rule with one named
+  exception: a `> [!note] Implementation Gap · YYYY-MM-DD` callout for a
+  known-but-unscheduled gap, which a spec-hygiene pass must leave in place rather
+  than delete. The ticket skeleton's `## Spec Impact` bullet no longer asks for a
+  `Contract-first spec: yes|no` declaration. `lead-forge-spec`'s wrap-up now
+  reads a persistent ambiguous-item record written earlier in the run, and can
+  reconstruct that list from a resumed session's own progress markers — labelled
+  as a reconstruction rather than a complete count.
+- **Sage-review enforcement for `ready/` landings happens at commit time, not at
+  the move.** `tickets.move` and `tickets.create_empty` no longer hard-block a
+  `ready/` landing with an unreviewed or blocked posture; they persist the
+  posture and warn. `ws/git.commit` is the single hard enforcement point, and
+  `lead-write-ticket` runs its Sage Review Gate before Commit so the posture
+  change lands in the same commit as the rest of the promotion instead of forcing
+  a second one. Non-`ready/` upward moves that leave a required stage blocked
+  still hard-reject.
+- **`tickets.sage_gate` no longer proposes or fires a commit for the posture it
+  writes.** Its decline path could auto-commit the flip as its own
+  `chore(sage): ...` commit — and, in an interim form, surface it as ready-to-
+  paste commit metadata — either of which could swallow co-located real edits or
+  collide with the caller's own commit step. The posture is written and left
+  uncommitted for the caller's ordinary commit to pick up.
+- **Open Decision Queue items show the actual decision text instead of a
+  placeholder label.** An item could be created with a vague subject while the
+  real text sat in a secondary description field that some hosts never render,
+  silently losing the decision. An item's visible text must now be the decision
+  itself on every host variant, and asking an item restates its full text with a
+  one-line roll-up of the rest.
+- **`specs.*` and `project_tree` no longer serialize planned-marker context.**
+  `specs.list` dropped its `marker:` line, `specs.status` dropped the
+  `# <marker context>` suffix on location lines, `project_tree` dropped its
+  WIP/planned spec stats, and `format=json` no longer emits `marker_contexts` /
+  `marker_context`. The underlying data still feeds `specs.find` match ranking
+  internally; only the serialized surface changed.
+- **`install.sh` now sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000` and
+  `CLAUDE_FORK_SUBAGENT=1`** alongside the existing `ENABLE_TOOL_SEARCH` in the
+  project-level `settings.json` it writes.
+
+### Fixed
+- **The review-relay loop stops after its budgeted number of cycles.** The cap
+  was live in spec but never reached the generated Instruction text a lead
+  follows, so it silently vanished and reviews could relay indefinitely. The
+  Instruction now states an explicit per-slice budget — 3 cycles for partitioned
+  and fallback reviews, 2 for single-reviewer runs, none for lead-only — and the
+  final budgeted cycle completes the run, carrying any unresolved findings into
+  the completion report instead of leaving the loop open.
+- **Mid-procedure skills point at the MCP repair skill instead of dead-ending.**
+  `lead-bootstrap`, `lead-forge-spec`, `lead-review`, `lead-ship`,
+  `lead-write-ticket`, and `lead-implement` — in both the `ws` and `wsflow` skill
+  trees — used to end a dropped MCP connection with a bare "stop and report that
+  blocker". Each now names `mcp-server-repair` so the agent can reconnect and
+  resume.
+- **The warning for a blocked `ready/` landing names an escape that can actually
+  clear it.** It pointed at `ws/tickets.sage_gate`, which returns immediately on
+  a `blocked` posture and can never resolve one. It now says to address the
+  blocker and call `ws/tickets.sage_stamp` with a non-`block` verdict.
+- **`tickets.move` again reports which fields changed when a rejected move
+  already wrote a partial mutation.** On the `idea/` → `todo/` path that posture
+  rules still block, migrated sage-review frontmatter is written before the move
+  is rejected, so callers got a rejection with no sign the file had already
+  changed. A prior cleanup removed the notice on the mistaken belief that no
+  write-then-reject window remained.
+
+### Removed
+- **The `lead-sprint` and `lead-salvage` skills, and their `enter.sprint` /
+  `enter.salvage` MCP tools, are gone with no deprecation period.** Sprint's
+  documentation wrap-up step is superseded by `lead-backfill-docs` above, but
+  salvage's recovery workflow has no successor route. A pinned install that
+  called `enter.sprint` or `enter.salvage`, or referenced either skill directly,
+  will find them missing after this release.
+- **`lead-skill-authoring` is no longer invocable and is now a plain reference
+  document.** It was only ever this project's own upstream maintenance guide, and
+  shipping it as a distributable skill was a packaging mistake. The content is
+  unchanged at `ai-docs/ref/skill-authoring.md`.
+
 ## v0.36.16 - 2026-07-26
 
 ### Changed
