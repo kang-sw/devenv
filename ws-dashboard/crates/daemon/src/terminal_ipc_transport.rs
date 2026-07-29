@@ -66,15 +66,47 @@ impl IpcListener {
 
 // Windows named pipes have no single "listen socket" accepting many
 // connections the way a Unix domain socket does: each `NamedPipeServer`
-// instance represents exactly one pending connection slot. The standard
-// multi-client pattern is to keep exactly one armed (unconnected) instance
-// at all times, `connect().await` it to serve one client, then immediately
-// create and arm the *next* instance before handing the connected one back
-// to the caller.
+// instance represents exactly one pending connection slot, and a client that
+// finds no UNCONNECTED instance gets `ERROR_PIPE_BUSY` rather than being
+// queued.
+//
+// CONTRACT (260729 review round 3, finding E - and this is a correctness fix,
+// not a tuning knob): this used to keep exactly ONE armed instance, re-armed
+// only inside `accept()`. That made "armed" conditional on `accept()` being
+// POLLED, and `terminal_helper_process::serve_session` deliberately stops
+// polling it while all `MAX_CONCURRENT_PROBE_CONNECTIONS` probe slots are
+// taken - that is its backpressure design, which on Unix parks the surplus in
+// the kernel backlog. On Windows it instead left at most one unconnected
+// instance, so the next daemon to connect got `ERROR_PIPE_BUSY`, its 400ms
+// connect budget expired, and the outcome inverted into exactly the false
+// death this ticket exists to remove:
+//   - `connect_and_handshake` -> `NoListener` -> `KillVerified` (unconditional:
+//     positive absence needs no probe verdict), or
+//   - `probe_helper` -> `Unanswered` -> `KillVerified`.
+// A healthy helper, SIGKILLed for being popular.
+//
+// The fix is a real BACKLOG: `PIPE_BACKLOG` instances are armed up front and
+// the count is restored on every accept, so unconnected instances exist
+// whether or not anyone is polling. `accept()` polls all of them concurrently
+// rather than one at a time - polling a single instance while a client sits
+// connected on another would be head-of-line blocking, i.e. the same "nobody
+// answered" signature by a different route. `NamedPipeServer::connect` is
+// documented cancel-safe, so the losing futures being dropped each time (and
+// on the caller's own `timeout(..., accept())`) loses no connection.
+//
+// Sized above `MAX_CONCURRENT_PROBE_CONNECTIONS` (8) plus the attached
+// session, so the whole in-flight probe cap can be saturated and a further
+// daemon can still connect and be queued.
+#[cfg(windows)]
+const PIPE_BACKLOG: usize = 16;
+
 #[cfg(windows)]
 pub struct IpcListener {
     pipe_name: String,
-    pending: tokio::net::windows::named_pipe::NamedPipeServer,
+    /// Always exactly `PIPE_BACKLOG` armed (unconnected-or-connected-but-not-
+    /// yet-accepted) instances. Never empty - `accept()` re-arms before it
+    /// returns.
+    pending: Vec<tokio::net::windows::named_pipe::NamedPipeServer>,
 }
 
 #[cfg(windows)]
@@ -82,19 +114,37 @@ impl IpcListener {
     pub fn bind(socket_path: &Path) -> io::Result<Self> {
         use tokio::net::windows::named_pipe::ServerOptions;
         let pipe_name = windows_pipe_name(socket_path);
-        let pending = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)?;
+        let mut pending = Vec::with_capacity(PIPE_BACKLOG);
+        // `first_pipe_instance` is what makes a second helper binding the same
+        // terminal id fail loudly instead of silently sharing the pipe; only
+        // the very first instance may claim it.
+        pending.push(
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&pipe_name)?,
+        );
+        while pending.len() < PIPE_BACKLOG {
+            pending.push(ServerOptions::new().create(&pipe_name)?);
+        }
         Ok(Self { pipe_name, pending })
     }
 
     pub async fn accept(&mut self) -> io::Result<BoxedIpcStream> {
         use tokio::net::windows::named_pipe::ServerOptions;
-        self.pending.connect().await?;
-        let connected = std::mem::replace(
-            &mut self.pending,
-            ServerOptions::new().create(&self.pipe_name)?,
-        );
+        let (result, index) = {
+            let connects = self
+                .pending
+                .iter_mut()
+                .map(|server| Box::pin(server.connect()));
+            let (result, index, _rest) = futures_util::future::select_all(connects).await;
+            (result, index)
+        };
+        result?;
+        let connected = self.pending.swap_remove(index);
+        // Re-arm BEFORE handing the connected instance back, so the backlog is
+        // never short even for the duration of this return.
+        self.pending
+            .push(ServerOptions::new().create(&self.pipe_name)?);
         Ok(Box::new(connected))
     }
 }

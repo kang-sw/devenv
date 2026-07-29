@@ -688,6 +688,233 @@ turns `a_probe_is_answered_while_a_session_is_attached` red; reverting
 reverting the GC gate turns
 `the_profile_gc_spares_a_helper_that_is_attached_to_another_daemon` red.
 
+#### Correction (0ff45251 refuted) - 2026-07-29
+
+A third adversarial review refuted `0ff45251`. Round 2 fixed peer-caused *I/O*
+errors and left every other peer-caused error fatal. `cargo build` and
+`cargo test` pass (377 lib tests, was 362, plus every integration target, 0
+failures). Six findings fixed, two recorded.
+
+**A - the invariant, stated in its real form.** Round 2's `is_peer_gone` was an
+allow-list of five `io::ErrorKind`s plus four Windows raw codes. An allow-list
+cannot be shown to be complete, and every kind missing from it is a dead shell.
+It was missing the *most common* case of all: a daemon SIGKILLed mid-`write_all`
+leaves a truncated final line, `Lines::next_line()` hands those trailing bytes
+back as `Some(line)` at EOF, and the resulting decode failure was
+`ErrorKind::Other`, which the list rejected. So the ordinary crash of the
+ordinary peer SIGKILLed the user's shell. Also missing: invalid UTF-8 in that
+same tail (`InvalidData`), an unknown variant tag from a newer daemon,
+`ErrorKind::WriteZero` (what `write_all` actually returns on a short write), and
+Windows `ERROR_OPERATION_ABORTED` (995).
+
+`is_peer_gone` is **deleted**. Classification moved into the transport and is
+**by source**, not by kind: `read_message` returns
+`terminal_helper_ipc::PeerFault` (`Io` / `InvalidUtf8` / `Malformed`) - every way
+reading can fail is the peer's, so reading has one error type and it is always a
+peer fault - and `write_ndjson` returns `WriteFault::{Peer, Serialize}`, where
+`Peer` is every I/O kind and `Serialize` (this process failing to serialize its
+own message) stays fatal. There is nothing left to enumerate. The invariant now
+reads, in the code: *no error attributable to the peer's connection may end the
+helper process or kill its shell; it ends the connection and the helper returns
+to its accept loop.*
+
+This also makes the unknown-variant defence **structural**. The Decisions made
+`supportsLivenessProbe` the defence; from this build onwards the guarantee is in
+the transport and the flag is defence-in-depth. It stays load-bearing, and the
+CONTRACTs at `terminal_registry_file.rs` / `terminal_helper_protocol.rs` now say
+why: the population the flag protects is exactly the one that does *not* have
+the structural guarantee - helpers already running from the previous binary.
+
+`only_peer_gone_io_errors_are_downgraded` pinned the too-narrow list as
+intentional and asserted `InvalidData`/`Other` stay fatal. It is **replaced**.
+The replacement is built so it can catch a missing case, which the old one
+structurally could not: `every_peer_connection_fault_ends_only_the_connection`
+asserts the classification ignores the kind (feeding it fourteen kinds including
+ones nobody enumerated, plus raw code 995) and that `Serialize` still separates;
+and `a_real_helper_survives_every_malformed_thing_a_peer_can_put_on_the_wire`
+drives all four real byte sequences (truncated line, mid-codepoint cut, garbage
+line, future variant) into a REAL attached helper and asserts new shell output
+afterwards.
+
+**B - `accept()` failures no longer kill.** Both accept sites returned `Err`,
+which `run_terminal_helper` turns into `kill_shell_if_running()`. EMFILE/ENFILE
+(someone else exhausted the machine's fd table), ECONNABORTED and the Windows
+pipe-connect failures are all transient and peer- or environment-influenced. New
+`AcceptFailures`: exponential backoff from 20ms to a 1s ceiling, shared across
+both sites so neither can reset the other's budget, and only
+`MAX_CONSECUTIVE_ACCEPT_FAILURES` (64, ~1 minute of unbroken failure) is treated
+as a permanently broken listener. Deliberately no per-kind "is this transient?"
+test - that is finding A's mistake in a new place, and the safe default here is
+retry. In the concurrent probe arm the backoff is awaited inside a `select!`
+with the session so an accept storm cannot starve the attached daemon.
+
+**C - the probe exchange is now totally bounded, and the bound never kills.**
+Per-message idle timeouts alone left the exchange unbounded: one line every 4.9s
+held the call forever, and `boot_reconcile` is awaited *before* the router binds
+while the same call runs on the reaper's 10s Burst-catch-up tick. Two bounds,
+because they fail independently - `MAX_PROBE_EXCHANGE_MESSAGES`
+(`MAX_OUTPUT_CHUNKS + 16` = 1040) catches a fast flood, and
+`PROBE_EXCHANGE_TOTAL_TIMEOUT` (20.8s = 1040 x a pessimistic 20ms/message, two
+orders of magnitude above a local socket round trip) catches a slow drip. Both
+are sized against the legitimate worst case, a full retained-ring flush ahead of
+the answer; `the_probe_exchange_bounds_clear_a_full_ring_flush` pins the
+derivation rather than the numbers. The idle window is clamped to what remains
+of the total, so the total is hard rather than "total plus one more idle
+window".
+
+**Neither bound produces a kill**, and this is the load-bearing half. Hitting
+one yields the new `ProbeVerdict::Abandoned`, which does not authorize reclaim:
+these bounds protect the *daemon*, they measure nothing about the helper, and
+turning the daemon's own impatience into positive evidence of death is exactly
+the F10 mistake one level up.
+
+**D - `profile_gc_may_reclaim` now establishes `VerifiedOurs`.** It read the
+entry off disk and went straight to the probe - the "GC bypasses everything"
+pattern the Background names - and it was wrong in both directions: a pid
+recycled by an unrelated process was reasoned about as though it were the
+helper, and a stale capability-absent entry resolved to `Unsupported`, i.e.
+never reclaimed, so its profile and token leaked. It now matches
+`reconcile_entry` and the sweep: an entry that cannot be verified as ours
+describes no helper of ours, which is the no-entry case - reclaim. (Never a
+kill; the GC has no kill path.) This closes the disk-state leak round 2 recorded
+against F9-gate.
+
+**E - the Windows F12 inversion, fixed in the transport where the defect is.**
+`IpcListener` kept exactly one armed instance, re-armed only inside `accept()`,
+which made "armed" conditional on `accept()` being *polled* - and `serve_session`
+deliberately stops polling it at probe capacity, which is its backpressure
+design. On Unix the surplus parks in the kernel backlog; on Windows it got
+`ERROR_PIPE_BUSY`, the daemon's 400ms connect budget expired, and the outcome
+inverted into `NoListener -> KillVerified` (unconditional - positive absence
+needs no probe verdict) or `Unanswered -> KillVerified`. A healthy helper,
+SIGKILLed for being popular. Fixed with a real backlog: `PIPE_BACKLOG` (16,
+above `MAX_CONCURRENT_PROBE_CONNECTIONS` + the session) instances armed up
+front, restored on every accept, so unconnected instances exist whether or not
+anyone is polling; `accept()` polls all of them concurrently via
+`select_all`, because polling one while a client sits connected on another is
+head-of-line blocking - the same "nobody answered" signature by a different
+route. `NamedPipeServer::connect` is documented cancel-safe, so the losing
+futures being dropped loses no connection. Load-shedding was not used, per the
+ticket: a dropped probe reads as `Unanswered`, which authorizes a SIGKILL.
+
+**F - the tests now exercise a LEGACY-SHAPED helper.** Every real-helper test ran
+the *current* binary, which by construction has all the fixes, so the at-risk
+population was untested - the same fixture-is-not-the-population blind spot as
+round 1, one layer up. New test-only seam `HelperShape` (`CURRENT` / `LEGACY`;
+production constructs only `CURRENT`) reproduces a pre-upgrade helper in all
+three respects at once: no peer-fault downgrade, no concurrent probe arm, and
+`supportsLivenessProbe` absent from its registry entry. `LivenessProbe` is also
+modelled as the decode failure it would be on that build, so a legacy fixture
+cannot cheerfully answer a probe it could never have parsed.
+
+What it establishes, as assertions of *damage* rather than of hope:
+- `a_legacy_shaped_helper_really_is_destroyed_by_what_a_daemon_used_to_do` - the
+  entry decodes capability-absent; a bare connect-and-drop makes it exit and
+  erase its own entry; and sending it a probe SIGKILLs the shell.
+- `a_legacy_shaped_helper_cannot_answer_anything_while_a_session_is_attached` -
+  a second daemon's connect is accepted and answered with nothing, reproducing
+  "healthy, busy helper looks dead" against a real helper.
+- `a_legacy_real_helper_survives_because_the_daemon_never_touches_it` - the
+  daemon side of the same story: `probe_helper` resolves `Unsupported` with no
+  connect, and the helper is alive with its entry intact afterwards. The sweep
+  itself is deliberately not driven against a `RealHelper` (it runs in-process,
+  so its entry names the test binary's pid and a regression reaching
+  `kill_verified` would SIGKILL the test runner rather than fail an assertion).
+
+**RECORDED, NOT FIXED (1) - review finding 2c, the one-time upgrade cost.**
+`connect_and_handshake` connects unconditionally, because adoption is what
+`boot_reconcile` exists to do and there is no way to adopt without connecting.
+Against an *attached* pre-upgrade helper that connect is queued, times out into
+`ConnectedButSilent`, and the stream is dropped; the helper then serves that
+dead connection on its next accept, EPIPEs on its own `Handshake`, and
+self-kills. Unfixable daemon-side - the defect is in the already-running binary.
+
+Before/after, which is why it is accepted rather than blocking:
+
+| path | before this ticket | after |
+| --- | --- | --- |
+| `boot_reconcile` vs attached pre-upgrade helper | killed outright: `Unreachable -> KillVerified` | not killed by the daemon; self-kills on its next accept after the adoption connect |
+| 10s sweep vs pre-upgrade helper | killed outright, every 10s | **no contact at all** - `probe_helper` short-circuits on the absent capability flag before connecting |
+| profile GC vs pre-upgrade helper | profile + token deleted | spared while the process is verifiably ours |
+
+So it is strictly better, not a regression, and the repeating destructive path
+(the sweep) is genuinely gone. Asserted, not assumed, by
+`a_legacy_helper_still_self_kills_on_the_adoption_connect_accepted_cost`, which
+exists so the cost is measured and so it goes red the day someone believes it
+has been fixed. It clears as terminals end and helpers are respawned from the
+new binary; do not close it with a version-based kill.
+
+The related disk-state leak, now narrowed by finding D: a capability-absent entry
+whose helper process is still verifiably ours is never GC-reclaimed
+(`Unsupported` does not authorize reclaim), so its `agent-profiles/<id>/` and
+`terminal-tokens/<id>.json` persist for as long as that helper lives. Bounded by
+the helper's own lifetime, and the state is the live terminal's own - it is
+retention, not orphaning. Once the process is gone, finding D's identity check
+reclaims on the next GC pass.
+
+**RECORDED (2) - review finding 3: `VerifiedOurs` does NOT imply alive.** Round
+2's equivalence claim was too strong and is withdrawn. `VerifiedOurs` means "a
+process object with this pid and this start time is still visible to the OS",
+which includes a Linux zombie (`/proc/<pid>/stat` exists in state `Z`), a macOS
+`SZOMB` process (`read_bsdinfo` still returns `Some`), and a Windows terminated
+process whose object is kept alive by an open handle.
+
+Assessed against every decision that consumes it; **no decision changes**:
+- No kill is affected. `kill_verified` re-verifies identity and signals through
+  a pidfd/handle; signalling a zombie or an already-terminated process is a
+  no-op, and start-time verification is what stops a recycled pid being hit.
+- The reachability answer is unchanged: a zombie has no listener, so the connect
+  F9-gate removed would have returned `NoListener` - which for a
+  capability-absent entry is still not a licence to probe, and connecting is
+  what kills that population.
+- What remains is a bounded disk-state lag, not a leaked shell. On Unix the
+  window is microseconds: `spawn_detached`'s `setsid()` + double fork reparents
+  every helper to init/launchd, which reaps immediately, so no helper of ours
+  has a parent that can leave it a zombie. On Windows it lasts as long as some
+  process holds a handle, and nothing in this tree holds one after spawn.
+
+A per-platform "is it a zombie?" check was considered and rejected: new
+per-platform code for a microsecond window, whose failure direction is the
+dangerous one - reading "cannot determine state" as dead would authorize a kill.
+Recorded at `probe_helper`'s CONTRACT, replacing the overstated claim.
+
+**Mutation results.** New, all confirmed red: reinstating round 2's narrowness on
+the read side (downgrade only `PeerFault::Io`) turns
+`a_real_helper_survives_every_malformed_thing_a_peer_can_put_on_the_wire` red;
+making every accept failure immediately fatal turns
+`accept_failures_back_off_and_only_a_sustained_run_is_fatal` red; removing the
+total deadline turns `a_dripping_peer_cannot_hold_the_probe_past_its_total_budget`
+red; removing the message cap turns
+`a_flooding_peer_cannot_hold_the_probe_past_its_message_budget` red (this test
+was initially non-discriminating - `Abandoned` alone does not say WHICH bound
+fired, and it passed under the mutation 30s later via the total deadline; an
+elapsed-time assertion was added and the mutation re-run); mapping `Abandoned`
+onto reclaim turns `probe_authorizes_reclaim_matches_the_three_way_predicate_exactly`
+red; deleting the GC identity check turns
+`the_profile_gc_reclaims_state_whose_helper_process_is_gone` red; collapsing
+`HelperShape::LEGACY` into `CURRENT` turns
+`a_legacy_shaped_helper_really_is_destroyed_by_what_a_daemon_used_to_do` red.
+
+Round 2's three re-run and all still hold: making peer write faults fatal kills
+the real helper (`a_real_helper_survives_a_daemon_that_connects_and_drops_without_reading`
+red); restoring one shared deadline over the whole exchange turns
+`a_slow_ring_flush_cannot_exhaust_the_probe_timeout` red; connecting before the
+capability gate turns
+`a_capability_absent_entry_is_never_probed_even_when_nothing_is_listening` red.
+Round 1's four re-run and all still hold: reverting the concurrent arm turns
+`a_probe_is_answered_while_a_session_is_attached` red; reverting `classify`'s
+`ConnectedButSilent` arm or the sweep's probe gate turns
+`a_helper_attached_to_another_daemon_survives_boot_reconcile_and_the_sweep` red;
+reverting the GC probe gate turns
+`the_profile_gc_spares_a_helper_that_is_attached_to_another_daemon` red.
+
+**Verification scope, stated honestly.** Finding E has no runtime coverage: this
+session has no Windows host, so the named-pipe backlog is cross-compile-checked
+(`cargo check --target x86_64-pc-windows-gnu`) and reviewed against the
+documented `ConnectNamedPipe` / cancel-safety semantics only. That is the same
+scope limit `terminal_ipc_transport.rs`'s Stage-2 header already carries, and it
+is unchanged by this fix.
+
 ### Phase 2: Correct the two CONTRACTs this ticket falsified
 
 Doc-only, no behaviour change.

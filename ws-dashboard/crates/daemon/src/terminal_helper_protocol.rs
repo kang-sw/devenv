@@ -63,10 +63,9 @@ pub enum HelperToDaemonMessage {
     // `DaemonToHelperMessage::LivenessProbe`, and STRICTLY request-gated -
     // this variant is never emitted unsolicited. That rule is what keeps a
     // rollback safe in the other direction: an old daemon never sends
-    // `LivenessProbe`, so it can never receive this variant, which its
-    // `read_message` would turn into an `io::Error` and escalate all the way
-    // to `kill_verified` (see `terminal_helper_ipc.rs`'s malformed-peer
-    // CONTRACT).
+    // `LivenessProbe`, so it can never receive this variant, which on that
+    // build would decode-fail, take its IPC connection down and escalate all
+    // the way to `kill_verified`.
     //
     // `attached` is what makes the daemon-side predicate three-way rather
     // than two-way: a helper that answers at all is alive, but only a helper
@@ -116,11 +115,17 @@ pub enum DaemonToHelperMessage {
     // HARD RULE: the daemon may only send this to a helper whose registry
     // entry declares `supportsLivenessProbe` (see
     // `terminal_registry_file.rs`). Sending it to a helper that predates the
-    // variant makes that helper's `read_message` fail, which its read site
-    // propagates with `?`, which makes `run_terminal_helper` run
+    // variant makes that helper's read fail, which on ITS build propagates
+    // with `?`, which makes `run_terminal_helper` run
     // `kill_shell_if_running()` + `delete_registry_entry()` - i.e. it
     // SIGKILLs the user's shell. Appending the variant is safe; sending it
     // unguarded is not.
+    //
+    // AMENDED (260729 review round 3, finding A): a helper built from this
+    // tree onwards drops only the CONNECTION on an unknown variant, so this
+    // rule now protects the pre-upgrade population specifically rather than
+    // every helper. Do not relax it on the strength of the new guarantee -
+    // the helpers it exists for are the ones that do not have it.
     LivenessProbe,
 }
 

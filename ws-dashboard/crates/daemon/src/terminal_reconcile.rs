@@ -181,6 +181,20 @@ pub enum ProbeVerdict {
     /// not answer" predicate leaks exactly this case forever, because an
     /// orphan with a live shell keeps its listener bound and DOES answer.
     UnattachedPastGrace,
+    /// CONTRACT (260729 review round 3, finding C): THIS DAEMON gave up on the
+    /// exchange - it hit `PROBE_EXCHANGE_TOTAL_TIMEOUT` or
+    /// `MAX_PROBE_EXCHANGE_MESSAGES` while the peer was still talking.
+    ///
+    /// Distinct from `Unanswered` on purpose, and the distinction is the whole
+    /// point of the variant. Those two bounds exist to protect the DAEMON (a
+    /// peer dripping one line every <5s otherwise holds `boot_reconcile` -
+    /// which runs before the router binds - and the reaper loop forever); they
+    /// are not measurements of the helper. Abandoning an exchange produces no
+    /// evidence of unreachability, and this ticket's governing rule is that a
+    /// kill needs POSITIVE evidence. Mapping this onto `Unanswered` would
+    /// manufacture a SIGKILL out of the daemon's own impatience - the same
+    /// mistake finding F10 corrected for the connect budget, one level up.
+    Abandoned,
 }
 
 /// CONTRACT (260729): the unattached window a helper must clear before it
@@ -227,7 +241,8 @@ pub fn probe_authorizes_reclaim(probe: ProbeVerdict) -> bool {
         ProbeVerdict::Unanswered | ProbeVerdict::UnattachedPastGrace => true,
         ProbeVerdict::Unsupported
         | ProbeVerdict::Attached
-        | ProbeVerdict::UnattachedWithinGrace => false,
+        | ProbeVerdict::UnattachedWithinGrace
+        | ProbeVerdict::Abandoned => false,
     }
 }
 
@@ -291,12 +306,13 @@ mod tests {
         IpcStatus::ConnectedButSilent,
     ];
 
-    const EVERY_PROBE_VERDICT: [ProbeVerdict; 5] = [
+    const EVERY_PROBE_VERDICT: [ProbeVerdict; 6] = [
         ProbeVerdict::Unsupported,
         ProbeVerdict::Unanswered,
         ProbeVerdict::Attached,
         ProbeVerdict::UnattachedWithinGrace,
         ProbeVerdict::UnattachedPastGrace,
+        ProbeVerdict::Abandoned,
     ];
 
     #[test]
@@ -370,6 +386,9 @@ mod tests {
             (ProbeVerdict::Attached, ReconcileRow::Leave),
             (ProbeVerdict::UnattachedWithinGrace, ReconcileRow::Leave),
             (ProbeVerdict::UnattachedPastGrace, ReconcileRow::KillVerified),
+            // Round 3 finding C: the daemon's own bounds firing is not
+            // evidence about the helper. See `ProbeVerdict::Abandoned`.
+            (ProbeVerdict::Abandoned, ReconcileRow::Leave),
         ];
         for (probe, row) in expected {
             assert_eq!(
@@ -495,6 +514,11 @@ mod tests {
         assert!(
             !probe_authorizes_reclaim(ProbeVerdict::Unsupported),
             "a helper that predates the probe must never be reclaimed for staying silent"
+        );
+        assert!(
+            !probe_authorizes_reclaim(ProbeVerdict::Abandoned),
+            "the daemon hitting its OWN total/message bound says nothing about the helper - \
+             turning impatience into a SIGKILL is the F10 mistake one level up"
         );
     }
 

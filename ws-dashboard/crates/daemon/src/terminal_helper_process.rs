@@ -21,7 +21,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use tokio::sync::Notify;
 
 use crate::cli::TerminalHelperArgs;
-use crate::terminal_helper_ipc::{write_ndjson, NdjsonReader};
+use crate::terminal_helper_ipc::{write_ndjson, NdjsonReader, WriteFault};
 use crate::terminal_helper_protocol::{
     DaemonToHelperMessage, HelperToDaemonMessage, TerminalHelperOutputChunk, TerminalHelperStatus,
 };
@@ -66,6 +66,28 @@ pub(crate) const PROBE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 // is hard-bounded by `PROBE_CONNECTION_TIMEOUT`, so a queue drains in
 // microseconds under any non-pathological load.
 const MAX_CONCURRENT_PROBE_CONNECTIONS: usize = 8;
+// CONTRACT (260729 review round 3, finding B): `accept()` failing is not
+// evidence that this helper should die. EMFILE/ENFILE (someone else on this
+// machine exhausted the fd table), ECONNABORTED (a peer that connected and
+// vanished before the accept completed) and the Windows named-pipe
+// connect failures are all PEER- or environment-influenced and all transient,
+// yet every one of them used to unwind into `run_terminal_helper`'s
+// `kill_shell_if_running()`. The listener errors; the shell does not.
+//
+// So every accept failure is retried with backoff, and only a listener that
+// has failed CONSECUTIVELY for this whole budget is treated as permanently
+// broken. There is deliberately no per-ErrorKind "is this transient?" test:
+// that is the same enumerate-the-kinds mistake finding A removed from the read
+// path, and the safe default here is "retry", not "die".
+const ACCEPT_RETRY_BACKOFF_START: Duration = Duration::from_millis(20);
+const ACCEPT_RETRY_BACKOFF_MAX: Duration = Duration::from_secs(1);
+// 20ms doubling to a 1s ceiling reaches the ceiling after 6 retries, so this
+// budget spans roughly a minute of UNBROKEN failure. Sized to outlast any
+// transient fd-table or backlog pressure while still bounding a listener that
+// is genuinely unusable (a closed/invalid fd fails instantly and forever). A
+// success anywhere in the run resets the counter, so intermittent failures
+// never accumulate to it.
+const MAX_CONSECUTIVE_ACCEPT_FAILURES: u32 = 64;
 
 struct RingState {
     output: VecDeque<TerminalHelperOutputChunk>,
@@ -266,6 +288,56 @@ impl SharedState {
     }
 }
 
+/// CONTRACT (260729 review round 3, finding F - THE TEST SEAM): which of the
+/// three helper-side behaviours this ticket added are actually present in a
+/// running helper.
+///
+/// Why this exists at all: every real-helper test in the tree runs the CURRENT
+/// binary, which by construction has all the fixes. The population this
+/// ticket's compatibility claims are ABOUT - helpers spawned by the previous
+/// binary, still alive, still holding a user's shell - was therefore untested
+/// by construction. That is the same fixture-is-not-the-population blind spot
+/// the first review round found, one layer up.
+///
+/// `CURRENT` is what this binary is; nothing in production ever constructs
+/// anything else. `LEGACY` is test-only and reproduces a pre-upgrade helper
+/// FAITHFULLY, in all three respects at once, so a test can assert what
+/// actually happens to one rather than what we hope happens.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct HelperShape {
+    /// `true`: a fault attributable to the peer's connection ends only that
+    /// connection (finding A). `false`: it propagates, and
+    /// `run_terminal_helper`'s exit path SIGKILLs the shell - the pre-upgrade
+    /// behaviour.
+    peer_faults_end_only_the_connection: bool,
+    /// `true`: probes are answerable while a session is attached. `false`: the
+    /// accept loop awaits the session inline, so a probe sits unread in the
+    /// backlog - the pre-upgrade behaviour, and the reason a busy helper
+    /// looked dead.
+    concurrent_probe_arm: bool,
+    /// What goes into `<registry_dir>/<id>.json` as `supportsLivenessProbe`.
+    /// `false` is what a pre-upgrade entry decodes to via `#[serde(default)]`.
+    declares_liveness_probe: bool,
+}
+
+impl HelperShape {
+    /// What this binary is.
+    pub(crate) const CURRENT: Self = Self {
+        peer_faults_end_only_the_connection: true,
+        concurrent_probe_arm: true,
+        declares_liveness_probe: true,
+    };
+
+    /// A helper as it existed before this ticket landed: the at-risk
+    /// population. Test-only - production has exactly one shape.
+    #[cfg(test)]
+    pub(crate) const LEGACY: Self = Self {
+        peer_faults_end_only_the_connection: false,
+        concurrent_probe_arm: false,
+        declares_liveness_probe: false,
+    };
+}
+
 // Pure builder for the entry `run_terminal_helper` durably writes before it
 // binds its listener. Extracted so the two facts a daemon reads off disk
 // BEFORE it ever puts a byte on this helper's wire - the boot identity and
@@ -275,6 +347,7 @@ fn startup_registry_entry(
     args: &TerminalHelperArgs,
     pid: u32,
     start_time: u64,
+    shape: HelperShape,
 ) -> TerminalRegistryEntry {
     TerminalRegistryEntry {
         terminal_id: args.terminal_id.clone(),
@@ -297,7 +370,7 @@ fn startup_registry_entry(
         // does not declare it is never sent a probe (which would SIGKILL its
         // shell) and is never reaped merely for staying silent - see
         // `TerminalRegistryEntry::supports_liveness_probe`.
-        supports_liveness_probe: true,
+        supports_liveness_probe: shape.declares_liveness_probe,
         socket_path: args.socket_path.clone(),
         created_at_ms: now_ms(),
         title: args.title.clone(),
@@ -308,12 +381,19 @@ fn startup_registry_entry(
 }
 
 pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()> {
+    run_terminal_helper_shaped(args, HelperShape::CURRENT).await
+}
+
+pub(crate) async fn run_terminal_helper_shaped(
+    args: TerminalHelperArgs,
+    shape: HelperShape,
+) -> anyhow::Result<()> {
     let pid = std::process::id();
     let start_time = crate::terminal_platform::process_start_time(pid).ok_or_else(|| {
         anyhow::anyhow!("failed to read own process start time for identity registration (pid {pid})")
     })?;
 
-    let entry = startup_registry_entry(&args, pid, start_time);
+    let entry = startup_registry_entry(&args, pid, start_time, shape);
     // CONTRACT (ticket "Registry-write ordering"): the entry is durably
     // written BEFORE the IPC listener even binds, and the shell is spawned
     // only after a daemon has connected AND handshaked (see
@@ -343,7 +423,7 @@ pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()>
         job: Mutex::new(None),
     });
 
-    let result = serve_connections(&args, &mut listener, &shared).await;
+    let result = serve_connections(&args, &mut listener, &shared, shape).await;
 
     shared.kill_shell_if_running();
     delete_registry_entry(&args.registry_dir, &args.terminal_id);
@@ -351,10 +431,49 @@ pub async fn run_terminal_helper(args: TerminalHelperArgs) -> anyhow::Result<()>
     result
 }
 
+/// CONTRACT (260729 review round 3, finding B): consecutive-`accept()`-failure
+/// state, shared by both accept sites (`serve_connections`' idle loop and
+/// `serve_session`'s concurrent probe arm) so a listener that fails in one of
+/// them cannot have its budget silently reset by the other.
+struct AcceptFailures {
+    consecutive: u32,
+}
+
+impl AcceptFailures {
+    fn new() -> Self {
+        Self { consecutive: 0 }
+    }
+
+    fn reset(&mut self) {
+        self.consecutive = 0;
+    }
+
+    /// Records one failure. `Some(delay)` means "back off this long and keep
+    /// accepting"; `None` means the listener has failed for the whole budget
+    /// and is treated as permanently broken.
+    fn record(&mut self, error: &std::io::Error) -> Option<Duration> {
+        self.consecutive += 1;
+        if self.consecutive >= MAX_CONSECUTIVE_ACCEPT_FAILURES {
+            return None;
+        }
+        let delay = ACCEPT_RETRY_BACKOFF_START
+            .saturating_mul(1u32 << (self.consecutive - 1).min(16))
+            .min(ACCEPT_RETRY_BACKOFF_MAX);
+        tracing::debug!(
+            %error,
+            consecutive = self.consecutive,
+            backoff_ms = delay.as_millis() as u64,
+            "terminal helper accept() failed; backing off and continuing (the shell is untouched)"
+        );
+        Some(delay)
+    }
+}
+
 async fn serve_connections(
     args: &TerminalHelperArgs,
     listener: &mut IpcListener,
     shared: &Arc<SharedState>,
+    shape: HelperShape,
 ) -> anyhow::Result<()> {
     // CONTRACT (sub-fix 2): captured once, at helper-process start, so
     // `NO_HANDSHAKE_TIMEOUT` below bounds the wait for this helper's very
@@ -367,6 +486,7 @@ async fn serve_connections(
     // semaphore would let the true in-flight count exceed the cap across a
     // reconnect.
     let probe_slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PROBE_CONNECTIONS));
+    let mut accept_failures = AcceptFailures::new();
     loop {
         let wait = match shared.exited_at() {
             Some(exited_at) => match GRACE_WINDOW.checked_sub(exited_at.elapsed()) {
@@ -390,7 +510,18 @@ async fn serve_connections(
         };
         match tokio::time::timeout(wait, listener.accept()).await {
             Ok(Ok(stream)) => {
-                match serve_session(args, stream, shared, listener, &probe_slots).await? {
+                accept_failures.reset();
+                match serve_session(
+                    args,
+                    stream,
+                    shared,
+                    listener,
+                    &probe_slots,
+                    &mut accept_failures,
+                    shape,
+                )
+                .await?
+                {
                     ConnectionOutcome::Shutdown => break,
                     // One reattach after the shell has exited is the grace
                     // window's whole purpose - deliver the exit + trailing
@@ -413,7 +544,16 @@ async fn serve_connections(
                     }
                 }
             }
-            Ok(Err(error)) => return Err(error.into()),
+            // CONTRACT (finding B): an `accept()` failure ends the ACCEPT, not
+            // the helper. Returning here ran `kill_shell_if_running()` for an
+            // EMFILE somebody else on the machine caused.
+            Ok(Err(error)) => match accept_failures.record(&error) {
+                Some(delay) => {
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                None => return Err(error.into()),
+            },
             Err(_elapsed) => continue,
         }
     }
@@ -475,8 +615,16 @@ async fn serve_session(
     shared: &Arc<SharedState>,
     listener: &mut IpcListener,
     probe_slots: &Arc<tokio::sync::Semaphore>,
+    accept_failures: &mut AcceptFailures,
+    shape: HelperShape,
 ) -> anyhow::Result<ConnectionOutcome> {
-    let mut session = std::pin::pin!(handle_connection(args, stream, shared));
+    let mut session = std::pin::pin!(handle_connection(args, stream, shared, shape));
+    // The pre-upgrade shape (test-only, see `HelperShape`): await the session
+    // inline with no concurrent accept arm at all, which is exactly why a busy
+    // helper could not answer a probe and therefore looked dead.
+    if !shape.concurrent_probe_arm {
+        return session.await;
+    }
     loop {
         // Take a probe slot BEFORE accepting (finding F12). While all slots
         // are held this select has only the session arm, so the listener is
@@ -500,9 +648,25 @@ async fn serve_session(
             outcome = &mut session => return outcome,
             accepted = listener.accept() => match accepted {
                 Ok(probe_stream) => {
+                    accept_failures.reset();
                     tokio::spawn(serve_probe_connection(shared.clone(), probe_stream, permit));
                 }
-                Err(error) => return Err(error.into()),
+                // CONTRACT (finding B): identical rule to the idle accept
+                // loop's - a failed accept must not reach
+                // `kill_shell_if_running()`. The backoff is awaited inside a
+                // select with the session so an accept storm cannot starve the
+                // attached daemon's traffic.
+                Err(error) => {
+                    drop(permit);
+                    let Some(delay) = accept_failures.record(&error) else {
+                        return Err(error.into());
+                    };
+                    tokio::select! {
+                        biased;
+                        outcome = &mut session => return outcome,
+                        () = tokio::time::sleep(delay) => {}
+                    }
+                }
             },
         }
     }
@@ -555,52 +719,57 @@ async fn serve_probe_connection(
     .await;
 }
 
-// CONTRACT (260729 review finding F9, and the invariant this whole ticket
-// rests on): HELPER LIFETIME IS INDEPENDENT OF ANY DAEMON'S BEHAVIOUR. A peer
-// that goes away mid-conversation must be indistinguishable from a peer that
-// goes away between messages - i.e. it must be handled exactly like the EOF
-// arm in `handle_connection`'s read loop: end the connection, return to the
-// accept loop, keep the shell.
+// CONTRACT (260729 review finding F9, WIDENED by review round 3 finding A -
+// and this is the invariant the whole ticket rests on):
 //
-// Before this, every write in `handle_connection` propagated with `?`, and
-// `run_terminal_helper` runs `kill_shell_if_running()` +
+//   NO ERROR ATTRIBUTABLE TO THE PEER'S CONNECTION MAY END THE HELPER PROCESS
+//   OR KILL ITS SHELL. IT ENDS THE CONNECTION; THE HELPER RETURNS TO ITS
+//   ACCEPT LOOP.
+//
+// Before this ticket, every write in `handle_connection` propagated with `?`,
+// and `run_terminal_helper` runs `kill_shell_if_running()` +
 // `delete_registry_entry()` on ANY return from `serve_connections` - so a
-// daemon that connected and dropped without reading (which is precisely what
-// a reachability check does) made the helper SIGKILL the user's shell and
-// erase its own registry entry. That is a silent, unlogged-on-the-victim path
-// to the exact destruction the daemon-side predicate was fixed to avoid, and
-// it fires on every connect from any local process.
+// daemon that connected and dropped without reading (which is precisely what a
+// reachability check does) made the helper SIGKILL the user's shell and erase
+// its own registry entry.
 //
-// Deliberately narrow: only errors that MEAN "the peer is gone" are
-// downgraded. A malformed line is `io::ErrorKind::Other` (see
-// `NdjsonReader::read_message`, which converts a parse failure into an
-// `io::Error` by contract) and stays fatal, as do genuine internal failures -
-// a helper that cannot serialize its own messages has a real problem worth
-// surfacing, not a departed peer.
-fn is_peer_gone(error: &std::io::Error) -> bool {
-    use std::io::ErrorKind;
-    if matches!(
-        error.kind(),
-        ErrorKind::BrokenPipe
-            | ErrorKind::ConnectionReset
-            | ErrorKind::ConnectionAborted
-            | ErrorKind::NotConnected
-            | ErrorKind::UnexpectedEof
-    ) {
-        return true;
+// Round 2 fixed that for a hand-written list of I/O `ErrorKind`s and left
+// everything else fatal. That was still wrong, and the list was wrong in the
+// most common case of all: a daemon SIGKILLed mid-`write_all` leaves a
+// TRUNCATED final line, `Lines::next_line()` returns those trailing bytes as
+// `Some(line)` at EOF, and the resulting decode failure was classified fatal.
+// So the ordinary crash of the ordinary peer killed the user's shell. Invalid
+// UTF-8 in that same tail (`ErrorKind::InvalidData`), an unknown variant tag
+// from a NEWER daemon, `ErrorKind::WriteZero` (what `write_all` actually
+// returns on a short write) and Windows `ERROR_OPERATION_ABORTED` (995) were
+// all fatal for the same reason: an allow-list of kinds cannot be shown to be
+// complete, and every kind missing from it is a dead shell.
+//
+// The classification is therefore BY SOURCE, in the transport itself
+// (`terminal_helper_ipc::PeerFault` / `WriteFault`), not by kind here. There
+// is nothing left to enumerate: reading can only fail because of the peer, and
+// writing fails either because of the peer's connection (`WriteFault::Peer`,
+// every kind) or because THIS process could not serialize its own message
+// (`WriteFault::Serialize`), which stays fatal because no reconnect can fix it.
+//
+// This also makes the unknown-variant defence STRUCTURAL. The ticket's
+// Decisions made `supportsLivenessProbe` the defence against a new variant
+// reaching a helper that predates it; after this change that flag is
+// defence-in-depth (it still stops the probe being SENT, which matters for the
+// helpers that predate this fix and have no such guarantee), and the guarantee
+// for every helper from this build onwards is here: an unparseable line, from
+// any cause, drops the connection and nothing else.
+
+/// The whole of the write-side classification, extracted only so it is
+/// directly assertable. There is nothing to enumerate: the discriminant is
+/// which SOURCE produced the fault, so no `ErrorKind` can be "missing" from it.
+/// Reads need no equivalent - every read fault is a peer fault by
+/// construction, which is `PeerFault`'s reason for existing.
+fn write_fault_ends_only_the_connection(fault: &WriteFault) -> bool {
+    match fault {
+        WriteFault::Peer(_) => true,
+        WriteFault::Serialize(_) => false,
     }
-    // Windows named pipes surface peer-gone as raw OS codes that older
-    // `std` mappings do not all fold into the kinds above:
-    // ERROR_BROKEN_PIPE (109), ERROR_NO_DATA (232, "the pipe is being
-    // closed" - what a write to a closed named pipe returns),
-    // ERROR_PIPE_NOT_CONNECTED (233), ERROR_NETNAME_DELETED (64). Checked by
-    // raw code on Windows only; on Unix these numbers mean unrelated errnos,
-    // so the check must not be shared.
-    #[cfg(windows)]
-    if matches!(error.raw_os_error(), Some(109 | 232 | 233 | 64)) {
-        return true;
-    }
-    false
 }
 
 /// Restarts the unattached clock when an attached connection ends, on every
@@ -624,6 +793,7 @@ async fn handle_connection(
     args: &TerminalHelperArgs,
     stream: BoxedIpcStream,
     shared: &Arc<SharedState>,
+    shape: HelperShape,
 ) -> anyhow::Result<ConnectionOutcome> {
     // CONTRACT (260729 helper liveness probe): the unattached clock must
     // restart when an attached connection ends BY WHATEVER ROUTE - clean
@@ -641,21 +811,26 @@ async fn handle_connection(
     let mut reader = NdjsonReader::new(read_half);
     let write_half = Arc::new(tokio::sync::Mutex::new(write_half));
 
-    // CONTRACT (260729 review finding F9): the ONLY way a write reaches the
-    // daemon peer from this function. A peer-gone error returns the same
-    // `Disconnected` outcome the EOF arm below returns - the connection ends,
-    // `serve_connections` goes back to accepting, and the shell lives. Every
-    // other error still propagates, because it is this helper's own problem.
-    // Do not reintroduce a bare `?` on any write here: `run_terminal_helper`
-    // turns any `Err` out of `serve_connections` into
-    // `kill_shell_if_running()` + `delete_registry_entry()`.
+    // CONTRACT (260729 review finding F9, widened by round 3 finding A): the
+    // ONLY way a write reaches the daemon peer from this function. A
+    // `WriteFault::Peer` - ANY I/O kind, since the source is what classifies
+    // it - returns the same `Disconnected` outcome the EOF arm below returns:
+    // the connection ends, `serve_connections` goes back to accepting, and the
+    // shell lives. Only `WriteFault::Serialize` (this process failing to
+    // serialize its own message) still propagates. Do not reintroduce a bare
+    // `?` on any write here: `run_terminal_helper` turns any `Err` out of
+    // `serve_connections` into `kill_shell_if_running()` +
+    // `delete_registry_entry()`.
     macro_rules! write_to_daemon {
         ($message:expr) => {
             match write_ndjson(&mut *write_half.lock().await, $message).await {
                 Ok(()) => {}
-                Err(error) if is_peer_gone(&error) => {
+                Err(fault)
+                    if shape.peer_faults_end_only_the_connection
+                        && write_fault_ends_only_the_connection(&fault) =>
+                {
                     tracing::debug!(
-                        %error,
+                        %fault,
                         "terminal helper's daemon peer went away mid-write; ending this \
                          connection and returning to the accept loop (the shell is untouched)"
                     );
@@ -712,24 +887,26 @@ async fn handle_connection(
     loop {
         tokio::select! {
             incoming = reader.read_message::<DaemonToHelperMessage>() => {
-                // Same peer-gone rule as the writes above (finding F9): a
-                // connection reset mid-read is a departed peer, not a helper
-                // fault. A malformed line is NOT peer-gone and still
-                // propagates, preserving `NdjsonReader`'s "a malformed peer
-                // is a transport failure" contract.
+                // Round 3 finding A: EVERY read failure is a `PeerFault` by
+                // construction - a reset mid-read, a truncated final line from
+                // a SIGKILLed daemon, invalid UTF-8 in that same tail, or a
+                // variant tag from a newer daemon. All of them end this
+                // connection and nothing more. The desync is still surfaced
+                // (logged, connection dropped); what is gone is the escalation
+                // from "the peer misspoke" to "SIGKILL the user's shell".
                 let incoming = match incoming {
                     Ok(incoming) => incoming,
-                    Err(error) if is_peer_gone(&error) => {
+                    Err(fault) if shape.peer_faults_end_only_the_connection => {
                         tracing::debug!(
-                            %error,
-                            "terminal helper's daemon peer went away mid-read; ending this \
-                             connection and returning to the accept loop"
+                            %fault,
+                            "terminal helper's daemon peer faulted mid-read; ending this \
+                             connection and returning to the accept loop (the shell is untouched)"
                         );
                         return Ok(ConnectionOutcome::Disconnected {
                             attached: attachment.attached,
                         });
                     }
-                    Err(error) => return Err(error.into()),
+                    Err(fault) => return Err(fault.into()),
                 };
                 match incoming {
                     // daemon disconnected; outer loop decides what's next
@@ -793,6 +970,27 @@ async fn handle_connection(
                     // being answerable. Answering costs nothing here: it
                     // never spawns a shell and never marks this connection
                     // attached, so it does not disturb `unattached_since`.
+                    // FIDELITY SEAM (260729 review round 3, finding F): a
+                    // pre-upgrade helper's `DaemonToHelperMessage` has no
+                    // `LivenessProbe` variant at all, so the line does not
+                    // decode - it is an unknown-variant fault, and on that
+                    // build an unknown-variant fault SIGKILLs the shell. Model
+                    // it here rather than letting a legacy-shaped fixture
+                    // cheerfully answer a probe it could never have parsed;
+                    // the daemon-side capability gate exists precisely because
+                    // this is what a probe does to that population.
+                    Some(DaemonToHelperMessage::LivenessProbe)
+                        if !shape.declares_liveness_probe =>
+                    {
+                        if shape.peer_faults_end_only_the_connection {
+                            return Ok(ConnectionOutcome::Disconnected {
+                                attached: attachment.attached,
+                            });
+                        }
+                        return Err(anyhow::anyhow!(
+                            "unknown message variant (helper predates the liveness probe)"
+                        ));
+                    }
                     Some(DaemonToHelperMessage::LivenessProbe) => {
                         let (attached, unattached_for_ms) = shared.liveness_report();
                         write_to_daemon!(&HelperToDaemonMessage::LivenessProbeResponse {
@@ -1908,7 +2106,7 @@ mod liveness_probe_tests {
 
         let serve_shared = shared.clone();
         let serve = tokio::spawn(async move {
-            let _ = serve_connections(&args, &mut listener, &serve_shared).await;
+            let _ = serve_connections(&args, &mut listener, &serve_shared, HelperShape::CURRENT).await;
         });
 
         // Connection 1: a daemon attaches and STAYS attached.
@@ -1970,7 +2168,7 @@ mod liveness_probe_tests {
 
         let serve_shared = shared.clone();
         let serve = tokio::spawn(async move {
-            let _ = serve_connections(&args, &mut listener, &serve_shared).await;
+            let _ = serve_connections(&args, &mut listener, &serve_shared, HelperShape::CURRENT).await;
         });
 
         tokio::time::sleep(Duration::from_millis(60)).await;
@@ -2003,7 +2201,7 @@ mod liveness_probe_tests {
 
         let serve_shared = shared.clone();
         let serve = tokio::spawn(async move {
-            let _ = serve_connections(&args, &mut listener, &serve_shared).await;
+            let _ = serve_connections(&args, &mut listener, &serve_shared, HelperShape::CURRENT).await;
         });
 
         tokio::time::sleep(Duration::from_millis(60)).await;
@@ -2061,7 +2259,7 @@ mod liveness_probe_tests {
     #[test]
     fn the_startup_registry_entry_declares_the_liveness_probe_capability() {
         let args = args_for_test(std::path::Path::new("/tmp/wsd-hp-decl.sock"));
-        let entry = startup_registry_entry(&args, 4242, 99);
+        let entry = startup_registry_entry(&args, 4242, 99, HelperShape::CURRENT);
 
         assert!(
             entry.supports_liveness_probe,
@@ -2125,6 +2323,25 @@ pub(crate) mod real_helper_test_support {
         /// Returns once the helper has durably written its registry entry and
         /// bound its listener, so no caller can race the bind.
         pub(crate) async fn spawn(label: &str, shell_command: &str) -> Self {
+            Self::spawn_shaped(label, shell_command, HelperShape::CURRENT).await
+        }
+
+        /// CONTRACT (260729 review round 3, finding F): the same real helper,
+        /// spawned in PRE-UPGRADE shape - no peer-fault downgrade, no
+        /// concurrent probe arm, and `supportsLivenessProbe` absent from its
+        /// registry entry. This is the population every compatibility claim in
+        /// this ticket is about, and before this seam existed it was untested
+        /// by construction: every real-helper test ran the current binary,
+        /// which already has the fixes.
+        pub(crate) async fn spawn_legacy(label: &str, shell_command: &str) -> Self {
+            Self::spawn_shaped(label, shell_command, HelperShape::LEGACY).await
+        }
+
+        pub(crate) async fn spawn_shaped(
+            label: &str,
+            shell_command: &str,
+            shape: HelperShape,
+        ) -> Self {
             // Short by necessity: `socket_path` is bound as a real Unix
             // domain socket (sun_path caps at ~108 bytes).
             static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -2151,7 +2368,7 @@ pub(crate) mod real_helper_test_support {
                 env_overlay: Vec::new(),
                 scrub_marker: Vec::new(),
             };
-            let task = tokio::spawn(run_terminal_helper(args));
+            let task = tokio::spawn(run_terminal_helper_shaped(args, shape));
 
             let helper = Self {
                 state_dir,
@@ -2176,6 +2393,23 @@ pub(crate) mod real_helper_test_support {
 
         pub(crate) fn is_running(&self) -> bool {
             !self.task.is_finished()
+        }
+
+        pub(crate) fn entry(&self) -> Option<TerminalRegistryEntry> {
+            crate::terminal_registry_file::read_registry_entry(&self.registry_dir, &self.terminal_id)
+        }
+
+        /// Waits for the helper task to finish, up to a bounded budget.
+        /// `true` means it exited - which for a legacy-shaped helper means its
+        /// exit path ran `kill_shell_if_running()` + `delete_registry_entry()`.
+        pub(crate) async fn wait_for_exit(&self) -> bool {
+            for _ in 0..200 {
+                if !self.is_running() {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            false
         }
 
         pub(crate) async fn connect(&self) -> DaemonConnection {
@@ -2344,44 +2578,294 @@ mod real_helper_peer_loss_tests {
         helper.shutdown().await;
     }
 
-    // Non-vacuity for `is_peer_gone`: the downgrade is deliberately narrow.
-    // `NdjsonReader::read_message` turns a malformed line into an
-    // `io::Error` BY CONTRACT ("a malformed peer is treated as a transport
-    // failure, not silently skipped"), and that must stay fatal - if
-    // everything became non-fatal, the classification would be a no-op with
-    // the same observable behaviour as deleting the check.
+    // REPLACES `only_peer_gone_io_errors_are_downgraded`, which was wrong on
+    // its face: it PINNED an allow-list of five `ErrorKind`s as intentional,
+    // and asserted that `InvalidData` (a truncated line's invalid UTF-8) and
+    // `Other` (any decode failure) stay fatal. Those are the two most common
+    // shapes a SIGKILLed daemon leaves behind. It also guarded only the
+    // too-WIDE direction - it could tell you the list had grown, never that
+    // the list was short a kind, which is the failure that kills a shell.
+    //
+    // The replacement is built so it CAN catch a missing case, in two layers:
+    // - the classification itself is by SOURCE, so there is no list to be
+    //   short of (asserted directly below, including against `ErrorKind`s
+    //   nobody enumerated);
+    // - and the behavioural tests that follow drive REAL faults through a REAL
+    //   helper and assert the shell survives, so a regression is caught by the
+    //   outcome that actually matters rather than by a list membership.
     #[test]
-    fn only_peer_gone_io_errors_are_downgraded() {
+    fn every_peer_connection_fault_ends_only_the_connection() {
+        use crate::terminal_helper_ipc::PeerFault;
         use std::io::{Error, ErrorKind};
 
+        // Deliberately includes the kinds the old allow-list rejected
+        // (`InvalidData`, `Other`), the ones it never considered (`WriteZero`,
+        // which is what `write_all` actually returns on a short write), and
+        // kinds that have nothing to do with sockets at all - because the
+        // point is that the KIND is not consulted.
         for kind in [
             ErrorKind::BrokenPipe,
             ErrorKind::ConnectionReset,
             ErrorKind::ConnectionAborted,
             ErrorKind::NotConnected,
             ErrorKind::UnexpectedEof,
-        ] {
-            assert!(
-                is_peer_gone(&Error::new(kind, "peer went away")),
-                "{kind:?} means the daemon is gone, which must never kill the shell"
-            );
-        }
-        for kind in [
             ErrorKind::InvalidData,
             ErrorKind::Other,
+            ErrorKind::WriteZero,
+            ErrorKind::TimedOut,
+            ErrorKind::Interrupted,
             ErrorKind::PermissionDenied,
             ErrorKind::OutOfMemory,
+            ErrorKind::InvalidInput,
+            ErrorKind::NotFound,
         ] {
             assert!(
-                !is_peer_gone(&Error::new(kind, "genuine failure")),
-                "{kind:?} is this helper's own problem and must stay fatal"
+                write_fault_ends_only_the_connection(&WriteFault::Peer(Error::new(kind, "peer"))),
+                "{kind:?} arrived on the PEER's connection, so it must end that connection and \
+                 nothing else - an allow-list that omits it kills the user's shell"
+            );
+        }
+        // Windows ERROR_OPERATION_ABORTED (995), which no ErrorKind folds
+        // predictably and which the raw-code list did not carry either.
+        assert!(
+            write_fault_ends_only_the_connection(&WriteFault::Peer(Error::from_raw_os_error(995))),
+            "a raw OS error on the peer's connection is still the peer's"
+        );
+
+        // Non-vacuity: the classification must still separate this process's
+        // OWN failures, or it is a no-op with the same behaviour as deleting
+        // the check.
+        let serialize_failure =
+            serde_json::to_string(&std::collections::BTreeMap::from([((1u8, 2u8), 3u8)]))
+                .expect_err("a tuple-keyed map has no JSON form");
+        assert!(
+            !write_fault_ends_only_the_connection(&WriteFault::Serialize(serialize_failure)),
+            "failing to serialize our OWN message is not the peer's doing and stays fatal"
+        );
+
+        // And the read side has no classification at all to get wrong: every
+        // variant of `PeerFault` is, by its type, the peer's.
+        let faults = [
+            PeerFault::Io(Error::new(ErrorKind::Other, "io")),
+            PeerFault::InvalidUtf8(Error::new(ErrorKind::InvalidData, "utf8")),
+            PeerFault::Malformed(
+                serde_json::from_str::<serde_json::Value>("{bad").expect_err("malformed"),
+            ),
+        ];
+        for fault in &faults {
+            assert!(
+                matches!(
+                    fault,
+                    PeerFault::Io(_) | PeerFault::InvalidUtf8(_) | PeerFault::Malformed(_)
+                ),
+                "reading can only fail because of the peer: {fault:?}"
+            );
+        }
+    }
+
+    // The behavioural half, and the one that would have caught round 2's gap:
+    // a REAL helper, an ATTACHED session, and the exact byte sequences a
+    // SIGKILLed or newer daemon leaves on the wire. Each of these was fatal
+    // after round 2 - the shell died and the registry entry was erased.
+    #[tokio::test]
+    async fn a_real_helper_survives_every_malformed_thing_a_peer_can_put_on_the_wire() {
+        use tokio::io::AsyncWriteExt;
+
+        // (label, bytes) - the four shapes named in review round 3.
+        let payloads: [(&str, &[u8]); 4] = [
+            // A daemon SIGKILLed mid-`write_all`: a truncated final line with
+            // no newline, returned by `Lines::next_line()` at EOF. THE common
+            // crash signature.
+            ("truncated", br#"{"type":"input","data":"abc"#),
+            // The same cut landing mid-codepoint.
+            ("invalid-utf8", &[0x7b, 0xf0, 0x9f, 0x92]),
+            // A complete but undecodable line.
+            ("malformed", b"{not json at all}\n"),
+            // A NEWER daemon sending a variant this build has never heard of.
+            ("unknown-variant", b"{\"type\":\"somethingFromTheFuture\"}\n"),
+        ];
+
+        for (label, payload) in payloads {
+            let helper = RealHelper::spawn(label, TICKING_SHELL).await;
+            let mut session = helper.attach().await;
+            let seen = read_output_past(&mut session, 0).await;
+
+            // Same connection the session is on, so the fault lands in
+            // `handle_connection`'s own read loop rather than on a probe task.
+            session
+                .writer
+                .write_all(payload)
+                .await
+                .expect("write the malformed payload");
+            session.writer.flush().await.expect("flush");
+            drop(session);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            assert!(
+                helper.is_running(),
+                "[{label}] a peer's malformed line must end the CONNECTION, not the helper"
+            );
+            assert!(
+                helper.entry_exists(),
+                "[{label}] and must not erase the registry entry its owner adopts through"
+            );
+
+            // The shell itself: NEW output past the pre-fault sequence proves
+            // `kill_shell_if_running()` never ran, and a full re-adoption
+            // proves the helper went back to its accept loop.
+            let mut reattached = helper.attach().await;
+            let fresh = read_output_past(&mut reattached, seen).await;
+            assert!(
+                fresh > seen,
+                "[{label}] the user's shell must still be producing output"
+            );
+            drop(reattached);
+            helper.shutdown().await;
+        }
+    }
+
+    // CONTRACT (260729 review round 3, finding F - the seam's fidelity, and
+    // the reason it is worth having): this asserts what actually happens to a
+    // PRE-UPGRADE helper, which is the population every compatibility claim in
+    // this ticket is about and which no test in the tree could reach before.
+    //
+    // The assertions here are deliberately assertions of DAMAGE. They are the
+    // instrument, not the goal: they are what makes the daemon-side "never
+    // make contact with a capability-absent entry" rule verifiable as
+    // load-bearing rather than merely stated. If a future change makes the
+    // daemon connect to such a helper again, the daemon-side tests that lean
+    // on this fixture go red instead of silently killing a user's shell.
+    #[tokio::test]
+    async fn a_legacy_shaped_helper_really_is_destroyed_by_what_a_daemon_used_to_do() {
+        // 1. The on-disk declaration, which is what every daemon-side kill
+        //    site reads before it puts a byte on the wire.
+        let helper = RealHelper::spawn_legacy("legacy-entry", TICKING_SHELL).await;
+        let entry = helper.entry().expect("a legacy helper still writes its entry");
+        assert!(
+            !entry.supports_liveness_probe,
+            "a pre-upgrade entry has no capability field; absent decodes to false"
+        );
+
+        // 2. A bare connect-and-drop - exactly what a daemon-side reachability
+        //    check does - kills it. The helper writes its `Handshake` into an
+        //    already-closed peer, the EPIPE propagates, and
+        //    `run_terminal_helper`'s exit path runs
+        //    `kill_shell_if_running()` + `delete_registry_entry()`.
+        let session = helper.attach().await;
+        drop(session);
+        helper.connect_and_drop().await;
+
+        assert!(
+            helper.wait_for_exit().await,
+            "a pre-upgrade helper DOES die when a peer connects and leaves - if this ever \
+             stops being true, the fixture has stopped modelling the at-risk population"
+        );
+        assert!(
+            !helper.entry_exists(),
+            "and it erases the entry that would have let anyone diagnose it"
+        );
+        helper.shutdown().await;
+
+        // 3. And a probe is worse still: an unknown variant on that build is a
+        //    decode failure, and a decode failure there is fatal. This is why
+        //    `probe_helper` refuses to send one without the capability flag.
+        let helper = RealHelper::spawn_legacy("legacy-probe", TICKING_SHELL).await;
+        let mut session = helper.attach().await;
+        let _ = read_output_past(&mut session, 0).await;
+        write_ndjson(&mut session.writer, &DaemonToHelperMessage::LivenessProbe)
+            .await
+            .expect("write probe");
+        assert!(
+            helper.wait_for_exit().await,
+            "sending the probe to a helper that predates it SIGKILLs the user's shell - \
+             the capability gate is the only thing standing between the two"
+        );
+        drop(session);
+        helper.shutdown().await;
+    }
+
+    // The other half of the legacy shape: with no concurrent accept arm, a
+    // probe arriving while a session is attached is never even read - it sits
+    // in the backlog. This is the "healthy, busy helper looks dead" signature
+    // the whole ticket exists for, reproduced against a real helper rather
+    // than argued from source.
+    #[tokio::test]
+    async fn a_legacy_shaped_helper_cannot_answer_anything_while_a_session_is_attached() {
+        let helper = RealHelper::spawn_legacy("legacy-busy", TICKING_SHELL).await;
+        let mut session = helper.attach().await;
+        let _ = read_output_past(&mut session, 0).await;
+
+        // A second connection, as a second daemon's `connect_and_handshake`
+        // would open it. It connects (the listener is bound) and hears
+        // nothing.
+        let stream = crate::terminal_ipc_transport::connect(&helper.socket_path)
+            .await
+            .expect("a busy helper still ACCEPTS - that is the trap");
+        let (read_half, _write_half) = crate::terminal_ipc_transport::split(stream);
+        let mut reader = NdjsonReader::new(read_half);
+        let silence = tokio::time::timeout(
+            Duration::from_millis(500),
+            reader.read_message::<HelperToDaemonMessage>(),
+        )
+        .await;
+        assert!(
+            silence.is_err(),
+            "a busy pre-upgrade helper answers nothing at all - 'connected but silent' is a \
+             HEALTHY signature, which is why it must never authorize a kill on its own"
+        );
+
+        // And it is still perfectly healthy underneath.
+        assert!(helper.is_running());
+        assert!(helper.entry_exists());
+        drop(session);
+        helper.shutdown().await;
+    }
+
+    // CONTRACT (260729 review round 3, finding B): an `accept()` failure ends
+    // the accept, not the helper. Driven through the classifier rather than by
+    // exhausting the machine's fd table, which no test may do.
+    #[test]
+    fn accept_failures_back_off_and_only_a_sustained_run_is_fatal() {
+        use std::io::{Error, ErrorKind};
+
+        let mut failures = AcceptFailures::new();
+        // The peer-influenced kinds named in the finding, plus an arbitrary
+        // one: none of them is consulted, exactly as in finding A.
+        for kind in [
+            ErrorKind::Other, // EMFILE/ENFILE have no stable ErrorKind
+            ErrorKind::ConnectionAborted,
+            ErrorKind::Interrupted,
+            ErrorKind::PermissionDenied,
+        ] {
+            assert!(
+                failures.record(&Error::new(kind, "accept")).is_some(),
+                "{kind:?} on accept() must back off and continue, never kill the shell"
+            );
+        }
+        // Backoff grows and is capped.
+        let mut last = Duration::ZERO;
+        for _ in 0..40 {
+            let delay = failures
+                .record(&Error::new(ErrorKind::Other, "accept"))
+                .expect("still under budget");
+            assert!(delay >= last || delay == ACCEPT_RETRY_BACKOFF_MAX);
+            assert!(delay <= ACCEPT_RETRY_BACKOFF_MAX, "backoff must be capped");
+            last = delay;
+        }
+        assert_eq!(last, ACCEPT_RETRY_BACKOFF_MAX);
+
+        // Non-vacuity in both directions: a success resets the run, and only
+        // an unbroken run reaches the fatal budget.
+        failures.reset();
+        for index in 1..MAX_CONSECUTIVE_ACCEPT_FAILURES {
+            assert!(
+                failures.record(&Error::new(ErrorKind::Other, "accept")).is_some(),
+                "failure {index} of {MAX_CONSECUTIVE_ACCEPT_FAILURES} must not be fatal"
             );
         }
         assert!(
-            !is_peer_gone(&Error::other(
-                serde_json::from_str::<serde_json::Value>("{bad").expect_err("malformed")
-            )),
-            "a malformed peer line is a protocol desync worth surfacing, not a departed peer"
+            failures.record(&Error::new(ErrorKind::Other, "accept")).is_none(),
+            "a listener that has failed for the entire budget is permanently broken"
         );
     }
 

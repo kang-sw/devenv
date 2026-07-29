@@ -53,11 +53,20 @@ pub struct TerminalRegistryEntry {
     /// for a strictly worse failure mode: entries written by helpers that
     /// predate the probe are on disk in live registry dirs right now, and
     /// sending `LivenessProbe` to one of those helpers does not merely
-    /// disconnect it - `read_message` turns the unknown variant into an
-    /// `io::Error`, the helper's read site propagates it, and
-    /// `run_terminal_helper`'s exit path then SIGKILLs the user's shell and
-    /// erases its own registry entry. Absent therefore means "assume it
-    /// cannot answer, and never ask".
+    /// disconnect it - on the binary THEY are running, an unknown variant is
+    /// an unparseable line, an unparseable line propagates out of the read
+    /// site, and `run_terminal_helper`'s exit path then SIGKILLs the user's
+    /// shell and erases its own registry entry. Absent therefore means
+    /// "assume it cannot answer, and never ask".
+    ///
+    /// AMENDED (260729 review round 3, finding A): helpers built from THIS
+    /// tree onwards no longer behave that way - an unparseable line, from any
+    /// cause, now ends only the connection (see
+    /// `terminal_helper_ipc::PeerFault`). That makes this flag
+    /// defence-in-depth rather than the sole defence, and it is still
+    /// load-bearing, because the population it protects is precisely the one
+    /// that does NOT have the structural guarantee: helpers already running
+    /// from the previous binary.
     ///
     /// The daemon-side consequence is deliberate and stated in the ticket: a
     /// helper that declares no capability is LEFT ALONE on silence rather
