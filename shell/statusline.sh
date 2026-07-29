@@ -260,25 +260,13 @@ RATE_5HR_RESET_FMT=$(_fmt_epoch "$RATE_5HR_RESETS" "+%HH")
 # 7d rate limit reset weekday
 RATE_7D_TTL=$(_fmt_epoch "$RATE_7D_RESETS" "+%a")
 
-# Output-tokens last-updated: absolute HH:MM + relative "ago", derived from
-# the last assistant-turn timestamp found in the transcript above.
+# Output-tokens last-updated: absolute HH:MM, derived from the last
+# assistant-turn timestamp found in the transcript above.
 LAST_UPD_ABS=""
-LAST_UPD_REL=""
 if [[ -n $LAST_MSG_ISO ]]; then
   LAST_MSG_EPOCH=$(_iso_epoch "$LAST_MSG_ISO")
   if [[ -n $LAST_MSG_EPOCH ]]; then
     LAST_UPD_ABS=$(_fmt_epoch "$LAST_MSG_EPOCH" "+%H:%M")
-    _upd_elapsed=$((_NOW_EPOCH - LAST_MSG_EPOCH))
-    [ "$_upd_elapsed" -lt 0 ] && _upd_elapsed=0
-    _upd_hrs=$((_upd_elapsed / 3600))
-    _upd_mins=$(((_upd_elapsed % 3600) / 60))
-    if [ "$_upd_hrs" -gt 0 ]; then
-      LAST_UPD_REL="${_upd_hrs}h ${_upd_mins}m ago"
-    elif [ "$_upd_mins" -eq 1 ]; then
-      LAST_UPD_REL="1 min ago"
-    else
-      LAST_UPD_REL="${_upd_mins} mins ago"
-    fi
   fi
 fi
 
@@ -511,14 +499,14 @@ _n3=1
 
 _PC1="${ESC}[38;5;${FG}m 🔄 "
 if [[ -n $LAST_UPD_ABS ]]; then
-  _upd_body="${LAST_UPD_ABS} ${LAST_UPD_REL}"
-  _PC1+="${LAST_UPD_ABS} ${ESC}[38;5;${FG_DIM}m${LAST_UPD_REL}"
+  _upd_body="$LAST_UPD_ABS"
+  _PC1+="$LAST_UPD_ABS"
 else
   _upd_body="--"
   _PC1+="${ESC}[38;5;${FG_DIM}m--"
 fi
 _PC1+=" "
-_PW1=$((5 + ${#_upd_body})) # " 🔄(+1) BODY " (BODY = "HH:MM N mins ago" or "--")
+_PW1=$((5 + ${#_upd_body})) # " 🔄(+1) BODY " (BODY = "HH:MM" or "--")
 _PBG1=$API_BG
 _n3=2
 
