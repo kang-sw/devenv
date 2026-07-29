@@ -53,6 +53,26 @@ const DAEMON_GRACE_WINDOW_MS: u64 = 30_000;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_millis(3_000);
 pub(crate) const DEFAULT_RECONCILE_CONNECT_TIMEOUT: Duration = Duration::from_millis(400);
 
+// CONTRACT (260729 review finding F10): how long the liveness probe waits for
+// the NEXT line from a helper that has already accepted its connection.
+// Deliberately separate from the connect budget above, and applied per
+// message rather than as one deadline over the whole exchange - see
+// `probe_helper_reachability` for why a shared connect-sized deadline
+// SIGKILLs a healthy helper with a full scrollback.
+//
+// Sized against the HELPER's own bound, not against a connect: a helper drops
+// a probe connection after `terminal_helper_process::PROBE_CONNECTION_TIMEOUT`
+// (5s) of not being asked, so once this daemon has gone that long without a
+// line, no amount of extra patience can produce an answer - the peer has
+// already abandoned the connection or is genuinely wedged, which is exactly
+// the case the `Unanswered` verdict is for. Equal to it rather than larger,
+// so the two constants cannot drift into a window where the daemon is still
+// hopefully waiting on a connection the helper has already closed;
+// `probe_response_idle_timeout_is_sized_against_the_helpers_own_bound` pins
+// the relationship.
+pub(crate) const PROBE_RESPONSE_IDLE_TIMEOUT: Duration =
+    crate::terminal_helper_process::PROBE_CONNECTION_TIMEOUT;
+
 // CONTRACT (260726 Phase 1 correctness review I1): the registry-dir backstop
 // must give the primary graceful self-exit path (helper observes the IPC
 // EOF `close_ipc_connection` produces -> `kill_shell_if_running` ->
@@ -1343,18 +1363,47 @@ async fn connect_and_handshake(socket_path: &Path, timeout: Duration) -> Handsha
 // predates the variant turns it into an `io::Error`, propagates it, and its
 // exit path then SIGKILLs the user's shell and erases its registry entry -
 // strictly worse than the daemon-side kill this ticket removes, because it
-// leaves nothing behind to diagnose with. For such a helper this function
-// connects (to distinguish "no listener" from "listening but old") and
-// returns `Unsupported` without writing a byte.
+// leaves nothing behind to diagnose with.
+//
+// CONTRACT (260729 review finding F9-gate): for such a helper this function
+// makes NO SOCKET CONTACT AT ALL - it does not even connect. The earlier
+// version connected first (to tell "no listener" from "listening but old")
+// and dropped the stream, which was itself destructive: a helper that
+// predates the probe also predates `is_peer_gone`, so it accepts the
+// connection, writes its `Handshake` to an already-closed peer, gets EPIPE,
+// propagates it with `?`, and `run_terminal_helper`'s exit path SIGKILLs the
+// user's shell. The sweep repeated that every 10s. The compatibility argument
+// was about BYTES; the connection is what kills.
+//
+// Losing that connect loses no decision, and the equivalence is exact: the
+// only two callers that reach a capability-absent entry are the sweep and the
+// GC. The sweep only probes after `identity_status` returned `VerifiedOurs`,
+// which means a live process whose start time matches the entry - so the
+// helper process demonstrably exists and `Unsupported` -> `Leave` is the
+// ticket's mandated outcome regardless of what a connect would have said; a
+// dead helper never reaches the probe at all (`NoSuchProcess`/`PidReused`/
+// `UnverifiableBoot` are drop-only, and never kill). `reconcile_entry` is
+// unaffected either way: it only probes for `ConnectedButSilent`, which
+// already proves a listener is there. The GC does not check identity, so a
+// capability-absent entry whose process is already dead now survives one
+// extra GC pass - bounded, because the sweep deletes that entry within its
+// own 10s period and a missing entry means "reclaim" by the no-entry rule.
+//
+// The accepted cost is stated in the ticket: pre-upgrade helpers are spared
+// unconditionally, with no expiry. Do NOT close it with a version-based kill
+// ("old, therefore dead" is the same unsound inference in a new costume).
 //
 // This is NOT an adopt: no `HandshakeAck` is ever written here, so the sweep
 // keeps its "never adopts" property while gaining the check it lacked.
-async fn probe_helper(
+pub(crate) async fn probe_helper(
     socket_path: &Path,
     supports_liveness_probe: bool,
     timeout: Duration,
 ) -> ProbeVerdict {
-    match probe_helper_reachability(socket_path, supports_liveness_probe, timeout).await {
+    if !supports_liveness_probe {
+        return ProbeVerdict::Unsupported;
+    }
+    match probe_helper_reachability(socket_path, timeout).await {
         Some(verdict) => verdict,
         // No listener at all is positive absence, which the shared predicate
         // spells as "reclaim". Expressed through `Unanswered` so
@@ -1363,12 +1412,10 @@ async fn probe_helper(
     }
 }
 
-/// `None` when there is no listener behind `socket_path` at all.
-async fn probe_helper_reachability(
-    socket_path: &Path,
-    supports_liveness_probe: bool,
-    timeout: Duration,
-) -> Option<ProbeVerdict> {
+/// `None` when there is no listener behind `socket_path` at all. Only ever
+/// called for a helper whose registry entry declares the probe capability -
+/// see `probe_helper`, which is the gate.
+async fn probe_helper_reachability(socket_path: &Path, timeout: Duration) -> Option<ProbeVerdict> {
     let deadline = Instant::now() + timeout;
     let stream = loop {
         match crate::terminal_ipc_transport::connect(socket_path).await {
@@ -1381,9 +1428,6 @@ async fn probe_helper_reachability(
             }
         }
     };
-    if !supports_liveness_probe {
-        return Some(ProbeVerdict::Unsupported);
-    }
 
     let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
     let mut reader = NdjsonReader::new(read_half);
@@ -1396,8 +1440,25 @@ async fn probe_helper_reachability(
 
     let grace_ms = UNATTACHED_GRACE.as_millis() as u64;
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        match tokio::time::timeout(remaining, reader.read_message::<HelperToDaemonMessage>()).await {
+        // CONTRACT (260729 review finding F10): a PER-MESSAGE idle timeout,
+        // deliberately NOT the connect deadline and deliberately NOT one
+        // deadline shared across the whole exchange. Both alternatives kill
+        // live helpers. An UNATTACHED helper answers from its ordinary
+        // session dispatch, which first flushes the entire retained ring -
+        // up to `MAX_OUTPUT_CHUNKS` (1024) chunks, each its own write+flush -
+        // so a single deadline sized for a connect (400ms,
+        // `DEFAULT_RECONCILE_CONNECT_TIMEOUT`) is exhausted by scrollback
+        // alone, and the verdict falls through to `Unanswered`, i.e. a
+        // SIGKILL for a helper whose only fault was having a full ring.
+        // Restarting the clock per message makes the bound "the peer went
+        // quiet", which is the thing actually being measured, and no ring
+        // size can exhaust it.
+        match tokio::time::timeout(
+            PROBE_RESPONSE_IDLE_TIMEOUT,
+            reader.read_message::<HelperToDaemonMessage>(),
+        )
+        .await
+        {
             Ok(Ok(Some(HelperToDaemonMessage::LivenessProbeResponse {
                 attached,
                 unattached_for_ms,
@@ -5693,6 +5754,15 @@ exec sleep 30
         /// Completes a full adoption handshake (`Handshake` + `Status`) and
         /// then keeps recording. Used to pin the adoption sequence.
         Adoptable,
+        /// Writes `chunks` `Output` lines spaced `interval_ms` apart before
+        /// answering anything, then answers `LivenessProbe`. Models the path
+        /// a REAL unattached helper answers a probe from
+        /// (`handle_connection`): the entire retained ring - up to
+        /// `MAX_OUTPUT_CHUNKS` (1024) chunks, each its own write+flush - is
+        /// flushed ahead of the answer. Scripted with explicit spacing so the
+        /// daemon-side timeout semantics can be asserted deterministically
+        /// instead of raced against a real machine's I/O speed.
+        FloodsThenAnswersProbe { chunks: u64, interval_ms: u64 },
     }
 
     #[cfg(unix)]
@@ -5776,6 +5846,38 @@ exec sleep 30
             .await;
         }
 
+        if let FakeHelperBehaviour::FloodsThenAnswersProbe {
+            chunks,
+            interval_ms,
+        } = behaviour
+        {
+            for sequence in 1..=chunks {
+                let _ = write_ndjson(
+                    &mut write_half,
+                    &HelperToDaemonMessage::Output(TerminalHelperOutputChunk {
+                        sequence,
+                        data: "x".repeat(64),
+                    }),
+                )
+                .await;
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            }
+        }
+
+        // What this fixture will report if asked. Kept as data rather than
+        // matched inline so a new probe-answering behaviour cannot silently
+        // stop answering.
+        let probe_report = match behaviour {
+            FakeHelperBehaviour::AnswersProbe {
+                attached,
+                unattached_for_ms,
+            } => Some((attached, unattached_for_ms)),
+            // A helper that just finished flushing a ring is by definition
+            // unattached, and freshly so.
+            FakeHelperBehaviour::FloodsThenAnswersProbe { .. } => Some((false, Some(50))),
+            FakeHelperBehaviour::SilentForever | FakeHelperBehaviour::Adoptable => None,
+        };
+
         // Raw lines, not decoded messages: the point of `received` is to
         // record what the daemon actually put on the wire, including anything
         // this fixture's own types would not understand.
@@ -5791,13 +5893,8 @@ exec sleep 30
             let Ok(message) = serde_json::from_str::<DaemonToHelperMessage>(&line) else {
                 continue;
             };
-            if let (
-                DaemonToHelperMessage::LivenessProbe,
-                FakeHelperBehaviour::AnswersProbe {
-                    attached,
-                    unattached_for_ms,
-                },
-            ) = (&message, behaviour)
+            if let (DaemonToHelperMessage::LivenessProbe, Some((attached, unattached_for_ms))) =
+                (&message, probe_report)
             {
                 let _ = write_ndjson(
                     &mut write_half,
@@ -6391,15 +6488,201 @@ exec sleep 30
         ));
         let _ = std::fs::remove_file(&socket_path);
 
-        for declares_capability in [true, false] {
-            let verdict = probe_helper(&socket_path, declares_capability, Duration::from_millis(80))
-                .await;
-            assert!(
-                probe_authorizes_reclaim(verdict),
-                "no listener is positive absence and must authorize reclaim regardless of what \
-                 the entry declared (declares_capability={declares_capability}, got {verdict:?})"
-            );
+        let verdict = probe_helper(&socket_path, true, Duration::from_millis(80)).await;
+        assert!(
+            probe_authorizes_reclaim(verdict),
+            "no listener is positive absence and must authorize reclaim for a helper that \
+             declares the probe capability (got {verdict:?})"
+        );
+    }
+
+    // CONTRACT (260729 review finding F9-gate): the capability gate is
+    // evaluated BEFORE the connect, so a capability-absent entry produces
+    // `Unsupported` even with nothing bound behind its socket path - the
+    // daemon makes no socket contact at all with such a helper. This
+    // deliberately WIDENS the "pre-upgrade helpers are spared" consequence
+    // the ticket already accepted, from "spared while attached" to "spared
+    // unconditionally", and it is asserted rather than left implicit because
+    // it is the observable difference from the previous behaviour (which
+    // connected first and reclaimed on a failed connect).
+    //
+    // Nothing is leaked by it: the sweep only probes after `identity_status`
+    // returned `VerifiedOurs`, i.e. the helper process is provably alive, and
+    // a capability-absent entry whose process has died is deleted by the
+    // sweep's own non-`VerifiedOurs` arm without ever consulting the probe.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_capability_absent_entry_is_never_probed_even_when_nothing_is_listening() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-probe-legacy-absent-{}-{}.sock",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&socket_path);
+
+        let started = Instant::now();
+        let verdict = probe_helper(&socket_path, false, Duration::from_millis(800)).await;
+
+        assert_eq!(
+            verdict,
+            ProbeVerdict::Unsupported,
+            "a helper that predates the probe must be undecidable, never positively absent - \
+             connecting to it is what SIGKILLs its shell"
+        );
+        assert!(
+            !probe_authorizes_reclaim(verdict),
+            "and undecidable must never authorize reclaim"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(400),
+            "the gate must short-circuit BEFORE the connect loop's retry budget is spent - \
+             taking the full budget means a connect was attempted (took {:?})",
+            started.elapsed()
+        );
+    }
+
+    // CONTRACT (260729 review finding F10, the per-message half): the probe's
+    // patience is bounded by "the peer went quiet", not by "the exchange has
+    // taken too long". A helper answers a probe from `handle_connection`
+    // whenever nobody is attached, and that path flushes the ENTIRE retained
+    // ring first - up to `MAX_OUTPUT_CHUNKS` (1024) chunks, each its own
+    // write+flush. Under one shared deadline a big scrollback is enough to
+    // spend the whole budget, and the verdict falls through to `Unanswered`,
+    // i.e. `KillVerified`: a live helper killed for being slow.
+    //
+    // The fixture drips for far longer than any single-deadline budget while
+    // never going quiet for as long as the idle timeout, so it separates the
+    // two policies exactly: restore a shared deadline and this goes red.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_slow_ring_flush_cannot_exhaust_the_probe_timeout() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-probe-flood-{}-{}.sock",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&socket_path);
+        let helper = spawn_fake_helper(
+            &socket_path,
+            FakeHelperBehaviour::FloodsThenAnswersProbe {
+                chunks: 12,
+                interval_ms: 120,
+            },
+        );
+
+        let started = Instant::now();
+        // The connect budget, deliberately left at a realistic value: the
+        // point is that it does NOT bound the answer.
+        let verdict = probe_helper(&socket_path, true, Duration::from_millis(150)).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(
+            verdict,
+            ProbeVerdict::UnattachedWithinGrace,
+            "a helper that keeps talking must be read to its answer, not timed out mid-ring"
+        );
+        assert!(
+            !probe_authorizes_reclaim(verdict),
+            "and it must not be reclaimed"
+        );
+        assert!(
+            elapsed > Duration::from_millis(1_000),
+            "the answer must genuinely have arrived long after the connect budget - otherwise \
+             this test would pass under a shared deadline too (elapsed {elapsed:?})"
+        );
+
+        drop(helper);
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // The same scenario against a REAL helper, end to end: a real
+    // `run_terminal_helper`, a real shell, a real retained ring larger than a
+    // socket buffer, probed with the REAL production connect budget the sweep
+    // uses. This is the integration-level guard for F10 - "a live helper with
+    // scrollback is answered, not reclaimed".
+    //
+    // Honest scope note: this test is NOT the mutation instrument for the
+    // timeout policy. On an unloaded machine a real helper flushes even a
+    // multi-megabyte ring faster than the 400ms budget, so restoring the
+    // shared deadline leaves it green; that is a statement about this
+    // machine's speed, not about the policy being safe. The deterministic
+    // instrument is `a_slow_ring_flush_cannot_exhaust_the_probe_timeout`
+    // above, which scripts the timing instead of racing it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_real_helper_with_a_retained_ring_answers_a_probe_without_being_reclaimed() {
+        use crate::terminal_helper_process::real_helper_test_support::RealHelper;
+
+        // Deliberately more than a socket buffer's worth (~200KB on Linux):
+        // a ring that fits entirely in the kernel buffer is flushed without
+        // the daemon's reads ever having to wait, which would make this test
+        // pass under a shared deadline too and prove nothing.
+        let helper = RealHelper::spawn(
+            "ring",
+            "head -c 1500000 /dev/zero | tr '\\0' A; sleep 30",
+        )
+        .await;
+
+        // Attach so the shell spawns and the ring fills, then leave: an
+        // unattached helper with a live shell is exactly what the sweep meets
+        // during another daemon's restart.
+        let mut session = helper.attach().await;
+        let mut chunks = 0;
+        while chunks < 60 {
+            if let crate::terminal_helper_protocol::HelperToDaemonMessage::Output(_) =
+                session.read().await
+            {
+                chunks += 1;
+            }
         }
+        drop(session);
+        // Let the helper observe the EOF and re-park in its own `accept()`,
+        // so the probe below lands on the ring-flushing `handle_connection`
+        // path rather than on the concurrent probe arm.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        let verdict = probe_helper(
+            &helper.socket_path,
+            true,
+            DEFAULT_RECONCILE_CONNECT_TIMEOUT,
+        )
+        .await;
+
+        assert_eq!(
+            verdict,
+            ProbeVerdict::UnattachedWithinGrace,
+            "a real helper flushing a real ring must still be heard out"
+        );
+        assert!(
+            !probe_authorizes_reclaim(verdict),
+            "and must not be reclaimed for having scrollback"
+        );
+        assert!(
+            helper.entry_exists(),
+            "probing must not disturb the helper's registry entry"
+        );
+
+        helper.shutdown().await;
+    }
+
+    // Pins the F10 constant to the helper's own bound rather than to a
+    // number: if either side is retuned without the other, the probe either
+    // waits on a connection the helper has already closed, or gives up on a
+    // helper that is still willing to answer.
+    #[test]
+    fn probe_response_idle_timeout_is_sized_against_the_helpers_own_bound() {
+        assert_eq!(
+            PROBE_RESPONSE_IDLE_TIMEOUT,
+            crate::terminal_helper_process::PROBE_CONNECTION_TIMEOUT,
+            "the probe's per-message idle timeout is defined by how long a helper will hold a \
+             probe connection open, not by the connect budget"
+        );
+        assert!(
+            PROBE_RESPONSE_IDLE_TIMEOUT > DEFAULT_RECONCILE_CONNECT_TIMEOUT,
+            "sharing the connect budget is the F10 defect: a full retained ring is flushed \
+             before the probe answer, and 400ms of it is enough to make a healthy helper look \
+             unanswered"
+        );
     }
 }
 

@@ -562,6 +562,132 @@ qualifier) still need writing, and must be reconciled with
 `260729-bug-dashboard-macos-terminal-socket-path-and-eperm-gaps` Phase 2,
 which restates the same reap predicate.
 
+#### Correction (bff07caf refuted) - 2026-07-29
+
+Adversarial review refuted `bff07caf`. The daemon-side *decision* was right; the
+*mechanism* it used to reach the decision was a new silent path into
+`kill_shell_if_running()`. Four findings, all confirmed against source and all
+fixed. `cargo build` and `cargo test` pass (362 lib tests, was 354, plus every
+integration target, 0 failures).
+
+**F9-root - a peer going away must never kill the shell (the real root cause).**
+Every write in `handle_connection` propagated with `?`, and
+`run_terminal_helper` runs `kill_shell_if_running()` + `delete_registry_entry()`
+on ANY return from `serve_connections`. So a daemon that merely connected and
+dropped without reading made the helper EPIPE on its own `Handshake` and SIGKILL
+the user's shell, erasing the entry that would have let anyone diagnose it. Fixed
+by `is_peer_gone` (BrokenPipe / ConnectionReset / ConnectionAborted /
+NotConnected / UnexpectedEof, plus the Windows named-pipe raw codes 109/232/233/64):
+a peer-gone write - and a peer-gone read - now returns the same
+`ConnectionOutcome::Disconnected` the EOF arm returns. All writes go through one
+`write_to_daemon!` macro so no site can reintroduce a bare `?`. Deliberately
+narrow: a malformed line is `ErrorKind::Other` by `NdjsonReader`'s own contract
+and stays fatal. **Helper lifetime is now independent of any daemon's
+behaviour** - that is the invariant, stated as such in the code.
+
+**F9-gate - the equivalence HOLDS, so a legacy entry now gets no socket contact
+at all.** Asked to verify whether `identity_status == VerifiedOurs` already
+implies a live helper process with a matching start time: it does -
+`identity_status` returns `VerifiedOurs` only when `process_start_time(pid)`
+returns `Some(observed) && observed == start_time`. So for a capability-absent
+entry the connect decided nothing: VerifiedOurs => `Unsupported` => `Leave`
+regardless, and a dead helper never reaches the probe (`NoSuchProcess` /
+`PidReused` / `UnverifiableBoot` are drop-only). The capability gate therefore
+moved ahead of the connect in `probe_helper`. `reconcile_entry` is unaffected -
+it only probes for `ConnectedButSilent`, which already proves a listener exists.
+Two consequences, both accepted deliberately:
+- The ticket's "pre-upgrade helpers are spared, with no expiry" widens from
+  *while attached* to *unconditionally*: a legacy helper whose socket is gone but
+  whose process is alive is no longer reaped by Site A. This is the same trade
+  the Decisions already made, extended to the case the connect used to cover; the
+  registry entry still clears the moment the process dies. Do not close it with a
+  version-based kill.
+- `profile_gc_may_reclaim` does not check identity, so a capability-absent entry
+  whose process is already dead survives one extra GC pass. Bounded: the sweep
+  deletes such an entry within its own 10s period, after which the no-entry rule
+  reclaims.
+
+**F10 - the probe no longer shares the connect budget.** New
+`PROBE_RESPONSE_IDLE_TIMEOUT`, defined as the helper's own
+`PROBE_CONNECTION_TIMEOUT` (5s) rather than as a number, and applied as a
+PER-MESSAGE idle timeout instead of one deadline over the whole exchange. Both
+halves are load-bearing: an unattached helper answers from `handle_connection`,
+which first flushes the entire retained ring (up to `MAX_OUTPUT_CHUNKS` = 1024
+chunks, each its own write+flush), so a single 400ms connect-sized deadline was
+exhausted by scrollback alone and fell through to `Unanswered` => `KillVerified`
+- a live helper killed for being slow. The sizing rationale is in the constant's
+comment: past 5s of silence the helper has already abandoned the connection, so
+more patience cannot produce an answer.
+
+**F11 - real, narrow, documented rather than fixed.** Confirmed: a connection
+accepted by the concurrent arm is served as a probe and nothing else, so a daemon
+that connects intending to adopt while a session is attached gets no `Handshake`,
+reads `ConnectedButSilent`, and that boot's `boot_reconcile` does not adopt.
+Precise trigger, now recorded at `serve_session`: daemon B connects while daemon
+A's session is *genuinely still attached* AND A disconnects inside B's
+connect/handshake budget. If A has already disconnected, `biased` makes the
+finished session future win the select and B's connection is served as a full
+session as before. Not fixed because the fix is disproportionate: promoting an
+accepted connection to a session is the second attach path the Decisions forbid
+by name, and handing it back is useless - B's 400ms budget elapses long before
+the arm's 5s timeout would release it. Consequence is bounded: entry, process,
+profile and token all survive; only the adoption is missed, and the next daemon
+start retries it. The pre-ticket behaviour in that same window was not "adopts
+reliably" but "queues, times out, then EPIPEs the helper into killing the shell"
+(F9-root).
+
+**F12 - the probe spawn is bounded, as backpressure not shedding.**
+`MAX_CONCURRENT_PROBE_CONNECTIONS` (8) permits, acquired BEFORE `accept()`, so at
+capacity the listener simply is not drained and surplus connections wait in the
+backlog. Dropping them would have been worse than the unbounded spawn: a dropped
+probe reads daemon-side as `Unanswered`, which authorizes a SIGKILL - i.e. load
+shedding would manufacture the exact false-death signal this ticket removes.
+
+**Tests - the previous suite could not see any of this, which was the real
+defect.** `FakeHelperBehaviour::SilentForever` writes nothing on accept (a real
+legacy helper writes `Handshake` immediately) and every fixture write is
+`let _ = ...`, so a write error was unobservable by construction. Added a
+REAL-helper fixture (`real_helper_test_support::RealHelper` - the actual
+`run_terminal_helper`, with its real registry write, real listener, real PTY and
+a real shell child) plus:
+- `a_real_helper_survives_a_daemon_that_connects_and_drops_without_reading` -
+  helper alive, `<id>.json` intact, and NEW shell output past the pre-drop
+  sequence (so "the shell lives" is observed, not inferred);
+- `a_peer_gone_write_returns_the_real_helper_to_its_accept_loop` - a full
+  adoption sequence still completes afterwards;
+- `only_peer_gone_io_errors_are_downgraded` - non-vacuity for the narrow
+  classification, including a malformed-line error staying fatal;
+- `every_probe_is_answered_even_past_the_concurrent_probe_bound` - 3x the cap,
+  all answered (guards the drop-instead-of-queue implementation of F12; it does
+  not distinguish bounded from unbounded, which is stated rather than claimed);
+- `a_slow_ring_flush_cannot_exhaust_the_probe_timeout` - scripted drip fixture,
+  the deterministic instrument for the F10 policy;
+- `a_real_helper_with_a_retained_ring_answers_a_probe_without_being_reclaimed` -
+  the same scenario end-to-end with a >1MB real ring and the production connect
+  budget. Honest scope note in the test: on an unloaded machine a real helper
+  outruns any budget, so this is an integration guard, not the F10 mutation
+  instrument;
+- `a_capability_absent_entry_is_never_probed_even_when_nothing_is_listening` -
+  F9-gate, including that the connect loop's budget is not spent;
+- `probe_response_idle_timeout_is_sized_against_the_helpers_own_bound`.
+
+`probe_helper_reports_a_reclaimable_verdict_when_nothing_is_listening` lost its
+`declares_capability = false` leg, which is exactly the F9-gate behaviour change;
+the replacement test above asserts the new outcome directly.
+
+**Mutation results.** New: making `is_peer_gone` always false kills the real
+helper - the reconnect fails with `NotFound` because the helper has exited and
+unlinked its socket (this is the bff07caf behaviour, reproduced); restoring the
+shared deadline turns `a_slow_ring_flush_cannot_exhaust_the_probe_timeout` red;
+connecting before the capability gate turns
+`a_capability_absent_entry_is_never_probed_even_when_nothing_is_listening` red.
+Re-ran the four original checks and all still hold: reverting the concurrent arm
+turns `a_probe_is_answered_while_a_session_is_attached` red; reverting
+`classify`'s `ConnectedButSilent` arm or the sweep's probe gate turns
+`a_helper_attached_to_another_daemon_survives_boot_reconcile_and_the_sweep` red;
+reverting the GC gate turns
+`the_profile_gc_spares_a_helper_that_is_attached_to_another_daemon` red.
+
 ### Phase 2: Correct the two CONTRACTs this ticket falsified
 
 Doc-only, no behaviour change.

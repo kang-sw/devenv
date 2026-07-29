@@ -49,7 +49,23 @@ const NO_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 // socket round trip and irrelevant to the attached session's latency, since
 // probe connections are served on their own tasks and never block
 // `handle_connection`.
-const PROBE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const PROBE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+// CONTRACT (260729 review finding F12): the concurrent probe arm spawns a
+// task per accepted probe connection, and nothing about a stranger's connect
+// rate is under this helper's control - an unbounded `tokio::spawn` there is
+// a task-growth channel any local process can drive. This caps the number of
+// in-flight probe tasks.
+//
+// The bound is applied as BACKPRESSURE, never as a drop: at capacity the
+// accept arm simply stops accepting, so the surplus connection waits in the
+// listener backlog until a slot frees instead of being accepted and closed.
+// That distinction is load-bearing - a dropped probe connection reads
+// daemon-side as `ProbeVerdict::Unanswered`, which authorizes a SIGKILL, so
+// "shed load" here would mean "manufacture the exact false-death signal this
+// ticket exists to remove". Each probe task is one line in, one line out and
+// is hard-bounded by `PROBE_CONNECTION_TIMEOUT`, so a queue drains in
+// microseconds under any non-pathological load.
+const MAX_CONCURRENT_PROBE_CONNECTIONS: usize = 8;
 
 struct RingState {
     output: VecDeque<TerminalHelperOutputChunk>,
@@ -345,6 +361,12 @@ async fn serve_connections(
     // first successful handshake - not merely the current accept-loop
     // iteration.
     let started_at = Instant::now();
+    // Created once per helper, not per session: probe tasks spawned during
+    // one session can outlive it (they are bounded by
+    // `PROBE_CONNECTION_TIMEOUT`, not by the session), so a per-session
+    // semaphore would let the true in-flight count exceed the cap across a
+    // reconnect.
+    let probe_slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PROBE_CONNECTIONS));
     loop {
         let wait = match shared.exited_at() {
             Some(exited_at) => match GRACE_WINDOW.checked_sub(exited_at.elapsed()) {
@@ -368,7 +390,7 @@ async fn serve_connections(
         };
         match tokio::time::timeout(wait, listener.accept()).await {
             Ok(Ok(stream)) => {
-                match serve_session(args, stream, shared, listener).await? {
+                match serve_session(args, stream, shared, listener, &probe_slots).await? {
                     ConnectionOutcome::Shutdown => break,
                     // One reattach after the shell has exited is the grace
                     // window's whole purpose - deliver the exit + trailing
@@ -424,14 +446,52 @@ enum ConnectionOutcome {
 // of this module is built on. Probe-only accept, probe-only response - the
 // spawned task is `serve_probe_connection`, which cannot spawn a shell,
 // cannot flip `shell_started`, and cannot touch `unattached_since`.
+// KNOWN LIMITATION (260729 review finding F11), stated here rather than left
+// to be rediscovered: every connection accepted by this arm is served as a
+// PROBE and nothing else. A daemon that connects intending to ADOPT while a
+// session is still attached therefore gets a peer that never sends
+// `Handshake`, so its `connect_and_handshake` reports `ConnectedButSilent`
+// and that boot's `boot_reconcile` does not adopt the terminal (it leaves it
+// alone - the entry, the process and its state all survive; only the
+// adoption is missed, and the next daemon start retries it).
+//
+// Trigger, precisely: daemon B connects while daemon A's session is genuinely
+// still attached, AND A disconnects inside B's connect/handshake budget. If A
+// has already disconnected when B connects, `biased` below makes the finished
+// session future win the select, so `serve_connections` re-parks in its own
+// `accept()` and B's connection is served as a full session as before.
+//
+// Not fixed here because the fix is disproportionate to the exposure: an
+// accepted connection cannot be promoted to a session without making this a
+// second attach path, which the ticket forbids by name, and handing it back
+// to `serve_connections` cannot help either - the daemon's whole
+// connect+handshake budget (400ms) elapses long before this arm's
+// `PROBE_CONNECTION_TIMEOUT` (5s) would release it. The pre-ticket behaviour
+// in the same window was not "adopts reliably" but "queues, times out, then
+// EPIPEs the helper into SIGKILLing the user's shell" (see `is_peer_gone`).
 async fn serve_session(
     args: &TerminalHelperArgs,
     stream: BoxedIpcStream,
     shared: &Arc<SharedState>,
     listener: &mut IpcListener,
+    probe_slots: &Arc<tokio::sync::Semaphore>,
 ) -> anyhow::Result<ConnectionOutcome> {
     let mut session = std::pin::pin!(handle_connection(args, stream, shared));
     loop {
+        // Take a probe slot BEFORE accepting (finding F12). While all slots
+        // are held this select has only the session arm, so the listener is
+        // not drained and surplus probe connections stay queued in the
+        // backlog rather than being accepted and dropped - see
+        // `MAX_CONCURRENT_PROBE_CONNECTIONS` for why dropping would be
+        // actively harmful. `acquire_owned` resolves immediately whenever a
+        // slot is free, so the uncontended path is unchanged.
+        let permit = tokio::select! {
+            biased;
+            outcome = &mut session => return outcome,
+            permit = probe_slots.clone().acquire_owned() => {
+                permit.expect("probe slot semaphore is never closed")
+            }
+        };
         tokio::select! {
             // Biased so an available session event is always taken first:
             // the attached daemon's traffic must never lose priority to a
@@ -440,7 +500,7 @@ async fn serve_session(
             outcome = &mut session => return outcome,
             accepted = listener.accept() => match accepted {
                 Ok(probe_stream) => {
-                    tokio::spawn(serve_probe_connection(shared.clone(), probe_stream));
+                    tokio::spawn(serve_probe_connection(shared.clone(), probe_stream, permit));
                 }
                 Err(error) => return Err(error.into()),
             },
@@ -460,7 +520,13 @@ async fn serve_session(
 // malformed or half-open probe connection is a stranger's problem, and
 // letting it reach `run_terminal_helper`'s exit path would kill the user's
 // shell over a stray byte from a process that is not even attached.
-async fn serve_probe_connection(shared: Arc<SharedState>, stream: BoxedIpcStream) {
+async fn serve_probe_connection(
+    shared: Arc<SharedState>,
+    stream: BoxedIpcStream,
+    // Held for exactly as long as this task runs; dropping it is what lets
+    // `serve_session` accept the next probe connection (finding F12).
+    _slot: tokio::sync::OwnedSemaphorePermit,
+) {
     let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
     let mut reader = NdjsonReader::new(read_half);
     let _ = tokio::time::timeout(PROBE_CONNECTION_TIMEOUT, async move {
@@ -487,6 +553,54 @@ async fn serve_probe_connection(shared: Arc<SharedState>, stream: BoxedIpcStream
         }
     })
     .await;
+}
+
+// CONTRACT (260729 review finding F9, and the invariant this whole ticket
+// rests on): HELPER LIFETIME IS INDEPENDENT OF ANY DAEMON'S BEHAVIOUR. A peer
+// that goes away mid-conversation must be indistinguishable from a peer that
+// goes away between messages - i.e. it must be handled exactly like the EOF
+// arm in `handle_connection`'s read loop: end the connection, return to the
+// accept loop, keep the shell.
+//
+// Before this, every write in `handle_connection` propagated with `?`, and
+// `run_terminal_helper` runs `kill_shell_if_running()` +
+// `delete_registry_entry()` on ANY return from `serve_connections` - so a
+// daemon that connected and dropped without reading (which is precisely what
+// a reachability check does) made the helper SIGKILL the user's shell and
+// erase its own registry entry. That is a silent, unlogged-on-the-victim path
+// to the exact destruction the daemon-side predicate was fixed to avoid, and
+// it fires on every connect from any local process.
+//
+// Deliberately narrow: only errors that MEAN "the peer is gone" are
+// downgraded. A malformed line is `io::ErrorKind::Other` (see
+// `NdjsonReader::read_message`, which converts a parse failure into an
+// `io::Error` by contract) and stays fatal, as do genuine internal failures -
+// a helper that cannot serialize its own messages has a real problem worth
+// surfacing, not a departed peer.
+fn is_peer_gone(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    if matches!(
+        error.kind(),
+        ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::NotConnected
+            | ErrorKind::UnexpectedEof
+    ) {
+        return true;
+    }
+    // Windows named pipes surface peer-gone as raw OS codes that older
+    // `std` mappings do not all fold into the kinds above:
+    // ERROR_BROKEN_PIPE (109), ERROR_NO_DATA (232, "the pipe is being
+    // closed" - what a write to a closed named pipe returns),
+    // ERROR_PIPE_NOT_CONNECTED (233), ERROR_NETNAME_DELETED (64). Checked by
+    // raw code on Windows only; on Unix these numbers mean unrelated errnos,
+    // so the check must not be shared.
+    #[cfg(windows)]
+    if matches!(error.raw_os_error(), Some(109 | 232 | 233 | 64)) {
+        return true;
+    }
+    false
 }
 
 /// Restarts the unattached clock when an attached connection ends, on every
@@ -527,14 +641,37 @@ async fn handle_connection(
     let mut reader = NdjsonReader::new(read_half);
     let write_half = Arc::new(tokio::sync::Mutex::new(write_half));
 
-    write_ndjson(
-        &mut *write_half.lock().await,
-        &HelperToDaemonMessage::Handshake {
-            pid: shared.pid,
-            start_time: shared.start_time,
-        },
-    )
-    .await?;
+    // CONTRACT (260729 review finding F9): the ONLY way a write reaches the
+    // daemon peer from this function. A peer-gone error returns the same
+    // `Disconnected` outcome the EOF arm below returns - the connection ends,
+    // `serve_connections` goes back to accepting, and the shell lives. Every
+    // other error still propagates, because it is this helper's own problem.
+    // Do not reintroduce a bare `?` on any write here: `run_terminal_helper`
+    // turns any `Err` out of `serve_connections` into
+    // `kill_shell_if_running()` + `delete_registry_entry()`.
+    macro_rules! write_to_daemon {
+        ($message:expr) => {
+            match write_ndjson(&mut *write_half.lock().await, $message).await {
+                Ok(()) => {}
+                Err(error) if is_peer_gone(&error) => {
+                    tracing::debug!(
+                        %error,
+                        "terminal helper's daemon peer went away mid-write; ending this \
+                         connection and returning to the accept loop (the shell is untouched)"
+                    );
+                    return Ok(ConnectionOutcome::Disconnected {
+                        attached: attachment.attached,
+                    });
+                }
+                Err(error) => return Err(error.into()),
+            }
+        };
+    }
+
+    write_to_daemon!(&HelperToDaemonMessage::Handshake {
+        pid: shared.pid,
+        start_time: shared.start_time,
+    });
 
     let (status, next_sequence) = shared.status_and_next_sequence();
     let mut last_sent_status = status;
@@ -543,7 +680,7 @@ async fn handle_connection(
     } else {
         HelperToDaemonMessage::Exit { status, next_sequence }
     };
-    write_ndjson(&mut *write_half.lock().await, &initial_message).await?;
+    write_to_daemon!(&initial_message);
 
     // CONTRACT (260723 Phase-1 review finding I1 - cross-restart backfill
     // gap): a fresh connection has nothing "already sent" from this
@@ -569,13 +706,32 @@ async fn handle_connection(
     };
     for chunk in initial_backfill {
         last_sent_sequence = last_sent_sequence.max(chunk.sequence);
-        write_ndjson(&mut *write_half.lock().await, &HelperToDaemonMessage::Output(chunk)).await?;
+        write_to_daemon!(&HelperToDaemonMessage::Output(chunk));
     }
 
     loop {
         tokio::select! {
             incoming = reader.read_message::<DaemonToHelperMessage>() => {
-                match incoming? {
+                // Same peer-gone rule as the writes above (finding F9): a
+                // connection reset mid-read is a departed peer, not a helper
+                // fault. A malformed line is NOT peer-gone and still
+                // propagates, preserving `NdjsonReader`'s "a malformed peer
+                // is a transport failure" contract.
+                let incoming = match incoming {
+                    Ok(incoming) => incoming,
+                    Err(error) if is_peer_gone(&error) => {
+                        tracing::debug!(
+                            %error,
+                            "terminal helper's daemon peer went away mid-read; ending this \
+                             connection and returning to the accept loop"
+                        );
+                        return Ok(ConnectionOutcome::Disconnected {
+                            attached: attachment.attached,
+                        });
+                    }
+                    Err(error) => return Err(error.into()),
+                };
+                match incoming {
                     // daemon disconnected; outer loop decides what's next
                     None => {
                         return Ok(ConnectionOutcome::Disconnected {
@@ -620,16 +776,12 @@ async fn handle_connection(
                             let ring = shared.ring.lock().expect("ring lock poisoned");
                             (ring.backfill_after(after), ring.next_sequence, ring.status)
                         };
-                        write_ndjson(
-                            &mut *write_half.lock().await,
-                            &HelperToDaemonMessage::BackfillResponse {
-                                request_id,
-                                chunks,
-                                next_sequence,
-                                status,
-                            },
-                        )
-                        .await?;
+                        write_to_daemon!(&HelperToDaemonMessage::BackfillResponse {
+                            request_id,
+                            chunks,
+                            next_sequence,
+                            status,
+                        });
                     }
                     // CONTRACT (260729 helper liveness probe): answered here
                     // too, not only on the concurrent probe arm. When NO
@@ -643,14 +795,10 @@ async fn handle_connection(
                     // attached, so it does not disturb `unattached_since`.
                     Some(DaemonToHelperMessage::LivenessProbe) => {
                         let (attached, unattached_for_ms) = shared.liveness_report();
-                        write_ndjson(
-                            &mut *write_half.lock().await,
-                            &HelperToDaemonMessage::LivenessProbeResponse {
-                                attached,
-                                unattached_for_ms,
-                            },
-                        )
-                        .await?;
+                        write_to_daemon!(&HelperToDaemonMessage::LivenessProbeResponse {
+                            attached,
+                            unattached_for_ms,
+                        });
                     }
                     Some(DaemonToHelperMessage::GracefulShutdown) => {
                         shared.kill_shell_if_running();
@@ -671,7 +819,7 @@ async fn handle_connection(
                 };
                 for chunk in pending {
                     last_sent_sequence = last_sent_sequence.max(chunk.sequence);
-                    write_ndjson(&mut *write_half.lock().await, &HelperToDaemonMessage::Output(chunk)).await?;
+                    write_to_daemon!(&HelperToDaemonMessage::Output(chunk));
                 }
                 if status_now != last_sent_status {
                     last_sent_status = status_now;
@@ -680,7 +828,7 @@ async fn handle_connection(
                     } else {
                         HelperToDaemonMessage::Exit { status: status_now, next_sequence }
                     };
-                    write_ndjson(&mut *write_half.lock().await, &message).await?;
+                    write_to_daemon!(&message);
                 }
             }
         }
@@ -1924,5 +2072,369 @@ mod liveness_probe_tests {
         assert_eq!(entry.start_time, 99);
         assert_eq!(entry.terminal_id, args.terminal_id);
         assert_eq!(entry.socket_path, args.socket_path);
+    }
+}
+
+// Regression coverage for 260729 review findings F9/F10, driven by a REAL
+// helper: `run_terminal_helper` itself, with its real registry write, real
+// listener, real PTY and a real shell child. The existing
+// `liveness_probe_tests` above drive `serve_connections` against a
+// hand-built `SharedState` with `shell_started` pre-flipped and no PTY at
+// all, which is exactly why they cannot see these defects - there is no
+// shell for a mis-fired `kill_shell_if_running()` to kill, no registry entry
+// for the exit path to delete, and every fixture write is `let _ = ...`, so
+// a write error is unobservable by construction.
+#[cfg(all(test, unix))]
+pub(crate) mod real_helper_test_support {
+    use super::*;
+    use crate::terminal_helper_ipc::write_ndjson;
+    use crate::terminal_ipc_transport::{IpcReadHalf, IpcWriteHalf};
+    use std::path::PathBuf;
+
+    /// A live `run_terminal_helper` task plus the on-disk state it owns.
+    pub(crate) struct RealHelper {
+        pub(crate) state_dir: PathBuf,
+        pub(crate) registry_dir: PathBuf,
+        pub(crate) terminal_id: String,
+        pub(crate) socket_path: PathBuf,
+        task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    }
+
+    /// A daemon-side connection to a `RealHelper`, split the way the daemon
+    /// splits it.
+    pub(crate) struct DaemonConnection {
+        pub(crate) reader: NdjsonReader<IpcReadHalf>,
+        pub(crate) writer: IpcWriteHalf,
+    }
+
+    impl DaemonConnection {
+        pub(crate) async fn read(&mut self) -> HelperToDaemonMessage {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                self.reader.read_message::<HelperToDaemonMessage>(),
+            )
+            .await
+            .expect("helper must answer without hanging")
+            .expect("helper read must not error")
+            .expect("helper must not EOF mid-conversation")
+        }
+    }
+
+    impl RealHelper {
+        /// Spawns the real helper with `sh -c <shell_command>` as its shell.
+        /// Returns once the helper has durably written its registry entry and
+        /// bound its listener, so no caller can race the bind.
+        pub(crate) async fn spawn(label: &str, shell_command: &str) -> Self {
+            // Short by necessity: `socket_path` is bound as a real Unix
+            // domain socket (sun_path caps at ~108 bytes).
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let state_dir = std::env::temp_dir()
+                .join(format!("wsd-rh-{label}-{}-{unique}", std::process::id()));
+            let registry_dir = state_dir.join("terminals");
+            std::fs::create_dir_all(&registry_dir).expect("create registry dir");
+            let terminal_id = format!("t_{label}");
+            let socket_path = registry_dir.join(format!("{terminal_id}.sock"));
+
+            let args = TerminalHelperArgs {
+                registry_dir: registry_dir.clone(),
+                terminal_id: terminal_id.clone(),
+                work_root_id: "wr-real".to_owned(),
+                cwd: std::env::temp_dir(),
+                cwd_hint: None,
+                title: "real helper".to_owned(),
+                columns: 80,
+                rows: 24,
+                socket_path: socket_path.clone(),
+                command: Some("sh".to_owned()),
+                command_args: vec!["-c".to_owned(), shell_command.to_owned()],
+                env_overlay: Vec::new(),
+                scrub_marker: Vec::new(),
+            };
+            let task = tokio::spawn(run_terminal_helper(args));
+
+            let helper = Self {
+                state_dir,
+                registry_dir,
+                terminal_id,
+                socket_path,
+                task,
+            };
+            for _ in 0..200 {
+                if helper.entry_exists() && helper.socket_path.exists() {
+                    return helper;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("real helper never wrote its registry entry and bound its socket");
+        }
+
+        pub(crate) fn entry_exists(&self) -> bool {
+            crate::terminal_registry_file::registry_entry_path(&self.registry_dir, &self.terminal_id)
+                .exists()
+        }
+
+        pub(crate) fn is_running(&self) -> bool {
+            !self.task.is_finished()
+        }
+
+        pub(crate) async fn connect(&self) -> DaemonConnection {
+            let stream = crate::terminal_ipc_transport::connect(&self.socket_path)
+                .await
+                .expect("connect to real helper");
+            let (read_half, writer) = crate::terminal_ipc_transport::split(stream);
+            DaemonConnection {
+                reader: NdjsonReader::new(read_half),
+                writer,
+            }
+        }
+
+        /// Full adoption sequence: `Handshake` + `Status` in, `HandshakeAck`
+        /// out - which is what spawns the shell.
+        pub(crate) async fn attach(&self) -> DaemonConnection {
+            let mut connection = self.connect().await;
+            assert!(
+                matches!(connection.read().await, HelperToDaemonMessage::Handshake { .. }),
+                "a real helper opens every connection with its Handshake"
+            );
+            let status = connection.read().await;
+            assert!(
+                matches!(status, HelperToDaemonMessage::Status { .. }),
+                "and follows it with a Status: {status:?}"
+            );
+            write_ndjson(&mut connection.writer, &DaemonToHelperMessage::HandshakeAck)
+                .await
+                .expect("write handshake ack");
+            connection
+        }
+
+        /// Connects and drops immediately without reading a byte - exactly
+        /// what a daemon-side reachability check used to do to a helper whose
+        /// registry entry declared no probe capability.
+        pub(crate) async fn connect_and_drop(&self) {
+            let stream = crate::terminal_ipc_transport::connect(&self.socket_path)
+                .await
+                .expect("connect to real helper");
+            drop(stream);
+        }
+
+        /// Ends the helper the way a daemon does, so the real exit path runs
+        /// and the shell child is reaped rather than leaked into the test
+        /// process.
+        pub(crate) async fn shutdown(self) {
+            if self.is_running() {
+                if let Ok(stream) = crate::terminal_ipc_transport::connect(&self.socket_path).await {
+                    let (_read_half, mut writer) = crate::terminal_ipc_transport::split(stream);
+                    let _ = write_ndjson(&mut writer, &DaemonToHelperMessage::GracefulShutdown).await;
+                }
+            }
+            let _ = tokio::time::timeout(Duration::from_secs(5), self.task).await;
+            let _ = std::fs::remove_dir_all(&self.state_dir);
+        }
+    }
+
+    /// A shell that keeps producing output forever, so "is the shell still
+    /// alive?" can be answered by observing NEW output rather than by
+    /// inferring it from the helper process still existing.
+    pub(crate) const TICKING_SHELL: &str =
+        "i=0; while true; do echo TICK$i; i=$((i+1)); sleep 0.1; done";
+
+    /// Reads until an `Output` chunk with a sequence strictly greater than
+    /// `after` arrives, returning its sequence. Panics on timeout, which is
+    /// the assertion: no new output means the shell is gone.
+    pub(crate) async fn read_output_past(connection: &mut DaemonConnection, after: u64) -> u64 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(Instant::now() < deadline, "no new output arrived from the shell");
+            if let HelperToDaemonMessage::Output(chunk) = connection.read().await {
+                if chunk.sequence > after {
+                    return chunk.sequence;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod real_helper_peer_loss_tests {
+    use super::real_helper_test_support::*;
+    use super::*;
+
+    // CONTRACT (260729 review finding F9-root, and the invariant the whole
+    // ticket rests on): A PEER GOING AWAY MUST NEVER KILL THE SHELL.
+    //
+    // This is the exact shape of the silent destruction the review found: a
+    // daemon connects to decide whether the helper is reachable and drops the
+    // connection without reading. The helper accepts, writes its `Handshake`
+    // into an already-closed peer, gets EPIPE - and before this fix that `?`
+    // unwound through `serve_connections` into `run_terminal_helper`'s exit
+    // path, which runs `kill_shell_if_running()` + `delete_registry_entry()`.
+    // The user's shell died and the entry that would have let anyone diagnose
+    // it was erased in the same breath. The periodic sweep did this every 10s.
+    //
+    // Fails against bff07caf: there the reconnect below cannot even connect,
+    // because the helper has already exited and unlinked its socket.
+    #[tokio::test]
+    async fn a_real_helper_survives_a_daemon_that_connects_and_drops_without_reading() {
+        let helper = RealHelper::spawn("drop", TICKING_SHELL).await;
+
+        // Attach once so the shell actually spawns, then leave - the helper
+        // is now unattached with a live shell, which is precisely the state
+        // the sweep finds another daemon's restarting terminal in.
+        let mut session = helper.attach().await;
+        let seen = read_output_past(&mut session, 0).await;
+        drop(session);
+
+        // The reachability check, three times over, exactly as the 10s sweep
+        // would repeat it.
+        for _ in 0..3 {
+            helper.connect_and_drop().await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            helper.is_running(),
+            "a helper must not exit because a peer connected and left"
+        );
+        assert!(
+            helper.entry_exists(),
+            "and it must not erase its own registry entry - without it the helper's real owner \
+             can never adopt it again, so sparing the process alone still destroys the terminal"
+        );
+
+        // The shell itself, not merely the helper process: NEW output past
+        // the sequence seen before the drops proves `kill_shell_if_running()`
+        // never ran.
+        let mut reattached = helper.attach().await;
+        let fresh = read_output_past(&mut reattached, seen).await;
+        assert!(
+            fresh > seen,
+            "the shell must still be producing output after the peer-gone writes"
+        );
+        drop(reattached);
+
+        helper.shutdown().await;
+    }
+
+    // The same invariant stated as behaviour rather than as survival: after a
+    // peer-gone write the helper must be back in its ACCEPT LOOP, able to
+    // serve the next daemon in full. "Did not die" and "can still be adopted"
+    // are separate properties - a helper that survived but stopped accepting
+    // would pass the test above and still be lost to its owner.
+    #[tokio::test]
+    async fn a_peer_gone_write_returns_the_real_helper_to_its_accept_loop() {
+        let helper = RealHelper::spawn("accept", TICKING_SHELL).await;
+        let session = helper.attach().await;
+        drop(session);
+
+        for _ in 0..5 {
+            helper.connect_and_drop().await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // A FULL adoption sequence, not merely a successful connect: the
+        // helper must still write `Handshake` + `Status` and accept a
+        // `HandshakeAck`.
+        let mut session = helper.attach().await;
+        let _ = read_output_past(&mut session, 0).await;
+        drop(session);
+
+        assert!(helper.is_running());
+        assert!(helper.entry_exists());
+        helper.shutdown().await;
+    }
+
+    // Non-vacuity for `is_peer_gone`: the downgrade is deliberately narrow.
+    // `NdjsonReader::read_message` turns a malformed line into an
+    // `io::Error` BY CONTRACT ("a malformed peer is treated as a transport
+    // failure, not silently skipped"), and that must stay fatal - if
+    // everything became non-fatal, the classification would be a no-op with
+    // the same observable behaviour as deleting the check.
+    #[test]
+    fn only_peer_gone_io_errors_are_downgraded() {
+        use std::io::{Error, ErrorKind};
+
+        for kind in [
+            ErrorKind::BrokenPipe,
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::NotConnected,
+            ErrorKind::UnexpectedEof,
+        ] {
+            assert!(
+                is_peer_gone(&Error::new(kind, "peer went away")),
+                "{kind:?} means the daemon is gone, which must never kill the shell"
+            );
+        }
+        for kind in [
+            ErrorKind::InvalidData,
+            ErrorKind::Other,
+            ErrorKind::PermissionDenied,
+            ErrorKind::OutOfMemory,
+        ] {
+            assert!(
+                !is_peer_gone(&Error::new(kind, "genuine failure")),
+                "{kind:?} is this helper's own problem and must stay fatal"
+            );
+        }
+        assert!(
+            !is_peer_gone(&Error::other(
+                serde_json::from_str::<serde_json::Value>("{bad").expect_err("malformed")
+            )),
+            "a malformed peer line is a protocol desync worth surfacing, not a departed peer"
+        );
+    }
+
+    // CONTRACT (260729 review finding F12): the probe arm's spawn is bounded,
+    // and the bound is BACKPRESSURE rather than shedding - every probe still
+    // gets answered. Dropping surplus connections would be worse than an
+    // unbounded spawn: daemon-side, a dropped probe reads as
+    // `ProbeVerdict::Unanswered`, which authorizes a SIGKILL.
+    #[tokio::test]
+    async fn every_probe_is_answered_even_past_the_concurrent_probe_bound() {
+        use crate::terminal_helper_ipc::write_ndjson;
+
+        let helper = RealHelper::spawn("bound", TICKING_SHELL).await;
+        // Hold a session open so every probe below is served by the
+        // CONCURRENT arm (the bounded one), not by `handle_connection`.
+        let session = helper.attach().await;
+
+        let probes = MAX_CONCURRENT_PROBE_CONNECTIONS * 3;
+        let mut tasks = Vec::new();
+        for _ in 0..probes {
+            let socket_path = helper.socket_path.clone();
+            tasks.push(tokio::spawn(async move {
+                let stream = crate::terminal_ipc_transport::connect(&socket_path)
+                    .await
+                    .expect("probe connect");
+                let (read_half, mut writer) = crate::terminal_ipc_transport::split(stream);
+                let mut reader = NdjsonReader::new(read_half);
+                write_ndjson(&mut writer, &DaemonToHelperMessage::LivenessProbe)
+                    .await
+                    .expect("write probe");
+                loop {
+                    let message = tokio::time::timeout(
+                        Duration::from_secs(10),
+                        reader.read_message::<HelperToDaemonMessage>(),
+                    )
+                    .await
+                    .expect("a queued probe must still be answered, never dropped")
+                    .expect("probe read")
+                    .expect("probe must be answered before EOF");
+                    if let HelperToDaemonMessage::LivenessProbeResponse { attached, .. } = message {
+                        return attached;
+                    }
+                }
+            }));
+        }
+        for task in tasks {
+            assert!(
+                task.await.expect("probe task"),
+                "every probe must report the session as attached"
+            );
+        }
+
+        drop(session);
+        helper.shutdown().await;
     }
 }
