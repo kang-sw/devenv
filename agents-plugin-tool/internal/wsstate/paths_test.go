@@ -240,6 +240,86 @@ func TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState(t *testing
 	}
 }
 
+// TestResolveTreatsSubmoduleWorkingTreesAsIndependentProjects covers the
+// submodule-root layout resolution contract: a submodule working tree
+// resolves as an independent single-worktree project (root == commonRoot,
+// so WorktreeKey carries no "@" suffix), both under a superproject's main
+// checkout and under a linked git worktree of that superproject. The two
+// submodule checkouts are expected to receive distinct ProjectKeys (accepted
+// side effect: each superproject worktree's submodule has its own
+// .git/worktrees/<wt>/modules/<sub> git-common-dir instance).
+func TestResolveTreatsSubmoduleWorkingTreesAsIndependentProjects(t *testing.T) {
+	superRepo, mainSubPath := initSubmoduleSuperproject(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	var mainProjectKey, linkedProjectKey string
+
+	t.Run("main worktree submodule", func(t *testing.T) {
+		layout, project, worktree, err := manager.Ensure(mainSubPath)
+		if err != nil {
+			t.Fatalf("Ensure(submodule) returned error: %v", err)
+		}
+		canonSub := canonicalForTest(t, mainSubPath)
+		if project.RootPath != canonSub {
+			t.Fatalf("submodule project root path = %q, want %q", project.RootPath, canonSub)
+		}
+		if worktree.WorktreePath != canonSub {
+			t.Fatalf("submodule worktree path = %q, want %q", worktree.WorktreePath, canonSub)
+		}
+		if worktree.WorktreeKey != project.ProjectKey {
+			t.Fatalf("submodule worktree key = %q, want project key %q (no @ suffix)", worktree.WorktreeKey, project.ProjectKey)
+		}
+		if strings.Contains(worktree.WorktreeKey, "@") {
+			t.Fatalf("submodule worktree key %q unexpectedly contains @", worktree.WorktreeKey)
+		}
+		if layout.WorktreeDir != layout.ProjectDir {
+			t.Fatalf("submodule worktree dir = %q, want project dir %q", layout.WorktreeDir, layout.ProjectDir)
+		}
+		mainProjectKey = project.ProjectKey
+	})
+
+	t.Run("submodule under superproject worktree", func(t *testing.T) {
+		superWorktreeParent := t.TempDir()
+		superWorktreePath := filepath.Join(superWorktreeParent, "super-feature")
+		runGit(t, superRepo, "worktree", "add", "-b", "feature/submodule-test", superWorktreePath, "HEAD")
+		runGit(t, superWorktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q")
+
+		linkedSubPath := filepath.Join(superWorktreePath, "sub")
+		layout, project, worktree, err := manager.Ensure(linkedSubPath)
+		if err != nil {
+			t.Fatalf("Ensure(linked submodule) returned error: %v", err)
+		}
+		canonSub := canonicalForTest(t, linkedSubPath)
+		if project.RootPath != canonSub {
+			t.Fatalf("linked submodule project root path = %q, want %q", project.RootPath, canonSub)
+		}
+		if worktree.WorktreePath != canonSub {
+			t.Fatalf("linked submodule worktree path = %q, want %q", worktree.WorktreePath, canonSub)
+		}
+		if worktree.WorktreeKey != project.ProjectKey {
+			t.Fatalf("linked submodule worktree key = %q, want project key %q (no @ suffix)", worktree.WorktreeKey, project.ProjectKey)
+		}
+		if strings.Contains(worktree.WorktreeKey, "@") {
+			t.Fatalf("linked submodule worktree key %q unexpectedly contains @", worktree.WorktreeKey)
+		}
+		if layout.WorktreeDir != layout.ProjectDir {
+			t.Fatalf("linked submodule worktree dir = %q, want project dir %q", layout.WorktreeDir, layout.ProjectDir)
+		}
+		linkedProjectKey = project.ProjectKey
+	})
+
+	if mainProjectKey == "" || linkedProjectKey == "" {
+		t.Fatal("subtests failed to populate project keys")
+	}
+	if mainProjectKey == linkedProjectKey {
+		t.Fatalf("submodule under superproject worktree reused main submodule project key %q", linkedProjectKey)
+	}
+}
+
 func TestResolveDoesNotRequireOriginRemote(t *testing.T) {
 	repo := initRepo(t)
 	if out := runGit(t, repo, "remote"); strings.TrimSpace(out) != "" {
@@ -300,6 +380,12 @@ func TestShortHashUsesEightCharacters(t *testing.T) {
 func initRepo(t *testing.T) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "devenv")
+	initRepoAt(t, repo)
+	return repo
+}
+
+func initRepoAt(t *testing.T, repo string) {
+	t.Helper()
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +397,27 @@ func initRepo(t *testing.T) string {
 	}
 	runGit(t, repo, "add", "README.md")
 	runGit(t, repo, "commit", "-m", "init")
-	return repo
+}
+
+// initSubmoduleSuperproject builds a superproject repo with a separate repo
+// added as a submodule at "sub", following the initRepo/runGit fixture
+// pattern above. The submodule addition is committed in the superproject:
+// a later `git worktree add` on the superproject checks out HEAD, and an
+// uncommitted submodule addition would leave that checkout without
+// .gitmodules/the submodule gitlink (confirmed empirically during survey).
+func initSubmoduleSuperproject(t *testing.T) (superRepo, subPath string) {
+	t.Helper()
+	base := t.TempDir()
+	superRepo = filepath.Join(base, "super")
+	subOrigin := filepath.Join(base, "sub-origin")
+
+	initRepoAt(t, superRepo)
+	initRepoAt(t, subOrigin)
+
+	runGit(t, superRepo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, "sub")
+	runGit(t, superRepo, "commit", "-m", "add sub submodule")
+
+	return superRepo, filepath.Join(superRepo, "sub")
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {

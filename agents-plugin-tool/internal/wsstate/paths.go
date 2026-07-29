@@ -236,11 +236,23 @@ func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err e
 	if err != nil {
 		return "", "", err
 	}
-	commonGitDir, err := git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	root, err = canonicalPath(root)
 	if err != nil {
 		return "", "", err
 	}
-	root, err = canonicalPath(root)
+	superprojectRoot, err := git(abs, "rev-parse", "--show-superproject-working-tree")
+	if err != nil {
+		return "", "", err
+	}
+	if superprojectRoot != "" {
+		// abs resolves inside a submodule's own working tree: treat the
+		// submodule as an independent single-worktree project (root ==
+		// commonRoot) rather than resolving its git-common-dir, which for a
+		// submodule lives under the parent's .git/modules tree and would
+		// otherwise fail commonRootFromGitDir's non-bare-.git guard.
+		return root, root, nil
+	}
+	commonGitDir, err := git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", "", err
 	}
