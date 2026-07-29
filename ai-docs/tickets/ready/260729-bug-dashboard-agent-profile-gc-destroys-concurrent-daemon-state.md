@@ -493,6 +493,75 @@ Verification, in order of load-bearing weight:
   above red. A change that can be reverted with the suite still green is not
   covered.
 
+### Result (bff07caf) - 2026-07-29
+
+All four steps landed in `ws-dashboard/crates/daemon/`. `cargo build` and
+`cargo test` pass (354 lib tests + all integration targets, 0 failures).
+
+**What the mechanism ended up being.** `DaemonToHelperMessage::LivenessProbe`
+/ `HelperToDaemonMessage::LivenessProbeResponse { attached,
+unattached_for_ms }`; a concurrent probe-only accept arm (`serve_session`)
+that `select!`s `listener.accept()` alongside the pinned `handle_connection`
+future and spawns `serve_probe_connection` — never `handle_connection` — for
+each accepted probe; new `SharedState::unattached_since`, flipped to `None`
+only by `HandshakeAck` and back by an `AttachmentGuard` on every exit route
+including the `?` ones; and `supportsLivenessProbe` in the registry entry,
+`#[serde(default)]`, absent = predates the probe.
+
+Daemon side: `connect_and_handshake` returns `HandshakeOutcome`
+(`Connected`/`NoListener`/`ConnectedButSilent`) instead of a bare `Option`;
+`IpcStatus::Unreachable` split into `NoListener` + `ConnectedButSilent`;
+`classify` takes `Option<ProbeVerdict>` and gained `ReconcileRow::Leave`;
+`probe_authorizes_reclaim` is the single predicate shared by `classify`, the
+sweep and the GC. `UNATTACHED_GRACE` is 120s.
+
+**Two things the plan did not anticipate.**
+
+- `handle_connection` had to answer the probe as well. When no session is
+  attached there is no session future for the concurrent arm to run
+  alongside, so the probe lands as an ordinary connection — and that is
+  exactly the case the "unattached past the grace" leg depends on being
+  answerable at all. Consequence: the grace-window "one reattach, then
+  self-exit" break is now gated on `attached`, so another daemon's probe
+  cannot consume the reattach the helper's real owner is coming back for.
+- `#[serde(rename_all = "camelCase")]` on these tagged enums renames
+  *variants* only, not struct-variant fields, so the wire has always carried
+  `start_time`/`next_sequence` in snake_case. Pinned literally by
+  `pre_probe_variant_tags_are_unchanged_by_the_appended_probe_variants`.
+
+**Non-vacuity.** Each of the four changes was mutation-verified: reverting
+the concurrent arm turns `a_probe_is_answered_while_a_session_is_attached`
+red; reverting `classify`'s `ConnectedButSilent` arm or the sweep's probe
+gate turns
+`a_helper_attached_to_another_daemon_survives_boot_reconcile_and_the_sweep`
+red; reverting the GC gate turns
+`the_profile_gc_spares_a_helper_that_is_attached_to_another_daemon` red.
+
+**The three consequences Decisions asked to be stated here, restated as
+landed:**
+
+1. A helper that wedges *while attached* reports itself attached forever and
+   is now unreclaimable by Sites A and B. Explicit `terminate()` (Site D)
+   still reclaims it. This narrows one of the three cases the kill path was
+   justified by, and is the deliberate price of not killing on a
+   self-reported attached state.
+2. `UNATTACHED_GRACE` (120s) supersedes `EVICTION_BACKSTOP_GRACE` (30s): an
+   evicted helper that fails to self-exit lingers for the longer window.
+3. Pre-upgrade helpers are spared unconditionally while attached, with no
+   expiry, and nothing this phase puts on the wire can reach them —
+   `a_helper_that_predates_the_probe_is_left_alone_and_never_sent_one`
+   asserts zero bytes received. Do not close this with a version-based kill.
+
+**Still open (not this phase):** Phase 2 owns both falsified CONTRACTs — only
+the sweep's *liveness* CONTRACT was rewritten here, as step 3 required; the
+`DAEMON_GRACE_WINDOW_MS` "authoritative timer ... self-exits independently"
+claim and the sweep's eviction-grace rationale are untouched. The Spec Impact
+section is also untouched: the new anchor and the
+`{#260728-terminal-helper-periodic-reap}` amendment (with its compatibility
+qualifier) still need writing, and must be reconciled with
+`260729-bug-dashboard-macos-terminal-socket-path-and-eperm-gaps` Phase 2,
+which restates the same reap predicate.
+
 ### Phase 2: Correct the two CONTRACTs this ticket falsified
 
 Doc-only, no behaviour change.
