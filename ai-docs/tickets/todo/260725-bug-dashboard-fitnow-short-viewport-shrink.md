@@ -84,6 +84,50 @@ The failure was deterministic across all 4 runs that reached the step —
 not a timing flake, despite the fixed `waitForTimeout(800)` making that a
 plausible first guess.
 
+## Linux reproduction and root cause (2026-07-29)
+
+Reproduced on Linux while restoring the acceptance gate after the terminal
+status-bar removal (PR #7, `goal/ws-dashboard-dev/copper-heron-vale`). Same
+step, same failure mode, different numbers: `expect(shortRows).toBe(56)` →
+received **3**. This answers the first open question below — **the defect is
+not macOS-specific**, and the socket-path fix unmasked it rather than the
+platform causing it.
+
+Viewport-height sweep on Linux (terminal surface floors at **65px**, the
+Dockview minimum):
+
+| viewport height | settled rows |
+| --- | --- |
+| 200px | 6 |
+| 160 / 140 / 120px | 3 |
+| 100 / 80 / 60px | **1** |
+
+Two conclusions follow, and they pull in opposite directions:
+
+1. **The step's contract is unsatisfiable as written.** No viewport height
+   reproduces "preserve the last-good size" — the terminal always refits.
+   Relaxing the strict-equality expectation locally does not rescue the step
+   either: at 3 rows the viewport shows only the prompt, so the *next*
+   assertion fails because `CLEAR-FIX-LINE-40` has scrolled into scrollback.
+   The whole step needs rewriting, not a threshold tweak.
+2. **There is a genuine product defect underneath.** At ≤100px the emulator
+   still reaches 1 row — precisely the state
+   `260707-bug-dashboard-terminal-clears-on-tab-switch` set out to prevent.
+   Mechanism located: `fitNow()`'s early-return guard only rejects proposals
+   of `rows <= 1`, but the post-fit
+   `while (rows > 1 && !terminalScreenFitsVisibleBox(...)) resize(rows - 1)`
+   shrink loop runs *after* that guard and is not covered by it. The guard
+   protects the proposal and then the loop walks the emulator down anyway.
+
+So the answer to "does the guard trip on the wrong threshold" is: the guard's
+threshold is fine, but it is not the only path to a degenerate size.
+
+Resolving this needs a product decision that this filing pass did not make:
+whether a pane too short to hold its last-good size should **preserve that
+size** (and clip/scroll) or **fit the pane** (and shrink). The pane-fill
+assertions elsewhere in the same spec constrain that choice, so the two must
+be settled together.
+
 ## Impact
 
 This failure red-lights the entire browser acceptance gate for every
@@ -107,10 +151,20 @@ assertion at
 `ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts:3696` passes on
 macOS. Open questions to resolve as part of this phase:
 
-- Did the `fitNow()` guard regress after
+- ~~Did the `fitNow()` guard regress after
   `260707-bug-dashboard-terminal-clears-on-tab-switch` landed, or was it
   never exercised/correct on macOS (i.e. this is a pre-existing platform
-  gap that the socket-path fix simply unmasked)?
-- Is 47 rows a stable settled value for a 160px-tall viewport (suggesting
-  the guard trips on the wrong threshold), or itself a partial/racy state?
+  gap that the socket-path fix simply unmasked)?~~ **Answered 2026-07-29** —
+  not platform-specific; reproduces identically on Linux. See the Linux
+  reproduction section above.
+- ~~Is 47 rows a stable settled value for a 160px-tall viewport (suggesting
+  the guard trips on the wrong threshold), or itself a partial/racy state?~~
+  **Answered 2026-07-29** — stable and deterministic, and the threshold is
+  not the problem: the post-fit shrink loop bypasses the guard entirely.
+- **Open, and blocking**: should a pane too short for its last-good size
+  preserve that size (clip/scroll) or fit the pane (shrink)? The step's
+  strict-equality contract assumes the former; the observed behaviour and the
+  spec's own pane-fill assertions assume the latter. Settle this before
+  touching either the guard or the gate, and rewrite the step to match —
+  relaxing its expectation alone leaves the following assertion failing.
 

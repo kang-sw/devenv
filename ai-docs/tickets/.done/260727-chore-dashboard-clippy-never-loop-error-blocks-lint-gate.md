@@ -2,6 +2,7 @@
 title: A vestigial loop in the attention SSE stream keeps cargo clippy permanently red
 related:
   260726-bug-dashboard-terminal-notify-silent-failure-no-expiry: surfaced while running clippy as a verification step for that phase
+completed: 2026-07-29
 ---
 
 # A vestigial loop in the attention SSE stream keeps cargo clippy permanently red
@@ -67,3 +68,22 @@ iterate.
 - Note the run also reports 16 ordinary clippy warnings in the daemon lib. They
   are out of scope here; this ticket is only about the one error that makes the
   command fail.
+
+
+## Resolution (2026-07-29)
+
+Fixed during the `47314c17` merge reconciliation, as a prerequisite rather than a
+goal: that merge mandated a green `cargo clippy --all-targets`, and this
+deny-by-default `clippy::never_loop` in the attention SSE stream
+(`agent_attention.rs`) was what kept the gate permanently red.
+
+The vestigial `loop` had every arm terminal, so removing it is
+semantics-preserving.
+
+Verified on the reconciled tree: `cargo clippy --all-targets` from
+`ws-dashboard/crates/daemon` finishes with 0 errors and 0 `never_loop`
+occurrences. Remaining output is warnings only, all pre-existing — checked
+against a baseline that emits the same count.
+
+The lint gate can now actually gate a phase, which is what this ticket asked
+for.

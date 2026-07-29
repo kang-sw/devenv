@@ -57,3 +57,32 @@ Run `dashboard-acceptance.spec.ts` to completion under the DOM renderer and
 under the WebGL renderer, and diff the failure sets. The 38 figure is a grep
 count; the real number of assertions that cannot survive the renderer change
 is unknown and is the input this decision actually needs.
+
+## Option 2 taken provisionally - 2026-07-29
+
+Recorded here because this ticket asked that the choice not be left implicit in
+a config flag.
+
+While restoring the acceptance gate after the terminal status-bar removal
+(`e946eb63`, PR #7), the `.xterm-rows` breakage blocked every downstream step and
+was pinned to the DOM renderer via `addInitScript` setting
+`gpuAcceleration: false`, mirroring what `altScreenRootSwitch.spec.ts` already
+did. The spec carries an explaining comment at the pin site.
+
+**This was expedient, not a considered answer to the decision above.** The cost
+option 2 was flagged as carrying is now real: the acceptance suite no longer
+exercises the renderer that ships. Every `.xterm-rows` assertion in the file now
+proves something about a renderer users do not get by default.
+
+Two things this does resolve:
+
+- The blast-radius question is partly answered. With the pin in place the file
+  now runs to completion, so the `.xterm-rows` assertions are no longer masked by
+  an early abort. The remaining failure is unrelated (see
+  `260725-bug-dashboard-fitnow-short-viewport-shrink`). The "diff the failure
+  sets" experiment still has not been run under WebGL.
+- The `altScreenRootSwitch.spec.ts` precedent means two specs now pin the DOM
+  renderer independently. If option 1 is ever chosen, both need re-anchoring.
+
+The ticket stays open. Option 1 remains the answer that keeps this suite an
+acceptance suite.

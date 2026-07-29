@@ -219,7 +219,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260722-feat-dashboard-hint-click-fast-jump` | todo | Vimium/flash/leap-style hint-click fast-jump over the full visible viewport, performance-gated |
 | `260722-refactor-dashboard-app-tsx-state-decomposition` | todo | Decompose App.tsx: untangle the WorkbenchShell/App() state core (design-gated) |
 | `260725-bug-dashboard-e2e-harness-destroys-daemon-diagnostics` | todo | e2e browser-acceptance harness drains and discards the daemon's stdout/stderr instead of preserving diagnostics for failure analysis |
-| `260725-bug-dashboard-fitnow-short-viewport-shrink` | todo | macOS short-viewport regression gate fails: `fitNow()` shrinks the terminal to 47 rows instead of holding 120 |
+| `260725-bug-dashboard-fitnow-short-viewport-shrink` | todo | Short-viewport regression gate fails: `fitNow()` shrinks the terminal partway instead of holding its last-good size — reproduced on Linux too (56 -> 3), root cause is the post-fit shrink loop bypassing the guard; blocked on a preserve-vs-fit product decision |
 | `260725-bug-dashboard-terminal-create-failure-silent` | todo | Terminal creation failure is invisible in the UI: a failed `create_terminal` call is swallowed with no toast, console error, or state change |
 | `260725-epic-ws-dashboard-git-panel` | todo | New git panel epic: `Files \| Git` tabbar with a log graph (UI 1), a GitHub/GitLab-style diff view (UI 2), and local review comments, also birthing the dashboard-local design guide |
 | `260725-feat-workspace-workroot-alias` | todo | Add a client-side, user-editable alias overriding workspace/workroot nav labels, introducing the scope-tagged prefs registry other client prefs stores will fold into |
@@ -230,7 +230,10 @@ dropped tickets live in hidden archive dirs and git history.
 | `260725-feat-xterm-ligatures` | todo | Add xterm.js font ligature (`->`, `=>`, `!=` etc.) rendering support to the dashboard terminal |
 | `260725-refactor-unwire-agents-activity-badge` | todo | Cut the always-on workroot activity ("agents") badge fetch while leaving its rendering/projection logic dormant in the tree for possible future revival |
 | `260726-refactor-dashboard-worktree-git-spawns-through-exec-seam` | todo | Route `git_worktree.rs`'s 8 direct git spawns through the `git_exec` seam so they are bounded and counted, the deferred remainder of the fs-watch invalidation Phase 1 seam |
-| `260726-refactor-ws-dashboard-long-uptime-leak-hardening` | todo | Harden long-uptime resource leaks (terminal reaper, git-invocation policy, bounded maps) found in a four-surface handle/process/subscriber audit |
+| `260729-bug-dashboard-agent-callback-url-uses-bound-interface` | todo | Agent callback base URL is built from the bound interface, so a public bind POSTs the per-terminal bearer token in cleartext and `0.0.0.0` breaks the hook on Windows |
+| `260729-bug-dashboard-agent-profile-gc-destroys-concurrent-daemon-state` | todo | `agent_profile_gc` reclaims a second daemon's live agent profiles and tokens under a shared state dir, and the escalation meant to surface it is structurally silent |
+| `260729-bug-dashboard-attention-tier-and-notification-optin-gaps` | todo | Tier 1 flashes "Attention needed" for `working` while Tier 2 excludes it, and a dismissed permission prompt leaves the notification opt-in persisted |
+| `260729-bug-dashboard-macos-terminal-socket-path-and-eperm-gaps` | todo | macOS terminal helper: `sun_path` 104-byte ceiling unguarded in production, and a cross-user `EPERM` drops the registry entry while the helper lives on unreclaimable |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -300,10 +303,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260726-idea-dashboard-resources-poll-eagerly-prunes-unavailable-work-roots` | idea | `/api/dashboard/resources` eagerly unregisters an unavailable, no-active-child work root on every poll, which a caller expecting a stable 409 does not expect |
 | `260727-bug-dashboard-notification-toggle-enabled-without-api` | idea | Notifications toggle stays enabled and never reconciles in a SECURE context whose browser has no `Notification` global; deferred sibling of `260726` Phase 2, whose disable decision was scoped to insecure origins only |
 | `260727-bug-dashboard-tab-strip-scroll-swallows-close-click` | idea | Deferred sibling of `260726`: tab-strip scroll on activation may swallow the close click on an overflowing workbench tab strip; verified in dockview source, never reproduced in a browser |
-| `260727-chore-dashboard-clippy-never-loop-error-blocks-lint-gate` | idea | A vestigial loop in the attention SSE stream keeps `cargo clippy -p ws-dashboard-daemon --all-targets` permanently red, so clippy cannot gate any phase |
 | `260727-chore-dashboard-e2e-helper-modules-never-type-checked` | idea | `tsconfig.e2e-tests.json` includes only `daemonHarness.*`, so shared e2e helper modules and every `*.spec.ts` are type-checked by no script in `package.json` |
 | `260728-bug-dashboard-acceptance-xterm-rows-assertions-blind-under-webgl-renderer` | idea | Dashboard e2e: the acceptance suite's `.xterm-rows` assertions cannot see terminal text once the WebGL/canvas renderer is active |
-| `260728-bug-dashboard-terminal-eviction-leaks-callback-token` | idea | `TerminalRegistry::insert`'s eviction path leaks the evicted terminal's callback token |
 
 ## Ticket Focus
 
