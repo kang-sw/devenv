@@ -98,6 +98,11 @@ statusline. It reports model, cost, context usage, output tokens, elapsed
 duration, rate-limit timing, cache hit state, Git status, and line delta
 information.
 
+It also reports when output tokens last changed, as an absolute clock time and
+a relative age. That timestamp is read from the transcript file the status JSON
+points at rather than from persisted state, so it degrades to a placeholder when
+the transcript is unreadable instead of failing the render.
+
 ## Developer Claude Plugin Config Install {#260505-developer-claude-plugin-config-install}
 
 The installer integrates local ws plugin configuration for this development

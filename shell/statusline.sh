@@ -92,14 +92,31 @@ PCT=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.1f\", $TOKENS_USED / $CTX_MAX * 
 
 # Cache hit rate: cache_read / (cache_read + cache_creation)
 CACHE_TOTAL=$((CACHE_READ + CACHE_CREATE))
-CACHE_HIT=$(awk "BEGIN { if ($CACHE_TOTAL > 0) printf \"%.1f\", $CACHE_READ / $CACHE_TOTAL * 100; else print \"\" }")
+# Guard in the shell, not inside the awk program: gawk constant-folds the
+# literal 0 / 0 at parse time and errors even when the branch is unreachable.
+CACHE_HIT=""
+if [ "$CACHE_TOTAL" -gt 0 ]; then
+  CACHE_HIT=$(awk "BEGIN { printf \"%.1f\", $CACHE_READ / $CACHE_TOTAL * 100 }")
+fi
 
 # Last assistant-turn timestamp (for the "output tokens last updated" pill) —
 # read from the transcript itself; no separate state/cache file needed since
 # the transcript already records when output_tokens last changed.
+#
+# Separators are normalized here rather than at the DIR/PROJECT_DIR block far
+# below, because this path is consumed immediately and Windows hands it over
+# backslash-separated like the other paths in the same payload.
+#
+# Read forward (tail | jq | tail) rather than reversed (tac | head | jq | head):
+# tac is absent on macOS, and reversing puts the newest line first, so a single
+# partially-written line — normal while the transcript is being appended to —
+# aborts jq before any timestamp is emitted and blanks the pill.
+TRANSCRIPT_PATH="${TRANSCRIPT_PATH//\\//}"
 LAST_MSG_ISO=""
 if [[ -n $TRANSCRIPT_PATH && -r $TRANSCRIPT_PATH ]]; then
-  LAST_MSG_ISO=$(tac "$TRANSCRIPT_PATH" 2>/dev/null | head -n 30 | jq -r 'select(.timestamp != null) | .timestamp' 2>/dev/null | head -n 1)
+  LAST_MSG_ISO=$(tail -n 30 "$TRANSCRIPT_PATH" 2>/dev/null |
+    jq -r 'select(.type == "assistant" and .timestamp != null) | .timestamp' 2>/dev/null |
+    tail -n 1)
 fi
 
 # ═══════════════════════════════════════════════════════════
@@ -257,6 +274,8 @@ if [[ -n $LAST_MSG_ISO ]]; then
     _upd_mins=$(((_upd_elapsed % 3600) / 60))
     if [ "$_upd_hrs" -gt 0 ]; then
       LAST_UPD_REL="${_upd_hrs}h ${_upd_mins}m ago"
+    elif [ "$_upd_mins" -eq 1 ]; then
+      LAST_UPD_REL="1 min ago"
     else
       LAST_UPD_REL="${_upd_mins} mins ago"
     fi

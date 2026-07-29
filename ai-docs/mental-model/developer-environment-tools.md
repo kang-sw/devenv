@@ -25,7 +25,7 @@ related:
 - `shell/scripts` is symlinked as `~/.devenv-scripts`; tmux config hardcodes that path for helper execution. {#260505-developer-dotfile-symlink-management}
 - tmux Claude activity is daemon-driven: tmux reads `@claude-indicator`, while `tmux-claude-watcher.sh` writes it. Per-statusline polling defeats the batching contract. {#260505-tmux-claude-activity-watcher}
 - Cross-window tmux/Neovim navigation is opt-in through `TMUX_ENABLE_PANE_NAVIGATION_OVER_WINDOW=1`. {#260505-tmux-helper-scripts}
-- `claude-watch` and `claude-dash` both depend on Claude JSONL session shape; parser changes should check both crates.
+- `claude-watch`, `claude-dash`, and `statusline.sh` all depend on Claude JSONL session shape; parser changes should check both crates and the statusline. The statusline reads `.type` and `.timestamp` off the transcript and degrades to a placeholder on any miss, so a shape change breaks it without an error. {#260505-claude-statusline-script}
 
 ## Coupling
 
@@ -46,6 +46,10 @@ related:
 - Editing installed dotfiles or plugin cache directly instead of repo sources.
 - Adding tmux helpers outside `shell/scripts` and breaking hardcoded tmux paths.
 - Changing `claude-watch` list layout without updating mouse hit-test math.
+- Consuming a new path field from the statusline's status JSON without
+  normalizing `\` to `/` at the point of use → silently broken under Git Bash.
+  The existing `DIR`/`PROJECT_DIR` normalization sits far below the extraction
+  block, so it does not cover fields read earlier.
 - Treating native Windows `claude-dash` behavior as verified; it remains
   unverified and is no longer active development scope.
 
