@@ -545,25 +545,29 @@ func renderBlockedSection(today string, sections []blockedReviewerSection) strin
 }
 
 // appendOrReplaceBlockedSection appends the rendered Blocked section at the end
-// of the ticket body, replacing any prior "## Blocked (" section (they are
-// always appended last, so a prior one is truncated from its heading to EOF).
+// of the ticket body, first excising any prior "## Blocked (" section. A prior
+// section is not reliably last: a lead records what changed while the ticket
+// waited by adding "## " sections after it, so excision runs from the Blocked
+// heading only up to the next "## " heading (or EOF when it is genuinely last).
+// Truncating to EOF instead would delete that later, unrelated content. Every
+// prior Blocked section is excised rather than only the first, so a hand-placed
+// duplicate cannot survive as a stale blocker beside the fresh one.
 func appendOrReplaceBlockedSection(path, section string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	text := string(raw)
-	lines := strings.Split(text, "\n")
-	cut := -1
-	for i, line := range lines {
-		if strings.HasPrefix(line, "## Blocked (") {
-			cut = i
-			break
+	lines := strings.Split(string(raw), "\n")
+	kept := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "## Blocked (") {
+			kept = append(kept, lines[i])
+			continue
+		}
+		for i+1 < len(lines) && !strings.HasPrefix(lines[i+1], "## ") {
+			i++
 		}
 	}
-	if cut >= 0 {
-		text = strings.Join(lines[:cut], "\n")
-	}
-	body := strings.TrimRight(text, "\n")
+	body := strings.TrimRight(strings.Join(kept, "\n"), "\n")
 	return os.WriteFile(path, []byte(body+"\n\n"+section+"\n"), 0o644)
 }

@@ -601,6 +601,98 @@ func TestSageRecordBlockedSectionReplacedOnSecondCycle(t *testing.T) {
 // TestSageGateCombinedSeparateAsks pins FIX 1: in combined mode each recommended
 // stage gets its own ask (design first) and the supplied answer never leaks from
 // one stage to the other.
+// TestAppendOrReplaceBlockedSectionExcisesOnlyItsOwnSection pins that excising a
+// prior Blocked section never removes the content that follows it. The
+// "later-sections-survive" case is shaped like
+// ai-docs/tickets/ready/260726-bug-inline-playbook-invocation-commit-ownership.md,
+// where a lead recorded two "## " sections after the Blocked section.
+func TestAppendOrReplaceBlockedSectionExcisesOnlyItsOwnSection(t *testing.T) {
+	const section = "## Blocked (2026-07-29)\n\n### Design Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | fresh | high |"
+	const header = "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n"
+	const prior = "## Blocked (2026-07-27)\n\n### Design Reviewer — block\n\n| # | Title | Severity |\n|---|-------|----------|\n| 1 | stale | high |\n"
+	const later = "## Landing-order inversion (2026-07-28)\n\nLater note one.\n\n## Category C dissolved (2026-07-28)\n\nLater note two.\n"
+
+	cases := []struct {
+		name  string
+		start string
+		want  string
+	}{
+		{
+			name:  "no-prior-blocked-appends",
+			start: header,
+			want:  header + "\n" + section + "\n",
+		},
+		{
+			name:  "no-prior-blocked-keeps-trailing-newline-normalization",
+			start: header + "\n\n\n",
+			want:  header + "\n" + section + "\n",
+		},
+		{
+			name:  "prior-blocked-last-is-replaced",
+			start: header + "\n" + prior,
+			want:  header + "\n" + section + "\n",
+		},
+		{
+			name:  "later-sections-survive",
+			start: header + "\n" + prior + "\n" + later,
+			want:  header + "\n" + later + "\n" + section + "\n",
+		},
+		{
+			name:  "multiple-prior-blocked-sections-all-excised",
+			start: header + "\n" + prior + "\n" + later + "\n" + prior,
+			want:  header + "\n" + later + "\n" + section + "\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			rel := filepath.Join("ai-docs", "tickets", "ready", "260101-bug-sample.md")
+			mustWrite(t, root, rel, tc.start)
+			path := filepath.Join(root, rel)
+			if err := appendOrReplaceBlockedSection(path, section); err != nil {
+				t.Fatalf("appendOrReplaceBlockedSection: %v", err)
+			}
+			if got := readFileString(t, path); got != tc.want {
+				t.Fatalf("body mismatch:\ngot:\n%q\nwant:\n%q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSageRecordSecondBlockKeepsLaterSections is the end-to-end shape of the
+// data loss: a second block verdict on a ticket whose Blocked section is not
+// last must not delete the sections written after it.
+func TestSageRecordSecondBlockKeepsLaterSections(t *testing.T) {
+	root := t.TempDir()
+	path := writeSageTicket(t, root, "260101-bug-later", map[string]string{"sage-review-design": "required"})
+	record := func(title string) {
+		t.Helper()
+		if _, err := SageRecord(root, SageRecordOptions{
+			TicketStem: "260101-bug-later", Stage: "design", Today: "2026-07-29",
+			Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "block", Issues: []SageIssue{{Title: title, Severity: "high", Resolution: "missing"}}}},
+		}); err != nil {
+			t.Fatalf("SageRecord %s: %v", title, err)
+		}
+	}
+	record("first")
+
+	const later = "## Landing-order inversion (2026-07-28)\n\nLater note one.\n\n## Category C dissolved (2026-07-28)\n\nLater note two.\n"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", "260101-bug-later.md"), readFileString(t, path)+"\n"+later)
+
+	record("second")
+
+	body := readFileString(t, path)
+	if !strings.Contains(body, later) {
+		t.Fatalf("later sections did not survive verbatim:\n%s", body)
+	}
+	if strings.Count(body, "## Blocked (") != 1 || strings.Contains(body, "first") || !strings.Contains(body, "second") {
+		t.Fatalf("prior Blocked section not replaced exactly once:\n%s", body)
+	}
+	if strings.Index(body, later) > strings.Index(body, "## Blocked (") {
+		t.Fatalf("new Blocked section should be appended after the later sections:\n%s", body)
+	}
+}
+
 func TestSageGateCombinedSeparateAsks(t *testing.T) {
 	newTicket := func(t *testing.T) (string, string) {
 		root := t.TempDir()
