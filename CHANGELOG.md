@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.37.2 - 2026-07-29
+
+### Changed
+- **A delegate's own session may now be continued instead of always being
+  respawned.** `lead-prefer-subagent` said a standing role "always takes a fresh
+  spawn — this is unconditional". That over-reached: the rule it came from
+  deleted the *fork* construct, which inherited the **lead's** conversation, and
+  never indicted continuing a delegate's **own** session. The absolute was
+  conflicting with three live surfaces — the same skill's authoring whitelist,
+  which already sanctioned "the delegated subagent's own continuing session";
+  the runtime-injected continuity tip, which tells the lead to reuse an agent id
+  rather than respawn; and the rule that delegated review fixes return to the
+  implementer that wrote the code. "Always takes" is now "opens with", so a
+  standing role's *first* spawn stays unconditionally fresh and the anti-fork
+  guarantee is untouched, while later turns may continue.
+
+  Continuation is scoped by **work-item identity, not role fit**: continue when
+  the instruction is the same work item that delegate already owns — a review
+  finding relayed back to its implementer, a widened query to the explorer that
+  ran it, a gap filled by the survey agent that produced it. Open a fresh spawn
+  when the work item is new, or when the judgment must not inherit the prior
+  agent's conclusion, such as an independent review verdict or a re-check of a
+  claim that agent itself made. A role-fit test would have allowed handing
+  ticket B to the implementer that just finished ticket A, dragging A's context
+  across a work boundary — the same contamination class fork was deleted for.
+
+  Deliberately not added: agent-id bookkeeping prose, which the runtime
+  continuity tip already delivers at the point of need, and long-running-session
+  retirement prose, which has no reliable signal for the lead to act on yet.
+
+### Fixed
+- **The workflow-skills spec no longer claims a single delegation carve-out.**
+  Its posture paragraph scoped "the sole carve-out" to freshness, which stopped
+  being true once continuation landed. It now records two carve-outs on distinct
+  axes — durable-artifact authoring governs *who* authors, continuation governs
+  *when* an existing delegate is reused — and drops the "two clean delegation
+  poles" framing. Collapsing those axes is what let the same absolute read true
+  in the skill body and false in the spec.
+
 ## v0.37.1 - 2026-07-29
 
 ### Fixed
