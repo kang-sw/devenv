@@ -26,6 +26,9 @@ jobs:
   build:
     name: Build ws-mcp assets
     runs-on: ubuntu-latest
+    # Normal duration ~3 min. Without a cap, a hung step burns runner time while
+    # the run still reads as in-progress (see windows-smoke below).
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: agents-plugin-tool
@@ -89,6 +92,10 @@ jobs:
   windows-smoke:
     name: Windows ws-mcp smoke
     runs-on: windows-latest
+    # Normal duration ~6 min. On the v0.37.2 run (30427222116) `go test ./...`
+    # hung here for 46 min and died without uploading logs; a re-run of the same
+    # commit passed in 6m21s. A cap turns that flake into a fast, legible failure.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: agents-plugin-tool
