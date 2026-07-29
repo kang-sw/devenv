@@ -19,6 +19,23 @@ use crate::terminal::TerminalRegistry;
 /// the router's own copy.
 pub fn spawn(registry: TerminalRegistry, interval: Duration) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // RECORDED, NOT FIXED (260729 review round 4, finding 7 - the
+        // reaper-starvation half): `sweep_once` is serial and probes each
+        // unaccounted-for entry, so an entry that always yields
+        // `ProbeVerdict::Abandoned` costs up to its connect budget plus
+        // `PROBE_EXCHANGE_TOTAL_TIMEOUT` (20.8s) on EVERY tick - far longer
+        // than this interval. `tokio::time::interval` defaults to
+        // `MissedTickBehavior::Burst`, so the ticks missed while a sweep ran
+        // long then fire back to back with no delay, and the sweeps behind a
+        // pathological entry queue up rather than being skipped.
+        //
+        // Deliberately left alone here: the safe fixes (a `Delay`/`Skip` miss
+        // behaviour, or bounding the sweep in aggregate the way
+        // `boot_reconcile` now is) change reap timing, which is observable
+        // behaviour and belongs to a phase that owns the reap predicate. The
+        // exposure is bounded - a starved sweep DELAYS reclamation, it never
+        // reclaims anything wrongly, and nothing here can kill a helper on its
+        // own.
         let mut ticker = tokio::time::interval(interval);
         loop {
             ticker.tick().await;

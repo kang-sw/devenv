@@ -195,6 +195,27 @@ pub enum ProbeVerdict {
     /// manufacture a SIGKILL out of the daemon's own impatience - the same
     /// mistake finding F10 corrected for the connect budget, one level up.
     Abandoned,
+    /// CONTRACT (260729 review round 4, finding 6): the probe connection
+    /// carried something this daemon could not read - a decode failure, a
+    /// non-UTF-8 line, or an I/O fault on the socket
+    /// (`terminal_helper_ipc::PeerFault`, any variant).
+    ///
+    /// This is the DAEMON-SIDE MIRROR of the invariant round 3 made structural
+    /// helper-side: no fault attributable to the peer's connection may be
+    /// escalated into ending the peer. It used to fall into `Unanswered`, i.e.
+    /// into a SIGKILL, and it is reachable today rather than theoretically:
+    /// `HelperToDaemonMessage` has no `#[serde(other)]`, so a NEWER helper's
+    /// variant is undecodable by an OLDER daemon, and a daemon rollback is the
+    /// realistic trigger. A healthy helper answering in a dialect this build
+    /// does not know is not evidence that it is dead - it is evidence that the
+    /// two builds disagree.
+    ///
+    /// Deliberately covers I/O faults too, not just decode faults. Splitting
+    /// them would mean deciding by `io::ErrorKind` again, which is exactly the
+    /// mistake round 3 finding A removed from the helper side; and nothing is
+    /// lost by it, because a helper that is genuinely gone yields either a
+    /// clean EOF (`Unanswered`) or no listener at all on the next sweep.
+    PeerFaulted,
 }
 
 /// CONTRACT (260729): the unattached window a helper must clear before it
@@ -242,7 +263,8 @@ pub fn probe_authorizes_reclaim(probe: ProbeVerdict) -> bool {
         ProbeVerdict::Unsupported
         | ProbeVerdict::Attached
         | ProbeVerdict::UnattachedWithinGrace
-        | ProbeVerdict::Abandoned => false,
+        | ProbeVerdict::Abandoned
+        | ProbeVerdict::PeerFaulted => false,
     }
 }
 
@@ -306,13 +328,14 @@ mod tests {
         IpcStatus::ConnectedButSilent,
     ];
 
-    const EVERY_PROBE_VERDICT: [ProbeVerdict; 6] = [
+    const EVERY_PROBE_VERDICT: [ProbeVerdict; 7] = [
         ProbeVerdict::Unsupported,
         ProbeVerdict::Unanswered,
         ProbeVerdict::Attached,
         ProbeVerdict::UnattachedWithinGrace,
         ProbeVerdict::UnattachedPastGrace,
         ProbeVerdict::Abandoned,
+        ProbeVerdict::PeerFaulted,
     ];
 
     #[test]
@@ -389,6 +412,9 @@ mod tests {
             // Round 3 finding C: the daemon's own bounds firing is not
             // evidence about the helper. See `ProbeVerdict::Abandoned`.
             (ProbeVerdict::Abandoned, ReconcileRow::Leave),
+            // Round 4 finding 6: neither is a fault on the probe connection.
+            // See `ProbeVerdict::PeerFaulted`.
+            (ProbeVerdict::PeerFaulted, ReconcileRow::Leave),
         ];
         for (probe, row) in expected {
             assert_eq!(
@@ -519,6 +545,11 @@ mod tests {
             !probe_authorizes_reclaim(ProbeVerdict::Abandoned),
             "the daemon hitting its OWN total/message bound says nothing about the helper - \
              turning impatience into a SIGKILL is the F10 mistake one level up"
+        );
+        assert!(
+            !probe_authorizes_reclaim(ProbeVerdict::PeerFaulted),
+            "a fault on the probe connection - including a NEWER helper's variant that this \
+             daemon cannot decode - is no evidence the helper is dead"
         );
     }
 

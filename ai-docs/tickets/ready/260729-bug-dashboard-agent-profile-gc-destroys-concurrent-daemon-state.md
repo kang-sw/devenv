@@ -915,6 +915,212 @@ documented `ConnectNamedPipe` / cancel-safety semantics only. That is the same
 scope limit `terminal_ipc_transport.rs`'s Stage-2 header already carries, and it
 is unchanged by this fix.
 
+#### Correction (8e9e5134 refuted) - 2026-07-29
+
+A fourth adversarial review refuted `8e9e5134`. Two of its decisions are SCOPE
+REDUCTIONS - machinery withdrawn rather than repaired. `cargo build` and `cargo
+check --target x86_64-pc-windows-gnu` pass clean; `cargo test` passes every
+integration target and 378 of 379 lib tests, the one failure being a
+PRE-EXISTING flake unrelated to this ticket (evidence under Verification below).
+Lib tests went 377 -> 379.
+
+**WITHDRAWN (1) - F12, and the Windows transport rewrite it caused.** Round 3
+bounded the concurrent probe arm's spawn with `MAX_CONCURRENT_PROBE_CONNECTIONS`
+(8) permits taken BEFORE `accept()`, so the listener was not drained at
+capacity. That made "is the listener armed" conditional on this helper's own
+load, which on a Windows named pipe - no backlog - inverted into
+`ERROR_PIPE_BUSY` -> `NoListener` -> `KillVerified`. Undoing THAT needed
+`PIPE_BACKLOG` + `select_all` in `terminal_ipc_transport.rs`, which cannot be
+runtime-verified in this environment and produced two defects in one round: a
+dropped already-connected client, and a backlog that shrinks to empty and panics
+`select_all`.
+
+Both are gone. The transport is back to its pre-`8e9e5134` single-armed-instance
+shape (verbatim, plus a note saying why it is sound: `accept()` is polled
+unconditionally again, and stopping that poll is what must never happen without
+restoring a real backlog first). The permit-before-accept gating is gone with it.
+
+F12 is not reimplemented, and that is the accepted state: probe tasks are one
+line in, one line out, hard-bounded by `PROBE_CONNECTION_TIMEOUT` (5s), on a
+local-only socket, so the reachable steady state is "however many probes a local
+process opened in the last 5 seconds". An unbounded spawn of 5s-bounded tasks on
+a local socket is accepted; a local process that wants to exhaust this machine
+has cheaper ways. Any future bound MUST NOT be built by withholding the
+`accept()` poll - the rationale is recorded where the constant used to be.
+`every_probe_is_answered_even_past_the_concurrent_probe_bound` outlived its
+subject and is renamed
+`many_simultaneous_probes_are_all_answered_while_a_session_is_attached`: it never
+distinguished bounded from unbounded, and what it does assert - every probe gets
+an answer - is still exactly what matters.
+
+**Finding 6 - the daemon side of the invariant this work declares closed.** The
+`_` arm in `probe_helper_reachability` swallowed `Ok(Err(PeerFault))` into
+`ProbeVerdict::Unanswered`, which authorizes reclaim. So a decode fault on the
+DAEMON's side of the probe SIGKILLed a healthy helper - the exact mirror of what
+round 3 made structurally safe helper-side, in the one direction round 3 did not
+check. Reachable today, not theoretically: `HelperToDaemonMessage` has no
+`#[serde(other)]`, so a NEWER helper's variant is undecodable by an OLDER daemon,
+and a daemon rollback is the realistic trigger.
+
+Fixed with a new sibling verdict, `ProbeVerdict::PeerFaulted`, which does not
+authorize reclaim. A sibling rather than reusing `Abandoned` because the two have
+different causes and want different logs: `Abandoned` is this daemon's own
+budgets firing, `PeerFaulted` is protocol skew or a framing desync, and the
+latter is logged at `warn!`. I/O faults ride along with decode faults
+deliberately - splitting them would mean deciding by `io::ErrorKind` again, which
+is round 3 finding A's mistake one level up, and nothing is lost because a helper
+that is genuinely gone still yields a clean EOF (`Unanswered`) or no listener on
+the next sweep. Pinned by
+`a_probe_reply_this_daemon_cannot_decode_never_authorizes_a_kill`, whose fixture
+answers with a raw undecodable line rather than a serialized message; non-vacuity
+is the `SilentForever` leg of
+`probe_helper_writes_nothing_to_a_peer_that_does_not_declare_the_capability`,
+which still resolves to `Unanswered`.
+
+**Finding 5 - accept failures are never fatal.** `MAX_CONSECUTIVE_ACCEPT_FAILURES`
+(64) and the fatal path are DELETED; the backoff caps at its 1s ceiling forever
+and the log is now `warn!`. The budget was a timer on this ticket's own subject:
+EMFILE/ENFILE are properties of the machine, so one fd exhaustion made every
+helper on the box kill its shell inside the same second. Self-killing bought no
+cleanup either - a genuinely dead listener is already reclaimed daemon-side via
+`HandshakeOutcome::NoListener` -> `KillVerified` - and it removed the only chance
+of recovery. `record` now returns `Duration` rather than `Option<Duration>`, so
+"there is no fatal path" is a property of the type; the success reset is kept.
+Test renamed to `accept_failures_back_off_forever_and_never_become_fatal`.
+
+**Finding 8 - `boot_reconcile` is bounded in aggregate.** Per-entry worst case is
+~21.6s (400ms handshake connect + 400ms probe connect + 20.8s exchange) and the
+loop is serial and awaited before the router binds (`server.rs`), so ten
+pathological entries held the daemon off HTTP for ~3.6 minutes. New
+`BOOT_RECONCILE_TOTAL_BUDGET` (30s), checked BEFORE each entry.
+
+Sizing, stated rather than asserted: 30s admits one entry consuming its entire
+worst case plus several hundred ordinary ones (a healthy helper handshakes in
+milliseconds; only `ConnectedButSilent` entries reach the probe at all), and is
+the outer edge of what a user waiting for the dashboard will sit through. The
+check is deliberately NOT a timeout AROUND an entry - that would drop a
+connection mid-adopt, which is the connect-and-drop pattern rounds 2 and 3 were
+spent removing - so the true worst case is budget + one entry (~52s).
+
+A skipped entry is UNTOUCHED: not adopted, and explicitly not reclaimed. Running
+out of startup budget is a fact about the daemon, exactly like `Abandoned`.
+`entries_boot_reconcile_never_reaches_are_left_completely_untouched` asserts this
+against entries `reconcile_entry` WOULD delete, so "untouched" is observable, and
+its second leg reclaims those same entries under a real budget so the assertion
+is about the budget rather than about unreclaimable entries.
+
+**CONSEQUENCE, accepted:** a skipped entry is never adopted until the next daemon
+start - nothing else adopts, the reaper only reclaims. If such a helper is a
+genuine orphan the sweep reclaims it on the ordinary predicate, which is correct;
+if it belongs to a daemon that is restarting, it can be reaped as
+`UnattachedPastGrace` once its 120s grace elapses. This is bounded by the fact
+that the entries that BURN the budget are precisely the ones that cannot be
+adopted anyway (`ConnectedButSilent`), so a healthy entry is only stranded when
+it queues behind many pathological ones.
+
+**RECORDED, NOT FIXED - finding 7, the reaper-starvation half.** An entry that
+always yields `Abandoned` costs up to its connect budget plus
+`PROBE_EXCHANGE_TOTAL_TIMEOUT` (20.8s) on EVERY 10s sweep tick, and
+`tokio::time::interval`'s default `MissedTickBehavior::Burst` then fires the
+missed ticks back to back. Recorded at `terminal_reaper.rs`'s spawn. Not fixed
+here because the safe fixes (a `Delay`/`Skip` miss behaviour, or an aggregate
+sweep bound) change reap TIMING, which is observable behaviour belonging to a
+phase that owns the reap predicate. Exposure is bounded: a starved sweep delays
+reclamation, it never reclaims wrongly.
+
+**RECORDED, NOT FIXED - finding 9, `HelperShape::LEGACY` fidelity.** The fixture
+is faithful for the three behaviours its two tests assert and NOT beyond them.
+Two divergences would let a FUTURE test pass while the real pre-upgrade binary
+failed, and are now named at the constant so nobody leans on it for them:
+- accept backoff is not shape-gated (`AcceptFailures` applies to both shapes; a
+  real legacy helper died on its FIRST accept error);
+- the grace-window self-exit is not shape-gated (the break is gated on
+  `attached`; a real legacy helper's was unconditional, so any connection at all
+  consumed the one post-shell-exit reattach).
+D3 as well: the fixture writes `"supportsLivenessProbe": false` where a real
+pre-upgrade entry OMITS the key. Decode-equivalent through `#[serde(default)]`,
+so no daemon-side decision differs, but the absent-key path is never exercised by
+this fixture - it is covered by the hand-written-JSON upgrade test in
+`terminal.rs`, and `spawn_legacy`'s doc no longer claims otherwise.
+
+**RECORDED - finding 10, `WriteFault::Serialize` is unreachable.** Every
+`HelperToDaemonMessage` variant is a struct of integers, strings, bools, options
+and vectors of the same, with string map keys only; `serde_json`'s failure modes
+(non-string map keys, a fallible `Serialize` impl, non-finite floats) are all
+absent. So "internal failures stay fatal" is decorative today - the split earns
+its keep only when a future message type introduces a fallible `Serialize`.
+Stated at `write_fault_ends_only_the_connection` rather than restating the
+guarantee, and it is why that test constructs a tuple-keyed map by hand.
+
+**Finding 11 - framing faults are visible.** `PeerFault::Malformed` /
+`InvalidUtf8` now log at `warn!` (helper-side read arm, and the daemon-side probe
+arm). `PeerFault::Io` stays at `debug!` - a peer going away is ordinary. A later
+framing desync must not be invisible at default levels merely because it is no
+longer fatal.
+
+**Finding 12 - two stale `is_peer_gone` references** (deleted in round 3) removed
+from `serve_session`'s and `probe_helper`'s CONTRACTs, both now pointing at
+`write_fault_ends_only_the_connection`.
+
+**Mutation results.** New, all confirmed red: routing `Ok(Err(PeerFault))` back
+to `Unanswered` turns `a_probe_reply_this_daemon_cannot_decode_never_authorizes_a_kill`
+red; mapping `PeerFaulted` onto reclaim turns
+`probe_authorizes_reclaim_matches_the_three_way_predicate_exactly` red; removing
+the `boot_reconcile` budget check, AND making a skipped entry delete its registry
+file instead, both turn
+`entries_boot_reconcile_never_reaches_are_left_completely_untouched` red (the
+second is the one that matters - it is the difference between "bounded" and
+"bounded by reclaiming").
+
+Every prior check re-run and all still hold. Round 3's seven: reinstating round
+2's read-side narrowness turns
+`a_real_helper_survives_every_malformed_thing_a_peer_can_put_on_the_wire` red;
+removing the total deadline turns `a_dripping_peer_cannot_hold_the_probe_past_its_total_budget`
+red; removing the message cap turns
+`a_flooding_peer_cannot_hold_the_probe_past_its_message_budget` red; mapping
+`Abandoned` onto reclaim turns the predicate test red; deleting the GC identity
+check turns `the_profile_gc_reclaims_state_whose_helper_process_is_gone` red;
+collapsing `HelperShape::LEGACY` into `CURRENT` turns
+`a_legacy_shaped_helper_really_is_destroyed_by_what_a_daemon_used_to_do` red.
+
+The seventh - "making every accept failure immediately fatal" - CHANGED CHARACTER
+and is reported as such rather than as a pass. The mutation is no longer
+expressible at `record`, whose return type is now `Duration`; reinstating the
+budget in full (Option return + both call sites' fatal branches) fails to
+COMPILE, taking the test with it. That is a weaker instrument than an assertion
+failure, and it is the honest state: the property is now enforced by the type,
+and no test drives a REAL accept failure (no test may exhaust the machine's fd
+table). Round 3 had the same limitation - its check was also only against
+`record`, never against the call sites.
+
+Round 2's three: making peer write faults fatal turns
+`a_real_helper_survives_a_daemon_that_connects_and_drops_without_reading` red;
+restoring ONE shared connect-sized deadline over the whole exchange turns
+`a_slow_ring_flush_cannot_exhaust_the_probe_timeout` red; connecting before the
+capability gate turns `a_capability_absent_entry_is_never_probed_even_when_nothing_is_listening`
+red. Round 1's four: reverting the concurrent arm turns
+`a_probe_is_answered_while_a_session_is_attached` red; reverting `classify`'s
+`ConnectedButSilent` arm or the sweep's probe gate turns
+`a_helper_attached_to_another_daemon_survives_boot_reconcile_and_the_sweep` red;
+reverting the GC probe gate turns
+`the_profile_gc_spares_a_helper_that_is_attached_to_another_daemon` red.
+
+**Verification scope, stated honestly.**
+- The Windows leg has no runtime coverage, as before - but the surface is now
+  SMALLER than at round 3, not larger: the reverted transport is the shape that
+  shipped before this ticket, and finding E's untestable machinery is gone rather
+  than being carried unverified.
+- `git_exec::tests::capture_refuses_to_spawn_once_the_outstanding_reader_cap_is_reached`
+  fails on this machine: it asserts that 32 spawned git readers all stay wedged
+  and observes 28-30. Confirmed PRE-EXISTING and unrelated, three ways: it fails
+  identically at `8e9e5134` with these changes checked away (376 passed / 1
+  failed there, 378 / 1 here - the same single failure); it PASSES when run
+  alone, so it is order- or load-sensitive within the binary; and it passed in
+  the first full runs of this session, before the machine accumulated load. It
+  touches no code this ticket changes. It deserves its own ticket - a test that
+  is green alone and red in the suite will eventually be read as a real
+  regression.
+
 ### Phase 2: Correct the two CONTRACTs this ticket falsified
 
 Doc-only, no behaviour change.

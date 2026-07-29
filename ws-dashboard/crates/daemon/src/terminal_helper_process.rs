@@ -21,7 +21,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use tokio::sync::Notify;
 
 use crate::cli::TerminalHelperArgs;
-use crate::terminal_helper_ipc::{write_ndjson, NdjsonReader, WriteFault};
+use crate::terminal_helper_ipc::{write_ndjson, NdjsonReader, PeerFault, WriteFault};
 use crate::terminal_helper_protocol::{
     DaemonToHelperMessage, HelperToDaemonMessage, TerminalHelperOutputChunk, TerminalHelperStatus,
 };
@@ -50,22 +50,30 @@ const NO_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 // probe connections are served on their own tasks and never block
 // `handle_connection`.
 pub(crate) const PROBE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
-// CONTRACT (260729 review finding F12): the concurrent probe arm spawns a
-// task per accepted probe connection, and nothing about a stranger's connect
-// rate is under this helper's control - an unbounded `tokio::spawn` there is
-// a task-growth channel any local process can drive. This caps the number of
-// in-flight probe tasks.
+// WITHDRAWN (260729 review round 4, finding F12): the concurrent probe arm
+// used to hold one of `MAX_CONCURRENT_PROBE_CONNECTIONS` (8) semaphore permits
+// per in-flight probe task, acquired BEFORE `accept()` so that at capacity the
+// listener was simply not drained (backpressure, never shedding - a dropped
+// probe reads daemon-side as `Unanswered`, which authorizes a SIGKILL).
 //
-// The bound is applied as BACKPRESSURE, never as a drop: at capacity the
-// accept arm simply stops accepting, so the surplus connection waits in the
-// listener backlog until a slot frees instead of being accepted and closed.
-// That distinction is load-bearing - a dropped probe connection reads
-// daemon-side as `ProbeVerdict::Unanswered`, which authorizes a SIGKILL, so
-// "shed load" here would mean "manufacture the exact false-death signal this
-// ticket exists to remove". Each probe task is one line in, one line out and
-// is hard-bounded by `PROBE_CONNECTION_TIMEOUT`, so a queue drains in
-// microseconds under any non-pathological load.
-const MAX_CONCURRENT_PROBE_CONNECTIONS: usize = 8;
+// The bound is gone, and so is the permit-before-accept gating: `accept()` is
+// polled unconditionally again. Rationale, recorded so it is not re-derived:
+// - Taking the permit before `accept()` made "is the listener armed"
+//   conditional on this helper's own load. On Unix the surplus parks in the
+//   kernel backlog, but on Windows a named pipe has no backlog, so it inverted
+//   into `ERROR_PIPE_BUSY` -> `NoListener` -> `KillVerified`. Undoing THAT
+//   needed a pre-armed instance pool in `terminal_ipc_transport.rs` that can
+//   be neither runtime-verified here nor kept obviously correct (it produced
+//   both a dropped already-connected client and an empty-`select_all` panic in
+//   one round).
+// - What the bound bought was small: each probe task is one line in, one line
+//   out and is hard-bounded by `PROBE_CONNECTION_TIMEOUT` (5s), and the socket
+//   is local-only, so the reachable steady state is "however many probes a
+//   local process opened in the last 5 seconds" - self-limiting, and a local
+//   process that wants to exhaust this machine's resources has cheaper ways.
+// An unbounded spawn of 5s-bounded tasks on a local socket is the accepted
+// state. Anything that reintroduces a bound MUST NOT do it by withholding the
+// `accept()` poll.
 // CONTRACT (260729 review round 3, finding B): `accept()` failing is not
 // evidence that this helper should die. EMFILE/ENFILE (someone else on this
 // machine exhausted the fd table), ECONNABORTED (a peer that connected and
@@ -74,20 +82,26 @@ const MAX_CONCURRENT_PROBE_CONNECTIONS: usize = 8;
 // yet every one of them used to unwind into `run_terminal_helper`'s
 // `kill_shell_if_running()`. The listener errors; the shell does not.
 //
-// So every accept failure is retried with backoff, and only a listener that
-// has failed CONSECUTIVELY for this whole budget is treated as permanently
-// broken. There is deliberately no per-ErrorKind "is this transient?" test:
-// that is the same enumerate-the-kinds mistake finding A removed from the read
-// path, and the safe default here is "retry", not "die".
+// So every accept failure is retried with backoff, and there is deliberately
+// no per-ErrorKind "is this transient?" test: that is the same
+// enumerate-the-kinds mistake finding A removed from the read path, and the
+// safe default here is "retry", not "die".
+//
+// AMENDED (260729 review round 4, finding 5): retrying is now UNBOUNDED. Round
+// 3 kept a `MAX_CONSECUTIVE_ACCEPT_FAILURES` (64, ~1 minute) budget after which
+// the listener was called permanently broken and the helper exited - which runs
+// `kill_shell_if_running()`. That budget was a timer on the exact outcome this
+// ticket exists to remove: EMFILE/ENFILE are properties of the MACHINE, not of
+// this helper, so an fd-table exhaustion makes every helper on the box kill its
+// shell inside the same second. Nothing is bought by self-killing either: a
+// genuinely dead listener is already handled daemon-side (`HandshakeOutcome::
+// NoListener` -> `KillVerified`), so the reclaim still happens, and staying
+// alive is the only chance the shell has of ever being reachable again. The
+// backoff therefore caps at its ceiling and stays there forever.
 const ACCEPT_RETRY_BACKOFF_START: Duration = Duration::from_millis(20);
+// 20ms doubling to this ceiling reaches it after 6 retries, so a permanently
+// broken listener costs one wakeup per second and nothing else.
 const ACCEPT_RETRY_BACKOFF_MAX: Duration = Duration::from_secs(1);
-// 20ms doubling to a 1s ceiling reaches the ceiling after 6 retries, so this
-// budget spans roughly a minute of UNBROKEN failure. Sized to outlast any
-// transient fd-table or backlog pressure while still bounding a listener that
-// is genuinely unusable (a closed/invalid fd fails instantly and forever). A
-// success anywhere in the run resets the counter, so intermittent failures
-// never accumulate to it.
-const MAX_CONSECUTIVE_ACCEPT_FAILURES: u32 = 64;
 
 struct RingState {
     output: VecDeque<TerminalHelperOutputChunk>,
@@ -330,6 +344,30 @@ impl HelperShape {
 
     /// A helper as it existed before this ticket landed: the at-risk
     /// population. Test-only - production has exactly one shape.
+    ///
+    /// KNOWN DIVERGENCES (260729 review round 4, finding 9) - the fixture is
+    /// faithful for the three behaviours its tests assert and NOT beyond them.
+    /// Named here so nobody leans on it for a property it does not model; a
+    /// future test asserting any of these would pass while the real
+    /// pre-upgrade binary failed:
+    /// - **Accept backoff is not shape-gated.** `AcceptFailures` applies to
+    ///   both shapes, but a real legacy helper had no backoff at all: the
+    ///   FIRST `accept()` error returned `Err` and its exit path SIGKILLed the
+    ///   shell. A legacy fixture therefore survives accept storms that the
+    ///   real binary did not.
+    /// - **The grace-window self-exit is not shape-gated.** `serve_connections`
+    ///   breaks out of the loop only when a DISCONNECTED connection was
+    ///   `attached`; a real legacy helper's break was unconditional, so any
+    ///   connection at all - including a stranger's - consumed the one
+    ///   post-shell-exit reattach. The fixture is more forgiving than the
+    ///   population.
+    /// - **The capability key is written, not omitted (D3).** The fixture
+    ///   writes `"supportsLivenessProbe": false`, where a real pre-upgrade
+    ///   entry has no such key. The two are decode-equivalent through
+    ///   `#[serde(default)]`, so no daemon-side decision differs - but the
+    ///   ABSENT-key path is never exercised by this fixture. It is covered
+    ///   instead by the hand-written-JSON upgrade test in `terminal.rs`, which
+    ///   is where that assertion belongs.
     #[cfg(test)]
     pub(crate) const LEGACY: Self = Self {
         peer_faults_end_only_the_connection: false,
@@ -448,24 +486,24 @@ impl AcceptFailures {
         self.consecutive = 0;
     }
 
-    /// Records one failure. `Some(delay)` means "back off this long and keep
-    /// accepting"; `None` means the listener has failed for the whole budget
-    /// and is treated as permanently broken.
-    fn record(&mut self, error: &std::io::Error) -> Option<Duration> {
+    /// Records one failure and returns how long to back off before accepting
+    /// again. There is no fatal return: an accept failure never ends this
+    /// helper (round 4 finding 5), so this is total.
+    fn record(&mut self, error: &std::io::Error) -> Duration {
         self.consecutive += 1;
-        if self.consecutive >= MAX_CONSECUTIVE_ACCEPT_FAILURES {
-            return None;
-        }
         let delay = ACCEPT_RETRY_BACKOFF_START
             .saturating_mul(1u32 << (self.consecutive - 1).min(16))
             .min(ACCEPT_RETRY_BACKOFF_MAX);
-        tracing::debug!(
+        // `warn!`, not `debug!`: an unbounded retry that nobody can see is a
+        // helper silently unreachable forever. This is the only surface that
+        // reports it.
+        tracing::warn!(
             %error,
             consecutive = self.consecutive,
             backoff_ms = delay.as_millis() as u64,
             "terminal helper accept() failed; backing off and continuing (the shell is untouched)"
         );
-        Some(delay)
+        delay
     }
 }
 
@@ -480,12 +518,6 @@ async fn serve_connections(
     // first successful handshake - not merely the current accept-loop
     // iteration.
     let started_at = Instant::now();
-    // Created once per helper, not per session: probe tasks spawned during
-    // one session can outlive it (they are bounded by
-    // `PROBE_CONNECTION_TIMEOUT`, not by the session), so a per-session
-    // semaphore would let the true in-flight count exceed the cap across a
-    // reconnect.
-    let probe_slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PROBE_CONNECTIONS));
     let mut accept_failures = AcceptFailures::new();
     loop {
         let wait = match shared.exited_at() {
@@ -511,16 +543,8 @@ async fn serve_connections(
         match tokio::time::timeout(wait, listener.accept()).await {
             Ok(Ok(stream)) => {
                 accept_failures.reset();
-                match serve_session(
-                    args,
-                    stream,
-                    shared,
-                    listener,
-                    &probe_slots,
-                    &mut accept_failures,
-                    shape,
-                )
-                .await?
+                match serve_session(args, stream, shared, listener, &mut accept_failures, shape)
+                    .await?
                 {
                     ConnectionOutcome::Shutdown => break,
                     // One reattach after the shell has exited is the grace
@@ -547,13 +571,10 @@ async fn serve_connections(
             // CONTRACT (finding B): an `accept()` failure ends the ACCEPT, not
             // the helper. Returning here ran `kill_shell_if_running()` for an
             // EMFILE somebody else on the machine caused.
-            Ok(Err(error)) => match accept_failures.record(&error) {
-                Some(delay) => {
-                    tokio::time::sleep(delay).await;
-                    continue;
-                }
-                None => return Err(error.into()),
-            },
+            Ok(Err(error)) => {
+                tokio::time::sleep(accept_failures.record(&error)).await;
+                continue;
+            }
             Err(_elapsed) => continue,
         }
     }
@@ -608,13 +629,13 @@ enum ConnectionOutcome {
 // connect+handshake budget (400ms) elapses long before this arm's
 // `PROBE_CONNECTION_TIMEOUT` (5s) would release it. The pre-ticket behaviour
 // in the same window was not "adopts reliably" but "queues, times out, then
-// EPIPEs the helper into SIGKILLing the user's shell" (see `is_peer_gone`).
+// EPIPEs the helper into SIGKILLing the user's shell" (see
+// `write_fault_ends_only_the_connection`, which is what stops that now).
 async fn serve_session(
     args: &TerminalHelperArgs,
     stream: BoxedIpcStream,
     shared: &Arc<SharedState>,
     listener: &mut IpcListener,
-    probe_slots: &Arc<tokio::sync::Semaphore>,
     accept_failures: &mut AcceptFailures,
     shape: HelperShape,
 ) -> anyhow::Result<ConnectionOutcome> {
@@ -626,30 +647,21 @@ async fn serve_session(
         return session.await;
     }
     loop {
-        // Take a probe slot BEFORE accepting (finding F12). While all slots
-        // are held this select has only the session arm, so the listener is
-        // not drained and surplus probe connections stay queued in the
-        // backlog rather than being accepted and dropped - see
-        // `MAX_CONCURRENT_PROBE_CONNECTIONS` for why dropping would be
-        // actively harmful. `acquire_owned` resolves immediately whenever a
-        // slot is free, so the uncontended path is unchanged.
-        let permit = tokio::select! {
-            biased;
-            outcome = &mut session => return outcome,
-            permit = probe_slots.clone().acquire_owned() => {
-                permit.expect("probe slot semaphore is never closed")
-            }
-        };
         tokio::select! {
             // Biased so an available session event is always taken first:
             // the attached daemon's traffic must never lose priority to a
             // stream of probes.
             biased;
             outcome = &mut session => return outcome,
+            // CONTRACT (round 4, finding F12 withdrawn): `accept()` is polled
+            // UNCONDITIONALLY - there is no capacity gate in front of it. See
+            // the withdrawal note where `MAX_CONCURRENT_PROBE_CONNECTIONS`
+            // used to be: withholding this poll is what made a Windows named
+            // pipe report "no listener" for a healthy helper.
             accepted = listener.accept() => match accepted {
                 Ok(probe_stream) => {
                     accept_failures.reset();
-                    tokio::spawn(serve_probe_connection(shared.clone(), probe_stream, permit));
+                    tokio::spawn(serve_probe_connection(shared.clone(), probe_stream));
                 }
                 // CONTRACT (finding B): identical rule to the idle accept
                 // loop's - a failed accept must not reach
@@ -657,10 +669,7 @@ async fn serve_session(
                 // select with the session so an accept storm cannot starve the
                 // attached daemon's traffic.
                 Err(error) => {
-                    drop(permit);
-                    let Some(delay) = accept_failures.record(&error) else {
-                        return Err(error.into());
-                    };
+                    let delay = accept_failures.record(&error);
                     tokio::select! {
                         biased;
                         outcome = &mut session => return outcome,
@@ -684,13 +693,7 @@ async fn serve_session(
 // malformed or half-open probe connection is a stranger's problem, and
 // letting it reach `run_terminal_helper`'s exit path would kill the user's
 // shell over a stray byte from a process that is not even attached.
-async fn serve_probe_connection(
-    shared: Arc<SharedState>,
-    stream: BoxedIpcStream,
-    // Held for exactly as long as this task runs; dropping it is what lets
-    // `serve_session` accept the next probe connection (finding F12).
-    _slot: tokio::sync::OwnedSemaphorePermit,
-) {
+async fn serve_probe_connection(shared: Arc<SharedState>, stream: BoxedIpcStream) {
     let (read_half, mut write_half) = crate::terminal_ipc_transport::split(stream);
     let mut reader = NdjsonReader::new(read_half);
     let _ = tokio::time::timeout(PROBE_CONNECTION_TIMEOUT, async move {
@@ -765,6 +768,20 @@ async fn serve_probe_connection(
 /// which SOURCE produced the fault, so no `ErrorKind` can be "missing" from it.
 /// Reads need no equivalent - every read fault is a peer fault by
 /// construction, which is `PeerFault`'s reason for existing.
+///
+/// RECORDED (260729 review round 4, finding 10) - state the reachability
+/// rather than restating the guarantee: `WriteFault::Serialize` is
+/// UNREACHABLE for the current protocol. Every `HelperToDaemonMessage` variant
+/// is a struct of `u32`/`u64`/`String`/`bool`/`Option`/`Vec<struct-of-those>`
+/// with string map keys only, and `serde_json` cannot fail on any of those
+/// (its failure modes are non-string map keys, a `Serialize` impl that returns
+/// an error, and non-finite floats - none present). So "genuinely internal
+/// failures stay fatal" is decorative TODAY: the split earns its keep only if
+/// a future message type introduces a fallible `Serialize`. The
+/// `WriteFault::Serialize` leg of
+/// `every_peer_connection_fault_ends_only_the_connection` constructs a
+/// tuple-keyed map by hand precisely because no production type can produce
+/// one.
 fn write_fault_ends_only_the_connection(fault: &WriteFault) -> bool {
     match fault {
         WriteFault::Peer(_) => true,
@@ -897,11 +914,28 @@ async fn handle_connection(
                 let incoming = match incoming {
                     Ok(incoming) => incoming,
                     Err(fault) if shape.peer_faults_end_only_the_connection => {
-                        tracing::debug!(
-                            %fault,
-                            "terminal helper's daemon peer faulted mid-read; ending this \
-                             connection and returning to the accept loop (the shell is untouched)"
-                        );
+                        // CONTRACT (260729 review round 4, finding 11): a
+                        // FRAMING fault is reported at `warn!`, not `debug!`.
+                        // `Io` is the ordinary way a peer goes away and stays
+                        // at `debug!`, but `Malformed`/`InvalidUtf8` mean the
+                        // two sides disagree about the bytes on the wire -
+                        // protocol skew, a framing desync, a corrupt stream -
+                        // and that must not be invisible at default log levels
+                        // just because it is no longer fatal.
+                        match &fault {
+                            PeerFault::Io(_) => tracing::debug!(
+                                %fault,
+                                "terminal helper's daemon peer faulted mid-read; ending this \
+                                 connection and returning to the accept loop (the shell is \
+                                 untouched)"
+                            ),
+                            PeerFault::Malformed(_) | PeerFault::InvalidUtf8(_) => tracing::warn!(
+                                %fault,
+                                "terminal helper could not decode a line from its daemon peer; \
+                                 ending this connection and returning to the accept loop (the \
+                                 shell is untouched)"
+                            ),
+                        }
                         return Ok(ConnectionOutcome::Disconnected {
                             attached: attachment.attached,
                         });
@@ -2328,11 +2362,14 @@ pub(crate) mod real_helper_test_support {
 
         /// CONTRACT (260729 review round 3, finding F): the same real helper,
         /// spawned in PRE-UPGRADE shape - no peer-fault downgrade, no
-        /// concurrent probe arm, and `supportsLivenessProbe` absent from its
-        /// registry entry. This is the population every compatibility claim in
-        /// this ticket is about, and before this seam existed it was untested
-        /// by construction: every real-helper test ran the current binary,
-        /// which already has the fixes.
+        /// concurrent probe arm, and a registry entry that declares no
+        /// liveness-probe capability (written as `"supportsLivenessProbe":
+        /// false`, which is decode-equivalent to the real absent key but not
+        /// byte-identical - see `HelperShape::LEGACY`'s divergence list). This
+        /// is the population every compatibility claim in this ticket is
+        /// about, and before this seam existed it was untested by
+        /// construction: every real-helper test ran the current binary, which
+        /// already has the fixes.
         pub(crate) async fn spawn_legacy(label: &str, shell_command: &str) -> Self {
             Self::spawn_shaped(label, shell_command, HelperShape::LEGACY).await
         }
@@ -2821,11 +2858,18 @@ mod real_helper_peer_loss_tests {
         helper.shutdown().await;
     }
 
-    // CONTRACT (260729 review round 3, finding B): an `accept()` failure ends
-    // the accept, not the helper. Driven through the classifier rather than by
-    // exhausting the machine's fd table, which no test may do.
+    // CONTRACT (260729 review round 3 finding B, amended by round 4 finding
+    // 5): an `accept()` failure ends the accept, not the helper - and there is
+    // no failure count at which that stops being true. Driven through the
+    // classifier rather than by exhausting the machine's fd table, which no
+    // test may do.
+    //
+    // The "no fatal budget" half is the one this test exists for now. EMFILE/
+    // ENFILE are properties of the MACHINE, so a bounded budget made every
+    // helper on the box kill its shell within the same second of fd
+    // exhaustion - a timer on the exact outcome this ticket removes.
     #[test]
-    fn accept_failures_back_off_and_only_a_sustained_run_is_fatal() {
+    fn accept_failures_back_off_forever_and_never_become_fatal() {
         use std::io::{Error, ErrorKind};
 
         let mut failures = AcceptFailures::new();
@@ -2837,53 +2881,61 @@ mod real_helper_peer_loss_tests {
             ErrorKind::Interrupted,
             ErrorKind::PermissionDenied,
         ] {
+            let delay = failures.record(&Error::new(kind, "accept"));
             assert!(
-                failures.record(&Error::new(kind, "accept")).is_some(),
+                delay <= ACCEPT_RETRY_BACKOFF_MAX,
                 "{kind:?} on accept() must back off and continue, never kill the shell"
             );
         }
         // Backoff grows and is capped.
         let mut last = Duration::ZERO;
         for _ in 0..40 {
-            let delay = failures
-                .record(&Error::new(ErrorKind::Other, "accept"))
-                .expect("still under budget");
+            let delay = failures.record(&Error::new(ErrorKind::Other, "accept"));
             assert!(delay >= last || delay == ACCEPT_RETRY_BACKOFF_MAX);
             assert!(delay <= ACCEPT_RETRY_BACKOFF_MAX, "backoff must be capped");
             last = delay;
         }
         assert_eq!(last, ACCEPT_RETRY_BACKOFF_MAX);
 
-        // Non-vacuity in both directions: a success resets the run, and only
-        // an unbroken run reaches the fatal budget.
-        failures.reset();
-        for index in 1..MAX_CONSECUTIVE_ACCEPT_FAILURES {
-            assert!(
-                failures.record(&Error::new(ErrorKind::Other, "accept")).is_some(),
-                "failure {index} of {MAX_CONSECUTIVE_ACCEPT_FAILURES} must not be fatal"
+        // The load-bearing assertion: an UNBROKEN run far past the old
+        // 64-failure budget still only ever yields a backoff. `record`
+        // returning `Duration` rather than `Option<Duration>` is what makes
+        // "there is no fatal path" a property of the type; this pins the
+        // ceiling behaviour that goes with it.
+        for _ in 0..10_000 {
+            assert_eq!(
+                failures.record(&Error::new(ErrorKind::Other, "accept")),
+                ACCEPT_RETRY_BACKOFF_MAX,
+                "a listener that has failed forever still only backs off at the ceiling"
             );
         }
-        assert!(
-            failures.record(&Error::new(ErrorKind::Other, "accept")).is_none(),
-            "a listener that has failed for the entire budget is permanently broken"
+
+        // A success resets the run, so intermittent failures never accumulate.
+        failures.reset();
+        assert_eq!(
+            failures.record(&Error::new(ErrorKind::Other, "accept")),
+            ACCEPT_RETRY_BACKOFF_START
         );
     }
 
-    // CONTRACT (260729 review finding F12): the probe arm's spawn is bounded,
-    // and the bound is BACKPRESSURE rather than shedding - every probe still
-    // gets answered. Dropping surplus connections would be worse than an
-    // unbounded spawn: daemon-side, a dropped probe reads as
-    // `ProbeVerdict::Unanswered`, which authorizes a SIGKILL.
+    // CONTRACT (260729 review finding F12, WITHDRAWN in round 4): the probe
+    // arm's spawn is deliberately unbounded, so what has to hold is simply
+    // that many simultaneous probes are all answered while a session is
+    // attached. This test outlived the bound it was written for: it never
+    // distinguished bounded from unbounded (it asserted answers, not slots),
+    // and answers are exactly what still matters - a probe that goes
+    // unanswered reads daemon-side as `ProbeVerdict::Unanswered`, which
+    // authorizes a SIGKILL.
     #[tokio::test]
-    async fn every_probe_is_answered_even_past_the_concurrent_probe_bound() {
+    async fn many_simultaneous_probes_are_all_answered_while_a_session_is_attached() {
         use crate::terminal_helper_ipc::write_ndjson;
 
         let helper = RealHelper::spawn("bound", TICKING_SHELL).await;
         // Hold a session open so every probe below is served by the
-        // CONCURRENT arm (the bounded one), not by `handle_connection`.
+        // CONCURRENT arm, not by `handle_connection`.
         let session = helper.attach().await;
 
-        let probes = MAX_CONCURRENT_PROBE_CONNECTIONS * 3;
+        let probes = 24;
         let mut tasks = Vec::new();
         for _ in 0..probes {
             let socket_path = helper.socket_path.clone();

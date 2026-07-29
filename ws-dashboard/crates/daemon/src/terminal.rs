@@ -104,6 +104,34 @@ pub(crate) const MAX_PROBE_EXCHANGE_MESSAGES: usize = MAX_OUTPUT_CHUNKS + 16;
 pub(crate) const PROBE_EXCHANGE_TOTAL_TIMEOUT: Duration =
     Duration::from_millis(20 * MAX_PROBE_EXCHANGE_MESSAGES as u64);
 
+// CONTRACT (260729 review round 4, finding 8): an AGGREGATE bound across the
+// whole of `boot_reconcile`, because bounding each entry does not bound the
+// loop. Per-entry worst case is now roughly 21.6s - the handshake connect
+// budget (400ms), then the probe's own connect budget (400ms), then
+// `PROBE_EXCHANGE_TOTAL_TIMEOUT` (20.8s) - and the loop is SERIAL and awaited
+// before the router binds (`server.rs`), so ten pathological entries would
+// hold the daemon off HTTP for about three and a half minutes.
+//
+// Sizing: one entry may consume its entire worst case and still leave room for
+// the ordinary ones, which cost single-digit milliseconds each (a healthy
+// helper handshakes immediately; only `ConnectedButSilent` entries reach the
+// probe at all). 30s admits that one pathological entry plus several hundred
+// healthy ones, and is the outer edge of what a user waiting for the dashboard
+// to come back will sit through.
+//
+// The bound is checked BEFORE each entry, never as a timeout AROUND one: a
+// timeout would drop a connection mid-adopt, which is the "connected and
+// dropped without reading" pattern this ticket spent two rounds removing. So
+// the true worst case is this budget plus one entry (~52s), and that is
+// deliberate.
+//
+// WHAT A SKIPPED ENTRY MEANS: untouched. Not adopted, and explicitly NOT
+// reclaimed - "this daemon ran out of startup budget" is a fact about the
+// daemon, exactly like `ProbeVerdict::Abandoned`, and must never become
+// evidence about a helper. Skipped entries are left to the reaper, which
+// applies the ordinary predicate to them on its own schedule.
+const BOOT_RECONCILE_TOTAL_BUDGET: Duration = Duration::from_secs(30);
+
 // CONTRACT (260726 Phase 1 correctness review I1): the registry-dir backstop
 // must give the primary graceful self-exit path (helper observes the IPC
 // EOF `close_ipc_connection` produces -> `kill_shell_if_running` ->
@@ -409,6 +437,31 @@ impl TerminalRegistry {
         state_dir: Option<PathBuf>,
         base_url: String,
     ) -> Self {
+        Self::boot_reconcile_within(
+            helper_binary,
+            registry_dir,
+            connect_timeout,
+            state_dir,
+            base_url,
+            BOOT_RECONCILE_TOTAL_BUDGET,
+        )
+        .await
+    }
+
+    /// `total_budget` is a parameter rather than a read of
+    /// `BOOT_RECONCILE_TOTAL_BUDGET` for the same reason
+    /// `probe_helper_reachability` parameterizes its bounds: the production
+    /// value can only be reached by an entry that takes tens of seconds, so a
+    /// test that elapsed it for real would be racing the machine instead of
+    /// asserting the policy.
+    async fn boot_reconcile_within(
+        helper_binary: PathBuf,
+        registry_dir: PathBuf,
+        connect_timeout: Duration,
+        state_dir: Option<PathBuf>,
+        base_url: String,
+        total_budget: Duration,
+    ) -> Self {
         let registry = Self::new(
             helper_binary,
             registry_dir.clone(),
@@ -422,6 +475,8 @@ impl TerminalRegistry {
             .unwrap_or_default();
 
         let mut seen_ids = std::collections::HashSet::new();
+        let deadline = Instant::now() + total_budget;
+        let mut skipped = 0usize;
         for entry in entries {
             // Duplicate-entry defense: the one-file-per-terminal-id scan
             // shape structurally prevents true duplicates, but keep the
@@ -430,7 +485,25 @@ impl TerminalRegistry {
             if !seen_ids.insert(entry.terminal_id.clone()) {
                 continue;
             }
+            // CONTRACT (260729 review round 4, finding 8): the aggregate bound.
+            // Checked here, before the entry is touched at all, so a skip is
+            // literally a no-op on that entry - no connect, no probe, no
+            // delete. See `BOOT_RECONCILE_TOTAL_BUDGET`: running out of startup
+            // budget is a fact about this daemon and must never be turned into
+            // evidence about a helper.
+            if Instant::now() >= deadline {
+                skipped += 1;
+                continue;
+            }
             registry.reconcile_entry(entry).await;
+        }
+        if skipped > 0 {
+            tracing::warn!(
+                skipped,
+                budget_ms = total_budget.as_millis() as u64,
+                "boot reconcile exhausted its aggregate budget; the remaining registry entries \
+                 were left completely untouched (not adopted, not reclaimed) for the reaper"
+            );
         }
         registry
     }
@@ -1605,12 +1678,36 @@ async fn probe_helper_reachability(
                 messages_seen += 1;
                 continue;
             }
+            // CONTRACT (260729 review round 4, finding 6): a fault on THIS
+            // connection is not silence from the helper. Every way this read
+            // can fail is a `PeerFault` by `read_message`'s own contract, and
+            // the helper-side invariant round 3 made structural has an exact
+            // daemon-side mirror: a peer-attributable fault must not be
+            // escalated into ending the peer. Folding this into `Unanswered`
+            // authorized a SIGKILL, and it is reachable today - a NEWER
+            // helper's variant is undecodable by an older daemon, and a daemon
+            // rollback is the realistic trigger. See
+            // `ProbeVerdict::PeerFaulted` for why I/O faults ride along rather
+            // than being split off by `ErrorKind`.
+            Ok(Err(fault)) => {
+                // `warn!`, not `debug!`: this is either protocol skew between
+                // two builds or a framing desync, and neither may be invisible
+                // at default levels (round 4, finding 11).
+                tracing::warn!(
+                    socket_path = %socket_path.display(),
+                    %fault,
+                    messages_seen,
+                    "liveness probe connection faulted; this is NOT evidence the helper is \
+                     unreachable and does not authorize reclaim"
+                );
+                return Some(ProbeVerdict::PeerFaulted);
+            }
             // A timeout that is really the TOTAL budget expiring is the
             // daemon's own bound, not silence from the helper - the loop top
             // will spell it `Abandoned`. Only a genuine idle window elapsing
-            // (or a read fault / EOF) is `Unanswered`.
+            // (or a clean EOF with no answer) is `Unanswered`.
             Err(_elapsed) if Instant::now() >= exchange_deadline => continue,
-            _ => return Some(ProbeVerdict::Unanswered),
+            Ok(Ok(None)) | Err(_) => return Some(ProbeVerdict::Unanswered),
         }
     }
 }
@@ -5896,6 +5993,12 @@ exec sleep 30
         /// daemon-side timeout semantics can be asserted deterministically
         /// instead of raced against a real machine's I/O speed.
         FloodsThenAnswersProbe { chunks: u64, interval_ms: u64 },
+        /// Answers a `LivenessProbe` with a line this daemon cannot decode -
+        /// a variant tag from a NEWER helper build. Models the realistic
+        /// trigger for round 4's finding 6: `HelperToDaemonMessage` has no
+        /// `#[serde(other)]`, so a daemon ROLLED BACK past a helper's build
+        /// meets exactly this on the wire from a perfectly healthy helper.
+        AnswersProbeWithAFutureVariant,
     }
 
     #[cfg(unix)]
@@ -6008,7 +6111,11 @@ exec sleep 30
             // A helper that just finished flushing a ring is by definition
             // unattached, and freshly so.
             FakeHelperBehaviour::FloodsThenAnswersProbe { .. } => Some((false, Some(50))),
-            FakeHelperBehaviour::SilentForever | FakeHelperBehaviour::Adoptable => None,
+            FakeHelperBehaviour::SilentForever
+            | FakeHelperBehaviour::Adoptable
+            // Answers, but not with anything decodable - handled separately
+            // below, because it cannot be expressed as a typed report.
+            | FakeHelperBehaviour::AnswersProbeWithAFutureVariant => None,
         };
 
         // Raw lines, not decoded messages: the point of `received` is to
@@ -6037,6 +6144,24 @@ exec sleep 30
                     },
                 )
                 .await;
+            }
+            if matches!(
+                (&message, behaviour),
+                (
+                    DaemonToHelperMessage::LivenessProbe,
+                    FakeHelperBehaviour::AnswersProbeWithAFutureVariant
+                )
+            ) {
+                // Written as RAW BYTES on purpose: the whole point is a line
+                // that this build's `HelperToDaemonMessage` cannot represent,
+                // so it cannot be produced by serializing one.
+                use tokio::io::AsyncWriteExt;
+                let _ = write_half
+                    .write_all(
+                        b"{\"type\":\"livenessProbeResponseV2\",\"attached\":true}\n",
+                    )
+                    .await;
+                let _ = write_half.flush().await;
             }
         }
     }
@@ -6929,6 +7054,146 @@ exec sleep 30
 
         drop(helper);
         let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // CONTRACT (260729 review round 4, finding 6): the DAEMON side of the
+    // invariant round 3 made structural helper-side. A fault on the probe
+    // connection is the peer's connection misbehaving, not evidence that the
+    // helper is dead - and this arm used to collapse into `Unanswered`, which
+    // authorizes `KillVerified`.
+    //
+    // The fixture answers with a variant tag from a NEWER helper build because
+    // that is the reachable trigger, not a hypothetical one:
+    // `HelperToDaemonMessage` has no `#[serde(other)]`, so a daemon rolled back
+    // past a helper's build cannot decode that helper's reply - and would then
+    // SIGKILL a helper that answered promptly and truthfully.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_probe_reply_this_daemon_cannot_decode_never_authorizes_a_kill() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "ws-dashboard-probe-future-{}-{}.sock",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&socket_path);
+        let helper = spawn_fake_helper(
+            &socket_path,
+            FakeHelperBehaviour::AnswersProbeWithAFutureVariant,
+        );
+
+        let verdict = probe_helper_reachability(
+            &socket_path,
+            Duration::from_millis(150),
+            PROBE_EXCHANGE_TOTAL_TIMEOUT,
+            MAX_PROBE_EXCHANGE_MESSAGES,
+        )
+        .await;
+
+        assert_eq!(
+            verdict,
+            Some(ProbeVerdict::PeerFaulted),
+            "a reply this build cannot decode must be its own verdict, not silence"
+        );
+        assert!(
+            !probe_authorizes_reclaim(ProbeVerdict::PeerFaulted),
+            "and that verdict must not authorize reclaim - the helper answered promptly, the \
+             two builds simply disagree about the wire"
+        );
+        // Non-vacuity lives in
+        // `probe_helper_writes_nothing_to_a_peer_that_does_not_declare_the_capability`,
+        // whose second leg drives the SAME `SilentForever` fixture to
+        // `Unanswered`: a peer that says nothing at all is still reclaimable,
+        // so this is not "every non-answer became safe".
+
+        drop(helper);
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    // CONTRACT (260729 review round 4, finding 8): the aggregate bound on
+    // `boot_reconcile`, and specifically what a SKIPPED entry means. Per-entry
+    // worst case is ~21.6s and the loop is serial and awaited before the router
+    // binds, so ten pathological entries held the daemon off HTTP for minutes.
+    //
+    // The budget is injected rather than elapsed: reaching the production 30s
+    // for real needs entries that each take tens of seconds, which is racing
+    // the machine rather than asserting the policy.
+    //
+    // The assertion is the load-bearing half. These entries are ones
+    // `reconcile_entry` would DELETE (their pid cannot exist), so "untouched"
+    // is observable: exhausting the budget must leave the files exactly where
+    // they are. "This daemon ran out of startup budget" is a fact about the
+    // daemon, and must never become a reclamation.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn entries_boot_reconcile_never_reaches_are_left_completely_untouched() {
+        let registry_dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-boot-budget-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        for index in 0..3 {
+            let terminal_id = format!("term_budget_{index}");
+            let entry = TerminalRegistryEntry {
+                terminal_id: terminal_id.clone(),
+                work_root_id: "root-budget".to_owned(),
+                // Implausibly high pid, as in the row-3 test: nothing can hold
+                // it, so a REACHED entry is deleted (`DropNoSuchProcess`).
+                pid: 0x7fff_fffe,
+                start_time: 123,
+                boot_id: crate::terminal_platform::boot_identity(),
+                supports_liveness_probe: true,
+                socket_path: registry_dir.join(format!("{terminal_id}.sock")),
+                created_at_ms: now_ms(),
+                title: "Budget".to_owned(),
+                cwd_hint: None,
+                columns: 80,
+                rows: 24,
+            };
+            crate::terminal_registry_file::write_registry_entry(&registry_dir, &entry)
+                .expect("write budget-fixture registry entry");
+        }
+
+        // Zero budget: the deadline is already past at the first entry, so
+        // nothing is reached at all.
+        let registry = TerminalRegistry::boot_reconcile_within(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(200),
+            None,
+            String::new(),
+            Duration::ZERO,
+        )
+        .await;
+
+        assert_eq!(
+            scan_registry_dir(&registry_dir).len(),
+            3,
+            "an entry the budget never reached must be left untouched - NOT reclaimed for \
+             having been skipped"
+        );
+        assert!(
+            registry.live_terminal_ids().is_empty(),
+            "and not adopted either; a skipped entry is a no-op in both directions"
+        );
+
+        // Non-vacuity: with a real budget the very same entries are reached
+        // and reclaimed, so the assertion above is about the budget and not
+        // about entries that were never reclaimable.
+        TerminalRegistry::boot_reconcile_within(
+            PathBuf::from("/nonexistent-unused-helper-binary"),
+            registry_dir.clone(),
+            Duration::from_millis(200),
+            None,
+            String::new(),
+            BOOT_RECONCILE_TOTAL_BUDGET,
+        )
+        .await;
+        assert!(
+            scan_registry_dir(&registry_dir).is_empty(),
+            "with budget to spare, these same entries are reached and dropped"
+        );
+
+        let _ = std::fs::remove_dir_all(&registry_dir);
     }
 
     // The second bound, which fails independently of the first: a peer that
