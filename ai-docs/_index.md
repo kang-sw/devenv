@@ -223,6 +223,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
+| `260729-bug-dashboard-submodule-workroot-empty-projection` | idea | Dashboard `git_identity()` still rejects submodules after wsstate gained support, so submodule workRoots render as an empty projection |
+| `260729-feat-workflow-manual-submodule-detection` | idea | Announce ws-aware submodules in `workflow_manual` output as separate roots and separate boards (detection, not federation) |
 
 ## Session Notes
 

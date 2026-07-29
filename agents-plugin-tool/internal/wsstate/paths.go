@@ -236,19 +236,38 @@ func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err e
 	if err != nil {
 		return "", "", err
 	}
-	commonGitDir, err := git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return "", "", err
-	}
 	root, err = canonicalPath(root)
 	if err != nil {
 		return "", "", err
 	}
-	commonRoot, err = commonRootFromGitDir(commonGitDir)
+	commonGitDir, err := git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", "", err
 	}
-	return root, commonRoot, nil
+	commonRoot, err = commonRootFromGitDir(commonGitDir)
+	if err == nil {
+		return root, commonRoot, nil
+	}
+	// commonRootFromGitDir rejected the git-common-dir. An absorbed submodule's
+	// common dir lives under the superproject's .git/modules tree, so it lands
+	// here by design; probe for that shape and, when confirmed, treat the
+	// submodule as an independent single-worktree project (root == commonRoot).
+	// Probing only on this error path is deliberate: every layout that resolves
+	// today still takes its original code path, so submodule support cannot
+	// reclassify it, and ordinary roots pay no extra git process.
+	superprojectRoot, probeErr := git(abs, "rev-parse", "--show-superproject-working-tree")
+	if probeErr != nil || superprojectRoot == "" {
+		// Not a submodule, or the probe itself failed: preserve the original
+		// fail-loud error. A worktree created inside a submodule normally lands
+		// here, because git reports no superproject for a checkout the parent
+		// does not track. The exception is a submodule worktree placed at a path
+		// the superproject records as a gitlink: git does report a superproject
+		// for it, so it resolves as an independent project instead of failing
+		// loud. That is accepted — the superproject genuinely tracks that
+		// checkout — but it is not the blanket fail-loud the non-goal implies.
+		return "", "", err
+	}
+	return root, root, nil
 }
 
 func commonRootFromGitDir(gitDir string) (string, error) {

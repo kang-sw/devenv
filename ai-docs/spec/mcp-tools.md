@@ -180,7 +180,8 @@ minted after they fall out of its own (compacted or restarted) context.
   metadata only and never widens the child's capability scope.
 - `ferrule` accepts an optional `parent_session_key`. A lead coordinating
   several repository roots in one conversation (for example multiple git
-  worktrees, each a distinct root) records each additional control key's parent
+  worktrees, or a superproject and a git submodule checked out inside it —
+  each a distinct root) records each additional control key's parent
   as its primary control key. Because `ferrule` is lead-only, control-key
   lineage stays within one lead — it does not create a tree of independent
   control agents.

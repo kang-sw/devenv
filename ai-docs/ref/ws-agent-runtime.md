@@ -74,6 +74,12 @@ and use `<project-hash8>@<worktree-hash8>`, where `worktree-hash8` is
 `sha256(canonical-worktree-path)[:8]`. The shorter flat layout reduces prompt
 and review-path context cost while preserving stable project/worktree lookup.
 
+A git submodule working tree is a project in its own right, not a worktree of
+its superproject: it resolves to its own `<project-hash8>` with no `@` suffix
+and shares no cache state with the parent. Because a submodule's git-common-dir
+lives under the superproject's git directory, the same submodule checked out
+under two superproject worktrees yields two distinct project keys.
+
 ## Agent Directory
 
 Each named agent owns one directory under the worktree-local `agents/` directory.
