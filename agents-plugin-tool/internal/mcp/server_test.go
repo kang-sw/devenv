@@ -108,6 +108,33 @@ func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]an
 	return nil
 }
 
+// toolEntryTextByName returns the marshaled JSON of the named tool's full
+// tools/list entry (name, description, inputSchema), for substring checks
+// against the description/schema text a client actually sees.
+func toolEntryTextByName(t *testing.T, listLine, toolName string) string {
+	t.Helper()
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := listResp["result"].(map[string]any)
+	listedTools, _ := result["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if name != toolName {
+			continue
+		}
+		entry, err := json.Marshal(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(entry)
+	}
+	t.Fatalf("tools/list missing %s: %s", toolName, listLine)
+	return ""
+}
+
 func toolNameListed(t *testing.T, listLine, toolName string) bool {
 	t.Helper()
 	var listResp map[string]any
@@ -1311,12 +1338,12 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
-	for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail", "config.agents_tier", "config.workflow_prefer_mercenary"} {
+	for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail", "config.workflow_prefer_mercenary"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "config.tuning", "config.workflow_prefer_subagent", "tickets.list", "playbook.print", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "config.workflow_prefer_subagent", "config.agents_tier", "tickets.list", "playbook.print", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
@@ -1326,6 +1353,9 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	if strings.Contains(list, "Full ws") || strings.Contains(list, "full ws") {
 		t.Fatalf("tools/list retained full-ws-only playbook wording in wsflow mode: %s", list)
+	}
+	if agentsTierEntry := toolEntryTextByName(t, list, "config.agents_tier"); strings.Contains(strings.ToLower(agentsTierEntry), "mercenary") {
+		t.Fatalf("config.agents_tier description/schema leaked mercenary wording in wsflow mode: %s", agentsTierEntry)
 	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
@@ -1448,6 +1478,45 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 	}
 	if got := toolText(t, printed); strings.Contains(got, "recommended-model:") || strings.Contains(got, "recommended-reasoning-effort:") || !strings.HasSuffix(strings.TrimSpace(got), "recommended-tier: medium") {
 		t.Fatalf("playbook.print contract changed: %q", got)
+	}
+}
+
+func TestWsflowConfigAgentsTierWriteRoundTripsIntoPlaybookRenderRecommendedModel(t *testing.T) {
+	useLeadProfile(t)
+	root := initGitRepo(t)
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	cacheHome := t.TempDir()
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "codex")
+	leadKey, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+
+	written := callToolOnce(t, s, 2, "config.agents_tier", map[string]any{
+		"tier":    "medium",
+		"harness": "codex",
+		"model":   "gpt-5.7-wsflow-roundtrip",
+		"effort":  "xhigh",
+	})
+	if toolIsError(t, written) {
+		t.Fatalf("wsflow config.agents_tier write returned error: %s", written)
+	}
+
+	rendered := callToolOnce(t, s, 3, "playbook.render", map[string]any{"name": "model-pb", "session_key": leadKey})
+	if toolIsError(t, rendered) {
+		t.Fatalf("wsflow playbook.render returned error: %s", rendered)
+	}
+	responseText := toolText(t, rendered)
+	if !strings.Contains(responseText, "recommended-model: gpt-5.7-wsflow-roundtrip") {
+		t.Fatalf("playbook.render recommended-model did not reflect wsflow config.agents_tier write:\n%s", responseText)
+	}
+	if !strings.Contains(responseText, "recommended-reasoning-effort: xhigh") {
+		t.Fatalf("playbook.render recommended-reasoning-effort did not reflect wsflow config.agents_tier write:\n%s", responseText)
 	}
 }
 

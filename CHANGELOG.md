@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.37.6 - 2026-07-30
+
+### Fixed
+- **`config.agents_tier` is now reachable in agentless wsflow.** It had been
+  grouped with the named-agent surfaces (`mercenary.*`) that `WS_MCP_NO_AGENT=1`
+  hides, but model tier is not a named-agent concept — it selects which model
+  backs a delegate, which agentless wsflow still does. The effect was that
+  wsflow users had no access point for the one tuning knob they were most
+  likely to want, and `lead-tune`'s model-tier route pointed at a tool that was
+  not advertised.
+
+  The tool is added to the wsflow runtime gate list, and `lead-tune`'s
+  `ws:full-only` markers move so that the model-tier handler and its routing
+  row fall outside the full-only region. `config.tuning` now lists the
+  `agents.tier` knob in both product modes; `workflow.prefer_mercenary` stays
+  full-only. The catalog append for `agents.tier` sits before the
+  `noAgentMode` early return, which is what makes it survive into the wsflow
+  catalog.
+
 ## v0.37.5 - 2026-07-30
 
 ### Changed

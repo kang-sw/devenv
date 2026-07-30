@@ -121,12 +121,12 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "config.tuning", "tickets.list"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "config.agents_tier", "tickets.list"} {
 		if !slices.Contains(got.Tools, visible) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
@@ -825,10 +825,13 @@ func TestToolsCommandBareListMatchesToolsList(t *testing.T) {
 			}
 
 			if tc.name == "agentless" {
-				for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail", "config.agents_tier"} {
+				for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail"} {
 					if slices.Contains(gotNames, hidden) {
 						t.Fatalf("agentless tools output exposed hidden tool %s in %v", hidden, gotNames)
 					}
+				}
+				if !slices.Contains(gotNames, "config.agents_tier") {
+					t.Fatalf("agentless tools output missing shared tool config.agents_tier in %v", gotNames)
 				}
 			}
 		})

@@ -2158,19 +2158,6 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemDocCoverageAlarm),
 	})
 
-	if noAgentMode {
-		return catalog, nil
-	}
-
-	catalog.Knobs = append(catalog.Knobs, tuningKnob{
-		ID:          "workflow.prefer_mercenary",
-		Kind:        "workflow_preference",
-		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
-		Writer:      tuningWriter{Tool: "config.workflow_prefer_mercenary"},
-		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_mercenary", "value"),
-		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
-	})
-
 	agentTiers, err := currentAgentTierMappings()
 	if err != nil {
 		return tuningCatalog{}, err
@@ -2183,6 +2170,19 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: tuningFieldsFromSchema("config.agents_tier", "tier", "harness"),
 		ValueFields:    tuningFieldsFromSchema("config.agents_tier", "backend", "model", "effort"),
 		Current:        agentTiers,
+	})
+
+	if noAgentMode {
+		return catalog, nil
+	}
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "workflow.prefer_mercenary",
+		Kind:        "workflow_preference",
+		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_mercenary"},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_mercenary", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
 	})
 
 	return catalog, nil
@@ -4766,8 +4766,6 @@ func noAgentHiddenTool(name string) bool {
 		return true
 	}
 	switch name {
-	case "config.agents_tier":
-		return true
 	case "config.workflow_prefer_mercenary":
 		// Mercenary render-mode control is ws-only; the agentless wsflow surface
 		// has no mercenary path, so prefer_mercenary is hidden there. The

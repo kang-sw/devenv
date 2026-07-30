@@ -1154,11 +1154,15 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
 	}
-	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary", "agents.tier"} {
+	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary"} {
 		if knob := findTuningKnob(catalog, hidden); knob != nil {
 			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)
 		}
 	}
+
+	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
+	assertFieldEnum(t, agentsKnob.SelectorFields, "tier", []string{"small", "medium", "large", "xlarge"})
+	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 }
 
 func parseTuningCatalogResponse(t *testing.T, line string) tuningCatalog {

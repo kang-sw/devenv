@@ -59,6 +59,7 @@ Examples:
 3. Confirm the Tuning Proposal with the selected value.
 4. Call the catalog-provided writer for `"workflow.prefer_mercenary"` with `session_key` and the selected value.
 5. Report the global state and that it controls both mercenary visibility and default render guidance.
+<!-- ws:full-only:end -->
 
 ## On: tune model tier
 
@@ -67,7 +68,6 @@ Examples:
 3. Confirm the Tuning Proposal with the selected fields.
 4. Call the catalog writer tool with `session_key` and the selected fields.
 5. Report the tier and, when returned by the writer/catalog, its resolved backend/model.
-<!-- ws:full-only:end -->
 
 ## On: unsupported axis
 
@@ -83,8 +83,8 @@ Examples:
 - "delegate more/less" or strict subagent posture -> workflow preference (`"workflow.prefer_subagent"`).
 <!-- ws:full-only:start -->
 - A preference for mercenary delegation mode, including persistent agents where supported -> workflow preference (`"workflow.prefer_mercenary"`).
-- A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 <!-- ws:full-only:end -->
+- A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 - Anything else -> unsupported axis.
 
 ### judge: proactive-propose
