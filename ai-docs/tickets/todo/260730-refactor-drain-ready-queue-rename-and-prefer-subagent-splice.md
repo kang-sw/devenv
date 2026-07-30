@@ -131,6 +131,47 @@ The caveat stays in `260725` with a removal trigger.
 the already-spliced ws source. The reverse order leaks ws-namespace text into
 the wsflow package.
 
+**Reuse the existing `<playbook>` boundary as the splice delimiter.** The
+spliced region is wrapped exactly as `wrapRenderedPlaybookForConcatenation`
+already wraps it at serve time
+(`agents-plugin-tool/internal/mcp/playbook_tools.go:863-871`):
+`<playbook name="lead-prefer-subagent" title="Prefer Subagent">` … `</playbook>`.
+Three reasons: idempotent regeneration needs a paired delimiter to locate and
+replace the region, and this is already one; hook #1 delivers this same body
+under this same boundary, so a second boundary shape for identical content would
+be gratuitous; and the tag carries no `ws:`/`ws/` token, as does the
+`lead-prefer-subagent` body itself, so the composed result passes
+`guardSubstitutionEligible` and the wsflow copy receives a byte-identical block.
+
+Do **not** use an `<!-- ws:… -->` comment marker for the region.
+`disqualifyingTokens` in `skills_mirror.go` hard-fails `<!-- ws:full-only:` and
+`<!-- ws:wsflow-only:`; a new `ws:`-prefixed marker token would sit directly
+adjacent to that guard.
+
+The wrapper helper currently lives in `internal/mcp`. Move it to
+`internal/wsrsrc` and have `mcp` call it there — the dependency already runs
+that direction (`mcp` → `wsrsrc.LoadSkillBody`).
+
+**Splice at the very bottom of the target body.** Not merely a formatting
+preference: the `Ending the turn` section carries the fixed terminal-line
+contract, and 414 words of appended posture placed after it would visually bury
+the "final line of the turn" rule the section exists to enforce.
+
+**Accept the duplicate body; do not suppress hook #1.** Once spliced,
+`lead-prefer-subagent` appears twice in any session that also renders
+`lead-workflow-manual` with `workflow.prefer_subagent` on. Accepted, on two
+measurements: the builtin default for that item is `off`
+(`agents-plugin-tool/internal/mcp/server.go:462-464`), so the duplication occurs
+only for users who explicitly opted in; and the body is 414 words / ~2.7 KB,
+roughly 700 tokens. Suppressing hook #1 for drain callers, or migrating it to
+build time, both stay out of scope below.
+
+**Size trajectory, recorded so it is not a surprise at review.** The 2026-07-30
+compression pass took the target body from 1378 words to 786; this splice adds
+414 back, landing near 1200. The skill ends up close to its pre-compression bulk
+— what changed is that the remaining words are rules rather than changelog
+residue and design-reviewer rationale, and that the body is now sectioned.
+
 ## Phases
 
 ### Phase 1: Build-time skill-body splice mechanism
@@ -139,15 +180,22 @@ Add composition to `wsrsrc` alongside the existing substitution mirror: a
 declarative mapping from a target skill to the skill bodies appended to it, a
 generator behind a regen env var, and an up-to-date guard test that fails loudly
 when the target's committed `SKILL.md` does not match the freshly composed
-output. Run `guardSubstitutionEligible` on the composed result, and order
-composition before namespace substitution so both package mirrors derive from
-one source.
+output. Append at the bottom of the target body, wrapped in the `<playbook>`
+boundary, per Decisions. Run `guardSubstitutionEligible` on the composed result,
+and order composition before namespace substitution so both package mirrors
+derive from one source.
+
+Move `wrapRenderedPlaybookForConcatenation` from `internal/mcp` to
+`internal/wsrsrc` and repoint its existing serve-time caller, so both the
+build-time and serve-time paths emit one boundary shape from one implementation.
 
 Deliberately narrow: the only mapping registered is
 `lead-prefer-subagent → lead-drain-ready-queue`.
 
 Verification: guard test fails on a hand-edited target and passes after regen;
-`go test ./...` green; the wsflow copy contains no ws-namespace token.
+regenerating twice is a no-op (idempotent region replacement, not repeated
+append); `go test ./...` green; the wsflow copy contains no ws-namespace token
+and its spliced block is byte-identical to the ws copy's.
 
 ### Phase 2: Rename across every surface
 
@@ -192,5 +240,8 @@ substance. Adds a spec statement for the build-time splice mechanism.
   templates changes here.
 - Any drain-local delegation constraint. See the `260725` caveat.
 - Migrating hook #1 (`lead-workflow-manual` ← `lead-prefer-subagent`) from
-  serve-time to the new build-time mechanism. Capture as `idea/` once Phase 1
-  proves the mechanism.
+  serve-time to the new build-time mechanism, and suppressing it for drain
+  callers. Both are responses to the duplicate body accepted in Decisions;
+  capture as `idea/` once Phase 1 proves the mechanism. Revisit if the duplicate
+  turns out to cost more than the 700 tokens measured here, or if the
+  `workflow.prefer_subagent` builtin default ever moves off `off`.
