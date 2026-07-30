@@ -324,19 +324,28 @@ Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
 writes mechanism decisions, rejected alternatives, future-scope hints, Result
 Forward notes, focus "Next" lines, or note/comment proposals, `lead-write-ticket`
 builds a visible Open Decision Queue, asks whether to persist the discussion
-when persistence was not already approved, resolves one queue item at a time,
-updates the visible queue after each answer, and writes only user-confirmed
-items. Rejected, deferred, unanswered, or otherwise unconfirmed items are omitted
-unless the user explicitly approves recording their status.
+when persistence was not already approved, resolves the queue as a single batch
+interview, and writes only user-confirmed items. Rejected, deferred, unanswered,
+or otherwise unconfirmed items are omitted unless the user explicitly approves
+recording their status; omission governs what gets written and never licenses
+leaving the queue unresolved.
 
 Queue conveyance does not depend on how a host renders the visible queue. Each
 queued item's visible text is the decision itself rather than a label, and any
 secondary note or description field is optional detail that may not render, so it
 never carries load-bearing content; the same rule applies to the Markdown
-checklist used when no task-list surface exists. Asking an item restates that
-item's full text in the response body, followed by a one-line status roll-up of
-the remaining items, so the question the user is answering stays legible even
-when the visible queue renders partially or not at all.
+checklist used when no task-list surface exists. Recommendations stay out of the
+visible queue for the same reason. One response restates every open item's full
+text in the response body, so the questions the user is answering stay legible
+even when the visible queue renders partially or not at all.
+
+Each restated item carries the skill's recommendation for it, as a proposal and
+never a default. An item the user's answer does not reach stays open and returns
+in a follow-up batch, and no round limit converts a still-open item into a
+disposition the user never gave. Where an answer's reach over an item is unclear,
+the skill states its reading on its own line and continues instead of re-asking,
+so the user's brake is a visible interpretation rather than an added confirmation
+turn.
 {#260727-odq-item-conveyance-restate-in-body}
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When

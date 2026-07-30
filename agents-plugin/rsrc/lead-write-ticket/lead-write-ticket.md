@@ -107,10 +107,12 @@ For each reviewer named by `tickets.sage_gate`, and for each stage the gate repo
 1. If the user has not already approved persistence, ask whether to persist the discussion into tickets or specs; stop with no edits when they decline or do not answer.
 2. List every unresolved or unconfirmed item that could affect ticket text: mechanism decisions, rejected alternatives, future-scope hints, Result Forward notes, focus "Next" lines, comment/note proposals, and any sage-review issue whose `resolution` is `missing`.
 3. Create or refresh the visible Open Decision Queue using the task-list guidance appended to this playbook.
-4. Ask about one queue item at a time by restating its full text in the response body, followed by a one-line status roll-up of the remaining items; after each answer, update the visible queue status before asking the next item.
-5. Continue only when every queue item is confirmed, rejected, or explicitly deferred.
-6. Write confirmed items only; omit rejected, deferred, or unanswered items unless the user explicitly approves recording their status.
-7. Never write draft decisions for later correction.
+4. Ask the whole queue in one response by restating every open item's full text in the response body, each carrying your recommendation as a proposal rather than a default.
+5. Reconcile the answer item by item, update the visible queue, and re-ask every item the answer did not reach as one follow-up batch; an unreached item stays open.
+6. Where an answer's reach over an item is unclear, state your reading of it on its own line and continue rather than asking again.
+7. Continue only when every queue item is confirmed, rejected, or explicitly deferred; re-batch without limit rather than disposing an item the user never settled.
+8. Write confirmed items only; omit rejected, deferred, or unanswered items unless the user explicitly approves recording their status.
+9. Never write draft decisions for later correction.
 
 ## On: Spec-address Check
 
