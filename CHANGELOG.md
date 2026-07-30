@@ -1,33 +1,51 @@
 # Changelog
 
-## v0.37.6 - 2026-07-30
+## v0.38.0 - 2026-07-30
 
-### Fixed
-- **`config.agents_tier` is now reachable in agentless wsflow.** It had been
-  grouped with the named-agent surfaces (`mercenary.*`) that `WS_MCP_NO_AGENT=1`
-  hides, but model tier is not a named-agent concept — it selects which model
-  backs a delegate, which agentless wsflow still does. The effect was that
-  wsflow users had no access point for the one tuning knob they were most
-  likely to want, and `lead-tune`'s model-tier route pointed at a tool that was
-  not advertised.
+### Added
+- **`lead-prefer-subagent` now ships inside `lead-drain-ready-queue`.** Every
+  goal run invoked the two together, so the standing directive had to name both.
+  The prefer-subagent body is spliced into the drain skill's committed
+  `SKILL.md` at build time — verbatim, frontmatter-stripped, wrapped in the same
+  `<playbook>` boundary the serve-time hooks use — rather than transcluded at
+  serve time, which would have forced the drain skill back into being a
+  `playbook.print` shim on the hottest path in the loop.
 
-  The tool is added to the wsflow runtime gate list, and `lead-tune`'s
-  `ws:full-only` markers move so that the model-tier handler and its routing
-  row fall outside the full-only region. `config.tuning` now lists the
-  `agents.tier` knob in both product modes; `workflow.prefer_mercenary` stays
-  full-only. The catalog append for `agents.tier` sits before the
-  `noAgentMode` early return, which is what makes it survive into the wsflow
-  catalog.
-
-## v0.37.5 - 2026-07-30
+- **Build-time skill-body composition** (`wsrsrc.ComposeSkillBody`), behind
+  `WS_REGEN_COMPOSED_SKILLS`, with a drift guard and an idempotence guard.
+  Regeneration replaces the existing region by its delimiter pair instead of
+  appending, and runs before the wsflow namespace mirror so both packages derive
+  from one composed source.
 
 ### Changed
+- **`lead-goal-step` is now `lead-drain-ready-queue`.** The rename reverses the
+  one `v0.35.0` made, because the mechanism fact that one rested on was wrong.
+  The `/goal` Stop-hook's continue-vs-stop judge reads the **skill name plus the
+  transcript**, not the skill body — which compaction may already have discarded
+  — and it runs on a weaker model than the main agent. Under that mechanism
+  `step` is actively harmful: a weak judge seeing `lead-goal-step` and a
+  transcript in which one step visibly completed has every reason to call the
+  run over. `drain-ready-queue` instead names the object whose exhaustion *is*
+  the termination test, so the stop decision reduces to a lookup. The name stops
+  at the invariant process shape and deliberately omits the terminal set, which
+  keeps changing.
+
+  The `step` framing is gone from the `description:` frontmatter and the body's
+  opening line too, not just the stem — the description is what a harness skill
+  listing pairs with the name, so leaving it would have reinstalled the same
+  inference one layer down.
+
+  Only the name layer changed. The body keeps the goal-run posture, terminal
+  states, `goal/*` staging, and curation authority exactly as they were. This is
+  a minor bump because it replaces a caller-visible Codex skill entry point, the
+  same reason `v0.35.0` took one for the rename in the other direction.
+
 - **The Open Decision Queue is now asked as one batch interview.**
   `lead-write-ticket` previously restated one queued item per response and
   waited for an answer before asking the next. That serialization was the
   defect: queue items co-vary, so a placement decision split across three
   questions commits the user to the first before the third reveals it wrong.
-  The downstream field report behind `v0.36.x`'s ledger fix already recorded the
+  The downstream field report behind `v0.37.0`'s ledger fix already recorded the
   symptom — two of seven items were materially revised on contact with the
   actual question, which is what serial asking maximizes by deferring contact
   for every item but one.
@@ -53,7 +71,7 @@
   batching saves.
 
 - **Both `task-list` host variants become the state record, not the channel.**
-  `v0.36.x` made response-body prose the load-bearing channel but left the
+  `v0.37.0` made response-body prose the load-bearing channel but left the
   includes calling the list "the consent ledger" without mentioning the prose
   they now depend on, so a reader of the include alone still saw the list as the
   mechanism. The list now holds the item set and each item's
@@ -69,43 +87,22 @@
   nothing load-bearing, and both rules still govern the Markdown-checklist
   fallback.
 
-## v0.37.4 - 2026-07-30
+### Fixed
+- **`config.agents_tier` is now reachable in agentless wsflow.** It had been
+  grouped with the named-agent surfaces (`mercenary.*`) that `WS_MCP_NO_AGENT=1`
+  hides, but model tier is not a named-agent concept — it selects which model
+  backs a delegate, which agentless wsflow still does. The effect was that
+  wsflow users had no access point for the one tuning knob they were most
+  likely to want, and `lead-tune`'s model-tier route pointed at a tool that was
+  not advertised.
 
-### Changed
-- **`lead-goal-step` is now `lead-drain-ready-queue`.** The rename reverses the
-  one `v0.36.x` made, because the mechanism fact that one rested on was wrong.
-  The `/goal` Stop-hook's continue-vs-stop judge reads the **skill name plus the
-  transcript**, not the skill body — which compaction may already have discarded
-  — and it runs on a weaker model than the main agent. Under that mechanism
-  `step` is actively harmful: a weak judge seeing `lead-goal-step` and a
-  transcript in which one step visibly completed has every reason to call the
-  run over. `drain-ready-queue` instead names the object whose exhaustion *is*
-  the termination test, so the stop decision reduces to a lookup. The name stops
-  at the invariant process shape and deliberately omits the terminal set, which
-  keeps changing.
-
-  The `step` framing is gone from the `description:` frontmatter and the body's
-  opening line too, not just the stem — the description is what a harness skill
-  listing pairs with the name, so leaving it would have reinstalled the same
-  inference one layer down.
-
-  Only the name layer changed. The body keeps the goal-run posture, terminal
-  states, `goal/*` staging, and curation authority exactly as they were.
-
-### Added
-- **`lead-prefer-subagent` now ships inside `lead-drain-ready-queue`.** Every
-  goal run invoked the two together, so the standing directive had to name both.
-  The prefer-subagent body is spliced into the drain skill's committed
-  `SKILL.md` at build time — verbatim, frontmatter-stripped, wrapped in the same
-  `<playbook>` boundary the serve-time hooks use — rather than transcluded at
-  serve time, which would have forced the drain skill back into being a
-  `playbook.print` shim on the hottest path in the loop.
-
-- **Build-time skill-body composition** (`wsrsrc.ComposeSkillBody`), behind
-  `WS_REGEN_COMPOSED_SKILLS`, with a drift guard and an idempotence guard.
-  Regeneration replaces the existing region by its delimiter pair instead of
-  appending, and runs before the wsflow namespace mirror so both packages derive
-  from one composed source.
+  The tool is added to the wsflow runtime gate list, and `lead-tune`'s
+  `ws:full-only` markers move so that the model-tier handler and its routing
+  row fall outside the full-only region. `config.tuning` now lists the
+  `agents.tier` knob in both product modes; `workflow.prefer_mercenary` stays
+  full-only. The catalog append for `agents.tier` sits before the
+  `noAgentMode` early return, which is what makes it survive into the wsflow
+  catalog.
 
 ## v0.37.3 - 2026-07-30
 
