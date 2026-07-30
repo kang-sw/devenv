@@ -5,139 +5,97 @@ description: Advance a goal-pursuit run by one step, picking the next `ready/` t
 
 # Goal Step
 
-**Goal-pursuit step; `ready/` is the sole progress gate.** This skill advances
-a goal-pursuit run by one step: select and dispatch exactly one ticket from
-`ready/` — nothing advances until a ticket reaches `ready/`. Invoked without
-an active goal run, it degenerates to a single-cycle shim: one invocation
-resolves at most one ready ticket and stops — it does not poll or repeat
-internally. Repeated draining across the whole `ready/` backlog is the
-caller's responsibility (for example, a standing `/goal` directive whose
-Stop-hook re-invokes this skill each turn until the queue is empty).
+**Goal-pursuit step; `ready/` is the sole progress gate.** Select and dispatch
+exactly one ticket from `ready/` — nothing advances until a ticket reaches it.
+One invocation resolves at most one ticket and never repeats internally;
+draining the whole backlog is the caller's job, typically a standing `/goal`
+directive that re-invokes this skill each turn.
 
-**Goal-run posture.** During a goal run — the current branch is `goal/*`, or an
-active `/goal` Stop-hook reminder is present — assume the user is away. Resolve
-reversible, local decisions on your own stated recommendation, record the choice
-in one line, and continue without waiting for confirmation; this posture carries
-into the work handed off downstream, not only this skill's own steps. Stop only
-for genuinely critical decisions: irreversible or destructive actions, scope
-expanding into public API or cross-module patterns, unresolved binding
-decisions, or any AGENTS.md "Always ask" item. A critical or "Always ask" action
-a `ready/` ticket's sage-settled design already scopes is pre-authorized by the
-goal directive and the ready-landing gate — execute it, don't re-ask. Only a
-decision the ticket did **not** settle — a flagged binding decision, scope beyond
-the ticket, or a newly surfaced irreversible action — still stops.
+## Posture
 
-Ticket-curation authority. Within the posture above, the lead may edit
-existing tickets — record findings, restructure, re-triage status — and
-create and link new tickets, through the normal ticket-write path
-(`lead-write-ticket`); this introduces no new ticket-system state — a
-recorded blocker and a captured bug are both ordinary ticket edits, not a
-new field or status directory. A bug found mid-run that blocks or is
-directly relevant to the current goal goes to `ready/` through that same
-path (still subject to the sage ready-landing gate) for a later step to
-pick up; an incidental or unrelated bug goes to `idea/`; an explicitly
-deferred bug is captured only, not queued to `ready/`. This routing is
-skill-intrinsic — judge it on its own terms, not against any downstream
-project's own dogfood-capture convention.
+A goal run — current branch `goal/*`, or an active `/goal` Stop-hook reminder —
+means the user is away. Resolve reversible local decisions on your own stated
+recommendation, record the choice in one line, and continue; this carries into
+the work you hand off, not only your own steps. Stop only for the genuinely
+critical: irreversible or destructive actions, scope expanding into public API
+or cross-module patterns, unresolved binding decisions, any AGENTS.md "Always
+ask" item. An action the ticket's sage-settled design already scopes is
+pre-authorized — execute it, don't re-ask. Only what the ticket did **not**
+settle still stops.
 
-Spawn a light-tier Explore-style subagent to pick the next ticket: list
-`ai-docs/tickets/ready/`, and for each candidate check its body for a
-recorded blocker note (e.g. a `## Blocked (...)` entry) and skip blocked
-candidates; among the remaining advanceable candidates, prefer a ticket
-already in progress — one whose body carries a `### Result` on at least
-one phase but still has a phase without one — over untouched tickets; then
-prefer one named as a prerequisite via another ready ticket's
-`related:`/`parent:` frontmatter, otherwise the oldest (FIFO). Have it
-return exactly one
-advanceable ticket path, or report that `ready/` is empty, or report that
-every remaining `ready/` ticket is blocked. Do not list `ready/` or read
-ticket files yourself — the subagent does that pinpoint read, not you.
+Curate tickets as you go, through `lead-write-ticket`: record findings,
+restructure, re-triage status, create and link. Route bugs found mid-run by
+relevance — blocking or goal-relevant to `ready/` (still subject to the sage
+ready-landing gate), incidental to `idea/`, explicitly deferred captured only.
+Judge this routing on its own terms, not against a downstream project's own
+dogfood-capture convention.
 
-If the subagent reports `ready/` is empty, check the current branch. When
-it is not `goal/*`, stop — do not hand off; this is today's behavior,
-unchanged. When it is `goal/<parent>/<slug>`, this is the goal run's
-completion point: derive PARENT and SLUG from the branch name — strip the
-`goal/` prefix, then split on the LAST `/`; everything before that final
-`/` is PARENT, the final segment is SLUG. If there is no parent segment
-(old-format `goal/<slug>`, a single segment after the prefix), fall back
-to `main` as the merge target instead. Ask the user for explicit approval
-to merge `goal/<parent>/<slug>` into `<parent>` (or, for the old-format
-fallback, `goal/<slug>` into `main`) — the same approval spirit as
-`lead-implement`'s Branch invariant — wait for explicit approval before
-merging — and only on approval perform the merge yourself with plain `git`
-commands (e.g. `git checkout <parent> && git merge --no-ff
-goal/<parent>/<slug>`, or the `main`-fallback equivalent, following
-repository commit rules for the merge commit). This override never
-extends to push or remote actions — do not push after this merge.
+Conserve your context for the long run this serves: beyond selection, delegate
+everything — including commits — to an appropriately tiered subagent, following
+`lead-prefer-subagent`.
 
-If the subagent instead reports that every remaining `ready/` ticket is
-blocked, this is a different outcome from the empty-queue completion
-above — check the current branch the same way. When it is not `goal/*`,
-this case does not apply and the unchanged non-goal stop above still
-governs. When it is `goal/<parent>/<slug>`, this is the blocked-progress
-conclusion: report the recorded blocker(s) to the user explicitly and end
-the run — do not loop, and do not run the merge-approval flow above,
-because merging here would misrepresent unfinished, blocked work as a
-completed goal. The scoping guard: this conclusion applies only when every
-remaining `ready/` ticket is blocked; one blocked ticket among otherwise-
-workable ones is not a conclusion, the selection subagent simply skips it
-and returns an advanceable one instead. The discriminator against a
-hard-gate pause (the Goal-run posture paragraph above): is there any work
-the lead could still do without the human? Work remaining with only a
-final irreversible/destructive action awaiting sign-off is a hard-gate
-pause, not this conclusion — a hard-gate pause must never be reclassified
-as goal-complete or routed through this blocked-progress ending.
+## Select
 
-Otherwise, a ticket path was returned. Before dispatching it, check for an
-active goal-staging context yourself (not the selection subagent): an
-active `/goal` Stop-hook reminder present in the current turn, and the
-current branch not already `goal/*`. When both hold, capture the current
-branch name first — e.g. via `git rev-parse --abbrev-ref HEAD` — as
-PARENT, the fork point this goal run branches from. Detached-HEAD guard:
-if that command returns literal `HEAD` (no branch checked out), abort
-staging-branch creation with a clear message instead of creating
-`goal/HEAD/<slug>`, and fall through to the non-staging path below.
-Otherwise generate an arbitrary random branch-safe slug (a short
-word-word-word token, e.g. `canny-hello-stride` — never derived from the
-goal text or command name) and create and check out the staging branch
-directly — `git checkout -b goal/<parent>/<slug>` — before the handoff. A
-slug derived from the goal text collides across independent concurrent
-goal runs of the same command (git branches are shared across worktrees
-of one repository), so the slug must be randomly generated per run
-instead. When no such reminder is active, or the current branch is
-already `goal/*`, skip this step and stay on the current branch; this
-preserves today's non-staging behavior exactly when no goal context is
-active.
+Spawn a light-tier Explore-style subagent to pick the next ticket. Do not list
+`ready/` or read ticket files yourself — the subagent does that pinpoint read.
+Have it skip candidates carrying a recorded blocker note (e.g. a
+`## Blocked (...)` entry), then among the rest prefer, in order: a ticket already
+in progress (some phase has a `### Result`, at least one does not), one named as
+a prerequisite by another ready ticket's `related:`/`parent:`, otherwise the
+oldest (FIFO). It returns exactly one advanceable ticket path, or reports
+`ready/` empty, or reports every remaining ticket blocked.
 
-Hand off to `lead-proceed` with the returned path as an explicit target;
-never call it bare. When the current branch is `goal/*`, include
-`policy.branch.merge_confirm: "skip"` as explicit caller policy alongside
-the handoff so the ensuing implementation merges into the goal branch
-without asking; do not set an explicit merge target — the checked-out goal
-branch is picked up automatically. When no goal-staging context is active,
-hand off exactly as before: no merge-confirm override, no staging branch.
+Both empty and all-blocked stop the turn with no handoff. Off a `goal/*` branch
+that is the whole behavior; on `goal/<parent>/<slug>` each has its own terminal
+below.
+
+## Dispatch a returned ticket
+
+If a `/goal` reminder is active and the branch is not already `goal/*`, stage
+first: capture the current branch as PARENT via `git rev-parse --abbrev-ref
+HEAD`, then `git checkout -b goal/<parent>/<slug>` with a random word-word-word
+slug — never derived from the goal text, which collides across concurrent runs
+of the same command. On a literal `HEAD` (detached), abort staging with a clear
+message and dispatch unstaged.
+
+Hand off to `lead-proceed` with the path as an explicit target; never call it
+bare. On a `goal/*` branch add `policy.branch.merge_confirm: "skip"` as caller
+policy, and set no merge target — the checked-out branch is picked up
+automatically.
+
+## Terminal: `ready/` empty on a goal branch
+
+The run's completion point. PARENT is everything between the `goal/` prefix and
+the last `/`; a single-segment `goal/<slug>` falls back to `main`. Ask the user
+for explicit approval to merge into PARENT, and only on approval merge it
+yourself with plain `git` (`--no-ff`, repository commit rules for the merge
+commit). Never push.
+
+## Terminal: every remaining ticket blocked on a goal branch
+
+Report the recorded blockers and end the run. Do not merge — that would
+misrepresent blocked work as a completed goal.
+
+Discriminate this from a hard-gate pause: is there work you could still do
+without the human? Work remaining behind a single pending sign-off is a pause,
+and a pause must never be reclassified as goal-complete or routed through this
+ending.
+
+## Ending the turn
 
 **One finished ticket is not a finished goal, and the turn's last line
-decides.** Whatever re-invokes this skill judges from this skill's name
-and the visible transcript, never from this body — so make the terminal
-call yourself and hand it over verbatim as the turn's final line:
+decides.** Whatever re-invokes this skill judges from this skill's name and the
+visible transcript, never from this body — so make the terminal call yourself
+and hand it over verbatim as the turn's final line:
 
 - Continuing: `Ready queue still has advanceable tickets — next cycle: lead-goal-step.`
 - Ending: `Goal run finished — <reason>. Do not re-invoke lead-goal-step.`
 
-Write nothing after that line; a wrap-up placed there is what gets read
-last. Keep `finished`, `complete`, and `done` out of a continuing turn
-entirely — name the ticket that landed instead.
+Write nothing after that line; a wrap-up placed there is what gets read last.
+Keep `finished`, `complete`, and `done` out of a continuing turn entirely — name
+the ticket that landed instead.
 
-Record the blocker before yielding — this step is not skippable. When this
-turn's downstream work concludes the dispatched ticket cannot advance
-further without a human decision, record that blocker onto the ticket
-itself before the turn ends — an ordinary body edit, e.g. a dated `##
-Blocked (YYYY-MM-DD)` note mirroring the sage precedent. An unrecorded
-blocker causes the next turn's selection subagent to re-pick the same
-stuck ticket instead of skipping it.
-
-Conserve lead context for the long-running goal this serves: beyond
-selection, delegate everything else too — including simple tasks like
-commits — to an appropriately tiered subagent, following
-`lead-prefer-subagent`.
+Record a blocker before yielding — not skippable. When this turn's work
+concludes the dispatched ticket cannot advance without a human decision, write
+that onto the ticket as a dated `## Blocked (YYYY-MM-DD)` note. Unrecorded, the
+next turn's selector re-picks the same stuck ticket.
