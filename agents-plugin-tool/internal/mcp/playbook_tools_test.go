@@ -1024,6 +1024,9 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		`"workflow.prefer_subagent"`,
 		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
 		"prompt.UserPreferenceSection",
+		"## On: tune model tier",
+		"Map the request to the `agents.tier` catalog knob",
+		"model tier (`agents.tier`)",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("wsflow lead-tune render missing %q:\n%s", want, body)
@@ -1033,8 +1036,6 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		`"workflow.prefer_mercenary"`,
 		"config.workflow_prefer_mercenary",
 		"delegation.prefer_mercenary",
-		"agents.tier",
-		"config.agents_tier",
 		"ws.mercenary.",
 		"Full ws",
 		"full ws",

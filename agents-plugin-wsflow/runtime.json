@@ -32,6 +32,7 @@
     "config.workflow_prefer_subagent": ">=0.37.3-dev <0.38.0",
     "config.bootstrap_alarm": ">=0.37.3-dev <0.38.0",
     "config.doc_coverage_alarm": ">=0.37.3-dev <0.38.0",
+    "config.agents_tier": ">=0.37.3-dev <0.38.0",
     "config.prompt.set": ">=0.37.3-dev <0.38.0",
     "config.prompt.unset": ">=0.37.3-dev <0.38.0",
     "config.prompt": ">=0.37.3-dev <0.38.0",

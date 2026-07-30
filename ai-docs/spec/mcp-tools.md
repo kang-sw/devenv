@@ -576,7 +576,8 @@ and `none` store the no-override state; supported non-empty effort values are
 visible through configuration output. The update applies to the explicit harness
 when provided, otherwise the detected MCP session harness when available, and
 otherwise the default tier mapping. This makes `backend` mean the execution
-backend rather than the tier-table key. {#260513-harness-local-agent-tier-config}
+backend rather than the tier-table key. Available in both full and agentless
+product modes. {#260513-harness-local-agent-tier-config}
 
 `config.workflow_prefer_subagent(session_key, value: "on"|"off")` sets the
 global `"workflow.prefer_subagent"` item, whose builtin default is `off`.
@@ -1401,10 +1402,10 @@ while preserving the sanitized logical stem.
 
 The MCP server supports an environment-selected agentless product mode for the
 internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
-omit named-agent and model-alias configuration surfaces:
-`mercenary.*` and `config.agents_tier`. `api.list` remains available as
-read-only cache discovery; the agent-backed API documentation ask tools are
-removed from the full ws surface rather than hidden only in wsflow mode.
+omit named-agent delegation surfaces: `mercenary.*`. `api.list` remains
+available as read-only cache discovery; the agent-backed API documentation ask
+tools are removed from the full ws surface rather than hidden only in wsflow
+mode.
 
 Explicit calls to hidden agent-backed tools fail with a clear disabled error and
 do not start named-agent workers. Runtime capability output and CLI command

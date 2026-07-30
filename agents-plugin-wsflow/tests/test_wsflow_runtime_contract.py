@@ -25,7 +25,6 @@ HIDDEN_TOOLS = {
     "ws.mercenary.cancel",
     "ws.mercenary.print",
     "ws.mercenary.erase",
-    "config.agents_tier",
     "config.workflow_prefer_mercenary",
     "api.ask",
     "api.ask_async",
@@ -112,6 +111,7 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
         self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
         self.assertIn("api.list", contract["tools"])
+        self.assertIn("config.agents_tier", contract["tools"])
         self.assertNotIn("prompt.render", contract["tools"])
         self.assertNotIn("prompt.render", payload["tools"])
 
