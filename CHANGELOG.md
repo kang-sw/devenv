@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.37.5 - 2026-07-30
+
+### Changed
+- **The Open Decision Queue is now asked as one batch interview.**
+  `lead-write-ticket` previously restated one queued item per response and
+  waited for an answer before asking the next. That serialization was the
+  defect: queue items co-vary, so a placement decision split across three
+  questions commits the user to the first before the third reveals it wrong.
+  The downstream field report behind `v0.36.x`'s ledger fix already recorded the
+  symptom — two of seven items were materially revised on contact with the
+  actual question, which is what serial asking maximizes by deferring contact
+  for every item but one.
+
+  One response now restates every open item's full text, each carrying the
+  skill's recommendation for it. The user answers across the whole batch in
+  prose, weaving items that depend on each other.
+
+  The gate is not weakened. Its invariant was never "ask one at a time" but
+  "every item receives an explicit disposition", and that now runs through an
+  explicit reconcile step: the skill maps the answer to items, updates the
+  visible queue, and re-batches whatever the answer did not reach. A
+  recommendation is a proposal and never a default, an unreached item stays
+  `open`, and no round limit converts a still-open item into a disposition the
+  user never gave.
+
+  Where an answer plausibly reaches an item but not unambiguously, the skill
+  states its reading on its own line and continues rather than asking again —
+  "reading [1] and [2] as confirmed and [3] as deferred, continuing." The brake
+  is that visible declaration. A grammar of what counts as an explicit agreement
+  signal, with a re-ask for anything failing it, was drafted and rejected: it
+  reinstates a confirmation turn per batch and spends back the round trips
+  batching saves.
+
+- **Both `task-list` host variants become the state record, not the channel.**
+  `v0.36.x` made response-body prose the load-bearing channel but left the
+  includes calling the list "the consent ledger" without mentioning the prose
+  they now depend on, so a reader of the include alone still saw the list as the
+  mechanism. The list now holds the item set and each item's
+  `open`/`confirmed`/`rejected`/`deferred` status — what survives the lead's own
+  compaction and what makes "did every item get a disposition?" checkable — and
+  their serial-rhythm rules are gone, since there is no "next item" in a batch.
+  Recommendations stay out of the list: added length is the input to the render
+  truncation that fix addressed, and an agent can regenerate a lost
+  recommendation where a truncated ledger is simply unreadable.
+
+  Item composition is unchanged. The item's visible text is still the decision
+  itself rather than a label, secondary note and description fields still carry
+  nothing load-bearing, and both rules still govern the Markdown-checklist
+  fallback.
+
 ## v0.37.4 - 2026-07-30
 
 ### Changed
