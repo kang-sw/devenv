@@ -310,7 +310,7 @@ code-side pragmatic-concatenation mechanism: after the normal
 render-plus-substitute pass, for specific serving playbook names it loads a
 second body straight from the skills tree via `wsrsrc.LoadSkillBody` and
 appends it, wrapped in a visible `<playbook name="..." title="...">` boundary
-(`wrapRenderedPlaybookForConcatenation`), rather than inlining that content
+(`wsrsrc.WrapForConcatenation`), rather than inlining that content
 into the rsrc source or duplicating it in prose. The append happens after
 `substitutePlaybookVars` runs on the primary body, because the appended
 skills-tree body is static prose with no `{{.` placeholders and must not trip
@@ -331,6 +331,47 @@ next `playbook.print` response with no separate build or regen step, but also
 means `agents-plugin/skills/manifest.json`'s drift gate does not catch a
 content change here the way `agents-plugin/rsrc/manifest.json` catches drift
 in ordinary rsrc playbook bodies.
+
+## Build-Time Skill-Body Composition {#260730-build-time-skill-body-composition}
+
+Distinct from the serve-time mechanism above and from the substitution-mirrored
+generation that produces the wsflow skill copies: composition splices one
+skill's body into another skill's **committed** `SKILL.md` at build time, so
+the target ships as a single inline body with no tool call and no runtime
+assembly. A skill that must always be read alongside another therefore carries
+that other body as text rather than pointing at it by name.
+
+The mechanism is a curated, bounded mapping — target skill, source skill,
+boundary title, anchor heading — not a general include facility. Exactly one
+mapping exists: `lead-drain-ready-queue` carries `lead-prefer-subagent`,
+anchored at the end of its `## Posture` section.
+
+Observable contract:
+
+- The spliced region is wrapped in the same
+  `<playbook name="..." title="...">` … `</playbook>` boundary the serve-time
+  mechanism emits, from the same implementation, so a reader sees one boundary
+  shape for the same content on either path.
+- The spliced body is the source's frontmatter-stripped body, verbatim, with no
+  target-local modification.
+- Composition runs before namespace substitution, so the wsflow copy derives
+  from the already-composed full-ws source and the spliced block is
+  byte-identical between packages.
+- Regeneration is idempotent: an existing region is located by its delimiter
+  pair and replaced in place; the anchor heading is consulted only when no
+  region exists yet. Composing an already-composed target is a no-op.
+- The composed result is subject to the same wsflow eligibility guard as any
+  mirrored skill, so a source body carrying a disqualifying token fails at
+  composition rather than reaching the mirror.
+- Unlike serve-time transclusion, staleness here is caught deterministically: a
+  committed target that does not match its freshly composed form fails a drift
+  guard test, following the manifest-regen precedent.
+
+Build time was chosen over serve time for this splice specifically because the
+serve-time hooks live in `printPlaybook`, so using them would force the target
+back into being a `playbook.print` shim — reintroducing the call-skip failure
+that moving these skills to inline bodies removed, on the most frequently
+served skill in the goal loop.
 
 ## Post-Compaction Session Restoration {#260626-post-compaction-session-restoration}
 

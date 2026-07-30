@@ -421,19 +421,46 @@ must not force full workflow-skill ceremony onto this checkpoint unless its
 actual output or end state is unclear.
 {#260512-discussion-verification-skill}
 
-`lead-goal-step` advances a goal-pursuit run by one step: select and
-dispatch exactly one ticket from `ready/`, the sole progress gate —
-nothing advances until a ticket reaches `ready/`. The skill name does not
-drive loop behavior; the `/goal` Stop-hook's continue-vs-stop decision is
-AI judgment over the body prose, not the name. Invoked without an active
-goal run, it degenerates to a single-cycle shim, not a loop: one
-invocation resolves at most one ready ticket and hands it to
-`lead-proceed` as an explicit target, so the caller does not depend on
-`lead-proceed`'s own target-from-conversation routing to guess which
-ticket is meant — it does not poll or repeat internally. Repeated
-draining across the whole `ready/` backlog is the caller's
-responsibility (for example, a standing `/goal` directive whose Stop-hook
-re-invokes this skill each turn until the queue is empty).
+`lead-drain-ready-queue` drains the `ready/` queue: one invocation selects
+and dispatches exactly one ticket from `ready/`, the sole progress gate —
+nothing advances until a ticket reaches `ready/`. It does not poll or
+repeat internally, so draining the whole queue is repeated invocation, for
+example a standing `/goal` directive whose Stop-hook re-invokes the skill
+each turn until nothing advanceable remains. Invoked without an active goal
+run it is a single-cycle shim: one ready ticket handed to `lead-proceed` as
+an explicit target, so the caller does not depend on `lead-proceed`'s own
+target-from-conversation routing to guess which ticket is meant.
+
+The skill's name and its body address **different readers, under separate
+contracts**:
+
+- *Body layer — read by the main agent.* It carries the full goal-run
+  posture: the terminal states, `goal/*` staging, ticket-curation authority,
+  blocker recording. The entries below specify it.
+- *Name layer — read by the `/goal` Stop-hook's continue-vs-stop judge.* That
+  judge sees the skill name plus the transcript up to the stop, never the
+  skill body, and runs on a weaker model than the main agent. The name must
+  therefore supply a termination test the judge can resolve by lookup rather
+  than infer: the named queue is either empty or it is not. The name encodes
+  the invariant process shape only and never the terminal set — terminals are
+  added over time, and a name enumerating them becomes a lie that misleads
+  the judge worse than a silent name does.
+
+An earlier revision of this entry asserted the opposite mechanism: that the
+hook reads the body rather than the name, and that the name does not drive
+loop behavior. That claim was retracted on 2026-07-30 after observation of
+live goal runs. It is recorded here so it is not reintroduced.
+
+Because the judge is weak, the skill does not leave the continue-vs-stop call
+to it. Every turn ends with one of two fixed lines as its final line, with
+deliberately disjoint vocabularies and an imperative ending clause:
+
+- Continuing: `Ready queue still has advanceable tickets — next cycle: lead-drain-ready-queue.`
+- Ending: `Goal run finished — <reason>. Do not re-invoke lead-drain-ready-queue.`
+
+Nothing may follow that line — a wrap-up placed after it is what the judge
+reads last — and `finished`, `complete`, and `done` stay out of a continuing
+turn entirely.
 {#260723-lead-goal-step-rename-reposition}
 
 Ticket selection is itself delegated, not done by the lead: the skill
