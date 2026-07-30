@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.37.4 - 2026-07-30
+
+### Changed
+- **`lead-goal-step` is now `lead-drain-ready-queue`.** The rename reverses the
+  one `v0.36.x` made, because the mechanism fact that one rested on was wrong.
+  The `/goal` Stop-hook's continue-vs-stop judge reads the **skill name plus the
+  transcript**, not the skill body — which compaction may already have discarded
+  — and it runs on a weaker model than the main agent. Under that mechanism
+  `step` is actively harmful: a weak judge seeing `lead-goal-step` and a
+  transcript in which one step visibly completed has every reason to call the
+  run over. `drain-ready-queue` instead names the object whose exhaustion *is*
+  the termination test, so the stop decision reduces to a lookup. The name stops
+  at the invariant process shape and deliberately omits the terminal set, which
+  keeps changing.
+
+  The `step` framing is gone from the `description:` frontmatter and the body's
+  opening line too, not just the stem — the description is what a harness skill
+  listing pairs with the name, so leaving it would have reinstalled the same
+  inference one layer down.
+
+  Only the name layer changed. The body keeps the goal-run posture, terminal
+  states, `goal/*` staging, and curation authority exactly as they were.
+
+### Added
+- **`lead-prefer-subagent` now ships inside `lead-drain-ready-queue`.** Every
+  goal run invoked the two together, so the standing directive had to name both.
+  The prefer-subagent body is spliced into the drain skill's committed
+  `SKILL.md` at build time — verbatim, frontmatter-stripped, wrapped in the same
+  `<playbook>` boundary the serve-time hooks use — rather than transcluded at
+  serve time, which would have forced the drain skill back into being a
+  `playbook.print` shim on the hottest path in the loop.
+
+- **Build-time skill-body composition** (`wsrsrc.ComposeSkillBody`), behind
+  `WS_REGEN_COMPOSED_SKILLS`, with a drift guard and an idempotence guard.
+  Regeneration replaces the existing region by its delimiter pair instead of
+  appending, and runs before the wsflow namespace mirror so both packages derive
+  from one composed source.
+
 ## v0.37.3 - 2026-07-30
 
 ### Added
