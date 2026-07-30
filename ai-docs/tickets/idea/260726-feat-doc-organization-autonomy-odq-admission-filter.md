@@ -2,6 +2,7 @@
 title: Documentation-organization decisions should default to agent autonomy — narrow the Open Decision Queue admission filter
 related:
   260726-bug-open-decision-queue-ledger-illegible: adjacent ODQ change — that one fixes how queued items are conveyed, this one narrows what enters the queue
+  260730-feat-odq-batch-interview: lands first; it replaces serial asking with one batch interview, which changes what a long queue costs and therefore where this ticket's boundary should fall
   260630-epic-skill-playbook-diet: same direction of travel — remove ceremony that does not earn its cost
 ---
 
@@ -69,6 +70,14 @@ ticket cannot be written about a conclusion not yet reached. Framing this as a
 distinct "retrofit mode" is likely the wrong shape — a named mode invites agents
 to select it — but a single doctrine line stating that queue length is not a
 defect signal may be enough.
+
+Answer both questions only after `260730-feat-odq-batch-interview` lands. That
+ticket replaces serial asking with a single batch interview, so a long queue stops
+costing one turn per item. Both questions above were framed against the serial
+cost — the primary one's motivation partly assumes a long queue is expensive to
+ask, and the secondary one largely dissolves once a long batch reads as one
+interview rather than as twelve interruptions. Re-derive the boundary against the
+batch cost curve rather than carrying these framings forward.
 
 ## Phases
 
