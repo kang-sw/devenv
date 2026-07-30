@@ -916,7 +916,7 @@ func TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally(t *testing.T)
 	if err != nil {
 		t.Fatalf("LoadSkillBody(lead-goal-step): %v", err)
 	}
-	wantBlock := wrapRenderedPlaybookForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
+	wantBlock := wsrsrc.WrapForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
 	if !strings.Contains(body, wantBlock) {
 		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live lead-goal-step SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
 	}
@@ -965,7 +965,7 @@ func TestPlaybookPrintGoalFanOutStepResolvesWsflowSkillsRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSkillBody(lead-goal-step): %v", err)
 	}
-	wantBlock := wrapRenderedPlaybookForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
+	wantBlock := wsrsrc.WrapForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
 	if !strings.Contains(body, wantBlock) {
 		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live wsflow lead-goal-step SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
 	}

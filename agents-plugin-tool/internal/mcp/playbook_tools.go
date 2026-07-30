@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"fmt"
-	"html"
 	"os"
 	"path/filepath"
 	"sort"
@@ -858,18 +857,6 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 	return result, nil
 }
 
-// wrapRenderedPlaybookForConcatenation wraps an already-rendered playbook body
-// for code-side pragmatic concatenation. It does not load or parse source text.
-func wrapRenderedPlaybookForConcatenation(name, title, body string) string {
-	trimmedBody := strings.TrimRight(body, "\n")
-	return fmt.Sprintf(
-		"<playbook name=\"%s\" title=\"%s\">\n%s\n</playbook>",
-		html.EscapeString(name),
-		html.EscapeString(title),
-		trimmedBody,
-	)
-}
-
 func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
 	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferSubagent)
@@ -917,7 +904,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 			if err != nil {
 				return "", "", fmt.Errorf("load appended %s: %w", preferSubagentPlaybookName, err)
 			}
-			body += "\n\n" + wrapRenderedPlaybookForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
+			body += "\n\n" + wsrsrc.WrapForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
 		}
 	}
 	if name == goalFanOutStepPlaybookName {
@@ -929,7 +916,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 		if err != nil {
 			return "", "", fmt.Errorf("load appended %s: %w", goalStepPlaybookName, err)
 		}
-		body += "\n\n" + wrapRenderedPlaybookForConcatenation(goalStepPlaybookName, goalStepPlaybookTitle, appendBody)
+		body += "\n\n" + wsrsrc.WrapForConcatenation(goalStepPlaybookName, goalStepPlaybookTitle, appendBody)
 	}
 	return body, recommendedTier, nil
 }

@@ -178,8 +178,63 @@ curated list in `agents-plugin-tool/internal/wsrsrc/skills_mirror_test.go`.
   no changing input, so go's test cache can return a stale green `ok` without
   running the write side effect.
 - **Env var:** `WS_REGEN_WSFLOW_SKILLS`, distinct from `WS_REGEN_WSFLOW_RSRC`
-  (rsrc mirror regen) and `WSRSRC_REGEN_SKILLS` (independent skills manifest
-  regen) — never reuse either name.
+  (rsrc mirror regen), `WS_REGEN_COMPOSED_SKILLS` (build-time skill
+  composition), and `WSRSRC_REGEN_SKILLS` (independent skills manifest regen) —
+  never reuse any of these names.
+
+## Build-Time Skill Composition
+
+Separate from, and ordered before, the substitution mirror above. Composition
+splices one skill's body into another skill's committed `SKILL.md` at build
+time, so a skill that is always invoked alongside another loads it as text
+instead of pointing at it by name. It is a **bounded, curated mapping**, not a
+general include mechanism.
+
+Current mapping (exhaustive):
+
+| Target | Spliced source | Anchor |
+| --- | --- | --- |
+| `lead-goal-step` | `lead-prefer-subagent` | end of `## Posture`, before `## Select` |
+
+- **Why build time, not serve time.** The serve-time concatenation hooks live
+  in `printPlaybook`, so a serve-time splice would force the target back into
+  being a `playbook.print` shim — reintroducing the call-skip failure
+  `260703-chore-prefer-subagent-verify-discussion-inline-mirror` removed, on
+  the highest-frequency skill in the goal loop. Build-time staleness is caught
+  deterministically by a guard test; serve-time staleness is not.
+- **Boundary:** the region is wrapped in the same
+  `<playbook name="…" title="…">` … `</playbook>` boundary the serve-time hooks
+  emit, from the same implementation (`wsrsrc.WrapForConcatenation`). Do not
+  introduce an `<!-- ws:… -->` comment marker for the region — it would sit
+  directly adjacent to the `<!-- ws:full-only:` / `<!-- ws:wsflow-only:`
+  entries in the eligibility guard's denylist.
+- **Source text:** the spliced body is `wsrsrc.LoadSkillBody`'s output —
+  verbatim and frontmatter-stripped — with no target-local modification.
+- **Idempotence:** on first generation the region is inserted before the anchor
+  heading; afterwards it is located by its delimiter pair and replaced in
+  place. The anchor is consulted only when no region exists yet.
+- **Generator:** `ComposeSkillBody` in
+  `agents-plugin-tool/internal/wsrsrc/skills_compose.go`; the curated mapping is
+  `composedSkills` in `skills_compose_test.go`. Adding an entry requires
+  updating both that mapping and this section.
+- **Eligibility:** the composed result is run through the same
+  `guardSubstitutionEligible` denylist, because every splice target is also a
+  substitution-mirrored skill. A source body that would disqualify the target
+  from mirroring fails at composition.
+- **Drift guard:** `TestComposedSkillsUpToDate`, with
+  `TestComposeSkillBodyIsIdempotent` pinning that regeneration does not stack
+  copies. Regenerate with `WS_REGEN_COMPOSED_SKILLS=1 go test ./internal/wsrsrc
+  -count=1 -run TestRegenerateComposedSkills`. `-count=1` is mandatory for the
+  same reason as every other regen entrypoint here.
+- **Order:** compose first, mirror second. The wsflow copy must derive from the
+  already-composed full-ws source; the reverse order leaks ws-namespace text
+  into the wsflow package.
+
+  ```bash
+  WS_REGEN_COMPOSED_SKILLS=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateComposedSkills
+  WS_REGEN_WSFLOW_SKILLS=1  go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowSkillsMirror
+  WSRSRC_REGEN_SKILLS=1     go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealSkillsManifest
+  ```
 
 ## Rsrc Tree Provisioning
 
