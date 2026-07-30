@@ -1,12 +1,22 @@
 ---
 title: "Rename lead-goal-step to lead-drain-ready-queue and splice lead-prefer-subagent at build time"
-sage-review-design: required
+sage-review-design: completed
+spec:
+  - 260723-lead-goal-step-rename-reposition
+  - 260703-drain-ready-queue-skill
+  - 260707-drain-goal-branch-staging
+  - 260723-goal-step-ticket-curation-authority
+  - 260723-goal-step-blocked-progress-conclusion
+  - 260725-goal-step-in-progress-ticket-affinity
+related-mental-model:
+  - workflow-skills
 related:
   260723-feat-goal-step-rename-and-goal-loop-completion: the rename this reverses; its "Mechanism facts (verified)" section records a Stop-hook fact that is wrong, and that fact is what its name choice rested on
   260703-chore-prefer-subagent-verify-discussion-inline-mirror: established both the inline-SKILL.md decision this preserves and the substitution-mirrored generation mechanism this extends
   260730-refactor-retire-goal-fan-out-step-and-session-note: sibling; must land first so the fan-out transclusion hook is gone before this reshapes the same skill surface
   260725-research-goal-loop-restart-starved-by-background-delegation: owns the background-dispatch starvation caveat this ticket deliberately does not encode in skill prose
   260722-feat-goal-run-autonomy-posture: adjacent open work on the same skill body; coordinate sequencing
+sage-review-completeness: completed
 ---
 
 # Rename lead-goal-step to lead-drain-ready-queue and splice lead-prefer-subagent at build time
@@ -152,10 +162,32 @@ The wrapper helper currently lives in `internal/mcp`. Move it to
 `internal/wsrsrc` and have `mcp` call it there — the dependency already runs
 that direction (`mcp` → `wsrsrc.LoadSkillBody`).
 
-**Splice at the very bottom of the target body.** Not merely a formatting
-preference: the `Ending the turn` section carries the fixed terminal-line
-contract, and 414 words of appended posture placed after it would visually bury
-the "final line of the turn" rule the section exists to enforce.
+**Splice at the end of the target's `## Posture` section, not at the bottom of
+the file.** An earlier draft of this ticket said "the very bottom" while
+justifying it by protecting the `## Ending the turn` section — self-contradictory,
+since that section *is* the last one in
+`agents-plugin/skills/lead-goal-step/SKILL.md`. Bottom-append is concretely
+wrong, not just cosmetically: `lead-prefer-subagent`'s body ends with "Require
+this exact return format: `Outcome: …`; … `Commit: <hash> or none`", so appending
+there puts a competing output-format contract immediately after the rule that
+says "Write nothing after that line."
+
+The spliced block therefore lands at the end of `## Posture`, anchored before the
+`## Select` heading — which is also where it belongs semantically, directly after
+the paragraph that already points at `lead-prefer-subagent`. The terminal-line
+contract stays the last thing in the file.
+
+Mechanically this is anchored insertion, not append: on first generation the
+region is inserted before a named heading; on every later generation the region
+is located by its `<playbook>`/`</playbook>` delimiter pair and replaced in
+place, so regeneration stays idempotent and the anchor is only consulted when no
+region exists yet.
+
+**Splice the frontmatter-stripped body.** "Verbatim, with no local modification"
+means the body as `wsrsrc.LoadSkillBody` returns it — that loader strips
+frontmatter (`internal/wsrsrc/loader.go:64-72`) and is what the serve-time caller
+already feeds the wrapper. Splicing the raw file would embed
+`lead-prefer-subagent`'s `---\nname: …\ndescription: …\n---` block mid-markdown.
 
 **Accept the duplicate body; do not suppress hook #1.** Once spliced,
 `lead-prefer-subagent` appears twice in any session that also renders
@@ -180,36 +212,69 @@ Add composition to `wsrsrc` alongside the existing substitution mirror: a
 declarative mapping from a target skill to the skill bodies appended to it, a
 generator behind a regen env var, and an up-to-date guard test that fails loudly
 when the target's committed `SKILL.md` does not match the freshly composed
-output. Append at the bottom of the target body, wrapped in the `<playbook>`
-boundary, per Decisions. Run `guardSubstitutionEligible` on the composed result,
-and order composition before namespace substitution so both package mirrors
-derive from one source.
+output. Insert the region at the end of `## Posture`, wrapped in the `<playbook>`
+boundary, per Decisions — source the appended body through
+`wsrsrc.LoadSkillBody` so frontmatter is stripped. Run
+`guardSubstitutionEligible` on the composed result, and order composition before
+namespace substitution so both package mirrors derive from one source.
 
 Move `wrapRenderedPlaybookForConcatenation` from `internal/mcp` to
 `internal/wsrsrc` and repoint its existing serve-time caller, so both the
 build-time and serve-time paths emit one boundary shape from one implementation.
 
-Deliberately narrow: the only mapping registered is
-`lead-prefer-subagent → lead-drain-ready-queue`.
+Deliberately narrow: one mapping only. It registers against the target's name as
+it exists in this phase — `lead-prefer-subagent → lead-goal-step` — because the
+rename lands in Phase 2; Phase 2 updates the mapping key along with every other
+surface. Also update the curated skill list and its prose contract in
+`ai-docs/ref/wsflow-mirroring.md`, which states that adding a skill requires
+updating both that document and the generator's list in
+`internal/wsrsrc/skills_mirror_test.go`.
 
 Verification: guard test fails on a hand-edited target and passes after regen;
-regenerating twice is a no-op (idempotent region replacement, not repeated
-append); `go test ./...` green; the wsflow copy contains no ws-namespace token
-and its spliced block is byte-identical to the ws copy's.
+regenerating twice is a no-op (idempotent region replacement located by the
+delimiter pair, not repeated insertion); `go test ./...` green; the wsflow copy
+contains no ws-namespace token and its spliced block is byte-identical to the ws
+copy's; `## Ending the turn` is still the target's last section afterward.
 
 ### Phase 2: Rename across every surface
 
 Rename the skill directory and `name:` frontmatter in both package mirrors, and
-propagate. Known surfaces: the two fixed terminal-line templates in the body
-(which name the skill), `agents-plugin/skills/manifest.json` (regenerate, do not
-hand-edit), the wsflow mirror, `playbook_tools.go` constants if any survive the
-sibling ticket, `ai-docs/spec/workflow-skills.md`,
-`ai-docs/mental-model/workflow-skills.md`, and the python skill-bundle tests.
-Sweep with `grep -rn lead-goal-step` and confirm only `ai-docs/` history
-references remain.
+propagate.
+
+**The `step` framing is part of the rename, not incidental.** Three surfaces
+carry it without containing the token `lead-goal-step`, so a stem-only sweep
+cannot reach them:
+
+- The `description:` frontmatter, currently "Advance a goal-pursuit run by one
+  step, picking the next `ready/` ticket … Stop if ready/ is empty." This is the
+  surface a harness skill listing pairs with the name. Shipping
+  `lead-drain-ready-queue` described as "by one step" reinstalls the exact
+  "one step completed, run is over" inference the rename exists to remove, at the
+  name layer. Rewrite it to the name-layer contract: repeated draining of
+  `ready/`, terminating when nothing advanceable remains.
+- The `# Goal Step` H1.
+- The opening bold line "**Goal-pursuit step; `ready/` is the sole progress
+  gate.**" Keep the sole-progress-gate clause — `260723` mandates it as the
+  body's first line — and drop only the step framing. This line is asserted
+  verbatim by `TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally`
+  (removed by the sibling ticket) and must stay consistent with whatever guard
+  survives.
+
+Remaining surfaces: the two fixed terminal-line templates in the body,
+`agents-plugin/skills/manifest.json` (regenerate, never hand-edit), the wsflow
+mirror, the Phase 1 splice mapping key, `playbook_tools.go` constants if any
+survive the sibling ticket, `ai-docs/spec/workflow-skills.md`,
+`ai-docs/mental-model/workflow-skills.md`, `ai-docs/ref/wsflow-mirroring.md`
+(four live non-history references), `internal/wsrsrc/skills_mirror_test.go`, and
+the python skill-bundle tests.
+
+Sweep for `lead-goal-step`, `Goal Step`, `goal-pursuit step`, and `one step` —
+not the stem alone. Every surviving `ai-docs/` hit must be justified as history
+rather than assumed to be.
 
 Verification: `go build ./...`, `go test ./...`, both python test files;
-`ws/playbook.print` and the harness skill listing both resolve the new name.
+`ws/playbook.print` and the harness skill listing both resolve the new name; the
+rendered skill listing entry contains no step framing.
 
 ### Phase 3: Documentation closeout
 
@@ -222,7 +287,27 @@ claim in `260723` stays discoverable and gets re-litigated a third time. Add
 the fixed terminal-line contract to the spec if the prose commit did not already
 cover it.
 
+Verification: `grep -rn "does not drive loop behavior\|reads the body, not the
+name"` over `ai-docs/spec/` and `ai-docs/mental-model/` returns nothing; the
+rewritten anchor names both the name layer (weak-judge reader, termination test
+intrinsic to the name) and the body layer (main-agent reader, goal-run posture)
+as distinct contracts; the two verbatim terminal lines appear in the spec;
+`ws/spec_index.verify` passes. Removing the retracted claim is the phase's
+acceptance criterion — an added note that leaves the old claim standing does not
+complete this phase.
+
 ## Spec Impact
+
+The `spec:` stems above are confirmed existing anchors in
+`ai-docs/spec/workflow-skills.md` and cover every phase's caller-visible
+behavior except one: the build-time splice mechanism of Phase 1 has no existing
+anchor. That needs a new statement in `ai-docs/spec/plugin-runtime.md`, beside
+the substitution-mirror generation it extends, describing composition as a
+generated-artifact contract — target skill, appended bodies, `<playbook>`
+boundary, and the guard test that makes committed `SKILL.md` files
+regeneration-verifiable.
+
+Anchor-by-anchor:
 
 Rewrites `{#260723-lead-goal-step-rename-reposition}` in
 `ai-docs/spec/workflow-skills.md` to separate the name-layer and body-layer
