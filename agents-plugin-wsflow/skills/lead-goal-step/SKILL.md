@@ -118,29 +118,16 @@ branch is picked up automatically. When no goal-staging context is active,
 hand off exactly as before: no merge-confirm override, no staging branch.
 
 **One finished ticket is not a finished goal, and the turn's last line
-decides whether another cycle runs.** Only the terminal states above end
-the run — an advanceable ticket still in `ready/` (one with no recorded
-blocker) does not. You are the only reader that can tell these apart: you
-can list `ready/` and read blocker notes. Whatever re-invokes this skill
-judges from this skill's name and the visible transcript, not from this
-body, and it judges less reliably than you do. So decide the terminal
-question yourself and hand that decision over as a fixed string. End every
-turn with exactly one of these two lines, verbatim, as the final line of
-the turn:
+decides.** Whatever re-invokes this skill judges from this skill's name
+and the visible transcript, never from this body — so make the terminal
+call yourself and hand it over verbatim as the turn's final line:
 
 - Continuing: `Ready queue still has advanceable tickets — next cycle: lead-goal-step.`
 - Ending: `Goal run finished — <reason>. Do not re-invoke lead-goal-step.`
 
-`<reason>` is the terminal state reached — an empty `ready/`, every
-remaining ticket blocked, or the approved final merge. Write nothing after
-the chosen line: no summary, no next-steps paragraph, no sign-off. A
-wrap-up placed after it is what gets read last and will override it.
-
-Keep the two vocabularies disjoint. A continuing turn must not call the
-run itself finished, complete, or done anywhere in its text — those words
-belong only to the ticket or cycle that just landed, and even there prefer
-naming the ticket ("`<stem>` landed") over a bare completion word. An
-ending turn must not describe remaining work as still available.
+Write nothing after that line; a wrap-up placed there is what gets read
+last. Keep `finished`, `complete`, and `done` out of a continuing turn
+entirely — name the ticket that landed instead.
 
 Record the blocker before yielding — this step is not skippable. When this
 turn's downstream work concludes the dispatched ticket cannot advance
