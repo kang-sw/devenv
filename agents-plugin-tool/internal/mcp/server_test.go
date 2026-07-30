@@ -108,6 +108,33 @@ func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]an
 	return nil
 }
 
+// toolEntryTextByName returns the marshaled JSON of the named tool's full
+// tools/list entry (name, description, inputSchema), for substring checks
+// against the description/schema text a client actually sees.
+func toolEntryTextByName(t *testing.T, listLine, toolName string) string {
+	t.Helper()
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := listResp["result"].(map[string]any)
+	listedTools, _ := result["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if name != toolName {
+			continue
+		}
+		entry, err := json.Marshal(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(entry)
+	}
+	t.Fatalf("tools/list missing %s: %s", toolName, listLine)
+	return ""
+}
+
 func toolNameListed(t *testing.T, listLine, toolName string) bool {
 	t.Helper()
 	var listResp map[string]any
@@ -1326,6 +1353,9 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	if strings.Contains(list, "Full ws") || strings.Contains(list, "full ws") {
 		t.Fatalf("tools/list retained full-ws-only playbook wording in wsflow mode: %s", list)
+	}
+	if agentsTierEntry := toolEntryTextByName(t, list, "config.agents_tier"); strings.Contains(strings.ToLower(agentsTierEntry), "mercenary") {
+		t.Fatalf("config.agents_tier description/schema leaked mercenary wording in wsflow mode: %s", agentsTierEntry)
 	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
