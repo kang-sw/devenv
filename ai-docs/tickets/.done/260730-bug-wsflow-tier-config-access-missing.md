@@ -6,6 +6,7 @@ related:
   260714-feat-playbook-tier-model-render-vars: shares the resolveTierModel/ResolveAgentForHarnessConfig seam this ticket's config surface backs
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-30
 ---
 
 # wsflow has no access point to inspect or configure the tier→model capability mapping
@@ -131,6 +132,49 @@ ticket; candidate follow-up, not yet created pending separate confirmation.
   agents-plugin-wsflow/tests`) pass; run the wsflow rsrc/skill mirror regen
   checklist if `lead-tune`'s shared playbook body changed.
 
+### Result (af3fa165) - 2026-07-30
+
+Un-bundled `config.agents_tier` from `noAgentHiddenTool`'s mercenary gating
+(one `server.go` case removed) and reordered `buildTuningCatalog` so its
+`"agents.tier"` knob append sits before the `noAgentMode` early return while
+`"workflow.prefer_mercenary"` stays gated after it. Split `lead-tune`'s shared
+`ws:full-only` marker block in two: the mercenary delegation-mode handler and
+judge bullet stay gated; the model-tier handler and judge bullet render
+unconditionally, giving wsflow an actual `lead-tune` entry point. Added the
+`config.agents_tier` entry to `agents-plugin-wsflow/runtime.json`, updated
+`mcp-tools.md` and `workflow-skills.md` per Spec Impact, and rewrote/added the
+tests named in this phase plus several more surfaced by survey
+(`main_test.go`'s two other hidden-tool lists, `prompt_override_test.go`'s
+direct `buildTuningCatalog` unit test, and `test_wsflow_runtime_contract.py`'s
+own `HIDDEN_TOOLS` set, which the plan's survey missed but which the ticket's
+own wsflow-suite verification step exercises directly).
+
+Partitioned review (correctness/fit/test) came back clean on correctness and
+fit; the test partition flagged one minor gap — no assertion that
+`config.agents_tier`'s tool text stays mercenary-free in the wsflow
+`tools/list` output, an explicit verification bullet above that the plan's
+test list hadn't covered. Closed in a follow-up commit
+(`41b593d3`) with a non-vacuous assertion (verified to fail when mercenary
+wording is temporarily injected, pass otherwise).
+
+Deviation: doc closeout also corrected two mental-model bullets
+(`mcp-runtime.md`'s `config.tuning` description, `workflow-skills.md`'s "Add a
+Codex workflow skill" recipe) that still stated `config.agents_tier`/agent-tier
+controls were wsflow-hidden — drift the plan's survey didn't name, found while
+checking the landed change against the mental-model corpus (`15e31a44`).
+
+Deferred: the harness-detection-less write path polluting the shared
+`"default"` alias bucket (see Background) remains an explicit non-goal,
+unticketed pending separate confirmation.
+
+Verification: `go build ./...` clean; targeted and full `internal/mcp`,
+`internal/wsrsrc`, `cmd/ws-mcp` package runs green; `python3 -m unittest
+discover agents-plugin-wsflow/tests` green (10/10); the new round-trip test
+manually confirmed to fail against the pre-fix parent commit and pass
+post-fix; `spec_index.verify` clean.
+
+Result commit range: `6efc552d..15e31a44`.
+
 ## Spec Impact
 
 - Target spec area: `ai-docs/spec/mcp-tools.md` Config Tools section
@@ -145,3 +189,8 @@ ticket; candidate follow-up, not yet created pending separate confirmation.
   wsflow-hidden.
 - Contract-first spec: no — implementation confirms exact wording; update the
   spec on landing.
+
+
+## Resolution (2026-07-30)
+
+Phase 1 shipped on branch impl/wsflow-tier-config-access (range 6efc552d..15e31a44): config.agents_tier un-bundled from wsflow's mercenary-hiding gates (noAgentHiddenTool + buildTuningCatalog), lead-tune given a wsflow model-tier entry point, specs and mental models updated, partitioned review clean. Single-phase ticket; complete. The deferred default-alias-bucket diagnostic-cost problem remains a separate, unticketed candidate follow-up.
