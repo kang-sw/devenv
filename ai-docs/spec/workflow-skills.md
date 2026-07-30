@@ -25,10 +25,10 @@ lead-add-rule
 lead-backfill-docs
 lead-bootstrap
 lead-discuss
+lead-drain-ready-queue
 lead-forge-mental-model
 lead-forge-spec
 lead-goal-fan-out-step
-lead-goal-step
 lead-implement
 lead-check-blockers
 lead-proceed
@@ -52,7 +52,7 @@ The directly invocable surface is narrowed to 13 entry skills the user invokes a
 `/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
-`lead-verify-discussion`, `lead-tune`, `lead-goal-step`,
+`lead-verify-discussion`, `lead-tune`, `lead-drain-ready-queue`,
 `lead-goal-fan-out-step`, and `lead-backfill-docs`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
@@ -445,7 +445,7 @@ prerequisite in another ready ticket's `related:`/`parent:` frontmatter
 when that referenced ticket is also in `ready/`; otherwise the oldest
 date-prefix ticket (FIFO). It returns exactly one ticket path (or reports
 the queue empty). The in-progress preference is a soft ordering tier, not
-a hard gate: one goal-step cycle advances a single phase, so a multi-phase
+a hard gate: one drain cycle advances a single phase, so a multi-phase
 ticket stays in `ready/` between cycles, and without this tier FIFO could
 bounce between started tickets each cycle and leave phases half-done.
 {#260725-goal-step-in-progress-ticket-affinity} The lead never
@@ -461,7 +461,7 @@ invocation — including simple tasks like commits — to a subagent per
 `lead-prefer-subagent`, conserving lead context across a long-running
 goal, rather than restating that posture's body. The skill's body is
 inlined as static text directly in
-`agents-plugin/skills/lead-goal-step/SKILL.md` (no rsrc playbook, no
+`agents-plugin/skills/lead-drain-ready-queue/SKILL.md` (no rsrc playbook, no
 `playbook.print` indirection), matching the `lead-verify-discussion`/
 `lead-prefer-subagent` inline-body shape, and is mirrored byte-identically
 into `agents-plugin-wsflow`.
@@ -482,7 +482,7 @@ ticket-system state field is introduced — a recorded blocker and a captured
 bug are both ordinary ticket edits.
 {#260723-goal-step-ticket-curation-authority}
 
-`lead-goal-step` adds goal-branch staging on top of the base
+`lead-drain-ready-queue` adds goal-branch staging on top of the base
 single-cycle shim above, activated only when the lead itself observes both
 an active `/goal` Stop-hook reminder in the current turn and a current
 branch that is not already `goal/*`; the ticket-selection subagent stays
@@ -540,7 +540,7 @@ ticket state/bodies to judge "advanceable now" and skips it, rather than the
 body-blind FIFO pick; so one blocked ticket does not terminate the run while
 others remain workable. {#260723-goal-step-blocked-progress-conclusion}
 
-`lead-goal-fan-out-step` is a batch-parallel `lead-goal-step` variant: instead
+`lead-goal-fan-out-step` is a batch-parallel `lead-drain-ready-queue` variant: instead
 of dispatching one advanceable ticket at a time, it selects a
 mutually-independent batch (disjoint edit surface, no `related:`/`parent:`
 ordering between candidates, excluding tickets already dispatched this run and
@@ -550,19 +550,19 @@ merging each serially back into the parent as its mini-lead reaches its merge
 gate. It degrades to the plain serial path — one ticket, dispatched directly
 to `lead-proceed` — whenever fewer than two independent tickets are available
 or recursive native dispatch is unavailable this cycle. It does not restate
-`lead-goal-step`'s contract: the goal-run posture, the three terminal states,
+`lead-drain-ready-queue`'s contract: the goal-run posture, the three terminal states,
 `goal/*` staging, blocker-recording before yield, and the
 one-step-is-not-a-finished-goal continuation all govern unchanged, delivered
 verbatim at serve time via the `printPlaybook` transclusion mechanism
 (`#260724-serve-time-skill-body-transclusion` in `plugin-runtime.md`) rather
 than duplicated prose: serving `lead-goal-fan-out-step` always appends the
-rendered `lead-goal-step` skill body inside a visible `<playbook
-name="lead-goal-step" title="Goal Step">` boundary, unconditionally (no
+rendered `lead-drain-ready-queue` skill body inside a visible `<playbook
+name="lead-drain-ready-queue" title="Drain Ready Queue">` boundary, unconditionally (no
 config-flag gate, unlike the `lead-prefer-subagent` precedent this mechanism
 generalizes). The overlay itself — batch selection, worktree/mini-lead
 dispatch, board bookkeeping via `session.note`/`session.children`, and serial
 merge — lives in `agents-plugin/rsrc/lead-goal-fan-out-step/lead-goal-fan-out-step.md`
-(a normal `kind: print` rsrc playbook, unlike `lead-goal-step`'s inline
+(a normal `kind: print` rsrc playbook, unlike `lead-drain-ready-queue`'s inline
 SKILL.md body), fronted by a thin `SKILL.md` shim shaped like `lead-discuss`'s.
 {#260724-goal-fan-out-step-transclusion}
 
@@ -629,7 +629,7 @@ startable regardless of what a later phase waits on. The judge fires before the
 Ground stage runs, so it decides from what the lead has already read; the
 populator's dependency-status decision gap is the backstop for what the lead
 missed, and reaches the user through the Open Decision Queue. This is a separate
-layer from `lead-goal-step`'s dispatch-time blocker skip: that filter reads the
+layer from `lead-drain-ready-queue`'s dispatch-time blocker skip: that filter reads the
 `## Blocked (` record a sage stamp writes, keeps a ticket out of a selection, and
 neither depends on nor repairs this rule.
 

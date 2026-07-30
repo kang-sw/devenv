@@ -454,8 +454,8 @@ const (
 	preferSubagentEnabledValue  = "on"
 
 	goalFanOutStepPlaybookName = "lead-goal-fan-out-step"
-	goalStepPlaybookName       = "lead-goal-step"
-	goalStepPlaybookTitle      = "Goal Step"
+	drainReadyQueuePlaybookName       = "lead-drain-ready-queue"
+	drainReadyQueuePlaybookTitle      = "Drain Ready Queue"
 )
 
 // builtinPromptOverrideDefaults returns code-owned default override values for
@@ -876,8 +876,8 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 //  1. lead-workflow-manual: gated by the global workflow.prefer_subagent
 //     preference — appends lead-prefer-subagent only when the preference is on.
 //  2. lead-goal-fan-out-step: unconditional on the name — always appends
-//     lead-goal-step, since the fan-out overlay transcludes goal-step's full
-//     contract verbatim rather than restating it.
+//     lead-drain-ready-queue, since the fan-out overlay transcludes that
+//     skill's full contract verbatim rather than restating it.
 //
 // printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
 //
@@ -910,13 +910,13 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 	if name == goalFanOutStepPlaybookName {
 		skillsRoot, err := wsrsrc.ResolveSkillsRoot()
 		if err != nil {
-			return "", "", fmt.Errorf("resolve skills root for appended %s: %w", goalStepPlaybookName, err)
+			return "", "", fmt.Errorf("resolve skills root for appended %s: %w", drainReadyQueuePlaybookName, err)
 		}
-		appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, goalStepPlaybookName)
+		appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, drainReadyQueuePlaybookName)
 		if err != nil {
-			return "", "", fmt.Errorf("load appended %s: %w", goalStepPlaybookName, err)
+			return "", "", fmt.Errorf("load appended %s: %w", drainReadyQueuePlaybookName, err)
 		}
-		body += "\n\n" + wsrsrc.WrapForConcatenation(goalStepPlaybookName, goalStepPlaybookTitle, appendBody)
+		body += "\n\n" + wsrsrc.WrapForConcatenation(drainReadyQueuePlaybookName, drainReadyQueuePlaybookTitle, appendBody)
 	}
 	return body, recommendedTier, nil
 }

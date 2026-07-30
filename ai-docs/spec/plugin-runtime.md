@@ -320,9 +320,9 @@ differently:
 - `lead-workflow-manual` appends `lead-prefer-subagent` only when the global
   `workflow.prefer_subagent` preference resolves to `on`.
 - `lead-goal-fan-out-step` (`#260724-goal-fan-out-step-transclusion` in
-  `workflow-skills.md`) appends `lead-goal-step` unconditionally — every
+  `workflow-skills.md`) appends `lead-drain-ready-queue` unconditionally — every
   serve, no config-flag check — since the fan-out overlay's whole point is to
-  transclude goal-step's contract verbatim rather than restate it.
+  transclude that skill's contract verbatim rather than restate it.
 
 The appended skills-tree body is read live off disk at serve time (not
 manifest-hash-verified, an accepted trade-off shared with the

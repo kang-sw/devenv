@@ -83,10 +83,16 @@ Remove the skill and playbook in both package mirrors, and the Go that serves it
   `agents-plugin/rsrc/lead-goal-fan-out-step/`, and the
   `agents-plugin-wsflow/` counterparts.
 - `playbook_tools.go`: the `name == goalFanOutStepPlaybookName` branch and the
-  now-unused `goalFanOutStepPlaybookName` / `goalStepPlaybookName` /
-  `goalStepPlaybookTitle` constants (verify `goalStepPlaybookName` has no other
-  reader before removing it). Update the `printPlaybook` doc comment, which
-  currently documents two concatenation hooks.
+  now-unused `goalFanOutStepPlaybookName` / `drainReadyQueuePlaybookName` /
+  `drainReadyQueuePlaybookTitle` constants (verify `drainReadyQueuePlaybookName`
+  has no other reader before removing it). Update the `printPlaybook` doc
+  comment, which currently documents two concatenation hooks.
+
+  The two `drainReadyQueue*` constants were `goalStep*` when this ticket was
+  written; `260730-refactor-drain-ready-queue-rename-and-prefer-subagent-splice`
+  landed the rename first. The skill they name is now
+  `lead-drain-ready-queue`, and the Background section below still refers to it
+  by its former name.
 - Regenerate `agents-plugin/skills/manifest.json`
   (`WSRSRC_REGEN_SKILLS=1 go test ./internal/wsrsrc/... -run TestGenerateRealSkillsManifest`)
   and any wsflow rsrc mirror (`WS_REGEN_WSFLOW_RSRC=1`).

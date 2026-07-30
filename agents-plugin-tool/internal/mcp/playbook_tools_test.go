@@ -864,13 +864,13 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally verifies the
+// TestPlaybookPrintGoalFanOutStepAppendsDrainReadyQueueUnconditionally verifies the
 // second printPlaybook transclusion branch (generalizing the
 // lead-workflow-manual/prefer_subagent precedent above): serving
-// lead-goal-fan-out-step always appends the lead-goal-step skill body,
-// wrapped in a visible <playbook name="lead-goal-step" title="Goal Step">
+// lead-goal-fan-out-step always appends the lead-drain-ready-queue skill body,
+// wrapped in a visible <playbook name="lead-drain-ready-queue" title="Drain Ready Queue">
 // boundary, with no config-flag gate (unlike prefer_subagent).
-func TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally(t *testing.T) {
+func TestPlaybookPrintGoalFanOutStepAppendsDrainReadyQueueUnconditionally(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
 	t.Setenv("WS_SKILLS_ROOT", skillsRoot)
@@ -883,55 +883,55 @@ func TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally(t *testing.T)
 	}
 
 	const overlaySubstr = "Degenerate to serial when you cannot fan out."
-	const boundaryTag = `<playbook name="lead-goal-step" title="Goal Step">`
+	const boundaryTag = `<playbook name="lead-drain-ready-queue" title="Drain Ready Queue">`
 
 	if !strings.Contains(body, overlaySubstr) {
 		t.Fatalf("lead-goal-fan-out-step body missing overlay procedure text %q:\n%s", overlaySubstr, body)
 	}
 	if !strings.Contains(body, boundaryTag) {
-		t.Fatalf("lead-goal-fan-out-step body missing appended lead-goal-step boundary:\n%s", body)
+		t.Fatalf("lead-goal-fan-out-step body missing appended lead-drain-ready-queue boundary:\n%s", body)
 	}
 	if !strings.Contains(body, "</playbook>") {
 		t.Fatalf("lead-goal-fan-out-step body missing closing </playbook> boundary:\n%s", body)
 	}
-	if !strings.Contains(body, "Goal-pursuit step; `ready/` is the sole progress gate.") {
-		t.Fatalf("lead-goal-fan-out-step body missing lead-goal-step procedure text:\n%s", body)
+	if !strings.Contains(body, "Draining `ready/`, which is the sole progress gate.") {
+		t.Fatalf("lead-goal-fan-out-step body missing lead-drain-ready-queue procedure text:\n%s", body)
 	}
 
 	// Ordering: the overlay body must appear BEFORE the transcluded
-	// lead-goal-step boundary, so a regression that dropped the overlay or
+	// lead-drain-ready-queue boundary, so a regression that dropped the overlay or
 	// reversed append order fails loudly instead of merely losing a
 	// substring check.
 	overlayIdx := strings.Index(body, overlaySubstr)
 	boundaryIdx := strings.Index(body, boundaryTag)
 	if overlayIdx < 0 || boundaryIdx < 0 || overlayIdx >= boundaryIdx {
-		t.Fatalf("expected overlay text (index %d) before lead-goal-step boundary (index %d):\n%s", overlayIdx, boundaryIdx, body)
+		t.Fatalf("expected overlay text (index %d) before lead-drain-ready-queue boundary (index %d):\n%s", overlayIdx, boundaryIdx, body)
 	}
 
 	// Lockstep: the appended block must equal exactly what LoadSkillBody
-	// returns right now for lead-goal-step, so any future edit to
-	// lead-goal-step/SKILL.md is automatically reflected here without a
+	// returns right now for lead-drain-ready-queue, so any future edit to
+	// lead-drain-ready-queue/SKILL.md is automatically reflected here without a
 	// fixture-text update.
-	wantAppendBody, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-goal-step")
+	wantAppendBody, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-drain-ready-queue")
 	if err != nil {
-		t.Fatalf("LoadSkillBody(lead-goal-step): %v", err)
+		t.Fatalf("LoadSkillBody(lead-drain-ready-queue): %v", err)
 	}
-	wantBlock := wsrsrc.WrapForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
+	wantBlock := wsrsrc.WrapForConcatenation("lead-drain-ready-queue", "Drain Ready Queue", wantAppendBody)
 	if !strings.Contains(body, wantBlock) {
-		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live lead-goal-step SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
+		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live lead-drain-ready-queue SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
 	}
 }
 
 // TestPlaybookPrintGoalFanOutStepResolvesWsflowSkillsRoot verifies the same
 // transclusion branch as
-// TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally, but under
+// TestPlaybookPrintGoalFanOutStepAppendsDrainReadyQueueUnconditionally, but under
 // the wsflow package roots (WS_SKILLS_ROOT pointed at
 // agents-plugin-wsflow/skills, rsrc loaded from agents-plugin-wsflow/rsrc).
 // It proves ResolveSkillsRoot/LoadSkillBody are root-agnostic: serving
 // lead-goal-fan-out-step from the wsflow tree loads the wsflow rsrc overlay
-// and still emits the visible <playbook name="lead-goal-step" title="Goal
-// Step"> boundary, with the appended block in lockstep with whatever
-// lead-goal-step SKILL.md the wsflow skills root carries. (lead-goal-step's
+// and still emits the visible <playbook name="lead-drain-ready-queue"
+// title="Drain Ready Queue"> boundary, with the appended block in lockstep with whatever
+// lead-drain-ready-queue SKILL.md the wsflow skills root carries. (lead-drain-ready-queue's
 // body has no namespace tokens, so the wsflow and full-ws copies are
 // byte-identical today; this test therefore guards the wsflow-root load +
 // boundary + lockstep-drift, not a wsflow-vs-full-ws body divergence that
@@ -948,26 +948,26 @@ func TestPlaybookPrintGoalFanOutStepResolvesWsflowSkillsRoot(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	const boundaryTag = `<playbook name="lead-goal-step" title="Goal Step">`
+	const boundaryTag = `<playbook name="lead-drain-ready-queue" title="Drain Ready Queue">`
 
 	if !strings.Contains(body, boundaryTag) {
-		t.Fatalf("lead-goal-fan-out-step body missing appended lead-goal-step boundary under wsflow roots:\n%s", body)
+		t.Fatalf("lead-goal-fan-out-step body missing appended lead-drain-ready-queue boundary under wsflow roots:\n%s", body)
 	}
 	if !strings.Contains(body, "</playbook>") {
 		t.Fatalf("lead-goal-fan-out-step body missing closing </playbook> boundary:\n%s", body)
 	}
 
 	// Lockstep: the appended block must equal exactly what LoadSkillBody
-	// returns right now for lead-goal-step as read from the wsflow skills
+	// returns right now for lead-drain-ready-queue as read from the wsflow skills
 	// root, so a future edit to that copy is auto-reflected here and the
 	// wsflow-root transclusion cannot silently drift.
-	wantAppendBody, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-goal-step")
+	wantAppendBody, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-drain-ready-queue")
 	if err != nil {
-		t.Fatalf("LoadSkillBody(lead-goal-step): %v", err)
+		t.Fatalf("LoadSkillBody(lead-drain-ready-queue): %v", err)
 	}
-	wantBlock := wsrsrc.WrapForConcatenation("lead-goal-step", "Goal Step", wantAppendBody)
+	wantBlock := wsrsrc.WrapForConcatenation("lead-drain-ready-queue", "Drain Ready Queue", wantAppendBody)
 	if !strings.Contains(body, wantBlock) {
-		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live wsflow lead-goal-step SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
+		t.Fatalf("lead-goal-fan-out-step appended block is not in lockstep with the live wsflow lead-drain-ready-queue SKILL.md body.\nwant block:\n%s\n\ngot body:\n%s", wantBlock, body)
 	}
 }
 

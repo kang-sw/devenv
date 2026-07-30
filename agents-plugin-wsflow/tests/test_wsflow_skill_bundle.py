@@ -18,7 +18,7 @@ EXPECTED_SKILLS = {
     "lead-backfill-docs",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-goal-step",
+    "lead-drain-ready-queue",
     "lead-goal-fan-out-step",
     "lead-forge-mental-model",
     "lead-forge-spec",
@@ -43,7 +43,7 @@ EXPECTED_INLINE_SKILLS = {
     "lead-revive",
     "lead-prefer-subagent",
     "lead-verify-discussion",
-    "lead-goal-step",
+    "lead-drain-ready-queue",
     "mcp-server-repair",
 }
 EXPECTED_PARALLEL_INIT_SKILLS = {"lead-backfill-docs", "lead-discuss", "lead-goal-fan-out-step"}

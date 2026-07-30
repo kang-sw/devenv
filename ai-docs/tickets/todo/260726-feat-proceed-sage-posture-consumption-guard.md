@@ -30,7 +30,7 @@ working tree, not git. Once
 succeed before review, the interval between a successful move and its commit *is*
 a state where an unreviewed ticket is visible in `ready/`. That is not a bypass
 artifact; it is the normal mid-procedure state of every promotion. `ready/` is
-also `lead-goal-step`'s sole progress gate, so an autonomous run can select such a
+also `lead-drain-ready-queue`'s sole progress gate, so an autonomous run can select such a
 ticket in that interval.
 
 ## Decisions
@@ -83,7 +83,7 @@ ticket in that interval.
   nor `skipped`, naming `ws/tickets.sage_gate(stem, landing: "ready")` as the
   resolving call.
 - Give `blocked` its own output, and decide there whether it stops or warns.
-- Confirm `lead-goal-step` and `lead-goal-fan-out-step` inherit the guard by
+- Confirm `lead-drain-ready-queue` and `lead-goal-fan-out-step` inherit the guard by
   routing through proceed rather than needing their own copy.
 
 Rejected alternatives: hard-blocking at proceed (recreates the dead end);

@@ -1,14 +1,14 @@
 ---
-name: lead-goal-step
-description: Advance a goal-pursuit run by one step, picking the next `ready/` ticket and handing it to lead-proceed; `ready/` is the sole progress gate. Stop if ready/ is empty.
+name: lead-drain-ready-queue
+description: Drain the `ready/` ticket queue — one ticket per invocation, re-invoked until nothing advanceable remains. Picks the next `ready/` ticket and hands it to lead-proceed; `ready/` is the sole progress gate.
 ---
 
-# Goal Step
+# Drain Ready Queue
 
-**Goal-pursuit step; `ready/` is the sole progress gate.** Select and dispatch
+**Draining `ready/`, which is the sole progress gate.** Select and dispatch
 exactly one ticket from `ready/` — nothing advances until a ticket reaches it.
 One invocation resolves at most one ticket and never repeats internally;
-draining the whole backlog is the caller's job, typically a standing `/goal`
+draining the queue takes repeated invocation, typically a standing `/goal`
 directive that re-invokes this skill each turn.
 
 ## Posture
@@ -105,8 +105,8 @@ decides.** Whatever re-invokes this skill judges from this skill's name and the
 visible transcript, never from this body — so make the terminal call yourself
 and hand it over verbatim as the turn's final line:
 
-- Continuing: `Ready queue still has advanceable tickets — next cycle: lead-goal-step.`
-- Ending: `Goal run finished — <reason>. Do not re-invoke lead-goal-step.`
+- Continuing: `Ready queue still has advanceable tickets — next cycle: lead-drain-ready-queue.`
+- Ending: `Goal run finished — <reason>. Do not re-invoke lead-drain-ready-queue.`
 
 Write nothing after that line; a wrap-up placed there is what gets read last.
 Keep `finished`, `complete`, and `done` out of a continuing turn entirely — name

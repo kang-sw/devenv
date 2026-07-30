@@ -13,7 +13,7 @@ import (
 // same change.
 var composedSkills = []SkillSplice{
 	{
-		Target:        "lead-goal-step",
+		Target:        "lead-drain-ready-queue",
 		Source:        "lead-prefer-subagent",
 		Title:         "Prefer Subagent",
 		AnchorHeading: "## Select",
@@ -82,7 +82,7 @@ func TestComposeSkillBodyIsIdempotent(t *testing.T) {
 func TestComposedTargetKeepsTurnEndingLast(t *testing.T) {
 	const turnEndingHeading = "\n## Ending the turn\n"
 	for _, splice := range composedSkills {
-		if splice.Target != "lead-goal-step" {
+		if splice.Target != "lead-drain-ready-queue" {
 			continue
 		}
 		targetPath := filepath.Join(fullSkillsRoot(), splice.Target, "SKILL.md")
