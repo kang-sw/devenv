@@ -1,5 +1,126 @@
 # Changelog
 
+## v0.37.3 - 2026-07-30
+
+### Added
+- **`lead-write-ticket` now grounds a ticket in facts before the design review
+  reads it.** The reported symptom was a coin flip: the lead drafts a ticket
+  without research, design review returns a mix of "this is factually wrong" and
+  "this is badly designed", and the lead cannot tell which finding is which, so
+  it explores by hand or guesses. A new **Ground** stage sits between Verify and
+  the sage review gate and delegates claim-checking to a new read-only
+  `ticket-fact-populator`, which returns corrections the lead applies itself and
+  never writes the ticket. Design review then judges design, having stopped
+  arbitrating facts.
+
+  The populator checks the ticket against the **ticket corpus** as well as the
+  tree. One `tickets.list` sweep shortlists tickets whose title or unresolved
+  phase titles cover work this ticket also claims, and a real overlap is reported
+  as a decision gap naming both stems. The same listing supplies the status of
+  every ticket this one names as a blocker, predecessor, or landing-order
+  constraint, so a dependency sitting behind this ticket's landing status is
+  caught mechanically. These checks sit in the populator on a cost argument, not
+  a role argument: one listing plus a shortlist read makes them without pulling
+  ticket bodies into the lead context.
+
+- **The design reviewer receives a `relations` premise ledger and takes every
+  entry as landed.** A ticket written against work that has not shipped yet used
+  to read as broken design, because the reviewer could see the premise but not
+  the ticket that would satisfy it. The populator now emits `relations` as a fact
+  table that stays complete even when nothing about it is wrong, and the reviewer
+  sketches its implementation plan with those entries assumed present. A premise
+  the table accounts for is a sequencing fact; only an **undeclared** premise is
+  a design defect. The reviewer also reads the `parent:` epic body, which owns
+  cross-child invariants that child tickets do not restate.
+
+- **`tickets.sage_stamp` routes review issues by `resolution`.** Both reviewer
+  playbooks have always emitted `resolution: autonomous|missing`, but nothing in
+  the calling playbook ever mentioned the field — the split was produced and then
+  discarded, leaving the caller to improvise. The tool's `next_instruction` now
+  counts issues by resolution and routes them: `autonomous` to the implementing
+  stage, `missing` to the Open Decision Queue that already served as the consent
+  ledger for exactly this.
+
+### Changed
+- **`missing` is now cut on policy-ness, never on discovery cost.** Both
+  reviewers previously let an expensive lookup read as a blocking gap. An issue
+  is `missing` only when it is a policy choice the planning or implementation
+  stage cannot make — what the system should do, what contract it commits to,
+  which of several defensible shapes is correct. A severity floor was considered
+  and rejected: it is a proxy that leaks genuine minor-severity policy gaps
+  through while still blocking on cheap lookups.
+
+- **A dependency-blocked ticket no longer reaches `ready/`.** `ready/` means
+  direct implementation target, and a ticket that cannot be started is not one.
+  `judge: initial-status` now refuses `ready/` when the **earliest unfinished
+  phase** waits on a ticket that has not landed, however complete the spec
+  addressing, and names the blocking stem. Cutting on the earliest unfinished
+  phase rather than the whole ticket keeps a ticket startable when only a later
+  phase waits.
+
+- **The design reviewer may read a source file the ticket cites**, and only to
+  check a claim the ticket makes about it. Without this the populator would be
+  the only source-reading agent in the ticket pipeline, unaudited on the very
+  axis it exists for.
+
+- **An epic child that does not exist yet is recorded, not deferred.** Populate
+  step 6 used to stop the invocation for a separate one scoped to that child;
+  when the child had no ticket, that pointed at a ticket nobody could open. The
+  constraint now lands as the epic skeleton's `- Planned:` entry and the
+  invocation continues.
+
+- **Both release jobs carry `timeout-minutes`** (build 20, windows-smoke 25). The
+  v0.37.2 run had a `go test ./...` step sit in progress for 46 minutes before
+  the job died without uploading logs, so there was no evidence of where it hung;
+  a re-run of the same commit passed in 6m21s. The caps sit well above observed
+  normal duration — the goal is turning a silent hang into a legible failure, not
+  tightening the budget.
+
+### Fixed
+- **Recording a sage-review block no longer deletes later ticket content.**
+  `appendOrReplaceBlockedSection` cut from the first `## Blocked (` heading to
+  EOF, on the assumption stated in its own doc comment that a Blocked section is
+  always last. It is not — a lead records what changed while the ticket waited by
+  adding `## ` sections after it. One live ticket in this tree lost 131 lines of
+  dependency-landing analysis to a second block verdict, and the caller committed
+  the deletion. Excision now runs only up to the next `## ` heading, and every
+  prior Blocked section is removed rather than just the first, so a hand-placed
+  duplicate cannot survive as a stale blocker beside the fresh one.
+
+- **The block verdict no longer prescribes a recovery loop that cannot run.** It
+  told the caller to resolve the issues and re-stamp with fresh verdicts, but
+  `resolveStage` returns `stop_blocked` for a blocked posture forever, so
+  `sage_gate` never names a reviewer again. The instruction is now
+  stop-and-report, matching `sageGateNextInstruction`. Separately, the block
+  branch used to return the same "commit, then proceed to handoff" text as a
+  pass, so a block at a `todo/` landing was written to frontmatter and then
+  dropped — with a later promotion refused by a posture nothing told the caller
+  how to clear.
+
+- **An unlanded-dependency claim is no longer silently dropped.** The populator
+  routes such claims to `unverified` rather than correcting them, but the handler
+  consumed only corrections and decision gaps, so those claims vanished and
+  `judge: populator-round-limit`'s continue condition was evaluated against state
+  the lead never held. The lead now states the named dependency in the ticket
+  where the claim sits.
+
+- **`Reviewer Spawn` can now reach a blocked stage this invocation's edits
+  address.** A `stop_blocked` gate names no reviewer, so the playbook had no
+  route to the fresh verdicts that `sage_stamp`'s own `next_instruction` names as
+  the only exit from a blocked posture.
+
+- **Smaller sage-record and reviewer corrections.** The missing-decision
+  escalation sentence is gated on there being a missing issue, since a standalone
+  stage can record `concern` with none. A landing-specific "do not land in
+  `ready/`" clause was dropped from a tool that has no landing input. The
+  issue-routing clause moved ahead of the verdict's own direction so fixes are
+  not stated behind the commit. An absent or unrecognized `resolution` value now
+  counts as `autonomous` instead of being dropped. The populator's evidence rule
+  was widened — a mandatory `path#Lstart-Lend` citation forbade its own primary
+  correction shapes, absence findings and multi-site counts. And
+  `ticket-reviewer-completeness` finished a half-migrated resolution axis whose
+  checklist still carried the old design-shaped wording.
+
 ## v0.37.2 - 2026-07-29
 
 ### Changed
