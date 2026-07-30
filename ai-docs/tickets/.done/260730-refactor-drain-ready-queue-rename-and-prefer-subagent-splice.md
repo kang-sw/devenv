@@ -17,6 +17,7 @@ related:
   260725-research-goal-loop-restart-starved-by-background-delegation: owns the background-dispatch starvation caveat this ticket deliberately does not encode in skill prose
   260722-feat-goal-run-autonomy-posture: adjacent open work on the same skill body; coordinate sequencing
 sage-review-completeness: completed
+completed: 2026-07-30
 ---
 
 # Rename lead-goal-step to lead-drain-ready-queue and splice lead-prefer-subagent at build time
@@ -236,6 +237,38 @@ delimiter pair, not repeated insertion); `go test ./...` green; the wsflow copy
 contains no ws-namespace token and its spliced block is byte-identical to the ws
 copy's; `## Ending the turn` is still the target's last section afterward.
 
+### Result (d2865ff4) - 2026-07-30
+
+Landed as designed. `internal/wsrsrc/skills_compose.go` carries `SkillSplice`
+(target / source / boundary title / anchor heading), `ComposeSkillBody`, and
+`WrapForConcatenation` moved over from `internal/mcp`; the curated mapping and
+the guards live in `skills_compose_test.go` beside `substitutionMirroredSkills`,
+matching the precedent that the curated list is test-side while the mechanism is
+production-side.
+
+`ComposeSkillBody` branches on the count of the open tag rather than a boolean
+"already composed" flag: two or more regions is an error, one is replaced in
+place, zero falls through to anchored insertion. The zero case additionally
+requires the anchor heading to appear exactly once, so an ambiguous anchor fails
+loudly instead of picking the first match.
+
+`guardSubstitutionEligible` runs on the composed result inside
+`ComposeSkillBody`, not at the mirror step. The mirror would have caught the
+same token one generation later, but the error there names the composed
+artifact; running it here names the source that introduced it.
+
+Removing the wrapper from `internal/mcp` left `html` unused in
+`playbook_tools.go` — dropped from the import block.
+
+Verification ran as written. The drift guard was mutation-checked: editing a word
+inside the spliced region of the committed target fails `TestComposedSkillsUpToDate`
+and passes after regen. `TestComposeSkillBodyIsIdempotent` composes twice and
+asserts byte-equality; `TestComposedTargetKeepsTurnEndingLast` asserts no `## `
+heading follows `## Ending the turn`. `go test ./... -count=1` green, both python
+suites green, and the wsflow copy diffs byte-identical against the ws copy with
+zero `ws:`/`ws/`/`ws.`/`ws-cli` matches (this skill has no namespace tokens, so
+identity is the expected mirror outcome here).
+
 ### Phase 2: Rename across every surface
 
 Rename the skill directory and `name:` frontmatter in both package mirrors, and
@@ -276,6 +309,55 @@ Verification: `go build ./...`, `go test ./...`, both python test files;
 `ws/playbook.print` and the harness skill listing both resolve the new name; the
 rendered skill listing entry contains no step framing.
 
+### Result (a0d857c3) - 2026-07-30
+
+All three `step`-framing surfaces rewritten. The new `description:` is "Drain the
+`ready/` ticket queue — one ticket per invocation, re-invoked until nothing
+advanceable remains. Picks the next `ready/` ticket and hands it to lead-proceed;
+`ready/` is the sole progress gate." The H1 is `# Drain Ready Queue`. The opening
+bold line is "**Draining `ready/`, which is the sole progress gate.**" — the
+sole-progress-gate clause `260723` mandates as the body's first line survives; only
+the step framing left. The following sentence's "draining the whole backlog is the
+caller's job" became "draining the queue takes repeated invocation", since
+"backlog" invited the same one-pass reading.
+
+Go constants `goalStepPlaybookName`/`goalStepPlaybookTitle` were renamed to
+`drainReadyQueuePlaybookName`/`Title` rather than left misnamed, and the sibling
+ticket's Phase 1 bullet was updated to the new identifiers so its deletion
+instruction stays executable. `TestPlaybookPrintGoalFanOutStepAppendsGoalStepUnconditionally`
+became `...AppendsDrainReadyQueueUnconditionally`; its one hardcoded body
+assertion tracked the new opening line, and everything else in both fan-out tests
+is lockstep against `LoadSkillBody` so it followed automatically.
+
+The `{#260723-lead-goal-step-rename-reposition}` anchor slug was **kept**. Spec
+conventions make anchors authored-once and stable-forever; renaming it would have
+required `renamed-spec:` plus updating every inbound reference — including this
+ticket's own `spec:` frontmatter — to buy nothing. Phase 3 rewrote its prose in
+place, which is what the ticket asked for.
+
+Two non-obvious sweep hits beyond the planned list: the skill inventory block in
+`workflow-skills.md` is alphabetical, so the entry moved from between
+`lead-forge-spec` and `lead-implement` up to after `lead-discuss`; and two prose
+uses of bare "goal-step" (not the stem) survived the stem sweep —
+`workflow-skills.md:448` "one goal-step cycle" and `plugin-runtime.md:325`
+"goal-step's contract".
+
+Deliberately not rewritten: `.done/`, `.plans/`, and CHANGELOG history; `idea/`
+background narration, which in `260725` includes a verbatim record of the user's
+past `/lead-goal-step ...` directive that must not be edited; and
+`260722-feat-goal-run-autonomy-posture:186`, which names the old SKILL.md path
+inside text that already sits after a `### Result`. That last one is a live stale
+pointer, left standing because editing post-Result phase text is against
+convention — its Phase 2 will need to resolve the path itself.
+
+Verification: `go build ./...`, `go test ./... -count=1`, and both python suites
+green. All five regen entrypoints ran in dependency order (rsrc manifest → wsflow
+rsrc mirror → compose → wsflow skills mirror → skills manifest); no manifest was
+hand-edited. `LoadSkillBody` resolving the new name is proven by the two fan-out
+transclusion tests, which load it by name from both package roots — the drain
+skill is an inline `SKILL.md` with no rsrc playbook, so `playbook.print` is not
+its resolution path and the ticket's verification line naming it does not apply.
+
 ### Phase 3: Documentation closeout
 
 Rewrite `{#260723-lead-goal-step-rename-reposition}` so it carries the two-layer
@@ -295,6 +377,46 @@ as distinct contracts; the two verbatim terminal lines appear in the spec;
 `ws/spec_index.verify` passes. Removing the retracted claim is the phase's
 acceptance criterion — an added note that leaves the old claim standing does not
 complete this phase.
+
+### Result (9018c193) - 2026-07-30
+
+`{#260723-lead-goal-step-rename-reposition}` was rewritten, not annotated: the
+two sentences carrying "The skill name does not drive loop behavior; the `/goal`
+Stop-hook's continue-vs-stop decision is AI judgment over the body prose, not the
+name" are gone from the corpus. The acceptance grep over `ai-docs/spec/` and
+`ai-docs/mental-model/` returns nothing.
+
+The entry now opens with the behavior, then states the name/body split as two
+named layers with their distinct readers, then records the retraction explicitly
+— "An earlier revision of this entry asserted the opposite mechanism … retracted
+on 2026-07-30 after observation of live goal runs. It is recorded here so it is
+not reintroduced." Silence was rejected: the claim was labelled "verified" in
+`260723` and has now been re-litigated twice, so a reader who meets the old
+wording in history needs the spec to say it was withdrawn.
+
+The two verbatim terminal lines are in the spec, with the reasoning that makes
+them non-arbitrary: disjoint vocabularies because a weak classifier keys on
+salient tokens and misses negation, an imperative ending clause because it
+follows instructions better than it infers state, and the no-trailing-text rule
+because the last line is what gets read.
+
+`{#260730-build-time-skill-body-composition}` added to `plugin-runtime.md`
+immediately after the serve-time transclusion entry it must be distinguished
+from, written as a caller-observable contract: one boundary shape from one
+implementation, verbatim frontmatter-stripped source, compose-before-substitute
+ordering, idempotent region replacement, eligibility guard, and — the property
+that decided the mechanism — deterministic staleness detection. Also fixed a
+stale identifier in the neighbouring entry, which still named
+`wrapRenderedPlaybookForConcatenation`.
+
+Two mental-model entries added under the same anchors, carrying the parts that
+are rationale rather than contract: why `260723` got the name wrong (it treated
+the name as identity expression and so conflated the two readers), and why the
+splice is build-time (serve-time would have forced a `playbook.print` shim, and
+its staleness mode is silent while build-time's is a failing test).
+
+`ws/spec_index.verify` returns `Spec index: ok`, and all six `spec:` stems
+resolve.
 
 ## Spec Impact
 
@@ -330,3 +452,14 @@ substance. Adds a spec statement for the build-time splice mechanism.
   capture as `idea/` once Phase 1 proves the mechanism. Revisit if the duplicate
   turns out to cost more than the 700 tokens measured here, or if the
   `workflow.prefer_subagent` builtin default ever moves off `off`.
+
+
+## Resolution (2026-07-30)
+
+All three phases landed on `main`: `d2865ff4` (build-time splice mechanism), `a0d857c3` (rename), `9018c193` (spec and mental-model closeout), plus `68680e9c` for the 0.37.4 bump the skill-body changes require for plugin-cache invalidation.
+
+`lead-goal-step` is now `lead-drain-ready-queue`, and `lead-prefer-subagent`'s body ships inside it, spliced at build time at the end of `## Posture`. The standing goal directive no longer needs to name either the skill's step semantics or prefer-subagent separately.
+
+Two items deliberately left open. The sibling `260730-refactor-retire-goal-fan-out-step-and-session-note` was supposed to land first so the fan-out transclusion hook would be gone before this reshaped the same surface; it is still in `todo/`, so this ticket carried the fan-out surfaces through the rename instead of skipping them. Nothing about that ordering inversion broke — the sibling's deletions still apply, and its Phase 1 constant names were updated in place to match. Separately, `260722-feat-goal-run-autonomy-posture` still names the old `agents-plugin/skills/lead-goal-step/SKILL.md` path in text sitting after a `### Result`; left standing because editing post-Result phase text is against convention, and its Phase 2 will need to resolve the path itself.
+
+The build-time composition mechanism is deliberately a one-entry mapping. Migrating serve-time hook #1 (`lead-workflow-manual` ← `lead-prefer-subagent`) onto it, and the duplicate body that hook now produces for opted-in users, stay out of scope per the ticket's Out of Scope section.
