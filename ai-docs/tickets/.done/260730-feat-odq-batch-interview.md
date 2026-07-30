@@ -10,6 +10,7 @@ spec:
   - 260727-odq-item-conveyance-restate-in-body
 related-mental-model:
   - workflow-skills
+completed: 2026-07-30
 ---
 
 # Ask the Open Decision Queue as one batch interview with declared interpretation
@@ -229,3 +230,69 @@ runtime probe:
    `python3 -m unittest discover agents-plugin/tests` and
    `python3 -m unittest discover agents-plugin-wsflow/tests` run from the
    repository root.
+
+### Result (766281e6) - 2026-07-30
+
+Done. All six verification-boundary conditions confirmed.
+
+**On: Open Decision Queue** went from seven steps to nine. The old step 4 split
+into three: batch dump with per-item recommendation, reconcile-and-re-batch, and
+the declared-reading rule. The old step 5 absorbed the never-auto-dispose clause.
+Both includes ended at eight bullets, each still one line.
+
+The spec anchor gained a third paragraph. The first two absorbed the batch
+contract and the recommendations-stay-out rule in place; the recommendation-is-a
+-proposal, unreached-stays-open, and declared-reading rules had no existing
+sentence to overwrite, so they are stated affirmatively as their own block. No
+retraction note was added, per the phase text.
+
+Deviation, deliberate: `ai-docs/ref/skill-authoring.md` permits H3 sub-blocks once
+a handler exceeds four steps with mixed responsibility, and this handler is now
+nine. It stayed flat. The flow is linear rather than mixed — consent, collect,
+ledger, ask, reconcile, write — and no other handler in the file uses sub-blocks,
+so introducing them in one handler would have cost more scanning consistency than
+the depth buys.
+
+The mental-model entry was trimmed in a follow-up pass after the owner asked why
+a policy change read as net-add. The first pass had restated the
+recommendation/open/ambiguity contract there, which the spec already carries;
+mental-model holds rationale that does not re-derive from the spec, so that was
+redundancy under the Non-redundant invariant. It was replaced with the reason the
+new rules exist at all — serial asking enforced every-item-disposition
+structurally, so the batch shape must write as rules what the old rhythm got for
+free — which is the guard against a later author trimming them as ceremony. The
+entry still runs roughly twice its former length because it now carries two
+decisions rather than one.
+
+Two other sources of net-add are structural rather than incidental, and worth
+naming so a later diet pass does not mistake them for slack. Replacing a
+mechanism with rules is inherently additive in text: the old rhythm enforced the
+invariant by making item 2 unreachable, and nothing but prose enforces it now.
+And per-item recommendations are a second feature bundled into this ticket,
+carrying their own two rules; they could have been a separate ticket.
+
+Unresolved: **On: Fresh-Reader Audit was not run.** `skill-authoring.md` requires
+it after skill edits and specifies a separate fresh reviewer holding only the
+target file, which this session was directed to complete without delegation. The
+edited handler and both includes are therefore unaudited by a context-free reader.
+Anyone next touching `lead-write-ticket` should run it before their own edits.
+
+Verification: `go build ./...` clean and `go test ./... -count=1` green across 12
+packages; `python3 -m unittest discover agents-plugin/tests` 46 tests OK and
+`agents-plugin-wsflow/tests` 10 tests OK, both from the repository root. Both
+regen commands ran clean and the second run produced no additional diff. The
+wsflow mirror is byte-identical to the ws copy for `task-list.md` and for the ODQ
+handler region. `ws/spec_index.verify` returned ok. A corpus grep for
+`one queue item at a time`, `next item`, and `roll-up` across both plugin trees,
+the spec, and the mental model returns nothing.
+
+
+## Resolution (2026-07-30)
+
+Phase 1 landed in 766281e6, with a mental-model trim in 25dacb3a and the version bump in a313b2d6. The Open Decision Queue now asks every open item in one response with a per-item recommendation, and reconciles the answer item by item.
+
+Deliberately left open: the Fresh-Reader Audit that `ai-docs/ref/skill-authoring.md` requires after skill edits. It specifies a separate fresh reviewer holding only the target file, and this session was directed to implement without delegation. The edited ODQ handler and both task-list includes are unaudited by a context-free reader.
+
+Per-item recommendations were bundled into this ticket rather than split out. They are a distinct feature from the asking rhythm and carry their own two rules; a stricter split would have made them a sibling ticket.
+
+`260726-feat-doc-organization-autonomy-odq-admission-filter` now carries the sequencing note: both of its Open Questions were framed against the serial cost curve and should be re-derived against the batch one before that ticket starts.
