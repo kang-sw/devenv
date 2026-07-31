@@ -1,9 +1,9 @@
 #!/bin/sh
-# Verify the archive and evidence recovery before the source branch is removed.
+# Verify the archive and evidence recovery after source refs are removed.
 set -eu
 
 archive_tag=archive/ws-dashboard
-source_ref=origin/impl/helper-liveness-probe
+source_ref="$archive_tag^2"
 source_path=ai-docs/mental-model/ws-dashboard-agent-harness.md
 reference_path=ai-docs/ref/agent-harness-capability-tiers.md
 expected_parents='0a688af1693c8d08c0c133aed2faba0b89356963 5d5f6ade126c880b9aeae667a4314259e4892770 7f2c8c58037633eb13124075b7cc76026dd666df 17a1023f5a45b5e523f8be500bd46ac59edc06f6'
