@@ -175,6 +175,19 @@ is deleted in this phase, so it is fully reversible.
 **Verification:** the tree-equality check passes; `ls-remote` shows the tag; a
 scratch `git checkout -b` from the tag reaches the dashboard code tree.
 
+### Result (73fc63e) - 2026-07-31
+
+- Published annotated `archive/ws-dashboard` at `bc2e54e` and confirmed its
+  remote tag object and peeled commit. Its tree equals pre-sweep `main`, and
+  its ordered parents preserve `main`, helper-liveness, server-scoped
+  forwarding, and the local-only SQLite activity tip.
+- Recovered the reusable four-tier agent-harness taxonomy and fixture-verified
+  Codex evidence as `ai-docs/ref/agent-harness-capability-tiers.md`, with the
+  retired Dashboard-specific Overlay actor neutralized to an integration layer.
+- Added `ai-docs/ref/verify-dashboard-archive-recovery.sh`; it proves the tag
+  and parent invariants, remote reachability, fresh checkout, and recovered
+  evidence comparison before Phase 2 may delete source refs.
+
 ### Phase 2: Tear down the dashboard git surface and code tree
 
 Irreversible. Do not start until Phase 1's `ls-remote` confirmation succeeded.
