@@ -49,10 +49,10 @@ tag. Closing a PR alone leaves commit reachability dependent on GitHub's
 `refs/pull/N/head` retention, which is an implementation detail rather than a
 guarantee; deleting a branch removes it entirely.
 
-**Artifacts are deleted outright.** No `ai-docs/.old/` convention is introduced —
-it does not exist in this tree today, and parking dead documents inside the live
-document tree keeps them in doc-coverage alarms and verification crawls. Git plus
-the archive tag are the recovery path.
+**Artifacts are deleted outright.** This sweep does not move dashboard artifacts
+to `ai-docs/.old/`: parking dead documents inside the live document tree keeps
+them in doc-coverage alarms and verification crawls. Git plus the archive tag
+are the recovery path.
 
 **The harness research is recovered, and moved out of `mental-model/`.** Blob
 `7ae574fa` (162 lines, identical on every dashboard branch, last touched
@@ -88,6 +88,13 @@ integration branch or `main`, and it touches no plugin edition point.
   `git rev-list --count main..<ref> -- ws-dashboard/` over every ref instead.
 - Shell state does not persist between tool calls: capture the four parent SHAs
   from `git rev-parse` output and pass them explicitly to the `commit-tree` call.
+- **Snapshot changes stop the sweep.** After Phase 1's fetch, capture the exact
+  SHA of every Phase 2 branch-deletion target. Immediately before each
+  destructive remote action, refresh and re-enumerate the path-based candidate
+  set; delete only through an exact-SHA lease. If a target moved or a new
+  non-exempt ref carries `ws-dashboard/` commits, stop before deletion. Do not
+  move a pushed `archive/ws-dashboard` tag; a later archive needs a new explicit
+  user decision.
 - `ws-mcp-release.yml` triggers on tags `v*` only, so pushing `archive/*` does
   not fire the release pipeline. All 108 existing tags are `vX.Y.Z`, and no tag
   named `archive` exists, so there is no D/F ref conflict.
@@ -143,7 +150,9 @@ never left describing a tree that is already gone.
 Establish the single recovery point and land the one asset worth keeping. Nothing
 is deleted in this phase, so it is fully reversible.
 
-1. `git fetch origin --prune`, then capture SHAs for `main`,
+1. `git fetch origin --prune`, enumerate every `refs/heads` and `refs/remotes`
+   ref with `ws-dashboard/` commits beyond `main`, and capture exact SHAs for
+   every Phase 2 branch-deletion target. Also capture SHAs for `main`,
    `origin/impl/helper-liveness-probe`,
    `implement/dashboard-server-scoped-forwarding-phase-7`, and
    `implement/260525-feat-ws-dashboard-sqlite-agent-activity-source`.
@@ -178,7 +187,10 @@ Irreversible. Do not start until Phase 1's `ls-remote` confirmation succeeded.
    `impl/nav-row-two-line-open-state-phase1`,
    `goal/ws-dashboard-dev/copper-heron-vale`,
    `goal/ws-dashboard-dev/velvet-arbor-quill`, `ws-dashboard-dev`,
-   `implement/dashboard-server-scoped-forwarding-phase-7`.
+   `implement/dashboard-server-scoped-forwarding-phase-7`. Immediately before
+   each deletion, fetch and repeat the path-based enumeration; delete with an
+   exact-SHA lease from Phase 1. A moved target or a new non-exempt candidate is
+   a stop condition, not a reason to force-push or update the archive tag.
 3. Delete local branches: `ws-dashboard-dev`,
    `impl/nav-row-two-line-open-state-phase1`,
    `implement/dashboard-server-scoped-forwarding-phase-7`,
@@ -309,7 +321,7 @@ property.
    commit; it exists so the "artifacts are deleted outright" decision is not
    silently limited to tracked files.
 
-**Verification:** `ws/spec_index_verify` passes; the ticket graph shows no
+**Verification:** `ws/spec_index.verify` passes; the ticket graph shows no
 dangling `parent:`; `_index.md` names no dashboard artifact beyond the kept
 ticket's reworded row.
 
