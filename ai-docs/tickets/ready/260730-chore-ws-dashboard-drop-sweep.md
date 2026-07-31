@@ -188,6 +188,12 @@ scratch `git checkout -b` from the tag reaches the dashboard code tree.
   and parent invariants, remote reachability, fresh checkout, and recovered
   evidence comparison before Phase 2 may delete source refs.
 
+#### Edition (6a2c696) - 2026-07-31
+
+Corrected the verification script to compare the archive tree with its captured
+pre-sweep `main` parent rather than later `main` history that includes Phase 1
+documentation commits.
+
 ### Phase 2: Tear down the dashboard git surface and code tree
 
 Irreversible. Do not start until Phase 1's `ls-remote` confirmation succeeded.
