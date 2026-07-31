@@ -221,15 +221,41 @@ Irreversible. Do not start until Phase 1's `ls-remote` confirmation succeeded.
 
 **Verification:** both PRs report closed; `ws-dashboard/` is absent; no workflow
 or release script referenced it, so CI needs no change. Verify branch teardown by
-**property, not by name list** — iterate `refs/heads` and `refs/remotes` and
-confirm `git rev-list --count main..<ref> -- ws-dashboard/` is `0`, with
-`origin/discuss` as the only accepted exception. Checking the six/five hardcoded
-names would have passed even while `impl/nav-row-two-line-open-state-phase1`
-survived, which is exactly how the original survey missed it. Scope the iteration
-to those two namespaces deliberately: `git for-each-ref` also walks `refs/tags`,
-where `archive/ws-dashboard` carries the entire dashboard line by construction and
+**property, not by name list** — immediately before the deletion commit, iterate
+`refs/heads` and `refs/remotes` and confirm `git rev-list --count main..<ref> --
+ws-dashboard/` is `0`, with `origin/discuss` as the only accepted exception. Once
+the implementation branch commits `git rm`, exclude that active branch from the
+same post-commit scan: its deletion commit necessarily touches the path but does
+not retain dashboard code; separately prove the tracked and working-tree paths
+are absent. Checking the six/five hardcoded names would have passed even while
+`impl/nav-row-two-line-open-state-phase1` survived, which is exactly how the
+original survey missed it. Scope the iteration to those two namespaces
+deliberately: `git for-each-ref` also walks `refs/tags`, where
+`archive/ws-dashboard` carries the entire dashboard line by construction and
 would read as a teardown failure. That tag is the one ref that must violate the
 property.
+
+### Result (4b96b68) - 2026-07-31
+
+- Closed PR #8 before PR #7 with `archive/ws-dashboard`, the documented revive
+  command, and `260730-chore-ws-dashboard-drop-sweep` in each comment; both
+  report `CLOSED` with their expected non-`main` bases.
+- Deleted all six remote dashboard branches only after a fresh fetch, complete
+  path-based candidate scan, and exact Phase 1 SHA-lease match; then removed
+  the five local dashboard branches and all 110 tracked `ws-dashboard/` files
+  in source commit `4b96b68`.
+- The archive recovery verifier, remote annotated-tag/peeled-entry check, and
+  pre-commit ref-property scan passed; `origin/discuss` was the sole permitted
+  remaining candidate. The post-commit scan excludes this active implementation
+  branch because its `git rm` commit necessarily touches `ws-dashboard/` while
+  retaining no dashboard code; zero tracked files and no working-tree directory
+  provide the separate absence proof. No release workflow change was needed.
+
+#### Edition (e3713ea) - 2026-07-31
+
+Corrected the archive recovery verifier to read the immutable second parent of
+`archive/ws-dashboard`, rather than the deleted helper-liveness remote branch,
+so the recovered-evidence check remains reproducible after Phase 2 teardown.
 
 ### Phase 3: Remove dashboard documentation and reconcile the board
 
