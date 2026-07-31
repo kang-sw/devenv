@@ -2857,13 +2857,22 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 	case "skip":
 		return "next_instruction: Sage review gate resolved with no further review required; proceed to handoff." + sageGatePostureUncommittedNote
 	case "stop_blocked":
+		// The recovery sentence exists because the bare "stop" read as a dead
+		// end while lead-write-ticket's On: Reviewer Spawn covers "each stage
+		// the gate reports blocked whose blocker this invocation's edits
+		// address" — a clause that looks unreachable if the gate is the only
+		// path to a reviewer. It is not: resolveStage returns stop_blocked
+		// forever, but sage_stamp is callable without the gate naming anyone,
+		// which formatSageRecord's block branch already states. Saying it here
+		// too keeps one condition from being described two ways.
+		//
 		// stop_blocked carries the note too: sageGateCombined can persist a
 		// design posture (design recommended + answer "yes") before the
 		// completeness stage hits its blocked branch, so this action is not
 		// guaranteed to be write-free. The note's hedged "Any sage-review
 		// posture this call wrote" stays true on the branches that wrote
 		// nothing, which is why it can be attached unconditionally.
-		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker." + sageGatePostureUncommittedNote
+		return "next_instruction: A blocked sage review must be addressed before promotion; stop and report the blocker. This gate returns stop_blocked while the posture is blocked and never names a reviewer again, so a later invocation whose edits address the blocker spawns that stage's reviewer via On: Reviewer Spawn and clears the posture with ws/tickets.sage_stamp carrying fresh verdicts; read which stage is blocked from the ticket's sage-review-* frontmatter, which this result does not carry." + sageGatePostureUncommittedNote
 	case "ask":
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":

@@ -154,6 +154,29 @@ func TestFormatSageRecordRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFormatSageGateBlockedRecovery pins that the gate's stop_blocked branch
+// names its recovery route rather than reading as a dead end. Without it, a
+// re-entry whose edits address the blocker got a bare "stop" from the gate while
+// lead-write-ticket's On: Reviewer Spawn told it to review the blocked stage —
+// one condition described two ways, which is what forced a judgement call
+// mid-procedure during dogfooding.
+func TestFormatSageGateBlockedRecovery(t *testing.T) {
+	out := formatSageGate(wsdoc.SageGateResult{Action: "stop_blocked"})
+	if !strings.Contains(out, "stop and report the blocker") {
+		t.Fatalf("stop_blocked must still tell the caller to stop:\n%s", out)
+	}
+	for _, want := range []string{"On: Reviewer Spawn", "ws/tickets.sage_stamp", "sage-review-* frontmatter"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stop_blocked must name its recovery route (missing %q):\n%s", want, out)
+		}
+	}
+	// The gate carries no stage field, so the text must not imply the caller can
+	// read the blocked stage off this result.
+	if strings.Contains(out, "reviewers:") {
+		t.Fatalf("stop_blocked must not render a reviewers line:\n%s", out)
+	}
+}
+
 // TestFormatSageRecordBlockRecovery pins the block branch's recovery route. It
 // previously emitted the pass text ("commit, then proceed to handoff"), which
 // silently dropped a block at a todo/ landing: the caller's only block branch
@@ -174,9 +197,10 @@ func TestFormatSageRecordBlockRecovery(t *testing.T) {
 		t.Fatalf("formatSageRecord block output must leave the commit decision to the caller:\n%s", out)
 	}
 	// resolveStage returns stop_blocked for a blocked posture forever, so
-	// sage_gate never names a reviewer again. A recovery loop stated here would
-	// be unexecutable and would contradict both sageGateNextInstruction's
-	// stop_blocked branch and the caller's own ready/ branch.
+	// sage_gate never names a reviewer again. The one executable recovery is the
+	// sage_stamp route this branch already names; an in-place resolve loop is
+	// not, and a landing-specific direction is the caller's own ready/ branch to
+	// make.
 	for _, forbidden := range []string{"resolve the issues in the appended Blocked section", "Do not land this ticket in ready/"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("formatSageRecord block output must not prescribe an unexecutable recovery loop or a landing-specific action (found %q):\n%s", forbidden, out)
