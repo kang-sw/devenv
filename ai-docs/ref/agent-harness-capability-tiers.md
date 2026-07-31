@@ -10,7 +10,7 @@ Interactive agent-harness provider/session work must classify each capability
 per **(harness, capability) cell**, never per capability as a whole, into one
 of four tiers: **Passthrough** (the harness itself officially
 documents/exposes the capability for third-party programmatic use), **Overlay**
-(the dashboard composes only officially-exposed primitives into new behavior;
+(an integration layer composes only officially-exposed primitives into new behavior;
 no vendor-private state touched), **Hack** (the only reachable path mutates a
 harness's private/undocumented on-disk state or relies on
 reverse-engineered/unofficial protocol messages), or **Unavailable** (no known
@@ -36,7 +36,21 @@ revert file changes) — do not design new functionality around it.
 ## Evidence Boundary
 
 This recovery preserves the four-tier definitions and the fixture-verified
-Codex findings verbatim. It intentionally does not preserve the retired
-dashboard's adapter, browser, plugin-presence, or provider-lifecycle contracts;
-those depended on the removed dashboard architecture rather than on reusable
-harness evidence.
+Codex findings from the archived source. The sole semantic-neutrality edit is
+the Overlay actor: its retired dashboard-specific wording is rendered as "an
+integration layer" so the reusable taxonomy does not retain a dashboard-owned
+contract. It intentionally does not preserve the retired dashboard's adapter,
+browser, plugin-presence, or provider-lifecycle contracts; those depended on
+the removed dashboard architecture rather than on reusable harness evidence.
+
+## Recovery Verification
+
+Run `./ai-docs/ref/verify-dashboard-archive-recovery.sh` before removing the
+source branch. It verifies that `archive/ws-dashboard` is an annotated tag,
+that its commit has the four captured parents in the required order (main,
+helper-liveness, server-scoped-forwarding, then local SQLite activity), and
+that `origin` advertises its peeled tag entry. It also compares this file's
+four-tier definition and fixture-verified Codex paragraph against
+`origin/impl/helper-liveness-probe:ai-docs/mental-model/ws-dashboard-agent-harness.md`.
+The comparison normalizes Markdown wrapping and makes only the documented
+`the dashboard` → `an integration layer` substitution in the tier definition.
