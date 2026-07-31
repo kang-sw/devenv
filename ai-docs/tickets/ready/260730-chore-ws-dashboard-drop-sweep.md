@@ -221,13 +221,17 @@ Irreversible. Do not start until Phase 1's `ls-remote` confirmation succeeded.
 
 **Verification:** both PRs report closed; `ws-dashboard/` is absent; no workflow
 or release script referenced it, so CI needs no change. Verify branch teardown by
-**property, not by name list** — iterate `refs/heads` and `refs/remotes` and
-confirm `git rev-list --count main..<ref> -- ws-dashboard/` is `0`, with
-`origin/discuss` as the only accepted exception. Checking the six/five hardcoded
-names would have passed even while `impl/nav-row-two-line-open-state-phase1`
-survived, which is exactly how the original survey missed it. Scope the iteration
-to those two namespaces deliberately: `git for-each-ref` also walks `refs/tags`,
-where `archive/ws-dashboard` carries the entire dashboard line by construction and
+**property, not by name list** — immediately before the deletion commit, iterate
+`refs/heads` and `refs/remotes` and confirm `git rev-list --count main..<ref> --
+ws-dashboard/` is `0`, with `origin/discuss` as the only accepted exception. Once
+the implementation branch commits `git rm`, exclude that active branch from the
+same post-commit scan: its deletion commit necessarily touches the path but does
+not retain dashboard code; separately prove the tracked and working-tree paths
+are absent. Checking the six/five hardcoded names would have passed even while
+`impl/nav-row-two-line-open-state-phase1` survived, which is exactly how the
+original survey missed it. Scope the iteration to those two namespaces
+deliberately: `git for-each-ref` also walks `refs/tags`, where
+`archive/ws-dashboard` carries the entire dashboard line by construction and
 would read as a teardown failure. That tag is the one ref that must violate the
 property.
 
