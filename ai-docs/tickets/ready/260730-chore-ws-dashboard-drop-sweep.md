@@ -235,6 +235,22 @@ deliberately: `git for-each-ref` also walks `refs/tags`, where
 would read as a teardown failure. That tag is the one ref that must violate the
 property.
 
+### Result (4b96b68) - 2026-07-31
+
+- Closed PR #8 before PR #7 with `archive/ws-dashboard`, the documented revive
+  command, and `260730-chore-ws-dashboard-drop-sweep` in each comment; both
+  report `CLOSED` with their expected non-`main` bases.
+- Deleted all six remote dashboard branches only after a fresh fetch, complete
+  path-based candidate scan, and exact Phase 1 SHA-lease match; then removed
+  the five local dashboard branches and all 110 tracked `ws-dashboard/` files
+  in source commit `4b96b68`.
+- The archive recovery verifier, remote annotated-tag/peeled-entry check, and
+  pre-commit ref-property scan passed; `origin/discuss` was the sole permitted
+  remaining candidate. The post-commit scan excludes this active implementation
+  branch because its `git rm` commit necessarily touches `ws-dashboard/` while
+  retaining no dashboard code; zero tracked files and no working-tree directory
+  provide the separate absence proof. No release workflow change was needed.
+
 ### Phase 3: Remove dashboard documentation and reconcile the board
 
 1. Delete `ai-docs/spec/ws-web-dashboard/` and
