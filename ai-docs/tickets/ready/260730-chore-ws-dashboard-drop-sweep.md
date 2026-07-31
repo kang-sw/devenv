@@ -251,6 +251,12 @@ property.
   retaining no dashboard code; zero tracked files and no working-tree directory
   provide the separate absence proof. No release workflow change was needed.
 
+#### Edition (e3713ea) - 2026-07-31
+
+Corrected the archive recovery verifier to read the immutable second parent of
+`archive/ws-dashboard`, rather than the deleted helper-liveness remote branch,
+so the recovered-evidence check remains reproducible after Phase 2 teardown.
+
 ### Phase 3: Remove dashboard documentation and reconcile the board
 
 1. Delete `ai-docs/spec/ws-web-dashboard/` and
