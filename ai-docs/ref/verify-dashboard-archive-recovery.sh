@@ -7,6 +7,7 @@ source_ref=origin/impl/helper-liveness-probe
 source_path=ai-docs/mental-model/ws-dashboard-agent-harness.md
 reference_path=ai-docs/ref/agent-harness-capability-tiers.md
 expected_parents='0a688af1693c8d08c0c133aed2faba0b89356963 5d5f6ade126c880b9aeae667a4314259e4892770 7f2c8c58037633eb13124075b7cc76026dd666df 17a1023f5a45b5e523f8be500bd46ac59edc06f6'
+expected_main=0a688af1693c8d08c0c133aed2faba0b89356963
 
 normalize() {
   tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
@@ -22,7 +23,7 @@ fail() {
 
 archive_commit=$(git rev-parse "$archive_tag^{commit}")
 archive_tag_object=$(git rev-parse "$archive_tag")
-[ "$(git rev-parse main^{tree})" = "$(git rev-parse "$archive_tag^{commit}^{tree}")" ] || fail 'archive tree differs from main'
+[ "$(git rev-parse "$expected_main^{tree}")" = "$(git rev-parse "$archive_tag^{commit}^{tree}")" ] || fail 'archive tree differs from the captured pre-sweep main'
 remote_tag=$(git ls-remote --tags origin "refs/tags/$archive_tag" |
   awk -v ref="refs/tags/$archive_tag" '$2 == ref { print $1 }')
 remote_peeled=$(git ls-remote --tags origin "refs/tags/$archive_tag^{}" |
