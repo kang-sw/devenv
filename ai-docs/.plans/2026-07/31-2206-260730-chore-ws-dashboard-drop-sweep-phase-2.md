@@ -42,4 +42,8 @@
 - Confirm `git ls-files ws-dashboard` is empty after `git rm`, the working tree has no `ws-dashboard/` directory after ignored-bulk cleanup, and `.github/workflows/ws-mcp-release.yml` needs no change because it triggers only `v*` tags.
 
 ## Escalations
-- None.
+- The ticket-driven Result checkpoint is authorized: read and append the
+  Phase 2 `### Result` in
+  `ai-docs/tickets/ready/260730-chore-ws-dashboard-drop-sweep.md` after the
+  source checkpoint. This is Phase 2 closeout documentation, not Phase 3
+  board or documentation-surface cleanup.
