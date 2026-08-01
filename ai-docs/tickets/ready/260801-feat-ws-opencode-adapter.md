@@ -10,7 +10,16 @@ sage-review-design: required
 status: blocked-on-harness-decision
 ---
 
-> **Status note (2026-08-01):** Implementation deferred pending harness
+> **Status note (2026-08-02):** Deprioritized in favor of
+> `260802-research-ws-pi-native-framework`, which corrected this ticket's
+> "Harness tradeoff note" (Pi *does* have a first-class compaction surface
+> and re-entry primitives in core) and chose Pi as the target harness via
+> the bridge path. This ticket is **not dropped**: the bridge path keeps
+> ws-mcp harness-neutral, so an opencode adapter remains a possible later
+> sibling under the same ws-mcp. See the new research ticket for the
+> corrected capability matrix and the active direction.
+>
+> **Prior status (2026-08-01):** Implementation deferred pending harness
 > tradeoff evaluation. The accumulated workaround cost for opencode (v1/v2
 > split, config hook timing hack, unbridged agent services, unstable v2
 > surface) raised the question of whether Pi (earendil-works) might be a
