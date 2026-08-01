@@ -483,35 +483,63 @@ User-directed order: MVP surface first, feature expansion second.
   closed; this research does not absorb its TUI work. Any ws-visible
   board/TODO surface is designed fresh on Pi. (was Q7)
 
+### Resolved by runtime spike (2026-08-02, pi 0.83.0)
+
+Spike extension at `/tmp/pi-spike/spike.ts` registered four tools
+(`ws/playbook.print`, `ws:tickets.create`, `ws/agent.spawn`, `normal_echo`)
+and ran `pi --mode json -p` against a live model (`z-ai/glm-5.2` via
+openrouter). Session spikes ran two sequential `--session <path>` turns.
+
+- **Pi tool-name charset — slash/colon/dot accepted end-to-end (was Q2).**
+  `pi.registerTool` performs **no name validation** — the name is stored
+  as a Map key and serialized into the provider payload unchanged
+  (verified in `dist/core/extensions/loader.js` and
+  `dist/core/agent-session.js` `_refreshToolRegistry`). The live model
+  emitted a `tool_use` with `name: "ws/playbook.print"`, pi dispatched it
+  to the registered handler by exact-name match, and the handler's output
+  (`echo:ws/playbook.print:hello-slash`) was returned to the model, which
+  then replied "DONE." Full round-trip confirmed. **Consequence: the
+  entire opencode prose-rewriting apparatus (colon→hyphen, allowlist
+  regex, `tool.execute.after`, `chat.system.transform`) is deleted on Pi.
+  ws `SKILL.md` prose with `ws/playbook.print`-style tool calls is
+  load-and-go.** This also resolves "skill prose references to MCP tool
+  calls" (was Q4) — prose works unmodified.
+- **`--session` + `-p` resume appends turns (was Q8).** Two sequential
+  `pi --mode json -p --session <path>` calls against the same file
+  accumulated turns: after turn 1 the file had 5 lines (session header +
+  model_change + thinking_level_change + user + assistant), after turn 2
+  it had 7 (turn 2's user+assistant appended at lines 6-7). Resume does
+  **not** start fresh. The session header is written once (id preserved,
+  not re-written on resume). A semantic recall test confirmed the resumed
+  model sees the full prior conversation (turn 1 planted "my favorite
+  color is blue"; turn 2, resumed on the same file, correctly answered
+  "blue"). **Consequence: file-based continuation is sound.**
+- **Session file flush on process exit is complete (was Q9).** After turn
+  1's process exited, the file contained turn 1's messages in full. Turn
+  2's process opened the same `--session` path, read the existing content,
+  and appended without corruption. **Consequence: async spawn/continue/wait
+  is safe — after `wait` harvests a finished subprocess, the lead can
+  immediately `continue` on that agent; the session file is flushed by
+  process exit.**
+- **Bonus: `--append-system-prompt` is not stored in the session file
+  (validates continuation design).** The session file contains only
+  `session`/`model_change`/`thinking_level_change`/`message` entries —
+  **no system messages at all.** The system prompt is reconstructed at
+  runtime from `--append-system-prompt <path>` on every resume. Reusing
+  the same path on every `continue` yields an identical, non-duplicated
+  system prompt. This directly validates the continuation design's claim
+  that "system prompt duplication is prevented by Pi's session model, not
+  by ws" — confirmed by inspection of the session file across two resumed
+  turns with the same `--append-system-prompt` path.
+
 ### Open
 
-1. **Pi tool-name character set.** Can `pi.registerTool({ name:
-   "ws/playbook.print" })` use the slash/colon form, letting ws prose work
-   unmodified? If yes, the entire opencode prose-rewriting apparatus is
-   deleted. If no, a thin name-mapping layer is needed (still far simpler
-   than opencode's allowlist regex because it is a deterministic tool-name
-   map, not prose regex). Runtime spike against `dynamic-tools.ts` resolves
-   this.
-2. **Skill prose references to MCP tool calls.** If tool-name preservation
-   (Q1) holds, ws `SKILL.md` prose is load-and-go. If not, the rewrite is a
-   deterministic tool-call rewrite, not the opencode allowlist regex.
-   Either way this is smaller than the opencode case — confirm after Q1.
-3. **`pi --mode json -p --session <path>` resume-time turn accumulation
-   (runtime spike).** Does resuming a session file under print mode append
-   a new turn (desired) or start fresh (breaks continuation)? The example
-   uses `--no-session` and never exercises this combination. Must be
-   verified at runtime before the continuation design is considered sound.
-4. **Session-file flush ordering vs process exit (runtime spike).** When
-   `wait` harvests a finished subprocess and the lead immediately calls
-   `continue`, is the session file fully flushed by process exit time so
-   the next `--session` open sees the appended turn? Normally yes, but
-   verify — this is the second runtime assumption underpinning async
-   continuation.
-5. **`--append-system-prompt` vs `--system-prompt` for subagent prompt
-   injection.** MVP uses append (example's verified path). Switching to
-   replace (leaner prompt, keeps skills/context files per `usage.md:240`)
-   is a later tuning decision after MVP validates that the subagent
-   behavior is correct. Open but low-risk.
+1. **`--append-system-prompt` vs `--system-prompt` for subagent prompt
+   injection.** MVP uses append (example's verified path, spike-confirmed
+   non-duplicating). Switching to replace (leaner prompt, keeps
+   skills/context files per `usage.md:240`) is a later tuning decision
+   after MVP validates that the subagent behavior is correct. Open but
+   low-risk. **Only remaining open question.**
 
 ## Monitoring items
 
