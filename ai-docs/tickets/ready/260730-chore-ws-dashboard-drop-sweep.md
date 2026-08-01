@@ -407,6 +407,12 @@ edited.
   ignored-local-document cleanup all passed. Historical CHANGELOG entries were
   preserved.
 
+#### Edition (8b594246) - 2026-08-01
+
+- Review correction: all 13 dropped dashboard tickets now carry required
+  `dropped:` metadata, and `tickets.verify` passes for the complete moved set.
+  Its unresolved-phase notices are non-blocking historical warnings.
+
 ## Blocked (2026-07-30)
 
 ### Design Reviewer — block
