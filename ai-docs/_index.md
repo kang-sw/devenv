@@ -169,7 +169,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260801-feat-ws-opencode-adapter` | ready | Thin boundary-layer shim plugin for opencode: v1+v2 coexistence, MCP registration, skill prose rewriting, goal-loop, compaction, tier swap |
+| `260801-feat-ws-opencode-adapter` | ready | Thin boundary-layer shim plugin for opencode — design complete but implementation deferred pending harness tradeoff evaluation (opencode vs Pi) |
 | `260801-todo-ws-mcp-log-append-cli` | ready | Add `ws-mcp log append` CLI subcommand for external warning logging (dependency for opencode adapter Phase 2) |
 | `260731-research-ws-opencode-drop-in-package` | done | Adapter depth and harness-neutral boundary for ws opencode install — all 9 design questions resolved |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |

@@ -7,7 +7,15 @@ related:
   260605-research-ws-native-subagent-pivot: host-neutral pivot direction
   260611-research-ws-per-role-delegation-tuning-config: model tier mapping research
 sage-review-design: required
+status: blocked-on-harness-decision
 ---
+
+> **Status note (2026-08-01):** Implementation deferred pending harness
+> tradeoff evaluation. The accumulated workaround cost for opencode (v1/v2
+> split, config hook timing hack, unbridged agent services, unstable v2
+> surface) raised the question of whether Pi (earendil-works) might be a
+> simpler target despite needing goal-loop/compaction built from scratch.
+> See "Harness tradeoff note" at the end of this ticket.
 
 # ws opencode adapter — thin boundary-layer shim plugin
 
@@ -68,9 +76,42 @@ derived from both `skills/manifest.json` and `rsrc/manifest.json`.
    false`), `enabled: true` for opencode automatic compaction (`overflow:
    true`).
 
-8. **Tier swap** (v2 `setup`): `ctx.catalog.model.default.set(...)` at spawn
-   time → spawn → restore. Mapping table derived from `opencode models` CLI,
-   filtered to credentialed providers.
+ 8. **Tier-agent registration — path revised (2026-08-01 spike).** Original
+    design used v2 `ctx.catalog.model.default.set(...)` at spawn time. Spike
+    investigation revealed:
+    - The `task` tool is **v1-only** and reads v1 `Agent.Service`, which is
+      populated from hardcoded built-ins + `opencode.json` `agent.*` config.
+      v2 `AgentV2.Service` (populated by `ctx.agent.transform`) is **unbridged**
+      — `task` does not see v2-registered agents.
+    - The v2 stack has **no `task` tool** yet (`builtins.ts` TODO: "task not
+      yet ported").
+    - `client.config.update` (HTTP) **persists to disk** (`config.json` write +
+      instance disposal) — unsuitable for ephemeral plugin-owned injection.
+    - **Working path: v1 `config` hook** (`Hooks.config?: (input: Config) =>
+      Promise<void>`) mutates the live cached `Config` object in-place during
+      `Plugin.state` init. Never touches disk. `Agent.state` reads `cfg.agent`
+      to build the registry, so tier agents injected via the `config` hook are
+      visible to `task` — **provided `Plugin.state` init runs before
+      `Agent.state` init** (normal dependency order, but timing-dependent and
+      requires runtime verification).
+    - Agent definitions carry a `model` field; `task` resolves
+      `next.model ?? parent.model`, so per-agent `model` overrides work.
+    - Tool restriction is via `permission` (deny-all + allow-list), NOT the
+      `tools` field (the cfg-merge loop ignores `tools`).
+    - `subagent_depth` (default 1) must be raised if tier agents should
+      delegate further.
+
+    **Tier agent shape** (injected via `config` hook):
+    ```jsonc
+    {
+      "light-agent":  { "model": "...", "mode": "subagent", "permission": {...}, "description": "..." },
+      "medium-agent": { ... },
+      "large-agent":  { ... },
+      "xlarge-agent": { ... }
+    }
+    ```
+    Tier → model mapping derived from `config.agents_tier` MCP + `opencode
+    models` CLI, filtered to credentialed providers.
 
 9. **Non-invasive grand principle**: all rewriting is adapter-side. ws-mcp,
    playbook, and rsrc source files are never modified. Dependency is
@@ -117,14 +158,19 @@ derived from both `skills/manifest.json` and `rsrc/manifest.json`.
   `260801-todo-ws-mcp-log-append-cli` to be landed. Until then, fall back
   to `console.warn`.
 
-### Phase 3: Tier swap
+### Phase 3: Tier-agent registration via `config` hook
 
-- Implement `config.agents_tier` MCP integration (read tier config).
-- Build model mapping table from `opencode models` CLI output, filtered
-  to credentialed providers.
-- Implement `ctx.catalog.model.default.set(...)` → spawn → restore at
-  spawn time.
-- Test tier swap with a concrete provider/model.
+- Implement v1 `Hooks.config` handler that injects `light-agent`,
+  `medium-agent`, `large-agent`, `xlarge-agent` into `input.agent` in-place.
+- Read `config.agents_tier` MCP tool to get tier → model mapping.
+- Build model mapping table from `opencode models` CLI output, filtered to
+  credentialed providers.
+- Set `subagent_depth` in config if tier agents should delegate further.
+- **Runtime verification required**: confirm `Plugin.state` init runs before
+  `Agent.state` init in the actual bootstrap sequence. If not, investigate
+  forcing plugin init early.
+- Test: `task({subagent_type: "light-agent"})` resolves and uses the
+  per-agent model.
 
 ### Phase 4: TuiPlugin reservation (later/optional)
 
@@ -143,3 +189,44 @@ derived from both `skills/manifest.json` and `rsrc/manifest.json`.
 ### Result
 
 _(to be filled after implementation)_
+
+## Harness tradeoff note (2026-08-01)
+
+During tier-agent design, the accumulated adapter complexity for opencode
+raised a strategic question: is the workaround cost justified, or would a
+simpler harness be a better target? A brief comparison with **Pi**
+(earendil-works, MIT, terminal coding-agent harness) was recorded:
+
+| Surface | opencode | Pi |
+|---------|----------|----|
+| Subagent/tier | v1 `config` hook timing hack; `task` v1-only; v1/v2 unbridged; #39937 open | **markdown frontmatter `model:` field — done** |
+| MCP connection | v1 `input.client.mcp.add` (works) | extension subprocess spawn (`pi-sub-agent` precedent) |
+| Goal-loop | `session.prompt({delivery:"queue"})` + marker (surface exists but unstable) | RPC/SDK mode — build from scratch on clean API |
+| Compaction | `experimental.session.compacting` + `autocontinue` (surface exists, hack-dependent) | **No compaction concept in Pi core** — build needed (or unnecessary if Pi's small-context philosophy holds) |
+| Skill/playbook | skill loader + prose rewriting pipeline (complex) | No skill concept — agent def + tool reconceptualization needed |
+| API stability | v2 unreleased/undocumented, `effect@beta`, unported `task` tool | **Single extension API, hot-reload, jiti, documented** |
+| Investigation invested | 9 questions fully resolved, source-verified | ~0 |
+
+**Key insight**: ws-mcp is harness-independent and reusable on either. The
+adapter work differs:
+- opencode: compaction/goal-loop/skill surfaces **exist but are unstable** and
+  require multiple workarounds (v1/v2 split, prose rewriting, config hook
+  timing, unbridged agent services). Architecture debt with no resolution
+  timeline (#39937, `effect@beta`, v2 `task` TODO).
+- Pi: compaction/goal-loop must be **built from scratch**, but on a **clean,
+  stable, single-API extension surface**. Tier/subagent is trivially simple.
+
+**Status**: tradeoff requires deeper evaluation before committing to opencode
+as the implementation target. Pi's extension API capabilities (MCP subprocess
+bridging, RPC/SDK session control for goal-loop) need spike investigation to
+make an informed comparison. This ticket remains in `ready/` but implementation
+is deferred until the harness decision is finalized.
+
+### Pi reference links
+- Site: https://pi.dev/
+- Package registry: https://pi.dev/packages
+- `pi-sub-agent` package: https://pi.dev/packages/pi-sub-agent (subagent tool,
+  bundled agents, markdown frontmatter agent definitions with per-agent `model`)
+- `pi-subagents` package (newer, native bidirectional parent-child
+  communication): https://pi.dev/packages/pi-sub-agents
+- GitHub: https://github.com/earendil-works/pi
