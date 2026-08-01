@@ -12,6 +12,7 @@ related:
   260726-refactor-retire-spec-planned-marker-mechanism: already retired the planned-marker mechanism on 2026-07-28, which falsifies the original premise for touching the marker research ticket
   260725-idea-retire-ticket-focus-root-regen: overlapping _index.md work, deliberately not waited on
 sage-review-completeness: completed
+completed: 2026-08-01
 ---
 
 # ws-dashboard drop sweep — archive tag, git-surface teardown, doc and board removal
@@ -432,3 +433,8 @@ edited.
 |---|-------|----------|
 | 1 | Dangling '13' self-correction has no referent inside this ticket | minor |
 | 2 | Doc-reference verification scoped narrower than the removal itself (nothing checks outside ai-docs/) | minor |
+
+
+## Resolution (2026-08-01)
+
+Phases 1–3 completed: the dashboard line is recoverable from `archive/ws-dashboard`, source and live documentation are removed, the board is reconciled, and the retained worktree-local-context defect is re-homed as ws-core work.
