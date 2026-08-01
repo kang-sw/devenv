@@ -20,9 +20,9 @@ evidence behind it, and what that costs.
 
 ## Decision
 
-Stop ws-dashboard feature development. Orca supersedes it. This is a freeze of
-forward investment, not an immediate deletion: cleanup scope and artifact
-disposition are separate, still-open questions recorded below.
+Stop ws-dashboard feature development. Orca supersedes it. The completed sweep
+deleted the dashboard code, documentation domain, and dashboard board; recovery
+is through the annotated `archive/ws-dashboard` tag.
 
 The ws/wsflow plugin itself is unaffected and remains the project's core
 deliverable. It installs into the Claude Code / Codex CLIs, and Orca runs those
@@ -70,19 +70,17 @@ survey behind that claim.
 
 ## Rejected Alternative
 
-Merging the dashboard branch into `main`. The branch
-`goal/ws-dashboard-dev/velvet-arbor-quill` has diverged far enough that a merge
-would be forced integration work in service of code that is no longer being
-developed. It stays dangling and unmerged; git history remains the recovery
-path.
+Merging the dashboard development line into `main`. The branch
+`goal/ws-dashboard-dev/velvet-arbor-quill` was already merged into
+`ws-dashboard-dev`, with later tips above it, but merging that line into `main`
+would still be forced integration work for code no longer being developed. It
+was instead preserved by the annotated `archive/ws-dashboard` tag. Recover it
+with `git fetch --tags && git checkout -b revive archive/ws-dashboard`.
 
-Consequence to be aware of: `main`'s dashboard documentation stays at its older,
-thinner state. Specifically, `ai-docs/mental-model/ws-dashboard-agent-harness.md`
-— the `(harness, capability)` four-tier matrix (Passthrough / Overlay / Hack /
-Unavailable) with fixture-verified Codex app-server findings — **exists only on
-the dangling branch**. That research stays valid independent of any UI and is
-the one asset worth deliberately recovering; on `main` today it is reachable
-only through git. Whether to cherry-pick it is an open decision below.
+The reusable `(harness, capability)` four-tier matrix (Passthrough / Overlay /
+Hack / Unavailable) with fixture-verified Codex app-server findings was
+recovered to `ai-docs/ref/agent-harness-capability-tiers.md`. It remains valid
+independently of the removed UI.
 
 ## Cleanup Scope
 
@@ -100,18 +98,10 @@ dangling worktree's (e.g. 73 live tickets and a 2,804-line spec there), so
 - `ai-docs/_index.md` references the dashboard in the inventory line and
   related sections.
 
-This list is a starting inventory, not a completed sweep. A cleanup pass still
-needs to trace spec anchors and cross-ticket references before moving anything.
-
-## Open Decisions
-
-Deliberately unresolved; do not infer answers from this ticket.
-
-- Artifact disposition: delete the dashboard spec and mental model outright
-  (git retains them), or move them to `ai-docs/.old/`.
-- `ai-docs/_index.md` cleanup scope.
-- Whether to cherry-pick `ws-dashboard-agent-harness.md` from the dangling
-  branch onto `main` before the branch is left alone.
+This inventory was resolved by `260730-chore-ws-dashboard-drop-sweep`: the code,
+specification, mental model, and 13 dashboard tickets were removed rather than
+archived in the live document tree; `_index.md` was reconciled; and the harness
+research was recovered as a reference.
 
 ## Unverified
 

@@ -944,3 +944,10 @@ detection, (3) MCP vs file-convention split for tickets/specs/mental-models
 and memory layers, (4) 260429 direction, wsflow mirroring rules, per-harness
 named-agent contracts. Claude durability was verified empirically in-session;
 Codex retained-subagent capability was verified by the user out-of-band.
+
+### Supersede: dashboard removed and archived
+
+The later dashboard retention and port-versus-remove premises are superseded.
+The dashboard code, documentation domain, and board were removed under
+`260730-chore-ws-dashboard-drop-sweep`; recovery is the annotated
+`archive/ws-dashboard` tag. The ws/wsflow plugin surface remains unaffected.

@@ -97,6 +97,20 @@ learn *which directory* to read. Two workarounds, neither clean:
 
 This is the single largest obstacle and the first thing a spike should measure.
 
+## Phase 3 Reconciliation
+
+- The loss of compact, fork, steer, and goal control applies to Orca-owned
+  sessions only. For ws-owned Codex app-server sessions, those capabilities are
+  Passthrough, so the earlier "permanently given up" claim was over-scoped.
+- The `storage` limits — 256 KB per value and 5 MB total — cannot hold a board
+  of roughly 100 live tickets together with its `related:` graph in one value.
+- `contributes.events` has no filesystem-change event. Worker re-projection and
+  panel refresh timing are therefore unspecified, and may block a useful board
+  more directly than worktree-path discovery.
+- For one to three personal projects, `settings:own` with a manually configured
+  root is adequate. The Hack-tier approach of reading Orca's private state is
+  avoidable.
+
 ## Risk
 
 The worker's lack of sandboxing is a current implementation fact, not a
