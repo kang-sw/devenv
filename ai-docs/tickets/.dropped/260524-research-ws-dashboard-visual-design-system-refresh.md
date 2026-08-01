@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: Research ws dashboard visual design system refresh
 related:
   260514-epic-ws-web-dashboard-mvp: dashboard MVP board that needs a coherent visual quality pass

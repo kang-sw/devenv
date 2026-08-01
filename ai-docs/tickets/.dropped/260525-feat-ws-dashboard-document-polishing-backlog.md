@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: ws dashboard document polishing backlog
 parent: 260514-epic-ws-web-dashboard-mvp
 spec:

@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: ws web dashboard direction research
 related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board

@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: Research ws dashboard React Aria UI primitives
 related:
   260524-feat-ws-dashboard-react-aria-root-picker-pilot: root picker pilot should provide the first concrete evidence before broader adoption
