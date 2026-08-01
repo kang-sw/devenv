@@ -54,6 +54,11 @@ history.
   `agents-plugin` remains compatibility behavior, not a separate source tree.
 - `ai-docs/.old/` is the Git-tracked project archive for inactive reference
   material that should not appear in default file listings.
+- `agents-plugin-opencode/` (in progress, branch `feat/opencode-adapter`) is a
+  thin boundary-layer shim for opencode: v1+v2 plugin coexistence, MCP
+  registration via `input.client.mcp.add`, skill prose rewriting (non-invasive),
+  goal-loop via `session.prompt`, compaction hooks, and tier swap. Non-invasive
+  grand principle: dependency is one-directional (opencode → ws-mcp).
 
 ## Read Before Editing
 
@@ -164,7 +169,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260731-research-ws-opencode-drop-in-package` | idea | Adapter depth and harness-neutral boundary for ws opencode install |
+| `260801-feat-ws-opencode-adapter` | ready | Thin boundary-layer shim plugin for opencode: v1+v2 coexistence, MCP registration, skill prose rewriting, goal-loop, compaction, tier swap |
+| `260801-todo-ws-mcp-log-append-cli` | ready | Add `ws-mcp log append` CLI subcommand for external warning logging (dependency for opencode adapter Phase 2) |
+| `260731-research-ws-opencode-drop-in-package` | done | Adapter depth and harness-neutral boundary for ws opencode install — all 9 design questions resolved |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
