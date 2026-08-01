@@ -294,40 +294,75 @@ the opencode adapter (Decision 9 there): ws-mcp, playbook, and rsrc source
 files are never modified to accommodate a harness. Dependency is
 one-directional (adapter → ws-mcp). The opencode adapter applied this to
 prose rewriting; the Pi adapter applies the same rule to **tool
-filtering and spawn policy**.
+filtering, skill exposure, and spawn policy**.
 
 **Decision: tool-group + playbook-curation live in the Pi adapter, not in
 ws-mcp.** ws-mcp/playbooks remain harness-agnostic and carry no knowledge
 of "how harness X filters tools" or "what depth means." The Pi adapter owns
-two curation tables:
+the curation tables:
 
 ```
-# tool-group → Pi tool names
+# tool-group → Pi tool names (explicit allowlist)
 tool-groups:
-  read-only: [read, grep, find, ls]
-  recon:     [read, grep, find, ls, bash, web_search]
-  full:      [<all default tools>]
-  none:      []
+  read-only:    [read, grep, find, ls]
+  recon:        [read, grep, find, ls, bash, web_search]
+  full-worker:  [read, bash, edit, write, grep, find, ls]   # default edit tools only, NO ws-mcp MCP tools
+  none:         []
 
-# playbook → { tool-group, tier, max-depth }
+# playbook → { tool-group, tier, max-depth, skills }
+#   tool-group omitted  => sentinel "all tools" (lead only); spawn omits --tools
+#   skills omitted      => sentinel "skill discovery on" (lead only); spawn omits --no-skills
+#   skills: none        => spawn passes --no-skills
+#   skills: [<paths>]   => spawn passes --no-skills --skill <p1> --skill <p2> ...
 playbook-curation:
-  explore:   { tool-group: recon,     tier: light,  max-depth: 2 }
-  implement: { tool-group: full,      tier: large,  max-depth: 1 }
-  review:    { tool-group: read-only, tier: medium, max-depth: 1 }
-  discuss:   { tool-group: none,      tier: medium, max-depth: 1 }
+  # lead playbooks (depth 0) — tool-group/skills omitted = full access sentinels
+  lead-implement: { tier: large,  max-depth: 1, skills: none }   # lead itself needs no skills; subs it spawns are restricted
+  lead-discuss:   { tier: medium, max-depth: 1, skills: none }
+  # subagent playbooks (depth >= 1) — explicit restricted groups
+  explore:   { tool-group: recon,       tier: light,  max-depth: 2, skills: none }
+  implement: { tool-group: full-worker, tier: large,  max-depth: 1, skills: none }
+  review:    { tool-group: read-only,   tier: medium, max-depth: 1, skills: none }
+  discuss:   { tool-group: none,        tier: medium, max-depth: 1, skills: none }
   ...
 ```
 
 When `ws-agent-spawn({ playbook, task, tier? })` is called, the adapter
 looks up the curation to resolve `--tools`, `--model` (from tier mapping),
-`WS_AGENT_DEPTH`, and validates `depth < max-depth` (reject if the caller's
-depth+1 would exceed the playbook's `max-depth`).
+`WS_AGENT_DEPTH`, `--no-skills`/`--skill`, and validates `depth < max-depth`
+(reject if the caller's depth+1 would exceed the playbook's `max-depth`).
+
+**Sentinel semantics:**
+- `tool-group` **omitted** = "all tools" sentinel. The spawn handler passes
+  *no* `--tools` flag, so Pi exposes every registered tool. Reserved for
+  lead (depth 0); if a subagent playbook omits `tool-group`, the adapter
+  rejects it (subagent must have an explicit group). Rationale: a hardcoded
+  "all tools" list would need updating whenever Pi or the bridge adds a
+  tool; omission is self-maintaining.
+- `skills` **omitted** = "skill discovery on" sentinel. The spawn handler
+  passes no `--no-skills`; Pi's normal discovery runs. Reserved for lead.
+- `skills: none` = `--no-skills` (no skill commands, no skill descriptions
+  in the system prompt).
+- `skills: [<paths>]` = `--no-skills --skill <p> ...` (whitelist; additive
+  per `skills.md:34`). MVP uses `none` for all subagent playbooks.
 
 **Triple control (depth + tool-group + playbook-curation):**
-- depth 0 lead spawns `implement`: curation OK (`max-depth: 1` ≥ 1) → `--tools full`.
-- depth 1 worker spawns `explore`: curation OK (`max-depth: 2` ≥ 2) → `--tools recon`, `WS_AGENT_DEPTH=2`.
+- depth 0 lead spawns `implement`: curation OK (`max-depth: 1` ≥ 1) → `--tools full-worker`, `--no-skills`.
+- depth 1 worker spawns `explore`: curation OK (`max-depth: 2` ≥ 2) → `--tools recon`, `--no-skills`, `WS_AGENT_DEPTH=2`.
 - depth 1 worker spawns `implement`: curation rejects (child depth 2 > `max-depth: 1`).
 - depth 2 explore: spawn tool not exposed (dual defense above).
+
+**Subagent cannot bypass lead authority via three routes:**
+1. `/skill:lead-implement` (skill command) → blocked: subagent playbooks
+   use `skills: none` → `--no-skills` disables skill discovery and commands.
+2. `ws/playbook.render(name:"lead-implement")` (MCP tool) → blocked: ws-mcp
+   MCP tools (`ws/*`) are **only in the lead's tool set** (depth 0 uses the
+   omitted-tool-group sentinel = all tools; subagent tool-groups
+   `full-worker`/`recon`/`read-only`/`none` never list `ws/*` tools). The
+   spawn handler's `--tools` filter excludes them, and `usage.md:209`
+   confirms `--tools` filters custom tools too.
+3. `ws-agent-spawn` (custom tool) → blocked at depth 2 (not exposed, dual
+   defense above) and blocked at depth 1 for non-explore playbooks
+   (curation `max-depth` check).
 
 **Trade-off accepted — split management point.** Adding a new playbook to
 ws-mcp requires one corresponding line in the Pi adapter's
@@ -338,7 +373,7 @@ the adapter. Mitigated by the ws-mcp version pin (the adapter validates
 `runtime.json` `plugin_version` on startup — rule 4 "pin and fail loudly"
 inherited from the opencode design). **Justification: golden-rule violation
 cost > split-management cost.** Putting tool/depth policy into ws-mcp would
-force ws-mcp to know "how harness X filters tools," breaking the
+force ws-mcp to know "how harness X filters tools and skills," breaking the
 harness-neutral "prompt factory" doctrine (260605).
 
 **Decision: curation is a data file, not hardcoded.** The curation tables
