@@ -394,6 +394,19 @@ changelog. After Phase 3, `README.md` and `CHANGELOG.md` are the only tracked
 files outside `ai-docs/` that mention the dashboard, and only the former is
 edited.
 
+### Result (61535fc) - 2026-08-01
+
+- Removed the dashboard spec domain, dashboard mental model, README/index
+  projections, and dashboard-specific named-agent references; the active board
+  moved the epic and 12 specified tickets to `.dropped/`.
+- Re-homed `260523-bug-worktree-local-index-missing` as the unchanged
+  surface-neutral worktree-local-context defect, leaving its mechanism
+  undecided, and reconciled the affected migration and Orca research records.
+- `ws/spec_index.verify`, ticket verification, the active-parent graph check,
+  both residual-reference checks with their stated exemptions, and the canonical
+  ignored-local-document cleanup all passed. Historical CHANGELOG entries were
+  preserved.
+
 ## Blocked (2026-07-30)
 
 ### Design Reviewer — block
