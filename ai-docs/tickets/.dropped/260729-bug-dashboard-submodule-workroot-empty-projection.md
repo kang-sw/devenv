@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: Dashboard renders submodule workRoots as an empty projection after wsstate gained submodule support
 related-mental-model:
   - ws-web-dashboard

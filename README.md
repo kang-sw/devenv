@@ -4,8 +4,7 @@ Personal developer environment and local `ws` workflow workspace.
 
 This repo started as dotfiles and a workstation bootstrap script. It now also
 contains the local `ws` and `wsflow` plugin packages, the native `ws-mcp`
-runtime source, workflow docs, and the dashboard scaffold used while developing
-that system.
+runtime source, and workflow docs for that system.
 
 ## Quick Start
 
@@ -27,7 +26,6 @@ tools/                 local Claude session TUIs
 agents-plugin/         ws plugin package
 agents-plugin-wsflow/  agentless wsflow plugin package
 agents-plugin-tool/    native ws MCP runtime and tooling source
-ws-dashboard/          local web dashboard scaffold
 ai-docs/               workflow specs, tickets, mental models, references
 ```
 

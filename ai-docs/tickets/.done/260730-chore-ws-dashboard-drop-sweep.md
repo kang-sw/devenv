@@ -12,6 +12,7 @@ related:
   260726-refactor-retire-spec-planned-marker-mechanism: already retired the planned-marker mechanism on 2026-07-28, which falsifies the original premise for touching the marker research ticket
   260725-idea-retire-ticket-focus-root-regen: overlapping _index.md work, deliberately not waited on
 sage-review-completeness: completed
+completed: 2026-08-01
 ---
 
 # ws-dashboard drop sweep — archive tag, git-surface teardown, doc and board removal
@@ -394,6 +395,25 @@ changelog. After Phase 3, `README.md` and `CHANGELOG.md` are the only tracked
 files outside `ai-docs/` that mention the dashboard, and only the former is
 edited.
 
+### Result (61535fc) - 2026-08-01
+
+- Removed the dashboard spec domain, dashboard mental model, README/index
+  projections, and dashboard-specific named-agent references; the active board
+  moved the epic and 12 specified tickets to `.dropped/`.
+- Re-homed `260523-bug-worktree-local-index-missing` as the unchanged
+  surface-neutral worktree-local-context defect, leaving its mechanism
+  undecided, and reconciled the affected migration and Orca research records.
+- `ws/spec_index.verify`, ticket verification, the active-parent graph check,
+  both residual-reference checks with their stated exemptions, and the canonical
+  ignored-local-document cleanup all passed. Historical CHANGELOG entries were
+  preserved.
+
+#### Edition (8b594246) - 2026-08-01
+
+- Review correction: all 13 dropped dashboard tickets now carry required
+  `dropped:` metadata, and `tickets.verify` passes for the complete moved set.
+  Its unresolved-phase notices are non-blocking historical warnings.
+
 ## Blocked (2026-07-30)
 
 ### Design Reviewer — block
@@ -413,3 +433,8 @@ edited.
 |---|-------|----------|
 | 1 | Dangling '13' self-correction has no referent inside this ticket | minor |
 | 2 | Doc-reference verification scoped narrower than the removal itself (nothing checks outside ai-docs/) | minor |
+
+
+## Resolution (2026-08-01)
+
+Phases 1–3 completed: the dashboard line is recoverable from `archive/ws-dashboard`, source and live documentation are removed, the board is reconciled, and the retained worktree-local-context defect is re-homed as ws-core work.

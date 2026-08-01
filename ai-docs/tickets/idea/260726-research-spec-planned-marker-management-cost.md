@@ -89,8 +89,8 @@ recorded here so it is not re-derived:
 Counted before opining, because nobody had:
 
 - **Real `🚧` usage across the whole spec corpus: exactly 1.** Six of the seven
-  matches are in `documentation-system.md` describing the mechanism itself. The
-  only live marker is `ws-web-dashboard/index.md:231`,
+  matches are in `documentation-system.md` describing the mechanism itself. At
+  the time of this measurement, the only live marker was
   `{#260524-dashboard-workspace-root-prune-policy}`.
 - **That one is stale.** Its backing ticket
   `260524-feat-ws-dashboard-workspace-root-prune-policy` is in `.done/`. Per

@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: Map persistable ws dashboard UI state
 parent: 260514-epic-ws-web-dashboard-mvp
 related:

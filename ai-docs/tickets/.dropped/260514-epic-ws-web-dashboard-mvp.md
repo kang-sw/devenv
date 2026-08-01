@@ -1,4 +1,5 @@
 ---
+dropped: 2026-08-01
 title: ws web dashboard MVP
 related:
   260427-chore-claude-dash-windows: prior PTY dashboard surface and Windows stability motivation

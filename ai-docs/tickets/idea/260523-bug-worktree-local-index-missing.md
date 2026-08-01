@@ -1,11 +1,8 @@
 ---
-title: dashboard-managed worktree local context
-parent: 260514-epic-ws-web-dashboard-mvp
-related-mental-model:
-  - ws-web-dashboard
+title: worktree local context propagation
 ---
 
-# dashboard-managed worktree local context
+# worktree local context propagation
 
 ## Background
 
@@ -21,24 +18,15 @@ try the wrong default account/path.
 
 Git worktree itself does not distinguish ignored build artifacts from ignored
 local workflow context. Copying all ignored files would drag build outputs,
-caches, and possibly secrets into implementation worktrees. Adding broad
-worktree-management APIs to ws core would also pull workflow orchestration into
-general Git workspace management.
+caches, and possibly secrets into implementation worktrees. Any broad API for
+worktree management must avoid coupling workflow context propagation to general
+Git workspace management.
 
 ## Direction
 
-Treat this as a dashboard/workroot management problem, not a ws core workflow
-primitive. A future dashboard surface could make local context propagation a
-human-visible action:
-
-- show which ignored local context files exist for the current workroot;
-- distinguish allowlisted local context from build artifacts and caches;
-- let the user copy selected local context into a new or existing worktree;
-- default to skip existing destination files unless the user explicitly
-  overwrites;
-- keep copied files ignored and unstaged;
-- warn before copying files likely to contain secrets.
-
-The likely allowlist starts with `ai-docs/_index.local.md` and
-`ai-docs/**/*.local.md`, but the dashboard design should decide the manifest,
-preview, and safety policy before implementation.
+The mechanism is undecided. The dashboard/workroot surface that previously
+assumed this responsibility no longer exists. A future solution must preserve
+the observed safety constraints: distinguish allowlisted local workflow context
+from build artifacts and caches, keep copied files ignored and unstaged, avoid
+overwriting existing destinations without explicit confirmation, and warn before
+copying files likely to contain secrets.

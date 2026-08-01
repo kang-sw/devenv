@@ -3,7 +3,6 @@ title: ws playbook-factory pivot — spawn removal and native-subagent convergen
 related:
   260605-research-ws-native-subagent-pivot: full direction discussion, decisions, evidence, and open questions
   260429-research-host-neutral-ws-plugin: prior migration anchor, absorbed and superseded by this epic (archived .done)
-  260514-epic-ws-web-dashboard-mvp: retained as a web-tmux surface; under option B the agent-activity feed is NOT stripped (mercenary lifecycle survives as its source) — M3 only keeps it compiling, port-vs-remove deferred to a dashboard idea ticket; MCP-integration children kept (TUI-replacement plan superseded)
   260521-research-libws-harness-agent-substrate: deprioritized by this pivot (dropped .dropped)
   260523-bug-ws-mcp-launcher-runtime-repair-race: prerequisite — binary/text swap race for rsrc distribution
   260524-bug-codex-plugin-cache-refresh-mcp-startup-race: prerequisite — plugin cache refresh race for rsrc distribution
@@ -25,21 +24,12 @@ subagents. Direction, decisions, and evidence live in
 - memory.* / ticket-mutation MCP tool contracts (deferred follow-up).
 - wsflow naming/convergence mechanics before M4; final convergence is a
   post-M4 follow-up owned by `260616-refactor-wsflow-product-mode-convergence`.
-- Dashboard feature changes beyond keeping it compiling against the reshaped
-  surface (the dashboard is retained as a web-tmux surface). Under option B the
-  agent-activity feed is NOT stripped — its mercenary lifecycle source survives,
-  so port-vs-remove is a deferred product decision in a separate dashboard idea
-  ticket. The earlier TUI-replacement/deprecation plan is superseded.
 - Gemini harness support (explicitly excluded).
 
 ## Child Tickets
 
 - Planned (M0 — cleanup): board and direction hygiene — absorb/close 260429,
-  retain dashboard as a web-tmux surface (under option B do NOT strip
-  agent-activity; M3 keeps it compiling, port-vs-remove deferred to a dashboard
-  idea ticket; destructive 260514 child drops move to idea-level backlog with an
-  epic pointer, still user-gated), retire
-  260521, re-triage spawn-bug tickets under option B (260517 empty-result and
+  retire 260521, re-triage spawn-bug tickets under option B (260517 empty-result and
   260524 stale-dir live in the retained mercenary path — NOT resolved-by-deletion;
   only subquery/wsstore-busy bugs drop), promote cache/launcher race tickets to
   prerequisites, start agentless-mode (`WS_MCP_NO_AGENT=1`) dogfooding as the
