@@ -109,8 +109,15 @@ the settled bridge direction (neither touches ws-mcp Go source):
   process-management burden, but depends on ws-mcp's transport surface
   (currently stdio-focused; see `260513-research-streamable-http-mcp-transport`).
 
-**Open**: which sub-path. (a-i) is the default assumption; (a-ii) is a
-follow-up if stdio lifecycle proves painful. Neither is decided.
+**Decided: (a-i) stdio MCP bridge.** The extension spawns the ws-mcp
+launcher as a subprocess, speaks stdio MCP, and re-exports every ws-mcp
+tool as a `pi.registerTool` call whose `execute` proxies to the MCP
+server. ws-mcp source untouched. The extension owns the subprocess
+lifecycle. The lightweight JSON-RPC framing logic lives in the TS
+extension itself — ws-mcp's tool-list schema is small enough that a
+minimal stdio client is straightforward, and we avoid a heavy MCP SDK
+dependency. A TCP/HTTP relay (a-ii) remains a possible later optimization
+if stdio lifecycle proves painful, but is not the starting path.
 
 **Tool-name surface.** ws-mcp tools are invoked as `ws/playbook.print`,
 `ws/tickets.create`, etc. (colon/slash form in prose). On Pi these become
@@ -388,7 +395,9 @@ rejected as a golden-rule violation.
 User-directed order: MVP surface first, feature expansion second.
 
 **MVP — skills + playbook + agent/tier + spawn/continue/wait:**
-- MCP bridge extension (sub-path TBD) exposing ws-mcp tools as Pi tools.
+- MCP stdio bridge extension (a-i, decided) embedding a lightweight
+  JSON-RPC stdio client, spawning ws-mcp and proxying each MCP tool via
+  `pi.registerTool`.
 - `resources_discover` returning `agents-plugin/skills/` as a skill path
   (zero prose rewriting, if tool-name preservation holds).
 - Tier/subagent definitions via curation data file (tool-groups +
@@ -404,11 +413,15 @@ User-directed order: MVP surface first, feature expansion second.
 - Recursive explore: depth-1 worker spawns depth-2 explore leaf (260605
   subquery absorption, reconstructed on Pi).
 - Always-visible TODO / workflow-board surface (Pi has no built-in todo;
-  `ui.setWidget` or a custom UI component — the dashboard-deprecation TUI
-  shape from the 260605 pivot lives here).
-- Goal-loop: `agent_settled` → judgment turn (`sendUserMessage` followUp) →
-  marker parse → `ctx.compact()` + re-enter. Loop guard portable from the
-  opencode design.
+  `ui.setWidget` footer or `ui.custom` component — exact shape decided at
+  implementation time. Designed fresh on Pi; the 260514 dashboard epic is
+  closed and not absorbed).
+- Goal-loop: `agent_settled` → judgment turn → `ctx.compact()` + re-enter.
+  The judgment-turn signal is **redesigned from scratch** on Pi (the
+  opencode four-token marker protocol is discarded — it carried
+  opencode-structure hacks). Candidate: a judgment tool call registered
+  by the extension, since Pi extensions can register tools the lead calls
+  to signal goal state. Designed in the expansion phase.
 - Compaction hooks: `session_before_compact` for ws-state injection and
   custom summary; `reason`/`willRetry` replace the opencode autocontinue
   flip.
@@ -446,58 +459,59 @@ User-directed order: MVP surface first, feature expansion second.
 
 ## Open questions
 
-1. **MCP bridge sub-path (a-i stdio vs a-ii relay).** Default (a-i). Decide
-   after a read-only spike of `examples/extensions/subagent/` (subprocess +
-   `exec` pattern) and `dynamic-tools.ts` (runtime tool registration). No
-   code change to ws-mcp.
-2. **Pi tool-name character set.** Can `pi.registerTool({ name: "ws/playbook.print" })`
-   use the slash/colon form, letting ws prose work unmodified? If yes, the
-   entire opencode prose-rewriting apparatus is deleted. If no, a thin
-   name-mapping layer is needed (still far simpler than opencode's
-   allowlist regex because it is a deterministic tool-name map, not prose
-   regex). Runtime spike against `dynamic-tools.ts` resolves this.
-3. **Pi extension vs Pi package layout.** Local `.pi/extensions/*.ts` for
-   development; npm/git `pi-package` for distribution. Does the ws Pi layer
-   ship as a Pi package that depends on a ws-mcp binary release asset, or
-   does it spawn a source-tree ws-mcp? Affects install story and the
-   version-bump/cache discipline (Pi local extensions are read fresh from
-   disk each launch — no Codex-style cache invalidation needed, per
-   `packages.md`).
-4. **Skill prose references to MCP tool calls.** If tool-name preservation
-   (Q2) holds, ws `SKILL.md` prose is load-and-go. If not, the rewrite is a
-   deterministic tool-call rewrite, not the opencode allowlist regex. Either
-   way this is smaller than the opencode case — confirm after Q2.
-5. **Goal-loop marker protocol reuse.** The opencode design's
-   `$goal-response:<token>` four-token protocol is portable, but Pi's
-   `agent_settled` (vs opencode's `session.idle` observer) is a stronger
-   primitive — it already drains auto-retry and auto-compaction. Re-evaluate
-   whether the marker protocol simplifies (e.g. a judgment *tool call*
-   instead of a free-text marker, since Pi extensions can register tools the
-   lead calls to signal goal state). Open for design.
-6. **Always-visible TODO surface shape.** Pi has no built-in todo. The 260605
-   pivot's "lightweight TUI that browses AI-generated content" and the
-   goal-loop's todo-board driver both land here. `ui.setWidget` (footer
-   widget) vs `ui.custom` (full component). Design in the expansion phase.
-7. **Dashboard deprecation convergence.** The 260514 dashboard epic is
-   already deprecated toward a lightweight TUI. The Pi `ui.custom` surface
-   is the natural home for that TUI. Does this research absorb the dashboard
-   TUI work, or does it stay a separate follow-up? Open.
-8. **`pi --mode json -p --session <path>` resume-time turn accumulation
+### Resolved this session
+
+- **MCP bridge sub-path → (a-i) stdio.** Decided: the TS extension embeds
+  a lightweight JSON-RPC stdio client, spawns ws-mcp, proxies each MCP tool
+  through `pi.registerTool`. No relay. (was Q1)
+- **Distribution → git package.** Pi supports `pi install
+  git:host/user/repo@<ref>` with ref pinning and clone-time `npm install`
+  (verified `packages.md` 2026-08-02). The ws Pi layer ships as a git
+  package, matching the existing Claude distribution pattern for
+  consistency. npm remains a fallback if git distribution proves
+  unsuitable, but git is the default. (was Q3)
+- **Goal-loop marker protocol — discard opencode design.** The opencode
+  `$goal-response:<token>` four-token protocol carried opencode-structure
+  hacks; it is not ported. The Pi goal-loop signal is redesigned from
+  scratch in the expansion phase (Pi's `agent_settled` is a stronger
+  primitive than opencode's `session.idle`). (was Q5)
+- **Always-visible TODO surface — implementation TBD (expansion).** The
+  tool surface exists; the exact shape (`ui.setWidget` vs `ui.custom`) is
+  decided at implementation time in the expansion phase. Not blocking MVP.
+  (was Q6)
+- **Dashboard — closed topic, not absorbed.** The 260514 dashboard epic is
+  closed; this research does not absorb its TUI work. Any ws-visible
+  board/TODO surface is designed fresh on Pi. (was Q7)
+
+### Open
+
+1. **Pi tool-name character set.** Can `pi.registerTool({ name:
+   "ws/playbook.print" })` use the slash/colon form, letting ws prose work
+   unmodified? If yes, the entire opencode prose-rewriting apparatus is
+   deleted. If no, a thin name-mapping layer is needed (still far simpler
+   than opencode's allowlist regex because it is a deterministic tool-name
+   map, not prose regex). Runtime spike against `dynamic-tools.ts` resolves
+   this.
+2. **Skill prose references to MCP tool calls.** If tool-name preservation
+   (Q1) holds, ws `SKILL.md` prose is load-and-go. If not, the rewrite is a
+   deterministic tool-call rewrite, not the opencode allowlist regex.
+   Either way this is smaller than the opencode case — confirm after Q1.
+3. **`pi --mode json -p --session <path>` resume-time turn accumulation
    (runtime spike).** Does resuming a session file under print mode append
    a new turn (desired) or start fresh (breaks continuation)? The example
    uses `--no-session` and never exercises this combination. Must be
    verified at runtime before the continuation design is considered sound.
-9. **Session-file flush ordering vs process exit (runtime spike).** When
+4. **Session-file flush ordering vs process exit (runtime spike).** When
    `wait` harvests a finished subprocess and the lead immediately calls
    `continue`, is the session file fully flushed by process exit time so
    the next `--session` open sees the appended turn? Normally yes, but
    verify — this is the second runtime assumption underpinning async
    continuation.
-10. **`--append-system-prompt` vs `--system-prompt` for subagent prompt
-    injection.** MVP uses append (example's verified path). Switching to
-    replace (leaner prompt, keeps skills/context files per `usage.md:240`)
-    is a later tuning decision after MVP validates that the subagent
-    behavior is correct. Open but low-risk.
+5. **`--append-system-prompt` vs `--system-prompt` for subagent prompt
+   injection.** MVP uses append (example's verified path). Switching to
+   replace (leaner prompt, keeps skills/context files per `usage.md:240`)
+   is a later tuning decision after MVP validates that the subagent
+   behavior is correct. Open but low-risk.
 
 ## Monitoring items
 
