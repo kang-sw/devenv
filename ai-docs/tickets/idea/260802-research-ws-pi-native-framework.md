@@ -2,9 +2,9 @@
 title: "Research: ws pi-native framework — bridge ws-mcp onto Pi as the opinionated workflow layer"
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
-  260801-feat-ws-opencode-adapter: sibling harness-adapter ticket whose "Harness tradeoff note" raised the pivot question; now deprioritized in favor of this direction but not dropped (bridge path keeps ws-mcp harness-neutral, so opencode remains a possible later adapter)
-  260731-research-ws-opencode-drop-in-package: resolved opencode adapter research whose accumulated-workaround findings motivated this pivot
-  260801-todo-ws-mcp-log-append-cli: external warning-logging CLI; still useful under the bridge path (the bridge extension is a separate process from ws-mcp) so remains valid, not dropped
+  260801-feat-ws-opencode-adapter: dropped — the opencode adapter direction superseded by this Pi-native framework; preserved in .dropped/ as historical design record
+  260731-research-ws-opencode-drop-in-package: resolved opencode adapter research (done) whose accumulated-workaround findings motivated this pivot; historical reference
+  260801-todo-ws-mcp-log-append-cli: dropped — sole consumer was the dropped opencode adapter; re-evaluate in Pi expansion phase if needed
   260605-research-ws-native-subagent-pivot: host-neutral pivot direction this research inherits; its "assume durable/retained subagents are a baseline harness capability" premise is corrected below for Pi (file-based, not in-memory)
   260605-epic-ws-playbook-factory-pivot: parent epic
   260611-research-ws-per-role-delegation-tuning-config: tier/model mapping research the pi subagent surface inherits
@@ -22,7 +22,7 @@ related-mental-model:
 ## Background
 
 The opencode adapter investigation (`260731-research-ws-opencode-drop-in-package`,
-done; `260801-feat-ws-opencode-adapter`, ready) converged on a thin
+done; `260801-feat-ws-opencode-adapter`, now dropped) converged on a thin
 boundary-layer shim design, but the 2026-08-01 tier-agent spike revealed an
 accumulated workaround cost on opencode: a v1/v2 API split, a `task` tool that
 is v1-only and blind to v2-registered agents, a `client.config.update` that
@@ -43,9 +43,9 @@ phases. Code work is deferred until the discussion in "Open questions" converges
 
 ## Settled direction (this session)
 
-1. **Pi is the target harness.** The opencode adapter work is deprioritized
-   (not dropped) and the ws workflow system is ported onto Pi as an
-   opinionated framework layer.
+1. **Pi is the target harness.** The opencode adapter work is dropped
+   (`260801-feat-ws-opencode-adapter` → `.dropped/`) and the ws workflow
+   system is ported onto Pi as an opinionated framework layer.
 2. **Bridge path (a), not native re-implementation (b).** ws-mcp stays as the
    harness-neutral MCP server (Go source untouched); a Pi extension bridges
    each ws-mcp MCP tool to a `pi.registerTool` call and drives the ws workflow
@@ -449,13 +449,13 @@ User-directed order: MVP surface first, feature expansion second.
 - **wsflow.** Unaffected by this research. wsflow is the agentless
   derivative; the Pi bridge is a separate harness adapter. The
   wsflow-mirroring maintenance discipline is orthogonal.
-- **opencode tickets.** `260801-feat-ws-opencode-adapter` stays in `ready/`
-  with its blocked-on-harness-decision status; this research supersedes it
-  as the active direction but does not drop it (bridge path keeps ws-mcp
-  harness-neutral, so an opencode adapter remains a possible later sibling).
-  `260801-todo-ws-mcp-log-append-cli` stays valid — the Pi bridge
-  extension is a separate process from ws-mcp, so external warning logging
-  is still wanted for goal-loop guard violations.
+- **opencode tickets.** `260801-feat-ws-opencode-adapter` is dropped
+  (moved to `.dropped/`); this research supersedes it as the active
+  direction. An opencode adapter could later be re-opened as a fresh
+  sibling under the same ws-mcp, but it is not a queued direction.
+  `260801-todo-ws-mcp-log-append-cli` is also dropped — its sole consumer
+  was the opencode adapter; the Pi bridge re-evaluates its logging needs in
+  the expansion phase.
 
 ## Open questions
 
@@ -559,8 +559,8 @@ openrouter). Session spikes ran two sequential `--session <path>` turns.
 ## Status
 
 Research / discussion. No code work. The opencode implementation ticket
-(`260801-feat-ws-opencode-adapter`) remains blocked-on-harness-decision;
-this research is the active direction but has not yet promoted to `ready/`.
+(`260801-feat-ws-opencode-adapter`, dropped); this research is the active
+direction but has not yet promoted to `ready/`.
 MVP scope is agreed; the runtime spikes (Q8, Q9) and the tool-name spike
 (Q2) are the next concrete investigations, all read-only / no ws-mcp
 source change.

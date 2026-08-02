@@ -54,11 +54,14 @@ history.
   `agents-plugin` remains compatibility behavior, not a separate source tree.
 - `ai-docs/.old/` is the Git-tracked project archive for inactive reference
   material that should not appear in default file listings.
-- `agents-plugin-opencode/` (in progress, branch `feat/opencode-adapter`) is a
-  thin boundary-layer shim for opencode: v1+v2 plugin coexistence, MCP
-  registration via `input.client.mcp.add`, skill prose rewriting (non-invasive),
-  goal-loop via `session.prompt`, compaction hooks, and tier swap. Non-invasive
-  grand principle: dependency is one-directional (opencode → ws-mcp).
+- `agents-plugin/` is the Claude plugin distribution (Codex-first). The active
+  direction is a **Pi-native framework** (branch `feat/ws-pi-plugin`, research
+  ticket `260802-research-ws-pi-native-framework`): a Pi extension bridges
+  ws-mcp (harness-neutral, Go source untouched) onto Pi via a stdio MCP client,\  composing skills + playbook + tier/subagent + goal-loop as an opinionated
+  framework layer. Non-invasive grand principle preserved: dependency is
+  one-directional (Pi extension → ws-mcp). The opencode adapter direction is
+  dropped (`260801-feat-ws-opencode-adapter` in `.dropped/`); an opencode
+  adapter could later be re-opened as a fresh sibling under the same ws-mcp.
 
 ## Read Before Editing
 
@@ -169,10 +172,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260802-research-ws-pi-native-framework` | idea | Bridge ws-mcp onto Pi as the opinionated workflow layer; corrected the opencode tradeoff note's compaction/goal-loop claims and chose the bridge path (a). Active direction; opencode adapter deprioritized (not dropped) |
-| `260801-feat-ws-opencode-adapter` | ready | Thin boundary-layer shim plugin for opencode — design complete but deprioritized in favor of the Pi-native framework research; not dropped (bridge path keeps ws-mcp harness-neutral) |
-| `260801-todo-ws-mcp-log-append-cli` | ready | Add `ws-mcp log append` CLI subcommand for external warning logging (dependency for opencode adapter Phase 2) |
-| `260731-research-ws-opencode-drop-in-package` | done | Adapter depth and harness-neutral boundary for ws opencode install — all 9 design questions resolved |
+| `260802-research-ws-pi-native-framework` | idea | Bridge ws-mcp onto Pi as the opinionated workflow layer via a stdio MCP extension; corrected the opencode tradeoff note's compaction/goal-loop claims, chose the bridge path (a-i stdio), git distribution. Runtime spike (pi 0.83.0) confirmed tool-name preservation (`ws/playbook.print` works end-to-end → prose rewriting deleted), file-based continuation (`--session` append + flush safe), `--append-system-prompt` non-duplication. Only 1 open question remains (MVP-later tuning). Active direction |
+| `260801-feat-ws-opencode-adapter` | dropped | Thin boundary-layer shim plugin for opencode — superseded by the Pi-native framework; preserved as historical design record |
+| `260801-todo-ws-mcp-log-append-cli` | dropped | `ws-mcp log append` CLI — sole consumer was the dropped opencode adapter; re-evaluate in Pi expansion phase if needed |
+| `260731-research-ws-opencode-drop-in-package` | done | Adapter depth and harness-neutral boundary for ws opencode install — all 9 design questions resolved (historical reference for the Pi bridge) |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |

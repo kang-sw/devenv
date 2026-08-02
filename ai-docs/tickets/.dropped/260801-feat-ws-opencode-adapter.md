@@ -7,10 +7,20 @@ related:
   260605-research-ws-native-subagent-pivot: host-neutral pivot direction
   260611-research-ws-per-role-delegation-tuning-config: model tier mapping research
 sage-review-design: required
-status: blocked-on-harness-decision
+status: dropped (2026-08-02)
 ---
 
-> **Status note (2026-08-02):** Deprioritized in favor of
+> **Dropped (2026-08-02):** Superseded by
+> `260802-research-ws-pi-native-framework`. The Pi-native framework research
+> corrected this ticket's "Harness tradeoff note" (Pi *does* have a
+> first-class compaction surface and re-entry primitives in core) and chose
+> Pi as the target harness via the bridge path. The bridge path keeps
+> ws-mcp harness-neutral, so an opencode adapter remains a *possible* later
+> sibling under the same ws-mcp, but it is no longer an active or queued
+> direction — if pursued, it would be a fresh ticket, not a revival of this
+> one. This ticket is preserved as historical design record.
+>
+> **Prior status (2026-08-02):** Deprioritized in favor of
 > `260802-research-ws-pi-native-framework`, which corrected this ticket's
 > "Harness tradeoff note" (Pi *does* have a first-class compaction surface
 > and re-entry primitives in core) and chose Pi as the target harness via

@@ -4,7 +4,17 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260731-research-ws-opencode-drop-in-package: research ticket whose goal-loop guard needs this logging surface
 sage-review-design: required
+status: dropped (2026-08-02)
 ---
+
+> **Dropped (2026-08-02):** The opencode adapter (`260801-feat-ws-opencode-adapter`,
+> also dropped) was the sole consumer of this CLI. The Pi-native framework
+> (`260802-research-ws-pi-native-framework`) will re-evaluate its logging
+> needs in the expansion phase (goal-loop guard warnings), at which point a
+> fresh harness-neutral `log append` ticket can be opened if the Pi bridge
+> still wants an external-process → ws-mcp diagnostic write surface. The
+> ws-mcp logging sinks investigated here (in-memory ring, crash file,
+> lifecycle file) remain valid reference material.
 
 # ws-mcp: add `log append` CLI subcommand for external warning logging
 
