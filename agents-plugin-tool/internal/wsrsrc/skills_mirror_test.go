@@ -193,6 +193,25 @@ func TestWsCliSubstitutionPattern(t *testing.T) {
 	}
 }
 
+// TestWsMCPSubstitutionPattern proves the "ws MCP" literal-token substitution
+// fires on the space-separated prose token while leaving the "ws-mcp" binary
+// name untouched, and does not degenerate into a bare-"ws" rule.
+func TestWsMCPSubstitutionPattern(t *testing.T) {
+	source := "---\nname: fixture\n---\n\n" +
+		"The ws MCP server is not running; run ws-mcp-launcher.py directly. " +
+		"Do not confuse ws-mcp with the ws workflow itself.\n"
+	out, err := GenerateWsflowSkillBody(source)
+	if err != nil {
+		t.Fatalf("expected guard to accept fixture, got error: %v", err)
+	}
+	want := "---\nname: fixture\n---\n\n" +
+		"The wsflow MCP server is not running; run ws-mcp-launcher.py directly. " +
+		"Do not confuse ws-mcp with the ws workflow itself.\n"
+	if out != want {
+		t.Fatalf("ws MCP substitution mismatch:\ngot:  %q\nwant: %q", out, want)
+	}
+}
+
 // TestSubstitutionGuardAcceptsNamespaceOnlyContent is the positive-path
 // sibling: a source containing only ws:/ws/ namespace tokens must pass the
 // guard and substitute cleanly.

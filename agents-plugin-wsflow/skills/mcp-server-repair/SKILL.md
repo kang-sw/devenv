@@ -1,6 +1,6 @@
 ---
 name: mcp-server-repair
-description: Recover when the wsflow/* MCP tools are absent from the tool list, or a wsflow/* tool call fails to connect. Keep working through wsflow-cli and relay the reconnect steps to the user.
+description: The wsflow MCP server is not running, failed to start, is disconnected, or its wsflow/* tools are missing from the tool list. When you are about to report that wsflow MCP is unavailable, invoke this instead.
 ---
 
 # MCP Server Repair
