@@ -144,7 +144,10 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 
 	designRequired, completenessRequired := sageReviewStageRequirement(stem)
 
-	ticketRel, _, err := findTicketPath(root, stem)
+	// nil scope: the sage tools write frontmatter to the ticket file, so a
+	// path they cannot open is no more actionable than a missing one. Leaving
+	// them index-unaware keeps their behavior identical to today.
+	ticketRel, _, _, err := findTicketPath(root, nil, stem)
 	if err != nil {
 		return SageGateResult{}, err
 	}
@@ -352,7 +355,10 @@ func SageRecord(root string, opts SageRecordOptions) (SageRecordResult, error) {
 		return SageRecordResult{}, fmt.Errorf("stage must be design, completeness, or combined")
 	}
 
-	ticketRel, _, err := findTicketPath(root, stem)
+	// nil scope: the sage tools write frontmatter to the ticket file, so a
+	// path they cannot open is no more actionable than a missing one. Leaving
+	// them index-unaware keeps their behavior identical to today.
+	ticketRel, _, _, err := findTicketPath(root, nil, stem)
 	if err != nil {
 		return SageRecordResult{}, err
 	}

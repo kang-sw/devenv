@@ -47,6 +47,23 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	} else if !os.IsNotExist(err) {
 		return TicketCreateResult{}, err
 	}
+	// The stat says nothing about a destination this worktree's sparse-checkout
+	// scope hides: the index entry would still be there, and writing over it
+	// would silently clobber a ticket the caller cannot see. The check stays
+	// destination-path-only — a same-stem ticket in a *different* status
+	// directory does not block creation today either.
+	if scope := newTicketScope(root); scope != nil {
+		exists, err := scope.hasIndexPath(relPath)
+		if err != nil {
+			return TicketCreateResult{}, err
+		}
+		if exists {
+			return TicketCreateResult{}, fmt.Errorf(
+				"ticket already exists outside this worktree's sparse-checkout scope (core.sparseCheckout): %s "+
+					"is in the index but not checked out here; widen the scope (`git sparse-checkout add %s`) to inspect it",
+				relPath, relPath)
+		}
+	}
 
 	designRequired, completenessRequired := sageReviewStageRequirement(fullStem)
 	resolved := ResolvedSageReviewPosture(opts.SageReview)

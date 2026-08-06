@@ -31,7 +31,10 @@ func ReferencesTrace(root string, opts ReferenceTraceOptions) (*ReferenceTrace, 
 }
 
 func traceTicketReferences(root, ticketStem string) (*ReferenceTrace, error) {
-	ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: ticketStem, IncludeDone: true, IncludeDropped: true})
+	// Resolve: references.trace is a resolution surface end to end — every
+	// branch answers "what does this stem point at", so a stem hidden by a
+	// worktree scope must still resolve.
+	ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: ticketStem, IncludeDone: true, IncludeDropped: true, Resolve: true})
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +68,10 @@ func traceSpecReferences(root, specStem string) (*ReferenceTrace, error) {
 		IncludeDropped:     true,
 		MentionsTicketStem: "",
 		Query:              specStem,
+		// Resolve: this query form must supply hidden bodies from the index
+		// rather than skip them, or the spec branch stops matching tickets this
+		// worktree does not check out.
+		Resolve: true,
 	})
 	if err != nil {
 		return nil, err
@@ -87,7 +94,7 @@ func ticketsFromSpecRefs(root string, specs []SpecInfo) []TicketInfo {
 				continue
 			}
 			seen[stem] = true
-			ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: stem, IncludeDone: true, IncludeDropped: true})
+			ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: stem, IncludeDone: true, IncludeDropped: true, Resolve: true})
 			if err != nil {
 				continue
 			}

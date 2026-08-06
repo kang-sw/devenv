@@ -82,9 +82,17 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 		return TicketMutateResult{}, fmt.Errorf("status must be done or dropped")
 	}
 
-	oldPath, curStatus, err := findTicketPath(root, stem)
+	scope := newTicketScope(root)
+	oldPath, curStatus, hidden, err := findTicketPath(root, scope, stem)
 	if err != nil {
 		return TicketMutateResult{}, err
+	}
+	if hidden {
+		// Source pre-flight: exact and free. Fail before any git call — under
+		// atomicGitMove a hidden source fails at `git add`, one step earlier
+		// than a hidden destination, and both surface as the same localized
+		// git advice text.
+		return TicketMutateResult{}, scopeBlockedMoveError("source ticket", oldPath)
 	}
 	if curStatus == ".done" || curStatus == ".dropped" {
 		return TicketMutateResult{}, fmt.Errorf("ticket already closed: %s is in %s", stem, curStatus)
@@ -101,7 +109,7 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 	}
 
 	newPath := ticketRelPath(targetDir, stem)
-	if err := atomicGitMove(root, runner, oldPath, newPath); err != nil {
+	if err := scopedGitMove(root, scope, runner, oldPath, newPath); err != nil {
 		return TicketMutateResult{}, err
 	}
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
@@ -130,9 +138,16 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		return TicketMutateResult{}, fmt.Errorf("to must be idea, todo, or ready")
 	}
 
-	oldPath, curStatus, err := findTicketPath(root, stem)
+	scope := newTicketScope(root)
+	oldPath, curStatus, hidden, err := findTicketPath(root, scope, stem)
 	if err != nil {
 		return TicketMutateResult{}, err
+	}
+	if hidden {
+		// Source pre-flight — see TicketsClose. This case only becomes
+		// reachable because tickets.status now resolves hidden stems, so a
+		// caller can name a ticket it cannot see.
+		return TicketMutateResult{}, scopeBlockedMoveError("source ticket", oldPath)
 	}
 	if curStatus == to {
 		return TicketMutateResult{}, fmt.Errorf("ticket already at status %s: %s", to, stem)
@@ -178,7 +193,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	newPath := ticketRelPath(to, stem)
-	if err := atomicGitMove(root, runner, oldPath, newPath); err != nil {
+	if err := scopedGitMove(root, scope, runner, oldPath, newPath); err != nil {
 		return TicketMutateResult{}, err
 	}
 
@@ -578,18 +593,38 @@ func ticketRelPath(statusDir, stem string) string {
 }
 
 // findTicketPath scans the five status directories for <stem>.md and returns the
-// repo-relative forward-slash path and its status directory token.
-func findTicketPath(root, stem string) (path string, status string, err error) {
+// repo-relative forward-slash path, its status directory token, and whether the
+// ticket resolved only through the index (hidden by this worktree's
+// sparse-checkout scope) rather than from disk.
+//
+// The hidden bit is what makes "present but not checked out" distinguishable
+// from "does not exist" at all, and it is the same index lookup tickets.status
+// now performs — so the two surfaces cannot disagree about whether a stem
+// exists. A nil scope skips the index entirely, i.e. today's behavior.
+func findTicketPath(root string, scope *ticketScope, stem string) (path string, status string, hidden bool, err error) {
 	if !ticketStemRE.MatchString(strings.TrimSpace(stem)) {
-		return "", "", fmt.Errorf("stem must be a ticket stem")
+		return "", "", false, fmt.Errorf("stem must be a ticket stem")
 	}
-	for _, status := range []string{"idea", "todo", "ready", ".done", ".dropped"} {
+	statuses := []string{"idea", "todo", "ready", ".done", ".dropped"}
+	for _, status := range statuses {
 		candidate := filepath.Join(root, "ai-docs", "tickets", statusDirs[status], stem+".md")
 		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			return ticketRelPath(status, stem), status, nil
+			return ticketRelPath(status, stem), status, false, nil
 		}
 	}
-	return "", "", fmt.Errorf("ticket not found: %s", stem)
+	if scope != nil {
+		for _, status := range statuses {
+			rel := ticketRelPath(statusDirs[status], stem)
+			present, indexErr := scope.hasIndexPath(rel)
+			if indexErr != nil {
+				return "", "", false, indexErr
+			}
+			if present {
+				return rel, status, true, nil
+			}
+		}
+	}
+	return "", "", false, fmt.Errorf("ticket not found: %s", stem)
 }
 
 // writeFrontmatterField updates or inserts scalar key/value pairs inside the
@@ -641,6 +676,37 @@ func appendResolution(path, today, resolution string) error {
 	}
 	section := "\n\n## Resolution (" + today + ")\n\n" + resolution + "\n"
 	return os.WriteFile(path, append(raw, []byte(section)...), 0o644)
+}
+
+// scopedGitMove wraps atomicGitMove with the two remaining scope layers: an
+// exact destination pre-flight, and a non-classifying post-hoc wrap for the
+// failures the pre-flight cannot catch.
+//
+// No git stderr is parsed at either layer. Git's sparse-path advice is
+// gettext-localized, so a substring match would be locale-dependent — and the
+// index knowledge needed to classify correctly is already in hand.
+//
+// Both blocked paths are safe to report as no-ops: a cross-scope `git mv`
+// exits 1 atomically, leaving index, worktree, and HEAD unchanged. That is
+// unrelated to TicketMutateResult.PartialMutationNotice, which reports the
+// separate sage-posture write-then-reject path.
+func scopedGitMove(root string, scope *ticketScope, runner GitRunner, oldPath, newPath string) error {
+	if scope == nil {
+		return atomicGitMove(root, runner, oldPath, newPath)
+	}
+	// Destination pre-flight: `git sparse-checkout check-rules` is exact even
+	// for a path that does not exist yet. It fails open on git < 2.42, where
+	// the subcommand is absent.
+	if !scope.includes(newPath) {
+		return scopeBlockedMoveError("destination path", newPath)
+	}
+	if err := atomicGitMove(root, runner, oldPath, newPath); err != nil {
+		// Backstop only: wrap rather than replace, so an unrelated git failure
+		// stays legible and the added sentence never claims a cause it did not
+		// verify.
+		return wrapScopeMoveError(err, newPath)
+	}
+	return nil
 }
 
 // atomicGitMove always stages the working-tree edit before the move so a prior

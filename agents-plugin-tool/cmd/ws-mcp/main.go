@@ -582,6 +582,9 @@ func ticketsFind(args []string) {
 		Query:              *query,
 		TicketStem:         *ticketStem,
 		MentionsTicketStem: *mentionsTicketStem,
+		// Mirrors the MCP surface: the explicit-stem form resolves through the
+		// index, the query form stays discovery.
+		Resolve: strings.TrimSpace(*ticketStem) != "",
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("tickets find", result, err)
@@ -606,6 +609,7 @@ func ticketsStatus(args []string) {
 		TicketStem:     *ticketStem,
 		IncludeDone:    *includeDone,
 		IncludeDropped: *includeDropped,
+		Resolve:        true,
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("tickets status", result, err)
