@@ -42,10 +42,19 @@ type ticketScope struct {
 // never enumerates the rest of the index.
 const ticketIndexPrefix = "ai-docs/tickets"
 
-// newTicketScope runs the gate cheapest-first so an unscoped repository spawns
-// zero git processes: two filesystem probes answer the common case, and the
-// git config call only runs once a sparse-checkout pattern file is known to
-// exist. Any negative or failed probe yields nil, i.e. today's behavior.
+// newTicketScope runs the gate cheapest-first so a repository the user does not
+// have scoped spawns zero git processes. Any negative or failed probe yields
+// nil, i.e. today's behavior.
+//
+// Both filter-off shapes must stay free, not just the never-scoped one:
+// `git sparse-checkout disable` leaves $GIT_DIR/info/sparse-checkout in place
+// with its patterns intact and only writes core.sparseCheckout = false into
+// $GIT_DIR/config.worktree (measured, git 2.43). A pattern-file stat alone
+// would therefore pass forever after a disable and spawn a `git config` process
+// on every gated call — per loadTicketGraph, per TicketCreate, per mutation,
+// per discovery annotation — on a repository the user restored. So an
+// explicitly false core.sparseCheckout read straight from the config files is
+// terminal, and git is consulted only when the files leave the answer open.
 func newTicketScope(root string) *ticketScope {
 	gitDir := resolveGitDir(root)
 	if gitDir == "" {
@@ -55,6 +64,9 @@ func newTicketScope(root string) *ticketScope {
 	// $(git rev-parse --absolute-git-dir)/info/sparse-checkout for both a plain
 	// repository and a linked worktree.
 	if info, err := os.Stat(filepath.Join(gitDir, "info", "sparse-checkout")); err != nil || info.IsDir() {
+		return nil
+	}
+	if value, found := sparseCheckoutConfigFileValue(gitDir); found && !value {
 		return nil
 	}
 	scope := &ticketScope{root: root, gitDir: gitDir}
@@ -67,6 +79,63 @@ func newTicketScope(root string) *ticketScope {
 		return nil
 	}
 	return scope
+}
+
+// sparseCheckoutConfigFileValue reads core.sparseCheckout out of the two config
+// files git keeps inside GIT_DIR, worktree config first because it outranks the
+// repository config for this key. It is deliberately a *negative* fast path
+// only: anything it cannot read unambiguously reports not-found and defers to
+// `git config`, which stays the authority for a positive answer (includes,
+// global/system scope, and precedence are git's business, not ours).
+func sparseCheckoutConfigFileValue(gitDir string) (value bool, found bool) {
+	for _, name := range []string{"config.worktree", "config"} {
+		raw, err := os.ReadFile(filepath.Join(gitDir, name))
+		if err != nil {
+			continue
+		}
+		if value, found := coreBoolFromGitConfig(string(raw), "sparsecheckout"); found {
+			return value, true
+		}
+	}
+	return false, false
+}
+
+// coreBoolFromGitConfig finds `key` under a plain `[core]` section and decodes
+// git's boolean spelling. Only the exact shapes git writes itself are
+// recognized; a subsectioned header, a continuation, or an unrecognized value
+// reports not-found so the caller falls through to git.
+func coreBoolFromGitConfig(text, key string) (value bool, found bool) {
+	inCore := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			inCore = strings.EqualFold(trimmed, "[core]")
+			continue
+		}
+		if !inCore {
+			continue
+		}
+		name, raw, hasValue := strings.Cut(trimmed, "=")
+		if !strings.EqualFold(strings.TrimSpace(name), key) {
+			continue
+		}
+		if !hasValue {
+			// A bare key is git's spelling of true.
+			return true, true
+		}
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "true", "yes", "on", "1":
+			return true, true
+		case "false", "no", "off", "0":
+			return false, true
+		default:
+			return false, false
+		}
+	}
+	return false, false
 }
 
 // resolveGitDir finds GIT_DIR with the filesystem only: <root>/.git is either
@@ -161,13 +230,25 @@ func (s *ticketScope) bodies(paths []string) (map[string]string, error) {
 	if len(wanted) > 0 {
 		var stdin strings.Builder
 		for _, path := range wanted {
+			// Records are paired to requests positionally, so a path carrying a
+			// newline would split into two stdin lines and shift every later
+			// body onto the wrong ticket - silently handing one ticket's
+			// `parent:` to another. Refuse instead: the caller's propagate path
+			// yields no advisories, which is the safe direction.
+			if strings.ContainsAny(path, "\n\r") {
+				return nil, fmt.Errorf("read sparse-checkout ticket bodies: index path contains a newline: %q", path)
+			}
 			stdin.WriteString(":" + path + "\n")
 		}
 		out, err := s.run(stdin.String(), "cat-file", "--batch")
 		if err != nil {
 			return nil, fmt.Errorf("read sparse-checkout ticket bodies: %w", err)
 		}
-		for path, body := range parseCatFileBatch(out, wanted) {
+		decoded, err := parseCatFileBatch(out, wanted)
+		if err != nil {
+			return nil, fmt.Errorf("read sparse-checkout ticket bodies: %w", err)
+		}
+		for path, body := range decoded {
 			s.bodyCache[path] = body
 		}
 	}
@@ -220,13 +301,21 @@ func splitNULPaths(out []byte) []string {
 // "<oid> blob <size>\n<content>\n"; an unknown path yields "<input> missing"
 // and is skipped. The input order is the only link back to the path, since the
 // header carries the object id rather than the request.
-func parseCatFileBatch(out []byte, requested []string) map[string]string {
+//
+// A framing anomaly is an error, never a short read. Returning what was decoded
+// so far would hand every later hidden ticket an empty body, and in resolveGraph
+// mode that drops its `parent:` - so graph.children loses the edge and the
+// all-children-closed ACTION can fire on an epic whose hidden children are still
+// open. That inverted advisory is exactly what the index path exists to prevent,
+// so a partial decode must take the propagate-then-swallow path instead of
+// returning success.
+func parseCatFileBatch(out []byte, requested []string) (map[string]string, error) {
 	result := map[string]string{}
 	offset, next := 0, 0
-	for offset < len(out) && next < len(requested) {
+	for next < len(requested) {
 		nl := bytes.IndexByte(out[offset:], '\n')
 		if nl < 0 {
-			break
+			return nil, fmt.Errorf("cat-file --batch ended after %d of %d records", next, len(requested))
 		}
 		header := string(out[offset : offset+nl])
 		offset += nl + 1
@@ -237,11 +326,11 @@ func parseCatFileBatch(out []byte, requested []string) map[string]string {
 		}
 		fields := strings.Fields(header)
 		if len(fields) != 3 || fields[1] != "blob" {
-			break
+			return nil, fmt.Errorf("cat-file --batch record %d for %s has an unexpected header: %q", next, path, header)
 		}
 		size, err := strconv.Atoi(fields[2])
 		if err != nil || size < 0 || offset+size > len(out) {
-			break
+			return nil, fmt.Errorf("cat-file --batch record %d for %s has an unreadable size: %q", next, path, header)
 		}
 		result[path] = string(out[offset : offset+size])
 		offset += size
@@ -249,7 +338,7 @@ func parseCatFileBatch(out []byte, requested []string) map[string]string {
 			offset++
 		}
 	}
-	return result
+	return result, nil
 }
 
 // ticketIndexPathParts splits a board-relative index path into its status

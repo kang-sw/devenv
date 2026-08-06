@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -231,6 +232,82 @@ func TestTicketsCloseHiddenSourceNamesTheScope(t *testing.T) {
 	}
 }
 
+// TestScopeBlockedMutationIsANoOpOnSageBearingTicket covers the ticket's
+// declared hot path, where the no-op claim is load-bearing rather than
+// incidental: a `bug` stem carries both sage-review stages, so TicketsMove's
+// prepareSageReviewForUpwardMove persists frontmatter on an upward move. If the
+// destination pre-flight ran after that write, the call would report a refusal
+// while leaving the working tree dirty. The research-stem case in
+// TestTicketsMoveBlockedByScopeNamesTheScope cannot catch that: it is exempt
+// from both stages, so it never writes at all.
+func TestScopeBlockedMutationIsANoOpOnSageBearingTicket(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("idea", "260101-bug-capture")
+	f.ticket("todo", "260105-feat-kept")
+	f.scope([]string{"todo"}, "ai-docs/tickets/todo/260105-feat-kept.md")
+
+	before := readFileString(t, filepath.Join(f.root, "ai-docs/tickets/idea/260101-bug-capture.md"))
+
+	_, err := TicketsMove(f.root, execGitRunner{}, TicketMoveOptions{TicketStem: "260101-bug-capture", To: "todo"})
+	if err == nil {
+		t.Fatal("TicketsMove into a hidden status succeeded, want a scope error")
+	}
+	requireContains(t, err.Error(), "outside this worktree's sparse-checkout scope (core.sparseCheckout)")
+	if out := gitOutput(t, f.root, "status", "--porcelain"); len(strings.TrimSpace(string(out))) != 0 {
+		t.Fatalf("blocked move of a sage-bearing ticket was not a no-op:\n%s", out)
+	}
+	if after := readFileString(t, filepath.Join(f.root, "ai-docs/tickets/idea/260101-bug-capture.md")); after != before {
+		t.Fatalf("blocked move rewrote the source frontmatter:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// TestTicketsCloseBlockedByScopeThenWidenedRetryIsClean is the other half of
+// the same property: TicketsClose's pre-move writes are non-idempotent
+// (appendResolution appends unconditionally), so a refusal landing after them
+// would make the error's own widen-then-retry remedy corrupt the ticket with a
+// second ## Resolution section.
+func TestTicketsCloseBlockedByScopeThenWidenedRetryIsClean(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260105-feat-kept")
+	// .done/ is excluded, so the close destination is out of scope while the
+	// source stays checked out.
+	f.scope([]string{".done"}, "ai-docs/tickets/todo/260105-feat-kept.md")
+
+	source := filepath.Join(f.root, "ai-docs/tickets/todo/260105-feat-kept.md")
+	before := readFileString(t, source)
+
+	_, err := TicketsClose(f.root, execGitRunner{}, TicketCloseOptions{
+		TicketStem: "260105-feat-kept", Status: "done", Today: "2026-08-06", Resolution: "Closed for the fixture.",
+	})
+	if err == nil {
+		t.Fatal("TicketsClose into a hidden status succeeded, want a scope error")
+	}
+	requireContains(t, err.Error(), "destination path ai-docs/tickets/.done/260105-feat-kept.md")
+	requireContains(t, err.Error(), "outside this worktree's sparse-checkout scope (core.sparseCheckout)")
+	if out := gitOutput(t, f.root, "status", "--porcelain"); len(strings.TrimSpace(string(out))) != 0 {
+		t.Fatalf("blocked close was not a no-op:\n%s", out)
+	}
+	if after := readFileString(t, source); after != before {
+		t.Fatalf("blocked close rewrote the source:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+
+	// Follow the remedy the error itself gives, then retry.
+	runGit(t, f.root, "sparse-checkout", "disable")
+	result, err := TicketsClose(f.root, execGitRunner{}, TicketCloseOptions{
+		TicketStem: "260105-feat-kept", Status: "done", Today: "2026-08-06", Resolution: "Closed for the fixture.",
+	})
+	if err != nil {
+		t.Fatalf("TicketsClose after widening the scope returned error: %v", err)
+	}
+	closed := readFileString(t, filepath.Join(f.root, filepath.FromSlash(result.NewPath)))
+	if count := strings.Count(closed, "## Resolution"); count != 1 {
+		t.Fatalf("retry produced %d ## Resolution sections, want exactly 1:\n%s", count, closed)
+	}
+	if count := strings.Count(closed, "completed: 2026-08-06"); count != 1 {
+		t.Fatalf("retry produced %d completed: fields, want exactly 1:\n%s", count, closed)
+	}
+}
+
 // TestTicketsMoveWrapsRawErrorWhenCheckRulesUnavailable covers the git < 2.42
 // backstop: includes fails open, so the refusal must arrive as the wrapped
 // post-hoc message instead. The case is probed rather than version-asserted -
@@ -354,7 +431,10 @@ func TestTicketScopeGateIsInertWithoutSparseCheckout(t *testing.T) {
 			t.Fatalf("%s: an absent stem resolved", label)
 		}
 		result := f.verify("ai-docs/tickets/idea/260102-feat-b.md")
-		requireContainsFlat(t, strings.Join([]string{result.Advisories[0].Text}, ""), "related: `260199-feat-absent` resolves to no ticket stem")
+		if len(result.Advisories) == 0 {
+			t.Fatalf("%s: no advisories; the dangling related: check stopped running", label)
+		}
+		requireContainsFlat(t, result.Advisories[0].Text, "related: `260199-feat-absent` resolves to no ticket stem")
 		scope, err := TicketScope(f.root, nil)
 		if err != nil {
 			t.Fatalf("%s: TicketScope returned error: %v", label, err)
@@ -372,6 +452,50 @@ func TestTicketScopeGateIsInertWithoutSparseCheckout(t *testing.T) {
 	runGit(t, f.root, "add", "-A")
 	runGit(t, f.root, "commit", "-q", "-m", "board")
 	assertUnchanged("git repository without sparse-checkout")
+	requireGateSpawnsNoGit(t, f.root, "in a repository that never enabled sparse-checkout")
+
+	// `git sparse-checkout disable` leaves $GIT_DIR/info/sparse-checkout on
+	// disk with its patterns intact and only flips core.sparseCheckout to false
+	// (measured, git 2.43). A pattern-file stat alone would therefore keep the
+	// gate "maybe active" forever after a restore, spawning a git config
+	// process on every gated call in a repository the user believes is
+	// unscoped - which is exactly the cost the byte-identical constraint
+	// forbids. A nil scope here is what makes that call count zero.
+	runGit(t, f.root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/todo/*")
+	runGit(t, f.root, "sparse-checkout", "disable")
+	if _, err := os.Stat(filepath.Join(f.root, ".git", "info", "sparse-checkout")); err != nil {
+		t.Skipf("this git removes the pattern file on disable (%v); the regression this pins is unreachable", err)
+	}
+	assertUnchanged("git repository after sparse-checkout disable")
+	requireGateSpawnsNoGit(t, f.root, "after sparse-checkout disable")
+}
+
+// requireGateSpawnsNoGit is how the zero-process half of the byte-identical
+// constraint is asserted without counting internal calls: PATH is replaced by a
+// shim that records any invocation and fails, so a surviving `git config` spawn
+// shows up as a marker file. Answering "inactive" is not enough - the gate has
+// always answered that; what regresses is answering it by paying a subprocess.
+func requireGateSpawnsNoGit(t *testing.T, root, label string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH shim assumes a POSIX shell")
+	}
+	t.Run("gate spawns no git "+label, func(t *testing.T) {
+		shimDir := t.TempDir()
+		marker := filepath.Join(shimDir, "invoked")
+		script := "#!/bin/sh\necho called >> " + marker + "\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", shimDir)
+
+		if scope := newTicketScope(root); scope != nil {
+			t.Fatalf("newTicketScope returned a scope %s", label)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("the gate executed git %s; the filter-off path must cost zero processes", label)
+		}
+	})
 }
 
 // --- TicketCreate collision -------------------------------------------------
@@ -444,4 +568,72 @@ func TestScanTicketsSurvivesFullyExcludedDirectories(t *testing.T) {
 			t.Fatalf("unexpected ticket: %#v", info)
 		}
 	})
+}
+
+// --- cat-file --batch framing ----------------------------------------------
+
+// TestParseCatFileBatchRejectsPartialDecode pins the propagate-then-swallow
+// posture at the decoder. Returning what was decoded so far would hand every
+// later hidden ticket an empty body, and in resolveGraph mode that silently
+// drops its `parent:` - which is how the all-children-closed ACTION could fire
+// on an epic whose hidden children are still open.
+func TestParseCatFileBatchRejectsPartialDecode(t *testing.T) {
+	requested := []string{"ai-docs/tickets/todo/260101-feat-a.md", "ai-docs/tickets/todo/260102-feat-b.md"}
+
+	t.Run("well formed", func(t *testing.T) {
+		out := []byte("aaa blob 5\nfirst\nbbb blob 6\nsecond\n")
+		bodies, err := parseCatFileBatch(out, requested)
+		if err != nil {
+			t.Fatalf("parseCatFileBatch returned error: %v", err)
+		}
+		if bodies[requested[0]] != "first" || bodies[requested[1]] != "second" {
+			t.Fatalf("bodies = %#v", bodies)
+		}
+	})
+
+	t.Run("missing record is skipped, not an error", func(t *testing.T) {
+		out := []byte(":ai-docs/tickets/todo/260101-feat-a.md missing\nbbb blob 6\nsecond\n")
+		bodies, err := parseCatFileBatch(out, requested)
+		if err != nil {
+			t.Fatalf("parseCatFileBatch returned error: %v", err)
+		}
+		if _, ok := bodies[requested[0]]; ok {
+			t.Fatalf("a missing record produced a body: %#v", bodies)
+		}
+		if bodies[requested[1]] != "second" {
+			t.Fatalf("bodies = %#v", bodies)
+		}
+	})
+
+	for name, out := range map[string]string{
+		"truncated stream":  "aaa blob 5\nfirst\n",
+		"short final body":  "aaa blob 5\nfirst\nbbb blob 99\nsecond\n",
+		"unexpected header": "aaa blob 5\nfirst\nbbb tree 6\nsecond\n",
+		"unreadable size":   "aaa blob 5\nfirst\nbbb blob six\nsecond\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseCatFileBatch([]byte(out), requested); err == nil {
+				t.Fatalf("parseCatFileBatch accepted a malformed stream (%s)", name)
+			}
+		})
+	}
+}
+
+// TestScopeBodiesRejectsNewlineInPath guards the positional pairing: records
+// come back in request order, so a path carrying a newline would split into two
+// stdin lines and shift every later body onto the wrong ticket - silently
+// handing one ticket's `parent:` to another.
+func TestScopeBodiesRejectsNewlineInPath(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260101-feat-visible")
+	f.ticket("todo", "260102-feat-hidden")
+	f.scope([]string{"todo"}, "ai-docs/tickets/todo/260101-feat-visible.md")
+
+	scope := newTicketScope(f.root)
+	if scope == nil {
+		t.Fatal("newTicketScope returned nil inside a scoped worktree")
+	}
+	if _, err := scope.bodies([]string{"ai-docs/tickets/todo/260102-feat-hidden.md\nevil.md"}); err == nil {
+		t.Fatal("scope.bodies accepted a path containing a newline")
+	}
 }

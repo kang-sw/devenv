@@ -3022,6 +3022,13 @@ func parseSageVerdicts(raw any) ([]wsdoc.SageVerdict, error) {
 // routes through loadTicketGraph, so a discovery call still pays no
 // .done/.dropped body reads. Any error degrades to no annotation.
 func ticketScopeAnnotation(root string, statuses []string) string {
+	if len(statuses) == 0 {
+		// The caller's filters selected no status at all, so the listing is
+		// empty for a reason that has nothing to do with the scope. Blaming the
+		// scope here would invert the annotation's purpose, which is exactly to
+		// keep "filtered" and "hidden" distinguishable.
+		return ""
+	}
 	info, err := wsdoc.TicketScope(root, statuses)
 	if err != nil || !info.Active || info.Hidden == 0 {
 		return ""
@@ -3031,20 +3038,41 @@ func ticketScopeAnnotation(root string, statuses []string) string {
 			"they remain in the index and resolvable by stem.\n", info.Hidden)
 }
 
-// effectiveTicketStatuses mirrors wsdoc's default status set so the hidden
-// count covers exactly the statuses the accompanying listing covered.
+// effectiveTicketStatuses mirrors wsdoc.ticketStatuses so the hidden count
+// covers exactly the statuses the accompanying listing covered — including its
+// archive gating, which drops an explicitly requested .done/.dropped unless the
+// matching include flag is set. Without that half, tickets.list(statuses:
+// ["done"]) with include_done unset would render an empty listing and then
+// blame the scope for it.
 func effectiveTicketStatuses(args map[string]any) []string {
-	if statuses := stringList(args["statuses"]); len(statuses) > 0 {
+	includeDone := boolArgument(args["include_done"])
+	includeDropped := boolArgument(args["include_dropped"])
+	statuses := stringList(args["statuses"])
+	if len(statuses) == 0 {
+		statuses = []string{"ready", "todo", "idea"}
+		if includeDone {
+			statuses = append(statuses, ".done")
+		}
+		if includeDropped {
+			statuses = append(statuses, ".dropped")
+		}
 		return statuses
 	}
-	statuses := []string{"ready", "todo", "idea"}
-	if boolArgument(args["include_done"]) {
-		statuses = append(statuses, ".done")
+	out := []string{}
+	for _, status := range statuses {
+		switch strings.TrimSpace(status) {
+		case "done", ".done":
+			if !includeDone {
+				continue
+			}
+		case "dropped", ".dropped":
+			if !includeDropped {
+				continue
+			}
+		}
+		out = append(out, status)
 	}
-	if boolArgument(args["include_dropped"]) {
-		statuses = append(statuses, ".dropped")
-	}
-	return statuses
+	return out
 }
 
 func formatTickets(tickets []wsdoc.TicketInfo) string {

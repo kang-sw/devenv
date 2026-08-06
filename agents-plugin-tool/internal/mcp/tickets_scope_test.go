@@ -15,6 +15,13 @@ import (
 // as intended (both directions) before the test body runs.
 func scopedTicketRepo(t *testing.T, tickets map[string]string, keep ...string) string {
 	t.Helper()
+	return scopedTicketRepoDirs(t, []string{"todo"}, tickets, keep...)
+}
+
+// scopedTicketRepoDirs is scopedTicketRepo with the excluded status directories
+// spelled out, for the cases that need a hidden ticket outside todo/.
+func scopedTicketRepoDirs(t *testing.T, excludeDirs []string, tickets map[string]string, keep ...string) string {
+	t.Helper()
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	for rel, body := range tickets {
@@ -24,7 +31,10 @@ func scopedTicketRepo(t *testing.T, tickets map[string]string, keep ...string) s
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-m", "board")
 
-	args := []string{"sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/todo/*"}
+	args := []string{"sparse-checkout", "set", "--no-cone", "/*"}
+	for _, dir := range excludeDirs {
+		args = append(args, "!/ai-docs/tickets/"+dir+"/*")
+	}
 	kept := map[string]bool{}
 	for _, rel := range keep {
 		kept[rel] = true
@@ -33,7 +43,12 @@ func scopedTicketRepo(t *testing.T, tickets map[string]string, keep ...string) s
 	runGit(t, root, args...)
 
 	for rel := range tickets {
-		hidden := strings.HasPrefix(rel, "ai-docs/tickets/todo/") && !kept[rel]
+		hidden := false
+		for _, dir := range excludeDirs {
+			if strings.HasPrefix(rel, "ai-docs/tickets/"+dir+"/") && !kept[rel] {
+				hidden = true
+			}
+		}
 		_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
 		if hidden && err == nil {
 			t.Fatalf("fixture: %s should have been hidden but is on disk", rel)
@@ -110,30 +125,81 @@ func TestTicketsListScopeAnnotationTextOnly(t *testing.T) {
 
 // TestTicketsStatusResolvesHiddenStemOverMCP is the resolution half of the same
 // boundary: the explicit-stem surfaces report hidden-but-found, marked hidden.
+//
+// The out-of-scope stem is deliberately "260102-feat-shadow", and the flag
+// assertion is on the bracketed "[hidden]" token: a stem containing the word
+// "hidden" makes a bare strings.Contains(text, "hidden") true no matter what
+// formatTickets renders, so the flag could be dropped entirely and the test
+// would still pass.
 func TestTicketsStatusResolvesHiddenStemOverMCP(t *testing.T) {
 	useLeadProfile(t)
 	root := scopedTicketRepo(t, map[string]string{
 		"ai-docs/tickets/todo/260101-feat-visible.md": "---\ntitle: Visible\n---\n# Visible\n",
-		"ai-docs/tickets/todo/260102-feat-hidden.md":  "---\ntitle: Hidden\n---\n# Hidden\n",
+		"ai-docs/tickets/todo/260102-feat-shadow.md":  "---\ntitle: Shadow\n---\n# Shadow\n",
 	}, "ai-docs/tickets/todo/260101-feat-visible.md")
 
-	status := callScopedTool(t, root, 1, "tickets.status", map[string]any{"ticket_stem": "260102-feat-hidden"})
-	if !strings.Contains(status, "260102-feat-hidden") || !strings.Contains(status, "hidden") {
-		t.Fatalf("tickets.status did not report the hidden ticket as hidden-but-found:\n%s", status)
+	status := callScopedTool(t, root, 1, "tickets.status", map[string]any{"ticket_stem": "260102-feat-shadow"})
+	if !strings.Contains(status, "260102-feat-shadow") {
+		t.Fatalf("tickets.status did not resolve the out-of-scope ticket:\n%s", status)
+	}
+	if !strings.Contains(status, "[hidden]") {
+		t.Fatalf("tickets.status did not mark the resolved ticket hidden:\n%s", status)
 	}
 
-	find := callScopedTool(t, root, 2, "tickets.find", map[string]any{"ticket_stem": "260102-feat-hidden"})
-	if !strings.Contains(find, "260102-feat-hidden") || !strings.Contains(find, "hidden") {
-		t.Fatalf("tickets.find(ticket_stem:) did not resolve the hidden ticket:\n%s", find)
+	find := callScopedTool(t, root, 2, "tickets.find", map[string]any{"ticket_stem": "260102-feat-shadow"})
+	if !strings.Contains(find, "260102-feat-shadow") {
+		t.Fatalf("tickets.find(ticket_stem:) did not resolve the out-of-scope ticket:\n%s", find)
 	}
+	if !strings.Contains(find, "[hidden]") {
+		t.Fatalf("tickets.find(ticket_stem:) did not mark the resolved ticket hidden:\n%s", find)
+	}
+
+	// A visible ticket must not carry the flag, so "[hidden]" is proven to
+	// track TicketInfo.Hidden rather than being present unconditionally.
+	visible := callScopedTool(t, root, 3, "tickets.status", map[string]any{"ticket_stem": "260101-feat-visible"})
+	if strings.Contains(visible, "[hidden]") {
+		t.Fatalf("a checked-out ticket was marked hidden:\n%s", visible)
+	}
+
 	// The query form stays a discovery surface: it lists nothing hidden and
 	// carries the aggregate count instead.
-	query := callScopedTool(t, root, 3, "tickets.find", map[string]any{"query": "Hidden"})
-	if strings.Contains(query, "260102-feat-hidden") {
+	query := callScopedTool(t, root, 4, "tickets.find", map[string]any{"query": "Shadow"})
+	if strings.Contains(query, "260102-feat-shadow") {
 		t.Fatalf("tickets.find(query:) listed a hidden ticket:\n%s", query)
 	}
 	if !strings.Contains(query, "scope: 1 ticket(s) hidden") {
 		t.Fatalf("tickets.find(query:) missing the hidden-count annotation:\n%s", query)
+	}
+}
+
+// TestTicketsListScopeAnnotationSuppressedWhenFilterSelectsNothing pins the
+// annotation's purpose: it must distinguish "hidden by the scope" from
+// "filtered out by your own arguments", so a status filter that selects no
+// status at all must not be blamed on the scope.
+func TestTicketsListScopeAnnotationSuppressedWhenFilterSelectsNothing(t *testing.T) {
+	useLeadProfile(t)
+	// A hidden .done ticket is what makes this bite: without one, the count
+	// would be zero for a reason unrelated to the archive gating.
+	root := scopedTicketRepoDirs(t, []string{"todo", ".done"}, map[string]string{
+		"ai-docs/tickets/todo/260101-feat-visible.md": "---\ntitle: Visible\n---\n# Visible\n",
+		"ai-docs/tickets/todo/260102-feat-shadow.md":  "---\ntitle: Shadow\n---\n# Shadow\n",
+		"ai-docs/tickets/.done/260103-feat-old.md":    "---\ntitle: Old\ncompleted: 2026-01-01\n---\n# Old\n",
+	}, "ai-docs/tickets/todo/260101-feat-visible.md")
+
+	// wsdoc.ticketStatuses drops an explicit "done" unless include_done is set,
+	// so this listing is empty because of the caller's own arguments. Blaming
+	// the scope would invert the annotation's purpose.
+	text := callScopedTool(t, root, 1, "tickets.list", map[string]any{"statuses": []any{"done"}})
+	if strings.Contains(text, "scope:") {
+		t.Fatalf("an archive listing gated off by include_done was blamed on the scope:\n%s", text)
+	}
+
+	// Positive control: with the gate opened, the same request must report the
+	// hidden archive ticket - so the suppression above is the gating, not a
+	// blanket silence.
+	opened := callScopedTool(t, root, 2, "tickets.list", map[string]any{"statuses": []any{"done"}, "include_done": true})
+	if !strings.Contains(opened, "scope: 1 ticket(s) hidden") {
+		t.Fatalf("include_done listing lost the hidden-count annotation:\n%s", opened)
 	}
 }
 

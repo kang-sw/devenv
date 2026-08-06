@@ -35,7 +35,10 @@ type TicketMutateResult struct {
 	NewPath string
 	Tip     string
 
-	// PartialMutationNotice is populated only on TicketsMove's non-ready
+	// PartialMutationNotice is populated on the error paths that reject after
+	// a source write already landed.
+	//
+	// The first is TicketsMove's non-ready
 	// upward-move error path (idea -> todo, or a demote/re-promote round
 	// trip re-entering todo), where blockedUpwardMoveError rejects a
 	// required stage left in the "blocked" posture. prepareSageReviewForUpwardMove
@@ -46,11 +49,17 @@ type TicketMutateResult struct {
 	// non-empty PartialMutationNotice must not treat the file as
 	// unchanged: a retry will not find the pre-call frontmatter.
 	//
-	// The ready-landing path (to == "ready") never populates this field:
-	// its posture rejection was relocated to ws/git.commit's
+	// The ready-landing path (to == "ready") never populates this field for a
+	// posture reason: that rejection was relocated to ws/git.commit's
 	// ready-sage-posture guardrail (see blockedUpwardMoveError's doc
 	// comment), so TicketsMove only emits a soft warning there and never
 	// blocks — there is no write-then-reject window to report.
+	//
+	// The second is a git move that fails after those writes (the residual
+	// sparse-checkout case on git < 2.42, where the destination pre-flight
+	// fails open, or any unrelated git failure). A scope refusal caught by the
+	// pre-flight is NOT one of these: it runs before the first write and is a
+	// true no-op, so it returns an empty result.
 	PartialMutationNotice string
 }
 
@@ -87,15 +96,27 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 	if err != nil {
 		return TicketMutateResult{}, err
 	}
-	if hidden {
-		// Source pre-flight: exact and free. Fail before any git call — under
-		// atomicGitMove a hidden source fails at `git add`, one step earlier
-		// than a hidden destination, and both surface as the same localized
-		// git advice text.
-		return TicketMutateResult{}, scopeBlockedMoveError("source ticket", oldPath)
-	}
+	// Status preconditions first: an already-closed hidden stem gets the more
+	// actionable "already closed" answer, since widening the scope would not
+	// make the close succeed.
 	if curStatus == ".done" || curStatus == ".dropped" {
 		return TicketMutateResult{}, fmt.Errorf("ticket already closed: %s is in %s", stem, curStatus)
+	}
+	newPath := ticketRelPath(targetDir, stem)
+	// Both scope pre-flights run before any source write, which is what makes
+	// the refusal a genuine no-op. Ordering matters here more than in
+	// TicketsMove: the writes below are non-idempotent (appendResolution
+	// unconditionally appends a `## Resolution` section), so a refusal landing
+	// after them would make the message's own widen-then-retry remedy corrupt
+	// the ticket with a duplicate section.
+	if hidden {
+		// Under atomicGitMove a hidden source fails at `git add`, one step
+		// earlier than a hidden destination, and both surface as the same
+		// localized git advice text - so it is classified here instead.
+		return TicketMutateResult{}, scopeBlockedMoveError("source ticket", oldPath)
+	}
+	if err := scopeDestinationError(scope, newPath); err != nil {
+		return TicketMutateResult{}, err
 	}
 
 	absOld := filepath.Join(root, filepath.FromSlash(oldPath))
@@ -108,9 +129,11 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 		}
 	}
 
-	newPath := ticketRelPath(targetDir, stem)
 	if err := scopedGitMove(root, scope, runner, oldPath, newPath); err != nil {
-		return TicketMutateResult{}, err
+		// The writes above already landed, so this is a write-then-reject: the
+		// caller must not treat the file as unchanged, and must not blind-retry
+		// a non-idempotent appendResolution.
+		return TicketMutateResult{PartialMutationNotice: partialCloseNotice(oldPath, opts.Resolution)}, err
 	}
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
 	// Soft, non-blocking tip only (must-not-forget SOFT seed) — reuses
@@ -143,17 +166,25 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	if err != nil {
 		return TicketMutateResult{}, err
 	}
-	if hidden {
-		// Source pre-flight — see TicketsClose. This case only becomes
-		// reachable because tickets.status now resolves hidden stems, so a
-		// caller can name a ticket it cannot see.
-		return TicketMutateResult{}, scopeBlockedMoveError("source ticket", oldPath)
-	}
+	// Status preconditions before the scope checks — see TicketsClose.
 	if curStatus == to {
 		return TicketMutateResult{}, fmt.Errorf("ticket already at status %s: %s", to, stem)
 	}
 	if curStatus == ".done" || curStatus == ".dropped" {
 		return TicketMutateResult{}, fmt.Errorf("ticket is closed (%s); reopen is out of scope", curStatus)
+	}
+	newPath := ticketRelPath(to, stem)
+	// Both scope pre-flights run before prepareSageReviewForUpwardMove, which
+	// persists sage-review frontmatter on every upward move. Refusing after
+	// that write would leave the working tree dirty while the caller was told
+	// the call was a no-op.
+	if hidden {
+		// This case only becomes reachable because tickets.status now resolves
+		// hidden stems, so a caller can name a ticket it cannot see.
+		return TicketMutateResult{}, scopeBlockedMoveError("source ticket", oldPath)
+	}
+	if err := scopeDestinationError(scope, newPath); err != nil {
+		return TicketMutateResult{}, err
 	}
 
 	var readySageWarning string
@@ -192,8 +223,13 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		}
 	}
 
-	newPath := ticketRelPath(to, stem)
 	if err := scopedGitMove(root, scope, runner, oldPath, newPath); err != nil {
+		if isUpwardMove(curStatus, to) {
+			// prepareSageReviewForUpwardMove already persisted the resolved
+			// postures, so this is a write-then-reject like the blocked-posture
+			// path above.
+			return TicketMutateResult{PartialMutationNotice: sageReviewPostureTip(currentSageReviewPostures(filepath.Join(root, filepath.FromSlash(oldPath)), stem))}, err
+		}
 		return TicketMutateResult{}, err
 	}
 
@@ -678,35 +714,54 @@ func appendResolution(path, today, resolution string) error {
 	return os.WriteFile(path, append(raw, []byte(section)...), 0o644)
 }
 
-// scopedGitMove wraps atomicGitMove with the two remaining scope layers: an
-// exact destination pre-flight, and a non-classifying post-hoc wrap for the
-// failures the pre-flight cannot catch.
+// scopeDestinationError is the destination half of the scope pre-flight:
+// `git sparse-checkout check-rules` is exact even for a path that does not
+// exist yet, which is what lets it run *before* the caller writes anything.
+// Every caller must invoke it before its first source write — that ordering,
+// not git's own atomicity, is what makes a scope refusal a true no-op.
 //
-// No git stderr is parsed at either layer. Git's sparse-path advice is
-// gettext-localized, so a substring match would be locale-dependent — and the
-// index knowledge needed to classify correctly is already in hand.
+// It fails open on git < 2.42, where the subcommand is absent; scopedGitMove's
+// post-hoc wrap is the backstop for that case.
+func scopeDestinationError(scope *ticketScope, newPath string) error {
+	if scope == nil || scope.includes(newPath) {
+		return nil
+	}
+	return scopeBlockedMoveError("destination path", newPath)
+}
+
+// scopedGitMove is the non-classifying backstop layer: it runs atomicGitMove
+// and, when a scope is active, wraps a failure rather than replacing it, so an
+// unrelated git failure stays legible and the added sentence never claims a
+// cause it did not verify.
 //
-// Both blocked paths are safe to report as no-ops: a cross-scope `git mv`
-// exits 1 atomically, leaving index, worktree, and HEAD unchanged. That is
-// unrelated to TicketMutateResult.PartialMutationNotice, which reports the
-// separate sage-posture write-then-reject path.
+// No git stderr is parsed here or in the pre-flight. Git's sparse-path advice
+// is gettext-localized, so a substring match would be locale-dependent — and
+// the index knowledge needed to classify correctly is already in hand.
+//
+// A cross-scope `git mv` is itself atomic (exit 1, index/worktree/HEAD
+// unchanged), but that says nothing about the caller: both callers write to the
+// source file before this point, so a failure reaching here is a
+// write-then-reject and the caller reports it through
+// TicketMutateResult.PartialMutationNotice. The pre-flight exists precisely so
+// the ordinary scope refusal never reaches this layer.
 func scopedGitMove(root string, scope *ticketScope, runner GitRunner, oldPath, newPath string) error {
-	if scope == nil {
-		return atomicGitMove(root, runner, oldPath, newPath)
-	}
-	// Destination pre-flight: `git sparse-checkout check-rules` is exact even
-	// for a path that does not exist yet. It fails open on git < 2.42, where
-	// the subcommand is absent.
-	if !scope.includes(newPath) {
-		return scopeBlockedMoveError("destination path", newPath)
-	}
-	if err := atomicGitMove(root, runner, oldPath, newPath); err != nil {
-		// Backstop only: wrap rather than replace, so an unrelated git failure
-		// stays legible and the added sentence never claims a cause it did not
-		// verify.
+	err := atomicGitMove(root, runner, oldPath, newPath)
+	if err != nil && scope != nil {
 		return wrapScopeMoveError(err, newPath)
 	}
-	return nil
+	return err
+}
+
+// partialCloseNotice describes exactly which non-idempotent writes TicketsClose
+// already made when its git move failed, so a caller acting on the error's
+// widen-then-retry remedy knows a blind retry would append a second
+// `## Resolution` section.
+func partialCloseNotice(oldPath, resolution string) string {
+	notice := "the close date was already written to " + oldPath + " before the move failed"
+	if strings.TrimSpace(resolution) != "" {
+		notice += ", and a `## Resolution` section was already appended; remove it before retrying, or the retry will append a second one"
+	}
+	return notice + "."
 }
 
 // atomicGitMove always stages the working-tree edit before the move so a prior
