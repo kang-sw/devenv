@@ -391,6 +391,53 @@ Verification must cover all three deliverables, not just their existence:
   `ai-docs/ref/skill-authoring.md`, which is where the discuss-first ordering and
   the mandatory listing step are enforced as skill invariants rather than prose.
 
+### Result (abf0859a) - 2026-08-06
+
+All three deliverables shipped and reside in the grouped migration layout:
+`agents-plugin/skills/lead-scope-worktree/` (thin shim),
+`agents-plugin/rsrc/lead-scope-worktree/` (procedure body), the wsflow mirror,
+`ai-docs/ref/worktree-ticket-scope.md` (manual), and
+`agents-plugin-tool/internal/mcp/scope_announcement.go` (the render gate).
+
+Verification against the phase's four bars:
+
+- **workflow_manual gate (code-level, tested).** `scope_announcement_test.go`
+  proves the render in both root-known branches (`TestScopeAnnouncementFiresOnWorkflowManual`),
+  the true no-op when `core.sparseCheckout` is unset
+  (`TestWorkflowManualScopeAnnouncementByteUnchangedWhenUnscoped`), and the
+  scope-active-but-nothing-hidden branch (`TestScopeAnnouncementFiresWithNoTicketHidden`).
+  The gate reuses Phase 1's `wsdoc.TicketScope` and is injected through the
+  existing no-op-when-empty `injectBootstrapStalenessWarning`, so no new
+  injector was added.
+- **End-to-end real-worktree run.** Exercised in a throwaway linked worktree of
+  this repo: discuss-first, apply, confirm-by-listing, `git sparse-checkout
+  disable`. The applied-then-restored tree was byte-identical to its pre-scope
+  state (SHA over 490 tracked files matched exactly).
+- **Widen-then-retry path — surfaced and fixed a real remedy defect.** The E2E
+  run proved the originally shipped remedy wrong: when every file in a status
+  directory is excluded the directory vanishes from disk, and `git
+  sparse-checkout add <dest-file>` does not recreate it, so a raw `git mv` into
+  it fails with exit 128 `No such file or directory` even after widening. The
+  correct promotion tool is `ws/tickets.move`, whose `atomicGitMove` does
+  `os.MkdirAll(dir(newPath))` between stage and rename
+  (`tickets_mutate.go:832-846`, source-verified). Both the skill (invariant +
+  step 5) and the manual (Verified Behavior bullet + Widen-Then-Retry Remedy
+  section) now state this; raw `git mv` is documented only with a preceding
+  `mkdir -p`. Fixed in the result commit.
+- **Skill-authoring checklist.** The fit reviewer confirmed the shim/rsrc shape
+  and Choreography layout; a Fresh-Reader Audit caught one context-free
+  violation (the idea-visible invariant named an undefined external rule) and it
+  was self-contained in `78a3184e`.
+
+Verification limitation recorded honestly: the `ws/git.commit`-emits-no-`FIX`
+check and the MCP-side scope-aware refusals **could not be dogfood-verified**.
+`ws/runtime.info` shows the running ws-mcp server is `0.38.0-dev` (pre-Phase-1);
+the plugin cache serves a stale binary, and the scope behavior activates only
+after a version bump plus plugin reinstall at >= 0.38.1. That behavior is
+covered by Phase 1's `wsdoc` unit tests (including `requireGateSpawnsNoGit` and
+the scope-refusal tests); the skill-side no-`FIX` guarantee follows from Phase
+1 being on `main`, not from a live dogfood observation this session could make.
+
 ## Non-Scope
 
 - No automatic derivation of patterns from an epic stem or graph closure. A

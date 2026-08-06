@@ -164,7 +164,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260806-feat-worktree-ticket-scope` | ready | Per-worktree ticket scope via sparse-checkout with index-aware board resolution (Phase 1 done; Phase 2 `ws:lead-scope-worktree` skill open) |
+| `260806-feat-worktree-ticket-scope` | ready | Per-worktree ticket scope via sparse-checkout with index-aware board resolution (both phases implemented; `ws:lead-scope-worktree` skill + `workflow_manual` scope gate landed, merge pending) |
 | `260806-bug-drain-select-primitive-unbound` | idea | `lead-drain-ready-queue` Select names no discovery primitive, leaving the selector free to shell-search |
 | `260731-research-ws-opencode-drop-in-package` | idea | Adapter depth and harness-neutral boundary for ws opencode install |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
