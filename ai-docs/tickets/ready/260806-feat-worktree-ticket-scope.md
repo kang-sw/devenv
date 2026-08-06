@@ -287,6 +287,67 @@ a raw git error.
 Caller-visible MCP behavior changes here; `## Spec Impact` above states what the
 `mcp-tools` area must document.
 
+### Result (0daa9b74) - 2026-08-06
+
+Board resolution is index-aware behind a filesystem-first gate. `wsdoc` gained an
+unexported per-call `ticketScope` (`tickets_scope.go`) that execs git directly -
+no `wsgit` import, no `GitRunner` threading, following the `gitIgnoreMatcher`
+precedent already in the tree. Resolution/discovery is a `Resolve` scan option
+threaded per call site as the constraint required, so `references.trace` reaches
+the whole board through the same `TicketsStatus`/`TicketsFind` the discovery
+callers use.
+
+Behavioral delta beyond the phase text:
+
+- Discovery enumerates the union too, rather than staying filesystem-only with a
+  bare count. Each hidden entry carries `hidden` (text flag list and
+  `json:"hidden,omitempty"`); `tickets.list` text mode additionally carries the
+  aggregate `scope:` line. The phase intro's "discovery surfaces keep walking the
+  filesystem" reads narrower than the constraint block's union rule; the union
+  rule won.
+- `tickets.list(json: true)` gets the per-ticket mark but no aggregate count. A
+  `TicketBoard` wrapper was rejected because it turns the response from an array
+  into an object. Accepted limitation, stated in the spec.
+- Hidden bodies are supplied from one `git cat-file --batch` so `TicketsFind`'s
+  query form still text-matches them, per the constraint.
+
+Deviations:
+
+- `git sparse-checkout check-rules` needs git >= 2.42. Below that the destination
+  pre-flight fails open and the refusal arrives after the source write, so that
+  path returns a `PartialMutationNotice` naming what was written and what a retry
+  would duplicate. Delivered on all four surfaces (MCP + CLI, move + close).
+- Plan Step 8 (the `mcp-tools` update) was excluded from the implementer
+  delegation and executed in the lead's documentation pre-pass. All three
+  reviewers filed it and accepted the deferral across three cycles.
+- The mental-model entry was written by the lead inline rather than dispatched to
+  `mental-model-updater`.
+
+Verification: the phase's three required fixtures all landed (hidden `related:`
+produces no `FIX:` advisory; an epic with hidden open children emits no
+all-children-closed advisory; `idea/` -> hidden `todo/` reports the scope). From
+`agents-plugin-tool/`: `go build ./...`, `go vet ./...`, and
+`go test ./... -count=1` clean across all 12 packages, verified independently by
+the lead at each cycle. Three review cycles; cycle 3 returned correctness
+`clean`, test `clean`, fit `clean with 1 minor remaining`. Cycle-1 and cycle-2
+findings and their mutation evidence are recorded in the dispositions files
+referenced from the review-paths cache.
+
+Unresolved, carried out of this phase:
+
+- The CLI `tickets move` partial-mutation rendering omits one clause the MCP
+  variant carries. No information is lost; accepted as cosmetic.
+- No test exercises a real `git mv` sparse refusal's exact error text; that
+  trigger is unreachable on any host whose git has `check-rules`. The delivery
+  and content-gating properties are covered by an occupied-destination
+  substitute, mutation-confirmed non-vacuous.
+- `references.go`'s first-wins `byStem` lookup remains a local reimplementation
+  of `TicketsStatus`'s resolution order rather than a shared helper; confirmed
+  behaviorally equivalent and kept as a justified perf fix.
+
+Spec: `mcp-tools` `{#260806-worktree-sparse-checkout-ticket-scope}`.
+Mental model: `mcp-runtime` `{#260806-wsdoc-git-read-access}`.
+
 ### Phase 2: `ws:lead-scope-worktree` skill and reference manual
 
 Depends on Phase 1: shipping the skill first would hand users a configuration

@@ -879,7 +879,9 @@ requested. `ready/` identifies spec-addressed implementation work, while
 `tickets.find` locates tickets by text query, exact ticket stem, mentioned
 ticket stem, and optional status filters. `tickets.status` returns structured
 metadata for a single ticket stem and can optionally include archived done or
-dropped tickets.
+dropped tickets. All three enumerate from the git index as well as the working
+tree, so a worktree-local sparse-checkout narrows what is *marked*, never what is
+found (`#260806-worktree-sparse-checkout-ticket-scope`).
 
 `tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
 (status=dropped), writing the appropriate `completed:` or `dropped:` date into
@@ -890,7 +892,10 @@ completeness: closing with an unresolved `### Phase N: <title>` heading (one
 with no `### Result` heading before the next Phase heading or EOF, and not
 marked `[dropped]`) returns a soft, non-blocking tip naming the unresolved
 phase(s) — never a hard block, mirroring `tickets.move`'s ready-gate spec-
-address tip. {#260620-ticket-close-tool}
+address tip. Under an active worktree sparse-checkout the scope pre-flight runs
+before the frontmatter and `## Resolution` writes
+(`#260806-worktree-sparse-checkout-ticket-scope`).
+{#260620-ticket-close-tool}
 
 `tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
@@ -947,6 +952,11 @@ fields are persisted in a single write. The response carries no
 non-`ready` upward move) can still run after that write, but the write is
 idempotent — the ticket is left in the migrated two-field form and a retry
 behaves identically — so a rejected move needs no special retry handling.
+
+A worktree sparse-checkout adds one further rejection, evaluated before that
+self-healing write and after the status preconditions: a source or destination
+outside the scope refuses the move as a true no-op
+(`#260806-worktree-sparse-checkout-ticket-scope`).
 {#260620-ticket-move-tool}
 
 `tickets.create_empty` (renamed from `tickets.create`, 260723 Phase 2) creates
@@ -977,8 +987,11 @@ A fresh ticket has no prior posture, so `create_empty` never produces the
 `blocked` warning variant.
 
 Terminal states (`done`, `dropped`) and an empty stem are rejected with errors. The tool is not idempotent: a duplicate path returns an
-error. The `idea/` tip directs the caller to promote through `todo/` so the
-resolved posture can be stamped. {#260622-create-ticket-tool}
+error — including when the colliding ticket is in the index but hidden by this
+worktree's sparse-checkout, which is reported as such rather than as a plain
+duplicate (`#260806-worktree-sparse-checkout-ticket-scope`). The `idea/` tip
+directs the caller to promote through `todo/` so the resolved posture can be
+stamped. {#260622-create-ticket-tool}
 
 `tickets.template` returns the typed body skeleton for a given ticket type.
 `type` is required; accepted values are `feat`, `bug`, `refactor`, `chore`,
@@ -1243,6 +1256,77 @@ reverting, which is landing-dependent and the caller's. Before this, a `block` a
 a `todo/` landing received "commit, then proceed to handoff" and was recorded and
 then dropped, since the caller's only block branch covers the `ready/` landing.
 {#260729-sage-stamp-resolution-routing}
+
+### Worktree Sparse-Checkout Ticket Scope
+
+A worktree may narrow which ticket files are checked out by a `--no-cone`
+sparse-checkout, so that a topic-focused worktree sees only its own tickets. The
+ticket tools treat that as a **display filter over a whole board**, never as a
+smaller board: a ticket the scope hides is still in the index, still enumerated,
+still resolvable by stem, and still blocks a colliding stem. The alternative —
+walking the filesystem — would let a session create a stem that collides with a
+hidden ticket, or edit a board listing while blind to entries it is about to
+drop. Enumeration is therefore driven by the union of the git index and the
+working tree, and hidden bodies are read out of the index in one
+`git cat-file --batch` rather than off disk.
+
+The scope is detected by a filesystem-first gate: `<GIT_DIR>/info/sparse-checkout`
+must exist, and `core.sparseCheckout` must resolve true. `git sparse-checkout
+disable` leaves the pattern file behind, so a stat alone is not conclusive; the
+gate reads the git config files directly and treats an explicit `false` as
+terminal **only** when no config file carries a competing `true`. Anything
+ambiguous defers to `git config`. Ranking the files by git's own precedence was
+rejected because that precedence is switched on by `extensions.worktreeConfig`,
+and honouring a stale worktree-local `false` while git itself filters the
+worktree inverts the gate — the exact partial-board blindness this whole entry
+exists to prevent. Requiring agreement instead needs no extension lookup.
+
+The consequence a caller can rely on: with `core.sparseCheckout` unset, every
+behavior below is unchanged and the ticket tools spawn **zero** additional git
+subprocesses. The scope path is additive, never a new cost on the ordinary path.
+
+Under an active scope:
+
+- `tickets.list`, `tickets.find`, and `tickets.status` enumerate hidden tickets
+  alongside checked-out ones. Each hidden entry carries `hidden` in its bracketed
+  flag list in text mode and `hidden: true` in JSON, so the caller reports
+  "filtered", not "absent".
+- `tickets.list` appends one trailing `scope:` line naming how many tickets this
+  worktree's scope hides and stating that they remain in the index and resolvable
+  by stem. It is text-mode only; a JSON listing gets the per-ticket `hidden` mark
+  but no aggregate count, because adding one would turn the response from an
+  array into an object. The line is suppressed when the caller's status filters
+  select nothing at all — an empty listing then has a cause unrelated to the
+  scope — and when the hidden count is zero.
+- `tickets.move` and `tickets.close` pre-flight both the resolved source and the
+  destination against the scope **before the first write to the source file**,
+  and refuse with a message naming the path, the governing config
+  (`core.sparseCheckout`), and a widen-or-disable remedy. Ordering matters
+  because a refusal after a frontmatter or `## Resolution` write is not a no-op:
+  following the message's own retry advice would then append a second
+  `## Resolution` section. Status preconditions are still evaluated first, so a
+  caller with a genuinely invalid transition gets the transition error rather
+  than a scope error. Destination inclusion is decided by `git sparse-checkout
+  check-rules`, which answers exactly for paths that do not exist yet; stderr is
+  never parsed, since git's sparse advice is gettext-localized.
+- A hidden source is distinguished from a stem that does not exist at all, so a
+  caller is never told to create a ticket that is already in the index.
+- `tickets.create_empty` refuses a stem whose ticket exists in the index but is
+  not checked out here, and says so explicitly rather than reporting a plain
+  duplicate-path error.
+- `tickets.verify` propagates a post-gate scope failure into its existing
+  silent branch and emits **no** ticket-graph advisories. Emitting `FIX:`
+  advisories computed over a board known to be partial would be worse than
+  emitting none.
+
+Two residual limits are stated rather than hidden. `check-rules` requires git
+≥ 2.42; on older git the destination pre-flight fails open and the refusal
+arrives from `git mv` after the source write, so that path returns a
+`partial-mutation:` notice naming exactly what was already written and what a
+retry would duplicate. The notice is gated on an active scope **and** on a byte
+comparison against a pre-write snapshot, so it can never fire on the
+sparse-off path or claim a write that a content-identical re-persist did not
+make. {#260806-worktree-sparse-checkout-ticket-scope}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
