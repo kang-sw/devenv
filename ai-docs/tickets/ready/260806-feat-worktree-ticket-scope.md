@@ -8,6 +8,7 @@ related:
   260523-bug-worktree-local-index-missing: adjacent worktree-local context propagation gap; scope state is deliberately kept out of _index.local.md for the reason recorded there
   260619-feat-ws-layered-config-scope-substrate: layered config was considered as the scope store and rejected (see Decisions)
   260806-bug-drain-select-primitive-unbound: the ready-queue selector's unbound primitive; independent of this ticket because the filesystem filter reaches the selector whichever tool it picks
+sage-review-completeness: completed
 ---
 
 # Per-worktree ticket scope via sparse-checkout, with index-aware board resolution
@@ -194,6 +195,49 @@ can be written. What follows is that pattern application must be verified by
 listing the affected directories every time, and that the failure direction is
 "hides too much", which is silent without that check.
 
+## Spec Impact
+
+No existing anchor covers scope-aware board resolution, so neither phase can
+point at a confirmed `spec:` stem; what follows is what each phase's
+caller-visible change will need documented. Neither phase removes a spec entry,
+so no `spec-remove:` applies.
+
+### `mcp-tools`, for phase 1
+
+Target area: `## Ticket Discovery Tools {#260505-ticket-discovery-tools}` and
+the mutation entries under it (`#260620-ticket-move-tool`,
+`#260620-ticket-close-tool`).
+
+The discovery-vs-resolution split becomes a documented contract rather than an
+implementation detail. Expected caller-visible changes, all gated on
+`core.sparseCheckout` being set:
+
+- `tickets.list`, `tickets.find(query:)`, and `project_tree` report the
+  worktree-visible board and carry a hidden count, so a filtered result is
+  distinguishable from an empty one.
+- `tickets.find(ticket_stem:)` and `tickets.status(ticket_stem:)` resolve a
+  hidden stem and mark it hidden instead of reporting it absent.
+- `tickets.verify` / `ws/git.commit` advisories are computed over the whole
+  board, so an active scope never changes which advisories fire.
+- `references.trace` resolves hidden tickets on both its ticket and spec
+  branches.
+- `tickets.move` / `tickets.close` failures caused by an out-of-scope source or
+  destination name the scope and the widen-then-retry remedy instead of relaying
+  a raw git error.
+
+With `core.sparseCheckout` unset, every one of these is unchanged - that
+no-change guarantee is itself part of what the spec must state.
+
+### `workflow-skills` and `mcp-tools`, for phase 2
+
+- `workflow-skills`: `ws:lead-scope-worktree` joins the entry-skill inventory
+  the spec enumerates, carrying its discuss-first contract and the
+  `git sparse-checkout disable` restore path.
+- `mcp-tools`: `workflow_manual`
+  (`#260626-workflow-manual-restoration-entry`) renders the active scope when
+  `core.sparseCheckout` is set, alongside the environment warnings it already
+  carries.
+
 ## Phases
 
 ### Phase 1: index-aware board resolution
@@ -237,8 +281,8 @@ epic with hidden open children does not emit the all-children-closed advisory,
 and that a blocked `idea/` -> hidden `todo/` move reports the scope rather than
 a raw git error.
 
-Caller-visible MCP behavior changes here, so `ready/` promotion will need spec
-addressing against the `mcp-tools` area.
+Caller-visible MCP behavior changes here; `## Spec Impact` above states what the
+`mcp-tools` area must document.
 
 ### Phase 2: `ws:lead-scope-worktree` skill and reference manual
 
@@ -264,6 +308,24 @@ Deliverables:
 The skill must state that promoting an out-of-scope ticket into a hidden status
 directory requires widening the pattern first, since `idea/` -> `todo/` triage of
 a captured dogfood ticket is exactly that case and is the expected hot path.
+
+Verification must cover all three deliverables, not just their existence:
+
+- `workflow_manual` renders the active scope only when `core.sparseCheckout` is
+  set, and its output is unchanged when it is not. This is the one deliverable
+  with a code-level gate, so it takes a test rather than an inspection.
+- The skill is exercised end to end in a real worktree of this repository:
+  discuss-first before any pattern is written, apply, confirm by listing the
+  affected status directories that exactly the intended tickets remain, promote
+  an out-of-scope ticket to observe the widen-then-retry path, and restore with
+  `git sparse-checkout disable`. The applied-then-restored worktree must be
+  byte-identical to its pre-scope state.
+- With a scope active, `ws/git.commit` on an unrelated ticket edit emits no
+  `FIX:` advisory - the Phase 1 guarantee checked from the skill's side, since
+  that is the failure the phase ordering exists to prevent.
+- The skill text passes the invariant checklist in
+  `ai-docs/ref/skill-authoring.md`, which is where the discuss-first ordering and
+  the mandatory listing step are enforced as skill invariants rather than prose.
 
 ## Non-Scope
 
