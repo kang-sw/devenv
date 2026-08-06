@@ -48,6 +48,18 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
+A second trigger class matches the session's own observation rather than a user
+request. `mcp-server-repair` is the case: no user types it, and the condition
+that should fire it is an environment state the agent has already noticed. Such
+a description is written in the vocabulary the agent emits when reporting that
+failure — the observable states it would name, phrased as a state declaration
+rather than an authoring-side condition clause — and names the moment of
+substitution, so the skill displaces the failure report the agent was about to
+write instead of competing with it. Descriptions in this class carry no
+restatement of body content: what the skill does on invocation is the body's
+job, and selection-surface budget buys trigger match only.
+{#260806-skill-description-self-invocation-trigger}
+
 The directly invocable surface is narrowed to 13 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-bootstrap`,
