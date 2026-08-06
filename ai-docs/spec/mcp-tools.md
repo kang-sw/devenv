@@ -450,6 +450,17 @@ prompt override-marker engine and the product-mode markers. The handler owns mod
 branching and the Session State scaffolding only; all manual prose lives in the
 rsrc.
 
+When `core.sparseCheckout` is set for the working root, both **fresh with
+root** and **continue** additionally render a sparse-checkout scope
+announcement — a short block naming the hidden ticket count and stems under
+`ai-docs/tickets/ready/` and `ai-docs/tickets/todo/`, pointing to
+`ai-docs/ref/worktree-ticket-scope.md` and the `git sparse-checkout disable`
+restore path — using the same `injectBootstrapStalenessWarning`
+no-op-when-empty injector already used for the bootstrap-staleness and
+doc-coverage warnings. With `core.sparseCheckout` unset, or in **fresh
+without root**, this block does not render and output is unchanged from
+before this addition.
+
 The rendered manual body carries a **Ticket System Concepts** grounding section
 (status-directory meaning, type-prefix categorization, sage-review rationale and
 posture semantics, spec addressing, the phase model, and epic-vs-workset), so a
