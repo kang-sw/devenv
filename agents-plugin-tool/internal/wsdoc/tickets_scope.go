@@ -53,8 +53,8 @@ const ticketIndexPrefix = "ai-docs/tickets"
 // would therefore pass forever after a disable and spawn a `git config` process
 // on every gated call — per loadTicketGraph, per TicketCreate, per mutation,
 // per discovery annotation — on a repository the user restored. So an
-// explicitly false core.sparseCheckout read straight from the config files is
-// terminal, and git is consulted only when the files leave the answer open.
+// explicitly false core.sparseCheckout that every config file agrees on is
+// terminal, and git is consulted whenever the files leave the answer open.
 func newTicketScope(root string) *ticketScope {
 	gitDir := resolveGitDir(root)
 	if gitDir == "" {
@@ -66,7 +66,7 @@ func newTicketScope(root string) *ticketScope {
 	if info, err := os.Stat(filepath.Join(gitDir, "info", "sparse-checkout")); err != nil || info.IsDir() {
 		return nil
 	}
-	if value, found := sparseCheckoutConfigFileValue(gitDir); found && !value {
+	if sparseCheckoutDisabledInConfigFiles(gitDir) {
 		return nil
 	}
 	scope := &ticketScope{root: root, gitDir: gitDir}
@@ -81,23 +81,66 @@ func newTicketScope(root string) *ticketScope {
 	return scope
 }
 
-// sparseCheckoutConfigFileValue reads core.sparseCheckout out of the two config
-// files git keeps inside GIT_DIR, worktree config first because it outranks the
-// repository config for this key. It is deliberately a *negative* fast path
-// only: anything it cannot read unambiguously reports not-found and defers to
-// `git config`, which stays the authority for a positive answer (includes,
-// global/system scope, and precedence are git's business, not ours).
-func sparseCheckoutConfigFileValue(gitDir string) (value bool, found bool) {
-	for _, name := range []string{"config.worktree", "config"} {
-		raw, err := os.ReadFile(filepath.Join(gitDir, name))
+// sparseCheckoutDisabledInConfigFiles reads core.sparseCheckout out of the
+// config files git keeps for this worktree and reports a *negative* fast path
+// only: it returns true solely when the files cannot disagree about the answer
+// being false. Anything else — a `true` anywhere, an unparseable value, no
+// value at all — reports false and defers to `git config`, which stays the
+// authority for a positive answer (includes, global/system scope, and
+// precedence are git's business, not ours).
+//
+// The agreement rule is what makes reading $GIT_DIR/config.worktree safe
+// without resolving extensions.worktreeConfig: git honors that file only when
+// the extension is set, so trusting it alone reports false where git resolves
+// true (measured: unset the extension by hand, leave config.worktree's
+// `sparseCheckout = false` in place, and `git config --get core.sparseCheckout`
+// still answers true from the repository config). That inversion is the
+// dangerous direction — the scope goes nil while git keeps filtering the
+// worktree, and every resolution surface silently reverts to a partial board.
+// Requiring agreement removes it: a `true` in either file defers to git, and a
+// `false` with no competing `true` resolves to false under both readings.
+func sparseCheckoutDisabledInConfigFiles(gitDir string) bool {
+	sawFalse := false
+	for _, path := range gitConfigFiles(gitDir) {
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		if value, found := coreBoolFromGitConfig(string(raw), "sparsecheckout"); found {
-			return value, true
+		value, found := coreBoolFromGitConfig(string(raw), "sparsecheckout")
+		if !found {
+			continue
 		}
+		if value {
+			return false
+		}
+		sawFalse = true
 	}
-	return false, false
+	return sawFalse
+}
+
+// gitConfigFiles lists the on-disk config files that can carry
+// core.sparseCheckout for this worktree, in no particular precedence order —
+// sparseCheckoutDisabledInConfigFiles requires agreement rather than ranking
+// them. A linked worktree's GIT_DIR holds only config.worktree, so the shared
+// repository config is reached through the $GIT_DIR/commondir pointer; missing
+// files are simply skipped by the caller.
+func gitConfigFiles(gitDir string) []string {
+	paths := []string{
+		filepath.Join(gitDir, "config.worktree"),
+		filepath.Join(gitDir, "config"),
+	}
+	raw, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return paths
+	}
+	common := strings.TrimSpace(strings.SplitN(string(raw), "\n", 2)[0])
+	if common == "" {
+		return paths
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(gitDir, common)
+	}
+	return append(paths, filepath.Join(common, "config"))
 }
 
 // coreBoolFromGitConfig finds `key` under a plain `[core]` section and decodes

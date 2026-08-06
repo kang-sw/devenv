@@ -203,6 +203,42 @@ func TestTicketsListScopeAnnotationSuppressedWhenFilterSelectsNothing(t *testing
 	}
 }
 
+// TestTicketsCloseDeliversPartialMutationNoticeOverMCP pins the delivery path,
+// not the notice text. wsdoc.TicketsClose populates PartialMutationNotice when
+// its non-idempotent writes landed before the git move failed, but the tool case
+// used to return toolTextResponse(id, "", err) and drop the result — so the
+// caller was told to widen the scope and retry, was not told the file had
+// already changed, and the retry appended a second `## Resolution` section.
+//
+// The failure is induced by occupying the destination status directory with a
+// regular file rather than by a cross-scope `git mv`, so the test does not
+// depend on the host's git version: the real trigger is git < 2.42, where
+// check-rules is absent and the destination pre-flight fails open, which cannot
+// be reproduced on a host whose git has the subcommand.
+func TestTicketsCloseDeliversPartialMutationNoticeOverMCP(t *testing.T) {
+	useLeadProfile(t)
+	root := scopedTicketRepo(t, map[string]string{
+		"ai-docs/tickets/ready/260101-feat-a.md":     "---\ntitle: A\n---\n# A\n",
+		"ai-docs/tickets/todo/260102-feat-shadow.md": "---\ntitle: Shadow\n---\n# Shadow\n",
+	})
+	if err := os.WriteFile(filepath.Join(root, "ai-docs", "tickets", ".done"), []byte("occupied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	text := callScopedTool(t, root, 1, "tickets.close", map[string]any{
+		"stem":       "260101-feat-a",
+		"status":     "done",
+		"resolution": "Closed for the fixture.",
+	})
+	if !strings.Contains(text, "partial-mutation:") {
+		t.Fatalf("tickets.close dropped the write-then-reject notice:\n%s", text)
+	}
+	// The actionable half: a blind retry would duplicate the appended section.
+	if !strings.Contains(text, "## Resolution") {
+		t.Fatalf("the delivered notice does not name the non-idempotent write:\n%s", text)
+	}
+}
+
 func TestProjectTreeCarriesScopeAnnotation(t *testing.T) {
 	useLeadProfile(t)
 	root := scopedTicketRepo(t, map[string]string{

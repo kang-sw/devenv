@@ -1325,6 +1325,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Today:      time.Now().Format("2006-01-02"),
 		})
 		if err != nil {
+			// The error branch must not drop result: TicketsClose populates
+			// PartialMutationNotice when its writes landed before the git move
+			// failed, and the error's own widen-then-retry remedy would append a
+			// second `## Resolution` section if the caller never learns that.
+			// Same shape as tickets.move below.
+			if result.PartialMutationNotice != "" {
+				return toolErrorTextResponse(req.ID, err.Error()+
+					"\npartial-mutation: "+result.PartialMutationNotice+
+					" A retry will not find an unchanged file.")
+			}
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("closed", result), nil)
@@ -3038,41 +3048,21 @@ func ticketScopeAnnotation(root string, statuses []string) string {
 			"they remain in the index and resolvable by stem.\n", info.Hidden)
 }
 
-// effectiveTicketStatuses mirrors wsdoc.ticketStatuses so the hidden count
-// covers exactly the statuses the accompanying listing covered — including its
-// archive gating, which drops an explicitly requested .done/.dropped unless the
-// matching include flag is set. Without that half, tickets.list(statuses:
-// ["done"]) with include_done unset would render an empty listing and then
-// blame the scope for it.
+// effectiveTicketStatuses decodes the tool arguments and defers to
+// wsdoc.EffectiveTicketStatuses so the hidden count covers exactly the statuses
+// the accompanying listing covered — including its archive gating, which drops
+// an explicitly requested .done/.dropped unless the matching include flag is
+// set. Without that half, tickets.list(statuses: ["done"]) with include_done
+// unset would render an empty listing and then blame the scope for it. The rule
+// itself lives in wsdoc rather than being mirrored here: mcp already imports
+// wsdoc freely, so there is no import-boundary reason to keep a second copy that
+// can drift.
 func effectiveTicketStatuses(args map[string]any) []string {
-	includeDone := boolArgument(args["include_done"])
-	includeDropped := boolArgument(args["include_dropped"])
-	statuses := stringList(args["statuses"])
-	if len(statuses) == 0 {
-		statuses = []string{"ready", "todo", "idea"}
-		if includeDone {
-			statuses = append(statuses, ".done")
-		}
-		if includeDropped {
-			statuses = append(statuses, ".dropped")
-		}
-		return statuses
-	}
-	out := []string{}
-	for _, status := range statuses {
-		switch strings.TrimSpace(status) {
-		case "done", ".done":
-			if !includeDone {
-				continue
-			}
-		case "dropped", ".dropped":
-			if !includeDropped {
-				continue
-			}
-		}
-		out = append(out, status)
-	}
-	return out
+	return wsdoc.EffectiveTicketStatuses(
+		stringList(args["statuses"]),
+		boolArgument(args["include_done"]),
+		boolArgument(args["include_dropped"]),
+	)
 }
 
 func formatTickets(tickets []wsdoc.TicketInfo) string {

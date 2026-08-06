@@ -890,6 +890,52 @@ func TestToolsCommandShowUnknownToolExitsNonZero(t *testing.T) {
 	}
 }
 
+// TestTicketsCloseCLIDeliversPartialMutationNotice is the CLI half of the
+// write-then-reject delivery path. printTextOrFatal only ever sees the error, so
+// the notice telling the caller its file already changed was dropped on exactly
+// the path that needs it: the caller acted on the error's widen-then-retry
+// remedy and the retry appended a second `## Resolution` section.
+//
+// The git move is made to fail by occupying the destination status directory
+// with a regular file, so this does not depend on the host's git version — the
+// real trigger is git < 2.42, where check-rules is absent and the destination
+// pre-flight fails open.
+func TestTicketsCloseCLIDeliversPartialMutationNotice(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs", "_index.md"), "# Index\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs", "tickets", "ready", "260101-feat-a.md"), "---\ntitle: A\n---\n# A\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs", "tickets", "todo", "260102-feat-shadow.md"), "---\ntitle: Shadow\n---\n# Shadow\n")
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "board")
+	runGit(t, root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/todo/*")
+	if err := os.WriteFile(filepath.Join(root, "ai-docs", "tickets", ".done"), []byte("occupied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "tickets", "close",
+		"--root", root, "--stem", "260101-feat-a", "--status", "done",
+		"--resolution", "Closed for the fixture.")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a failed close, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "partial-mutation:") {
+		t.Fatalf("ws-mcp tickets close dropped the write-then-reject notice:\n%s", out)
+	}
+	if !strings.Contains(string(out), "## Resolution") {
+		t.Fatalf("the delivered notice does not name the non-idempotent write:\n%s", out)
+	}
+}
+
 func TestCallCommandMalformedJSONExitsNonZero(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")

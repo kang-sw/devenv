@@ -347,27 +347,42 @@ func appendHiddenTickets(scope *ticketScope, onDisk []TicketInfo, statuses []str
 }
 
 func ticketStatuses(opts ticketScanOptions) []string {
-	if len(opts.Statuses) == 0 {
-		statuses := []string{"ready", "todo", "idea"}
-		if opts.IncludeDone {
-			statuses = append(statuses, ".done")
+	return EffectiveTicketStatuses(opts.Statuses, opts.IncludeDone, opts.IncludeDropped)
+}
+
+// EffectiveTicketStatuses is the single implementation of "which status
+// directories does this request actually cover": the default open set when no
+// status is named, plus the archive gating that drops an explicitly requested
+// .done/.dropped unless the matching include flag is set.
+//
+// It is exported because a second caller outside wsdoc needs the same answer:
+// the MCP layer's hidden-ticket annotation must count exactly the statuses the
+// accompanying listing covered, or a listing that is empty because of the
+// caller's own include flags gets blamed on the sparse-checkout scope. Sharing
+// the rule keeps the two from drifting if a further archive status is ever
+// added.
+func EffectiveTicketStatuses(statuses []string, includeDone, includeDropped bool) []string {
+	if len(statuses) == 0 {
+		out := []string{"ready", "todo", "idea"}
+		if includeDone {
+			out = append(out, ".done")
 		}
-		if opts.IncludeDropped {
-			statuses = append(statuses, ".dropped")
+		if includeDropped {
+			out = append(out, ".dropped")
 		}
-		return statuses
+		return out
 	}
 	seen := map[string]bool{}
 	out := []string{}
-	for _, status := range opts.Statuses {
+	for _, status := range statuses {
 		normalized := normalizeTicketStatus(status)
 		if normalized == "" || seen[normalized] {
 			continue
 		}
-		if normalized == ".done" && !opts.IncludeDone {
+		if normalized == ".done" && !includeDone {
 			continue
 		}
-		if normalized == ".dropped" && !opts.IncludeDropped {
+		if normalized == ".dropped" && !includeDropped {
 			continue
 		}
 		out = append(out, normalized)

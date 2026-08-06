@@ -1,6 +1,7 @@
 package wsdoc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -55,11 +56,16 @@ type TicketMutateResult struct {
 	// comment), so TicketsMove only emits a soft warning there and never
 	// blocks — there is no write-then-reject window to report.
 	//
-	// The second is a git move that fails after those writes (the residual
-	// sparse-checkout case on git < 2.42, where the destination pre-flight
-	// fails open, or any unrelated git failure). A scope refusal caught by the
-	// pre-flight is NOT one of these: it runs before the first write and is a
-	// true no-op, so it returns an empty result.
+	// The second is a git move that fails after those writes, and it is
+	// reported only when a sparse-checkout scope is active AND the file really
+	// differs from its pre-call bytes. Both conditions are load-bearing: with
+	// the filter off this field stays empty exactly as before this feature
+	// existed (the ticket's byte-identical constraint), and a content-identical
+	// re-persist never claims a change it did not make. The window it does
+	// cover is the residual sparse-checkout case on git < 2.42, where
+	// check-rules is absent so the destination pre-flight fails open. A scope
+	// refusal caught by the pre-flight is NOT one of these: it runs before the
+	// first write and is a true no-op, so it returns an empty result.
 	PartialMutationNotice string
 }
 
@@ -120,6 +126,11 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 	}
 
 	absOld := filepath.Join(root, filepath.FromSlash(oldPath))
+	// Captured only under an active scope, which is the only configuration whose
+	// git move can still fail after these writes for a scope reason (git < 2.42,
+	// where the destination pre-flight fails open). With the filter off this
+	// costs nothing and the error return below stays exactly today's.
+	before := captureTicketBytes(scope, absOld)
 	if err := writeFrontmatterField(absOld, map[string]string{dateField: opts.Today}); err != nil {
 		return TicketMutateResult{}, err
 	}
@@ -130,10 +141,15 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 	}
 
 	if err := scopedGitMove(root, scope, runner, oldPath, newPath); err != nil {
-		// The writes above already landed, so this is a write-then-reject: the
-		// caller must not treat the file as unchanged, and must not blind-retry
-		// a non-idempotent appendResolution.
-		return TicketMutateResult{PartialMutationNotice: partialCloseNotice(oldPath, opts.Resolution)}, err
+		// A write above landed, so this is a write-then-reject: the caller must
+		// not treat the file as unchanged, and must not blind-retry a
+		// non-idempotent appendResolution. Reported only when the file really
+		// differs, so the notice never claims a change a content-identical
+		// re-write did not make.
+		if ticketBytesChanged(absOld, before) {
+			return TicketMutateResult{PartialMutationNotice: partialCloseNotice(oldPath, opts.Resolution)}, err
+		}
+		return TicketMutateResult{}, err
 	}
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
 	// Soft, non-blocking tip only (must-not-forget SOFT seed) — reuses
@@ -187,12 +203,21 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		return TicketMutateResult{}, err
 	}
 
+	absOld := filepath.Join(root, filepath.FromSlash(oldPath))
+	// See TicketsClose: scope-gated capture, so the filter-off path pays nothing
+	// and its git-move failure returns exactly today's empty result.
+	before := captureTicketBytes(scope, absOld)
+
 	var readySageWarning string
+	var written sageReviewPostures
 	if isUpwardMove(curStatus, to) {
-		postures, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), stem, opts.SageReview)
+		postures, err := prepareSageReviewForUpwardMove(absOld, stem, opts.SageReview)
 		if err != nil {
 			return TicketMutateResult{}, err
 		}
+		// Remembered for the git-move failure path below: these are the values
+		// this call persisted, as opposed to whatever the file happens to carry.
+		written = postures
 		if to == "ready" {
 			// Recompute the ready-landing problem set from the postures
 			// prepareSageReviewForUpwardMove already resolved and persisted,
@@ -224,11 +249,15 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	if err := scopedGitMove(root, scope, runner, oldPath, newPath); err != nil {
-		if isUpwardMove(curStatus, to) {
-			// prepareSageReviewForUpwardMove already persisted the resolved
-			// postures, so this is a write-then-reject like the blocked-posture
-			// path above.
-			return TicketMutateResult{PartialMutationNotice: sageReviewPostureTip(currentSageReviewPostures(filepath.Join(root, filepath.FromSlash(oldPath)), stem))}, err
+		// Two guards, both required. ticketBytesChanged keeps the notice to the
+		// frontmatter this call actually changed: reading the postures back off
+		// disk (the previous shape) reported every ticket that merely *carries*
+		// postures, including one whose required stages were re-persisted
+		// byte-identically. And `written` is the value prepareSageReviewForUpwardMove
+		// returned, not a re-read, so the text cannot describe a stage this call
+		// never touched.
+		if ticketBytesChanged(absOld, before) {
+			return TicketMutateResult{PartialMutationNotice: sageReviewPostureTip(written)}, err
 		}
 		return TicketMutateResult{}, err
 	}
@@ -740,16 +769,50 @@ func scopeDestinationError(scope *ticketScope, newPath string) error {
 //
 // A cross-scope `git mv` is itself atomic (exit 1, index/worktree/HEAD
 // unchanged), but that says nothing about the caller: both callers write to the
-// source file before this point, so a failure reaching here is a
-// write-then-reject and the caller reports it through
-// TicketMutateResult.PartialMutationNotice. The pre-flight exists precisely so
-// the ordinary scope refusal never reaches this layer.
+// source file before this point, so a failure reaching here can be a
+// write-then-reject, which the caller reports through
+// TicketMutateResult.PartialMutationNotice when the write actually changed the
+// file. The pre-flight exists precisely so the ordinary scope refusal never
+// reaches this layer.
 func scopedGitMove(root string, scope *ticketScope, runner GitRunner, oldPath, newPath string) error {
 	err := atomicGitMove(root, runner, oldPath, newPath)
 	if err != nil && scope != nil {
 		return wrapScopeMoveError(err, newPath)
 	}
 	return err
+}
+
+// captureTicketBytes snapshots a ticket file before a mutation helper's own
+// writes, but only when a sparse-checkout scope is active. The snapshot exists
+// solely to decide whether a write-then-reject notice is truthful, and that
+// notice is itself scope-gated: the ticket's constraint is that with the filter
+// off behavior and cost stay byte-identical to today, so the filter-off path
+// must not pay for a read it will never use. A nil return means "no window to
+// report", which ticketBytesChanged renders as unchanged.
+func captureTicketBytes(scope *ticketScope, absPath string) []byte {
+	if scope == nil {
+		return nil
+	}
+	raw, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// ticketBytesChanged reports whether the ticket file now differs from the
+// snapshot captureTicketBytes took. An unreadable file after a write attempt
+// counts as changed: the caller must not be told its retry will find the
+// original file when we cannot show that it would.
+func ticketBytesChanged(absPath string, before []byte) bool {
+	if before == nil {
+		return false
+	}
+	after, err := os.ReadFile(absPath)
+	if err != nil {
+		return true
+	}
+	return !bytes.Equal(before, after)
 }
 
 // partialCloseNotice describes exactly which non-idempotent writes TicketsClose

@@ -30,11 +30,7 @@ import (
 // tests pass vacuously.
 func (f *graphFixture) scope(excludeDirs []string, keep ...string) {
 	f.t.Helper()
-	runGit(f.t, f.root, "init", "-q")
-	runGit(f.t, f.root, "config", "user.email", "test@example.com")
-	runGit(f.t, f.root, "config", "user.name", "Test User")
-	runGit(f.t, f.root, "add", "-A")
-	runGit(f.t, f.root, "commit", "-q", "-m", "board")
+	f.commitBoard()
 
 	args := []string{"sparse-checkout", "set", "--no-cone", "/*"}
 	for _, dir := range excludeDirs {
@@ -62,6 +58,18 @@ func (f *graphFixture) scope(excludeDirs []string, keep ...string) {
 			f.t.Fatalf("fixture: %s should have stayed on disk but is missing (%v) - the scope hides too much", rel, err)
 		}
 	}
+}
+
+// commitBoard makes the fixture a git repository with the board committed and
+// no sparse-checkout applied. It is the filter-off baseline the scope-gated
+// behavior must stay byte-identical to.
+func (f *graphFixture) commitBoard() {
+	f.t.Helper()
+	runGit(f.t, f.root, "init", "-q")
+	runGit(f.t, f.root, "config", "user.email", "test@example.com")
+	runGit(f.t, f.root, "config", "user.name", "Test User")
+	runGit(f.t, f.root, "add", "-A")
+	runGit(f.t, f.root, "commit", "-q", "-m", "board")
 }
 
 func (f *graphFixture) trackedPaths() []string {
@@ -333,6 +341,155 @@ func TestTicketsMoveWrapsRawErrorWhenCheckRulesUnavailable(t *testing.T) {
 	}
 	requireContains(t, err.Error(), "a sparse-checkout scope is active in this worktree (core.sparseCheckout)")
 	requireContains(t, err.Error(), "git sparse-checkout add")
+}
+
+// blockStatusDir occupies a status directory with a regular file, so
+// atomicGitMove's MkdirAll fails and the mutation reaches its post-write failure
+// branch on every git version. The real trigger for that branch is a cross-scope
+// `git mv` on git < 2.42, where the destination pre-flight fails open — which is
+// unreachable on any host whose git has check-rules, i.e. the host this suite
+// runs on. The failure mode is deliberately not a sparse one: what these tests
+// pin is which failures carry a PartialMutationNotice, not how the error reads.
+func blockStatusDir(t *testing.T, root, status string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "ai-docs", "tickets", status), []byte("occupied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestGitMoveFailureCarriesNoNoticeWithoutAScope pins the filter-off half of the
+// ticket's byte-identical constraint on the one path this feature added a return
+// value to: with no sparse-checkout at all, a failing git move must return the
+// same empty result it returned before this branch, so no caller renders a
+// `partial-mutation:` line it never rendered before.
+func TestGitMoveFailureCarriesNoNoticeWithoutAScope(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260101-feat-a", "sage-review-design: skipped", "sage-review-completeness: skipped")
+	f.commitBoard()
+
+	blockStatusDir(t, f.root, ".done")
+	result, err := TicketsClose(f.root, execGitRunner{}, TicketCloseOptions{
+		TicketStem: "260101-feat-a", Status: "done", Today: "2026-08-06", Resolution: "Closed for the fixture.",
+	})
+	if err == nil {
+		t.Fatal("TicketsClose succeeded with an occupied destination directory")
+	}
+	if result.PartialMutationNotice != "" {
+		t.Fatalf("unscoped close reported PartialMutationNotice = %q, want empty (filter-off behavior must not change)", result.PartialMutationNotice)
+	}
+	if strings.Contains(err.Error(), "sparse-checkout scope is active") {
+		t.Fatalf("unscoped close error mentions a scope: %v", err)
+	}
+
+	blockStatusDir(t, f.root, "ready")
+	moved, err := TicketsMove(f.root, execGitRunner{}, TicketMoveOptions{TicketStem: "260101-feat-a", To: "ready"})
+	if err == nil {
+		t.Fatal("TicketsMove succeeded with an occupied destination directory")
+	}
+	if moved.PartialMutationNotice != "" {
+		t.Fatalf("unscoped move reported PartialMutationNotice = %q, want empty (filter-off behavior must not change)", moved.PartialMutationNotice)
+	}
+	if strings.Contains(err.Error(), "sparse-checkout scope is active") {
+		t.Fatalf("unscoped move error mentions a scope: %v", err)
+	}
+}
+
+// TestScopedGitMoveFailureNoticeAssertsOnlyThisCallsWrites covers the other
+// direction: under an active scope the residual write-then-reject window must be
+// reported, but only for the writes this call actually made. The move notice
+// used to be derived from the postures read back off disk, so it fired for a
+// ticket that merely carried postures; it is now gated on the file really
+// differing from its pre-call bytes.
+func TestScopedGitMoveFailureNoticeAssertsOnlyThisCallsWrites(t *testing.T) {
+	t.Run("close reports its non-idempotent writes", func(t *testing.T) {
+		f := newGraphFixture(t)
+		f.ticket("todo", "260101-feat-a")
+		f.ticket("idea", "260102-feat-hidden")
+		f.scope([]string{"idea"})
+		blockStatusDir(t, f.root, ".done")
+
+		result, err := TicketsClose(f.root, execGitRunner{}, TicketCloseOptions{
+			TicketStem: "260101-feat-a", Status: "done", Today: "2026-08-06", Resolution: "Closed for the fixture.",
+		})
+		if err == nil {
+			t.Fatal("TicketsClose succeeded with an occupied destination directory")
+		}
+		requireContains(t, result.PartialMutationNotice, "the close date was already written to ai-docs/tickets/todo/260101-feat-a.md")
+		requireContains(t, result.PartialMutationNotice, "## Resolution")
+	})
+
+	t.Run("move stays silent when its re-persist changed nothing", func(t *testing.T) {
+		f := newGraphFixture(t)
+		// Both required stages already hold terminal values, so
+		// prepareSageReviewForUpwardMove re-persists them byte-identically. The
+		// file did not change, so no notice may claim it did.
+		f.ticket("todo", "260101-feat-a", "sage-review-design: skipped", "sage-review-completeness: skipped")
+		f.ticket("idea", "260102-feat-hidden")
+		f.scope([]string{"idea"})
+		before := readFileString(t, filepath.Join(f.root, "ai-docs/tickets/todo/260101-feat-a.md"))
+		blockStatusDir(t, f.root, "ready")
+
+		result, err := TicketsMove(f.root, execGitRunner{}, TicketMoveOptions{TicketStem: "260101-feat-a", To: "ready"})
+		if err == nil {
+			t.Fatal("TicketsMove succeeded with an occupied destination directory")
+		}
+		if after := readFileString(t, filepath.Join(f.root, "ai-docs/tickets/todo/260101-feat-a.md")); after != before {
+			t.Fatalf("fixture: the re-persist was supposed to be content-identical:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+		}
+		if result.PartialMutationNotice != "" {
+			t.Fatalf("PartialMutationNotice = %q, want empty: the ticket carried postures but this call changed nothing", result.PartialMutationNotice)
+		}
+	})
+
+	t.Run("move reports a frontmatter change it made", func(t *testing.T) {
+		f := newGraphFixture(t)
+		// No sage-review fields yet, so the same call stamps them: a real change
+		// on disk, and the notice must say so.
+		f.ticket("todo", "260101-feat-a")
+		f.ticket("idea", "260102-feat-hidden")
+		f.scope([]string{"idea"})
+		blockStatusDir(t, f.root, "ready")
+
+		result, err := TicketsMove(f.root, execGitRunner{}, TicketMoveOptions{TicketStem: "260101-feat-a", To: "ready"})
+		if err == nil {
+			t.Fatal("TicketsMove succeeded with an occupied destination directory")
+		}
+		requireContains(t, result.PartialMutationNotice, "sage review posture:")
+	})
+}
+
+// TestGateDefersWhenWorktreeConfigDisagreesWithRepositoryConfig pins the
+// negative fast path's stated defer-on-ambiguity posture. git honors
+// $GIT_DIR/config.worktree only while extensions.worktreeConfig is set, so
+// trusting that file alone reports "no scope" where git still filters the
+// worktree — the inversion the index path exists to prevent, since every
+// resolution surface would silently revert to a partial board and start
+// emitting false dangling-reference advisories.
+func TestGateDefersWhenWorktreeConfigDisagreesWithRepositoryConfig(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260101-feat-a")
+	f.commitBoard()
+
+	runGit(t, f.root, "sparse-checkout", "set", "--no-cone", "/*")
+	runGit(t, f.root, "sparse-checkout", "disable")
+	if _, err := os.Stat(filepath.Join(f.root, ".git", "info", "sparse-checkout")); err != nil {
+		t.Skipf("this git removes the pattern file on disable (%v); the gate never reaches the config files", err)
+	}
+	// The divergence, exactly as an unrelated tool or a hand edit can leave it.
+	runGit(t, f.root, "config", "--unset", "extensions.worktreeConfig")
+	runGit(t, f.root, "config", "core.sparseCheckout", "true")
+
+	worktreeConfig := readFileString(t, filepath.Join(f.root, ".git", "config.worktree"))
+	if !strings.Contains(worktreeConfig, "sparseCheckout = false") {
+		t.Skipf("this git did not leave a false core.sparseCheckout in config.worktree; nothing to disagree about:\n%s", worktreeConfig)
+	}
+	if resolved := strings.TrimSpace(string(gitOutput(t, f.root, "config", "--type=bool", "--get", "core.sparseCheckout"))); resolved != "true" {
+		t.Fatalf("fixture: git resolves core.sparseCheckout = %q, want true", resolved)
+	}
+
+	if scope := newTicketScope(f.root); scope == nil {
+		t.Fatal("the gate returned nil while git still resolves core.sparseCheckout=true; the config-file fast path must defer when the two files disagree")
+	}
 }
 
 // --- Resolution surfaces ---------------------------------------------------
