@@ -77,7 +77,12 @@ func (g *ticketGraph) verifiedInfo(ticket verifiedTicket) (TicketInfo, bool) {
 }
 
 func loadTicketGraph(root string) (*ticketGraph, error) {
-	tickets, err := scanTickets(root, ticketScanOptions{IncludeDone: true, IncludeDropped: true})
+	// resolveGraph, not resolveOff: the integrity checks resolve `parent:` and
+	// `related:` against the whole board, so a worktree that only checks out
+	// part of ai-docs/tickets/ would otherwise report a hidden-but-present stem
+	// as dangling. TicketVerify's signature and all of its call sites stay
+	// untouched — resolution is a property of this call, threaded here.
+	tickets, err := scanTickets(root, ticketScanOptions{IncludeDone: true, IncludeDropped: true, Resolve: resolveGraph})
 	if err != nil {
 		return nil, err
 	}

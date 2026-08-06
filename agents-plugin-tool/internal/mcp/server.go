@@ -1101,6 +1101,15 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		text, err := wsdoc.ProjectTree(root)
+		if err == nil {
+			// Appended here rather than threaded into ProjectTree: renderTickets
+			// walks the filesystem directly and project_tree has no JSON mode,
+			// so the annotation belongs to the tool case. Only the count is
+			// added — a hidden parent:/related: target still renders without its
+			// title suffix, which is a presentation nicety on a discovery
+			// surface.
+			text += ticketScopeAnnotation(root, []string{"ready", "todo", "idea"})
+		}
 		return toolTextResponse(req.ID, text, err)
 	case "infra.read":
 		name, _ := params.Arguments["name"].(string)
@@ -1240,7 +1249,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
-		return toolTextResponse(req.ID, formatTickets(result), err)
+		return toolTextResponse(req.ID, formatTickets(result)+ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments)), err)
 	case "tickets.find":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1252,6 +1261,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		query, _ := params.Arguments["query"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		mentionsTicketStem, _ := params.Arguments["mentions_ticket_stem"].(string)
+		// The explicit-stem form is a resolution query and must report a
+		// hidden-but-found ticket; the free-text query form stays a discovery
+		// surface, filesystem-only plus the aggregate hidden count below.
+		resolve := strings.TrimSpace(ticketStem) != ""
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
 			Statuses:           stringList(params.Arguments["statuses"]),
 			IncludeDone:        boolArgument(params.Arguments["include_done"]),
@@ -1259,11 +1272,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Query:              query,
 			TicketStem:         ticketStem,
 			MentionsTicketStem: mentionsTicketStem,
+			Resolve:            resolve,
 		})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
-		return toolTextResponse(req.ID, formatTickets(result), err)
+		text := formatTickets(result)
+		if !resolve {
+			text += ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments))
+		}
+		return toolTextResponse(req.ID, text, err)
 	case "tickets.status":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1277,6 +1295,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			TicketStem:     ticketStem,
 			IncludeDone:    boolArgument(params.Arguments["include_done"]),
 			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
+			// tickets.status is a resolution surface by definition: it answers
+			// "where is this stem", so a hidden ticket must be reported as
+			// hidden-but-found rather than absent.
+			Resolve: true,
 		})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1303,6 +1325,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Today:      time.Now().Format("2006-01-02"),
 		})
 		if err != nil {
+			// The error branch must not drop result: TicketsClose populates
+			// PartialMutationNotice when its writes landed before the git move
+			// failed, and the error's own widen-then-retry remedy would append a
+			// second `## Resolution` section if the caller never learns that.
+			// Same shape as tickets.move below.
+			if result.PartialMutationNotice != "" {
+				return toolErrorTextResponse(req.ID, err.Error()+
+					"\npartial-mutation: "+result.PartialMutationNotice+
+					" A retry will not find an unchanged file.")
+			}
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("closed", result), nil)
@@ -2991,6 +3023,48 @@ func parseSageVerdicts(raw any) ([]wsdoc.SageVerdict, error) {
 	return verdicts, nil
 }
 
+// ticketScopeAnnotation is the aggregate hidden-count line the discovery
+// surfaces carry when this worktree's sparse-checkout hides part of the board.
+// It is text-mode only, following CommitResult.Advisories' `json:"-"`
+// precedent ({#260626-git-commit-todo-reinjection}): a non-blocking annotation
+// never changes a tool's JSON contract, and every response this server produces
+// is a single content block. It runs a path-only index enumeration and never
+// routes through loadTicketGraph, so a discovery call still pays no
+// .done/.dropped body reads. Any error degrades to no annotation.
+func ticketScopeAnnotation(root string, statuses []string) string {
+	if len(statuses) == 0 {
+		// The caller's filters selected no status at all, so the listing is
+		// empty for a reason that has nothing to do with the scope. Blaming the
+		// scope here would invert the annotation's purpose, which is exactly to
+		// keep "filtered" and "hidden" distinguishable.
+		return ""
+	}
+	info, err := wsdoc.TicketScope(root, statuses)
+	if err != nil || !info.Active || info.Hidden == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"scope: %d ticket(s) hidden by this worktree's sparse-checkout scope (core.sparseCheckout); "+
+			"they remain in the index and resolvable by stem.\n", info.Hidden)
+}
+
+// effectiveTicketStatuses decodes the tool arguments and defers to
+// wsdoc.EffectiveTicketStatuses so the hidden count covers exactly the statuses
+// the accompanying listing covered — including its archive gating, which drops
+// an explicitly requested .done/.dropped unless the matching include flag is
+// set. Without that half, tickets.list(statuses: ["done"]) with include_done
+// unset would render an empty listing and then blame the scope for it. The rule
+// itself lives in wsdoc rather than being mirrored here: mcp already imports
+// wsdoc freely, so there is no import-boundary reason to keep a second copy that
+// can drift.
+func effectiveTicketStatuses(args map[string]any) []string {
+	return wsdoc.EffectiveTicketStatuses(
+		stringList(args["statuses"]),
+		boolArgument(args["include_done"]),
+		boolArgument(args["include_dropped"]),
+	)
+}
+
 func formatTickets(tickets []wsdoc.TicketInfo) string {
 	var b strings.Builder
 	for _, ticket := range tickets {
@@ -3007,6 +3081,9 @@ func formatTickets(tickets []wsdoc.TicketInfo) string {
 		}
 		if ticket.MentionsTicketStem {
 			flags = append(flags, "mentions_ticket_stem")
+		}
+		if ticket.Hidden {
+			flags = append(flags, "hidden")
 		}
 		if ticket.Parent != "" {
 			flags = append(flags, "parent="+ticket.Parent)

@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.38.0-dev"
+var version = "0.38.1-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -582,6 +582,9 @@ func ticketsFind(args []string) {
 		Query:              *query,
 		TicketStem:         *ticketStem,
 		MentionsTicketStem: *mentionsTicketStem,
+		// Mirrors the MCP surface: the explicit-stem form resolves through the
+		// index, the query form stays discovery.
+		Resolve: strings.TrimSpace(*ticketStem) != "",
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("tickets find", result, err)
@@ -606,6 +609,7 @@ func ticketsStatus(args []string) {
 		TicketStem:     *ticketStem,
 		IncludeDone:    *includeDone,
 		IncludeDropped: *includeDropped,
+		Resolve:        true,
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("tickets status", result, err)
@@ -635,7 +639,7 @@ func ticketsClose(args []string) {
 		Resolution: *resolution,
 		Today:      time.Now().Format("2006-01-02"),
 	})
-	printTextOrFatal("tickets close", mcp.FormatTicketMutate("closed", result), err)
+	printTextOrFatal("tickets close", mcp.FormatTicketMutate("closed", result), withPartialMutationNotice(err, result.PartialMutationNotice))
 }
 
 func ticketsMove(args []string) {
@@ -655,7 +659,7 @@ func ticketsMove(args []string) {
 		To:         *to,
 		SageReview: resolved.Value,
 	})
-	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), err)
+	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), withPartialMutationNotice(err, result.PartialMutationNotice))
 }
 
 func ticketsCreateEmpty(args []string) {
@@ -1074,6 +1078,18 @@ func printJSONOrFatal(prefix string, value any, err error) {
 		fatal(prefix, err)
 	}
 	fmt.Println(string(encoded))
+}
+
+// withPartialMutationNotice folds a ticket mutation's write-then-reject notice
+// into the error text. printTextOrFatal only ever sees the error, so without
+// this the notice — the one thing telling the caller its file already changed —
+// is discarded on exactly the path that needs it, and the error's own
+// widen-then-retry remedy corrupts the ticket on the retry.
+func withPartialMutationNotice(err error, notice string) error {
+	if err == nil || notice == "" {
+		return err
+	}
+	return fmt.Errorf("%w\npartial-mutation: %s A retry will not find an unchanged file.", err, notice)
 }
 
 func printTextOrFatal(prefix, text string, err error) {
