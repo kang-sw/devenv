@@ -10,7 +10,7 @@ Target: user request
 
 - Never write a `git sparse-checkout` pattern before discussing what this worktree targets with the user and getting their explicit topic/pattern decision.
 - `--no-cone` is required — cone mode selects directories, not files, and `git sparse-checkout set <file>` fails with `is not a directory`.
-- Scope covers `ready/` and `todo/` only; `idea/` always stays visible, because hiding it collides with the mandatory dogfood-capture rule — a captured surprise is off-topic for the worktree by nature, so a hidden `idea/` would fail every capture at the staging step.
+- Scope covers `ready/` and `todo/` only; `idea/` always stays visible. `idea/` is the capture surface for surprises found mid-work, and such a capture is off-topic for the worktree by nature, so hiding `idea/` would put every new capture out of scope and make it fail at the staging step — an out-of-scope path cannot be staged under an active scope.
 - Verify by listing the affected status directories after every apply — mandatory, not optional. It is the only defense against the unreproduced hazard recorded in `ai-docs/ref/worktree-ticket-scope.md` (`## Unreproduced Hazard`): no pattern shape is provably safe, so the effect on disk must be confirmed by listing, never assumed from the apply command's exit code.
 - Promoting an out-of-scope ticket into a hidden status directory (e.g. `idea/` -> hidden `todo/` triage) requires widening the pattern first (`git sparse-checkout add <path>`); the bare move fails atomically otherwise.
 - Restore is `git sparse-checkout disable`, which fully restores the worktree.

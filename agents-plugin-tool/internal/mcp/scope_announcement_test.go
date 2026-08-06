@@ -99,11 +99,11 @@ func TestWorkflowManualScopeAnnouncementByteUnchangedWhenUnscoped(t *testing.T) 
 	}
 }
 
-// TestScopeAnnouncementSilentWhenNoTicketHidden verifies the scope block
+// TestScopeAnnouncementFiresWithNoTicketHidden verifies the scope block
 // still renders when core.sparseCheckout is active but no ticket is
 // currently hidden (Hidden == 0 branch of scopeAnnouncement), so the caller
 // still learns a scope is in effect even before anything is actually hidden.
-func TestScopeAnnouncementSilentWhenNoTicketHidden(t *testing.T) {
+func TestScopeAnnouncementFiresWithNoTicketHidden(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
