@@ -41,23 +41,39 @@ Established by direct experiment in throwaway repositories:
 - Cross-scope `git mv` (e.g. triaging `idea/` -> hidden `todo/`) exits **1**
   and is an atomic no-op: index, working tree, and HEAD are all unchanged, and
   `git status` stays clean because nothing happened. Widening the pattern
-  first makes the same `git mv` exit 0 and produce a clean `R` rename.
+  first lets the move proceed, with one caveat when the destination status
+  directory was fully hidden off disk — see the remedy section below.
 - `git sparse-checkout disable` fully restores the worktree.
 
 ## Cross-Scope `git mv` And The Widen-Then-Retry Remedy
 
 Promoting an out-of-scope ticket into a hidden status directory — the
 declared `idea/` -> hidden `todo/` dogfood-capture hot path — fails
-atomically at the `git mv` step rather than partially applying. The remedy is
-always "widen the pattern first, then retry the same move":
+atomically at the move step rather than partially applying. Widen the pattern
+first, then promote with `ws/tickets.move`, which recreates the status
+directory the scope had emptied off disk and stages the rename atomically:
 
 ```
 git sparse-checkout add ai-docs/tickets/todo/<stem>.md
+ws/tickets.move(stem: "<stem>", to: "todo")
+```
+
+`ws/tickets.move` is the correct promotion tool because a fully-hidden status
+directory vanishes from disk (git does not track empty directories), and a
+raw `git mv` into it fails with `No such file or directory` even after the
+sparse pattern is widened — widening a pattern for a not-yet-checked-out file
+does not recreate the directory. If you must use raw git, recreate the
+directory yourself between the widen and the move:
+
+```
+git sparse-checkout add ai-docs/tickets/todo/<stem>.md
+mkdir -p ai-docs/tickets/todo
 git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md
 ```
 
-No other remedy exists; the move does not need to be reissued differently
-once the pattern is widened.
+(2026-08-06, git 2.43.0, Linux: with `todo/` fully hidden, the widened raw
+`git mv` exits **128** with `No such file or directory`, while both the
+`mkdir -p` form and `ws/tickets.move` succeed with a clean `R` rename.)
 
 ## Unreproduced Hazard
 
