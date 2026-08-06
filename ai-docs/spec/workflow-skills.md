@@ -33,6 +33,7 @@ lead-implement
 lead-check-blockers
 lead-proceed
 lead-review
+lead-scope-worktree
 lead-ship
 lead-tune
 lead-update-spec
@@ -60,12 +61,15 @@ restatement of body content: what the skill does on invocation is the body's
 job, and selection-surface budget buys trigger match only.
 {#260806-skill-description-self-invocation-trigger}
 
-The directly invocable surface is narrowed to 13 entry skills the user invokes as
+The directly invocable surface is narrowed to 14 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
 `lead-verify-discussion`, `lead-tune`, `lead-drain-ready-queue`,
-`lead-goal-fan-out-step`, and `lead-backfill-docs`. The remaining
+`lead-goal-fan-out-step`, `lead-backfill-docs`, and `lead-scope-worktree`.
+`lead-scope-worktree` always discusses what this worktree's work line or
+topic is before writing any `git sparse-checkout` pattern — it never derives
+a pattern from inference. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
