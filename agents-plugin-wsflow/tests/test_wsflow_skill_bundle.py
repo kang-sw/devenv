@@ -35,6 +35,7 @@ EXPECTED_SKILLS = {
     "lead-write-ticket",
     "lead-prefer-subagent",
     "lead-revive",
+    "lead-scope-worktree",
     "mcp-server-repair",
 }
 
@@ -70,6 +71,7 @@ POINTER_TAIL_TITLES = {
     "lead-check-blockers": "Check Blockers",
     "lead-update-spec": "Update Spec",
     "lead-workflow-manual": "Workflow Manual",
+    "lead-scope-worktree": "Scope Worktree",
 }
 
 FORBIDDEN_PATTERNS = {
