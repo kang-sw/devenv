@@ -71,9 +71,9 @@ dogfood-capture rule ("create a short `idea/` ticket immediately when the
 surprise implies a bug, feature, or research follow-up"). A captured surprise
 is by nature off-topic for the worktree that captured it, so under a hidden
 `idea/` that capture would hit the sparse refusal path on every occurrence:
-`git add` warns and declines to stage, and an explicit-pathspec commit - which
-is how `ws/git.commit` stages - fails hard with `pathspec did not match any
-file(s) known to git`.
+`git add -A -- <path>` - which is how `ws/git.commit` stages - prints git's
+sparse-path advice, declines to stage, and exits 1, so the capture fails at
+staging before a commit is attempted.
 
 ### Boundary: explicit lookup resolves, discovery filters
 
@@ -175,6 +175,9 @@ Established by direct experiment in throwaway repositories:
   not track empty directories.
 - `git ls-files -v` marks excluded entries `S` (skip-worktree); `git show :<path>`
   reads a hidden ticket's body from the index.
+- Staging an out-of-scope path exits **1** whether the path is tracked-but-hidden
+  or a brand-new untracked file, in both `git add <path>` and
+  `git add -A -- <path>` form. The path stays `??` in `git status`.
 - Cross-scope `git mv` (e.g. triaging `idea/` -> hidden `todo/`) exits **1** and
   is an atomic no-op: index, working tree, and HEAD are all unchanged and
   `git status` stays clean because nothing happened. Widening the pattern first
