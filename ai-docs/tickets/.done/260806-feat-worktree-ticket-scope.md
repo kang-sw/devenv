@@ -9,6 +9,7 @@ related:
   260619-feat-ws-layered-config-scope-substrate: layered config was considered as the scope store and rejected (see Decisions)
   260806-bug-drain-select-primitive-unbound: the ready-queue selector's unbound primitive; independent of this ticket because the filesystem filter reaches the selector whichever tool it picks
 sage-review-completeness: completed
+completed: 2026-08-07
 ---
 
 # Per-worktree ticket scope via sparse-checkout, with index-aware board resolution
@@ -449,3 +450,8 @@ the scope-refusal tests); the skill-side no-`FIX` guarantee follows from Phase
 - Does not propagate worktree-local workflow context
   (`260523-bug-worktree-local-index-missing`); only ticket visibility is in
   scope.
+
+
+## Resolution (2026-08-07)
+
+Both phases shipped. Phase 1 landed index-aware ticket board resolution for scoped worktrees (0daa9b74). Phase 2 added the ws:lead-scope-worktree skill, the ai-docs/ref/worktree-ticket-scope.md manual, and the workflow_manual sparse-checkout scope announcement gate, with an E2E run that surfaced and fixed a vanished-directory promotion-remedy defect (ws/tickets.move recreates the emptied status dir via MkdirAll; raw git mv needs mkdir -p first). The ws/git.commit no-FIX and MCP-side scope refusals are covered by wsdoc unit tests; they could not be dogfood-verified this session because the running ws-mcp server was a stale pre-Phase-1 0.38.0-dev build. Version bumped to 0.38.2 for cache invalidation on merge.
