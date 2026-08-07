@@ -51,3 +51,46 @@ Skill guidance should then require `lead-implement` to validate any
 caller-provided merge target before the Final Action Gate and stop for explicit
 user confirmation when the target is not proven by branch ancestry or captured
 handoff metadata.
+
+## Confirmed Direction (2026-08-07): self-describing `impl/<merge-root>/<stem>`
+
+Discussion settled on making the impl branch name self-describing about its merge
+target, rather than deriving the target only from agenda/policy — the current
+`deriveImplementBranchPlan` behavior, which stops the plan when policy is absent
+and was the source of the observed wrong-parent merges.
+
+- **Chosen shape: `impl/<merge-root>/<stem>`** (Option A). The `impl/` prefix is
+  kept, so autodelete (the literal `impl/*` glob at `lead-implement.md:96`), the
+  prefix gates (`strings.HasPrefix(branch, "impl/")` in `implement_resolver.go`),
+  and goal-run nesting all survive. `<stem>` keeps its meaningful scope-slug (not
+  a random slug), so branch names stay human-scannable.
+- **Parsing is unambiguous** because `<stem>` is guaranteed single-segment
+  (non-slash): strip the `impl/` prefix and split on the LAST `/` — everything
+  before is `<merge-root>` (which may itself contain slashes, e.g.
+  `impl/feature/foo/<stem>`), and the final segment is `<stem>`. This is exactly
+  the parse rule the `goal/<parent>/<slug>` convention already uses, which is why a
+  slashed merge-root is safe. Single-segment legacy `impl/<stem>` has no slash and
+  falls back to the default target (`main`) — backward compatible.
+- **Rejected: renaming impl onto the `goal/` namespace directly.** `goal/` was
+  cited only as prior art. A literal `goal/<merge-root>/<stem>` rename breaks two
+  ways: (1) impl branches are created *inside* goal runs (fan-out workers,
+  drain-queue tickets), so it produces `goal/.../goal/...` and breaks the goal
+  parser ("strip `goal/`, split on last `/`"); (2) goal slugs are deliberately
+  random for concurrent-run collision avoidance while impl stems are meaningful —
+  merging the namespaces forces one property to be lost. Converging only the
+  *structure* (`<prefix>/<merge-root>/<stem>`) while keeping the `impl/` prefix
+  avoids both.
+- **Sub-item — git ref D/F conflict.** git cannot hold `impl/foo` (a loose-ref
+  file) and `impl/foo/bar` (a directory) at once, so a leftover legacy
+  single-segment `impl/<stem>` can block creating `impl/<stem>/...`. The resolver
+  should detect a conflicting legacy ref on create and clean up or warn. Low risk
+  in practice (impl branches are autodeleted post-merge).
+
+This turns the "merge-base hash ≠ workflow merge target" distinction above into a
+name-encoded target: the resolver reads `<merge-root>` from the branch name
+instead of requiring a merge-target policy or inferring an ambiguous base.
+Coupling to update: `implementTargetBranchName` and the `impl/`-prefix checks in
+`implement_resolver.go`, the impl branch-name test literals, the convention
+statements in `spec/mcp-tools.md` and `spec/workflow-skills.md`,
+`mental-model/workflow-skills.md`, and the mirrored skill trees (`agents-plugin/`
++ `agents-plugin-wsflow/`). Ready-ticket-sized, not a quick edit.
