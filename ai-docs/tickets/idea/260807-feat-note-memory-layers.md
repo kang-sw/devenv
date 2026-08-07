@@ -1,5 +1,6 @@
 ---
 title: Harness-agnostic PC-local note memory layers injected into workflow_manual
+parent: 260807-epic-mechanical-project-memory
 related:
   260523-bug-worktree-local-index-missing: resolves — the machine-local context (_index.local.md) lost across worktree switches is exactly what the non-tracked layers close
   260730-refactor-retire-goal-fan-out-step-and-session-note: constraint — this feature must NOT resurrect or build on the retiring session.note surface; it is a fresh note.* surface
@@ -113,16 +114,16 @@ being lost across worktrees because it is injected, not file-read.
 Must not resurrect `session.note`; this is a new `note.*` surface. Layer/verb
 names above are provisional and to be settled before implementation.
 
-### Phase 2: Tracked `repo` layer and `_index.md` decomposition (deferred, scope not final)
+### Phase 2: Tracked `repo` note layer (deferred, scope not final)
 
-A git-tracked layer (`repo`) storing one key per file under `ai-docs/ws-notes/`,
-committed through the normal agent path (single-key = single-file so merge
-conflicts resolve on the filesystem, no merge tooling in MCP). Its justification
-is not storage but **converting `_index.md` from a hand-edited monolith into a
-modular, assembled artifact**: the volatile sections move into notes that
-`workflow_manual` injects, the derivable sections (ticket/spec tables) are
-generated (already tracked by `260710` / `260725` / `260728`), and the residual
-non-volatile orientation content is redistributed (candidate: inline into
-AGENTS.md for guaranteed injection vs. on-demand `ref/`). Whether this layer
-lands at all, and the exact decomposition, are under active discussion and may
-become a separate ticket. Do not implement Phase 2 from this body as written.
+A git-tracked note layer (`repo`) storing one key per file under
+`ai-docs/ws-notes/`, committed through the normal agent path (single-key =
+single-file, so merge conflicts resolve on the filesystem — no merge tooling in
+MCP). Whether this layer lands at all is undecided.
+
+Its motivating use is feeding the `_index.md` dissolution (a modular, assembled
+project index instead of a hand-edited monolith), but that decomposition is
+**owned by the epic's planned `_index.md` decomposition (`refactor`) child**
+(`parent: 260807-epic-mechanical-project-memory`), not this ticket — this phase
+provides only the tracked-note substrate that dissolution might consume. Do not
+implement `_index.md` decomposition from this body.
