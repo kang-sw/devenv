@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.39.0 - 2026-08-07
+
+### Added
+- **`ws:lead-scope-worktree`** — a new entry skill that scopes a worktree's
+  ticket board to one work line via `git sparse-checkout --no-cone`, hiding
+  out-of-topic `ready/`/`todo/` tickets while `idea/` stays visible. It always
+  discusses the target with the user first, derives the pattern set from that
+  conversation, applies it, verifies by listing the affected directories, and
+  offers `git sparse-checkout disable` restore. Its reference manual lives at
+  `ai-docs/ref/worktree-ticket-scope.md`.
+- **`workflow_manual` sparse-checkout scope announcement.** When
+  `core.sparseCheckout` is active, `workflow_manual` now renders the active
+  scope and names the hidden ticket stems in both its FRESH-with-root and
+  CONTINUE branches; its output is byte-unchanged when the scope is unset.
+
+### Changed
+- **Index-aware ticket board resolution for scoped worktrees.** Ticket board
+  tools resolve tickets hidden by a worktree sparse-checkout scope from the
+  index rather than the working tree, so scoped worktrees no longer under-report
+  the board. Cross-scope ticket moves refuse as true atomic no-ops, and the
+  filter-off path stays byte-identical to the unscoped behavior.
+- **`mcp-server-repair` skill description** retuned to the agent's own failure
+  vocabulary so self-invocation triggers on the symptoms an agent actually
+  reports.
+- **Statusline** consolidates its subprocess forks per render.
+
+### Removed
+- **ws-dashboard** source tree and its documentation, completing the dashboard
+  drop sweep; the board was reconciled and the archived tree removed.
+
 ## v0.38.0 - 2026-07-30
 
 ### Added
