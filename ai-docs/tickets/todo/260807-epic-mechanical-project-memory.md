@@ -42,24 +42,33 @@ independently.
 - **Injection telemetry / diagnostics** (`260716-feat-ws-doc-condition-diagnostics`).
   Ambient injection has no selection and therefore no silent false-negatives to
   measure, so it needs no telemetry substrate.
-- **The tracked `repo` note layer and its `_index.md` modular-assembly** is a
-  deferred phase inside the note-memory child, not an epic-level commitment.
+- **The tracked `repo` note layer** is an epic-deferred future ticket, not an
+  epic-level commitment. It is no longer a phase inside the note-memory child (that
+  ticket ships only the two non-tracked layers); it is spun up if and when the
+  `_index.md` decomposition needs a tracked substrate.
 
 ## Child Tickets
 
-- `260807-feat-note-memory-layers` - the volatile memory sink; Phase 1
-  (non-tracked machine/worktree layers + injection) closes
-  `260523-bug-worktree-local-index-missing`. Currently `idea/`.
-- Planned: **`manuals` doc tier** (`feat`) - new first-tier category, shared
+- `260807-feat-note-memory-layers` (`ready/`) - the volatile memory sink; a single
+  Phase 1 (non-tracked machine/worktree layers + injection) closes
+  `260523-bug-worktree-local-index-missing`. Names locked, sage-reviewed. Ready to
+  proceed independently.
+- `260807-feat-manuals-doc-tier` (`ready/`) - new first-tier category, shared
   frontmatter infra (see Cross-Child Decisions), ambient one-line applicability
-  index injected into `workflow_manual`, discovery tools, `project_tree`
-  integration, and a bootstrap-migration step moving procedure content from
-  `ref/` and inline `_index.md` procedures into `manuals/`. Landable
-  independently of the other children.
-- Planned: **`_index.md` decomposition** (`refactor`) - the consumer that
-  dissolves the file. Depends on note-memory Phase 1 (volatile sink), the
-  `manuals` tier (procedure sink), and the derivable->generate leg
-  (`260710` / `260725` / `260728`).
+  index injected into `workflow_manual`, discovery tools, and a bootstrap-migration
+  step (Phase 2) moving procedure content from `ref/` and the inline `_index.md`
+  Read-Before-Editing table into `manuals/`. Landable independently. Sage-reviewed.
+- `260807-refactor-dissolve-project-index` (`idea/`) - the consumer that dissolves
+  the file. Depends on note-memory (volatile sink), the `manuals` tier (procedure
+  sink), and the derivable->generate leg (`260710` / `260725` / `260728`). Held at
+  `idea/` (not `todo/`) with an **Open Decision**: the tracked cross-clone Session
+  Notes have no landed home (non-tracked layers drop cross-clone persistence, or
+  the deferred tracked `repo` layer becomes a prerequisite) — needs a user decision.
+
+Two children carry unresolved user decisions surfaced by sage review:
+`260807-refactor-dissolve-project-index` (tracked-notes sink fork, above) and
+`260523-bug-implement-merge-target-discovery` (rootless/legacy impl-branch fallback
+contract — held at `todo/`, not promoted).
 
 ## Cross-Child Decisions
 
