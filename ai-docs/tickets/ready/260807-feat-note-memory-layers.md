@@ -5,6 +5,8 @@ related:
   260523-bug-worktree-local-index-missing: resolves — the machine-local context (_index.local.md) lost across worktree switches is exactly what the non-tracked layers close
   260730-refactor-retire-goal-fan-out-step-and-session-note: constraint — this feature must NOT resurrect or build on the retiring session.note surface; it is a fresh note.* surface
   260806-feat-worktree-ticket-scope: prior-art — scopeAnnouncement is the workflow_manual injection pattern this `# Notes` section is modeled on
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Harness-agnostic PC-local note memory layers injected into workflow_manual
@@ -51,13 +53,34 @@ Confirmed in discussion (2026-08-07):
   not add a git-mutation/commit tool to MCP (that runs counter to the
   `260605` pivot direction).
 - **Search is the pruning escape valve.** All notes are force-injected, so the
-  injection budget must be bounded: inject recent/up-to-cap items, elide the rest
-  behind a visible "N older notes elided" line, and make them retrievable via
-  `note.search`. This keeps aggressive pruning a soft requirement, not a hard one.
-- **priority/category on a note is for injection ordering only** — deciding what
-  stays injected versus elided-to-search. It is explicitly NOT a mechanism for
-  reconstructing document sections; the moment "category" starts naming document
-  sections it has become a worse re-implementation of a document.
+  injection budget must be bounded: inject the highest-priority items up to a cap,
+  elide the rest behind a visible "N lower-priority notes elided" line, and make
+  them retrievable via `note.search`. This keeps aggressive pruning a soft
+  requirement, not a hard one.
+- **`priority` is a single integer, for injection ordering only** — deciding what
+  stays injected versus elided-to-search. **Higher integer = higher priority**:
+  highest-priority records fill the injection cap first, lower-priority ones are
+  elided to search. A full-overwrite `note.write` carries the key's `priority` and
+  updates it on every write (a key's priority is part of the record, re-set each
+  time the key is written). There is no `category` field: the moment a tag starts
+  naming document sections it has become a worse re-implementation of a document.
+- **The stored record is `[key, value, priority, written_at]`.** Each write also
+  records a last-write timestamp — full-overwrite writes make this the single
+  meaningful time — which backs both the date shown per note in the injected
+  block and the `from` / `then` date-range filter of `note.search`.
+
+## Confirmed names (2026-08-07)
+
+Settled so the Spec Impact below is concrete; no longer open.
+
+- **Layers (Phase 1): `machine` / `worktree`.** They read as scope labels and
+  both are non-tracked, which is the only tracked-ness this feature ships. A
+  later tracked layer is `repo`, but it is epic-owned and out of this ticket.
+- **Verbs: `note.write(layer, [[key, value, priority], ...])` (full overwrite,
+  updates priority) / `note.erase(layer, [key, ...])` / `note.search(glob, from?,
+  then?)`.** Minimal surface: no git-mutation/commit verb (counter to the
+  `260605` pivot), read is by forced injection plus `search` as the pruning
+  escape valve.
 
 ## Prior Art
 
@@ -77,18 +100,24 @@ Confirmed in discussion (2026-08-07):
   section on. A `# Notes` section renders near Session State (append), not as a
   top-of-body banner.
 
-## Open Decisions
+## Spec Impact
 
-Recorded as OPEN — not settled; discussion continues:
+No existing stem covers a `note.*` MCP surface or note injection into
+`workflow_manual`, so this ticket addresses spec at ready time here.
 
-- **Layer names.** `machine` / `worktree` (and later `repo`) are provisional.
-  The names should capture both git-tracked-ness and scope legibly.
-- **Verb names.** `note.write(layer, [[key, value], ...])` (full overwrite) /
-  `note.erase(layer, [key, ...])` / `note.search(glob, from?, then?)` are
-  provisional sketches.
-- **priority/category exact shape** (integer priority, category tag, or both).
-- **The `repo` layer and the `_index.md` decomposition agenda** (Phase 2) — under
-  active discussion; likely spun into its own ticket. See Phase 2.
+- **`spec/mcp-tools.md`** (host-neutral MCP tool contracts): add the `note.*`
+  tool family — `note.write` / `note.erase` / `note.search` — with the layer
+  argument (`machine` / `worktree`), the full-overwrite semantics, the
+  `[key, value, priority, written_at]` record shape, and the glob/date-range
+  search contract.
+  Caller-visible change: a new MCP tool family agents call to persist and prune
+  PC-local orientation notes.
+- **`spec/mcp-tools.md`** `workflow_manual` section: document the injected
+  `# Notes` block (rendered near Session State on both the fresh-with-root and
+  continue branches), its priority-ordered cap, and the visible
+  "N lower-priority notes elided" line. Caller-visible change: `workflow_manual`
+  output
+  gains a Notes section carrying the two layers' records.
 
 ## Phases
 
@@ -108,22 +137,19 @@ Confirmed implementable core. Deliver:
   all layers' items up to a priority-ordered cap with a visible elision line for
   the remainder.
 
+Verification: a `note.write` → `note.search` round trip returns the written
+record on each layer; a `workflow_manual` call after a write renders the `# Notes`
+section carrying that record; a `worktree`-layer note is absent from a different
+worktree's injection while a `machine`-layer note is present in both.
+
 Closes `260523-bug-worktree-local-index-missing`: machine-local context stops
 being lost across worktrees because it is injected, not file-read.
 
-Must not resurrect `session.note`; this is a new `note.*` surface. Layer/verb
-names above are provisional and to be settled before implementation.
+Must not resurrect `session.note`; this is a new `note.*` surface. Layer and verb
+names are settled (see **Confirmed names**).
 
-### Phase 2: Tracked `repo` note layer (deferred, scope not final)
-
-A git-tracked note layer (`repo`) storing one key per file under
-`ai-docs/ws-notes/`, committed through the normal agent path (single-key =
-single-file, so merge conflicts resolve on the filesystem — no merge tooling in
-MCP). Whether this layer lands at all is undecided.
-
-Its motivating use is feeding the `_index.md` dissolution (a modular, assembled
-project index instead of a hand-edited monolith), but that decomposition is
-**owned by the epic's planned `_index.md` decomposition (`refactor`) child**
-(`parent: 260807-epic-mechanical-project-memory`), not this ticket — this phase
-provides only the tracked-note substrate that dissolution might consume. Do not
-implement `_index.md` decomposition from this body.
+The tracked `repo` note layer (one key per file under `ai-docs/ws-notes/`,
+committed through the normal agent path) is **out of this ticket** — it is an
+epic-deferred concern owned by `260807-epic-mechanical-project-memory`, spun into
+its own future ticket if and when the `_index.md` decomposition needs a tracked
+substrate. This ticket ships only the two non-tracked layers.
