@@ -579,6 +579,28 @@ Whether a project's spec/mental-model authoring is otherwise complete is out
 of scope for this warning; it only detects the presence-of-any-frontmatter-file
 floor.
 
+### Manuals Ambient Injection {#260807-manuals-ambient-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, mirroring the
+Bootstrap Staleness and Doc Coverage warnings above) injects a `# Manuals`
+block listing every manual under `ai-docs/manuals/`: one line per manual,
+`<path> — <summary>`. There is no applicability predicate — every manual's
+path and summary is injected unconditionally; selection/relevance filtering
+is out of scope for this block (see Manuals Document System in the
+documentation-system spec).
+
+The block is silent by design when `ai-docs/manuals/` does not exist or
+contains no `.md` files (the common case until content is migrated into this
+tier), using the same `injectBootstrapStalenessWarning` no-op-when-empty
+injector already used for the scope announcement and the staleness/coverage
+warnings. The `workflow_manual` FRESH-without-root branch never renders this
+block, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+A manual with no `summary:` frontmatter line is still listed, with an
+explicit no-summary marker in place of a bare or blank line, so the gap is
+visible in the ambient block rather than silently omitted.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
@@ -1356,6 +1378,16 @@ description, and source metadata.
 `mental_models.find` locates mental-model paths by text query, domain, or spec
 stem reference. `mental_models.status` returns path-first metadata for documents
 selected by domain or path.
+
+## Manuals Discovery Tools {#260807-manuals-discovery-tools}
+
+`manuals.list` returns available manual documents (`ai-docs/manuals/*.md`)
+with their path and one-line summary.
+
+`manuals.find` locates manual paths by text query across path, summary, and
+body text. There is no `domain` or `spec_stem` selector — the manuals schema
+carries neither field (see Manuals Document System in the
+documentation-system spec).
 
 ## Reference Trace Tool {#260505-reference-trace-tool}
 

@@ -74,3 +74,7 @@ func FormatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string 
 func FormatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
 	return formatReferenceTrace(trace)
 }
+
+func FormatManuals(manuals []wsdoc.ManualInfo) string {
+	return formatManuals(manuals)
+}

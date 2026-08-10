@@ -397,6 +397,8 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/tickets/todo/260504-demo-ticket.md"), "---\ntitle: Demo Ticket\nspec:\n  - 260504-demo-spec\n---\n# Demo Ticket\n")
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/spec/demo.md"), "---\ntitle: Demo Spec\nsummary: Demo summary\n---\n# Demo\n\n## Feature {#260504-demo-spec}\n\nDemo installer marketplace release packaging behavior.\n")
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/mental-model/demo.md"), "---\ndomain: demo\ndescription: Demo model\nsources:\n  - ai-docs/spec/demo.md#260504-demo-spec\n---\n# Demo\n\nRuntime readable CLI mirror behavior.\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/manuals/deploy.md"), "---\nsummary: How to deploy the service.\n---\n# Deploy\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/manuals/no-summary.md"), "# No Summary\n\nBody with no frontmatter.\n")
 	runGit(t, root, "init")
 	runGit(t, root, "config", "core.autocrlf", "false")
 
@@ -409,6 +411,8 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 		{name: "tickets list", textArgs: []string{"tickets", "list", "--root", root}, jsonArgs: []string{"tickets", "list", "--root", root, "--format", "json"}, wantText: "[todo] 260504-demo-ticket"},
 		{name: "specs status", textArgs: []string{"specs", "status", "--root", root, "260504-demo-spec"}, jsonArgs: []string{"specs", "status", "--root", root, "--format", "json", "260504-demo-spec"}, wantText: "spec_stem: 260504-demo-spec"},
 		{name: "mental-models find", textArgs: []string{"mental-models", "find", "--root", root, "--domain", "demo"}, jsonArgs: []string{"mental-models", "find", "--root", root, "--domain", "demo", "--format", "json"}, wantText: "ai-docs/mental-model/demo.md"},
+		{name: "manuals list", textArgs: []string{"manuals", "list", "--root", root}, jsonArgs: []string{"manuals", "list", "--root", root, "--format", "json"}, wantText: "ai-docs/manuals/deploy.md"},
+		{name: "manuals find", textArgs: []string{"manuals", "find", "--root", root, "--query", "deploy"}, jsonArgs: []string{"manuals", "find", "--root", root, "--query", "deploy", "--format", "json"}, wantText: "ai-docs/manuals/deploy.md"},
 		{name: "references trace", textArgs: []string{"references", "trace", "--root", root, "--ticket-stem", "260504-demo-ticket"}, jsonArgs: []string{"references", "trace", "--root", root, "--ticket-stem", "260504-demo-ticket", "--format", "json"}, wantText: "input: ticket 260504-demo-ticket"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -464,6 +468,29 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
 		t.Fatalf("mental-models query json missing evidence: %s", string(out))
+	}
+
+	// Ticket verification requirement (b) at the CLI mirror layer: a manual
+	// with no summary: frontmatter must still be reported by `manuals list`
+	// and `manuals find`, not silently dropped. The CLI mirror renders a
+	// missing summary via mcp.FormatManuals -> displayOrDash ("-"), so the
+	// expected line is "<path> - -".
+	cmd = exec.Command(bin, "manuals", "list", "--root", root)
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp manuals list failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "ai-docs/manuals/no-summary.md - -") {
+		t.Fatalf("manuals list must report the summary-less manual's path, not drop it: %q", text)
+	}
+
+	cmd = exec.Command(bin, "manuals", "find", "--root", root, "--query", "frontmatter")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp manuals find (summary-less) failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "ai-docs/manuals/no-summary.md - -") {
+		t.Fatalf("manuals find must report the summary-less manual's path for a matching query, not drop it: %q", text)
 	}
 }
 

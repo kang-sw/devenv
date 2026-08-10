@@ -281,6 +281,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectDocCoverageWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
+			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -311,6 +312,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectDocCoverageWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
+			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 		}
 	}
 
