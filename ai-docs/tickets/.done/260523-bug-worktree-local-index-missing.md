@@ -1,5 +1,6 @@
 ---
 title: worktree local context propagation
+completed: 2026-08-10
 ---
 
 # worktree local context propagation
@@ -30,3 +31,8 @@ the observed safety constraints: distinguish allowlisted local workflow context
 from build artifacts and caches, keep copied files ignored and unstaged, avoid
 overwriting existing destinations without explicit confirmation, and warn before
 copying files likely to contain secrets.
+
+
+## Resolution (2026-08-10)
+
+Resolved by 260807-feat-note-memory-layers Phase 1 (Result 41475bdd). The new non-tracked `machine` note layer stores PC-global, project-agnostic context (SSH hosts, IP records, local environment notes) outside the working tree at `~/.ws/notes.json` and injects it into every session's `workflow_manual` output. Machine-local context is therefore no longer lost across git-worktree switches, and the mechanism sidesteps this ticket's open safety constraints (distinguishing workflow context from build artifacts, keeping copied files ignored, warning on secrets) by never copying ignored files into worktrees at all — the context lives outside the tree and is injected, not file-copied. The `worktree` layer additionally covers worktree-specific ephemeral context.

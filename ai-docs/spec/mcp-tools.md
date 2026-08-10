@@ -413,6 +413,67 @@ add an indented `...+` marker line to distinguish hidden instruction payloads fr
 instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
 are always explicit via `todo.check`.
 
+## Note Tools {#260810-note-tools}
+
+`note.write`, `note.erase`, and `note.search` implement the two non-tracked
+note-memory layers (260807 Phase 1): **machine** (PC-global, project-agnostic
+— lives beside the global ws config file, e.g. `~/.ws/notes.json`) and
+**worktree** (worktree-local, ephemeral — lives under the existing per-worktree
+ws cache directory, so it does not survive worktree deletion and is invisible
+to any other worktree of the same repository). Both layers share the same
+record shape and storage mechanism; only the resolved file changes. The
+tracked `repo` layer is out of scope for this phase, and no git-mutation MCP
+verb is added anywhere in this family (260605 pivot constraint). This is a
+fresh surface, sharing no code or store with `session.note`
+(`#260619-session-key-lineage-children`), which is a distinct one-line
+per-child annotation on the session-key store, not a note-memory layer.
+
+All three tools require `session_key` and a `layer` argument (`"machine"` or
+`"worktree"`); they carry no `session.`/`config.`/`lead.` prefix, so — like
+`todo.*`/`agenda.*` — they are reachable by any scope (lead, delegate, leaf)
+that holds a session key. The `worktree` layer resolves its store path through
+the same `session_key`-authoritative root resolution every other root-aware
+tool uses. The `machine` layer needs no root, but still requires a
+`session_key` that resolves to a known session — an unrecognized key is
+rejected with the same `unknown_session` error shape root-aware tools use,
+even though no root is consumed.
+
+**Wire shape.** A record is `{key, value, priority, written_at}`: `key` and
+`value` are strings, `priority` is an integer (higher = higher priority,
+default `0`), and `written_at` is an RFC3339 timestamp stamped server-side at
+write time (never caller-supplied). `note.write`'s `notes` argument is an
+**array of `{"key", "value", "priority"}` objects** — not an array of
+positional `[key, value, priority]` tuples — matching the universal
+named-JSON-object convention every other MCP tool argument in this codebase
+uses; there is no positional-array precedent anywhere in the tool surface.
+
+- **`note.write(session_key, layer, notes)`** performs a full overwrite per
+  key: writing an existing key replaces its `value` and `priority` in one
+  step (there is no separate priority-update verb). Multiple notes may be
+  written in one call.
+- **`note.erase(session_key, layer, keys)`** removes each listed key from that
+  layer's store. A missing key is a no-op, matching `todo.erase`'s erase-by-key
+  precedent.
+- **`note.search(session_key, layer, glob?, from?, then?)`** returns every
+  record on that layer whose `key` matches `glob` (shell-glob syntax, e.g.
+  `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
+  falls within the inclusive `[from, then]` bound when those are supplied.
+  Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
+  `"2026-08-01"`), compared as strings. This is the retrieval path for notes
+  elided from the ambient `# Notes` block (`#260810-note-injection`) — a
+  caller that sees the elision line uses `note.search` with a narrower glob to
+  read a specific elided note.
+
+Storage is an flock-serialized read-modify-write (temp-file + atomic rename)
+over one JSON file per layer, reusing the same concurrent-safe-write pattern
+`wsconfig`'s project/global config writers use, with its own sibling `.lock`
+file per store (never shared with the `wsconfig` config lock, even though the
+machine-layer store lives in the same directory as the global config file).
+
+There is no CLI mirror for `note.*`: like every other session-keyed tool
+(`todo.*`, `agenda.*`, `enter.*`), its authority model is
+`session_key`-only, and the CLI takes `--root`, not `--session_key`.
+
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
 `workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
@@ -600,6 +661,32 @@ block, matching the bootstrap-staleness precedent
 A manual with no `summary:` frontmatter line is still listed, with an
 explicit no-summary marker in place of a bare or blank line, so the gap is
 visible in the ambient block rather than silently omitted.
+
+### Note Injection {#260810-note-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
+Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
+`# Notes` block: the highest-priority notes across both the `machine` and
+`worktree` layers (`#260810-note-tools`), up to a fixed cap (20), one line
+per note as `- [<layer>] <key> (priority <n>, <written_at>): <value>`.
+
+**Placement is the one deliberate divergence from its Manuals/scope/staleness
+siblings**: those three are all *prepended* ahead of the manual body as
+top-of-body banners. The `# Notes` block is instead **appended immediately
+after `## Session State`**, using a plain string append rather than the
+`injectBootstrapStalenessWarning` prepend helper — notes are session-context,
+not a standing warning, so they render alongside the restored agenda/todo
+state a lead just asked to see, not as a banner above the reference material.
+The append is skipped entirely (not appended as an empty block) when there
+are no notes on either layer, so an empty result produces no stray blank
+section — matching the silent-when-empty contract of every sibling injection.
+
+When more notes exist than the cap, the block ends with a visible `(N
+lower-priority notes elided — use note.search to retrieve.)` line; the elided
+notes are never dropped, only deferred to an explicit `note.search` call
+(`#260810-note-tools`). The `workflow_manual` FRESH-without-root branch
+never renders this block, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
 
 ## Config Tools {#260505-config-tools}
 

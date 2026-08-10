@@ -106,6 +106,25 @@ related:
 
 ## Common Mistakes
 
+- Wiring a new `workflow_manual` ambient injection through
+  `injectBootstrapStalenessWarning` by default because `scopeAnnouncement` and
+  `computeManuals` both use it: that helper **prepends** (`warning + "\n\n" +
+  body`), producing a top-of-body banner. The `# Notes` block
+  (`note.write`/`note.erase`/`note.search`, 260807 Phase 1 —
+  `internal/wsnote`) deliberately **appends** near `## Session State` instead,
+  via a plain guarded string concat (`if notes := computeNotes(root); notes !=
+  "" { body += "\n\n" + notes }`) placed immediately after each branch's
+  `renderSessionState` call in `workflow_manual.go`, not through the prepend
+  helper. The guard is required, not optional: an unconditional `body += "\n\n"
+  + computeNotes(root)` still appends `"\n\n"` even when `computeNotes` returns
+  `""`, corrupting the exact-byte-equality contract between `workflow_manual`'s
+  `## Session State` suffix and `workflow_state`'s standalone output
+  (`{#260702-workflow-state-tool}`) — `injectBootstrapStalenessWarning`'s own
+  no-op path avoids this because it is a real no-op, not an unconditional
+  concat. Mirror only the compute-function *shape* (pure, root-in string-out,
+  silent `""` on error) from `computeManuals`/`scopeAnnouncement`; do not
+  assume their injection call site is the precedent for a new block's
+  placement — read `workflow_manual.go` directly. {#260810-note-tools}
 - Registering the request-goroutine recover-defer BEFORE the `wg.Done`/`cancel`/`requests.Delete` defers (so it does not run first on unwind), or having it silently swallow the panic without both persisting the trace to the crash file AND returning a visible JSON-RPC error — either defeats the mid-session-crash fix. The `wsagent` async worker keeps its own separate `recover()`; do not route request-handler panics through it.
 - Advertising a tool in `tools()` without a dispatch case creates a visible broken tool.
 - Gating a tool at `callTool` and `toolAllowed` but forgetting `LeadToolNames`: tools/list and explicit calls gate correctly, yet `runtime.capabilities` still advertises it and the launcher contract test breaks.
