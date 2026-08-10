@@ -1242,6 +1242,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatManuals(result), err)
+	case "note.write":
+		return s.handleNoteWrite(req.ID, params.Arguments, params.Meta)
+	case "note.erase":
+		return s.handleNoteErase(req.ID, params.Arguments, params.Meta)
+	case "note.search":
+		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "references.trace":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -4269,6 +4275,48 @@ func tools() []map[string]any {
 					"query":  stringProperty("Optional case-insensitive text query."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
+			},
+		},
+		{
+			"name":        "note.write",
+			"description": "Write one or more notes to the machine (PC-global) or worktree (worktree-local, ephemeral) non-tracked note layer. Full-overwrite per key, including priority. Higher integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which non-tracked layer to write: "machine" (PC-global, project-agnostic) or "worktree" (this worktree only, ephemeral).`, []string{"machine", "worktree"}),
+					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority defaults to 0; higher = higher priority.`),
+				},
+				"required": []string{"session_key", "layer", "notes"},
+			},
+		},
+		{
+			"name":        "note.erase",
+			"description": "Erase notes by key from the machine or worktree non-tracked note layer.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which non-tracked layer to erase from: "machine" or "worktree".`, []string{"machine", "worktree"}),
+					"keys":        stringArrayProperty("Note keys to erase. A missing key is a no-op."),
+				},
+				"required": []string{"session_key", "layer", "keys"},
+			},
+		},
+		{
+			"name":        "note.search",
+			"description": "Search notes on the machine or worktree non-tracked note layer by key glob and optional written_at date range. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which non-tracked layer to search: "machine" or "worktree".`, []string{"machine", "worktree"}),
+					"glob":        stringProperty(`Optional key glob (path.Match syntax, e.g. "ticket.*"). Omit or "*" to match every key.`),
+					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
+					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"session_key", "layer"},
 			},
 		},
 		{
