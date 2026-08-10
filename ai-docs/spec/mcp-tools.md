@@ -313,10 +313,19 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   ignored (not on an implementation branch: impl/*, or legacy implement/*);
   derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
   the applicability rule sees that the field was read and deliberately not
-  applied. Fresh implementation branches are created under the `impl/<stem>`
-  convention, with `<stem>` <=15 characters recommended (trailing `-`
-  trimmed); legacy `implement/<scope-slug>` branches already in progress are
-  still recognized as implementation branches for continue/rename purposes.
+  applied. Fresh implementation branches are created under the
+  `impl/<merge-root>/<stem>` convention: `<merge-root>` is the current branch
+  at creation time (may itself contain `/`) or, on re-entry onto an already
+  name-rooted `impl/<merge-root>/<stem>` branch, the root parsed from the
+  branch name itself (name-authoritative — a diverging caller
+  `policy.branch.merge_target` is reconciled to the name-root with a warning,
+  never silently honored); `<stem>` keeps the <=15 characters recommendation
+  (trailing `-` trimmed) and stays single-segment (any `/` in a
+  caller-supplied `target.scope_slug` is sanitized away). A rootless
+  `impl/<stem>` branch or any legacy `implement/<scope-slug>` branch already
+  in progress keeps the original stop-and-ask behavior unchanged — merge
+  target comes solely from `policy.branch.merge_target` — and both are still
+  recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
   partitions from material risk, contracts/public symbols, cross-module/reuse
   uncertainty, and new or unknown test surfaces. Public-interface surface and

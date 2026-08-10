@@ -1856,6 +1856,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
+	runGit(t, root, "switch", "-c", "feature/base")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	server := NewServer(root, "test")
@@ -1865,10 +1866,10 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	for _, want := range []string{
 		"Implementation Verdict",
 		"Mode: delegated",
-		"Branch Action: create impl/enter-implement",
+		"Branch Action: create impl/feature/base/enter-implement",
 		"Plan Depth: survey",
 		"Review Allocation: partitioned: correctness, fit, test",
-		"Next: Create impl/enter-implement",
+		"Next: Create impl/feature/base/enter-implement",
 		"installed delegated Prep and Edit todos",
 		"partitioned: correctness, fit, test review",
 		"standard documentation gates",
@@ -2157,7 +2158,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 		},
 		{
 			name:        "matching impl branch continues",
-			branch:      implementTargetBranchName("tiny-direct-edit"),
+			branch:      implementTargetBranchName("", "tiny-direct-edit"),
 			wantAction:  "continue",
 			wantWarning: true,
 		},
@@ -2297,6 +2298,63 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 	}
 	if !strings.Contains(result.Verdict.BranchPlan.Reason, "already exists") {
 		t.Fatalf("expected already-exists reason, got %q", result.Verdict.BranchPlan.Reason)
+	}
+}
+
+// TestEnterImplementCreatePathMergeRootRefConflictDetectedByRealGit exercises
+// the real git-backed D/F ref-conflict detector in observeImplementBranch
+// (the loop over targetBranch's "/"-separated ancestor segments, each
+// rev-parse --verify'd as refs/heads/<ancestor>) end to end. Every other test
+// that touches MergeRootRefConflict fabricates the observation directly and
+// only proves deriveImplementBranchPlan's response to a conflict, not that
+// the ancestor-path scan actually finds one against a real repo. Here a
+// legacy single-segment ref "impl/ws-dashboard-dev" is pre-created as a real
+// branch, then enter.implement is driven for a fresh create on current
+// branch "ws-dashboard-dev" — whose derived target is
+// "impl/ws-dashboard-dev/<stem>" — so the scan's second ancestor probe
+// (segments[:2] == "impl/ws-dashboard-dev") must rev-parse-verify a ref that
+// really exists on disk for the conflict to be detected.
+func TestEnterImplementCreatePathMergeRootRefConflictDetectedByRealGit(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	// Pre-create the legacy single-segment ref that will collide with the new
+	// nested target's ancestor path. Left un-checked-out on purpose: the D/F
+	// conflict is a ref that already exists, not a branch that is currently
+	// active.
+	runGit(t, root, "branch", "impl/ws-dashboard-dev")
+	// The current branch becomes the merge root the create path derives
+	// automatically; it must not itself be impl/- or implement/-prefixed.
+	runGit(t, root, "switch", "-c", "ws-dashboard-dev")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	args := implementReadyArgs("json")
+	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	var result implementResult
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
+	}
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("expected stop branch action on real D/F ref conflict, got %+v", result.Verdict.BranchPlan)
+	}
+	wantTargetBranch := "impl/ws-dashboard-dev/enter-implement-deterministic-verdict-engine"
+	if result.Verdict.BranchPlan.TargetBranch != wantTargetBranch {
+		t.Fatalf("target branch = %q, want %q", result.Verdict.BranchPlan.TargetBranch, wantTargetBranch)
+	}
+	if result.Verdict.BranchPlan.MergeTarget != "ws-dashboard-dev" {
+		t.Fatalf("merge target = %q, want ws-dashboard-dev (derived merge root)", result.Verdict.BranchPlan.MergeTarget)
+	}
+	if !strings.Contains(result.Verdict.BranchPlan.Reason, "impl/ws-dashboard-dev") {
+		t.Fatalf("reason = %q, want it to name the real conflicting ref impl/ws-dashboard-dev", result.Verdict.BranchPlan.Reason)
+	}
+	if !strings.Contains(result.NextInstruction, "Stop before source edits") {
+		t.Fatalf("next instruction = %q, want the branch-safety-blocker stop instruction", result.NextInstruction)
 	}
 }
 

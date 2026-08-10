@@ -4,6 +4,7 @@ related:
   260514-epic-ws-web-dashboard-mvp: dashboard dogfood exposed nested implementation branch merge risk
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-10
 ---
 
 # Implement merge target discovery can select the wrong parent branch
@@ -208,3 +209,44 @@ resolver stops-and-asks; a rootless/legacy single-segment branch stops and asks 
 an explicit merge target (no silent `main`); a slashed `ScopeSlug` is sanitized so
 `<stem>` stays single-segment; the D/F-conflict path warns/stops and is exercised
 by a test.
+
+### Result (e1a83399) - 2026-08-10
+
+Encoded `impl/<merge-root>/<stem>` in the implement branch resolver and drained
+the full coupling set. Behavioral delta:
+
+- `implementTargetBranchName(mergeRoot, scopeSlug)` now builds the rooted name and
+  sanitizes any `/` in `scopeSlug` (→ `-`) so a caller-supplied `target.scope_slug`
+  can never break the single-segment `<stem>` invariant.
+- `deriveImplementBranchPlan` split three ways: **create** derives merge-root from
+  the current branch; **name-rooted re-entry** parses the root from the branch name
+  via new `parseImplBranchRoot` (strip `impl/`, split on last `/`) and treats it as
+  authoritative; **rootless `impl/<stem>` / legacy `implement/<stem>`** keep today's
+  stop-and-ask byte-for-byte. Divergent-caller resolution landed as
+  **reconcile-with-warning** (the ticket-permitted alternative to stop-and-ask):
+  a diverging `merge_target` on a name-rooted branch is overridden to the name-root
+  and a warning is appended — never silently honored.
+- New `MergeRootRefConflict` observation field + a git-level ancestor-path D/F scan
+  in `observeImplementBranch` stop create instead of silently colliding with a
+  legacy single-segment ref; non-destructive (no auto-delete).
+- `enter.implement` preflight fixed an ordering bug: it now peeks the current branch
+  (`observeImplementBranch(root, "")`) before building the root-dependent target
+  name, then re-observes for real.
+- Spec/mental-model prose (`spec/mcp-tools.md`, `spec/workflow-skills.md` ×3,
+  `mental-model/workflow-skills.md` ×2) and both mirrored `lead-goal-fan-out-step.md`
+  copies updated to the new shape; rsrc manifests regenerated (mirror-drift CI gate).
+
+Verification: `go test ./internal/mcp/... -run Implement -v` and `go test ./...`
+(all 12 packages) pass. New `TestResolveImplementMergeRootEncoding` covers the five
+resolver invariants; `TestEnterImplementCreatePathMergeRootRefConflictDetectedByRealGit`
+exercises the real git-backed D/F detection (proven load-bearing via a mutation test).
+Mirror copies confirmed byte-identical.
+
+Review: partitioned (correctness / fit / test), all clean after one relay cycle —
+the sole Important finding (git-level D/F detection had no positive-conflict test)
+was fixed by the git-backed test above. One non-blocking correctness Minor is
+deferred as-is: an empty `scopeSlug` with a non-empty `mergeRoot` yields a
+trailing-slash `impl/<root>/`; no worse than the pre-encoding rootless behavior and
+`ScopeSlug` is validated non-empty upstream of the helper.
+
+Phase 1 is the ticket's only phase; ticket complete.
