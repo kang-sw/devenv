@@ -53,12 +53,19 @@ func TestWorkflowManualCarriesManualsBlockOnFreshAndContinue(t *testing.T) {
 // TestManualsListAndFindMCPToolsReturnFixtureManual verifies manuals.list and
 // manuals.find are reachable as ordinary MCP tools (discovery parity with
 // specs.*/mental_models.*), not only through workflow_manual's ambient
-// injection — the ticket's verification requirement (c).
+// injection — the ticket's verification requirement (c). It also covers
+// verification requirement (b) — a manual with no `summary:` is reported, not
+// silently dropped — at this discovery-tool layer specifically:
+// formatManuals renders a missing summary via displayOrDash ("-"), a
+// different marker than the ambient computeManuals block's explicit
+// no-summary text, so it needs its own assertion rather than relying on the
+// ambient-injection coverage in manuals_announcement_test.go.
 func TestManualsListAndFindMCPToolsReturnFixtureManual(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	mustWrite(t, root, "ai-docs/manuals/deploy.md", "---\nsummary: How to deploy the service.\n---\n# Deploy\n")
+	mustWrite(t, root, "ai-docs/manuals/no-summary.md", "# No Summary\n\nBody with no frontmatter.\n")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
@@ -70,13 +77,24 @@ func TestManualsListAndFindMCPToolsReturnFixtureManual(t *testing.T) {
 	if !strings.Contains(listResp, "ai-docs/manuals/deploy.md") || !strings.Contains(listResp, "How to deploy the service.") {
 		t.Fatalf("manuals.list must return the fixture manual: %s", listResp)
 	}
+	if !strings.Contains(listResp, "ai-docs/manuals/no-summary.md - -") {
+		t.Fatalf("manuals.list must still report the summary-less manual's path (via displayOrDash), not drop it: %s", listResp)
+	}
 
 	findResp := callToolWithKey(t, s, 3, key, "manuals.find", map[string]any{"query": "deploy"})
 	if !strings.Contains(findResp, "ai-docs/manuals/deploy.md") {
 		t.Fatalf("manuals.find must return the fixture manual for a matching query: %s", findResp)
 	}
 
-	emptyFindResp := callToolWithKey(t, s, 4, key, "manuals.find", map[string]any{"query": "no-such-term-anywhere"})
+	noSummaryFindResp := callToolWithKey(t, s, 4, key, "manuals.find", map[string]any{"query": "frontmatter"})
+	if !strings.Contains(noSummaryFindResp, "ai-docs/manuals/no-summary.md - -") {
+		t.Fatalf("manuals.find must return the summary-less manual's path for a matching query, not drop it: %s", noSummaryFindResp)
+	}
+	if strings.Contains(noSummaryFindResp, "ai-docs/manuals/deploy.md") {
+		t.Fatalf("manuals.find must not return the unrelated fixture manual for a non-matching query: %s", noSummaryFindResp)
+	}
+
+	emptyFindResp := callToolWithKey(t, s, 5, key, "manuals.find", map[string]any{"query": "no-such-term-anywhere"})
 	if strings.Contains(emptyFindResp, "ai-docs/manuals/deploy.md") {
 		t.Fatalf("manuals.find must not return the fixture manual for a non-matching query: %s", emptyFindResp)
 	}

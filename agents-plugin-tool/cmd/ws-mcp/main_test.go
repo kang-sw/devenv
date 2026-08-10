@@ -398,6 +398,7 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/spec/demo.md"), "---\ntitle: Demo Spec\nsummary: Demo summary\n---\n# Demo\n\n## Feature {#260504-demo-spec}\n\nDemo installer marketplace release packaging behavior.\n")
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/mental-model/demo.md"), "---\ndomain: demo\ndescription: Demo model\nsources:\n  - ai-docs/spec/demo.md#260504-demo-spec\n---\n# Demo\n\nRuntime readable CLI mirror behavior.\n")
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/manuals/deploy.md"), "---\nsummary: How to deploy the service.\n---\n# Deploy\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/manuals/no-summary.md"), "# No Summary\n\nBody with no frontmatter.\n")
 	runGit(t, root, "init")
 	runGit(t, root, "config", "core.autocrlf", "false")
 
@@ -467,6 +468,29 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
 		t.Fatalf("mental-models query json missing evidence: %s", string(out))
+	}
+
+	// Ticket verification requirement (b) at the CLI mirror layer: a manual
+	// with no summary: frontmatter must still be reported by `manuals list`
+	// and `manuals find`, not silently dropped. The CLI mirror renders a
+	// missing summary via mcp.FormatManuals -> displayOrDash ("-"), so the
+	// expected line is "<path> - -".
+	cmd = exec.Command(bin, "manuals", "list", "--root", root)
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp manuals list failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "ai-docs/manuals/no-summary.md - -") {
+		t.Fatalf("manuals list must report the summary-less manual's path, not drop it: %q", text)
+	}
+
+	cmd = exec.Command(bin, "manuals", "find", "--root", root, "--query", "frontmatter")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp manuals find (summary-less) failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "ai-docs/manuals/no-summary.md - -") {
+		t.Fatalf("manuals find must report the summary-less manual's path for a matching query, not drop it: %q", text)
 	}
 }
 
