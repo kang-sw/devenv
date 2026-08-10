@@ -75,6 +75,25 @@ func TestProjectTreeFoldsOrphanIdeaTickets(t *testing.T) {
 	}
 }
 
+func TestProjectTreeOrphanOnlyIdeaSuppressesNone(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-one.md", "---\ntitle: Orphan one\n---\n# Orphan one\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-two.md", "---\ntitle: Orphan two\n---\n# Orphan two\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+
+	if !strings.Contains(got, "  idea: 2 orphan hidden — tickets.list status=idea to view") {
+		t.Fatalf("ProjectTree output missing orphan count line\n%s", got)
+	}
+	if strings.Contains(got, "(none)") {
+		t.Fatalf("ProjectTree output unexpectedly included (none) alongside folded orphans\n%s", got)
+	}
+}
+
 func TestProjectTreeNoOrphanIdeaCountLineWhenZero(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")

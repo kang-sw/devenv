@@ -232,12 +232,11 @@ func renderTickets(b *strings.Builder, ticketsRoot string) {
 			stem := strings.TrimSuffix(entry.Name(), ".md")
 			fm := frontmatter(filepath.Join(statusDir, entry.Name()))
 			parent, _ := fm["parent"].(string)
+			anyTicket = true
 			if status == "idea" && parent == "" {
 				orphanIdea++
-				anyTicket = true
 				continue
 			}
-			anyTicket = true
 			fmt.Fprintf(b, "  [%s] %s\n", status, stem)
 			if parent != "" {
 				fmt.Fprintf(b, "      parent: %s%s\n", parent, titleSuffix(parent, ticketsRoot))
