@@ -553,9 +553,11 @@ dispatching the selected ticket, then hands off to `lead-proceed` with
 consumes this without any goal-specific change on that side, and no
 `merge_target` override is needed since the create-path already derives
 the merge target from the checked-out branch. Each ticket still gets its
-own `impl/<stem>` branch, merged into `goal/<parent>/<slug>` without an
-approval ask and auto-deleted per the Branch Cleanup naming-gate behavior
-(see the `impl/<stem>`-branch section above). When the selection subagent
+own `impl/<goal-branch>/<stem>` branch (the create-path resolver
+automatically encodes the checked-out `goal/<parent>/<slug>` branch as the
+merge root), merged into `goal/<parent>/<slug>` without an approval ask and
+auto-deleted per the Branch Cleanup naming-gate behavior (see the
+`impl/<merge-root>/<stem>`-branch section above). When the selection subagent
 reports `ready/` empty while the current branch is `goal/<parent>/<slug>`,
 the skill performs the run's one confirmed final merge itself in its own
 prose: derive PARENT and SLUG from the branch name by stripping the
@@ -598,7 +600,7 @@ of dispatching one advanceable ticket at a time, it selects a
 mutually-independent batch (disjoint edit surface, no `related:`/`parent:`
 ordering between candidates, excluding tickets already dispatched this run and
 not yet merged) and advances each in its own worktree-isolated mini-lead in
-parallel, one `impl/<stem>` branch and background native dispatch per ticket,
+parallel, one `impl/<goal-branch>/<stem>` branch and background native dispatch per ticket,
 merging each serially back into the parent as its mini-lead reaches its merge
 gate. It degrades to the plain serial path — one ticket, dispatched directly
 to `lead-proceed` — whenever fewer than two independent tickets are available
@@ -938,10 +940,11 @@ branch is a strict ancestor of the merge target
 reason without deleting when the branch is currently checked out, linked to
 an active worktree, the merge target was ambiguous, or the branch has commits
 unreachable from the merge target. When none of those conditions hold, the
-branch's naming convention gates the remaining flow: a branch named
-`impl/<stem>` (the convention `lead-implement` uses for branches it creates,
-`<stem>` <=15 characters recommended, with any trailing `-` trimmed) is
-deleted without asking. A branch under any other name — including the legacy
+branch's naming convention gates the remaining flow: any `impl/`-prefixed
+branch — `impl/<merge-root>/<stem>` (the convention `lead-implement` uses for
+branches it creates, `<stem>` <=15 characters recommended, with any trailing
+`-` trimmed) or the rootless `impl/<stem>` form — is deleted without asking.
+A branch under any other name — including the legacy
 `implement/<scope-slug>` convention — keeps the ask-first flow: the user is
 asked before `git branch -d` runs, and the branch is retained if not
 approved. The naming convention is a trust boundary, not a security
