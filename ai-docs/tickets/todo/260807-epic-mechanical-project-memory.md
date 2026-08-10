@@ -42,10 +42,12 @@ independently.
 - **Injection telemetry / diagnostics** (`260716-feat-ws-doc-condition-diagnostics`).
   Ambient injection has no selection and therefore no silent false-negatives to
   measure, so it needs no telemetry substrate.
-- **The tracked `repo` note layer** is an epic-deferred future ticket, not an
-  epic-level commitment. It is no longer a phase inside the note-memory child (that
-  ticket ships only the two non-tracked layers); it is spun up if and when the
-  `_index.md` decomposition needs a tracked substrate.
+- **The tracked `repo` note layer** was epic-deferred, and is now **un-deferred**:
+  the decomposition's tracked-notes-sink fork resolved (2026-08-10) to keep tracked
+  Session Notes tracked, so the layer is spun up as child
+  `260810-feat-repo-tracked-note-layer` (see Child Tickets). It remains **out of the
+  note-memory child** (that ticket ships only the two non-tracked layers); this is
+  its own child that extends the `note.*` surface with a third, git-tracked layer.
 
 ## Child Tickets
 
@@ -58,17 +60,23 @@ independently.
   index injected into `workflow_manual`, discovery tools, and a bootstrap-migration
   step (Phase 2) moving procedure content from `ref/` and the inline `_index.md`
   Read-Before-Editing table into `manuals/`. Landable independently. Sage-reviewed.
-- `260807-refactor-dissolve-project-index` (`idea/`) - the consumer that dissolves
-  the file. Depends on note-memory (volatile sink), the `manuals` tier (procedure
-  sink), and the derivable->generate leg (`260710` / `260725` / `260728`). Held at
-  `idea/` (not `todo/`) with an **Open Decision**: the tracked cross-clone Session
-  Notes have no landed home (non-tracked layers drop cross-clone persistence, or
-  the deferred tracked `repo` layer becomes a prerequisite) — needs a user decision.
+- `260810-feat-repo-tracked-note-layer` (`idea/`) - the tracked `repo` note layer,
+  un-deferred by the decomposition's fork resolution. Extends the `note.*` surface
+  with a git-tracked, one-key-per-file layer under `ai-docs/ws-notes/`; the landed
+  home for `_index.md`'s tracked `# Session Notes`. Blocked on the note-memory
+  surface (its Phase 1). Design-reviewed at `idea/` scope only.
+- `260807-refactor-dissolve-project-index` (`todo/`) - the consumer that dissolves
+  the file. Depends on note-memory (volatile sink), the new `repo` layer (tracked
+  Session Notes home), the `manuals` tier (procedure sink), and the
+  derivable->generate leg (`260710` / `260725` / `260728`). Tracked-notes-sink fork
+  **resolved** (2026-08-10, chose the tracked `repo` layer); promoted `idea/` ->
+  `todo/` after design sage review. Stays `todo/` (not `ready/`) until every
+  prerequisite lands; completeness review runs at the eventual ready promotion.
 
-Two children carry unresolved user decisions surfaced by sage review:
-`260807-refactor-dissolve-project-index` (tracked-notes sink fork, above) and
-`260523-bug-implement-merge-target-discovery` (rootless/legacy impl-branch fallback
-contract — held at `todo/`, not promoted).
+Both children's previously-open user decisions are now **resolved** (2026-08-10):
+`260807-refactor-dissolve-project-index`'s tracked-notes sink chose the tracked
+`repo` layer, and `260523-bug-implement-merge-target-discovery`'s rootless/legacy
+impl-branch fallback chose preserve-stop-and-ask; the latter is now at `ready/`.
 
 ## Cross-Child Decisions
 
