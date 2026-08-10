@@ -57,12 +57,29 @@ IFS= read -r -d '' -t 5 input
 # name) can never be misread as control codes.
 ESC=$'\033'
 
+# Resolve a jq binary. Claude Code runs this statusline in a non-interactive
+# shell, which does NOT source ~/.zshrc / ~/.bash_profile — so PATH additions
+# that only exist there (e.g. linuxbrew's `brew shellenv`) are absent and a
+# bare `jq` fails even though it works in an interactive terminal. Probe the
+# common install locations directly, and fall back to a Windows jq.exe on WSL.
+if command -v jq >/dev/null 2>&1; then
+  JQ=jq
+else
+  for _c in /home/linuxbrew/.linuxbrew/bin/jq /usr/local/bin/jq /usr/bin/jq \
+    "$(command -v jq.exe 2>/dev/null)"; do
+    if [[ -n $_c && -x $_c ]]; then
+      JQ=$_c
+      break
+    fi
+  done
+fi
+
 # Single jq call to extract all fields (17 → 1 subprocess). Fed by here-string
 # rather than `echo "$input" |` so the pipeline does not add a second process.
 IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
   DURATION_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
   RATE_7D_RAW RATE_7D_RESETS CACHE_CREATE CACHE_READ TRANSCRIPT_PATH \
-  <<<"$(jq -r '[
+  <<<"$("$JQ" -r '[
   (.model.display_name // ""),
   (.workspace.current_dir // ""),
   (.workspace.project_dir // ""),
@@ -143,7 +160,7 @@ TRANSCRIPT_PATH="${TRANSCRIPT_PATH//\\//}"
 LAST_MSG_ISO=""
 if [[ -n $TRANSCRIPT_PATH && -r $TRANSCRIPT_PATH ]]; then
   _ts_all=$(tail -n 30 "$TRANSCRIPT_PATH" 2>/dev/null |
-    jq -r 'select(.type == "assistant" and .timestamp != null) | .timestamp' 2>/dev/null)
+    "$JQ" -r 'select(.type == "assistant" and .timestamp != null) | .timestamp' 2>/dev/null)
   LAST_MSG_ISO=${_ts_all##*$'\n'}
 fi
 
