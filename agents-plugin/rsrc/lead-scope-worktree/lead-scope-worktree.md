@@ -10,7 +10,7 @@ Target: user request
 
 - Never write a `git sparse-checkout` pattern before discussing what this worktree targets with the user and getting their explicit topic/pattern decision.
 - `--no-cone` is required — cone mode selects directories, not files, and `git sparse-checkout set <file>` fails with `is not a directory`.
-- Scope covers `ready/`, `todo/`, and `idea/` uniformly — no status directory is exempt; before excluding `idea/*`, ensure a tracked `/ai-docs/tickets/idea/.gitkeep` exists (create and commit it if absent), because git does not track empty directories and the directory otherwise vanishes from disk (`ai-docs/ref/worktree-ticket-scope.md`).
+- Scope covers `ready/`, `todo/`, and `idea/` uniformly — no status directory is exempt; see step 3 for the tracked `.gitkeep` precondition before excluding `idea/*`.
 - Verify by listing the affected status directories after every apply — mandatory, not optional. It is the only defense against the unreproduced hazard recorded in `ai-docs/ref/worktree-ticket-scope.md` (`## Unreproduced Hazard`): no pattern shape is provably safe, so the effect on disk must be confirmed by listing, never assumed from the apply command's exit code.
 - Promoting a ticket into a hidden status directory (the `idea/` -> hidden `todo/` triage hot path) requires widening the pattern first (`git sparse-checkout add <path>`), then moving with `{{.McpNamespace}}/tickets.move`, which recreates the status directory the scope emptied off disk; a cross-scope move before widening refuses as an atomic no-op, and a raw `git mv` into a vanished directory fails even after widening (see `ai-docs/ref/worktree-ticket-scope.md`).
 - Restore is `git sparse-checkout disable`, which fully restores the worktree.
