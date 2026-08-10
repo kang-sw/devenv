@@ -189,9 +189,8 @@ one field, `summary:` — a one-line description of the manual's purpose.
 Unlike mental-model documents, manuals carry no domain/sources/spec-refs
 metadata and no applicability predicate: every manual under
 `ai-docs/manuals/*.md` is announced unconditionally in `workflow_manual`
-output (see Manuals Ambient Injection,
-`{#260807-manuals-ambient-injection}`), rather than being selected by
-relevance.
+output (see Manuals Ambient Injection in the mcp-tools spec), rather than
+being selected by relevance.
 
 A manual with no `summary:` frontmatter line is still discovered and
 announced — reported with an explicit no-summary marker, not silently

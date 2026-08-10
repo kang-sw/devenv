@@ -586,8 +586,8 @@ Bootstrap Staleness and Doc Coverage warnings above) injects a `# Manuals`
 block listing every manual under `ai-docs/manuals/`: one line per manual,
 `<path> — <summary>`. There is no applicability predicate — every manual's
 path and summary is injected unconditionally; selection/relevance filtering
-is out of scope for this block (see Manuals Document System,
-`{#260807-manuals-document-system}`, in the documentation-system spec).
+is out of scope for this block (see Manuals Document System in the
+documentation-system spec).
 
 The block is silent by design when `ai-docs/manuals/` does not exist or
 contains no `.md` files (the common case until content is migrated into this
@@ -1386,8 +1386,8 @@ with their path and one-line summary.
 
 `manuals.find` locates manual paths by text query across path, summary, and
 body text. There is no `domain` or `spec_stem` selector — the manuals schema
-carries neither field (see Manuals Document System,
-`{#260807-manuals-document-system}`, in the documentation-system spec).
+carries neither field (see Manuals Document System in the
+documentation-system spec).
 
 ## Reference Trace Tool {#260505-reference-trace-tool}
 
