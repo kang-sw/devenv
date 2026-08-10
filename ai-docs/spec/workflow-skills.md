@@ -70,11 +70,9 @@ The directly invocable surface is narrowed to 14 entry skills the user invokes a
 `lead-scope-worktree` always discusses what this worktree's work line or
 topic is before writing any `git sparse-checkout` pattern — it never derives
 a pattern from inference. Its derived scope covers `ready/`, `todo/`, and
-`idea/` uniformly (no status directory is exempt); a tracked
-`ai-docs/tickets/idea/.gitkeep` keeps the `idea/` directory materialized when
-its tickets are scoped out, and a captured `idea/` ticket still commits under
-an active scope via `git.commit`'s `--sparse` staging
-(`#260810-git-commit-sparse-staging`). The remaining
+`idea/` uniformly (no status directory is exempt); see
+`#260810-git-commit-sparse-staging` for the `.gitkeep` and `--sparse`
+capture-staging mechanism. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
