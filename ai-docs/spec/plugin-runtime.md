@@ -109,7 +109,7 @@ undeclared extras in the legacy Render Context block in wsflow mode. The stored 
 the copy in sync, and the launcher sets `WS_RSRC_ROOT` and `WS_SKILLS_ROOT` to
 the plugin-root sibling trees when present. The rsrc subtree is the one
 generated-sameness exception to the
-otherwise-curated derivative (see `ai-docs/ref/wsflow-mirroring.md`).
+otherwise-curated derivative (see `ai-docs/manuals/wsflow-mirroring.md`).
 Distributed `agents-plugin-wsflow/skills/lead-*` files are also converged entry
 shims over that rsrc surface: each shim calls
 `wsflow/playbook.print(name: "<lead-name>")` and leaves procedure behavior to the

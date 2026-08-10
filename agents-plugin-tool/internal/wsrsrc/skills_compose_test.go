@@ -9,7 +9,7 @@ import (
 
 // composedSkills is the curated, bounded mapping of build-time skill-body
 // splices. Like substitutionMirroredSkills this is not a blanket mechanism —
-// adding an entry requires updating ai-docs/ref/wsflow-mirroring.md in the
+// adding an entry requires updating ai-docs/manuals/wsflow-mirroring.md in the
 // same change.
 var composedSkills = []SkillSplice{
 	{

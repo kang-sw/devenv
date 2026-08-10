@@ -1,3 +1,7 @@
+---
+summary: Native-Windows source-build dogfood / Phase C cold-load acceptance procedure
+---
+
 # Windows source-build dogfood
 
 How to dogfood a branch's `ws` plugin on a native Windows host with an automatic

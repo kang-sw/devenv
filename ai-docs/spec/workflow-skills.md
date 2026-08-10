@@ -215,7 +215,7 @@ when a handler exceeds four steps and mixes responsibilities. Sub-block names
 describe the responsibility they perform; single-purpose checklists are not
 split only because they are long. Compact checkpoint skills may stay prose or
 short lists when output and end state are obvious.
-These authoring rules are maintained as `ai-docs/ref/skill-authoring.md`, an
+These authoring rules are maintained as `ai-docs/manuals/skill-authoring.md`, an
 upstream reference document read directly rather than a shipped invocable
 skill; the audit they describe covers `agents-plugin/skills/*/SKILL.md` and
 `agents-plugin/rsrc/lead-*/lead-*.md`.

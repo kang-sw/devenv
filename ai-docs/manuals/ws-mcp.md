@@ -1,3 +1,7 @@
+---
+summary: MCP operational runbook, launcher environment, release and verification steps
+---
+
 # ws MCP Operations Runbook
 
 Operational runbook for the host-neutral `ws-mcp` runtime used by the `ws`
