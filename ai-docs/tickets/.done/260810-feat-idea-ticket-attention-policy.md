@@ -4,6 +4,7 @@ sage-review-design: completed
 related:
   260807-refactor-dissolve-project-index: related — both edit project_tree's renderTickets; this ticket's orphan-idea fold is orthogonal to that ticket's _index dissolution but shares the same surface
 sage-review-completeness: completed
+completed: 2026-08-10
 ---
 
 # Idea ticket attention policy — topic-scope idea/ in worktrees, fold orphan idea/ in project_tree
@@ -209,6 +210,42 @@ Verification: `project_tree` renders every parented idea (with its
 tickets collapse to one count line whose N equals the orphan idea count; the
 folded stems are absent from the tree body but returned by
 `tickets.list(status:"idea")`.
+
+### Result (c2005628) - 2026-08-10
+
+Landed on `impl/idea-attention-project-tree-fold`, range `14171b95..c2005628`
+(3 commits), merged into goal branch `goal/main/copper-lantern-marsh`.
+
+- **`renderTickets` orphan-idea fold.** `agents-plugin-tool/internal/wsdoc/project_tree.go`
+  `renderTickets` now reads each entry's frontmatter before deciding render-vs-fold:
+  `ready/` and `todo/` render in full unchanged, an `idea/` ticket carrying a
+  `parent:` renders in full (epic child), and every remaining orphan `idea/`
+  ticket (no `parent:`, regardless of `related:`) folds into a single
+  `idea: N orphan hidden — tickets.list status=idea to view` count line, emitted
+  only when N>0. The pre-existing per-entry `frontmatter(...)` read was reordered
+  and reused (no duplicate read); `anyTicket = true` was hoisted to a single
+  assignment before the fold check so a folded orphan still counts as a ticket
+  (an all-orphan repo prints the count line, never `(none)`).
+- **Tests.** Three project_tree_test.go tests: `TestProjectTreeFoldsOrphanIdeaTickets`
+  (parented-full + orphan-absent + count-line + ready/todo-unaffected),
+  `TestProjectTreeNoOrphanIdeaCountLineWhenZero`, and
+  `TestProjectTreeOrphanOnlyIdeaSuppressesNone` (orphan-only repo → count line
+  present, `(none)` absent). The count-line assertions pin the literal em-dash
+  (U+2014) and exact N.
+- **Spec.** `spec/mcp-tools.md` `{#260505-project-context-convention-tools}`
+  paragraph amended in place (no new anchor) to describe the parented-full /
+  orphan-folded inventory behavior and the `tickets.list(status:"idea")` recovery
+  path.
+
+Independent of Phase 1 (sparse-checkout does not apply to the unscoped full
+checkout); `ticketScopeAnnotation` (the sparse hidden-count annotation) and
+ticket 260807's `_index` dissolution are separate mechanisms, both untouched.
+Verification: `go build`/`go vet` clean, `go test ./internal/wsdoc/... -count=1`
+green; partitioned review clean (correctness clean first pass; fit one Minor and
+test one Important, both [resolved] on re-review after the anyTicket hoist + the
+orphan-only test).
+
+Both phases complete — ticket closed.
 
 ## Spec Impact
 
