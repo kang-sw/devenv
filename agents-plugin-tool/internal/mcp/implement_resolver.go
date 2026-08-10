@@ -136,12 +136,13 @@ type implementAgenda struct {
 }
 
 type implementBranchObservation struct {
-	CurrentBranch string
-	StartCommit   string
-	Upstream      string
-	Ahead         int
-	Behind        int
-	TargetExists  bool
+	CurrentBranch        string
+	StartCommit          string
+	Upstream             string
+	Ahead                int
+	Behind               int
+	TargetExists         bool
+	MergeRootRefConflict string
 }
 
 type normalizedImplementFacts struct {
@@ -428,6 +429,14 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 		if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
 			obs.TargetExists = true
 		}
+		segments := strings.Split(targetBranch, "/")
+		for i := 1; i < len(segments); i++ {
+			ancestor := strings.Join(segments[:i], "/")
+			if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+ancestor); err == nil {
+				obs.MergeRootRefConflict = ancestor
+				break
+			}
+		}
 	}
 	return obs, nil
 }
@@ -670,17 +679,126 @@ func deriveImplementDocMode(n normalizedImplementFacts) string {
 }
 
 // implementTargetBranchName builds the canonical implementation branch name
-// for a given scope slug: "impl/" followed by the slug (<=15 characters
-// recommended, not enforced) with any trailing "-" trimmed. Both branch-plan
-// derivation and enter-implement observation must use this single helper so
-// the two never construct diverging target-branch names.
-func implementTargetBranchName(scopeSlug string) string {
-	stem := strings.TrimRight(scopeSlug, "-")
-	return "impl/" + stem
+// for a given merge root and scope slug: "impl/" followed by the merge root
+// (if any) and the slug (<=15 characters recommended, not enforced), with any
+// "/" in scopeSlug sanitized to "-" (the stem must stay single-segment so
+// parseImplBranchRoot's split-on-last-slash parse is never ambiguous) and any
+// trailing "-" trimmed. Both branch-plan derivation and enter-implement
+// observation must use this single helper so the two never construct
+// diverging target-branch names.
+func implementTargetBranchName(mergeRoot, scopeSlug string) string {
+	stem := strings.ReplaceAll(scopeSlug, "/", "-")
+	stem = strings.TrimRight(stem, "-")
+	if mergeRoot == "" {
+		return "impl/" + stem
+	}
+	return "impl/" + mergeRoot + "/" + stem
 }
 
+// parseImplBranchRoot parses an "impl/"-prefixed branch name into its merge
+// root and stem. ok is true only when branch has the "impl/" prefix and the
+// remainder contains at least one "/" (i.e. a merge-root segment is present);
+// the split happens on the LAST "/", so a merge root that itself contains "/"
+// (e.g. a nested branch name) is preserved intact.
+func parseImplBranchRoot(branch string) (root, stem string, ok bool) {
+	const prefix = "impl/"
+	if !strings.HasPrefix(branch, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(branch, prefix)
+	idx := strings.LastIndex(rest, "/")
+	if idx < 0 {
+		return "", "", false
+	}
+	return rest[:idx], rest[idx+1:], true
+}
+
+// implementMergeRootFor derives the merge root for a given current branch
+// using the same 3-way rule deriveImplementBranchPlan applies: a fresh
+// (non-impl/-, non-implement/-prefixed) branch is its own merge root; a
+// name-rooted "impl/<root>/<stem>" branch yields the parsed root; a rootless
+// "impl/<stem>" or any "implement/<stem>" branch yields "" (legacy path,
+// merge target comes solely from caller policy). Used by enter.implement's
+// preflight to build the correct target branch name before the real
+// observation is taken.
+func implementMergeRootFor(currentBranch string) string {
+	if !strings.HasPrefix(currentBranch, "impl/") && !strings.HasPrefix(currentBranch, "implement/") {
+		return currentBranch
+	}
+	if root, _, ok := parseImplBranchRoot(currentBranch); ok {
+		return root
+	}
+	return ""
+}
+
+// deriveImplementBranchPlan implements a 3-way split on the observed current
+// branch:
+//  1. Not "impl/"- or "implement/"-prefixed -> create: merge root is the
+//     current branch itself (may contain "/"), the D/F ref-conflict guard
+//     applies only here since this is the only path that mints a brand-new
+//     nested ref.
+//  2. "impl/<root>/<stem>" (root present) -> name-rooted: the branch NAME is
+//     the authoritative merge-root source, never the caller's
+//     policy.branch.merge_target; a diverging caller value is reconciled to
+//     the name-root with a warning rather than silently honored.
+//  3. Rootless "impl/<stem>" or any "implement/<stem>" -> unchanged legacy
+//     path: merge target comes solely from policy.branch.merge_target, empty
+//     still stops-and-asks. This path's behavior is byte-for-byte identical
+//     to the pre-encoding resolver.
 func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchObservation) implementBranchPlan {
-	targetBranch := implementTargetBranchName(n.ScopeSlug)
+	if !validObservedBranch(obs.CurrentBranch) {
+		return implementBranchPlan{
+			CurrentBranch: obs.CurrentBranch,
+			StartCommit:   obs.StartCommit,
+			MergeConfirm:  n.MergeConfirmPolicy,
+			Action:        "stop",
+			Reason:        "current branch is unavailable or detached",
+		}
+	}
+
+	isImpl := strings.HasPrefix(obs.CurrentBranch, "impl/")
+	isImplement := strings.HasPrefix(obs.CurrentBranch, "implement/")
+
+	if !isImpl && !isImplement {
+		mergeRoot := obs.CurrentBranch
+		targetBranch := implementTargetBranchName(mergeRoot, n.ScopeSlug)
+		plan := implementBranchPlan{
+			CurrentBranch: obs.CurrentBranch,
+			TargetBranch:  targetBranch,
+			StartCommit:   obs.StartCommit,
+			MergeTarget:   mergeRoot,
+			MergeConfirm:  n.MergeConfirmPolicy,
+		}
+		if obs.MergeRootRefConflict != "" {
+			plan.Action = "stop"
+			plan.Reason = fmt.Sprintf("existing branch %q conflicts with creating %q", obs.MergeRootRefConflict, targetBranch)
+			return plan
+		}
+		plan.Action = "create"
+		plan.Reason = "current branch is not an implementation branch"
+		return plan
+	}
+
+	if root, _, ok := parseImplBranchRoot(obs.CurrentBranch); ok {
+		mergeRoot := root
+		targetBranch := implementTargetBranchName(mergeRoot, n.ScopeSlug)
+		plan := implementBranchPlan{
+			CurrentBranch: obs.CurrentBranch,
+			TargetBranch:  targetBranch,
+			StartCommit:   obs.StartCommit,
+			MergeTarget:   mergeRoot,
+			MergeConfirm:  n.MergeConfirmPolicy,
+		}
+		if n.MergeTargetPolicy != "" && n.MergeTargetPolicy != mergeRoot {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf(
+				"policy.branch.merge_target %q ignored (implementation branch name encodes merge root %q)",
+				n.MergeTargetPolicy, mergeRoot))
+		}
+		return finishImplementBranchPlanTail(plan, n, obs, targetBranch)
+	}
+
+	// Rootless "impl/<stem>" or any "implement/<stem>": unchanged legacy path.
+	targetBranch := implementTargetBranchName("", n.ScopeSlug)
 	plan := implementBranchPlan{
 		CurrentBranch: obs.CurrentBranch,
 		TargetBranch:  targetBranch,
@@ -688,22 +806,18 @@ func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchOb
 		MergeTarget:   n.MergeTargetPolicy,
 		MergeConfirm:  n.MergeConfirmPolicy,
 	}
-	if !validObservedBranch(obs.CurrentBranch) {
-		plan.Action = "stop"
-		plan.Reason = "current branch is unavailable or detached"
-		return plan
-	}
-	if !strings.HasPrefix(obs.CurrentBranch, "implement/") && !strings.HasPrefix(obs.CurrentBranch, "impl/") {
-		plan.Action = "create"
-		plan.MergeTarget = obs.CurrentBranch
-		plan.Reason = "current branch is not an implementation branch"
-		return plan
-	}
 	if plan.MergeTarget == "" {
 		plan.Action = "stop"
 		plan.Reason = "merge target required while already on an implementation branch"
 		return plan
 	}
+	return finishImplementBranchPlanTail(plan, n, obs, targetBranch)
+}
+
+// finishImplementBranchPlanTail applies the shared continue/rename/stop
+// comparison logic once a branch's mergeRoot and targetBranch are known,
+// regardless of which of the 3 deriveImplementBranchPlan paths produced them.
+func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImplementFacts, obs implementBranchObservation, targetBranch string) implementBranchPlan {
 	if obs.CurrentBranch == targetBranch {
 		plan.Action = "continue"
 		plan.Reason = "current implementation branch matches target scope"

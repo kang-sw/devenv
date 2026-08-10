@@ -1856,6 +1856,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
+	runGit(t, root, "switch", "-c", "feature/base")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	server := NewServer(root, "test")
@@ -1865,10 +1866,10 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	for _, want := range []string{
 		"Implementation Verdict",
 		"Mode: delegated",
-		"Branch Action: create impl/enter-implement",
+		"Branch Action: create impl/feature/base/enter-implement",
 		"Plan Depth: survey",
 		"Review Allocation: partitioned: correctness, fit, test",
-		"Next: Create impl/enter-implement",
+		"Next: Create impl/feature/base/enter-implement",
 		"installed delegated Prep and Edit todos",
 		"partitioned: correctness, fit, test review",
 		"standard documentation gates",
@@ -2157,7 +2158,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 		},
 		{
 			name:        "matching impl branch continues",
-			branch:      implementTargetBranchName("tiny-direct-edit"),
+			branch:      implementTargetBranchName("", "tiny-direct-edit"),
 			wantAction:  "continue",
 			wantWarning: true,
 		},

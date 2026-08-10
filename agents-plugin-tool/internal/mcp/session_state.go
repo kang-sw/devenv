@@ -1017,7 +1017,11 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
 		normalized, _ := normalizeImplementFacts(input)
-		targetBranch := implementTargetBranchName(normalized.ScopeSlug)
+		peek, err := observeImplementBranch(record.Root, "")
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
+		}
+		targetBranch := implementTargetBranchName(implementMergeRootFor(peek.CurrentBranch), normalized.ScopeSlug)
 		obs, err := observeImplementBranch(record.Root, targetBranch)
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))

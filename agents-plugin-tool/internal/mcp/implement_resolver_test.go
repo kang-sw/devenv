@@ -566,7 +566,7 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
 			wantAction:       "create",
 			wantReason:       "not an implementation branch",
-			wantTargetBranch: "impl/target",
+			wantTargetBranch: "impl/feature/base/target",
 		},
 		{
 			name:       "stop missing merge target on implement branch",
@@ -624,7 +624,7 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
 			wantAction:       "create",
 			wantReason:       "not an implementation branch",
-			wantTargetBranch: "impl/a-very-long-scope-slug-name",
+			wantTargetBranch: "impl/feature/base/a-very-long-scope-slug-name",
 		},
 		{
 			name:             "target branch name trims a trailing dash regardless of length",
@@ -632,7 +632,7 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
 			wantAction:       "create",
 			wantReason:       "not an implementation branch",
-			wantTargetBranch: "impl/abc-defghijklm-nop",
+			wantTargetBranch: "impl/feature/base/abc-defghijklm-nop",
 		},
 	}
 	for _, tc := range cases {
@@ -649,6 +649,72 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveImplementMergeRootEncoding(t *testing.T) {
+	t.Run("fresh create on non-main current branch encodes merge root", func(t *testing.T) {
+		n := normalizedImplementFacts{ScopeSlug: "target"}
+		obs := implementBranchObservation{CurrentBranch: "ws-dashboard-dev", StartCommit: "abc123"}
+		got := deriveImplementBranchPlan(n, obs)
+		if got.Action != "create" {
+			t.Fatalf("action = %q, want create; plan=%+v", got.Action, got)
+		}
+		if got.TargetBranch != "impl/ws-dashboard-dev/target" {
+			t.Fatalf("target branch = %q, want impl/ws-dashboard-dev/target", got.TargetBranch)
+		}
+		if got.MergeTarget != "ws-dashboard-dev" {
+			t.Fatalf("merge target = %q, want ws-dashboard-dev", got.MergeTarget)
+		}
+	})
+
+	t.Run("re-entry on name-rooted branch derives merge root from the branch name", func(t *testing.T) {
+		n := normalizedImplementFacts{ScopeSlug: "target", AllowRename: "no"}
+		obs := implementBranchObservation{CurrentBranch: "impl/ws-dashboard-dev/target", StartCommit: "abc123"}
+		got := deriveImplementBranchPlan(n, obs)
+		if got.Action != "continue" {
+			t.Fatalf("action = %q, want continue; plan=%+v", got.Action, got)
+		}
+		if got.MergeTarget != "ws-dashboard-dev" {
+			t.Fatalf("merge target = %q, want ws-dashboard-dev (derived from branch name)", got.MergeTarget)
+		}
+	})
+
+	t.Run("diverging caller merge_target on a name-rooted branch does not silently win", func(t *testing.T) {
+		n := normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "main", AllowRename: "no"}
+		obs := implementBranchObservation{CurrentBranch: "impl/ws-dashboard-dev/target", StartCommit: "abc123"}
+		got := deriveImplementBranchPlan(n, obs)
+		if got.MergeTarget != "ws-dashboard-dev" {
+			t.Fatalf("merge target = %q, want name-root ws-dashboard-dev (caller value must not silently win)", got.MergeTarget)
+		}
+		wantWarning := `policy.branch.merge_target "main" ignored (implementation branch name encodes merge root "ws-dashboard-dev")`
+		if !containsString(got.Warnings, wantWarning) {
+			t.Fatalf("warnings missing name-root reconcile note: %v", got.Warnings)
+		}
+	})
+
+	t.Run("slashed scope slug sanitizes to a single-segment stem on create", func(t *testing.T) {
+		n := normalizedImplementFacts{ScopeSlug: "feature/evil"}
+		obs := implementBranchObservation{CurrentBranch: "main", StartCommit: "abc123"}
+		got := deriveImplementBranchPlan(n, obs)
+		if got.Action != "create" {
+			t.Fatalf("action = %q, want create; plan=%+v", got.Action, got)
+		}
+		if got.TargetBranch != "impl/main/feature-evil" {
+			t.Fatalf("target branch = %q, want impl/main/feature-evil (no accidental extra /)", got.TargetBranch)
+		}
+	})
+
+	t.Run("merge root ref conflict on create stops with a reason naming the conflict", func(t *testing.T) {
+		n := normalizedImplementFacts{ScopeSlug: "target"}
+		obs := implementBranchObservation{CurrentBranch: "ws-dashboard-dev", StartCommit: "abc123", MergeRootRefConflict: "impl/ws-dashboard-dev"}
+		got := deriveImplementBranchPlan(n, obs)
+		if got.Action != "stop" {
+			t.Fatalf("action = %q, want stop; plan=%+v", got.Action, got)
+		}
+		if !strings.Contains(got.Reason, "impl/ws-dashboard-dev") {
+			t.Fatalf("reason = %q, want it to name the conflicting ref", got.Reason)
+		}
+	})
 }
 
 func TestDeriveImplementBranchPlanMergeConfirmPassthrough(t *testing.T) {
