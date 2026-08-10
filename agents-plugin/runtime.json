@@ -46,6 +46,8 @@
     "mental_models.list": ">=0.39.1-dev <0.40.0",
     "mental_models.find": ">=0.39.1-dev <0.40.0",
     "mental_models.status": ">=0.39.1-dev <0.40.0",
+    "manuals.list": ">=0.39.1-dev <0.40.0",
+    "manuals.find": ">=0.39.1-dev <0.40.0",
     "references.trace": ">=0.39.1-dev <0.40.0",
     "tickets.list": ">=0.39.1-dev <0.40.0",
     "tickets.find": ">=0.39.1-dev <0.40.0",
@@ -111,6 +113,8 @@
     "specs.status": ">=0.39.1-dev <0.40.0",
     "mental-models.find": ">=0.39.1-dev <0.40.0",
     "mental-models.status": ">=0.39.1-dev <0.40.0",
+    "manuals.list": ">=0.39.1-dev <0.40.0",
+    "manuals.find": ">=0.39.1-dev <0.40.0",
     "references.trace": ">=0.39.1-dev <0.40.0"
   }
 }

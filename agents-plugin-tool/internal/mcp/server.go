@@ -1221,6 +1221,27 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatMentalModels(result), err)
+	case "manuals.list":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		result, err := wsdoc.ManualsList(root)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatManuals(result), err)
+	case "manuals.find":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		query, _ := params.Arguments["query"].(string)
+		result, err := wsdoc.ManualsFind(root, query)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatManuals(result), err)
 	case "references.trace":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3130,6 +3151,14 @@ func formatMentalModels(models []wsdoc.MentalModelInfo) string {
 	return b.String()
 }
 
+func formatManuals(manuals []wsdoc.ManualInfo) string {
+	var b strings.Builder
+	for _, manual := range manuals {
+		fmt.Fprintf(&b, "%s - %s\n", manual.Path, displayOrDash(manual.Summary))
+	}
+	return b.String()
+}
+
 func formatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
 	if trace == nil {
 		return ""
@@ -4224,6 +4253,25 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "manuals.list",
+			"description": "List manual documents under ai-docs/manuals with their one-line summaries.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			"name":        "manuals.find",
+			"description": "Find manual documents by query. Defaults to compact text; use format=json for structured metadata.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query":  stringProperty("Optional case-insensitive text query."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+			},
+		},
+		{
 			"name":        "references.trace",
 			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
@@ -4607,7 +4655,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
-		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
+		"mental_models.list", "mental_models.find", "mental_models.status", "manuals.list", "manuals.find", "references.trace",
 		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
