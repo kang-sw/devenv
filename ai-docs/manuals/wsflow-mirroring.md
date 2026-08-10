@@ -1,3 +1,7 @@
+---
+summary: Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors
+---
+
 # wsflow Mirroring
 
 ## Purpose

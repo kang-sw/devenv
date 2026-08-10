@@ -122,7 +122,7 @@ related:
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must reject without a valid `session_key` and direct the caller to `ws.ferrule(root)`.
 - Treating namespace override as a tool rename; wsflow changes user-facing namespace text, while generic MCP tool identifiers stay stable. In playbook text, use explicit `McpNamespace` / `SkillNamespace` render vars for display notation instead of relying on broad string rewriting.
 - Updating `specs.find` or `mental_models.find` MCP output without the CLI mirror; users dogfood the CLI fallback when MCP host behavior is unclear.
-- Treating `ai-docs/ref/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
+- Treating `ai-docs/manuals/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
 - Migrating agent or exec state into SQLite while also moving large stream payloads into the database; that defeats raw tail/read/grep and increases lock pressure.
 - Classifying `*_path` fields as file-backed payloads; the path strings are SQLite metadata indexes even when the bytes at those paths stay file-backed.
 - Treating a missing exec stream file as empty output; status/result/raw readers must surface the recoverable file-backed payload consistency state so prune/tombstone or repair paths can diagnose the artifact.

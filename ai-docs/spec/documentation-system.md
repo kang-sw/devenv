@@ -205,10 +205,10 @@ The manuals-vs-`ref` boundary is a per-file editorial decision made at
 content-migration time, not a schema field: content that benefits from
 ambient, always-surfaced discovery (short, frequently needed procedures)
 belongs under `ai-docs/manuals/`; longer or rarely needed reference material
-stays under `ai-docs/ref/`, reachable only by explicit lookup. Migrating
-existing `ai-docs/ref/`/`ai-docs/_index.md` procedure content into this tier
-is a separate, later phase; this tier ships with zero manuals in this
-repository until that migration lands.
+stays under `ai-docs/ref/`, reachable only by explicit lookup. The initial
+migration of applicable `ai-docs/ref/`/`ai-docs/_index.md` procedure content
+into this tier has landed; further content moves between the two tiers
+follow the same per-file editorial decision as new docs are authored.
 
 ## Mental-Model Update Context Annotation {#260518-mental-model-update-context-annotation}
 

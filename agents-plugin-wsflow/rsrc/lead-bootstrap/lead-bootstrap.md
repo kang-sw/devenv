@@ -89,6 +89,7 @@ Mode: user request
 | Behavior coverage | `{{.SkillNamespace}}:lead-forge-spec` or the lead-write-spec procedure |
 | Modification knowledge | `{{.SkillNamespace}}:lead-forge-mental-model` |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
+| Procedure or how-to content (has a one-line applicability description) | Move to `ai-docs/manuals/` with a `summary:` frontmatter line equal to that description |
 | Project reading map | `{{.SkillNamespace}}:lead-forge-mental-model` or `{{.SkillNamespace}}:lead-discuss` when mixed with status claims |
 | Focus or ticket ordering | the lead-write-ticket procedure |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |

@@ -104,11 +104,11 @@ project_index = re.sub(r"agents-plugin-wsflow/` \(`wsflow@[0-9]+\.[0-9]+\.[0-9]+
 project_index = re.sub(r"create `v[0-9]+\.[0-9]+\.[0-9]+`", f"create `{release_tag}`", project_index)
 write_text("ai-docs/_index.md", project_index)
 
-ws_mcp_ref = read_text("ai-docs/ref/ws-mcp.md")
+ws_mcp_ref = read_text("ai-docs/manuals/ws-mcp.md")
 ws_mcp_ref = re.sub(r"v[0-9]+\.[0-9]+\.[0-9]+", release_tag, ws_mcp_ref)
 ws_mcp_ref = re.sub(r"[0-9]+\.[0-9]+\.[0-9]+-dev", dev_version, ws_mcp_ref)
 ws_mcp_ref = re.sub(r"[0-9]+\.[0-9]+\.x", f"{major}.{minor}.x", ws_mcp_ref)
-write_text("ai-docs/ref/ws-mcp.md", ws_mcp_ref)
+write_text("ai-docs/manuals/ws-mcp.md", ws_mcp_ref)
 
 print(f"ws version set to {version}")
 print(f"release tag: {release_tag}")
