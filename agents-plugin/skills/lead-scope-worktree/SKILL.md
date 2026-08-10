@@ -1,6 +1,6 @@
 ---
 name: lead-scope-worktree
-description: Scope this worktree's ticket board to one work line via git sparse-checkout, hiding out-of-topic ready/todo tickets while idea/ stays visible. Use when the user wants a worktree dedicated to one work line, topic, or ticket subset.
+description: Scope this worktree's ticket board to one work line via git sparse-checkout, hiding out-of-topic ready/todo/idea tickets. Use when the user wants a worktree dedicated to one work line, topic, or ticket subset.
 ---
 
 # Scope Worktree

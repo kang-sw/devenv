@@ -435,6 +435,15 @@ type CommitOptions struct {
 	UpdatedTickets      []string `json:"updated_tickets,omitempty"`
 	UpdatedSpecs        []string `json:"updated_specs,omitempty"`
 	UpdatedMentalModels []string `json:"updated_mental_models,omitempty"`
+	// SparseScopeActive is a caller-computed signal, never a client-supplied
+	// field (json:"-"): true only when the caller has already determined a
+	// sparse-checkout scope is active for root (see wsdoc.SparseCheckoutActive).
+	// It makes stagingCommandsForCommit's `add` staging use `git add --sparse`
+	// so an off-topic capture (e.g. a new idea/ ticket) can be staged and then
+	// self-hide, instead of failing with "did not match any files". The zero
+	// value (false) reproduces today's staging shape byte-for-byte, so every
+	// existing caller and test is unaffected.
+	SparseScopeActive bool `json:"-"`
 }
 
 type CommitResult struct {
@@ -470,7 +479,7 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	}
 	preStatus := ParseStatus(preStatusOut)
 	opts.Paths = expandCommitPathsForTicketMoves(preStatus, opts.Paths)
-	for _, args := range stagingCommandsForCommit(opts.Paths, preStatus) {
+	for _, args := range stagingCommandsForCommit(opts.Paths, preStatus, opts.SparseScopeActive) {
 		if _, err := runner.RunGit(ctx, root, args...); err != nil {
 			return CommitResult{}, err
 		}
@@ -565,7 +574,14 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 	return opts, nil
 }
 
-func stagingCommandsForCommit(paths []string, status StatusResult) [][]string {
+// sparseActive threads the caller-computed SparseScopeActive signal into the
+// `add` command only. The `rm --cached` branch never gets `--sparse`:
+// deletedPathsUnderCommitRoot reads only the pre-staging `git status`, which
+// never reports a tracked, skip-worktree, on-disk-absent, unmodified path at
+// all (skip-worktree suppresses the worktree-vs-index comparison entirely),
+// so that branch can never be asked to stage a merely-hidden path as deleted
+// — `--sparse` would be scope creep there, not a guardrail.
+func stagingCommandsForCommit(paths []string, status StatusResult, sparseActive bool) [][]string {
 	addPaths := []string{}
 	rmPaths := []string{}
 	seen := map[string]bool{}
@@ -587,7 +603,12 @@ func stagingCommandsForCommit(paths []string, status StatusResult) [][]string {
 	}
 	commands := [][]string{}
 	if len(addPaths) > 0 {
-		commands = append(commands, append([]string{"add", "-A", "--"}, addPaths...))
+		addArgs := []string{"add", "-A"}
+		if sparseActive {
+			addArgs = append(addArgs, "--sparse")
+		}
+		addArgs = append(addArgs, "--")
+		commands = append(commands, append(addArgs, addPaths...))
 	}
 	if len(rmPaths) > 0 {
 		commands = append(commands, append([]string{"rm", "--cached", "--ignore-unmatch", "--"}, rmPaths...))

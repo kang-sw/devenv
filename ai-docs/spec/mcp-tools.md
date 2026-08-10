@@ -523,13 +523,15 @@ rsrc.
 When `core.sparseCheckout` is set for the working root, both **fresh with
 root** and **continue** additionally render a sparse-checkout scope
 announcement — a short block naming the hidden ticket count and stems under
-`ai-docs/tickets/ready/` and `ai-docs/tickets/todo/`, pointing to
-`ai-docs/ref/worktree-ticket-scope.md` and the `git sparse-checkout disable`
-restore path — using the same `injectBootstrapStalenessWarning`
-no-op-when-empty injector already used for the bootstrap-staleness and
-doc-coverage warnings. With `core.sparseCheckout` unset, or in **fresh
-without root**, this block does not render and output is unchanged from
-before this addition.
+`ai-docs/tickets/ready/`, `ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/`,
+pointing to `ai-docs/ref/worktree-ticket-scope.md`, the `git sparse-checkout
+disable` restore path, and a `git sparse-checkout list` pointer to the
+worktree's active re-include patterns — using the same
+`injectBootstrapStalenessWarning` no-op-when-empty injector already used for
+the bootstrap-staleness and doc-coverage warnings. With `core.sparseCheckout`
+unset, or in **fresh without root**, this block does not render and output is
+unchanged from before this addition.
+{#260810-scope-announcement-idea-inclusion}
 
 The rendered manual body carries a **Ticket System Concepts** grounding section
 (status-directory meaning, type-prefix categorization, sage-review rationale and
@@ -1533,6 +1535,23 @@ When an explicit commit path names an old root from a rename or a deleted root,
 than passing the missing root to `git add`; requested roots with live changes
 still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
+Under an active worktree sparse-checkout scope, `git.commit` stages its
+additions with `git add -A --sparse --` instead of the plain `git add -A --`
+form, so an explicitly requested path that sits outside the current
+sparse-checkout pattern (for example, a newly captured `idea/` ticket in a
+worktree scoped away from `idea/`) can still be staged and committed; the
+path returns to skip-worktree and disappears from the worktree only on the
+next `git sparse-checkout reapply`, while remaining resolvable from the index
+and other worktrees throughout. Scope activity is detected once per call via
+a cheap filesystem-first gate, so the unscoped path (`core.sparseCheckout`
+unset) is unaffected and stages exactly as before. `--sparse` is added to the
+`add` command only; the `rm --cached --ignore-unmatch` branch used for
+genuine deletions never gains it, since a merely-hidden (skip-worktree,
+on-disk-absent, unmodified) path never appears in the pre-staging `git
+status` this branch reads, so it can never be misrouted into a staged
+deletion. `tickets.create_empty` is unaffected by this change — it still only
+writes the ticket file and never stages or commits.
+{#260810-git-commit-sparse-staging}
 `git.commit` ticket-change summaries conservatively reconstruct an unambiguous
 same-stem ticket status move even when native Git reports the staged change as
 separate add/delete records instead of a rename. Ambiguous add/delete sets remain

@@ -54,6 +54,7 @@ Included:
 - `lead-prefer-subagent`
 - `lead-drain-ready-queue`
 - `lead-goal-fan-out-step`
+- `lead-scope-worktree`
 - `lead-revive` (inline-body exception; see below)
 - `mcp-server-repair` (inline-body exception; see below)
 

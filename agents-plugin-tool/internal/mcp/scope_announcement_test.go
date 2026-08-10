@@ -7,16 +7,19 @@ import (
 )
 
 // enableSparseCheckout turns on core.sparseCheckout with a scope that hides
-// one ready/ and one todo/ ticket while leaving another visible, mirroring
-// the exact command shape ws:lead-scope-worktree derives.
+// one ready/, one todo/, and one idea/ ticket while leaving another visible
+// in each, mirroring the exact command shape ws:lead-scope-worktree derives
+// (#260810 Phase 1: idea/ is scoped uniformly with ready/ and todo/).
 func enableSparseCheckout(t *testing.T, root string) {
 	t.Helper()
 	runGit(t, root, "sparse-checkout", "set", "--no-cone",
 		"/*",
 		"!/ai-docs/tickets/ready/*",
 		"!/ai-docs/tickets/todo/*",
+		"!/ai-docs/tickets/idea/*",
 		"/ai-docs/tickets/ready/kept-*",
 		"/ai-docs/tickets/todo/kept-*",
+		"/ai-docs/tickets/idea/kept-*",
 	)
 }
 
@@ -39,6 +42,7 @@ func TestScopeAnnouncementFiresOnWorkflowManual(t *testing.T) {
 	mustWriteAndCommitTicket(t, root, "ready", "kept-one")
 	mustWriteAndCommitTicket(t, root, "ready", "hidden-one")
 	mustWriteAndCommitTicket(t, root, "todo", "hidden-two")
+	mustWriteAndCommitTicket(t, root, "idea", "hidden-three")
 	enableSparseCheckout(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
@@ -52,11 +56,14 @@ func TestScopeAnnouncementFiresOnWorkflowManual(t *testing.T) {
 	if !strings.Contains(freshResp, "Sparse-checkout scope is active") {
 		t.Fatalf("workflow_manual FRESH-with-root must carry the scope announcement: %s", freshResp)
 	}
-	if !strings.Contains(freshResp, "hidden-one") || !strings.Contains(freshResp, "hidden-two") {
-		t.Fatalf("workflow_manual FRESH-with-root must name the hidden stems: %s", freshResp)
+	if !strings.Contains(freshResp, "hidden-one") || !strings.Contains(freshResp, "hidden-two") || !strings.Contains(freshResp, "hidden-three") {
+		t.Fatalf("workflow_manual FRESH-with-root must name the hidden stems, including a hidden idea/ stem: %s", freshResp)
 	}
 	if !strings.Contains(freshResp, "worktree-ticket-scope.md") {
 		t.Fatalf("workflow_manual FRESH-with-root scope announcement must point to the reference manual: %s", freshResp)
+	}
+	if !strings.Contains(freshResp, "git sparse-checkout list") {
+		t.Fatalf("workflow_manual FRESH-with-root scope announcement must point to `git sparse-checkout list`: %s", freshResp)
 	}
 
 	key, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
@@ -64,8 +71,11 @@ func TestScopeAnnouncementFiresOnWorkflowManual(t *testing.T) {
 	if !strings.Contains(continueResp, "Sparse-checkout scope is active") {
 		t.Fatalf("workflow_manual CONTINUE must carry the scope announcement: %s", continueResp)
 	}
-	if !strings.Contains(continueResp, "hidden-one") || !strings.Contains(continueResp, "hidden-two") {
-		t.Fatalf("workflow_manual CONTINUE must name the hidden stems: %s", continueResp)
+	if !strings.Contains(continueResp, "hidden-one") || !strings.Contains(continueResp, "hidden-two") || !strings.Contains(continueResp, "hidden-three") {
+		t.Fatalf("workflow_manual CONTINUE must name the hidden stems, including a hidden idea/ stem: %s", continueResp)
+	}
+	if !strings.Contains(continueResp, "git sparse-checkout list") {
+		t.Fatalf("workflow_manual CONTINUE scope announcement must point to `git sparse-checkout list`: %s", continueResp)
 	}
 }
 

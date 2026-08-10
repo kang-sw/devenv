@@ -17,7 +17,7 @@ import (
 // A resolution error is treated the same as inactive: a scope-detection
 // failure must not block workflow_manual from rendering its body.
 func scopeAnnouncement(root string) string {
-	info, err := wsdoc.TicketScope(root, []string{"ready", "todo"})
+	info, err := wsdoc.TicketScope(root, []string{"ready", "todo", "idea"})
 	if err != nil || !info.Active {
 		return ""
 	}
@@ -25,13 +25,14 @@ func scopeAnnouncement(root string) string {
 	var sb strings.Builder
 	sb.WriteString("> **Sparse-checkout scope is active.** ")
 	if info.Hidden == 0 {
-		sb.WriteString("ai-docs/tickets/ready/ and ai-docs/tickets/todo/ are scoped, but no ticket is currently hidden.")
+		sb.WriteString("ai-docs/tickets/ready/, ai-docs/tickets/todo/, and ai-docs/tickets/idea/ are scoped, but no ticket is currently hidden.")
 	} else {
 		sb.WriteString(fmt.Sprintf(
-			"%d ticket(s) hidden in ai-docs/tickets/ready/ and ai-docs/tickets/todo/ (stems: %s).",
+			"%d ticket(s) hidden in ai-docs/tickets/ready/, ai-docs/tickets/todo/, and ai-docs/tickets/idea/ (stems: %s).",
 			info.Hidden, strings.Join(info.HiddenStems, ", "),
 		))
 	}
 	sb.WriteString(" See ai-docs/ref/worktree-ticket-scope.md; restore full visibility with `git sparse-checkout disable`.")
+	sb.WriteString(" Run `git sparse-checkout list` to see this worktree's active re-include patterns.")
 	return sb.String()
 }
