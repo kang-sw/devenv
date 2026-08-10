@@ -39,6 +39,79 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 	}
 }
 
+func TestProjectTreeFoldsOrphanIdeaTickets(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo ticket\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260503-epic-demo.md", "---\ntitle: Epic demo\n---\n# Epic demo\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-child-demo.md", "---\ntitle: Child idea\nparent: 260503-epic-demo\nrelated:\n  260503-feat-demo: source\n---\n# Child idea\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-one.md", "---\ntitle: Orphan one\n---\n# Orphan one\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-two.md", "---\ntitle: Orphan two\nrelated:\n  260503-feat-demo: related-only\n---\n# Orphan two\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+
+	for _, want := range []string{
+		"  [ready] 260503-feat-demo",
+		"  [todo] 260503-epic-demo",
+		"  [idea] 260503-child-demo",
+		"      parent: 260503-epic-demo  # Epic demo",
+		"      related: 260503-feat-demo  # source · Demo ticket",
+		"  idea: 2 orphan hidden — tickets.list status=idea to view",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{
+		"[idea] 260503-orphan-one",
+		"[idea] 260503-orphan-two",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("ProjectTree output included folded orphan %q\n%s", forbidden, got)
+		}
+	}
+}
+
+func TestProjectTreeOrphanOnlyIdeaSuppressesNone(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-one.md", "---\ntitle: Orphan one\n---\n# Orphan one\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-orphan-two.md", "---\ntitle: Orphan two\n---\n# Orphan two\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+
+	if !strings.Contains(got, "  idea: 2 orphan hidden — tickets.list status=idea to view") {
+		t.Fatalf("ProjectTree output missing orphan count line\n%s", got)
+	}
+	if strings.Contains(got, "(none)") {
+		t.Fatalf("ProjectTree output unexpectedly included (none) alongside folded orphans\n%s", got)
+	}
+}
+
+func TestProjectTreeNoOrphanIdeaCountLineWhenZero(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260503-child-demo.md", "---\ntitle: Child idea\nparent: 260503-epic-demo\n---\n# Child idea\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+
+	if !strings.Contains(got, "  [idea] 260503-child-demo") {
+		t.Fatalf("ProjectTree output missing parented idea line\n%s", got)
+	}
+	if strings.Contains(got, "orphan hidden") {
+		t.Fatalf("ProjectTree output unexpectedly included orphan count line\n%s", got)
+	}
+}
+
 func TestProjectTreeSkipsGitIgnoredEntries(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init")

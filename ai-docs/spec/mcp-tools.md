@@ -939,7 +939,12 @@ ignored by the repository's Git ignore rules so generated or vendored
 directories do not dominate the readable project context. The spec inventory
 also flags any spec file that still carries a legacy planned marker with the
 same advisory the spec discovery tools emit; the flag is advisory and never
-fails the call.
+fails the call. The ticket inventory renders `ready/` and `todo/` tickets in
+full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
+folds remaining orphan `idea/` tickets — those without `parent:`, regardless
+of `related:` — into a single hidden-count line so the raw idea backlog does
+not dominate the tree, and their full bodies remain reachable via
+`tickets.list(status: "idea")` or `tickets.find`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
