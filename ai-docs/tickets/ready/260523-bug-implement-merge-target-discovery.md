@@ -2,8 +2,8 @@
 title: Implement merge target discovery can select the wrong parent branch
 related:
   260514-epic-ws-web-dashboard-mvp: dashboard dogfood exposed nested implementation branch merge risk
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Implement merge target discovery can select the wrong parent branch
@@ -31,6 +31,11 @@ suggests one of these gaps:
   that survives the handoff.
 
 ## Proposed Direction
+
+> **Superseded** by the `## Confirmed Direction` and `## Resolved Decision` below.
+> This section is the original exploration (a generic merge-target-discovery API)
+> and is retained only for rationale; Phase 1 implements the name-encoding
+> approach, not this API. Do not build the resolver API sketched here.
 
 Treat "merge base hash" and "workflow merge target" as different contracts.
 The runtime already exposes `git.merge_base`, which answers the read-only Git
@@ -74,9 +79,11 @@ and was the source of the observed wrong-parent merges.
   slashed merge-root is safe. A single-segment branch (rootless `impl/<stem>`, or a
   legacy `implement/<stem>` — the resolver still gates both prefixes at
   `implement_resolver.go:577-578,696`) carries no merge-root; how the resolver
-  treats that case is an **Open Decision** below, and is explicitly **not** a
-  silent default to `main`, which would reproduce the wrong-parent incident this
-  ticket exists to fix.
+  treats that case is **settled** (see **Resolved Decision** below): it **stops
+  and asks** for an explicit merge target — the safe gate already implemented at
+  `implement_resolver.go:702-706` — and is explicitly **not** a silent default to
+  `main`, which would reproduce the wrong-parent incident this ticket exists to
+  fix.
 - **Rejected: renaming impl onto the `goal/` namespace directly.** `goal/` was
   cited only as prior art. A literal `goal/<merge-root>/<stem>` rename breaks two
   ways: (1) impl branches are created *inside* goal runs (fan-out workers,
@@ -105,25 +112,26 @@ statements in `spec/mcp-tools.md` and `spec/workflow-skills.md`,
 `mental-model/workflow-skills.md`, and the mirrored skill trees (`agents-plugin/`
 + `agents-plugin-wsflow/`). Ready-ticket-sized, not a quick edit.
 
-## Open Decisions
+## Resolved Decision
 
-Recorded as OPEN — needs a user decision before ready (surfaced by design review,
-resolution: missing):
+**Rootless / legacy fallback contract — settled (2026-08-10): preserve
+stop-and-ask.** For a branch with no merge-root segment (rootless `impl/<stem>`
+on re-entry, or a legacy `implement/<stem>`), the resolver **stops and asks** for
+an explicit merge target, exactly as the current code already does ("merge target
+required while already on an implementation branch", `implement_resolver.go:702-706`).
+It never silently defaults to a target.
 
-- **Rootless / legacy fallback contract.** For a branch with no merge-root segment
-  (rootless `impl/<stem>` on re-entry, or a legacy `implement/<stem>`), the
-  resolver must pick one contract. The current code already **stops and asks**
-  ("merge target required while already on an implementation branch",
-  `implement_resolver.go:702-706`) — a safe gate. The two options:
-  - **(a) Preserve stop-and-ask** (recommended): a rootless/legacy branch with no
-    supplied target stops for explicit confirmation, exactly as today. Keeps the
-    incident from recurring; no silent target.
-  - **(b) Default to `main`**: convenient but reproduces the wrong-parent merge for
-    precisely the branch class that triggered the incident. The reviewer and I
-    judge this unsafe.
-  Until this is chosen, Phase 1's fallback behavior is unspecified. The
-  recommendation is (a); it is recorded here rather than assumed because it is a
-  caller-visible contract decision.
+- **Chosen (a) preserve stop-and-ask.** A rootless/legacy branch with no supplied
+  target stops for explicit confirmation. Keeps the wrong-parent incident from
+  recurring; no silent target. This is a no-behavior-change for the legacy/rootless
+  path — the ticket's new work is purely the `impl/<merge-root>/<stem>` encoding for
+  freshly-created branches.
+- **Rejected (b) default to `main`.** Convenient but reproduces the wrong-parent
+  merge for precisely the branch class that triggered the incident; both the design
+  reviewer and lead judged it unsafe. Rationale for not carrying migration
+  exceptions into the resolver: a rootless/legacy branch is exactly the ambiguous
+  provenance the safe convention exists to catch, and one-off migration cases do not
+  belong hard-coded in the skill rulebook.
 
 ## Spec Impact
 
@@ -132,8 +140,9 @@ The impl branch-name convention is stated in specs; encoding
 
 - **`spec/workflow-skills.md`**: update the `implement` / `lead-implement` branch
   convention to the `impl/<merge-root>/<stem>` shape and the split-on-last-slash
-  parse rule, and document the single-segment legacy `impl/<stem>` fallback to the
-  default target. Caller-visible change: an impl branch's merge target is read
+  parse rule, and document the single-segment rootless/legacy `impl/<stem>`
+  contract: the resolver stops and asks for an explicit merge target, never a
+  silent default. Caller-visible change: an impl branch's merge target is read
   from its name, not inferred from agenda/policy.
 - **`spec/mcp-tools.md`**: update the `implement`-resolver branch-name contract
   (`implementTargetBranchName`, the `impl/`-prefix behavior) so the merge target
@@ -144,7 +153,8 @@ The impl branch-name convention is stated in specs; encoding
 
 ### Phase 1: Encode impl/<merge-root>/<stem> in the resolver, convention, and mirrors
 
-Implement the Confirmed Direction above (fallback contract per Open Decision):
+Implement the Confirmed Direction above (rootless/legacy fallback = stop-and-ask,
+per the Resolved Decision):
 
 - `implementTargetBranchName` builds `impl/<merge-root>/<stem>`. Encoding the root
   makes the name depend on the current branch, so both call sites —
@@ -155,8 +165,27 @@ Implement the Confirmed Direction above (fallback contract per Open Decision):
   **existing branch name** (strip the `impl/` prefix, split on the last `/`:
   everything before is `<merge-root>`, the final segment is `<stem>`), not from the
   current branch; this is the actual bug scenario. A rootless/legacy single-segment
-  branch has no `<merge-root>` — its behavior is the Open Decision, not a silent
-  `main`.
+  branch has no `<merge-root>` — it stops and asks for an explicit merge target
+  (the existing `implement_resolver.go:702-706` gate), never a silent `main`.
+- **Name-root precedence (load-bearing).** On a name-rooted impl branch the
+  name-derived `<merge-root>` is **authoritative**: it supersedes any
+  caller-supplied `merge_target` policy that diverges from it, so the encoding
+  actually fires. Today `deriveImplementBranchPlan` sets
+  `plan.MergeTarget = n.MergeTargetPolicy` unconditionally
+  (`implement_resolver.go:688`) before the stop gate — a naive least-change edit
+  that keeps that line would let a stale caller-supplied `main` override the
+  name's root and reproduce the wrong-parent merge on exactly the branch class
+  that triggered the incident. Required behavior: when the name carries a
+  `<merge-root>`, derive the target from the name; if a caller target diverges from
+  it, reconcile to the name-root or stop-and-ask — never silently honor the
+  divergent caller target. (A caller target is only the sole source for a
+  rootless/legacy branch, which stops-and-asks per the Resolved Decision.)
+- **Preserve the single-segment `<stem>` invariant the parse relies on.** The
+  split-on-last-slash parse is only unambiguous while `<stem>` has no slash.
+  `implementTargetBranchName` (`implement_resolver.go:677-680`) currently only
+  trims a trailing `-`; it must strip or reject slashes in the `ScopeSlug` so a
+  slashed stem can never misattribute part of the stem to `<merge-root>`. Add or
+  confirm this sanitization at name-build time.
 - Keep the `impl/` prefix so autodelete (`impl/*` at `lead-implement.md:96`) and
   the `strings.HasPrefix(branch, "impl/")` gates survive.
 - Detect the git ref D/F conflict on create and warn/stop (see the D/F sub-item —
@@ -172,6 +201,10 @@ Implement the Confirmed Direction above (fallback contract per Open Decision):
 Verification: an impl branch created for a ticket whose merge root is a non-`main`
 branch (e.g. `ws-dashboard-dev`) is named `impl/ws-dashboard-dev/<stem>` and its
 resolver-selected merge target is `ws-dashboard-dev`, not `main`; **re-entering**
-that branch re-derives `ws-dashboard-dev` from the name (not the current branch); a
-rootless/legacy single-segment branch follows the Open Decision's chosen contract
-(no silent `main`); the D/F-conflict path warns/stops and is exercised by a test.
+that branch re-derives `ws-dashboard-dev` from the name (not the current branch);
+re-entering a name-rooted branch with a **divergent** caller-supplied
+`merge_target` (e.g. `main`) does not silently honor it — the name-root wins or the
+resolver stops-and-asks; a rootless/legacy single-segment branch stops and asks for
+an explicit merge target (no silent `main`); a slashed `ScopeSlug` is sanitized so
+`<stem>` stays single-segment; the D/F-conflict path warns/stops and is exercised
+by a test.
