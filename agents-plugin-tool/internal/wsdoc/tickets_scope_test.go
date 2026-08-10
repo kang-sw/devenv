@@ -627,39 +627,47 @@ func TestTicketScopeGateIsInertWithoutSparseCheckout(t *testing.T) {
 	requireGateSpawnsNoGit(t, f.root, "after sparse-checkout disable")
 }
 
-// TestSparseCheckoutActiveMatchesTicketScopeActive pins SparseCheckoutActive
-// (the #260810 lighter gate internal/mcp's git.commit dispatch uses to decide
-// `--sparse` staging) against the same three states TicketScope's Active
-// field already covers: no repository, a plain repository with no
-// sparse-checkout, and an active sparse-checkout scope. The two must never
-// disagree, since SparseCheckoutActive is defined as newTicketScope(root) !=
-// nil — the identical gate TicketScope itself starts from.
-func TestSparseCheckoutActiveMatchesTicketScopeActive(t *testing.T) {
+// TestSparseCheckoutActiveReportsGroundTruthAcrossRepoStates pins
+// SparseCheckoutActive (the #260810 lighter gate internal/mcp's git.commit
+// dispatch uses to decide `--sparse` staging) against a literal expected bool
+// for each of the three states TicketScope's own gate test already
+// distinguishes: no repository, a plain repository with no sparse-checkout,
+// and an active sparse-checkout scope. The primary assertion is against the
+// hand-known expected value, not merely against TicketScope.Active — a
+// same-formula parity check alone could only ever catch a future decoupling
+// edit between the two functions, never a defect in the gate itself, since
+// SparseCheckoutActive and TicketScope both start from the identical
+// newTicketScope(root) != nil gate. The parity check is kept as a secondary
+// assertion, since the two genuinely must never disagree in production.
+func TestSparseCheckoutActiveReportsGroundTruthAcrossRepoStates(t *testing.T) {
 	f := newGraphFixture(t)
 	f.ticket("todo", "260101-feat-a")
 
-	assertMatches := func(label string) {
+	assertActive := func(label string, want bool) {
 		t.Helper()
+		if got := SparseCheckoutActive(f.root); got != want {
+			t.Fatalf("%s: SparseCheckoutActive = %v, want %v", label, got, want)
+		}
 		scope, err := TicketScope(f.root, nil)
 		if err != nil {
 			t.Fatalf("%s: TicketScope returned error: %v", label, err)
 		}
-		if got := SparseCheckoutActive(f.root); got != scope.Active {
-			t.Fatalf("%s: SparseCheckoutActive = %v, want %v (TicketScope.Active)", label, got, scope.Active)
+		if scope.Active != want {
+			t.Fatalf("%s: TicketScope.Active = %v, want %v (parity check)", label, scope.Active, want)
 		}
 	}
 
-	assertMatches("not a git repository")
+	assertActive("not a git repository", false)
 
 	runGit(t, f.root, "init", "-q")
 	runGit(t, f.root, "config", "user.email", "test@example.com")
 	runGit(t, f.root, "config", "user.name", "Test User")
 	runGit(t, f.root, "add", "-A")
 	runGit(t, f.root, "commit", "-q", "-m", "board")
-	assertMatches("git repository without sparse-checkout")
+	assertActive("git repository without sparse-checkout", false)
 
 	runGit(t, f.root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/todo/*")
-	assertMatches("git repository with an active sparse-checkout scope")
+	assertActive("git repository with an active sparse-checkout scope", true)
 }
 
 // requireGateSpawnsNoGit is how the zero-process half of the byte-identical

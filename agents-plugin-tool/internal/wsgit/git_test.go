@@ -553,6 +553,45 @@ func TestStagingCommandsForCommitLeavesRmCachedUnsparsedWhenScopeActive(t *testi
 	}
 }
 
+// TestStagingCommandsForCommitRoutesUnmatchedSparseHiddenPathToAddNotRm pins
+// the ticket's binding, non-negotiable deletion-safety guardrail: `--sparse`
+// staging must never stage a deletion of an absent skip-worktree path. A
+// tracked, skip-worktree, on-disk-absent, unmodified path is exactly the
+// shape that produces NO matching entry in the pre-staging `git status`
+// snapshot (skip-worktree suppresses the worktree-vs-index comparison
+// entirely — verified empirically, git 2.43; see
+// deletedPathsUnderCommitRoot's doc comment). This test asserts that when a
+// caller-named path has no matching ChangedFiles entry at all,
+// stagingCommandsForCommit still routes it through the `add` command — never
+// `rm --cached` — regardless of sparseActive, because deletedPathsUnderCommitRoot
+// can only classify a path as deleted when status actually reports a `D` or
+// rename record for it.
+func TestStagingCommandsForCommitRoutesUnmatchedSparseHiddenPathToAddNotRm(t *testing.T) {
+	// No ChangedFiles at all: an unrelated path's status line is present, but
+	// nothing matches ai-docs/tickets/idea/hidden-existing.md — the shape a
+	// merely-hidden, unmodified tracked path produces.
+	status := ParseStatus([]byte("1 .M N... 100644 100644 100644 aaa bbb src/unrelated.go\n"))
+	path := "ai-docs/tickets/idea/hidden-existing.md"
+
+	got := stagingCommandsForCommit([]string{path}, status, true)
+	want := [][]string{
+		{"add", "-A", "--sparse", "--", path},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging commands = %#v, want %#v — a path with no matching pre-staging status entry must route to `add`, never `rm --cached`", got, want)
+	}
+
+	// Same guardrail must hold when sparseActive is false too — the routing
+	// logic (add vs. rm) is independent of the --sparse flag.
+	got = stagingCommandsForCommit([]string{path}, status, false)
+	want = [][]string{
+		{"add", "-A", "--", path},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging commands (unscoped) = %#v, want %#v", got, want)
+	}
+}
+
 // TestCommitPassesSparseScopeActiveThroughToStagingCommand exercises
 // Client.Commit end-to-end (fake runner) to prove opts.SparseScopeActive
 // reaches the actual `git add` invocation, not just the pure
@@ -1225,7 +1264,7 @@ func TestCommitStagesCapturedIdeaTicketUnderSparseScopeThenSelfHides(t *testing.
 
 	// Seed HEAD with a tracked keep-file so the idea/ directory survives the
 	// upcoming exclude pattern.
-	sparseTestWrite(t, root, "ai-docs/tickets/idea/.gitkeep", "")
+	mustWriteGitTestFixture(t, root, "ai-docs/tickets/idea/.gitkeep", "")
 	sparseTestRunGit(t, root, "add", "ai-docs/tickets/idea/.gitkeep")
 	sparseTestRunGit(t, root, "commit", "-m", "chore: seed idea/ keep-file")
 
@@ -1236,7 +1275,7 @@ func TestCommitStagesCapturedIdeaTicketUnderSparseScopeThenSelfHides(t *testing.
 	)
 
 	ticketPath := "ai-docs/tickets/idea/260810-idea-demo.md"
-	sparseTestWrite(t, root, ticketPath, "# Demo Idea\n")
+	mustWriteGitTestFixture(t, root, ticketPath, "# Demo Idea\n")
 
 	client := Client{Runner: ExecRunner{}}
 	result, err := client.Commit(context.Background(), root, CommitOptions{
@@ -1283,17 +1322,6 @@ func sparseTestInitGit(t *testing.T, root string) {
 	sparseTestRunGit(t, root, "config", "core.autocrlf", "false")
 	sparseTestRunGit(t, root, "config", "user.email", "test@example.com")
 	sparseTestRunGit(t, root, "config", "user.name", "Test User")
-}
-
-func sparseTestWrite(t *testing.T, root, rel, content string) {
-	t.Helper()
-	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func sparseTestRunGit(t *testing.T, root string, args ...string) {
