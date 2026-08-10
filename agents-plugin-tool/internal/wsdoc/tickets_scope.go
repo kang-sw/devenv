@@ -416,6 +416,17 @@ type TicketScopeInfo struct {
 	HiddenStems []string `json:"hidden_stems,omitempty"`
 }
 
+// SparseCheckoutActive reports whether a sparse-checkout scope is active for
+// root, using the same cheapest-first gate as TicketScope but without paying
+// for TicketScope's `git ls-files` index enumeration. Callers that only need
+// a yes/no answer — e.g. internal/mcp's git.commit dispatch, deciding whether
+// to stage additions with `git add --sparse` — should call this instead of
+// TicketScope(root, nil).Active to avoid an unused hidden-count computation on
+// every commit.
+func SparseCheckoutActive(root string) bool {
+	return newTicketScope(root) != nil
+}
+
 // TicketScope counts the tickets under statuses that live in the index but not
 // on disk. statuses is the effective status list (empty means the default open
 // set ready/todo/idea). With core.sparseCheckout unset it returns

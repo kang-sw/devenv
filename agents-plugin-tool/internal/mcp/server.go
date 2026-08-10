@@ -1069,6 +1069,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			"raw_bytes":             aiContextRawBytes,
 			"post_trim_entry_count": aiContextPostTrimCount,
 		})
+		// SparseScopeActive is computed here, not inside wsgit: the
+		// {#260720-wsdoc-commit-boundary} rule forbids wsdoc importing wsgit,
+		// not the reverse, and internal/mcp already imports both — the
+		// established bridge for this shape (mirrors the Verifier injection
+		// above). wsdoc.SparseCheckoutActive is the cheap gate (no index
+		// enumeration), matching #260810's guardrail that the unscoped path
+		// (the common case) pays no extra cost.
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:               stringList(params.Arguments["paths"]),
 			Title:               title,
@@ -1078,6 +1085,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
 			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
 			UpdatedMentalModels: stringList(params.Arguments["updated_mental_models"]),
+			SparseScopeActive:   wsdoc.SparseCheckoutActive(root),
 		})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)

@@ -627,6 +627,41 @@ func TestTicketScopeGateIsInertWithoutSparseCheckout(t *testing.T) {
 	requireGateSpawnsNoGit(t, f.root, "after sparse-checkout disable")
 }
 
+// TestSparseCheckoutActiveMatchesTicketScopeActive pins SparseCheckoutActive
+// (the #260810 lighter gate internal/mcp's git.commit dispatch uses to decide
+// `--sparse` staging) against the same three states TicketScope's Active
+// field already covers: no repository, a plain repository with no
+// sparse-checkout, and an active sparse-checkout scope. The two must never
+// disagree, since SparseCheckoutActive is defined as newTicketScope(root) !=
+// nil — the identical gate TicketScope itself starts from.
+func TestSparseCheckoutActiveMatchesTicketScopeActive(t *testing.T) {
+	f := newGraphFixture(t)
+	f.ticket("todo", "260101-feat-a")
+
+	assertMatches := func(label string) {
+		t.Helper()
+		scope, err := TicketScope(f.root, nil)
+		if err != nil {
+			t.Fatalf("%s: TicketScope returned error: %v", label, err)
+		}
+		if got := SparseCheckoutActive(f.root); got != scope.Active {
+			t.Fatalf("%s: SparseCheckoutActive = %v, want %v (TicketScope.Active)", label, got, scope.Active)
+		}
+	}
+
+	assertMatches("not a git repository")
+
+	runGit(t, f.root, "init", "-q")
+	runGit(t, f.root, "config", "user.email", "test@example.com")
+	runGit(t, f.root, "config", "user.name", "Test User")
+	runGit(t, f.root, "add", "-A")
+	runGit(t, f.root, "commit", "-q", "-m", "board")
+	assertMatches("git repository without sparse-checkout")
+
+	runGit(t, f.root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/todo/*")
+	assertMatches("git repository with an active sparse-checkout scope")
+}
+
 // requireGateSpawnsNoGit is how the zero-process half of the byte-identical
 // constraint is asserted without counting internal calls: PATH is replaced by a
 // shim that records any invocation and fails, so a surviving `git config` spawn
