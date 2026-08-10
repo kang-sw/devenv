@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsnote"
 )
@@ -182,28 +183,52 @@ func TestNoteWorktreeLayerIsolatedAcrossWorktrees(t *testing.T) {
 
 // TestNoteWriteRestampsWrittenAtOnOverwrite verifies the MCP-layer
 // server-side written_at stamping (noteRecordsArg in note_tools.go) actually
-// re-stamps on a full-overwrite write, not just value/priority — the
-// storage-layer wsnote tests exercise Write/Load directly with caller-chosen
-// WrittenAt values and do not cover this handler-level behavior.
+// RECOMPUTES on a full-overwrite write, rather than echoing the prior
+// record's written_at. The storage-layer wsnote tests exercise Write/Load
+// directly with caller-chosen WrittenAt values and do not cover this
+// handler-level behavior.
+//
+// This overrides the package-level noteNow clock to two distinct, controlled
+// instants instead of relying on real wall-clock time: noteRecordsArg stamps
+// at RFC3339 (second) granularity, so two sequential in-process writes almost
+// always land in the same real second — first == second as strings — which
+// would make a stale-echo regression (handler echoes the OLD written_at
+// instead of recomputing) indistinguishable from a correct fresh same-second
+// re-stamp. Injecting two instants a day apart makes the assertion exact and
+// deterministic with no sleep and no flakiness.
 func TestNoteWriteRestampsWrittenAtOnOverwrite(t *testing.T) {
 	setupNoteTestEnv(t)
 	s := NewServer(t.TempDir(), "test")
 	_, key := mintRootKey(t, s, 1)
 
+	firstInstant := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	secondInstant := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	originalNoteNow := noteNow
+	t.Cleanup(func() { noteNow = originalNoteNow })
+
+	noteNow = func() time.Time { return firstInstant }
 	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
 		"layer": "machine",
 		"notes": []any{map[string]any{"key": "restamp.me", "value": "v1", "priority": 1}},
 	})
 	first := searchSingleNoteRecord(t, s, 3, key, "machine", "restamp.me")
+	if first.WrittenAt != firstInstant.Format(time.RFC3339) {
+		t.Fatalf("first written_at = %q, want %q (the injected first instant)", first.WrittenAt, firstInstant.Format(time.RFC3339))
+	}
 
+	noteNow = func() time.Time { return secondInstant }
 	callToolWithKey(t, s, 4, key, "note.write", map[string]any{
 		"layer": "machine",
 		"notes": []any{map[string]any{"key": "restamp.me", "value": "v2", "priority": 1}},
 	})
 	second := searchSingleNoteRecord(t, s, 5, key, "machine", "restamp.me")
 
-	if second.WrittenAt < first.WrittenAt {
-		t.Fatalf("note.write did not re-stamp written_at on overwrite: first=%q second=%q (want second >= first)", first.WrittenAt, second.WrittenAt)
+	if second.WrittenAt != secondInstant.Format(time.RFC3339) {
+		t.Fatalf("note.write did not re-stamp written_at on overwrite: got %q, want the injected second instant %q (a stale echo of the first write's %q would fail this exact check)",
+			second.WrittenAt, secondInstant.Format(time.RFC3339), first.WrittenAt)
+	}
+	if second.WrittenAt == first.WrittenAt {
+		t.Fatalf("first and second written_at unexpectedly equal (%q); the two injected clock instants must differ for this test to be load-bearing", first.WrittenAt)
 	}
 }
 

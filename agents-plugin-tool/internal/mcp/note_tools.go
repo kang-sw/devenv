@@ -63,6 +63,14 @@ func noteLayerArg(toolName string, args map[string]any) (wsnote.Layer, error) {
 	}
 }
 
+// noteNow is the injectable clock noteRecordsArg stamps WrittenAt from. Tests
+// override it to assert exact, controlled instants (e.g. proving a
+// full-overwrite re-stamps rather than echoing the prior value) without
+// depending on real wall-clock gaps at RFC3339's second granularity, which
+// would make a stale-echo regression indistinguishable from a fresh
+// same-second re-stamp. Always restore the original via t.Cleanup.
+var noteNow = func() time.Time { return time.Now().UTC() }
+
 // noteRecordsArg parses the "notes" argument into []wsnote.Record. Each item
 // must be a {"key", "value", "priority"} object (the wire shape is
 // array-of-objects, not positional array-of-tuples — the universal MCP
@@ -73,7 +81,7 @@ func noteRecordsArg(toolName string, args map[string]any) ([]wsnote.Record, erro
 	if !ok {
 		return nil, fmt.Errorf(`%s: notes must be an array of {"key","value","priority"} objects`, toolName)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := noteNow().Format(time.RFC3339)
 	out := make([]wsnote.Record, 0, len(raw))
 	for i, item := range raw {
 		obj, ok := item.(map[string]any)
