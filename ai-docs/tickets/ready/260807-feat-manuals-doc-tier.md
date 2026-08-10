@@ -91,6 +91,43 @@ Verification: a manual added under `ai-docs/manuals/` with a `summary:` appears 
 the next `workflow_manual` call's `# Manuals` block; a manual with no `summary:`
 is reported (not silently dropped); the discovery surface returns the new manual.
 
+### Result (b7ec4e29) - 2026-08-10
+
+Shipped the `ai-docs/manuals/` first-tier doc category and its ambient injection.
+Behavioral delta:
+
+- New `internal/wsdoc/manuals.go`: `ManualInfo{Path, Summary}`, `ManualsList(root)`
+  (flat `ai-docs/manuals/*.md` glob, reuses the existing unexported
+  `wsdoc.frontmatter()` parser — not forked; a missing directory returns
+  `nil, nil`, not an error, so pre-Phase-2 sessions see no scary error) and
+  `ManualsFind(root, query)` (reuses the shared `matchDocumentQuery` helper).
+- New `internal/mcp/manuals_announcement.go`: `computeManuals(root)` modeled on
+  `scopeAnnouncement`, wired into `workflow_manual` on BOTH the fresh-with-root and
+  continue branches. Silent (`""`) when no manuals exist; a manual missing
+  `summary:` is reported with an explicit no-summary marker line, never dropped.
+- `manuals.list` / `manuals.find` MCP tools (dispatch + schema + `formatManuals`),
+  a `manuals list|find` CLI mirror in `cmd/ws-mcp/main.go`, and capability entries
+  in both `runtime.json` files mirroring the `mental_models.*` version bracket
+  exactly (no hand-picked version). No `manuals.status` (the one-line `summary:`
+  schema has no `domain` selector to key one on).
+- Spec: new `## Manuals Document System` (documentation-system.md), `### Manuals
+  Ambient Injection` + `## Manuals Discovery Tools` (mcp-tools.md).
+
+Verification: `go build ./... && go vet ./... && go test ./...` (all 12 packages)
+pass. Tests cover the block on both injection branches, the no-summary report at
+the data / ambient / discovery-tool / CLI layers, empty-and-missing-dir silence,
+and `manuals.find` match + non-match.
+
+Review: partitioned (correctness / fit / test), all clean after one relay cycle —
+the sole Important finding (no-summary case unasserted at the discovery-tool/CLI
+layer) was fixed with test-only additions (`faab5ffb`). A lead doc-pre-pass
+`spec_index.verify` caught three duplicate anchors from backtick-wrapped `{#anchor}`
+inline cross-references the doc pass introduced; rewritten to plain section-name
+references (`b7ec4e29`), index now ok.
+
+Phase 2 (migrating `ref/` + inline `_index.md` procedures into `manuals/` and
+teaching `lead-bootstrap` to route there) remains; ticket stays in `ready/`.
+
 ### Phase 2: bootstrap migration of ref/ and inline _index procedures into manuals/
 
 Move existing operating-procedure content into the new tier and teach the
