@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsnote"
 )
 
 // setupNoteTestEnv isolates WS_CACHE_HOME/WS_CONFIG_HOME per test so note
@@ -24,6 +27,28 @@ func mintRootKey(t *testing.T, s *Server, id int) (root, key string) {
 	initGit(t, root)
 	key, _ = parseLoginResponse(t, callLogin(t, s, id, root, nil))
 	return root, key
+}
+
+// twoWorktreesOfOneRepo creates a git repo with an initial commit at one temp
+// dir, then adds a SECOND LINKED WORKTREE of that same repository (`git
+// worktree add`) at another temp dir, and returns both worktree roots. This
+// is required (not two unrelated repos from mintRootKey) to test worktree-
+// layer isolation at the correct granularity: two worktrees of one repo
+// share a common git dir/ProjectKey but resolve to different WorktreeKeys,
+// so this fixture would catch a bug that keyed the worktree note store off
+// ProjectKey instead of WorktreeKey, whereas two unrelated repos (which
+// already differ at the ProjectKey level) would mask that exact bug.
+func twoWorktreesOfOneRepo(t *testing.T) (mainRoot, linkedRoot string) {
+	t.Helper()
+	mainRoot = t.TempDir()
+	initGit(t, mainRoot)
+	mustWrite(t, mainRoot, "README.md", "# test\n")
+	runGit(t, mainRoot, "add", "README.md")
+	runGit(t, mainRoot, "commit", "-m", "init")
+
+	linkedRoot = filepath.Join(t.TempDir(), "linked")
+	runGit(t, mainRoot, "worktree", "add", "-b", "note-isolation-linked", linkedRoot)
+	return mainRoot, linkedRoot
 }
 
 // TestNoteWriteSearchEraseRoundTripPerLayer verifies the ticket's core
@@ -107,46 +132,99 @@ func TestNoteWriteFullOverwriteUpdatesPriority(t *testing.T) {
 }
 
 // TestNoteWorktreeLayerIsolatedAcrossWorktrees verifies the ticket's
-// cross-worktree isolation requirement: a worktree-layer note written under
-// one root's session key is invisible to note.search under a different
-// root's key, while a machine-layer note written under either key is visible
-// to both.
+// headline cross-worktree isolation requirement AT WORKTREE GRANULARITY: a
+// worktree-layer note written under one linked worktree's session key is
+// invisible to note.search under a DIFFERENT worktree OF THE SAME
+// REPOSITORY's key, while a machine-layer note written under either key is
+// visible to both. Using two unrelated repos here (as an earlier draft did)
+// would already differ at the ProjectKey level and pass even for a bug that
+// keyed the worktree store off ProjectKey instead of WorktreeKey — see
+// twoWorktreesOfOneRepo's doc comment.
 func TestNoteWorktreeLayerIsolatedAcrossWorktrees(t *testing.T) {
 	setupNoteTestEnv(t)
 	s := NewServer(t.TempDir(), "test")
-	_, keyA := mintRootKey(t, s, 1)
-	_, keyB := mintRootKey(t, s, 2)
+	mainRoot, linkedRoot := twoWorktreesOfOneRepo(t)
+	keyMain, _ := parseLoginResponse(t, callLogin(t, s, 1, mainRoot, nil))
+	keyLinked, _ := parseLoginResponse(t, callLogin(t, s, 2, linkedRoot, nil))
 
-	callToolWithKey(t, s, 3, keyA, "note.write", map[string]any{
+	callToolWithKey(t, s, 3, keyMain, "note.write", map[string]any{
 		"layer": "worktree",
-		"notes": []any{map[string]any{"key": "wt.only.a", "value": "root A worktree note", "priority": 1}},
+		"notes": []any{map[string]any{"key": "wt.only.main", "value": "main worktree note", "priority": 1}},
 	})
-	callToolWithKey(t, s, 4, keyA, "note.write", map[string]any{
+	callToolWithKey(t, s, 4, keyMain, "note.write", map[string]any{
 		"layer": "machine",
 		"notes": []any{map[string]any{"key": "machine.shared", "value": "visible everywhere", "priority": 1}},
 	})
 
-	// The worktree note must be visible under root A's own key...
-	searchAWorktree := callToolWithKey(t, s, 5, keyA, "note.search", map[string]any{"layer": "worktree", "glob": "wt.only.a"})
-	if !strings.Contains(searchAWorktree, "wt.only.a") {
-		t.Fatalf("note.search(worktree, root A) missing its own note: %s", searchAWorktree)
+	// The worktree note must be visible under the main worktree's own key...
+	searchMainWorktree := callToolWithKey(t, s, 5, keyMain, "note.search", map[string]any{"layer": "worktree", "glob": "wt.only.main"})
+	if !strings.Contains(searchMainWorktree, "wt.only.main") {
+		t.Fatalf("note.search(worktree, main) missing its own note: %s", searchMainWorktree)
 	}
 
-	// ...but absent under root B's key (different worktree note store).
-	searchBWorktree := callToolWithKey(t, s, 6, keyB, "note.search", map[string]any{"layer": "worktree", "glob": "wt.only.a"})
-	if strings.Contains(searchBWorktree, "wt.only.a") {
-		t.Fatalf("note.search(worktree, root B) leaked root A's worktree note: %s", searchBWorktree)
+	// ...but absent under the linked worktree's key, even though both are the
+	// SAME repository (different worktree note store, same project).
+	searchLinkedWorktree := callToolWithKey(t, s, 6, keyLinked, "note.search", map[string]any{"layer": "worktree", "glob": "wt.only.main"})
+	if strings.Contains(searchLinkedWorktree, "wt.only.main") {
+		t.Fatalf("note.search(worktree, linked worktree of the same repo) leaked the main worktree's note: %s", searchLinkedWorktree)
 	}
 
 	// The machine-layer note is visible under both keys.
-	searchAMachine := callToolWithKey(t, s, 7, keyA, "note.search", map[string]any{"layer": "machine", "glob": "machine.shared"})
-	if !strings.Contains(searchAMachine, "machine.shared") {
-		t.Fatalf("note.search(machine, root A) missing shared machine note: %s", searchAMachine)
+	searchMainMachine := callToolWithKey(t, s, 7, keyMain, "note.search", map[string]any{"layer": "machine", "glob": "machine.shared"})
+	if !strings.Contains(searchMainMachine, "machine.shared") {
+		t.Fatalf("note.search(machine, main) missing shared machine note: %s", searchMainMachine)
 	}
-	searchBMachine := callToolWithKey(t, s, 8, keyB, "note.search", map[string]any{"layer": "machine", "glob": "machine.shared"})
-	if !strings.Contains(searchBMachine, "machine.shared") {
-		t.Fatalf("note.search(machine, root B) missing shared machine note: %s", searchBMachine)
+	searchLinkedMachine := callToolWithKey(t, s, 8, keyLinked, "note.search", map[string]any{"layer": "machine", "glob": "machine.shared"})
+	if !strings.Contains(searchLinkedMachine, "machine.shared") {
+		t.Fatalf("note.search(machine, linked worktree) missing shared machine note: %s", searchLinkedMachine)
 	}
+}
+
+// TestNoteWriteRestampsWrittenAtOnOverwrite verifies the MCP-layer
+// server-side written_at stamping (noteRecordsArg in note_tools.go) actually
+// re-stamps on a full-overwrite write, not just value/priority — the
+// storage-layer wsnote tests exercise Write/Load directly with caller-chosen
+// WrittenAt values and do not cover this handler-level behavior.
+func TestNoteWriteRestampsWrittenAtOnOverwrite(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "restamp.me", "value": "v1", "priority": 1}},
+	})
+	first := searchSingleNoteRecord(t, s, 3, key, "machine", "restamp.me")
+
+	callToolWithKey(t, s, 4, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "restamp.me", "value": "v2", "priority": 1}},
+	})
+	second := searchSingleNoteRecord(t, s, 5, key, "machine", "restamp.me")
+
+	if second.WrittenAt < first.WrittenAt {
+		t.Fatalf("note.write did not re-stamp written_at on overwrite: first=%q second=%q (want second >= first)", first.WrittenAt, second.WrittenAt)
+	}
+}
+
+// searchSingleNoteRecord runs note.search with format:"json" and returns the
+// single matched wsnote.Record, failing the test if the match count is not
+// exactly 1.
+func searchSingleNoteRecord(t *testing.T, s *Server, id int, key, layer, glob string) wsnote.Record {
+	t.Helper()
+	resp := callToolWithKey(t, s, id, key, "note.search", map[string]any{
+		"layer":  layer,
+		"glob":   glob,
+		"format": "json",
+	})
+	var records []wsnote.Record
+	if err := json.Unmarshal([]byte(resp), &records); err != nil {
+		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+	}
+	if len(records) != 1 {
+		t.Fatalf("note.search(%s) = %d records, want exactly 1: %s", glob, len(records), resp)
+	}
+	return records[0]
 }
 
 // TestNoteWriteRejectsInvalidLayer verifies layer validation runs before any
@@ -178,5 +256,23 @@ func TestNoteWriteMachineLayerRequiresKnownSessionKey(t *testing.T) {
 	})
 	if !strings.Contains(resp, "unknown_session") {
 		t.Fatalf("note.write(machine, unknown key) = %s, want unknown_session error", resp)
+	}
+}
+
+// TestNoteWriteMachineLayerRejectsEmptySessionKey covers the OTHER machine-
+// layer rejection path in resolveNoteStorePath: an empty session_key must
+// fail with "session_key is required" before an unknown_session lookup is
+// ever attempted. TestNoteWriteMachineLayerRequiresKnownSessionKey only
+// covers the known-but-unresolvable-key path.
+func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+
+	resp := callToolWithKey(t, s, 1, "", "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "a", "value": "b"}},
+	})
+	if !strings.Contains(resp, "session_key is required") {
+		t.Fatalf("note.write(machine, empty session_key) = %s, want a session_key-required error", resp)
 	}
 }

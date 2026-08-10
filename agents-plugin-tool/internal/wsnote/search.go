@@ -2,35 +2,53 @@ package wsnote
 
 import (
 	"path"
+	"regexp"
 	"sort"
 )
 
+// dateOnlyBound matches a bare "YYYY-MM-DD" date, distinguishing it from a
+// full RFC3339 timestamp for the from/then bound-widening logic below.
+var dateOnlyBound = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
 // Search returns records whose Key matches glob (stdlib path.Match — no new
 // dependency, only key-glob matching is required) and whose WrittenAt falls
-// within [from, then] when those bounds are non-empty. An empty glob matches
-// every key. Bounds accept RFC3339 timestamps or a bare date prefix (e.g.
-// "2026-08-01"); comparison is lexicographic string comparison, which is
-// correct both for RFC3339-vs-RFC3339 and for a shorter date-prefix bound
-// against a full RFC3339 value (a date prefix sorts as a lower/upper bound of
-// every timestamp on that day). Results are sorted by Priority descending,
-// then Key ascending, matching the injection ordering in inject.go.
+// within the inclusive [from, then] range when those bounds are non-empty.
+// An empty or "*" glob matches every key, including keys containing "/"
+// (path.Match's "*" does not cross "/", so it is bypassed entirely for the
+// match-all case rather than relied on to behave like one).
+//
+// Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
+// "2026-08-01"), compared as strings. The two bounds are NOT symmetric under
+// a bare date: a date-only "from" already sorts below every RFC3339 timestamp
+// on that day (e.g. "2026-08-01" < "2026-08-01T00:00:00Z"), so it needs no
+// adjustment as an inclusive lower bound. A date-only "then" does NOT sort
+// above every timestamp on that day — e.g. "2026-08-09T09:00:00Z" >
+// "2026-08-09" is true — so taken literally it would exclude the entire
+// target day from an inclusive upper bound. A bare-date "then" is therefore
+// widened to the last instant of that day before comparison.
 func Search(records map[string]Record, glob string, from, then string) ([]Record, error) {
-	if glob == "" {
-		glob = "*"
+	matchAll := glob == "" || glob == "*"
+
+	thenBound := then
+	if dateOnlyBound.MatchString(then) {
+		thenBound = then + "T23:59:59Z"
 	}
+
 	out := []Record{}
 	for _, rec := range records {
-		matched, err := path.Match(glob, rec.Key)
-		if err != nil {
-			return nil, err
-		}
-		if !matched {
-			continue
+		if !matchAll {
+			matched, err := path.Match(glob, rec.Key)
+			if err != nil {
+				return nil, err
+			}
+			if !matched {
+				continue
+			}
 		}
 		if from != "" && rec.WrittenAt < from {
 			continue
 		}
-		if then != "" && rec.WrittenAt > then {
+		if thenBound != "" && rec.WrittenAt > thenBound {
 			continue
 		}
 		out = append(out, rec)
