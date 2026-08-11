@@ -1,186 +1,246 @@
 ---
-title: Dissolve _index.md — redistribute its content to injected, generated, and always-resident homes
+title: Dissolve _index.md — author the versioned lead-bootstrap dissolution step, validated on devenv
 sage-review-design: completed
 parent: 260807-epic-mechanical-project-memory
 related:
-  260807-feat-note-memory-layers: prerequisite — the volatile sink; _index.md's Session Notes move to the note layers, which must ship first
+  260807-feat-note-memory-layers: prerequisite (landed) — the volatile sink; _index.md's non-tracked session state moves to the note layers
   260810-feat-repo-tracked-note-layer: prerequisite — the tracked `repo` layer, landed home for the git-tracked `# Session Notes` (Resolved Decision chose to keep them tracked)
-  260807-feat-manuals-doc-tier: prerequisite — the procedure sink; _index.md's inlined procedures and Read-Before-Editing table move to manuals/, which must ship first
+  260807-feat-manuals-doc-tier: prerequisite (landed) — the procedure sink; _index.md's inlined procedures and Read-Before-Editing table move to manuals/
   260710-bug-project-index-ticket-focus-stale-status: prerequisite — the derivable->generate leg; Ticket Focus / status content must become generated before it can be removed from _index.md
   260725-idea-retire-ticket-focus-root-regen: prerequisite — retires the _index.md Ticket Focus regen machinery, part of the derivable->generate leg
   260728-research-index-ticket-table-drift: motivates — documents the hand-maintained _index ticket/spec table drift this dissolution removes by generation
 sage-review-completeness: required
 ---
 
-# Dissolve _index.md — redistribute its content to injected, generated, and always-resident homes
+# Dissolve _index.md — author the versioned lead-bootstrap dissolution step, validated on devenv
 
 ## Background
 
 `ai-docs/_index.md` is a hand-edited monolith the workflow expects an agent to
 read at session start. That expectation is behavioral and unreliable — sessions
 routinely run without it in context — which is the founding problem of the
-`260807-epic-mechanical-project-memory` epic. This ticket is the consumer that
-dissolves the file once its content has somewhere mechanical to live.
+`260807-epic-mechanical-project-memory` epic.
 
-This ticket does not build any new delivery mechanism; it **redistributes** the
-existing `_index.md` content into homes the sibling tickets provide, then removes
-the file. It is deliberately last in the epic.
+The deliverable is **not** a one-off edit of devenv's own `_index.md`. Both faces
+of the `_index.md` dependency are template-managed and version-gated inside
+`lead-bootstrap`'s `AGENTS.template.md`:
+
+1. the session-start "read `ai-docs/_index.md`" step (its `## Project Memory`
+   block), stamped into every downstream `AGENTS.md`; and
+2. the fresh-bootstrap scaffold that instructs a *new* project to **create**
+   `_index.md` as its memory store.
+
+So dissolving `_index.md` is a **`lead-bootstrap` change** — downstream-applicable
+to every project that bootstraps — not a local file deletion. devenv's own
+`_index.md` dissolution is the **first validation** of that general instruction,
+not the whole of it.
+
+It plugs into machinery that already exists rather than building new mechanism:
+`AGENTS.template.md` carries an ordered, version-gated migration checklist marked
+by a `<!-- Template Version: vNNNN -->` tag; `lead-bootstrap`'s upgrade handler
+walks checklist items whose version exceeds a project's installed tag; and the
+runtime bootstrap-staleness alarm nudges a stale project to re-bootstrap. The
+dissolution is therefore a **new migration-checklist item plus the template and
+procedure rewrites it implies**, not new version-gating or alarm infrastructure.
+devenv is a real target here: its own `AGENTS.md` tag trails the shipped
+template, so running the upgrade on devenv exercises the genuine downstream path.
 
 ## Blocked on
 
-This ticket cannot land until every destination exists. Its earliest phase waits
-on unlanded work, so it stays in `todo/` (not `ready/`) until:
+This ticket cannot land until every content destination exists.
+
+Satisfied (landed in ws 0.40.0):
 
 - `260807-feat-note-memory-layers` (Phase 1) — the note layers, destination for
-  volatile content.
+  volatile / non-tracked session state.
+- `260807-feat-manuals-doc-tier` — the `manuals/` tier, destination for
+  procedures; the `# Manuals` ambient index replaces the hand-maintained
+  `## Read Before Editing` applicability table.
+
+Still pending — keeps this ticket in `todo/` (not `ready/`):
+
 - `260810-feat-repo-tracked-note-layer` — the tracked `repo` layer, the landed
-  home for the git-tracked `# Session Notes` (per the Resolved Decision). Itself
-  blocked on the note-memory surface.
-- `260807-feat-manuals-doc-tier` — the `manuals/` tier, destination for procedures.
+  home for the git-tracked `# Session Notes` (per the Resolved Decision). Its own
+  prerequisite (the note-memory surface) has landed, so it is unblocked to build.
 - The derivable->generate leg (`260710`, `260725`, and the drift documented in
-  `260728-research-index-ticket-table-drift`) — so the ticket/spec/status tables
-  are generated, not hand-copied, before they are removed from `_index.md`.
+  `260728-research-index-ticket-table-drift`) — so the Ticket Focus / status
+  tables are generated (`project_tree`), not hand-copied, before they are removed
+  from `_index.md`. The ticket/spec inventory tables `project_tree` already emits.
 
 ## Decisions
 
-Dissolution target — each `_index.md` region redistributes to its correct home
-(the epic's `dissolution-target` cross-child decision):
+### Dissolution target — where each `_index.md` region goes
+
+Each `_index.md` region redistributes to its correct home (the epic's
+`dissolution-target` cross-child decision):
 
 - **Volatile content** (Session Notes and any per-session state) -> the **note
-  layers**. Injected, not file-read. The **tracked** `# Session Notes` subset goes
-  specifically to the tracked `repo` layer (`260810-feat-repo-tracked-note-layer`)
-  to preserve cross-clone persistence — see the Resolved Decision; genuinely
-  machine-local or ephemeral state goes to `machine` / `worktree`. The one-time
-  migration of legacy `# Session Notes` is a `lead-bootstrap` step applying
-  qualitative staleness pruning, not an automated move.
+  layers**, injected not file-read. The **tracked** `# Session Notes` subset goes
+  specifically to the tracked `repo` layer (`260810`) to preserve cross-clone
+  persistence — see the Resolved Decision; genuinely machine-local or ephemeral
+  state goes to `machine` / `worktree`.
 - **Every-session orientation** (repo identity, plugin topology, canonical flows,
   and the documentation-system routing that names which doc tier lives where) ->
-  **`AGENTS.md`**, which the harness already auto-injects every session. Only
-  stable, always-resident orientation belongs here; nothing that needs periodic
-  hand-maintenance. (This AGENTS.md documentation-system routing is a *distinct*
-  artifact from the per-document `## Read Before Editing` applicability table in
-  the next bullet — the two must not be conflated or duplicated.)
-- **Procedures** (the inlined operating procedures and the per-document `## Read
-  Before Editing` applicability table) -> **`manuals/`**, ambient-injected via the
-  manuals tier. That hand-maintained applicability table is *replaced* by the
-  generated `# Manuals` ambient index — this is what retires its drift, not a copy.
+  **`AGENTS.md`** body, which the harness auto-injects every session. Only stable,
+  always-resident orientation belongs here; nothing needing periodic
+  hand-maintenance.
+- **Procedures** (inlined operating procedures and the per-document `## Read
+  Before Editing` applicability table) -> **`manuals/`**, ambient-injected. The
+  hand-maintained applicability table is *replaced* by the generated `# Manuals`
+  ambient index, which is what retires its drift.
 - **Derivable tables** (ticket inventory, spec inventory, status/focus) ->
-  **generated** output (`project_tree` and the derivable->generate leg). Nothing
-  hand-maintained that a tool can regenerate. This bucket is **paths only**;
-  description-bearing prose is handled by the next bullet, since `project_tree`
-  emits paths and cannot reproduce hand-written descriptions.
+  **generated** output (`project_tree` and the derivable->generate leg). Paths
+  only; description-bearing prose handled below.
 
-**Description-bearing inventory / notes regions.** `_index.md` also carries prose
-regions the four buckets above do not cleanly claim — `## Runtime Surfaces`,
-`## MCP Runtime Notes`, `## Prompt And Agent Inventory`, `## Skill Inventory`, and
-`## Current Branch Rules`. Reading them shows they are almost entirely **pointer
-prose** (they say where the real content lives) or duplicates of what `AGENTS.md`
-and the specs already carry, so none needs a new generator. Per-region disposition
+**Description-bearing inventory / notes regions** (`## Runtime Surfaces`,
+`## MCP Runtime Notes`, `## Prompt And Agent Inventory`, `## Skill Inventory`,
+`## Current Branch Rules`) are almost entirely pointer prose or duplicates of
+`AGENTS.md`/specs, so none needs a new generator. Per-region disposition
 (exhaustive; no region silently falls to "generated"):
 
 - `## Runtime Surfaces` — pointer prose to `spec/mcp-tools.md` /
   `spec/plugin-runtime.md` plus "schemas are runtime-discoverable, don't copy
-  them." Already covered by `AGENTS.md`'s Documentation-System list; **fold the
-  non-duplicate line ("don't copy runtime-discoverable schemas into docs") into
-  AGENTS.md orientation, drop the rest as duplicate.**
-- `## MCP Runtime Notes` — pointers to the runbook `ref/ws-mcp.md` (already in
-  AGENTS.md) plus concrete Windows launcher startup steps. **The Windows startup
-  steps are an operating procedure -> `manuals/`** (the manuals-vs-ref boundary
-  call, alongside the existing `ref/windows-dogfood.md`); the pointer lines drop as
-  duplicate.
-- `## Prompt And Agent Inventory` and `## Skill Inventory` — pointer prose to
-  `mental-model/prompt-bundle.md`, `agents-plugin/runtime.json`, and the
-  `agents-plugin/skills/` source tree. Source/spec-derivable; **drop as
-  source-derivable, keeping at most a one-line "inventory is discoverable from the
-  source tree and manifest" pointer in AGENTS.md.**
-- `## Current Branch Rules` — the `.codex`-untracked rule is **already in
-  AGENTS.md** (Commit Rules) -> drop as duplicate; the "verify branch with
-  `git status`, don't trust `_index.md`" line is moot once the file is gone; the
-  "no active freeze" line is volatile default state -> drop (a real freeze would be
-  recorded as a note, not a standing heading).
+  them." **Fold the non-duplicate line into AGENTS.md orientation, drop the rest
+  as duplicate.**
+- `## MCP Runtime Notes` — runbook pointer (already in AGENTS.md) plus concrete
+  Windows launcher startup steps. **The startup steps are an operating procedure
+  -> `manuals/`**; the pointer lines drop as duplicate.
+- `## Prompt And Agent Inventory` / `## Skill Inventory` — pointer prose to the
+  prompt-bundle mental model, `runtime.json`, and the `agents-plugin/skills/`
+  tree. **Drop as source-derivable**, keeping at most a one-line "inventory is
+  discoverable from the source tree and manifest" pointer in AGENTS.md.
+- `## Current Branch Rules` — the `.codex`-untracked rule is already in AGENTS.md
+  (Commit Rules) -> drop as duplicate; the "verify branch with `git status`" line
+  is moot once the file is gone; the "no active freeze" line is volatile default
+  state -> drop.
 
-After redistribution, `_index.md` holds nothing requiring a session-start
-behavioral read and is removed; references to it (AGENTS.md project-memory step,
-conventions) are updated to point at the new homes.
+### The template has two faces; fresh and upgrade paths converge
+
+`AGENTS.template.md` both stamps the session-start read step **and** scaffolds
+fresh-project creation of `_index.md`. Dissolution must rewrite **both**:
+
+- **Read step** (`## Project Memory`): point at the new homes (notes / manuals /
+  generated / AGENTS.md), not at reading `_index.md`.
+- **Fresh-bootstrap scaffold**: stop creating `_index.md`; the always-resident
+  orientation is carried in the **AGENTS.md template body itself** (repo identity,
+  project map / plugin topology, canonical flows, doc-system routing).
+
+**Convergence invariant.** A fresh-bootstrapped project and an upgrade-migrated
+project must reach the **same `AGENTS.md` shape**, neither carrying an `_index.md`.
+The fresh scaffold and the upgrade migration item are two routes to one end state.
+
+### Delivery rides the existing version-gate, not new machinery
+
+The dissolution is authored as a **new migration-checklist item** in
+`AGENTS.template.md` (the next `vNNNN`), picked up automatically by
+`lead-bootstrap`'s existing upgrade handler and surfaced by the existing runtime
+staleness alarm. No new version-gating, upgrade-walk, or alarm mechanism is built.
+The item directs the project's lead agent to migrate resident orientation into
+`AGENTS.md`, move Session Notes to the `repo` note layer with qualitative
+staleness pruning, and delete the file (see Resolved Decision).
 
 ## Resolved Decision
 
 **Tracked Session Notes sink — settled (2026-08-10): require the tracked `repo`
-layer.** `_index.md`'s Session Notes are git-tracked, cross-clone shared content
-(commit-hash closeouts, dogfood findings). Demoting them to the non-tracked
-`machine` / `worktree` layers would silently drop that cross-clone persistence, so
-the user chose to keep them tracked.
+layer.** `_index.md`'s Session Notes are git-tracked, cross-clone content
+(commit-hash closeouts, dogfood findings). Demoting them to non-tracked layers
+would silently drop cross-clone persistence, so tracked Session Notes migrate into
+the `repo` layer (`260810`), now a hard prerequisite (see **Blocked on**).
+Rejected: accept non-tracked (closeouts to `git log --grep`) — judged a real loss,
+not acceptable pruning.
 
-- **Chosen (b) require the tracked `repo` layer.** The deferred tracked `repo`
-  note layer is un-deferred and spun up as `260810-feat-repo-tracked-note-layer`,
-  now a **hard prerequisite** of this ticket (see **Blocked on**). Tracked Session
-  Notes migrate into that layer and keep a tracked, cross-clone home.
-- **Rejected (a) accept non-tracked.** Treating Session Notes as volatile (live
-  ones to the non-tracked layers, closeouts to `git log --grep`) was rejected: it
-  demotes previously-shared tracked content to machine-local, which the user judged
-  a real loss rather than acceptable pruning.
-- **Migration is a one-time `lead-bootstrap` step with qualitative staleness
-  pruning, not an automated mechanism.** Moving a legacy project's existing
-  `_index.md` `# Session Notes` into the note tool is a version-gated one-time
-  operation owned by `lead-bootstrap`. Its instruction directs the project's lead
-  agent to read each note and **qualitatively judge staleness** — migrate a live
-  note, drop a stale one instead of carrying it over. There is no staleness
-  threshold, no reconciliation mechanism, and no note-tool feature involved. The
-  always-injected `# Notes` date display in `workflow_manual` (owned by
-  `260807-feat-note-memory-layers`) is a **separate concern** and explicitly not
-  this ticket's staleness answer.
+**Migration is a one-time `lead-bootstrap` step with qualitative staleness
+pruning, not an automated mechanism.** The migration-checklist item directs the
+lead agent to read each note and **qualitatively judge staleness** — migrate a
+live note, drop a stale one. No staleness threshold, no reconciliation mechanism,
+no note-tool feature. The always-injected `# Notes` date display (owned by
+`260807-feat-note-memory-layers`) is a separate concern, not this step's staleness
+answer.
 
 ## Spec Impact
 
-Recorded now because deleting `_index.md` contradicts a live spec entry, even
-though this ticket lands at `idea/` (spec addressing is only gated at `ready/`):
+Recorded now because deleting `_index.md` and re-guiding the template contradict
+live spec entries, even though this ticket lands at `todo/` (spec addressing is
+gated at `ready/`):
 
 - **`spec/documentation-system.md`** `## Project Memory Index
   {#260505-project-memory-index}` currently declares `ai-docs/_index.md` "the
-  project memory and active inventory document." This ticket must rewrite that
-  entry to describe the dissolved model (injected notes + `manuals/` + AGENTS.md
-  orientation + generated inventory) rather than a single canonical file, and
-  reconcile its spec/ticket-inventory expectations to the generated tables. The
-  sibling `260807-feat-manuals-doc-tier` also amends this spec (a different
-  section — the new `manuals/` tier); the two edits are additive.
+  project memory and active inventory document." Rewrite it to describe the
+  dissolved model (injected notes + `manuals/` + AGENTS.md orientation + generated
+  inventory) and the un-migrated coexistence state as a supported transitional
+  configuration. The sibling `260807-feat-manuals-doc-tier` amends a different
+  section of this spec; the edits are additive.
+- **`spec/workflow-skills.md`** bootstrap section currently documents
+  `lead-bootstrap`'s `_index.md` health-check as advisory-only and names no
+  dissolution / note / manuals wiring beyond the landed manuals routing row.
+  Amend it to describe the versioned dissolution migration item, the rewritten
+  fresh-bootstrap scaffold (no `_index.md` creation), and the fresh/upgrade
+  convergence invariant.
+- **`AGENTS.template.md`** is the template surface both edits above manifest in
+  (read step, fresh scaffold, and the new migration-checklist item); it is a
+  shipped downstream-affecting artifact, so its rewrite is the caller-visible
+  behavior these spec entries must cover.
 
 ## Phases
 
-### Phase 1: Redistribute each region and remove _index.md
+### Phase 1: Author the versioned lead-bootstrap dissolution step, validated on devenv
 
-For each `_index.md` region, move its content to the home named in Decisions,
-updating every pointer that currently sends a reader to `_index.md`
-(notably the `AGENTS.md` "Project Memory" step and the documentation conventions),
-then delete the file.
+The active, downstream-applicable path. Author the dissolution as a
+`lead-bootstrap` change and prove it by running it on devenv itself.
 
-- Volatile -> note layers; orientation -> `AGENTS.md`; procedures -> `manuals/`;
-  derivable tables -> generated; description-bearing inventory/notes regions per
-  their explicit per-region disposition in Decisions (no `_index.md` heading is
-  left unclassified or silently dropped as "generated").
-- Update `AGENTS.md`'s session-start reading protocol so it no longer instructs
-  reading `_index.md`; it points at the injected/generated/always-resident homes.
-- Reconcile the documentation-system convention text that currently names
-  `_index.md` as "project memory and focus."
-- Rewrite `spec/documentation-system.md` §`{#260505-project-memory-index}` so no
-  live spec entry declares the deleted `_index.md` canonical (see Spec Impact).
-- Migrate this repo's own tracked `# Session Notes` into the `repo` note layer,
-  applying qualitative staleness pruning (drop stale closeouts rather than
-  carrying them over). Generalizing this into a version-gated one-time
-  `lead-bootstrap` migration step for downstream projects is a coupling to
-  `lead-bootstrap` — a shared-skill/template change (downstream-affecting), so it
-  is recorded here and taken up under `lead-bootstrap`'s own approval, not silently
-  bundled into this dissolution.
+- Add a new migration-checklist item (next `vNNNN`) to `AGENTS.template.md`: for
+  an upgrading project, migrate `_index.md`'s resident orientation into its
+  `AGENTS.md`, move `# Session Notes` -> `repo` note layer (qualitative pruning),
+  procedures -> `manuals/`, derivable tables -> generated, remove the
+  read-`_index.md` step, and delete the file.
+- Rewrite `AGENTS.template.md`'s two faces: the `## Project Memory` read step
+  points at the new homes; the fresh-bootstrap scaffold no longer creates
+  `_index.md`, and the always-resident orientation is carried in the `AGENTS.md`
+  template body.
+- Update `lead-bootstrap.md`: `On: fresh` no longer creates `_index.md`; the
+  index-health-check routing reflects the dissolved model.
+- Apply every template and procedure edit to **both** shipped `lead-bootstrap`
+  copies — `agents-plugin/` and `agents-plugin-wsflow/` (`AGENTS.template.md` and
+  `lead-bootstrap.md` are dual-maintained mirrors). Editing one copy alone leaves
+  wsflow-bootstrapped projects still reading `_index.md` and diverges the two
+  distributions.
+- Reconcile specs per **Spec Impact** (`documentation-system.md`,
+  `workflow-skills.md`).
+- Hold the **convergence invariant**: fresh-bootstrap and upgrade-migration reach
+  the same `AGENTS.md` shape, neither with an `_index.md`.
+- Validate on devenv: run the upgrade item against this repo — its `_index.md`
+  dissolves, its `AGENTS.md` absorbs the resident orientation, its tracked
+  `# Session Notes` migrate into the `repo` layer with the stale closeout pruned.
 
-Verification: `ai-docs/_index.md` is gone; no shipped skill, playbook, convention,
-`AGENTS.md` step, or spec entry instructs reading it or declares it canonical
-(specifically `{#260505-project-memory-index}` describes the dissolved model);
-each former region is reachable through its new home (a note layer, `manuals/`,
-`AGENTS.md`, or a generated table) — including every description-bearing region
-(`Runtime Surfaces`, `MCP Runtime Notes`, `Prompt And Agent Inventory`, `Skill
-Inventory`, `Current Branch Rules`) resolving to its stated disposition rather than
-vanishing; a fresh session started with no manual file reads still receives the
-repo orientation it previously depended on `_index.md` for.
+Verification: `ai-docs/_index.md` is gone from devenv; the template neither
+creates nor reads `_index.md` on either the fresh or the upgrade path; no shipped
+skill, playbook, convention, `AGENTS.md` step, or spec entry instructs reading it
+or declares it canonical (`{#260505-project-memory-index}` describes the dissolved
+model); a fresh session started with no manual file reads still receives the repo
+orientation it previously depended on `_index.md` for. Gated on all **Blocked on**
+prerequisites landing.
 
-This phase is one reviewable slice but is gated on all three prerequisite legs
-landing; do not begin redistribution of a region whose destination is not yet
-shipped.
+### Phase 2: Un-migrated-downstream coexistence contract
+
+The passive path for a project on the new runtime that keeps a live `_index.md`
+and has not re-bootstrapped. This state must degrade gracefully, and the
+version-gate architecture already supplies the mechanism — so this phase is
+largely verification and spec, adding a guard only if a real hard-dependency
+surfaces.
+
+- Verify graceful coexistence: a pre-migration `AGENTS.md` still reads
+  `_index.md`; the file remains; the new ambient injections (`# Notes`,
+  `# Manuals`) and generated tables coexist **additively** (transitional
+  duplication is acceptable, not a conflict); the index-health-check runs only
+  when `_index.md` exists and skips cleanly when it is absent; the staleness alarm
+  nudges the new migration item.
+- Confirm nothing in the runtime or bootstrap flow hard-depends on `_index.md`
+  presence or absence; add a guard only where a real dependency is found.
+- Document the transitional coexistence as a supported configuration in spec
+  (`documentation-system.md` / `workflow-skills.md`).
+
+Verification: with a live `_index.md` and an old template version, session start
+succeeds and injections render additively with no tool erroring on `_index.md`
+being present; with a migrated project (no `_index.md`), the health-check and any
+`_index.md` reader skip cleanly. Phase 2 secures the passive path around the active
+migration Phase 1 authors.

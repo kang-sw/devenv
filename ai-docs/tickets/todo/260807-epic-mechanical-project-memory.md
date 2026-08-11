@@ -65,13 +65,17 @@ independently.
   with a git-tracked, one-key-per-file layer under `ai-docs/ws-notes/`; the landed
   home for `_index.md`'s tracked `# Session Notes`. Blocked on the note-memory
   surface (its Phase 1). Design-reviewed at `idea/` scope only.
-- `260807-refactor-dissolve-project-index` (`todo/`) - the consumer that dissolves
-  the file. Depends on note-memory (volatile sink), the new `repo` layer (tracked
-  Session Notes home), the `manuals` tier (procedure sink), and the
-  derivable->generate leg (`260710` / `260725` / `260728`). Tracked-notes-sink fork
-  **resolved** (2026-08-10, chose the tracked `repo` layer); promoted `idea/` ->
-  `todo/` after design sage review. Stays `todo/` (not `ready/`) until every
-  prerequisite lands; completeness review runs at the eventual ready promotion.
+- `260807-refactor-dissolve-project-index` (`todo/`) - authors the **versioned
+  `lead-bootstrap` dissolution step** (a new `AGENTS.template.md` migration item
+  plus the template's two-face rewrite), downstream-applicable and **validated by
+  running it on devenv**; also owns the un-migrated-downstream coexistence
+  contract. Depends on the tracked `repo` layer (tracked Session Notes home) and
+  the derivable->generate leg (`260710` / `260725` / `260728`); note-memory and the
+  `manuals` tier have landed. Tracked-notes-sink fork **resolved** (2026-08-10,
+  chose the tracked `repo` layer). **Reframed 2026-08-11** from a devenv-local file
+  edit to the downstream `lead-bootstrap` instruction; design sage review re-runs.
+  Stays `todo/` (not `ready/`) until every prerequisite lands; completeness review
+  runs at the eventual ready promotion.
 
 Both children's previously-open user decisions are now **resolved** (2026-08-10):
 `260807-refactor-dissolve-project-index`'s tracked-notes sink chose the tracked
@@ -105,7 +109,10 @@ impl-branch fallback chose preserve-stop-and-ask; the latter is now at `ready/`.
   -> AGENTS.md; procedures -> `manuals/`; derivable tables (ticket/spec) ->
   generated (`project_tree`). AGENTS.md keeps only stable always-resident
   orientation; the previously hand-maintained routing table is replaced by the
-  generated `manuals` ambient index, which is what retires its drift.
+  generated `manuals` ambient index, which is what retires its drift. Delivery is
+  a versioned `lead-bootstrap` migration item plus a fresh-scaffold rewrite that
+  converge on one `AGENTS.md` shape (no `_index.md` on either the fresh or the
+  upgrade path); see `260807-refactor-dissolve-project-index`.
 
 ## Completion Criteria
 
