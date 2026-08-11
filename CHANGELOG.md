@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.40.0 - 2026-08-11
+
+### Added
+- **Note-memory layers (`note.write` / `note.erase` / `note.search`).** A new
+  MCP tool family backing non-tracked, per-machine and per-worktree note memory.
+  Notes are key-addressed, overwrite-on-write, and ambiently injected into the
+  workflow manual under a `# Notes` section; `note.search` supports glob key
+  patterns and inclusive `from`/`then` date bounds. This gives a worktree a
+  stable scratch memory that survives session churn without riding the git
+  index, and closes the worktree-local-index gap.
+- **`manuals/` documentation tier.** A dedicated procedure-manual tier with MCP
+  discovery and ambient `# Manuals` injection into the workflow manual, distinct
+  from static `ref/`. Six live procedure references were migrated `ref/ ->
+  manuals/`, and `lead-bootstrap` routes procedure findings into it.
+- **Idea-ticket attention policy.** `idea/` tickets are brought into a scoped
+  worktree's topic view via add-only sparse staging, and `project_tree` folds
+  orphan `idea/` tickets into a single hidden-count line while rendering
+  parented epic-children and all `ready/`/`todo/` in full. Full idea bodies stay
+  reachable via `tickets.list(status:"idea")`.
+
+### Changed
+- **Implement branches encode their merge base.** The implement-branch resolver
+  now names branches `impl/<merge-root>/<stem>`, mirroring the goal-branch
+  convention so an impl branch declares the base it merges into and merge-target
+  discovery is unambiguous.
+
+### Fixed
+- **Statusline resolves `jq` explicitly** instead of relying on `PATH`, so it no
+  longer breaks under a stripped environment.
+- **Skills manifest drift** for `lead-scope-worktree` regenerated; the
+  skills-manifest is a third regen surface that had gone stale.
+- **`note.search` date bound** `then` is now inclusive of the whole day, and the
+  `written_at` re-stamp path is covered via an injectable clock.
+
 ## v0.39.0 - 2026-08-07
 
 ### Added
