@@ -377,3 +377,24 @@ defect is commit granularity, not the call). Retired: the invocation-mode
 variable and the callee-side ownership rule. The survey re-run over
 `agents-plugin/rsrc/**/*.md` is still required (see Phase 2) — the preserved
 2026-07-27 survey overstates the opt-in set by one site.
+
+## Downgraded ready -> todo (2026-08-11)
+
+Owner-decided in-session, not dropped. After the reframe, working through the
+squash mechanism reduced this ticket's benefit to a single thing: **revert
+atomicity** (one commit = one reversible unit; and, only when the split spec
+commit omits the ticket stem, `git log --grep` completeness) for the one rare
+surviving call site (`lead-discuss.md:62`, the ticket-Drop branch). The message
+content is byte-identical whether split or squashed, so message preservation is a
+constraint on the fix, not a benefit of it — nothing else is gained.
+
+Given low severity, low frequency, and no independent reuse for a
+`git.commit squash_from` primitive (implement-merge owns its own squash), a
+`ready/` slot is not justified. The owner also holds that doc-commit
+proliferation (thousands accumulating) is acceptable rather than a problem to
+engineer around, which further lowers urgency; residual uncertainty about the
+squash mechanism itself points the same way.
+
+Not dropped: the design is captured and sound, and Phase 2 is a small,
+mechanical, message-preserving `squash_from` when picked up. Revisit if the
+split-commit granularity on the drop path ever becomes a felt pain.
