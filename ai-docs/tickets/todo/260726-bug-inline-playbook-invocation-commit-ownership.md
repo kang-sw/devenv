@@ -38,6 +38,10 @@ caller's side, where the callee never reads it.
 
 ## Decisions
 
+> Superseded 2026-08-11 by `## Reframe` below (owner-settled in-session).
+> Retained as the rejected ownership-transfer approach; do not implement from
+> this section.
+
 - **Commit ownership belongs to the outermost invocation.** A playbook invoked
   inline returns its changed paths to the caller and does not commit; the caller
   stages them together with its own edits.
@@ -85,18 +89,26 @@ caller's side, where the callee never reads it.
 
 ## Spec Impact
 
+> Revised 2026-08-11 for the caller-local squash approach (see `## Reframe`).
+
 - Target spec area: `ai-docs/spec/workflow-skills.md` — the playbook invocation
-  and commit-ownership contract.
-- Expected caller-visible change: an inline-invoked playbook reports changed
-  paths instead of committing, so one logical unit of work produces one commit.
-  Direct invocation is unaffected.
-- Contract-first spec: no. The behavioral rule is stated here; how invocation
-  mode is conveyed (parameter, caller-set context, or shared guidance the callee
-  reads) settles during implementation.
+  and doc-commit granularity contract.
+- Expected caller-visible change: a spawning playbook that treats an inline
+  invocation as part of its own logical unit squashes the callee's intervening
+  commit(s) into its own doc-commit (soft-reset to a captured base, then a single
+  `git.commit`), distinct from the implement-merge squash. Callee commit behavior
+  and direct invocation are both unchanged.
+- Contract-first spec: no. The behavioral rule is stated here; the squash
+  mechanism (a `git.commit` option vs. a small helper) settles during
+  implementation.
 
 ## Phases
 
-### Phase 1: Transfer commit ownership to the outermost invocation
+### Phase 1: Transfer commit ownership to the outermost invocation [dropped]
+
+> Dropped 2026-08-11 — the ownership-transfer approach is superseded by the
+> caller-local squash in `## Reframe`. Plan text below is retained as the
+> rejected approach; implement from Phase 2.
 
 - **Survey, with a stated boundary.** Corpus: `agents-plugin/rsrc/**/*.md`.
   "Invoked inline" means a playbook that calls `playbook.print` on another
@@ -141,7 +153,64 @@ Verification boundary:
 4. The survey result and its corpus are recorded in `### Result`.
 5. `lead-write-spec`'s own text states the ownership rule.
 
-## Blocked (2026-07-27)
+### Phase 2: Squash inline-callee doc commits at the spawning call site
+
+Supersedes Phase 1. Callee commit behavior is unchanged; the fix lives entirely
+in spawning playbooks that treat an inline invocation as part of their own
+logical unit.
+
+- **Re-run the survey, with the same boundary.** Corpus:
+  `agents-plugin/rsrc/**/*.md`. "Invoked inline" means a playbook that calls
+  `playbook.print` on another playbook and *continues its own procedure*
+  afterward. Enumerate the opt-in call sites — those where the caller intends the
+  inline invocation as part of one logical unit (the former Category A). Record
+  the result in this phase's `### Result`. Do not reuse the preserved 2026-07-27
+  survey output: it overstates the opt-in set by one site
+  (`lead-write-ticket.md:106`, removed by the marker-mechanism retirement);
+  `lead-discuss.md:62` (the ticket-Drop branch) is the known surviving instance.
+- **Add the squash mechanism.** A spawning playbook captures the base commit
+  before the inline invocation (`git rev-parse HEAD`) and, after the callee
+  returns having committed, folds the callee's intervening commit(s) into its own
+  doc-commit via soft-reset to that base + a single
+  `{{.McpNamespace}}/git.commit`. Soft-reset (not rebase or amend) so the
+  combined change re-enters the `git.commit` validation gate established by
+  `260723-feat-ticket-write-verify-commit-gate`. The base SHA must be threaded
+  explicitly — shell state does not persist between tool calls (AGENTS.md
+  invariant). Prefer a `git.commit` option (e.g. a `squash_from: <sha>` parameter
+  that soft-resets to `<sha>` before committing) or a small helper over
+  hand-rolled `git reset` prose in the playbook.
+- **Opt-in per call site.** Only spawning playbooks that assert the inline
+  invocation is part of their own unit adopt the squash. Category B
+  (callee-commit is the caller's intent: `lead-implement.md:76` -> `lead-update-spec`,
+  `lead-forge-spec.md:262` -> `lead-forge-mental-model`) does not adopt it and is
+  left unchanged. Nothing is stated callee-side; no invocation-mode variable is
+  introduced.
+- Regenerate both rsrc artifacts if any `agents-plugin/rsrc/**/*.md` changed
+  (`WSRSRC_REGEN=1`, `WS_REGEN_WSFLOW_RSRC=1`).
+
+Fail-safe posture (explicit trade-off): if a spawning caller omits the squash,
+the result is today's two-commit granularity — both commits valid and
+individually revertable — not a hard error or a dropped commit. This is a
+strictly better failure floor than the retired invocation-mode variable, which
+`internal/wsrsrc/loader.go`'s `ErrUnprovidedVar` would have turned into a
+hard-fail of every context-less invocation. The Phase-1 constraint "no parameter
+without a fail-safe fallback" is met differently: there is no callee parameter at
+all, and a caller-side omission degrades to the benign floor.
+
+Verification boundary:
+
+1. A spawning playbook that adopts the squash (e.g. `lead-discuss`'s ticket-Drop
+   branch) produces exactly one commit for its logical unit, containing both the
+   callee's changes and the caller's own — no path dropped.
+2. The combined commit passes through the `git.commit` validation gate (the
+   squash is soft-reset + re-commit, not a gate-bypassing history edit).
+3. Callee playbooks are byte-unchanged; a direct invocation of any callee still
+   commits exactly as today.
+4. Category B call sites are unchanged and still produce their intended separate
+   commits.
+5. The re-run survey result and its corpus are recorded in `### Result`.
+
+## Blocked (2026-07-27) — RESOLVED 2026-08-11 (superseded by `## Reframe`)
 
 **Phase 1's own stop condition fired on its first step.** The survey ran over the
 stated corpus (`agents-plugin/rsrc/**/*.md`, 46 files, 15 `playbook.print`
@@ -273,3 +342,59 @@ ownership is a property of the call site or of the callee) is a real design
 question that outlives the retirement, and the preserved Phase 1 survey output
 still needs re-running for the reason already stated above. But the re-plan should
 not open by re-deriving a conflict that no longer exists.
+
+## Reframe (2026-08-11): caller-local squash supersedes ownership-transfer
+
+Settled with the owner in-session. Supersedes `## Decisions` and clears both
+blockers recorded in `## Blocked (2026-07-27)`. Implement from Phase 2, not
+Phase 1.
+
+The original fix rewrote the commit-ownership contract: an inline-invoked callee
+would stop committing, return its changed paths, and let the caller stage them.
+That had a wide blast radius (every inline callee's commit behavior) and hit two
+blockers — a callee-side rule cannot express per-caller intent (blocker 1), and
+the "unset variable = direct mode" fail-safe does not exist because
+`ErrUnprovidedVar` hard-fails an unset declared variable (blocker 2).
+
+New approach: leave *who commits* untouched. The callee commits as today. A
+spawning playbook that treats an inline invocation as part of its own logical
+unit squashes the callee's intervening commit(s) into its own doc-commit —
+soft-reset to a captured base, then a single `git.commit` — separate from the
+implement-merge squash. Why this is better:
+
+- **Blocker 1 (call-site vs callee) resolved as call-site.** Granularity is
+  decided by the spawning caller, which is exactly where a squash policy lives.
+  Different callers differ freely; Category B simply does not squash. The
+  2026-07-28 Category C dissolution already removed the only
+  same-callee-opposite-behavior case, so nothing forces a callee-side rule.
+- **Blocker 2 (fail-safe variable) moot.** No variable is passed to the callee,
+  so `ErrUnprovidedVar` never enters.
+- **Failure floor flips favorably.** A forgotten squash degrades to today's two
+  valid commits, never a hard-fail or a dropped commit.
+
+Preserved from the original `## Constraints`: the inline invocation is kept (the
+defect is commit granularity, not the call). Retired: the invocation-mode
+variable and the callee-side ownership rule. The survey re-run over
+`agents-plugin/rsrc/**/*.md` is still required (see Phase 2) — the preserved
+2026-07-27 survey overstates the opt-in set by one site.
+
+## Downgraded ready -> todo (2026-08-11)
+
+Owner-decided in-session, not dropped. After the reframe, working through the
+squash mechanism reduced this ticket's benefit to a single thing: **revert
+atomicity** (one commit = one reversible unit; and, only when the split spec
+commit omits the ticket stem, `git log --grep` completeness) for the one rare
+surviving call site (`lead-discuss.md:62`, the ticket-Drop branch). The message
+content is byte-identical whether split or squashed, so message preservation is a
+constraint on the fix, not a benefit of it — nothing else is gained.
+
+Given low severity, low frequency, and no independent reuse for a
+`git.commit squash_from` primitive (implement-merge owns its own squash), a
+`ready/` slot is not justified. The owner also holds that doc-commit
+proliferation (thousands accumulating) is acceptable rather than a problem to
+engineer around, which further lowers urgency; residual uncertainty about the
+squash mechanism itself points the same way.
+
+Not dropped: the design is captured and sound, and Phase 2 is a small,
+mechanical, message-preserving `squash_from` when picked up. Revisit if the
+split-commit granularity on the drop path ever becomes a felt pain.

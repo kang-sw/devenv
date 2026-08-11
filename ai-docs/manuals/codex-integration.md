@@ -1,3 +1,7 @@
+---
+summary: Probed Codex CLI behavior
+---
+
 # Codex CLI Integration Reference
 
 Probed 2026-04-27 against `codex exec` on WSL2/Linux.
@@ -33,7 +37,7 @@ Iterative local plugin testing uses UI uninstall/install or a fresh Codex sessio
 after editing the registered local source. Verified after UI uninstall/install:
 `$ws:lead-write-ticket` and `$ws:lead-discuss` are visible. The probe also
 covered `$ws:lead-skill-authoring` until 2026-07-28, when that skill was
-relocated out of the plugin surface to `ai-docs/ref/skill-authoring.md`.
+relocated out of the plugin surface to `ai-docs/manuals/skill-authoring.md`.
 
 Skill invocation is namespaced as `$<plugin-name>:<skill-name>`; for this repo's
 candidate plugin the form is `$ws:<skill-name>`.
@@ -98,7 +102,7 @@ the installed plugin cache.
 
 For the `ws` plugin candidate's MCP behavior contracts, see
 `ai-docs/spec/mcp-tools.md` and `ai-docs/spec/plugin-runtime.md`. For launcher
-and verification runbook steps, see `ai-docs/ref/ws-mcp.md`.
+and verification runbook steps, see `ai-docs/manuals/ws-mcp.md`.
 
 ## Invocation
 

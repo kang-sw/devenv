@@ -11,7 +11,7 @@ import (
 // substitutionMirroredSkills is the curated, bounded list of skills eligible
 // for substitution-mirrored generation: only skills explicitly and
 // deliberately migrated out of playbook.print. This is not a blanket
-// auto-mirror mechanism — see ai-docs/ref/wsflow-mirroring.md.
+// auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md.
 var substitutionMirroredSkills = []string{
 	"lead-drain-ready-queue",
 	"lead-prefer-subagent",

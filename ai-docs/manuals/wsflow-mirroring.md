@@ -1,3 +1,7 @@
+---
+summary: Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors
+---
+
 # wsflow Mirroring
 
 ## Purpose
@@ -50,6 +54,7 @@ Included:
 - `lead-prefer-subagent`
 - `lead-drain-ready-queue`
 - `lead-goal-fan-out-step`
+- `lead-scope-worktree`
 - `lead-revive` (inline-body exception; see below)
 - `mcp-server-repair` (inline-body exception; see below)
 

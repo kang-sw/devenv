@@ -218,6 +218,7 @@ func specStats(fm map[string]any) int {
 func renderTickets(b *strings.Builder, ticketsRoot string) {
 	b.WriteString("tickets:\n")
 	anyTicket := false
+	orphanIdea := 0
 	for _, status := range []string{"ready", "todo", "idea"} {
 		statusDir := filepath.Join(ticketsRoot, status)
 		if !isDir(statusDir) {
@@ -228,11 +229,16 @@ func renderTickets(b *strings.Builder, ticketsRoot string) {
 			if filepath.Ext(entry.Name()) != ".md" {
 				continue
 			}
-			anyTicket = true
 			stem := strings.TrimSuffix(entry.Name(), ".md")
-			fmt.Fprintf(b, "  [%s] %s\n", status, stem)
 			fm := frontmatter(filepath.Join(statusDir, entry.Name()))
-			if parent, _ := fm["parent"].(string); parent != "" {
+			parent, _ := fm["parent"].(string)
+			anyTicket = true
+			if status == "idea" && parent == "" {
+				orphanIdea++
+				continue
+			}
+			fmt.Fprintf(b, "  [%s] %s\n", status, stem)
+			if parent != "" {
 				fmt.Fprintf(b, "      parent: %s%s\n", parent, titleSuffix(parent, ticketsRoot))
 			}
 			if related, _ := fm["related"].(map[string]string); len(related) > 0 {
@@ -258,6 +264,9 @@ func renderTickets(b *strings.Builder, ticketsRoot string) {
 				}
 			}
 		}
+	}
+	if orphanIdea > 0 {
+		fmt.Fprintf(b, "  idea: %d orphan hidden — tickets.list status=idea to view\n", orphanIdea)
 	}
 	if !anyTicket {
 		b.WriteString("  (none)\n")

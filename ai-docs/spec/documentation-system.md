@@ -181,6 +181,35 @@ visible before work begins.
 references, snippets, and hierarchy hints without requiring callers to scan the
 tree manually.
 
+## Manuals Document System {#260807-manuals-document-system}
+
+`ai-docs/manuals/` is a flat, ambient-injection doc tier for short,
+path-addressable operational manuals. Each file's frontmatter carries exactly
+one field, `summary:` — a one-line description of the manual's purpose.
+Unlike mental-model documents, manuals carry no domain/sources/spec-refs
+metadata and no applicability predicate: every manual under
+`ai-docs/manuals/*.md` is announced unconditionally in `workflow_manual`
+output (see Manuals Ambient Injection in the mcp-tools spec), rather than
+being selected by relevance.
+
+A manual with no `summary:` frontmatter line is still discovered and
+announced — reported with an explicit no-summary marker, not silently
+dropped — so an author notices and fills in the missing line rather than the
+manual quietly vanishing from the ambient block or discovery tools.
+
+`ws/manuals.list` and `ws/manuals.find` expose manual path and summary
+metadata without requiring callers to scan the tree manually, mirroring the
+discovery parity `specs.*`/`mental_models.*` already provide.
+
+The manuals-vs-`ref` boundary is a per-file editorial decision made at
+content-migration time, not a schema field: content that benefits from
+ambient, always-surfaced discovery (short, frequently needed procedures)
+belongs under `ai-docs/manuals/`; longer or rarely needed reference material
+stays under `ai-docs/ref/`, reachable only by explicit lookup. The initial
+migration of applicable `ai-docs/ref/`/`ai-docs/_index.md` procedure content
+into this tier has landed; further content moves between the two tiers
+follow the same per-file editorial decision as new docs are authored.
+
 ## Mental-Model Update Context Annotation {#260518-mental-model-update-context-annotation}
 
 Implementers annotate commits with a `### Mental Model Notes` sub-section

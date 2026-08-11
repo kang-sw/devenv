@@ -106,6 +106,25 @@ related:
 
 ## Common Mistakes
 
+- Wiring a new `workflow_manual` ambient injection through
+  `injectBootstrapStalenessWarning` by default because `scopeAnnouncement` and
+  `computeManuals` both use it: that helper **prepends** (`warning + "\n\n" +
+  body`), producing a top-of-body banner. The `# Notes` block
+  (`note.write`/`note.erase`/`note.search`, 260807 Phase 1 —
+  `internal/wsnote`) deliberately **appends** near `## Session State` instead,
+  via a plain guarded string concat (`if notes := computeNotes(root); notes !=
+  "" { body += "\n\n" + notes }`) placed immediately after each branch's
+  `renderSessionState` call in `workflow_manual.go`, not through the prepend
+  helper. The guard is required, not optional: an unconditional `body += "\n\n"
+  + computeNotes(root)` still appends `"\n\n"` even when `computeNotes` returns
+  `""`, corrupting the exact-byte-equality contract between `workflow_manual`'s
+  `## Session State` suffix and `workflow_state`'s standalone output
+  (`{#260702-workflow-state-tool}`) — `injectBootstrapStalenessWarning`'s own
+  no-op path avoids this because it is a real no-op, not an unconditional
+  concat. Mirror only the compute-function *shape* (pure, root-in string-out,
+  silent `""` on error) from `computeManuals`/`scopeAnnouncement`; do not
+  assume their injection call site is the precedent for a new block's
+  placement — read `workflow_manual.go` directly. {#260810-note-tools}
 - Registering the request-goroutine recover-defer BEFORE the `wg.Done`/`cancel`/`requests.Delete` defers (so it does not run first on unwind), or having it silently swallow the panic without both persisting the trace to the crash file AND returning a visible JSON-RPC error — either defeats the mid-session-crash fix. The `wsagent` async worker keeps its own separate `recover()`; do not route request-handler panics through it.
 - Advertising a tool in `tools()` without a dispatch case creates a visible broken tool.
 - Gating a tool at `callTool` and `toolAllowed` but forgetting `LeadToolNames`: tools/list and explicit calls gate correctly, yet `runtime.capabilities` still advertises it and the launcher contract test breaks.
@@ -122,7 +141,7 @@ related:
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must reject without a valid `session_key` and direct the caller to `ws.ferrule(root)`.
 - Treating namespace override as a tool rename; wsflow changes user-facing namespace text, while generic MCP tool identifiers stay stable. In playbook text, use explicit `McpNamespace` / `SkillNamespace` render vars for display notation instead of relying on broad string rewriting.
 - Updating `specs.find` or `mental_models.find` MCP output without the CLI mirror; users dogfood the CLI fallback when MCP host behavior is unclear.
-- Treating `ai-docs/ref/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
+- Treating `ai-docs/manuals/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
 - Migrating agent or exec state into SQLite while also moving large stream payloads into the database; that defeats raw tail/read/grep and increases lock pressure.
 - Classifying `*_path` fields as file-backed payloads; the path strings are SQLite metadata indexes even when the bytes at those paths stay file-backed.
 - Treating a missing exec stream file as empty output; status/result/raw readers must surface the recoverable file-backed payload consistency state so prune/tombstone or repair paths can diagnose the artifact.

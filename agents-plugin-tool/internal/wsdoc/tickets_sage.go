@@ -97,7 +97,7 @@ type SageRecordResult struct {
 	// procedure never branched on it and the only prior reader was
 	// anyIssueResolutionMissing's pass->concern escalation. Surfacing the counts
 	// here lets the dispatch layer's next_instruction route them, which is where
-	// post-call branch handling belongs (ai-docs/ref/skill-authoring.md Layer 2)
+	// post-call branch handling belongs (ai-docs/manuals/skill-authoring.md Layer 2)
 	// rather than in restated playbook prose.
 	Autonomous int
 	Missing    int

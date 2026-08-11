@@ -265,6 +265,9 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
+			if notes := computeNotes(canonical); notes != "" {
+				body += "\n\n" + notes
+			}
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
@@ -281,6 +284,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectDocCoverageWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
+			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -294,6 +298,9 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
+		if notes := computeNotes(rec.Root); notes != "" {
+			body += "\n\n" + notes
+		}
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
 		}
@@ -311,6 +318,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectDocCoverageWarning(body, warning)
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
+			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 		}
 	}
 

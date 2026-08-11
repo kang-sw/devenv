@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.39.0`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.39.0`).
+Active plugin package: `agents-plugin/` (`ws@0.39.6`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.39.6`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.
@@ -59,12 +59,12 @@ history.
 
 | File | Use |
 |------|-----|
-| `ai-docs/ref/skill-authoring.md` | On auditing skill/agent/prompt/convention content — authoring rules and invariant checklist |
-| `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors |
-| `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
-| `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
-| `ai-docs/ref/windows-dogfood.md` | Native-Windows source-build dogfood / Phase C cold-load acceptance procedure |
-| `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
+| `ai-docs/manuals/skill-authoring.md` | On auditing skill/agent/prompt/convention content — authoring rules and invariant checklist |
+| `ai-docs/manuals/wsflow-mirroring.md` | Required before editing full ws skills, shared `agents-plugin/rsrc/` playbooks, or plugin surfaces that may need wsflow mirrors |
+| `ai-docs/manuals/codex-integration.md` | Probed Codex CLI behavior |
+| `ai-docs/manuals/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
+| `ai-docs/manuals/windows-dogfood.md` | Native-Windows source-build dogfood / Phase C cold-load acceptance procedure |
+| `ai-docs/manuals/ws-agent-runtime.md` | Durable agent runtime contract |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
 | `ws/infra.read("impl-playbook")` | Implementation discipline |
 | `ws/infra.read("subagent-rules")` | Subagent dispatch rules |
@@ -72,11 +72,11 @@ history.
 
 Before editing tickets/specs/mental models, read the matching convention through
 `ws/convention.read`. Before editing skill, agent, prompt, or convention text,
-read `ai-docs/ref/skill-authoring.md`. Before editing full
+read `ai-docs/manuals/skill-authoring.md`. Before editing full
 `agents-plugin/skills/lead-*` skills, shared `agents-plugin/rsrc/` playbooks,
 plugin packaging, runtime contracts, launcher behavior, prompt guidance, or
 release validation that may affect wsflow, read
-`ai-docs/ref/wsflow-mirroring.md` and run
+`ai-docs/manuals/wsflow-mirroring.md` and run
 `python3 -m unittest discover agents-plugin-wsflow/tests` when the derivative
 surface may drift.
 
@@ -110,7 +110,7 @@ and convention text are bundled into the runtime and read through
 
 Runtime and launcher contracts are maintained in `ai-docs/spec/plugin-runtime.md`,
 `ai-docs/spec/mcp-tools.md`, and the source under `agents-plugin-tool/` and
-`agents-plugin/bin/`. `ai-docs/ref/ws-mcp.md` is the operational runbook for
+`agents-plugin/bin/`. `ai-docs/manuals/ws-mcp.md` is the operational runbook for
 launcher environment, release, and verification steps.
 
 Windows plugin-managed startup uses the same Python launcher. Native Windows
@@ -199,7 +199,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260523-bug-worktree-local-index-missing` | idea | Resolve propagation of ignored local workflow context across worktrees |
-| `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
+| `260523-bug-implement-merge-target-discovery` | done | Encode `impl/<merge-root>/<stem>` so the resolver reads the merge target from the branch name; rootless/legacy branches stop-and-ask (no silent `main`) |
 | `260523-bug-ws-mcp-launcher-runtime-repair-race` | idea | Investigate ws-mcp launcher runtime repair race behavior |
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
 | `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit` | idea | Capture wsflow rsrc mirror drift when canonical shipped rsrc edits are not mirrored |

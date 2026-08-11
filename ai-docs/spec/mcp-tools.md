@@ -313,10 +313,19 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   ignored (not on an implementation branch: impl/*, or legacy implement/*);
   derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
   the applicability rule sees that the field was read and deliberately not
-  applied. Fresh implementation branches are created under the `impl/<stem>`
-  convention, with `<stem>` <=15 characters recommended (trailing `-`
-  trimmed); legacy `implement/<scope-slug>` branches already in progress are
-  still recognized as implementation branches for continue/rename purposes.
+  applied. Fresh implementation branches are created under the
+  `impl/<merge-root>/<stem>` convention: `<merge-root>` is the current branch
+  at creation time (may itself contain `/`) or, on re-entry onto an already
+  name-rooted `impl/<merge-root>/<stem>` branch, the root parsed from the
+  branch name itself (name-authoritative — a diverging caller
+  `policy.branch.merge_target` is reconciled to the name-root with a warning,
+  never silently honored); `<stem>` keeps the <=15 characters recommendation
+  (trailing `-` trimmed) and stays single-segment (any `/` in a
+  caller-supplied `target.scope_slug` is sanitized away). A rootless
+  `impl/<stem>` branch or any legacy `implement/<scope-slug>` branch already
+  in progress keeps the original stop-and-ask behavior unchanged — merge
+  target comes solely from `policy.branch.merge_target` — and both are still
+  recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
   partitions from material risk, contracts/public symbols, cross-module/reuse
   uncertainty, and new or unknown test surfaces. Public-interface surface and
@@ -404,6 +413,67 @@ add an indented `...+` marker line to distinguish hidden instruction payloads fr
 instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
 are always explicit via `todo.check`.
 
+## Note Tools {#260810-note-tools}
+
+`note.write`, `note.erase`, and `note.search` implement the two non-tracked
+note-memory layers (260807 Phase 1): **machine** (PC-global, project-agnostic
+— lives beside the global ws config file, e.g. `~/.ws/notes.json`) and
+**worktree** (worktree-local, ephemeral — lives under the existing per-worktree
+ws cache directory, so it does not survive worktree deletion and is invisible
+to any other worktree of the same repository). Both layers share the same
+record shape and storage mechanism; only the resolved file changes. The
+tracked `repo` layer is out of scope for this phase, and no git-mutation MCP
+verb is added anywhere in this family (260605 pivot constraint). This is a
+fresh surface, sharing no code or store with `session.note`
+(`#260619-session-key-lineage-children`), which is a distinct one-line
+per-child annotation on the session-key store, not a note-memory layer.
+
+All three tools require `session_key` and a `layer` argument (`"machine"` or
+`"worktree"`); they carry no `session.`/`config.`/`lead.` prefix, so — like
+`todo.*`/`agenda.*` — they are reachable by any scope (lead, delegate, leaf)
+that holds a session key. The `worktree` layer resolves its store path through
+the same `session_key`-authoritative root resolution every other root-aware
+tool uses. The `machine` layer needs no root, but still requires a
+`session_key` that resolves to a known session — an unrecognized key is
+rejected with the same `unknown_session` error shape root-aware tools use,
+even though no root is consumed.
+
+**Wire shape.** A record is `{key, value, priority, written_at}`: `key` and
+`value` are strings, `priority` is an integer (higher = higher priority,
+default `0`), and `written_at` is an RFC3339 timestamp stamped server-side at
+write time (never caller-supplied). `note.write`'s `notes` argument is an
+**array of `{"key", "value", "priority"}` objects** — not an array of
+positional `[key, value, priority]` tuples — matching the universal
+named-JSON-object convention every other MCP tool argument in this codebase
+uses; there is no positional-array precedent anywhere in the tool surface.
+
+- **`note.write(session_key, layer, notes)`** performs a full overwrite per
+  key: writing an existing key replaces its `value` and `priority` in one
+  step (there is no separate priority-update verb). Multiple notes may be
+  written in one call.
+- **`note.erase(session_key, layer, keys)`** removes each listed key from that
+  layer's store. A missing key is a no-op, matching `todo.erase`'s erase-by-key
+  precedent.
+- **`note.search(session_key, layer, glob?, from?, then?)`** returns every
+  record on that layer whose `key` matches `glob` (shell-glob syntax, e.g.
+  `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
+  falls within the inclusive `[from, then]` bound when those are supplied.
+  Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
+  `"2026-08-01"`), compared as strings. This is the retrieval path for notes
+  elided from the ambient `# Notes` block (`#260810-note-injection`) — a
+  caller that sees the elision line uses `note.search` with a narrower glob to
+  read a specific elided note.
+
+Storage is an flock-serialized read-modify-write (temp-file + atomic rename)
+over one JSON file per layer, reusing the same concurrent-safe-write pattern
+`wsconfig`'s project/global config writers use, with its own sibling `.lock`
+file per store (never shared with the `wsconfig` config lock, even though the
+machine-layer store lives in the same directory as the global config file).
+
+There is no CLI mirror for `note.*`: like every other session-keyed tool
+(`todo.*`, `agenda.*`, `enter.*`), its authority model is
+`session_key`-only, and the CLI takes `--root`, not `--session_key`.
+
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
 `workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
@@ -453,13 +523,15 @@ rsrc.
 When `core.sparseCheckout` is set for the working root, both **fresh with
 root** and **continue** additionally render a sparse-checkout scope
 announcement — a short block naming the hidden ticket count and stems under
-`ai-docs/tickets/ready/` and `ai-docs/tickets/todo/`, pointing to
-`ai-docs/ref/worktree-ticket-scope.md` and the `git sparse-checkout disable`
-restore path — using the same `injectBootstrapStalenessWarning`
-no-op-when-empty injector already used for the bootstrap-staleness and
-doc-coverage warnings. With `core.sparseCheckout` unset, or in **fresh
-without root**, this block does not render and output is unchanged from
-before this addition.
+`ai-docs/tickets/ready/`, `ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/`,
+pointing to `ai-docs/ref/worktree-ticket-scope.md`, the `git sparse-checkout
+disable` restore path, and a `git sparse-checkout list` pointer to the
+worktree's active re-include patterns — using the same
+`injectBootstrapStalenessWarning` no-op-when-empty injector already used for
+the bootstrap-staleness and doc-coverage warnings. With `core.sparseCheckout`
+unset, or in **fresh without root**, this block does not render and output is
+unchanged from before this addition.
+{#260810-scope-announcement-idea-inclusion}
 
 The rendered manual body carries a **Ticket System Concepts** grounding section
 (status-directory meaning, type-prefix categorization, sage-review rationale and
@@ -569,6 +641,54 @@ there is no once-per-session suppression state, mirroring
 Whether a project's spec/mental-model authoring is otherwise complete is out
 of scope for this warning; it only detects the presence-of-any-frontmatter-file
 floor.
+
+### Manuals Ambient Injection {#260807-manuals-ambient-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, mirroring the
+Bootstrap Staleness and Doc Coverage warnings above) injects a `# Manuals`
+block listing every manual under `ai-docs/manuals/`: one line per manual,
+`<path> — <summary>`. There is no applicability predicate — every manual's
+path and summary is injected unconditionally; selection/relevance filtering
+is out of scope for this block (see Manuals Document System in the
+documentation-system spec).
+
+The block is silent by design when `ai-docs/manuals/` does not exist or
+contains no `.md` files (the common case until content is migrated into this
+tier), using the same `injectBootstrapStalenessWarning` no-op-when-empty
+injector already used for the scope announcement and the staleness/coverage
+warnings. The `workflow_manual` FRESH-without-root branch never renders this
+block, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+A manual with no `summary:` frontmatter line is still listed, with an
+explicit no-summary marker in place of a bare or blank line, so the gap is
+visible in the ambient block rather than silently omitted.
+
+### Note Injection {#260810-note-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
+Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
+`# Notes` block: the highest-priority notes across both the `machine` and
+`worktree` layers (`#260810-note-tools`), up to a fixed cap (20), one line
+per note as `- [<layer>] <key> (priority <n>, <written_at>): <value>`.
+
+**Placement is the one deliberate divergence from its Manuals/scope/staleness
+siblings**: those three are all *prepended* ahead of the manual body as
+top-of-body banners. The `# Notes` block is instead **appended immediately
+after `## Session State`**, using a plain string append rather than the
+`injectBootstrapStalenessWarning` prepend helper — notes are session-context,
+not a standing warning, so they render alongside the restored agenda/todo
+state a lead just asked to see, not as a banner above the reference material.
+The append is skipped entirely (not appended as an empty block) when there
+are no notes on either layer, so an empty result produces no stray blank
+section — matching the silent-when-empty contract of every sibling injection.
+
+When more notes exist than the cap, the block ends with a visible `(N
+lower-priority notes elided — use note.search to retrieve.)` line; the elided
+notes are never dropped, only deferred to an explicit `note.search` call
+(`#260810-note-tools`). The `workflow_manual` FRESH-without-root branch
+never renders this block, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
 
 ## Config Tools {#260505-config-tools}
 
@@ -819,7 +939,12 @@ ignored by the repository's Git ignore rules so generated or vendored
 directories do not dominate the readable project context. The spec inventory
 also flags any spec file that still carries a legacy planned marker with the
 same advisory the spec discovery tools emit; the flag is advisory and never
-fails the call.
+fails the call. The ticket inventory renders `ready/` and `todo/` tickets in
+full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
+folds remaining orphan `idea/` tickets — those without `parent:`, regardless
+of `related:` — into a single hidden-count line so the raw idea backlog does
+not dominate the tree, and their full bodies remain reachable via
+`tickets.list(status: "idea")` or `tickets.find`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
@@ -1348,6 +1473,16 @@ description, and source metadata.
 stem reference. `mental_models.status` returns path-first metadata for documents
 selected by domain or path.
 
+## Manuals Discovery Tools {#260807-manuals-discovery-tools}
+
+`manuals.list` returns available manual documents (`ai-docs/manuals/*.md`)
+with their path and one-line summary.
+
+`manuals.find` locates manual paths by text query across path, summary, and
+body text. There is no `domain` or `spec_stem` selector — the manuals schema
+carries neither field (see Manuals Document System in the
+documentation-system spec).
+
 ## Reference Trace Tool {#260505-reference-trace-tool}
 
 `references.trace` returns the reference graph reachable from exactly one ticket
@@ -1405,6 +1540,23 @@ When an explicit commit path names an old root from a rename or a deleted root,
 than passing the missing root to `git add`; requested roots with live changes
 still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
+Under an active worktree sparse-checkout scope, `git.commit` stages its
+additions with `git add -A --sparse --` instead of the plain `git add -A --`
+form, so an explicitly requested path that sits outside the current
+sparse-checkout pattern (for example, a newly captured `idea/` ticket in a
+worktree scoped away from `idea/`) can still be staged and committed; the
+path returns to skip-worktree and disappears from the worktree only on the
+next `git sparse-checkout reapply`, while remaining resolvable from the index
+and other worktrees throughout. Scope activity is detected once per call via
+a cheap filesystem-first gate, so the unscoped path (`core.sparseCheckout`
+unset) is unaffected and stages exactly as before. `--sparse` is added to the
+`add` command only; the `rm --cached --ignore-unmatch` branch used for
+genuine deletions never gains it, since a merely-hidden (skip-worktree,
+on-disk-absent, unmodified) path never appears in the pre-staging `git
+status` this branch reads, so it can never be misrouted into a staged
+deletion. `tickets.create_empty` is unaffected by this change — it still only
+writes the ticket file and never stages or commits.
+{#260810-git-commit-sparse-staging}
 `git.commit` ticket-change summaries conservatively reconstruct an unambiguous
 same-stem ticket status move even when native Git reports the staged change as
 separate add/delete records instead of a rename. Ambiguous add/delete sets remain

@@ -4,6 +4,7 @@ sage-review-design: completed
 related:
   260807-refactor-dissolve-project-index: related — both edit project_tree's renderTickets; this ticket's orphan-idea fold is orthogonal to that ticket's _index dissolution but shares the same surface
 sage-review-completeness: completed
+completed: 2026-08-10
 ---
 
 # Idea ticket attention policy — topic-scope idea/ in worktrees, fold orphan idea/ in project_tree
@@ -146,6 +147,50 @@ Verification: under an active scope excluding `idea/*` —
    `git sparse-checkout list` pointer.
 5. an attempted cross-scope ready/todo move still refuses with the widen tip.
 
+### Result (585af568) - 2026-08-10
+
+Landed on `impl/idea-attention-scope-worktree`, range `b34ff4b3..585af568`
+(6 commits), merged into goal branch `goal/main/copper-lantern-marsh`.
+
+- **`lead-scope-worktree` playbook + shims.** Canonical
+  `agents-plugin/rsrc/lead-scope-worktree/lead-scope-worktree.md` dropped the
+  "idea/ always stays visible" carve-out; the derived `--no-cone` pattern now
+  excludes `/ai-docs/tickets/idea/*` and re-includes tracked
+  `/ai-docs/tickets/idea/.gitkeep`, with the forced-`.gitkeep`, verify-by-listing,
+  and widen-then-move-for-idea→todo steps added. The wsflow rsrc mirror + both
+  `manifest.json` were regenerated (env-gated, not hand-edited); both SKILL.md
+  `description:` shims (ws + wsflow trees) hand-edited to drop the carve-out phrase.
+- **`git.commit` `--sparse` staging.** New `wsgit.CommitOptions.SparseScopeActive`
+  bool threads into `stagingCommandsForCommit`, adding `--sparse` to the `add`
+  branch only — never `rm --cached`. Deletion-safety holds because a tracked,
+  skip-worktree, on-disk-absent, unmodified path never appears in pre-staging
+  `git status --porcelain=v2`, so the existing `#260513`
+  `deletedPathsUnderCommitRoot` routing can never misclassify a sparse-hidden path
+  as a deletion (correctness partition confirmed this; a synthetic regression test
+  pins the "present in paths, absent from status snapshot → add, not rm" branch).
+  The flag is computed by `internal/mcp` via new `wsdoc.SparseCheckoutActive(root)`
+  and passed across the `{#260720-wsdoc-commit-boundary}` import ban, mirroring the
+  existing Verifier/verifyAdapter bridge. `TicketCreate`/`tickets.create_empty`
+  untouched (stage-free contract preserved).
+- **`scope_announcement.go`.** Counted-status list gained `idea`; banner names
+  idea/ and carries a `git sparse-checkout list` topic-recovery pointer, closing
+  the prior asymmetry with `project_tree`'s already-idea-aware annotation.
+- **Specs.** `spec/mcp-tools.md` gained `{#260810-scope-announcement-idea-inclusion}`
+  and `{#260810-git-commit-sparse-staging}`; `spec/workflow-skills.md`
+  `lead-scope-worktree` roster trimmed to the uniform-scope fact plus a terse
+  cross-ref (mechanism sole-sourced in mcp-tools.md). Mental-model updater found
+  no gap — the modification reasoning is sole-sourced in the spec anchor + code
+  comments, so no model edit.
+
+Deviation: `spec/workflow-skills.md` had no literal "idea/ always stays visible"
+clause at the plan's cited location; the removal became a positive uniform-scope
+statement, later trimmed to a terse pointer on fit review. Verification: full Go
+build/vet, `wsgit`/`mcp`/`wsdoc` test packages, both env-gated regen tests
+(zero residual diff), and the python wsflow bundle (10/10) all green; partitioned
+review clean (correctness clean first pass; fit + test clean on re-review).
+
+Phase 2 (project_tree orphan-idea fold) remains — ticket stays in `ready/`.
+
 ### Phase 2: Fold orphan idea/ in project_tree, keep parented idea and ready/todo
 
 The unscoped-worktree half, independent of Phase 1 (sparse-checkout does not help
@@ -165,6 +210,42 @@ Verification: `project_tree` renders every parented idea (with its
 tickets collapse to one count line whose N equals the orphan idea count; the
 folded stems are absent from the tree body but returned by
 `tickets.list(status:"idea")`.
+
+### Result (c2005628) - 2026-08-10
+
+Landed on `impl/idea-attention-project-tree-fold`, range `14171b95..c2005628`
+(3 commits), merged into goal branch `goal/main/copper-lantern-marsh`.
+
+- **`renderTickets` orphan-idea fold.** `agents-plugin-tool/internal/wsdoc/project_tree.go`
+  `renderTickets` now reads each entry's frontmatter before deciding render-vs-fold:
+  `ready/` and `todo/` render in full unchanged, an `idea/` ticket carrying a
+  `parent:` renders in full (epic child), and every remaining orphan `idea/`
+  ticket (no `parent:`, regardless of `related:`) folds into a single
+  `idea: N orphan hidden — tickets.list status=idea to view` count line, emitted
+  only when N>0. The pre-existing per-entry `frontmatter(...)` read was reordered
+  and reused (no duplicate read); `anyTicket = true` was hoisted to a single
+  assignment before the fold check so a folded orphan still counts as a ticket
+  (an all-orphan repo prints the count line, never `(none)`).
+- **Tests.** Three project_tree_test.go tests: `TestProjectTreeFoldsOrphanIdeaTickets`
+  (parented-full + orphan-absent + count-line + ready/todo-unaffected),
+  `TestProjectTreeNoOrphanIdeaCountLineWhenZero`, and
+  `TestProjectTreeOrphanOnlyIdeaSuppressesNone` (orphan-only repo → count line
+  present, `(none)` absent). The count-line assertions pin the literal em-dash
+  (U+2014) and exact N.
+- **Spec.** `spec/mcp-tools.md` `{#260505-project-context-convention-tools}`
+  paragraph amended in place (no new anchor) to describe the parented-full /
+  orphan-folded inventory behavior and the `tickets.list(status:"idea")` recovery
+  path.
+
+Independent of Phase 1 (sparse-checkout does not apply to the unscoped full
+checkout); `ticketScopeAnnotation` (the sparse hidden-count annotation) and
+ticket 260807's `_index` dissolution are separate mechanisms, both untouched.
+Verification: `go build`/`go vet` clean, `go test ./internal/wsdoc/... -count=1`
+green; partitioned review clean (correctness clean first pass; fit one Minor and
+test one Important, both [resolved] on re-review after the anyTicket hoist + the
+orphan-only test).
+
+Both phases complete — ticket closed.
 
 ## Spec Impact
 

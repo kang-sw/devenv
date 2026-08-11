@@ -1069,6 +1069,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			"raw_bytes":             aiContextRawBytes,
 			"post_trim_entry_count": aiContextPostTrimCount,
 		})
+		// SparseScopeActive is computed here, not inside wsgit: the
+		// {#260720-wsdoc-commit-boundary} rule forbids wsdoc importing wsgit,
+		// not the reverse, and internal/mcp already imports both — the
+		// established bridge for this shape (mirrors the Verifier injection
+		// above). wsdoc.SparseCheckoutActive is the cheap gate (no index
+		// enumeration), matching #260810's guardrail that the unscoped path
+		// (the common case) pays no extra cost.
 		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:               stringList(params.Arguments["paths"]),
 			Title:               title,
@@ -1078,6 +1085,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
 			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
 			UpdatedMentalModels: stringList(params.Arguments["updated_mental_models"]),
+			SparseScopeActive:   wsdoc.SparseCheckoutActive(root),
 		})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1221,6 +1229,33 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatMentalModels(result), err)
+	case "manuals.list":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		result, err := wsdoc.ManualsList(root)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatManuals(result), err)
+	case "manuals.find":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		query, _ := params.Arguments["query"].(string)
+		result, err := wsdoc.ManualsFind(root, query)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatManuals(result), err)
+	case "note.write":
+		return s.handleNoteWrite(req.ID, params.Arguments, params.Meta)
+	case "note.erase":
+		return s.handleNoteErase(req.ID, params.Arguments, params.Meta)
+	case "note.search":
+		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "references.trace":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3130,6 +3165,14 @@ func formatMentalModels(models []wsdoc.MentalModelInfo) string {
 	return b.String()
 }
 
+func formatManuals(manuals []wsdoc.ManualInfo) string {
+	var b strings.Builder
+	for _, manual := range manuals {
+		fmt.Fprintf(&b, "%s - %s\n", manual.Path, displayOrDash(manual.Summary))
+	}
+	return b.String()
+}
+
 func formatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
 	if trace == nil {
 		return ""
@@ -4224,6 +4267,67 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "manuals.list",
+			"description": "List manual documents under ai-docs/manuals with their one-line summaries.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			"name":        "manuals.find",
+			"description": "Find manual documents by query. Defaults to compact text; use format=json for structured metadata.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query":  stringProperty("Optional case-insensitive text query."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+			},
+		},
+		{
+			"name":        "note.write",
+			"description": "Write one or more notes to the machine (PC-global) or worktree (worktree-local, ephemeral) non-tracked note layer. Full-overwrite per key, including priority. Higher integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which non-tracked layer to write: "machine" (PC-global, project-agnostic) or "worktree" (this worktree only, ephemeral).`, []string{"machine", "worktree"}),
+					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority defaults to 0; higher = higher priority.`),
+				},
+				"required": []string{"session_key", "layer", "notes"},
+			},
+		},
+		{
+			"name":        "note.erase",
+			"description": "Erase notes by key from the machine or worktree non-tracked note layer.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which non-tracked layer to erase from: "machine" or "worktree".`, []string{"machine", "worktree"}),
+					"keys":        stringArrayProperty("Note keys to erase. A missing key is a no-op."),
+				},
+				"required": []string{"session_key", "layer", "keys"},
+			},
+		},
+		{
+			"name":        "note.search",
+			"description": "Search notes on the machine or worktree non-tracked note layer by key glob and optional written_at date range. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which non-tracked layer to search: "machine" or "worktree".`, []string{"machine", "worktree"}),
+					"glob":        stringProperty(`Optional key glob (path.Match syntax, e.g. "ticket.*"). Omit or "*" to match every key.`),
+					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
+					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+				"required": []string{"session_key", "layer"},
+			},
+		},
+		{
 			"name":        "references.trace",
 			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
@@ -4607,7 +4711,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
-		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
+		"mental_models.list", "mental_models.find", "mental_models.status", "manuals.list", "manuals.find", "references.trace",
 		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",

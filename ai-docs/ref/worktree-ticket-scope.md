@@ -11,14 +11,17 @@ caller-visible contract itself. The MCP behavior contract lives in
 
 ## What This Covers
 
-`git sparse-checkout --no-cone` lets a worktree hide `ai-docs/tickets/ready/`
-and `ai-docs/tickets/todo/` entries outside one work line, while
-`ai-docs/tickets/idea/` always stays visible — hiding it would collide with
-the mandatory dogfood-capture rule (a captured surprise is off-topic for the
-worktree that captured it by nature, so a hidden `idea/` would fail every
-capture at the staging step). Cone mode cannot express this scope — it
-selects directories, not files (`git sparse-checkout set <file>` fails with
-`is not a directory`) — so `--no-cone` is required.
+`git sparse-checkout --no-cone` lets a worktree hide `ai-docs/tickets/ready/`,
+`ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/` entries outside one work
+line, uniformly. A tracked `ai-docs/tickets/idea/.gitkeep` keeps the `idea/`
+directory materialized when its tickets are scoped out — git does not track
+empty directories, so without it the directory would vanish from disk instead
+of narrowing to the keep-file. A captured surprise (a dogfood `idea/` ticket)
+stays committable under an active scope because `git.commit` stages it with
+`git add --sparse` and it then self-hides on the next sparse re-apply. Cone
+mode cannot express this scope — it selects directories, not files
+(`git sparse-checkout set <file>` fails with `is not a directory`) — so
+`--no-cone` is required.
 
 ## Verified Behavior (2026-08-06, git 2.43.0, Linux)
 

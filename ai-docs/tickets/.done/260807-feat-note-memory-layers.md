@@ -7,6 +7,7 @@ related:
   260806-feat-worktree-ticket-scope: prior-art — scopeAnnouncement is the workflow_manual injection pattern this `# Notes` section is modeled on
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-10
 ---
 
 # Harness-agnostic PC-local note memory layers injected into workflow_manual
@@ -153,3 +154,70 @@ committed through the normal agent path) is **out of this ticket** — it is an
 epic-deferred concern owned by `260807-epic-mechanical-project-memory`, spun into
 its own future ticket if and when the `_index.md` decomposition needs a tracked
 substrate. This ticket ships only the two non-tracked layers.
+
+### Result (41475bdd) - 2026-08-10
+
+Shipped the two non-tracked note-memory layers and their ambient
+`workflow_manual` injection. Behavioral delta:
+
+- New `internal/wsnote/` package (peer to `wsconfig`/`wsstate`, not folded into
+  the git-tracked-doc `wsdoc`): `machine` layer at `~/.ws/notes.json` (via a
+  `wsconfig.GlobalPath` sibling — PC-global, project-agnostic) and `worktree`
+  layer at `layout.WorktreeDir/notes.json` (via `wsstate.NewManager(...).Ensure`
+  — the existing `proj/<projectKey>@<worktreeKey>/` tree, so it is genuinely
+  worktree-isolated). Record shape `[key, value, priority, written_at]`;
+  full-overwrite `Write`, key-list `Erase`, and glob + date-range `Search`, all
+  reusing the `wsconfig` flock + temp-file + atomic-rename RMW pattern (own
+  `.lock` sibling per store, no shared lock).
+- Three `note.write` / `note.erase` / `note.search` MCP tools (`note_tools.go`)
+  reachable by any scope holding a session key (mirroring `todo.*`/`agenda.*`,
+  not lead-only). The `machine` layer resolves without a repo root but still
+  rejects empty/unknown session keys; `worktree` routes through
+  `resolveToolRoot`. No CLI mirror (session-keyed tools have none by precedent);
+  no git-mutation/commit verb (honors the `260605` pivot constraint).
+- A `# Notes` block injected into `workflow_manual` on BOTH the fresh-with-root
+  and continue branches, appended immediately after Session State via plain
+  concat — deliberately NOT routed through `injectBootstrapStalenessWarning`,
+  which prepends a top banner; only the pure `computeX` shape of
+  `scopeAnnouncement`/`computeManuals` was mirrored, not their injection site.
+  Highest-priority items fill a `notesInjectionCap = 20` budget; the remainder
+  is elided behind a visible "N lower-priority notes elided" line and stays
+  retrievable via `note.search`. Silent (no heading, no stray blank) when no
+  notes exist.
+
+Wire-shape decision (lead-adjudicated): `note.write` takes named JSON objects
+`{key, value, priority}`, not the ticket's illustrative positional
+`[[key,value,priority],...]` tuples, to match the codebase-wide MCP tool-arg
+convention (zero positional-array precedent); the `[key,value,priority,written_at]`
+record semantics are preserved and documented explicitly in the spec.
+
+Spec: new `## Note Tools {#260810-note-tools}` and `### Note Injection
+{#260810-note-injection}` in `spec/mcp-tools.md`; a `mental-model/mcp-runtime.md`
+bullet records the non-obvious prepend-vs-append injection-placement divergence so
+a future author copying the compute-inject pattern does not default to the wrong
+wiring.
+
+Verification: `go build ./... && go vet ./... && go test ./... -count=1` all green
+across 13 packages. Tests cover per-layer write→search→erase round trips,
+full-overwrite priority + `written_at` re-stamping (via an injectable clock so the
+stale-echo regression is deterministically caught), cross-worktree isolation
+proven at worktree granularity (`git worktree add` on one repo, not two unrelated
+repos), the elision cap + count + search retrieval, empty-state silence and
+after-Session-State positioning on both injection branches, the inclusive
+whole-day `then` search bound, match-all glob across slash-bearing keys, and
+empty/unknown session-key rejection.
+
+Review: partitioned correctness / fit / test. Fit clean first pass. Correctness
+found one Critical (`note.search` `then` date-prefix upper bound excluded the
+target day) — fixed. Test found three Important gaps (cross-worktree test proved
+only project granularity; `written_at` re-stamp and empty-session-key branches
+untested) — all fixed; a follow-up re-review caught that the `written_at` test was
+not load-bearing under second-granularity timestamps, fixed with an injectable
+clock. Clean after the budgeted cycles; one accepted Minor remains (a newline in a
+note `value` would break the injected one-line format — agent-supplied, cosmetic).
+
+Closes `260523-bug-worktree-local-index-missing`: the `machine` layer lives
+outside the working tree and is injected every session, so machine-local context
+(SSH hosts, IP records) is no longer lost across worktree switches — dissolving
+that ticket's "safely copy ignored files into worktrees" problem entirely rather
+than solving it. The tracked `repo` layer remains epic-deferred.

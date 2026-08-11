@@ -1,3 +1,7 @@
+---
+summary: Durable agent runtime contract
+---
+
 # ws Agent Runtime Reference
 
 Host-neutral contract for sustainable ws agent sessions. This document preserves
