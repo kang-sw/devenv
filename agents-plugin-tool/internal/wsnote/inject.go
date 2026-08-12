@@ -56,25 +56,42 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 		}
 	}
 
+	// The empty-skip check stays keyed on the UNFILTERED collection (muted or
+	// not, across every layer): this is what distinguishes the all-muted edge
+	// (block still renders — heading + muted line, zero bullet lines) from the
+	// truly-empty edge (block skipped entirely).
 	if len(all) == 0 {
 		return ""
 	}
 
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].Priority != all[j].Priority {
-			return all[i].Priority > all[j].Priority
+	var visible []layeredRecord
+	muted := 0
+	for _, note := range all {
+		if note.Visible {
+			visible = append(visible, note)
+		} else {
+			muted++
 		}
-		if all[i].WrittenAt != all[j].WrittenAt {
-			return all[i].WrittenAt > all[j].WrittenAt
+	}
+
+	sort.Slice(visible, func(i, j int) bool {
+		if visible[i].Priority != visible[j].Priority {
+			return visible[i].Priority > visible[j].Priority
 		}
-		return all[i].Key < all[j].Key
+		if visible[i].WrittenAt != visible[j].WrittenAt {
+			return visible[i].WrittenAt > visible[j].WrittenAt
+		}
+		return visible[i].Key < visible[j].Key
 	})
 
-	shown := all
+	// Muted notes never consume a limit slot: capping/eliding operates only on
+	// the visible subset, so muting a note can free a slot for a previously
+	// elided visible one.
+	shown := visible
 	elided := 0
-	if limit > 0 && limit < len(all) {
-		shown = all[:limit]
-		elided = len(all) - limit
+	if limit > 0 && limit < len(visible) {
+		shown = visible[:limit]
+		elided = len(visible) - limit
 	}
 
 	var sb strings.Builder
@@ -84,6 +101,9 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 	}
 	if elided > 0 {
 		fmt.Fprintf(&sb, "(%d lower-priority notes elided — use note.search to retrieve.)\n", elided)
+	}
+	if muted > 0 {
+		fmt.Fprintf(&sb, "(%d muted — use note.search to view.)\n", muted)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

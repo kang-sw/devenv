@@ -6,6 +6,7 @@ related:
   260810-feat-repo-tracked-note-layer: coordinates — visibility is a layer-agnostic note attribute; the tracked repo layer inherits it, and whichever of the two lands second extends the shared record shape
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-12
 ---
 
 # Note visibility — mute a note out of injection while keeping it searchable
@@ -176,3 +177,49 @@ Verification: a write → mute round trip drops the note from a subsequent
 muting an over-cap-adjacent note frees a slot for a previously-elided visible
 note; the muted-count line and the over-cap elision line render independently
 and together; muting an already-muted key is a no-op.
+
+### Result (7e49a426) - 2026-08-12
+
+Shipped the `visible` attribute and mute/unmute verbs across all three note
+layers. Because `260810` (repo layer) landed first, this extended `visible`
+over `machine`, `worktree`, and `repo` at once rather than the two named in the
+phase text — the "lands second extends the shared shape" coordination branch.
+
+Behavioral delta:
+
+- `internal/wsnote` record gains a `visible` bool. Absent-field migration is
+  handled by a custom `Record.UnmarshalJSON` with a `*bool` shadow so a legacy
+  record with no `visible` key decodes as `true` (Go's `encoding/json` would
+  otherwise zero it to `false` and invert the contract). Covered by legacy-
+  fixture tests at both `Load` and `RepoLoad`.
+- `note.write` never accepts or mutates `visible`: it preserves the stored value
+  on an existing key and initializes new keys to `true`, so a content-only
+  overwrite never un-mutes.
+- New `note.mute(layer, [keys])` / `note.unmute(layer, [keys])` MCP verbs:
+  idempotent set-state on `visible`, reusing the flock + temp-file + atomic-
+  rename RMW path, and **never** re-stamping `written_at` (verified with the
+  injectable clock).
+- `workflow_manual` `# Notes`: muted notes are filtered before the priority cap
+  so they consume no slot (muting frees a slot for a previously elided visible
+  note), and a distinct `(N muted — use note.search to view.)` line renders
+  independently of the over-cap elision line — both together when both apply.
+  The all-muted edge still renders the heading plus muted-count line (empty-skip
+  fires only when there are no notes at all). `note.search` returns muted
+  records unchanged.
+
+Deviations: verb spelling settled as `mute`/`unmute` (the ticket's provisional
+pair). The optional `visible`/`muted` filter on `note.search` was **not** added
+— it was flagged planning-optional and is not required by the contract; a caller
+following the muted-count pointer distinguishes records by the `visible` field,
+matching the existing over-cap pointer's imprecision. Deferred, no follow-up
+ticket.
+
+Verification: `go build ./...` and `go test -count=1 ./internal/wsnote/...
+./internal/mcp/...` green. Spec `spec/mcp-tools.md` `{#260810-note-tools}` /
+`{#260810-note-injection}` updated inline (commit c54836df). Partitioned review
+(correctness/fit/test) reached clean at cycle 2: the test partition initially
+flagged three coverage gaps (2 important + 1 minor — migration tested only via
+bare `json.Unmarshal`, three injection scenarios asserted only at `wsnote.Compute`
+rather than the MCP dispatch path, and `note.unmute` empty-keys untested), all
+resolved by a single relay adding six tests with no production change; re-review
+returned clean. Correctness and fit were clean on first pass.

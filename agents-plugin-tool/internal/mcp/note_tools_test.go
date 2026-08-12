@@ -391,3 +391,199 @@ func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
 		t.Fatalf("note.write(machine, empty session_key) = %s, want a session_key-required error", resp)
 	}
 }
+
+// TestNoteMuteUnmuteRoundTrip verifies note.mute/note.unmute across all
+// three layers: mute drops a note's visible state to false, unmute restores
+// it to true, observed via note.search's json format (note.search itself
+// never filters on visible, so this exercises the stored field directly).
+func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	id := 2
+	for _, layer := range []string{"machine", "worktree", "repo"} {
+		t.Run(layer, func(t *testing.T) {
+			noteKey := "mute.roundtrip." + layer
+			callToolWithKey(t, s, id, key, "note.write", map[string]any{
+				"layer": layer,
+				"notes": []any{map[string]any{"key": noteKey, "value": "v", "priority": 1}},
+			})
+			id++
+
+			rec := searchSingleNoteRecord(t, s, id, key, layer, noteKey)
+			id++
+			if !rec.Visible {
+				t.Fatalf("note.write(%s) new key Visible = false, want true", layer)
+			}
+
+			muteResp := callToolWithKey(t, s, id, key, "note.mute", map[string]any{
+				"layer": layer,
+				"keys":  []any{noteKey},
+			})
+			id++
+			if !strings.Contains(muteResp, noteKey) {
+				t.Fatalf("note.mute(%s) confirmation missing key: %s", layer, muteResp)
+			}
+
+			rec = searchSingleNoteRecord(t, s, id, key, layer, noteKey)
+			id++
+			if rec.Visible {
+				t.Fatalf("note.mute(%s) did not set Visible = false", layer)
+			}
+
+			unmuteResp := callToolWithKey(t, s, id, key, "note.unmute", map[string]any{
+				"layer": layer,
+				"keys":  []any{noteKey},
+			})
+			id++
+			if !strings.Contains(unmuteResp, noteKey) {
+				t.Fatalf("note.unmute(%s) confirmation missing key: %s", layer, unmuteResp)
+			}
+
+			rec = searchSingleNoteRecord(t, s, id, key, layer, noteKey)
+			id++
+			if !rec.Visible {
+				t.Fatalf("note.unmute(%s) did not restore Visible = true", layer)
+			}
+		})
+	}
+}
+
+// TestNoteMuteUnmuteDoesNotRestampWrittenAt verifies mute/unmute never touch
+// written_at, even when the injected clock visibly moves between the write
+// and the mute/unmute call — matching
+// TestNoteWriteRestampsWrittenAtOnOverwrite's clock-injection pattern.
+func TestNoteMuteUnmuteDoesNotRestampWrittenAt(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	writeInstant := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	laterInstant := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	originalNoteNow := noteNow
+	t.Cleanup(func() { noteNow = originalNoteNow })
+
+	noteNow = func() time.Time { return writeInstant }
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "no.restamp", "value": "v", "priority": 1}},
+	})
+	wantWrittenAt := writeInstant.Format(time.RFC3339)
+
+	noteNow = func() time.Time { return laterInstant }
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"no.restamp"},
+	})
+	muted := searchSingleNoteRecord(t, s, 4, key, "machine", "no.restamp")
+	if muted.WrittenAt != wantWrittenAt {
+		t.Fatalf("note.mute restamped written_at: got %q, want unchanged %q", muted.WrittenAt, wantWrittenAt)
+	}
+	if muted.Visible {
+		t.Fatalf("note.mute did not set Visible = false")
+	}
+
+	callToolWithKey(t, s, 5, key, "note.unmute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"no.restamp"},
+	})
+	unmuted := searchSingleNoteRecord(t, s, 6, key, "machine", "no.restamp")
+	if unmuted.WrittenAt != wantWrittenAt {
+		t.Fatalf("note.unmute restamped written_at: got %q, want unchanged %q", unmuted.WrittenAt, wantWrittenAt)
+	}
+}
+
+// TestNoteWriteOverMutedKeyPreservesMute is the MCP-level version of the
+// write-over-a-muted-key regression: note.write/note.mute/note.write again
+// must leave the key muted even though the second write changes content.
+func TestNoteWriteOverMutedKeyPreservesMute(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "write.over.mute", "value": "v1", "priority": 1}},
+	})
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"write.over.mute"},
+	})
+	callToolWithKey(t, s, 4, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "write.over.mute", "value": "v2", "priority": 9}},
+	})
+
+	rec := searchSingleNoteRecord(t, s, 5, key, "machine", "write.over.mute")
+	if rec.Visible {
+		t.Fatalf("note.write over a muted key set Visible = true, want the mute to survive (false)")
+	}
+	if rec.Value != "v2" || rec.Priority != 9 {
+		t.Fatalf("note.write over a muted key did not update content fields: %+v", rec)
+	}
+}
+
+// TestNoteMuteAlreadyMutedKeyIsNoop verifies muting an already-muted key
+// succeeds as a no-op (idempotent set-state), not an error.
+func TestNoteMuteAlreadyMutedKeyIsNoop(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "double.mute", "value": "v", "priority": 1}},
+	})
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"double.mute"},
+	})
+	secondMuteResp := callToolWithKey(t, s, 4, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"double.mute"},
+	})
+	if !strings.Contains(secondMuteResp, "double.mute") {
+		t.Fatalf("note.mute on an already-muted key did not succeed: %s", secondMuteResp)
+	}
+
+	rec := searchSingleNoteRecord(t, s, 5, key, "machine", "double.mute")
+	if rec.Visible {
+		t.Fatalf("note.mute called twice left Visible = true, want false")
+	}
+}
+
+// TestNoteMuteRejectsEmptyKeys mirrors note.erase's empty-keys rejection,
+// confirming note.mute/note.unmute share the same required-non-empty
+// validation via noteKeysArg.
+func TestNoteMuteRejectsEmptyKeys(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{},
+	})
+	if !strings.Contains(resp, "non-empty") {
+		t.Fatalf("note.mute(empty keys) = %s, want a non-empty-array error", resp)
+	}
+}
+
+// TestNoteUnmuteRejectsEmptyKeys is the symmetric counterpart of
+// TestNoteMuteRejectsEmptyKeys: note.unmute shares handleNoteSetVisible's
+// validation with note.mute, but that shared code path had no dedicated
+// note.unmute-side assertion until now.
+func TestNoteUnmuteRejectsEmptyKeys(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.unmute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{},
+	})
+	if !strings.Contains(resp, "non-empty") {
+		t.Fatalf("note.unmute(empty keys) = %s, want a non-empty-array error", resp)
+	}
+}
