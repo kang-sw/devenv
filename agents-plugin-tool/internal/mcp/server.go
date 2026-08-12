@@ -1254,6 +1254,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleNoteWrite(req.ID, params.Arguments, params.Meta)
 	case "note.erase":
 		return s.handleNoteErase(req.ID, params.Arguments, params.Meta)
+	case "note.mute":
+		return s.handleNoteMute(req.ID, params.Arguments, params.Meta)
+	case "note.unmute":
+		return s.handleNoteUnmute(req.ID, params.Arguments, params.Meta)
 	case "note.search":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "references.trace":
@@ -4307,6 +4311,32 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"layer":       enumStringProperty(`Which layer to erase from: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
 					"keys":        stringArrayProperty("Note keys to erase. A missing key is a no-op."),
+				},
+				"required": []string{"session_key", "layer", "keys"},
+			},
+		},
+		{
+			"name":        "note.mute",
+			"description": "Mute notes by key on the machine, worktree, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.search still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which layer to mute on: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
+					"keys":        stringArrayProperty("Note keys to mute. A missing key is a no-op."),
+				},
+				"required": []string{"session_key", "layer", "keys"},
+			},
+		},
+		{
+			"name":        "note.unmute",
+			"description": "Unmute notes by key on the machine, worktree, or repo note layer: sets visible=true, restoring them to the workflow_manual ambient Notes block. Idempotent (unmuting an already-visible key is a no-op) and never restamps written_at.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"layer":       enumStringProperty(`Which layer to unmute on: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
+					"keys":        stringArrayProperty("Note keys to unmute. A missing key is a no-op."),
 				},
 				"required": []string{"session_key", "layer", "keys"},
 			},

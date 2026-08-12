@@ -12,15 +12,17 @@ import (
 )
 
 // noteStore abstracts the per-layer note storage backend so
-// handleNoteWrite/handleNoteErase/handleNoteSearch stay layer-agnostic: the
-// machine/worktree layers store one JSON file per whole layer
-// (fileNoteStore, wrapping wsnote.Load/Write/Erase), while the repo layer
-// stores one JSON file per key (repoNoteStore, wrapping
-// wsnote.RepoLoad/RepoWrite/RepoErase).
+// handleNoteWrite/handleNoteErase/handleNoteSearch/handleNoteMute/
+// handleNoteUnmute stay layer-agnostic: the machine/worktree layers store one
+// JSON file per whole layer (fileNoteStore, wrapping
+// wsnote.Load/Write/Erase/SetVisible), while the repo layer stores one JSON
+// file per key (repoNoteStore, wrapping
+// wsnote.RepoLoad/RepoWrite/RepoErase/RepoSetVisible).
 type noteStore interface {
 	Load() (map[string]wsnote.Record, error)
 	Write(records []wsnote.Record) error
 	Erase(keys []string) error
+	SetVisible(keys []string, visible bool) error
 }
 
 // fileNoteStore implements noteStore over a single whole-layer JSON file, the
@@ -32,6 +34,9 @@ type fileNoteStore struct {
 func (f fileNoteStore) Load() (map[string]wsnote.Record, error) { return wsnote.Load(f.path) }
 func (f fileNoteStore) Write(records []wsnote.Record) error     { return wsnote.Write(f.path, records) }
 func (f fileNoteStore) Erase(keys []string) error               { return wsnote.Erase(f.path, keys) }
+func (f fileNoteStore) SetVisible(keys []string, visible bool) error {
+	return wsnote.SetVisible(f.path, keys, visible)
+}
 
 // repoNoteStore implements noteStore over the tracked repo-layer directory,
 // one JSON file per key.
@@ -42,6 +47,9 @@ type repoNoteStore struct {
 func (r repoNoteStore) Load() (map[string]wsnote.Record, error) { return wsnote.RepoLoad(r.dir) }
 func (r repoNoteStore) Write(records []wsnote.Record) error     { return wsnote.RepoWrite(r.dir, records) }
 func (r repoNoteStore) Erase(keys []string) error               { return wsnote.RepoErase(r.dir, keys) }
+func (r repoNoteStore) SetVisible(keys []string, visible bool) error {
+	return wsnote.RepoSetVisible(r.dir, keys, visible)
+}
 
 // resolveNoteStore resolves the noteStore backend for the "layer" argument,
 // given the tool's session_key and (worktree/repo layers only) a resolved
@@ -236,6 +244,39 @@ func (s *Server) handleNoteErase(id json.RawMessage, args map[string]any, meta m
 	return toolTextResponse(id, formatNoteErase(keys), nil)
 }
 
+// handleNoteMute and handleNoteUnmute mirror handleNoteErase's shape exactly:
+// resolve the layer's store, parse keys, reject an empty list, and dispatch
+// to the store's SetVisible. They never call noteRecordsArg/noteNow — mute
+// and unmute set-state on Visible only and must NOT restamp WrittenAt.
+func (s *Server) handleNoteMute(id json.RawMessage, args map[string]any, meta map[string]any) response {
+	return s.handleNoteSetVisible(id, args, meta, "note.mute", false, formatNoteMute)
+}
+
+func (s *Server) handleNoteUnmute(id json.RawMessage, args map[string]any, meta map[string]any) response {
+	return s.handleNoteSetVisible(id, args, meta, "note.unmute", true, formatNoteUnmute)
+}
+
+func (s *Server) handleNoteSetVisible(id json.RawMessage, args map[string]any, meta map[string]any, tool string, visible bool, format func([]string) string) response {
+	store, err := s.resolveNoteStore(tool, args, meta)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	keys, err := noteKeysArg(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	if len(keys) == 0 {
+		return toolTextResponse(id, "", fmt.Errorf("%s: keys must be a non-empty array", tool))
+	}
+	if err := store.SetVisible(keys, visible); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	if wantsJSON(args) {
+		return toolJSONResponse(id, keys, nil)
+	}
+	return toolTextResponse(id, format(keys), nil)
+}
+
 func (s *Server) handleNoteSearch(id json.RawMessage, args map[string]any, meta map[string]any) response {
 	const tool = "note.search"
 	store, err := s.resolveNoteStore(tool, args, meta)
@@ -271,6 +312,18 @@ func formatNoteWrite(records []wsnote.Record) string {
 func formatNoteErase(keys []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "erased %d note(s):\n", len(keys))
+	for _, key := range keys {
+		fmt.Fprintf(&b, "- %s\n", key)
+	}
+	return b.String()
+}
+
+func formatNoteMute(keys []string) string   { return formatNoteSetVisible("muted", keys) }
+func formatNoteUnmute(keys []string) string { return formatNoteSetVisible("unmuted", keys) }
+
+func formatNoteSetVisible(verb string, keys []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %d note(s):\n", verb, len(keys))
 	for _, key := range keys {
 		fmt.Fprintf(&b, "- %s\n", key)
 	}
