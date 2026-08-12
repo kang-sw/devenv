@@ -8,6 +8,7 @@ related:
   260811-feat-note-visibility-mute: coordinates — the layer-agnostic `visible`/mute attribute is owned there; this `repo` layer inherits it, and whichever of the two lands second extends the shared record shape
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-12
 ---
 
 # Tracked repo note layer — one-key-per-file git-tracked substrate for cross-clone notes
@@ -104,3 +105,44 @@ under `ai-docs/ws-notes/`; the record appears in the next `workflow_manual`
 call's `# Notes` block; a second clone/worktree on the same branch sees the file
 after the normal commit+merge path (i.e. it is genuinely tracked, unlike the
 `machine`/`worktree` layers).
+
+### Result (d0cf6b80) - 2026-08-12
+
+Landed the git-tracked `repo` note layer as a third value on the existing
+`note.*` surface: one JSON file per key under `ai-docs/ws-notes/`, sharing the
+`[key, value, priority, written_at]` record shape and the `# Notes`
+`workflow_manual` injection (same priority-ordered cap and elision) with the
+`machine`/`worktree` layers. No new git-mutation MCP verb; staging/commit rides
+the ordinary agent path.
+
+- **Key→filename encoding:** hex of the key's raw UTF-8 bytes + `.json` (e.g.
+  `a/b.c` → `612f622e63.json`) — deterministic across clone/OS/locale,
+  collision-free, and immune to the slash/dot-as-path hazard the ticket flagged;
+  `note.erase` recomputes the identical name, so it reliably finds and removes
+  the exact file.
+- **Lock outside the tracked tree (review fix):** the per-key flock lives in a
+  machine-local temp path (`os.TempDir()/ws-notes-locks/<sha256(abs path)>.lock`),
+  not a sibling in `ai-docs/ws-notes/`, so the tracked directory only ever holds
+  `.json` key files. Corrects a first-pass Important review finding where a
+  `<hexkey>.json.lock` sidecar would have been staged and orphaned after erase.
+
+Files: `internal/wsnote/{store.go,repo_store.go,inject.go,record.go}`,
+`internal/mcp/{note_tools.go,server.go}`; spec `mcp-tools.md`
+`#260810-note-tools`. Commits `dde338bd..d0cf6b80` (code+tests) and `c0f735a4`
+(spec lock-location clarification).
+
+Verification: `go build ./...` clean; `go test -count=1 ./internal/wsnote/...
+./internal/mcp/...` green. Tests prove one-file-per-key write, `# Notes`
+appearance, erase round-trip, genuine git-tracking via `git status --porcelain`,
+slash/dotted-key flatness, three-layer sort/cap, and no lock/temp residue in the
+tracked dir before or after erase.
+
+Accepted minors (non-blocking): the flock parent under shared `/tmp` could
+collide across OS users on a multi-user host (loud error, no corruption;
+single-dev norm); very long keys can hit `ENAMETOOLONG` (fails loud,
+pathological input); the per-key RMW duplicates `rmw()` rather than sharing a
+helper (matches existing codebase precedent, plan-directed).
+
+Deferred: the `visible`/mute attribute and its record-shape extension stay
+owned by `260811-feat-note-visibility-mute`; whichever of the two lands second
+extends the shared record shape.
