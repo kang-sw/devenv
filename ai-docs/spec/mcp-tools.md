@@ -415,28 +415,43 @@ are always explicit via `todo.check`.
 
 ## Note Tools {#260810-note-tools}
 
-`note.write`, `note.erase`, and `note.search` implement the two non-tracked
-note-memory layers (260807 Phase 1): **machine** (PC-global, project-agnostic
-— lives beside the global ws config file, e.g. `~/.ws/notes.json`) and
-**worktree** (worktree-local, ephemeral — lives under the existing per-worktree
-ws cache directory, so it does not survive worktree deletion and is invisible
-to any other worktree of the same repository). Both layers share the same
-record shape and storage mechanism; only the resolved file changes. The
-tracked `repo` layer is out of scope for this phase, and no git-mutation MCP
-verb is added anywhere in this family (260605 pivot constraint). This is a
-fresh surface, sharing no code or store with `session.note`
+`note.write`, `note.erase`, and `note.search` implement three note-memory
+layers: the two non-tracked layers from 260807 Phase 1 — **machine**
+(PC-global, project-agnostic — lives beside the global ws config file, e.g.
+`~/.ws/notes.json`) and **worktree** (worktree-local, ephemeral — lives under
+the existing per-worktree ws cache directory, so it does not survive worktree
+deletion and is invisible to any other worktree of the same repository) —
+plus the git-tracked **repo** layer from 260810 Phase 1. All three layers
+share the same record shape. The `machine`/`worktree` layers share one
+storage mechanism (one JSON file per whole layer; only the resolved file
+changes between them); the `repo` layer instead stores **one JSON file per
+key** under the tracked `ai-docs/ws-notes/` directory, so merge conflicts
+resolve on the filesystem with normal git tooling instead of any
+merge/conflict logic inside MCP — writing/erasing a key writes/removes
+exactly that key's file, and staging/committing it rides the caller's
+ordinary `git.commit` flow; no new git-mutation MCP verb is added anywhere in
+this family (260605 pivot constraint). A note key can contain arbitrary
+characters (including `/` and `.`), so the repo layer encodes each key into
+its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
+key `a/b.c` becomes `612f622e63.json`) — deterministic across every
+clone/OS/locale, collision-free, and immune to the slash/dot-as-path hazard,
+since hex output only ever contains `[0-9a-f]`. The filename is purely a
+storage detail: `note.search`/`workflow_manual` always report the record's
+real `key` field, never the encoded filename. This is a fresh surface,
+sharing no code or store with `session.note`
 (`#260619-session-key-lineage-children`), which is a distinct one-line
 per-child annotation on the session-key store, not a note-memory layer.
 
-All three tools require `session_key` and a `layer` argument (`"machine"` or
-`"worktree"`); they carry no `session.`/`config.`/`lead.` prefix, so — like
-`todo.*`/`agenda.*` — they are reachable by any scope (lead, delegate, leaf)
-that holds a session key. The `worktree` layer resolves its store path through
-the same `session_key`-authoritative root resolution every other root-aware
-tool uses. The `machine` layer needs no root, but still requires a
-`session_key` that resolves to a known session — an unrecognized key is
-rejected with the same `unknown_session` error shape root-aware tools use,
-even though no root is consumed.
+All three tools require `session_key` and a `layer` argument (`"machine"`,
+`"worktree"`, or `"repo"`); they carry no `session.`/`config.`/`lead.`
+prefix, so — like `todo.*`/`agenda.*` — they are reachable by any scope
+(lead, delegate, leaf) that holds a session key. The `worktree` and `repo`
+layers both resolve their store location through the same
+`session_key`-authoritative root resolution every other root-aware tool
+uses. The `machine` layer needs no root, but still requires a `session_key`
+that resolves to a known session — an unrecognized key is rejected with the
+same `unknown_session` error shape root-aware tools use, even though no root
+is consumed.
 
 **Wire shape.** A record is `{key, value, priority, written_at}`: `key` and
 `value` are strings, `priority` is an integer (higher = higher priority,
@@ -464,11 +479,15 @@ uses; there is no positional-array precedent anywhere in the tool surface.
   caller that sees the elision line uses `note.search` with a narrower glob to
   read a specific elided note.
 
-Storage is an flock-serialized read-modify-write (temp-file + atomic rename)
-over one JSON file per layer, reusing the same concurrent-safe-write pattern
-`wsconfig`'s project/global config writers use, with its own sibling `.lock`
-file per store (never shared with the `wsconfig` config lock, even though the
-machine-layer store lives in the same directory as the global config file).
+Storage is an flock-serialized read-modify-write (temp-file + atomic rename),
+reusing the same concurrent-safe-write pattern `wsconfig`'s project/global
+config writers use, with its own sibling `.lock` file per store (never shared
+with the `wsconfig` config lock, even though the machine-layer store lives in
+the same directory as the global config file). The `machine`/`worktree`
+layers RMW one JSON file per layer; the `repo` layer instead performs one
+such flock+temp-file+atomic-rename write per key, scoped to that key's own
+file under `ai-docs/ws-notes/` — each key file is independently owned, which
+is the point of one-key-per-file filesystem-level conflict resolution.
 
 There is no CLI mirror for `note.*`: like every other session-keyed tool
 (`todo.*`, `agenda.*`, `enter.*`), its authority model is
@@ -668,8 +687,8 @@ visible in the ambient block rather than silently omitted.
 
 `workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
 Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
-`# Notes` block: the highest-priority notes across both the `machine` and
-`worktree` layers (`#260810-note-tools`), up to a fixed cap (20), one line
+`# Notes` block: the highest-priority notes across the `machine`, `worktree`,
+and `repo` layers (`#260810-note-tools`), up to a fixed cap (20), one line
 per note as `- [<layer>] <key> (priority <n>, <written_at>): <value>`.
 
 **Placement is the one deliberate divergence from its Manuals/scope/staleness
@@ -680,7 +699,7 @@ after `## Session State`**, using a plain string append rather than the
 not a standing warning, so they render alongside the restored agenda/todo
 state a lead just asked to see, not as a banner above the reference material.
 The append is skipped entirely (not appended as an empty block) when there
-are no notes on either layer, so an empty result produces no stray blank
+are no notes on any layer, so an empty result produces no stray blank
 section — matching the silent-when-empty contract of every sibling injection.
 
 When more notes exist than the cap, the block ends with a visible `(N
