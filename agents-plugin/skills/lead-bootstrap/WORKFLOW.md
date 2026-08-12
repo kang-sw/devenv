@@ -16,17 +16,22 @@ template rather than relying on a project-local guide override.
 - `CLAUDE.md` exists only for Claude compatibility and should contain
   `@AGENTS.md` when the project has migrated to the host-neutral context.
 - `ai-docs/WORKFLOW.md` is this pinned guide for plugin-less
-  maintenance. Keep root context short; put durable project context in
-  `ai-docs/_index.md` and workflow-system changes in upstream tooling.
+  maintenance. Keep root context short; put durable project orientation in
+  `AGENTS.md`'s `## Project Orientation` section, procedures in
+  `ai-docs/manuals/`, volatile session context in the `repo` note layer, and
+  workflow-system changes in upstream tooling.
 
 ## `ai-docs/` Layout
 
-- `_index.md` is the session-start memory and active focus. Prune aggressively:
-  completed work belongs in Git history, not the index.
-- `_index.md` should keep compact orientation: summary, stack, workspace,
-  conventions, build/test commands, operational pitfalls, current focus, and
-  short session notes.
+- `AGENTS.md`'s `## Project Orientation` section is the every-session
+  orientation: repo identity, project map/topology, and canonical flows. Keep
+  it compact; route deep detail to specs, mental models, or manuals.
 - `_index.local.md` is machine-local memory and should be ignored by Git.
+- `manuals/` stores procedures and how-to content, one file per procedure with
+  a `summary:` frontmatter line describing when it applies.
+- `ws-notes/` is the git-tracked `repo` note layer, one file per key, written
+  through `ws/note.write(layer: "repo", ...)`. It holds volatile or tracked
+  session context; prune stale entries qualitatively as the project advances.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
 - `spec/` stores caller-visible behavior specs with stable stem anchors.
@@ -83,10 +88,19 @@ template rather than relying on a project-local guide override.
 
 ## Index Health
 
-When candidates exist, bootstrap reports `_index.md` scope-drift candidates as
+`ai-docs/_index.md` is a legacy all-in-one memory file. Current projects route
+every-session orientation into `AGENTS.md`'s `## Project Orientation` section,
+procedures into `ai-docs/manuals/`, volatile or tracked session context into
+the `repo` note layer, and ticket/spec inventory into generated project-tree
+output; they do not have an `_index.md`. This section only applies to a
+project that still has one, until it runs the bootstrap migration item that
+dissolves it.
+
+When `ai-docs/_index.md` exists, bootstrap reports scope-drift candidates as
 an advisory health note and asks whether to clean up now, defer cleanup, or
-route semantic follow-up. The first pass reads `_index.md` only; it does not
-load the full spec or mental-model corpus and does not move semantic content.
+migrate to the current model. The first pass reads `_index.md` only; it does
+not load the full spec or mental-model corpus and does not move semantic
+content.
 
 Common drift candidates:
 
@@ -99,7 +113,11 @@ Common drift candidates:
 - stable task/topic reading maps mixed into `_index.md`;
 - long duplicated spec, mental-model, module, or ticket indexes.
 
-When a maintainer approves `_index.md` cleanup:
+When a maintainer approves cleanup, prefer the dissolution migration (move
+`_index.md` content into `AGENTS.md`'s `## Project Orientation`, the `repo`
+note layer, and `ai-docs/manuals/`, then delete `_index.md`) over a partial
+in-place compaction. If a maintainer only wants a lighter compaction pass
+instead of full dissolution:
 
 1. Preserve the memory-policy comment.
 2. Keep project summary, stack, top-level workspace, build/test commands,
@@ -134,7 +152,7 @@ When a maintainer approves `_index.md` cleanup:
 
 When ws skills, MCP tools, or Claude compatibility commands are unavailable:
 
-1. Read `AGENTS.md`, `_index.md`, this guide, and the relevant current docs.
+1. Read `AGENTS.md`, this guide, and the relevant current docs.
 2. Use existing nearby tickets, specs, and mental models as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
 4. Keep generated AI docs and commit messages in English unless a human-facing

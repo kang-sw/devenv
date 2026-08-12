@@ -17,7 +17,8 @@ You are in <worktree> on branch impl/<parent>/<stem>.
 1. Call {{.McpNamespace}}/workflow_manual(session_key: "<worker key>").
 2. Call {{.McpNamespace}}/playbook.print(name: "lead-proceed", session_key: "<worker key>")
    and execute it on ticket <stem>: implement and review to a committed impl/<parent>/<stem>
-   branch, editing any ai-docs you touch (spec, _index.md, ticket Result) directly —
+   branch, editing any ai-docs you touch (spec, AGENTS.md Project Orientation,
+   _index.md if present, ticket Result) directly —
    you are the document owner for this ticket.
 Stop at lead-proceed's merge gate — do not merge. Report your result there and stay
 available; do not end your turn before that gate.
@@ -25,7 +26,7 @@ available; do not end your turn before that gate.
 
 Then seed the board: `{{.McpNamespace}}/session.note(session_key: <your key>, child_session_key: <worker key>, text: "<stem>: dispatched")`.
 
-**Collect and merge, one at a time.** The host signals when a worker stops at its merge gate. On each such signal, dispatch a **merge subagent** in your own worktree — the only checkout of the parent branch, so merges are physically serial. It reconciles from git evidence (expected commits present, the worker's own review clean), serial-merges `impl/<parent>/<stem>` into the parent, resolves the `_index.md`/spec conflicts that overlapping doc-owners produce, and returns only a compact verdict (merge hash or blocker). For a worker whose handle you lost (e.g. after compaction) but whose branch exists, judge it from commits plus verification rather than resuming it. Advance each worker's board note to `merged` (or `blocked`) as it lands, so the next selection stops excluding it.
+**Collect and merge, one at a time.** The host signals when a worker stops at its merge gate. On each such signal, dispatch a **merge subagent** in your own worktree — the only checkout of the parent branch, so merges are physically serial. It reconciles from git evidence (expected commits present, the worker's own review clean), serial-merges `impl/<parent>/<stem>` into the parent, resolves doc conflicts (spec, `AGENTS.md`, `ai-docs/_index.md` if present) that overlapping doc-owners produce, and returns only a compact verdict (merge hash or blocker). For a worker whose handle you lost (e.g. after compaction) but whose branch exists, judge it from commits plus verification rather than resuming it. Advance each worker's board note to `merged` (or `blocked`) as it lands, so the next selection stops excluding it.
 
 **When the batch settles, resume the base terminal check.** Once every dispatched worker has merged or recorded a blocker onto its own ticket, delegate one aggregate verification pass over the merged parent, then hand back to the appended Drain Ready Queue block's selection-and-terminal logic unchanged: a fresh independent batch pulls another fan-out cycle, a lone advanceable ticket takes the serial path, and an empty or all-blocked `ready/` reaches the base's terminal states. End a productive cycle by naming that next selection, never with a wrap-up that reads as goal-complete.
 

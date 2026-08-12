@@ -17,7 +17,9 @@ Record a fact only when **both** conditions hold:
 2. Not derivable from reading entry-point files in under 30 seconds.
 
 **Never record:** type/struct field listings, function signatures, API route enumerations,
-source-paraphrasing descriptions, information already in `_index.md`.
+source-paraphrasing descriptions, information already in `AGENTS.md`'s
+`## Project Orientation` section (or `ai-docs/_index.md` when the project has
+not migrated off it).
 
 ## Structure
 
@@ -43,7 +45,8 @@ A reading-map entry contains only routing information:
 
 Do not use the map to record current behavior, implementation status, feature
 lists, source summaries, or active focus state. Those belong in specs, tickets,
-source/tests, generated surveys, or `_index.md`.
+source/tests, generated surveys, the repo note layer, or `ai-docs/_index.md`
+(pre-dissolution projects only).
 
 ## Directory Hierarchy
 

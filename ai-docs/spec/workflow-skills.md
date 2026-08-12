@@ -1186,14 +1186,29 @@ lifecycle, spec stems, mental models, commit traceability, and manual fallback
 expectations without becoming a project-local override for runtime semantics.
 {#260506-bootstrap-workflow-guide}
 
-Bootstrap runs an advisory `_index.md` health check when the index exists. The
-first pass reads only `_index.md`; when candidates exist, it reports likely
-scope drift such as source-derived detail, behavior inventories, modification
-knowledge, static reference material, work history, duplicated maps, or stable
-reading maps, and asks whether to clean up `_index.md` now, defer cleanup, or
-route semantic follow-up work through the owning workflow. Bootstrap cleanup
-itself only compacts `_index.md`; it does not author or semantically update
-specs, mental models, tickets, or references.
+A versioned migration item retires `ai-docs/_index.md`. On upgrade,
+`lead-bootstrap` migrates the index's regions to their homes — resident
+orientation into the `AGENTS.md` body, tracked session notes into the `repo`
+note layer with qualitative staleness pruning, procedures into `manuals/`,
+derivable inventories to generation — removes the read-`_index.md` step, and
+deletes the file. On a fresh bootstrap the scaffold no longer creates
+`_index.md`; the always-resident orientation is carried in the `AGENTS.md`
+template body directly. A fresh-bootstrapped project and an upgrade-migrated
+project converge on the same `AGENTS.md` shape, neither carrying an `_index.md`.
+{#260812-bootstrap-index-dissolution}
+
+While a project still has an `ai-docs/_index.md` — an un-migrated but supported
+transitional state — bootstrap runs an advisory index health check gated on the
+file existing. The first pass reads only `_index.md`; when candidates exist, it
+reports likely scope drift such as source-derived detail, behavior inventories,
+modification knowledge, static reference material, work history, duplicated maps,
+or stable reading maps, and asks whether to clean up `_index.md` now, defer
+cleanup, or route semantic follow-up work through the owning workflow. Bootstrap
+cleanup itself only compacts `_index.md`; it does not author or semantically
+update specs, mental models, tickets, or references. The check skips cleanly once
+the file is gone, and every other workflow step that reads or maintains
+`_index.md` is likewise gated on its presence, degrading to the dissolved homes
+when it is absent.
 
 Bootstrap ensures downstream `.gitignore` covers local workflow state and
 runtime-managed API documentation cache data: `ai-docs/**/*.local.md` and
