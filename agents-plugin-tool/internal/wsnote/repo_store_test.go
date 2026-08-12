@@ -182,3 +182,95 @@ func TestRepoWriteSlashAndDottedKeysStayFlat(t *testing.T) {
 		t.Fatalf("slash-bearing key created a nested path entry: stat err = %v", err)
 	}
 }
+
+// TestRepoWriteSetsVisibleTrueOnNewKey is the repo-layer counterpart of
+// TestWriteSetsVisibleTrueOnNewKey: a brand new key is always visible.
+func TestRepoWriteSetsVisibleTrueOnNewKey(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws-notes")
+
+	if err := RepoWrite(dir, []Record{{Key: "fresh", Value: "v", Priority: 1, WrittenAt: "t1"}}); err != nil {
+		t.Fatalf("RepoWrite: %v", err)
+	}
+	loaded, err := RepoLoad(dir)
+	if err != nil {
+		t.Fatalf("RepoLoad: %v", err)
+	}
+	if !loaded["fresh"].Visible {
+		t.Fatalf("RepoWrite(new key) Visible = false, want true")
+	}
+}
+
+// TestRepoWritePreservesVisibleOnExistingMutedKey is the repo-layer
+// counterpart of the ticket-mandated write-over-a-muted-key regression.
+func TestRepoWritePreservesVisibleOnExistingMutedKey(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws-notes")
+
+	if err := RepoWrite(dir, []Record{{Key: "k", Value: "v1", Priority: 1, WrittenAt: "t1"}}); err != nil {
+		t.Fatalf("RepoWrite initial: %v", err)
+	}
+	if err := RepoSetVisible(dir, []string{"k"}, false); err != nil {
+		t.Fatalf("RepoSetVisible(mute): %v", err)
+	}
+	if err := RepoWrite(dir, []Record{{Key: "k", Value: "v2", Priority: 9, WrittenAt: "t2"}}); err != nil {
+		t.Fatalf("RepoWrite over muted key: %v", err)
+	}
+
+	loaded, err := RepoLoad(dir)
+	if err != nil {
+		t.Fatalf("RepoLoad: %v", err)
+	}
+	got := loaded["k"]
+	if got.Visible {
+		t.Fatalf("RepoWrite over a muted key set Visible = true, want the mute to survive (false)")
+	}
+	if got.Value != "v2" || got.Priority != 9 || got.WrittenAt != "t2" {
+		t.Fatalf("RepoWrite over a muted key did not update content fields: %+v", got)
+	}
+}
+
+// TestRepoSetVisibleIdempotentAndLeavesWrittenAtUnchanged is the repo-layer
+// counterpart of the idempotency/no-restamp regression.
+func TestRepoSetVisibleIdempotentAndLeavesWrittenAtUnchanged(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws-notes")
+
+	if err := RepoWrite(dir, []Record{{Key: "k", Value: "v", Priority: 1, WrittenAt: "original-timestamp"}}); err != nil {
+		t.Fatalf("RepoWrite: %v", err)
+	}
+	if err := RepoSetVisible(dir, []string{"k"}, false); err != nil {
+		t.Fatalf("RepoSetVisible(mute): %v", err)
+	}
+	if err := RepoSetVisible(dir, []string{"k"}, false); err != nil {
+		t.Fatalf("RepoSetVisible(mute again, idempotent): %v", err)
+	}
+
+	loaded, err := RepoLoad(dir)
+	if err != nil {
+		t.Fatalf("RepoLoad: %v", err)
+	}
+	got := loaded["k"]
+	if got.Visible {
+		t.Fatalf("RepoSetVisible(false) twice left Visible = true, want false")
+	}
+	if got.WrittenAt != "original-timestamp" {
+		t.Fatalf("RepoSetVisible restamped WrittenAt: got %q, want unchanged %q", got.WrittenAt, "original-timestamp")
+	}
+}
+
+// TestRepoSetVisibleMissingKeyIsNoop is the repo-layer counterpart of the
+// missing-key no-op regression.
+func TestRepoSetVisibleMissingKeyIsNoop(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws-notes")
+	if err := RepoWrite(dir, []Record{{Key: "a", Value: "v", Priority: 1, WrittenAt: "t"}}); err != nil {
+		t.Fatalf("RepoWrite: %v", err)
+	}
+	if err := RepoSetVisible(dir, []string{"never-written"}, false); err != nil {
+		t.Fatalf("RepoSetVisible on missing key: %v", err)
+	}
+	loaded, err := RepoLoad(dir)
+	if err != nil {
+		t.Fatalf("RepoLoad: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("RepoSetVisible on missing key mutated the store: %#v", loaded)
+	}
+}
