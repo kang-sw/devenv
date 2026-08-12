@@ -230,6 +230,63 @@ model); a fresh session started with no manual file reads still receives the rep
 orientation it previously depended on `_index.md` for. Gated on all **Blocked on**
 prerequisites landing.
 
+### Result (b844635a) - 2026-08-12
+
+Authored the dissolution as a versioned `lead-bootstrap` migration and validated
+it on devenv. Range `0b7d0f46..b844635a` (impl `f652a0d8..b844635a`).
+
+Behavioral delta:
+- New migration-checklist item in both distributions' `AGENTS.template.md` (ws
+  `v0046`, wsflow `v0007` — independent lineages), plus a new `## Project
+  Orientation` template section, a rewritten `## Project Memory` read step, and a
+  fresh-bootstrap scaffold that no longer creates `_index.md`. Both `WORKFLOW.md`
+  master templates and `lead-bootstrap.md` (byte-identical mirror) updated in
+  step; skills manifest regenerated.
+- devenv self-dissolved: `ai-docs/_index.md` deleted, resident orientation moved
+  into devenv's `AGENTS.md` `## Project Orientation`, tracked `# Session Notes`
+  migrated to the `repo` note layer (`ai-docs/ws-notes/`) with the stale closeout
+  pruned, devenv tag `v0041 -> v0046`. Absorbed-260725 residual Ticket Focus refs
+  cleared by regeneration.
+- Specs reconciled: `documentation-system.md {#260505-project-memory-index}`
+  rewritten to the distributed model; `workflow-skills.md` gained
+  `{#260812-bootstrap-index-dissolution}` + coexistence-only health-check framing.
+  Two mental-model drift lines fixed on contact.
+
+Deviations / discoveries beyond the plan:
+- **`_index.md` was not docs-only.** Two live runtime dependents surfaced during
+  edit — `internal/wsdoc/doctor.go` (the `ws-mcp doctor` check) and
+  `scripts/bump-ws-version.sh` (a release-version edition point). Both retargeted
+  to `AGENTS.md`; `AGENTS.md`'s `## Project Orientation` version strings are now
+  the documented bump surface (the edition-point list was updated to match).
+- **The dissolution surface was wider than the plan grep.** Review cycle 1 (Test
+  Critical) found the entire shared `agents-plugin{,-wsflow}/rsrc/` playbook
+  surface + `mental-model-conventions.md` still reading/writing `_index.md`
+  (`reference-discovery`, `executor-wrapup`, `lead-write-spec`, `lead-write-ticket`,
+  `lead-implement`, `impl-playbook`, `lead-goal-fan-out-step`). Cycle 2 relay swept
+  them with **if-present degrade** (context reads fall back to the dissolved homes;
+  doc-pipeline writes are gated on the file existing) so un-migrated downstream
+  projects keep working; the retired Ticket-Focus write was dropped, not gated.
+- **WORKFLOW.md brought into scope** by lead ruling (ticket verification bar +
+  convergence invariant).
+
+Verification: extended `grep` sweeps clean (no unconditional `_index.md`
+read/write remains); `grep -rni "ticket focus"` clean; `_index.md` absent on
+devenv; wsrsrc regen tests, `go build ./...`, and `TestGenerate*Manifest` pass;
+`python3 -m unittest discover agents-plugin-wsflow/tests` 9/10 (the one failure is
+a pre-existing, unrelated `note.mute`/`note.unmute` wsflow tool-registration gap,
+independently reproduced at the base commit — captured as a separate idea ticket).
+
+Review: partitioned (correctness/fit/test). Cycle 1 — fit clean, correctness clean
++2 minor, test 1 Critical + 1 Important. Cycle 2 relay + re-review — Critical
+[resolved], minors [fixed], the no-regression-test Important [accepted: no existing
+scaffolding, trivial repoints, grep+build verified]. Re-review clean.
+
+> Forward: Phase 2 (coexistence contract) is substantially satisfied by this
+> phase's if-present degrade + the compiled-code hard-dependency fixes + the
+> transitional-coexistence spec text. It is reduced to a verification pass (run
+> the coexistence checks on an un-migrated project; add a guard only if a new hard
+> dependency surfaces) — no new mechanism expected.
+
 ### Phase 2: Un-migrated-downstream coexistence contract
 
 The passive path for a project on the new runtime that keeps a live `_index.md`
