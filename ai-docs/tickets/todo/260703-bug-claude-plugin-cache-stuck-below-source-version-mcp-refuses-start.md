@@ -92,10 +92,11 @@ which re-syncs `agents-plugin/` into the snapshot (bringing `runtime.json` to
 `0.40.0`) and reinstalls the plugin — the snapshot re-sync, not a CLI plugin
 update, is what clears it.
 
-Tempers the "rare in practice" deprioritization above: this is not rare, it is
-**deterministic after every ship** — every release bump leaves the installed
-snapshot one minor behind the live devenv source until `install.sh update` runs,
-so any post-ship session in this repo hits it. Strengthens Research Direction #3
-(a pre-session `source_version > installed plugin_version` self-check that emits
-an actionable "run install.sh update" message instead of the opaque launcher
-failure); the trigger is predictable enough to guard mechanically.
+Classification (user, 2026-08-12): this is a **known limitation** of the devenv
+dogfood loop, not a defect to prioritize. In this repo a ship bump predictably
+leaves the installed snapshot one minor behind the live source until
+`install.sh update` re-syncs it, and forgetting that step is a routine
+self-inflicted trip the user owns and clears manually. Recorded here as a data
+point, not as pressure to promote the ticket; it stays deprioritized in `todo/`.
+Research Direction #3 (a pre-session source-vs-installed self-check) remains the
+option if this is ever revisited, but nothing here asks to.
