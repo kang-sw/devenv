@@ -7,7 +7,7 @@ related:
   260810-feat-repo-tracked-note-layer: prerequisite — the tracked `repo` layer, landed home for the git-tracked `# Session Notes` (Resolved Decision chose to keep them tracked)
   260807-feat-manuals-doc-tier: prerequisite (landed) — the procedure sink; _index.md's inlined procedures and Read-Before-Editing table move to manuals/
   260710-bug-project-index-ticket-focus-stale-status: prerequisite — the derivable->generate leg; Ticket Focus / status content must become generated before it can be removed from _index.md
-  260725-idea-retire-ticket-focus-root-regen: prerequisite — retires the _index.md Ticket Focus regen machinery, part of the derivable->generate leg
+  260725-idea-retire-ticket-focus-root-regen: absorbs (dropped) — its devenv AGENTS.md/WORKFLOW.md Ticket Focus regen cleanup is folded into this ticket's Phase 1 validate-on-devenv step; the unique section-placement gotcha was transplanted there
   260728-research-index-ticket-table-drift: motivates — documents the hand-maintained _index ticket/spec table drift this dissolution removes by generation
 sage-review-completeness: completed
 ---
@@ -211,6 +211,18 @@ The active, downstream-applicable path. Author the dissolution as a
 - Validate on devenv: run the upgrade item against this repo — its `_index.md`
   dissolves, its `AGENTS.md` absorbs the resident orientation, its tracked
   `# Session Notes` migrate into the `repo` layer with the stale closeout pruned.
+- Absorbed from `260725` (residual Ticket Focus regen): the same devenv
+  bootstrap-regeneration must also clear the retired Ticket Focus references
+  `260710` left in this repo's *managed* consumer files — root `AGENTS.md`
+  (the `Check '## Ticket Focus' …` reader instruction) and `ai-docs/WORKFLOW.md`
+  (Ticket Focus semantics / keep-list / routing mentions). These must be cleared
+  by regeneration, never a hand-edit (a hand-edit is re-added on the next upgrade).
+  Section-placement gotcha: the migration entry's section hint points the reader
+  bullet at `## Project Knowledge`, but in devenv's own generated `AGENTS.md` the
+  equivalent line sits under `## Ticket System`, so a section-scoped regen must
+  catch it there. Verify afterward: repo-wide `grep -ri 'ticket focus'` returns
+  only immutable migration-history entries, `CHANGELOG.md`, and ticket bodies —
+  no live reader/semantics reference in `AGENTS.md` / `WORKFLOW.md`.
 
 Verification: `ai-docs/_index.md` is gone from devenv; the template neither
 creates nor reads `_index.md` on either the fresh or the upgrade path; no shipped

@@ -2,6 +2,7 @@
 title: regenerate devenv's own root AGENTS.md / WORKFLOW.md to clear retired Ticket Focus references
 related:
   260710-bug-project-index-ticket-focus-stale-status: completes the deferred post-reinstall regeneration of this ticket's Phase 1
+dropped: 2026-08-12
 ---
 
 # regenerate devenv's own root AGENTS.md / WORKFLOW.md to clear retired Ticket Focus references
@@ -48,3 +49,8 @@ After the plugin with template `v0044` is installed:
    under `## Project Knowledge` (true in the template); in devenv's own generated
    `AGENTS.md` the equivalent line sits under `## Ticket System`, so a
    section-scoped regen must still catch it there.
+
+
+## Resolution (2026-08-12)
+
+Absorbed into 260807-refactor-dissolve-project-index Phase 1. The devenv AGENTS.md / WORKFLOW.md Ticket Focus regeneration this ticket described is the same bootstrap regeneration 260807's validate-on-devenv step performs; its unique detail — the residual reader refs in root AGENTS.md and WORKFLOW.md, the regenerate-not-hand-edit rule, and the section-placement gotcha (migration hint says `## Project Knowledge`, devenv's generated AGENTS.md carries it under `## Ticket System`) — was transplanted into 260807 Phase 1. Dropped rather than done: not independently implemented, subsumed by another ticket. Its install-gate (v0044 template) is now cleared (0.40.2 installed), so 260807 can execute the regen directly.
