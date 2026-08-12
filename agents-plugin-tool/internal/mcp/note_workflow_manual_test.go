@@ -140,7 +140,7 @@ func TestWorkflowManualCarriesRepoLayerNoteAndErasesCleanly(t *testing.T) {
 
 // TestWorkflowManualNotesBlockAbsentWhenNoNotesExist verifies the injection is
 // a true no-op (scopeAnnouncement/computeManuals-style silent case) when no
-// note has ever been written on either layer.
+// note has ever been written on any layer.
 func TestWorkflowManualNotesBlockAbsentWhenNoNotesExist(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()

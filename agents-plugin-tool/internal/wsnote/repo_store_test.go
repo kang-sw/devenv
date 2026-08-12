@@ -3,6 +3,7 @@ package wsnote
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,46 @@ func TestRepoWriteLoadEraseRoundTrip(t *testing.T) {
 	}
 	if _, ok := afterErase["roundtrip.key"]; ok {
 		t.Fatalf("RepoLoad after erase still returned %q: %v", "roundtrip.key", afterErase)
+	}
+}
+
+// TestRepoWriteLeavesNoLockOrTempArtifactInTrackedDir verifies the fix for
+// the reviewed defect: writeRepoRecordFile's per-key flock must NOT live
+// beside the target file inside the tracked dir (that would leave a
+// "<hex>.json.lock" sidecar that `git status`/`git add ai-docs/ws-notes/`
+// would pick up and commit as orphaned litter, and that RepoErase would
+// never clean up). After RepoWrite, the tracked dir must contain exactly the
+// intended ".json" file(s) and nothing else; after RepoErase, the dir must
+// be completely empty — no leftover ".lock" or "*.tmp" residue either way.
+func TestRepoWriteLeavesNoLockOrTempArtifactInTrackedDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws-notes")
+
+	if err := RepoWrite(dir, []Record{
+		{Key: "clean.tracking", Value: "hello", Priority: 1, WrittenAt: "2026-08-01T00:00:00Z"},
+	}); err != nil {
+		t.Fatalf("RepoWrite: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", dir, err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("tracked dir has %d entries after RepoWrite, want exactly 1 (.json only): %v", len(entries), entries)
+	}
+	if got := entries[0].Name(); !strings.HasSuffix(got, ".json") {
+		t.Fatalf("tracked dir entry %q is not a .json file — lock/temp artifact leaked into the tracked tree", got)
+	}
+
+	if err := RepoErase(dir, []string{"clean.tracking"}); err != nil {
+		t.Fatalf("RepoErase: %v", err)
+	}
+	afterErase, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) after erase: %v", dir, err)
+	}
+	if len(afterErase) != 0 {
+		t.Fatalf("tracked dir has %d leftover entries after RepoErase, want 0 (no orphaned lock/temp artifact): %v", len(afterErase), afterErase)
 	}
 }
 

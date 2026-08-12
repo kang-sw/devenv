@@ -2,6 +2,7 @@ package wsnote
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -65,11 +66,16 @@ func RepoLoad(dir string) (map[string]Record, error) {
 
 // RepoWrite writes each record to its own tracked file under dir (full
 // overwrite per key, matching note.write's existing per-key contract),
-// creating dir if needed. Each file's write is serialized by its own sibling
-// ".lock" file via the same flock + temp-file + atomic-rename pattern rmw
-// uses, but scoped to one record per file rather than rmw's whole-layer
-// map-transform — each file is independently owned, which is the point of
-// "one key = one file" filesystem-level conflict resolution.
+// creating dir if needed. Each file's write is serialized by its own per-key
+// flock via the same flock + temp-file + atomic-rename pattern rmw uses, but
+// scoped to one record per file rather than rmw's whole-layer map-transform —
+// each file is independently owned, which is the point of "one key = one
+// file" filesystem-level conflict resolution. Unlike rmw's sibling ".lock"
+// file, the per-key lock here lives under os.TempDir() (see
+// repoLockPath), not beside the target file: dir is git-tracked, and a
+// sibling "<hex>.json.lock" would be picked up by the caller's ordinary
+// `git status`/`git add ai-docs/ws-notes/` and committed as orphaned litter,
+// defeating the layer's clean-tracking contract.
 func RepoWrite(dir string, records []Record) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create repo note dir: %w", err)
@@ -82,10 +88,30 @@ func RepoWrite(dir string, records []Record) error {
 	return nil
 }
 
+// repoLockPath derives the non-tracked flock path for the tracked note file
+// at targetPath: os.TempDir() joined with a sha256 hex digest of targetPath's
+// absolute form, so distinct key files (even across different repo roots)
+// get distinct, deterministic, collision-free lock paths without ever
+// placing a lock artifact inside the tracked ai-docs/ws-notes/ tree.
+func repoLockPath(targetPath string) (string, error) {
+	abs, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve repo note lock path for %s: %w", targetPath, err)
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return filepath.Join(os.TempDir(), "ws-notes-locks", hex.EncodeToString(sum[:])+".lock"), nil
+}
+
 func writeRepoRecordFile(dir string, rec Record) error {
 	path := filepath.Join(dir, repoKeyFilename(rec.Key))
 
-	lockPath := path + ".lock"
+	lockPath, err := repoLockPath(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return fmt.Errorf("create repo note lock dir: %w", err)
+	}
 	fl := flock.New(lockPath)
 	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
 	defer cancel()

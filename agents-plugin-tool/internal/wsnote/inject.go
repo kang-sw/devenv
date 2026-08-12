@@ -9,8 +9,8 @@ import (
 )
 
 // layeredRecord tags a Record with the layer it was loaded from, purely for
-// display in the injected block — the two layers never share a namespace on
-// disk, so this is not used for identity/dedup.
+// display in the injected block — the three layers never share a namespace
+// on disk, so this is not used for identity/dedup.
 type layeredRecord struct {
 	Record
 	Layer Layer
