@@ -183,6 +183,34 @@ func TestRepoWriteSlashAndDottedKeysStayFlat(t *testing.T) {
 	}
 }
 
+// TestRepoLoadDefaultsVisibleTrueForLegacyRecordMissingField is the
+// repo-layer counterpart of TestLoadDefaultsVisibleTrueForLegacyRecordMissingField:
+// pins the migration contract through RepoLoad's REAL per-key-file decode
+// path (single Record, not a map), not a bare json.Unmarshal probe.
+func TestRepoLoadDefaultsVisibleTrueForLegacyRecordMissingField(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws-notes")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, repoKeyFilename("legacy.repo.key"))
+	legacy := `{"key":"legacy.repo.key","value":"v","priority":1,"written_at":"2026-08-01T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy fixture: %v", err)
+	}
+
+	loaded, err := RepoLoad(dir)
+	if err != nil {
+		t.Fatalf("RepoLoad: %v", err)
+	}
+	rec, ok := loaded["legacy.repo.key"]
+	if !ok {
+		t.Fatalf("RepoLoad(legacy fixture) missing key %q: %#v", "legacy.repo.key", loaded)
+	}
+	if !rec.Visible {
+		t.Fatalf("RepoLoad(legacy fixture, no \"visible\" key) Visible = false, want true (migration default)")
+	}
+}
+
 // TestRepoWriteSetsVisibleTrueOnNewKey is the repo-layer counterpart of
 // TestWriteSetsVisibleTrueOnNewKey: a brand new key is always visible.
 func TestRepoWriteSetsVisibleTrueOnNewKey(t *testing.T) {

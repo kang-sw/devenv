@@ -569,3 +569,21 @@ func TestNoteMuteRejectsEmptyKeys(t *testing.T) {
 		t.Fatalf("note.mute(empty keys) = %s, want a non-empty-array error", resp)
 	}
 }
+
+// TestNoteUnmuteRejectsEmptyKeys is the symmetric counterpart of
+// TestNoteMuteRejectsEmptyKeys: note.unmute shares handleNoteSetVisible's
+// validation with note.mute, but that shared code path had no dedicated
+// note.unmute-side assertion until now.
+func TestNoteUnmuteRejectsEmptyKeys(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.unmute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{},
+	})
+	if !strings.Contains(resp, "non-empty") {
+		t.Fatalf("note.unmute(empty keys) = %s, want a non-empty-array error", resp)
+	}
+}

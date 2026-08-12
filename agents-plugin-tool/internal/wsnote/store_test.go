@@ -137,6 +137,35 @@ func TestMachinePathIsSiblingOfGlobalConfig(t *testing.T) {
 	}
 }
 
+// TestLoadDefaultsVisibleTrueForLegacyRecordMissingField pins the migration
+// contract through the REAL production read path, not a bare
+// json.Unmarshal(&Record{}) probe: a legacy whole-layer store file (the
+// map[string]Record shape Load actually decodes) with an entry that has no
+// "visible" key at all must load with Visible==true. This exercises Go's
+// per-map-element addressable UnmarshalJSON dispatch the plan's Codebase
+// Findings section calls out as the reason the migration fix "covers this
+// path without further change" — a claim worth pinning with a real Load call
+// rather than trusting by inspection.
+func TestLoadDefaultsVisibleTrueForLegacyRecordMissingField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.json")
+	legacy := `{"legacy.key":{"key":"legacy.key","value":"v","priority":1,"written_at":"2026-08-01T00:00:00Z"}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy fixture: %v", err)
+	}
+
+	records, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	rec, ok := records["legacy.key"]
+	if !ok {
+		t.Fatalf("Load(legacy fixture) missing key %q: %#v", "legacy.key", records)
+	}
+	if !rec.Visible {
+		t.Fatalf("Load(legacy fixture, no \"visible\" key) Visible = false, want true (migration default)")
+	}
+}
+
 // TestWriteSetsVisibleTrueOnNewKey verifies Write's default-on-new-key half
 // of the visible contract: a brand new key is always visible, regardless of
 // whatever the caller's Record literal happened to carry (note.write has no
