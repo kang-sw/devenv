@@ -65,19 +65,6 @@ in place:
   already emits. `260728-research-index-ticket-table-drift` (`idea/`) `motivates`
   this dissolution but is not a build prerequisite.
 
-## Blocked (2026-08-12) — decision gate, not dependency
-
-All dependency prerequisites are satisfied (see **Prerequisites**), so this is
-advanceable on the merits. It is held only for an explicit human go-ahead:
-Phase 1 is an AGENTS.md **"Always ask"**-grade change — it adds a new
-`AGENTS.template.md` migration-checklist item (modifying migration-checklist
-semantics), rewrites the template's two faces and `lead-bootstrap.md` across
-**both** shipped distributions (`agents-plugin/` and `agents-plugin-wsflow/`),
-reconciles two specs, and deletes `_index.md`. `lead-drain-ready-queue` posture
-preserves any AGENTS.md "Always ask" item as a hard stop even on a goal run, so
-the drain will not dispatch this autonomously. Lift this note on user sign-off
-and dispatch to `lead-proceed`.
-
 ## Decisions
 
 ### Dissolution target — where each `_index.md` region goes
