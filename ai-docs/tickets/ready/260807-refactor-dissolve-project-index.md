@@ -9,7 +9,7 @@ related:
   260710-bug-project-index-ticket-focus-stale-status: prerequisite — the derivable->generate leg; Ticket Focus / status content must become generated before it can be removed from _index.md
   260725-idea-retire-ticket-focus-root-regen: prerequisite — retires the _index.md Ticket Focus regen machinery, part of the derivable->generate leg
   260728-research-index-ticket-table-drift: motivates — documents the hand-maintained _index ticket/spec table drift this dissolution removes by generation
-sage-review-completeness: required
+sage-review-completeness: completed
 ---
 
 # Dissolve _index.md — author the versioned lead-bootstrap dissolution step, validated on devenv
