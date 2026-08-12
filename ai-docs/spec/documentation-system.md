@@ -10,16 +10,36 @@ set of structured document systems for behavior, work tracking, operational
 knowledge, and cross-reference discovery. It is designed for host-neutral access
 through MCP discovery tools and convention documents.
 
-## Project Memory Index {#260505-project-memory-index}
+## Project Memory {#260505-project-memory-index}
 
-`ai-docs/_index.md` is the project memory and active inventory document. It
-records the repository purpose, plugin topology, read-before-edit references,
-implemented runtime surfaces, prompt and skill inventory, current spec list,
-active ticket list, and compact session notes.
+Project memory — the repository purpose, plugin topology, procedure references,
+runtime surfaces, inventories, and session notes a future session should not
+re-derive — is distributed across purpose-specific homes rather than one
+hand-maintained file:
 
-The index is intentionally bounded: completed and dropped ticket history lives
-in the ticket archive directories and Git history, while the index keeps the
-current focus and context a future session should not have to re-derive.
+- **Every-session orientation** (repo identity, plugin topology, canonical
+  flows, documentation-system routing) lives in the `AGENTS.md` body, which the
+  host injects every session.
+- **Session notes and volatile state** live in the note layers, injected into
+  the workflow manual rather than file-read; tracked cross-clone notes use the
+  `repo` layer.
+- **Procedures** live in `manuals/`, ambient-injected and indexed by the
+  generated `# Manuals` list.
+- **Derivable inventories** (ticket and spec tables, status/focus) are generated
+  (`project_tree`), not hand-copied.
+
+`ai-docs/_index.md` — formerly the single project-memory-and-inventory document —
+is retired by a versioned `lead-bootstrap` migration that moves each region to
+its home and deletes the file.
+
+**Transitional coexistence.** A project on the current runtime that has not yet
+run the dissolution migration keeps a live `ai-docs/_index.md`, and that is a
+supported configuration: the new ambient injections (`# Notes`, `# Manuals`) and
+the generated tables coexist additively with it, and every workflow step that
+reads or maintains `_index.md` does so only while the file exists, degrading
+cleanly once it is gone. A migrated project carries no `_index.md`; a
+fresh-bootstrapped project never creates one. Both reach the same
+`AGENTS.md`-anchored shape.
 
 ## Project Old Archive {#260511-project-old-archive}
 
