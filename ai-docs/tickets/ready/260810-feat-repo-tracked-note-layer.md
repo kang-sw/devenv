@@ -6,6 +6,8 @@ related:
   260807-refactor-dissolve-project-index: consumer — this layer is the landed home for _index.md's tracked `# Session Notes`, without which that content would be demoted to non-tracked
   260730-refactor-retire-goal-fan-out-step-and-session-note: constraint — must not resurrect or build on the retiring session.note surface
   260811-feat-note-visibility-mute: coordinates — the layer-agnostic `visible`/mute attribute is owned there; this `repo` layer inherits it, and whichever of the two lands second extends the shared record shape
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Tracked repo note layer — one-key-per-file git-tracked substrate for cross-clone notes
@@ -36,6 +38,15 @@ contract:
   file per key, so merge conflicts resolve on the filesystem with normal git
   tooling. No merge/conflict logic enters MCP — that was an explicit epic-level
   rejection of complex tooling in the note surface.
+  - **Key→filename encoding is a required planning choice.** The shipped surface
+    admits slash-bearing and dotted keys (its tests exercise a match-all glob
+    across slash-bearing keys), so the raw key cannot be used as a path: a slash
+    would nest directories and make `note.erase` a silent no-op that leaves a
+    stale tracked note re-injected forever. Pick any reversible or stable-hash
+    encoding — the only hard requirements are that it round-trips (so `erase`
+    finds the file) and is deterministic across clones (so the same key yields
+    the same filename and concurrent same-key writes collide as one git
+    conflict, which is what the filesystem-merge rationale depends on).
 - **No git-mutation verb in MCP.** Writing a tracked file and committing it is
   something an agent already does through the normal path; the value this layer
   adds over "just edit a file" is the forced `workflow_manual` injection and a

@@ -5,6 +5,7 @@ related:
   260807-feat-note-memory-layers: extends — adds a `visible` attribute and mute/unmute verbs to the shipped note.* surface and its workflow_manual injection
   260810-feat-repo-tracked-note-layer: coordinates — visibility is a layer-agnostic note attribute; the tracked repo layer inherits it, and whichever of the two lands second extends the shared record shape
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Note visibility — mute a note out of injection while keeping it searchable
