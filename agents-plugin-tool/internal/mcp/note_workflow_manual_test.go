@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,9 +80,67 @@ func assertNotesAfterSessionState(t *testing.T, body, wantKey, wantValue string)
 	}
 }
 
+// TestWorkflowManualCarriesRepoLayerNoteAndErasesCleanly verifies the
+// ticket's end-to-end verification boundary for the repo layer:
+// note.write(layer: "repo") lands a tracked file under
+// <root>/ai-docs/ws-notes/, the record appears in the very next
+// workflow_manual "# Notes" block tagged "[repo]", and note.erase removes
+// the file so a subsequent workflow_manual no longer carries it.
+func TestWorkflowManualCarriesRepoLayerNoteAndErasesCleanly(t *testing.T) {
+	setupWorkflowManualNoteEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "repo",
+		"notes": []any{map[string]any{"key": "repo.manual", "value": "tracked note", "priority": 1}},
+	})
+
+	notesDir := filepath.Join(root, "ai-docs", "ws-notes")
+	entries, err := os.ReadDir(notesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", notesDir, err)
+	}
+	var jsonFile string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			jsonFile = entry.Name()
+		}
+	}
+	if jsonFile == "" {
+		t.Fatalf("note.write(repo) did not create a .json file under %s", notesDir)
+	}
+	for _, r := range strings.TrimSuffix(jsonFile, ".json") {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			t.Fatalf("repo note filename %q is not a plain hex string", jsonFile)
+		}
+	}
+
+	afterWrite := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
+	if !strings.Contains(afterWrite, "[repo] repo.manual") || !strings.Contains(afterWrite, "tracked note") {
+		t.Fatalf("workflow_manual missing repo-layer note: %s", afterWrite)
+	}
+
+	callToolWithKey(t, s, 4, key, "note.erase", map[string]any{
+		"layer": "repo",
+		"keys":  []any{"repo.manual"},
+	})
+	if _, err := os.Stat(filepath.Join(notesDir, jsonFile)); !os.IsNotExist(err) {
+		t.Fatalf("note.erase(repo) left the tracked file in place: stat err = %v", err)
+	}
+
+	afterErase := callToolWithKey(t, s, 5, key, "workflow_manual", nil)
+	if strings.Contains(afterErase, "repo.manual") {
+		t.Fatalf("workflow_manual still carries the erased repo-layer note: %s", afterErase)
+	}
+}
+
 // TestWorkflowManualNotesBlockAbsentWhenNoNotesExist verifies the injection is
 // a true no-op (scopeAnnouncement/computeManuals-style silent case) when no
-// note has ever been written on either layer.
+// note has ever been written on any layer.
 func TestWorkflowManualNotesBlockAbsentWhenNoNotesExist(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()

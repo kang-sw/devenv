@@ -9,23 +9,24 @@ import (
 )
 
 // layeredRecord tags a Record with the layer it was loaded from, purely for
-// display in the injected block — the two layers never share a namespace on
-// disk, so this is not used for identity/dedup.
+// display in the injected block — the three layers never share a namespace
+// on disk, so this is not used for identity/dedup.
 type layeredRecord struct {
 	Record
 	Layer Layer
 }
 
 // Compute computes the ambient "# Notes" block: the highest-priority notes
-// across both the machine and worktree layers, up to limit items, or "" when
-// there are no notes at all. Modeled on computeManuals / scopeAnnouncement in
-// package mcp: silent-by-design, never blocks workflow_manual from rendering.
+// across the machine, worktree, and repo layers, up to limit items, or ""
+// when there are no notes at all. Modeled on computeManuals /
+// scopeAnnouncement in package mcp: silent-by-design, never blocks
+// workflow_manual from rendering.
 //
-// A resolution error on either layer (including an empty root, or a
-// worktree-path resolution failure) is treated the same as "no notes on that
-// layer" and degrades to whatever the other layer has — mirroring
-// scopeAnnouncement's "a resolution error is treated the same as inactive"
-// contract — rather than failing the whole block.
+// A resolution error on any layer (including an empty root, which also
+// skips the worktree and repo layers entirely) is treated the same as "no
+// notes on that layer" and degrades to whatever the other layers have —
+// mirroring scopeAnnouncement's "a resolution error is treated the same as
+// inactive" contract — rather than failing the whole block.
 func Compute(root string, opts wsconfig.Options, limit int) string {
 	var all []layeredRecord
 
@@ -43,6 +44,14 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 				for _, rec := range records {
 					all = append(all, layeredRecord{Record: rec, Layer: LayerWorktree})
 				}
+			}
+		}
+	}
+
+	if root != "" {
+		if records, err := RepoLoad(RepoDir(root)); err == nil {
+			for _, rec := range records {
+				all = append(all, layeredRecord{Record: rec, Layer: LayerRepo})
 			}
 		}
 	}
