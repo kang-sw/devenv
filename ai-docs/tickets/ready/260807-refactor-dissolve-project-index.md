@@ -45,27 +45,38 @@ procedure rewrites it implies**, not new version-gating or alarm infrastructure.
 devenv is a real target here: its own `AGENTS.md` tag trails the shipped
 template, so running the upgrade on devenv exercises the genuine downstream path.
 
-## Blocked on
+## Prerequisites — all satisfied (2026-08-12)
 
-This ticket cannot land until every content destination exists.
-
-Satisfied (landed in ws 0.40.0):
+This ticket could not land until every content destination existed. All are now
+in place:
 
 - `260807-feat-note-memory-layers` (Phase 1) — the note layers, destination for
-  volatile / non-tracked session state.
+  volatile / non-tracked session state. Landed in ws 0.40.0.
 - `260807-feat-manuals-doc-tier` — the `manuals/` tier, destination for
   procedures; the `# Manuals` ambient index replaces the hand-maintained
-  `## Read Before Editing` applicability table.
-
-Still pending — keeps this ticket in `todo/` (not `ready/`):
-
+  `## Read Before Editing` applicability table. Landed in ws 0.40.0.
 - `260810-feat-repo-tracked-note-layer` — the tracked `repo` layer, the landed
-  home for the git-tracked `# Session Notes` (per the Resolved Decision). Its own
-  prerequisite (the note-memory surface) has landed, so it is unblocked to build.
-- The derivable->generate leg (`260710`, `260725`, and the drift documented in
-  `260728-research-index-ticket-table-drift`) — so the Ticket Focus / status
-  tables are generated (`project_tree`), not hand-copied, before they are removed
-  from `_index.md`. The ticket/spec inventory tables `project_tree` already emits.
+  home for the git-tracked `# Session Notes` (per the Resolved Decision).
+  **Landed** (`.done`; live at ws 0.40.2-dev).
+- The derivable->generate leg — `260710` **landed** (`.done`): it *removed* the
+  `_index.md` Ticket Focus section and retired its maintenance machinery, so
+  there is no Ticket Focus table left to generate. `260725` **dropped** (absorbed
+  into this ticket's Phase 1). The ticket/spec inventory tables `project_tree`
+  already emits. `260728-research-index-ticket-table-drift` (`idea/`) `motivates`
+  this dissolution but is not a build prerequisite.
+
+## Blocked (2026-08-12) — decision gate, not dependency
+
+All dependency prerequisites are satisfied (see **Prerequisites**), so this is
+advanceable on the merits. It is held only for an explicit human go-ahead:
+Phase 1 is an AGENTS.md **"Always ask"**-grade change — it adds a new
+`AGENTS.template.md` migration-checklist item (modifying migration-checklist
+semantics), rewrites the template's two faces and `lead-bootstrap.md` across
+**both** shipped distributions (`agents-plugin/` and `agents-plugin-wsflow/`),
+reconciles two specs, and deletes `_index.md`. `lead-drain-ready-queue` posture
+preserves any AGENTS.md "Always ask" item as a hard stop even on a goal run, so
+the drain will not dispatch this autonomously. Lift this note on user sign-off
+and dispatch to `lead-proceed`.
 
 ## Decisions
 
