@@ -22,7 +22,7 @@ Source-level reference mapping is a different role (`plan-populator-survey`).
 
 ## Process
 
-0. Read project context: `ai-docs/_index.md`, `ai-docs/_index.local.md` if present, and `ai-docs/mental-model.md` if present. Do not rank these; use them for relevance judgments.
+0. Read project context: `AGENTS.md`'s `## Project Orientation` section (or `ai-docs/_index.md` if the project has not migrated off it), `ai-docs/_index.local.md` if present, and `ai-docs/mental-model.md` if present. Do not rank these; use them for relevance judgments.
 1. Discover candidates through:
    - `{{.McpNamespace}}/specs.list()`
    - `{{.McpNamespace}}/mental_models.list()`

@@ -101,7 +101,6 @@ write_text(".github/workflows/ws-mcp-release.yml", workflow)
 agents_md = read_text("AGENTS.md")
 agents_md = re.sub(r"agents-plugin/` \(`ws@[0-9]+\.[0-9]+\.[0-9]+`\)", f"agents-plugin/` (`ws@{version}`)", agents_md)
 agents_md = re.sub(r"agents-plugin-wsflow/` \(`wsflow@[0-9]+\.[0-9]+\.[0-9]+`\)", f"agents-plugin-wsflow/` (`wsflow@{version}`)", agents_md)
-agents_md = re.sub(r"create `v[0-9]+\.[0-9]+\.[0-9]+`", f"create `{release_tag}`", agents_md)
 write_text("AGENTS.md", agents_md)
 
 ws_mcp_ref = read_text("ai-docs/manuals/ws-mcp.md")

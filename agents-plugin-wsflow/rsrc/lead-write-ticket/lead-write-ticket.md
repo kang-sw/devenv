@@ -73,7 +73,7 @@ Movement
 ### 7. Commit
 
 1. If no file changed because a requested move was refused, skip commit.
-2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
+2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; separate follow-up invocations own their own commits and outputs.
 
 ### 8. Handoff
 
@@ -148,7 +148,7 @@ Applies to a single edit target; **Cascade Edit** reuses this logic across multi
 
 ## On: Cascade Edit
 
-1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to `_index.md` active inventory when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
+1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to the project's active ticket inventory (`{{.McpNamespace}}/tickets.list`, or `ai-docs/_index.md` active inventory when the project has not migrated off it) when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
 2. Apply per-target decision recording per **Cross-ticket decision review**.
 3. Do not promote a target to `ready/` unless the user explicitly asked for ready promotion or routed through `{{.SkillNamespace}}:lead-proceed`; run **Spec-address Check** before commit for any target entering `ready/`.
 4. Run **Verify** across the edited set; commit one logical documentation unit when the edits are one decision propagation.
