@@ -20,6 +20,7 @@ type Layer string
 const (
 	LayerMachine  Layer = "machine"
 	LayerWorktree Layer = "worktree"
+	LayerRepo     Layer = "repo"
 )
 
 // lockTimeout bounds how long a note-store RMW waits to acquire its flock
@@ -45,6 +46,13 @@ func WorktreePath(root string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(layout.WorktreeDir, "notes.json"), nil
+}
+
+// RepoDir resolves the repo-layer note store directory: the tracked
+// ai-docs/ws-notes/ directory under root. Unlike MachinePath/WorktreePath,
+// this cannot fail (it is a pure filepath.Join), so it returns no error.
+func RepoDir(root string) string {
+	return filepath.Join(root, "ai-docs", "ws-notes")
 }
 
 // Load reads the note store at path into a key->Record map. A missing file

@@ -52,6 +52,83 @@ func TestComputeRendersMachineAndWorktreeLayers(t *testing.T) {
 	}
 }
 
+func TestComputeRendersRepoLayer(t *testing.T) {
+	configHome := t.TempDir()
+	opts := wsconfig.Options{ConfigHome: configHome}
+
+	root := initGitFixture(t)
+	if err := RepoWrite(RepoDir(root), []Record{
+		{Key: "r", Value: "repo note", Priority: 5, WrittenAt: "2026-08-03T00:00:00Z"},
+	}); err != nil {
+		t.Fatalf("RepoWrite: %v", err)
+	}
+
+	got := Compute(root, opts, 20)
+	if !strings.Contains(got, "[repo] r") || !strings.Contains(got, "repo note") {
+		t.Fatalf("Compute missing repo note: %q", got)
+	}
+}
+
+func TestComputeSortsAndCapsAcrossAllThreeLayers(t *testing.T) {
+	configHome := t.TempDir()
+	opts := wsconfig.Options{ConfigHome: configHome}
+	machinePath, err := MachinePath(opts)
+	if err != nil {
+		t.Fatalf("MachinePath: %v", err)
+	}
+	if err := Write(machinePath, []Record{{Key: "m", Value: "machine note", Priority: 1, WrittenAt: "2026-08-01T00:00:00Z"}}); err != nil {
+		t.Fatalf("Write machine: %v", err)
+	}
+
+	root := initGitFixture(t)
+	worktreePath, err := WorktreePath(root)
+	if err != nil {
+		t.Fatalf("WorktreePath: %v", err)
+	}
+	if err := Write(worktreePath, []Record{{Key: "w", Value: "worktree note", Priority: 2, WrittenAt: "2026-08-02T00:00:00Z"}}); err != nil {
+		t.Fatalf("Write worktree: %v", err)
+	}
+	if err := RepoWrite(RepoDir(root), []Record{{Key: "r", Value: "repo note", Priority: 3, WrittenAt: "2026-08-03T00:00:00Z"}}); err != nil {
+		t.Fatalf("RepoWrite: %v", err)
+	}
+
+	got := Compute(root, opts, 2)
+	if strings.Contains(got, "[machine] m") {
+		t.Fatalf("Compute with limit=2 kept the lowest-priority (machine) note, want it elided: %q", got)
+	}
+	if !strings.Contains(got, "[repo] r") || !strings.Contains(got, "[worktree] w") {
+		t.Fatalf("Compute with limit=2 did not keep the two highest-priority notes across all three layers: %q", got)
+	}
+	if strings.Index(got, "[repo] r") > strings.Index(got, "[worktree] w") {
+		t.Fatalf("Compute order = %q, want higher-priority repo note (3) before worktree note (2)", got)
+	}
+	if !strings.Contains(got, "1 lower-priority notes elided") {
+		t.Fatalf("Compute with limit=2 missing elision line: %q", got)
+	}
+}
+
+func TestComputeDegradesSilentlyOnAbsentRepoDir(t *testing.T) {
+	configHome := t.TempDir()
+	opts := wsconfig.Options{ConfigHome: configHome}
+	machinePath, err := MachinePath(opts)
+	if err != nil {
+		t.Fatalf("MachinePath: %v", err)
+	}
+	if err := Write(machinePath, []Record{{Key: "m", Value: "machine note", Priority: 1, WrittenAt: "t"}}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	root := initGitFixture(t)
+	// No RepoWrite call: ai-docs/ws-notes/ never exists under root.
+	got := Compute(root, opts, 20)
+	if !strings.Contains(got, "[machine] m") {
+		t.Fatalf("Compute with absent repo dir = %q, want machine note still rendered (no error surfaced)", got)
+	}
+	if strings.Contains(got, "[repo]") {
+		t.Fatalf("Compute with absent repo dir unexpectedly rendered a repo note: %q", got)
+	}
+}
+
 func TestComputeElidesBeyondLimit(t *testing.T) {
 	configHome := t.TempDir()
 	opts := wsconfig.Options{ConfigHome: configHome}
