@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,6 +101,85 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 				t.Fatalf("note.search(%s) after erase still returned the record: %s", layer, searchAfterErase)
 			}
 		})
+	}
+}
+
+// TestNoteRepoLayerRoundTripAndGitTracking verifies the ticket's headline
+// verification boundary for the repo layer, distinct from the non-tracked
+// layers covered above: note.write(layer: "repo") lands one real file on
+// disk under <root>/ai-docs/ws-notes/, `git status --porcelain` reports it
+// as an untracked/added path (genuinely tracked-location, unlike
+// machine/worktree which live outside the working tree entirely),
+// note.search finds it, and note.erase removes the file from disk.
+func TestNoteRepoLayerRoundTripAndGitTracking(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	root, key := mintRootKey(t, s, 1)
+
+	writeResp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "repo",
+		"notes": []any{
+			map[string]any{"key": "repo.roundtrip", "value": "hello repo", "priority": 4},
+		},
+	})
+	if !strings.HasPrefix(writeResp, "wrote 1 note") || !strings.Contains(writeResp, "repo.roundtrip") {
+		t.Fatalf("note.write(repo) unexpected response: %s", writeResp)
+	}
+
+	notesDir := filepath.Join(root, "ai-docs", "ws-notes")
+	entries, err := os.ReadDir(notesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", notesDir, err)
+	}
+	var jsonFiles int
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			jsonFiles++
+		}
+	}
+	if jsonFiles != 1 {
+		t.Fatalf("found %d .json files under %s, want exactly 1", jsonFiles, notesDir)
+	}
+
+	// -uall forces git to list the individual untracked file rather than
+	// collapsing the wholly-untracked ai-docs/ directory into one line.
+	status := string(runGitOutput(t, root, "status", "--porcelain", "-uall"))
+	if !strings.Contains(status, "ai-docs/ws-notes/") {
+		t.Fatalf("git status --porcelain = %q, want it to report the new file under ai-docs/ws-notes/", status)
+	}
+
+	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+		"layer": "repo",
+		"glob":  "repo.roundtrip",
+	})
+	if !strings.Contains(searchResp, "repo.roundtrip") || !strings.Contains(searchResp, "hello repo") {
+		t.Fatalf("note.search(repo) did not return the written record: %s", searchResp)
+	}
+
+	eraseResp := callToolWithKey(t, s, 4, key, "note.erase", map[string]any{
+		"layer": "repo",
+		"keys":  []any{"repo.roundtrip"},
+	})
+	if !strings.Contains(eraseResp, "repo.roundtrip") {
+		t.Fatalf("note.erase(repo) confirmation missing key: %s", eraseResp)
+	}
+
+	remaining, err := os.ReadDir(notesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) after erase: %v", notesDir, err)
+	}
+	for _, entry := range remaining {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			t.Fatalf("found leftover .json file %q under %s after note.erase", entry.Name(), notesDir)
+		}
+	}
+
+	searchAfterErase := callToolWithKey(t, s, 5, key, "note.search", map[string]any{
+		"layer": "repo",
+		"glob":  "repo.roundtrip",
+	})
+	if strings.Contains(searchAfterErase, "repo.roundtrip") {
+		t.Fatalf("note.search(repo) after erase still returned the record: %s", searchAfterErase)
 	}
 }
 
@@ -260,11 +340,11 @@ func TestNoteWriteRejectsInvalidLayer(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "repo",
+		"layer": "bogus",
 		"notes": []any{map[string]any{"key": "a", "value": "b"}},
 	})
-	if !strings.Contains(resp, `must be "machine" or "worktree"`) {
-		t.Fatalf("note.write(layer=repo) = %s, want a layer-validation error", resp)
+	if !strings.Contains(resp, `must be "machine", "worktree", or "repo"`) {
+		t.Fatalf("note.write(layer=bogus) = %s, want a layer-validation error", resp)
 	}
 }
 
