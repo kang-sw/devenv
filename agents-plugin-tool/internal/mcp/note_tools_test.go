@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,6 +101,95 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 				t.Fatalf("note.search(%s) after erase still returned the record: %s", layer, searchAfterErase)
 			}
 		})
+	}
+}
+
+// TestNoteRepoLayerRoundTripAndGitTracking verifies the ticket's headline
+// verification boundary for the repo layer, distinct from the non-tracked
+// layers covered above: note.write(layer: "repo") lands one real file on
+// disk under <root>/ai-docs/ws-notes/, `git status --porcelain` reports it
+// as an untracked/added path (genuinely tracked-location, unlike
+// machine/worktree which live outside the working tree entirely),
+// note.search finds it, and note.erase removes the file from disk. It also
+// proves the reviewed lock-artifact fix: the tracked dir holds exactly the
+// intended .json file (no ".lock"/"*.tmp" sidecar) while the note exists, and
+// nothing at all — not even an orphaned lock file — once it is erased.
+func TestNoteRepoLayerRoundTripAndGitTracking(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	root, key := mintRootKey(t, s, 1)
+
+	writeResp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "repo",
+		"notes": []any{
+			map[string]any{"key": "repo.roundtrip", "value": "hello repo", "priority": 4},
+		},
+	})
+	if !strings.HasPrefix(writeResp, "wrote 1 note") || !strings.Contains(writeResp, "repo.roundtrip") {
+		t.Fatalf("note.write(repo) unexpected response: %s", writeResp)
+	}
+
+	notesDir := filepath.Join(root, "ai-docs", "ws-notes")
+	entries, err := os.ReadDir(notesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", notesDir, err)
+	}
+	// Exactly one entry, and it must be the .json file itself — no ".lock" or
+	// "*.tmp" sidecar leaked into the tracked directory.
+	if len(entries) != 1 {
+		t.Fatalf("tracked dir %s has %d entries after note.write, want exactly 1 (.json only): %v", notesDir, len(entries), entries)
+	}
+	if !strings.HasSuffix(entries[0].Name(), ".json") {
+		t.Fatalf("tracked dir entry %q is not a .json file — lock/temp artifact leaked into %s", entries[0].Name(), notesDir)
+	}
+
+	// -uall forces git to list the individual untracked file rather than
+	// collapsing the wholly-untracked ai-docs/ directory into one line.
+	status := string(runGitOutput(t, root, "status", "--porcelain", "-uall"))
+	if !strings.Contains(status, "ai-docs/ws-notes/") {
+		t.Fatalf("git status --porcelain = %q, want it to report the new file under ai-docs/ws-notes/", status)
+	}
+	if strings.Contains(status, ".lock") {
+		t.Fatalf("git status --porcelain = %q, want no .lock artifact reported under the tracked dir", status)
+	}
+
+	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+		"layer": "repo",
+		"glob":  "repo.roundtrip",
+	})
+	if !strings.Contains(searchResp, "repo.roundtrip") || !strings.Contains(searchResp, "hello repo") {
+		t.Fatalf("note.search(repo) did not return the written record: %s", searchResp)
+	}
+
+	eraseResp := callToolWithKey(t, s, 4, key, "note.erase", map[string]any{
+		"layer": "repo",
+		"keys":  []any{"repo.roundtrip"},
+	})
+	if !strings.Contains(eraseResp, "repo.roundtrip") {
+		t.Fatalf("note.erase(repo) confirmation missing key: %s", eraseResp)
+	}
+
+	// After erase the tracked dir must be completely empty — not just free of
+	// .json files, but free of any leftover .lock/*.tmp residue too.
+	remaining, err := os.ReadDir(notesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) after erase: %v", notesDir, err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("tracked dir %s has %d leftover entries after note.erase, want 0: %v", notesDir, len(remaining), remaining)
+	}
+
+	statusAfterErase := string(runGitOutput(t, root, "status", "--porcelain", "-uall"))
+	if strings.Contains(statusAfterErase, "ai-docs/ws-notes/") {
+		t.Fatalf("git status --porcelain after erase = %q, want no residue reported under ai-docs/ws-notes/", statusAfterErase)
+	}
+
+	searchAfterErase := callToolWithKey(t, s, 5, key, "note.search", map[string]any{
+		"layer": "repo",
+		"glob":  "repo.roundtrip",
+	})
+	if strings.Contains(searchAfterErase, "repo.roundtrip") {
+		t.Fatalf("note.search(repo) after erase still returned the record: %s", searchAfterErase)
 	}
 }
 
@@ -260,11 +350,11 @@ func TestNoteWriteRejectsInvalidLayer(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
-		"layer": "repo",
+		"layer": "bogus",
 		"notes": []any{map[string]any{"key": "a", "value": "b"}},
 	})
-	if !strings.Contains(resp, `must be "machine" or "worktree"`) {
-		t.Fatalf("note.write(layer=repo) = %s, want a layer-validation error", resp)
+	if !strings.Contains(resp, `must be "machine", "worktree", or "repo"`) {
+		t.Fatalf("note.write(layer=bogus) = %s, want a layer-validation error", resp)
 	}
 }
 
@@ -299,5 +389,201 @@ func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
 	})
 	if !strings.Contains(resp, "session_key is required") {
 		t.Fatalf("note.write(machine, empty session_key) = %s, want a session_key-required error", resp)
+	}
+}
+
+// TestNoteMuteUnmuteRoundTrip verifies note.mute/note.unmute across all
+// three layers: mute drops a note's visible state to false, unmute restores
+// it to true, observed via note.search's json format (note.search itself
+// never filters on visible, so this exercises the stored field directly).
+func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	id := 2
+	for _, layer := range []string{"machine", "worktree", "repo"} {
+		t.Run(layer, func(t *testing.T) {
+			noteKey := "mute.roundtrip." + layer
+			callToolWithKey(t, s, id, key, "note.write", map[string]any{
+				"layer": layer,
+				"notes": []any{map[string]any{"key": noteKey, "value": "v", "priority": 1}},
+			})
+			id++
+
+			rec := searchSingleNoteRecord(t, s, id, key, layer, noteKey)
+			id++
+			if !rec.Visible {
+				t.Fatalf("note.write(%s) new key Visible = false, want true", layer)
+			}
+
+			muteResp := callToolWithKey(t, s, id, key, "note.mute", map[string]any{
+				"layer": layer,
+				"keys":  []any{noteKey},
+			})
+			id++
+			if !strings.Contains(muteResp, noteKey) {
+				t.Fatalf("note.mute(%s) confirmation missing key: %s", layer, muteResp)
+			}
+
+			rec = searchSingleNoteRecord(t, s, id, key, layer, noteKey)
+			id++
+			if rec.Visible {
+				t.Fatalf("note.mute(%s) did not set Visible = false", layer)
+			}
+
+			unmuteResp := callToolWithKey(t, s, id, key, "note.unmute", map[string]any{
+				"layer": layer,
+				"keys":  []any{noteKey},
+			})
+			id++
+			if !strings.Contains(unmuteResp, noteKey) {
+				t.Fatalf("note.unmute(%s) confirmation missing key: %s", layer, unmuteResp)
+			}
+
+			rec = searchSingleNoteRecord(t, s, id, key, layer, noteKey)
+			id++
+			if !rec.Visible {
+				t.Fatalf("note.unmute(%s) did not restore Visible = true", layer)
+			}
+		})
+	}
+}
+
+// TestNoteMuteUnmuteDoesNotRestampWrittenAt verifies mute/unmute never touch
+// written_at, even when the injected clock visibly moves between the write
+// and the mute/unmute call — matching
+// TestNoteWriteRestampsWrittenAtOnOverwrite's clock-injection pattern.
+func TestNoteMuteUnmuteDoesNotRestampWrittenAt(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	writeInstant := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	laterInstant := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	originalNoteNow := noteNow
+	t.Cleanup(func() { noteNow = originalNoteNow })
+
+	noteNow = func() time.Time { return writeInstant }
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "no.restamp", "value": "v", "priority": 1}},
+	})
+	wantWrittenAt := writeInstant.Format(time.RFC3339)
+
+	noteNow = func() time.Time { return laterInstant }
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"no.restamp"},
+	})
+	muted := searchSingleNoteRecord(t, s, 4, key, "machine", "no.restamp")
+	if muted.WrittenAt != wantWrittenAt {
+		t.Fatalf("note.mute restamped written_at: got %q, want unchanged %q", muted.WrittenAt, wantWrittenAt)
+	}
+	if muted.Visible {
+		t.Fatalf("note.mute did not set Visible = false")
+	}
+
+	callToolWithKey(t, s, 5, key, "note.unmute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"no.restamp"},
+	})
+	unmuted := searchSingleNoteRecord(t, s, 6, key, "machine", "no.restamp")
+	if unmuted.WrittenAt != wantWrittenAt {
+		t.Fatalf("note.unmute restamped written_at: got %q, want unchanged %q", unmuted.WrittenAt, wantWrittenAt)
+	}
+}
+
+// TestNoteWriteOverMutedKeyPreservesMute is the MCP-level version of the
+// write-over-a-muted-key regression: note.write/note.mute/note.write again
+// must leave the key muted even though the second write changes content.
+func TestNoteWriteOverMutedKeyPreservesMute(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "write.over.mute", "value": "v1", "priority": 1}},
+	})
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"write.over.mute"},
+	})
+	callToolWithKey(t, s, 4, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "write.over.mute", "value": "v2", "priority": 9}},
+	})
+
+	rec := searchSingleNoteRecord(t, s, 5, key, "machine", "write.over.mute")
+	if rec.Visible {
+		t.Fatalf("note.write over a muted key set Visible = true, want the mute to survive (false)")
+	}
+	if rec.Value != "v2" || rec.Priority != 9 {
+		t.Fatalf("note.write over a muted key did not update content fields: %+v", rec)
+	}
+}
+
+// TestNoteMuteAlreadyMutedKeyIsNoop verifies muting an already-muted key
+// succeeds as a no-op (idempotent set-state), not an error.
+func TestNoteMuteAlreadyMutedKeyIsNoop(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{map[string]any{"key": "double.mute", "value": "v", "priority": 1}},
+	})
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"double.mute"},
+	})
+	secondMuteResp := callToolWithKey(t, s, 4, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{"double.mute"},
+	})
+	if !strings.Contains(secondMuteResp, "double.mute") {
+		t.Fatalf("note.mute on an already-muted key did not succeed: %s", secondMuteResp)
+	}
+
+	rec := searchSingleNoteRecord(t, s, 5, key, "machine", "double.mute")
+	if rec.Visible {
+		t.Fatalf("note.mute called twice left Visible = true, want false")
+	}
+}
+
+// TestNoteMuteRejectsEmptyKeys mirrors note.erase's empty-keys rejection,
+// confirming note.mute/note.unmute share the same required-non-empty
+// validation via noteKeysArg.
+func TestNoteMuteRejectsEmptyKeys(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.mute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{},
+	})
+	if !strings.Contains(resp, "non-empty") {
+		t.Fatalf("note.mute(empty keys) = %s, want a non-empty-array error", resp)
+	}
+}
+
+// TestNoteUnmuteRejectsEmptyKeys is the symmetric counterpart of
+// TestNoteMuteRejectsEmptyKeys: note.unmute shares handleNoteSetVisible's
+// validation with note.mute, but that shared code path had no dedicated
+// note.unmute-side assertion until now.
+func TestNoteUnmuteRejectsEmptyKeys(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.unmute", map[string]any{
+		"layer": "machine",
+		"keys":  []any{},
+	})
+	if !strings.Contains(resp, "non-empty") {
+		t.Fatalf("note.unmute(empty keys) = %s, want a non-empty-array error", resp)
 	}
 }

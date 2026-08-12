@@ -20,6 +20,7 @@ type Layer string
 const (
 	LayerMachine  Layer = "machine"
 	LayerWorktree Layer = "worktree"
+	LayerRepo     Layer = "repo"
 )
 
 // lockTimeout bounds how long a note-store RMW waits to acquire its flock
@@ -47,6 +48,13 @@ func WorktreePath(root string) (string, error) {
 	return filepath.Join(layout.WorktreeDir, "notes.json"), nil
 }
 
+// RepoDir resolves the repo-layer note store directory: the tracked
+// ai-docs/ws-notes/ directory under root. Unlike MachinePath/WorktreePath,
+// this cannot fail (it is a pure filepath.Join), so it returns no error.
+func RepoDir(root string) string {
+	return filepath.Join(root, "ai-docs", "ws-notes")
+}
+
 // Load reads the note store at path into a key->Record map. A missing file
 // returns an empty, non-nil map — not an error — mirroring
 // wsconfig.loadGlobalConfig's "no file yet" contract.
@@ -63,10 +71,19 @@ func Load(path string) (map[string]Record, error) {
 
 // Write performs an flock-serialized read-modify-write on the note store at
 // path, upserting each record (full overwrite, including priority) keyed by
-// its Key. This is the sole mutation path for note.write.
+// its Key. This is the sole mutation path for note.write. Visible is never
+// taken from the caller-supplied record: an overwrite of an existing key
+// preserves that key's current Visible value, and a brand new key always
+// initializes Visible to true — note.write has no wire-level way to accept
+// or mutate visibility (see note.mute/note.unmute/SetVisible instead).
 func Write(path string, records []Record) error {
 	return rmw(path, func(current map[string]Record) map[string]Record {
 		for _, rec := range records {
+			if existing, ok := current[rec.Key]; ok {
+				rec.Visible = existing.Visible
+			} else {
+				rec.Visible = true
+			}
 			current[rec.Key] = rec
 		}
 		return current
@@ -80,6 +97,27 @@ func Erase(path string, keys []string) error {
 	return rmw(path, func(current map[string]Record) map[string]Record {
 		for _, key := range keys {
 			delete(current, key)
+		}
+		return current
+	})
+}
+
+// SetVisible performs an flock-serialized read-modify-write on the note
+// store at path, setting Visible to visible for each listed key already
+// present in the store. This is the sole mutation path for note.mute/
+// note.unmute: idempotent (setting the same value again is a harmless
+// no-op), and it never touches any other field — WrittenAt in particular
+// stays byte-identical across a mute/unmute call. A missing key is silently
+// skipped, matching Erase's missing-key no-op precedent.
+func SetVisible(path string, keys []string, visible bool) error {
+	return rmw(path, func(current map[string]Record) map[string]Record {
+		for _, key := range keys {
+			rec, ok := current[key]
+			if !ok {
+				continue
+			}
+			rec.Visible = visible
+			current[key] = rec
 		}
 		return current
 	})

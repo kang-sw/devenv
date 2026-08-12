@@ -415,60 +415,106 @@ are always explicit via `todo.check`.
 
 ## Note Tools {#260810-note-tools}
 
-`note.write`, `note.erase`, and `note.search` implement the two non-tracked
-note-memory layers (260807 Phase 1): **machine** (PC-global, project-agnostic
-— lives beside the global ws config file, e.g. `~/.ws/notes.json`) and
-**worktree** (worktree-local, ephemeral — lives under the existing per-worktree
-ws cache directory, so it does not survive worktree deletion and is invisible
-to any other worktree of the same repository). Both layers share the same
-record shape and storage mechanism; only the resolved file changes. The
-tracked `repo` layer is out of scope for this phase, and no git-mutation MCP
-verb is added anywhere in this family (260605 pivot constraint). This is a
-fresh surface, sharing no code or store with `session.note`
+`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.search`
+implement three note-memory layers: the two non-tracked layers from 260807
+Phase 1 — **machine**
+(PC-global, project-agnostic — lives beside the global ws config file, e.g.
+`~/.ws/notes.json`) and **worktree** (worktree-local, ephemeral — lives under
+the existing per-worktree ws cache directory, so it does not survive worktree
+deletion and is invisible to any other worktree of the same repository) —
+plus the git-tracked **repo** layer from 260810 Phase 1. All three layers
+share the same record shape. The `machine`/`worktree` layers share one
+storage mechanism (one JSON file per whole layer; only the resolved file
+changes between them); the `repo` layer instead stores **one JSON file per
+key** under the tracked `ai-docs/ws-notes/` directory, so merge conflicts
+resolve on the filesystem with normal git tooling instead of any
+merge/conflict logic inside MCP — writing/erasing a key writes/removes
+exactly that key's file, and staging/committing it rides the caller's
+ordinary `git.commit` flow; no new git-mutation MCP verb is added anywhere in
+this family (260605 pivot constraint). A note key can contain arbitrary
+characters (including `/` and `.`), so the repo layer encodes each key into
+its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
+key `a/b.c` becomes `612f622e63.json`) — deterministic across every
+clone/OS/locale, collision-free, and immune to the slash/dot-as-path hazard,
+since hex output only ever contains `[0-9a-f]`. The filename is purely a
+storage detail: `note.search`/`workflow_manual` always report the record's
+real `key` field, never the encoded filename. This is a fresh surface,
+sharing no code or store with `session.note`
 (`#260619-session-key-lineage-children`), which is a distinct one-line
 per-child annotation on the session-key store, not a note-memory layer.
 
-All three tools require `session_key` and a `layer` argument (`"machine"` or
-`"worktree"`); they carry no `session.`/`config.`/`lead.` prefix, so — like
-`todo.*`/`agenda.*` — they are reachable by any scope (lead, delegate, leaf)
-that holds a session key. The `worktree` layer resolves its store path through
-the same `session_key`-authoritative root resolution every other root-aware
-tool uses. The `machine` layer needs no root, but still requires a
-`session_key` that resolves to a known session — an unrecognized key is
-rejected with the same `unknown_session` error shape root-aware tools use,
-even though no root is consumed.
+All three tools require `session_key` and a `layer` argument (`"machine"`,
+`"worktree"`, or `"repo"`); they carry no `session.`/`config.`/`lead.`
+prefix, so — like `todo.*`/`agenda.*` — they are reachable by any scope
+(lead, delegate, leaf) that holds a session key. The `worktree` and `repo`
+layers both resolve their store location through the same
+`session_key`-authoritative root resolution every other root-aware tool
+uses. The `machine` layer needs no root, but still requires a `session_key`
+that resolves to a known session — an unrecognized key is rejected with the
+same `unknown_session` error shape root-aware tools use, even though no root
+is consumed.
 
-**Wire shape.** A record is `{key, value, priority, written_at}`: `key` and
-`value` are strings, `priority` is an integer (higher = higher priority,
-default `0`), and `written_at` is an RFC3339 timestamp stamped server-side at
-write time (never caller-supplied). `note.write`'s `notes` argument is an
-**array of `{"key", "value", "priority"}` objects** — not an array of
-positional `[key, value, priority]` tuples — matching the universal
-named-JSON-object convention every other MCP tool argument in this codebase
-uses; there is no positional-array precedent anywhere in the tool surface.
+**Wire shape.** A record is `{key, value, priority, written_at, visible}`:
+`key` and `value` are strings, `priority` is an integer (higher = higher
+priority, default `0`), `written_at` is an RFC3339 timestamp stamped
+server-side at write time (never caller-supplied), and `visible` is a boolean
+gating inclusion in the injected `# Notes` block (`#260810-note-injection`) —
+default `true`, mutated only by `note.mute`/`note.unmute`. A record stored
+before `visible` existed has no such key in its on-disk JSON at all; that
+absence decodes as `true` (visible), a migration-safe default handled by a
+custom unmarshaler rather than plain `encoding/json` zero-value decoding
+(which would default an absent bool to `false` — the opposite of the required
+contract). `note.write`'s `notes` argument is an **array of `{"key", "value",
+"priority"}` objects** — not an array of positional `[key, value, priority]`
+tuples, and never `visible` — matching the universal named-JSON-object
+convention every other MCP tool argument in this codebase uses; there is no
+positional-array precedent anywhere in the tool surface.
 
 - **`note.write(session_key, layer, notes)`** performs a full overwrite per
   key: writing an existing key replaces its `value` and `priority` in one
   step (there is no separate priority-update verb). Multiple notes may be
-  written in one call.
+  written in one call. `note.write` never accepts or mutates `visible`: an
+  overwrite of an existing key preserves that key's current `visible` value
+  exactly (a muted note stays muted across a content-only overwrite), and a
+  brand new key always initializes `visible: true`.
 - **`note.erase(session_key, layer, keys)`** removes each listed key from that
   layer's store. A missing key is a no-op, matching `todo.erase`'s erase-by-key
   precedent.
+- **`note.mute(session_key, layer, keys)`** / **`note.unmute(session_key,
+  layer, keys)`** set `visible` to `false`/`true` for each listed key,
+  reusing the same flock-serialized read-modify-write as `note.write`/
+  `note.erase`. Both are idempotent set-state operations (muting an
+  already-muted key, or unmuting an already-visible one, is a no-op) and
+  never touch `written_at` or any other field. A missing key is a no-op,
+  matching `note.erase`'s precedent. Muting excludes a note from the injected
+  `# Notes` block and its priority cap (`#260810-note-injection`) without
+  erasing it — `note.search` continues to return muted records unchanged.
 - **`note.search(session_key, layer, glob?, from?, then?)`** returns every
   record on that layer whose `key` matches `glob` (shell-glob syntax, e.g.
   `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
   falls within the inclusive `[from, then]` bound when those are supplied.
   Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
-  `"2026-08-01"`), compared as strings. This is the retrieval path for notes
-  elided from the ambient `# Notes` block (`#260810-note-injection`) — a
-  caller that sees the elision line uses `note.search` with a narrower glob to
-  read a specific elided note.
+  `"2026-08-01"`), compared as strings. `note.search` applies no `visible`
+  filtering — muted records are returned unchanged alongside visible ones.
+  This is the retrieval path for notes elided from the ambient `# Notes`
+  block (`#260810-note-injection`), muted or not — a caller that sees the
+  elision or muted-count line uses `note.search` with a narrower glob to read
+  a specific elided or muted note.
 
-Storage is an flock-serialized read-modify-write (temp-file + atomic rename)
-over one JSON file per layer, reusing the same concurrent-safe-write pattern
-`wsconfig`'s project/global config writers use, with its own sibling `.lock`
-file per store (never shared with the `wsconfig` config lock, even though the
-machine-layer store lives in the same directory as the global config file).
+Storage is an flock-serialized read-modify-write (temp-file + atomic rename),
+reusing the same concurrent-safe-write pattern `wsconfig`'s project/global
+config writers use. The `machine`/`worktree` layers RMW one JSON file per
+layer, each with its own sibling `.lock` file beside the store (never shared
+with the `wsconfig` config lock, even though the machine-layer store lives in
+the same directory as the global config file). The `repo` layer instead
+performs one such flock+temp-file+atomic-rename write per key, scoped to that
+key's own file under `ai-docs/ws-notes/` — each key file is independently
+owned, which is the point of one-key-per-file filesystem-level conflict
+resolution. Its per-key lock file lives **outside** the tracked tree (in a
+machine-local temp location keyed by a hash of the target path), never as a
+sibling in `ai-docs/ws-notes/`, so the tracked directory only ever contains
+the `.json` key files — no lock or temp residue is committable, which is what
+keeps the layer cleanly git-tracked.
 
 There is no CLI mirror for `note.*`: like every other session-keyed tool
 (`todo.*`, `agenda.*`, `enter.*`), its authority model is
@@ -668,9 +714,13 @@ visible in the ambient block rather than silently omitted.
 
 `workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
 Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
-`# Notes` block: the highest-priority notes across both the `machine` and
-`worktree` layers (`#260810-note-tools`), up to a fixed cap (20), one line
-per note as `- [<layer>] <key> (priority <n>, <written_at>): <value>`.
+`# Notes` block: the highest-priority **visible** notes across the
+`machine`, `worktree`, and `repo` layers (`#260810-note-tools`), up to a
+fixed cap (20), one line per note as `- [<layer>] <key> (priority <n>,
+<written_at>): <value>`. Muted (`visible: false`) notes are excluded from
+both the block and the cap budget itself — a muted note never consumes one
+of the 20 slots, so muting a note can free a slot for a previously elided
+visible one.
 
 **Placement is the one deliberate divergence from its Manuals/scope/staleness
 siblings**: those three are all *prepended* ahead of the manual body as
@@ -680,15 +730,24 @@ after `## Session State`**, using a plain string append rather than the
 not a standing warning, so they render alongside the restored agenda/todo
 state a lead just asked to see, not as a banner above the reference material.
 The append is skipped entirely (not appended as an empty block) when there
-are no notes on either layer, so an empty result produces no stray blank
-section — matching the silent-when-empty contract of every sibling injection.
+are no notes **at all** on any layer, muted or visible — matching the
+silent-when-empty contract of every sibling injection. This empty-skip check
+is distinct from the all-muted case below: it fires only when a layer has no
+notes whatsoever, not merely no visible ones.
 
-When more notes exist than the cap, the block ends with a visible `(N
+When more visible notes exist than the cap, the block ends with a visible `(N
 lower-priority notes elided — use note.search to retrieve.)` line; the elided
 notes are never dropped, only deferred to an explicit `note.search` call
-(`#260810-note-tools`). The `workflow_manual` FRESH-without-root branch
-never renders this block, matching the bootstrap-staleness precedent
-(`#260703-bootstrap-staleness-warning`).
+(`#260810-note-tools`). Independently, whenever any note across any layer is
+muted, the block ends with a `(N muted — use note.search to view.)` line
+naming the total muted count; both lines render together when both
+conditions apply, in that order (elision line first, muted line second), and
+either can appear alone. In the all-muted edge case — every note on a layer
+is muted, leaving zero visible notes — the block still renders (heading plus
+the muted-count line, zero bullet lines) rather than being skipped, since the
+layer is not empty, only fully muted. The `workflow_manual`
+FRESH-without-root branch never renders this block, matching the
+bootstrap-staleness precedent (`#260703-bootstrap-staleness-warning`).
 
 ## Config Tools {#260505-config-tools}
 

@@ -11,42 +11,96 @@ import (
 	"github.com/kang-sw/devenv/internal/wsnote"
 )
 
-// resolveNoteStorePath resolves the on-disk note store path for the "layer"
-// argument, given the tool's session_key and (worktree layer only) a
-// resolved root. Every note.* call requires a valid session_key, matching the
-// "every ws tool call carries a session key" invariant, even for the machine
-// layer which does not itself need a root:
-//   - "worktree" routes through resolveToolRoot, the same root-resolution
-//     path every other root-aware tool uses.
+// noteStore abstracts the per-layer note storage backend so
+// handleNoteWrite/handleNoteErase/handleNoteSearch/handleNoteMute/
+// handleNoteUnmute stay layer-agnostic: the machine/worktree layers store one
+// JSON file per whole layer (fileNoteStore, wrapping
+// wsnote.Load/Write/Erase/SetVisible), while the repo layer stores one JSON
+// file per key (repoNoteStore, wrapping
+// wsnote.RepoLoad/RepoWrite/RepoErase/RepoSetVisible).
+type noteStore interface {
+	Load() (map[string]wsnote.Record, error)
+	Write(records []wsnote.Record) error
+	Erase(keys []string) error
+	SetVisible(keys []string, visible bool) error
+}
+
+// fileNoteStore implements noteStore over a single whole-layer JSON file, the
+// storage shape shared by the machine and worktree layers.
+type fileNoteStore struct {
+	path string
+}
+
+func (f fileNoteStore) Load() (map[string]wsnote.Record, error) { return wsnote.Load(f.path) }
+func (f fileNoteStore) Write(records []wsnote.Record) error     { return wsnote.Write(f.path, records) }
+func (f fileNoteStore) Erase(keys []string) error               { return wsnote.Erase(f.path, keys) }
+func (f fileNoteStore) SetVisible(keys []string, visible bool) error {
+	return wsnote.SetVisible(f.path, keys, visible)
+}
+
+// repoNoteStore implements noteStore over the tracked repo-layer directory,
+// one JSON file per key.
+type repoNoteStore struct {
+	dir string
+}
+
+func (r repoNoteStore) Load() (map[string]wsnote.Record, error) { return wsnote.RepoLoad(r.dir) }
+func (r repoNoteStore) Write(records []wsnote.Record) error     { return wsnote.RepoWrite(r.dir, records) }
+func (r repoNoteStore) Erase(keys []string) error               { return wsnote.RepoErase(r.dir, keys) }
+func (r repoNoteStore) SetVisible(keys []string, visible bool) error {
+	return wsnote.RepoSetVisible(r.dir, keys, visible)
+}
+
+// resolveNoteStore resolves the noteStore backend for the "layer" argument,
+// given the tool's session_key and (worktree/repo layers only) a resolved
+// root. Every note.* call requires a valid session_key, matching the "every
+// ws tool call carries a session key" invariant, even for the machine layer
+// which does not itself need a root:
+//   - "worktree" and "repo" both route through resolveToolRoot, the same
+//     root-resolution path every other root-aware tool uses.
 //   - "machine" looks the key up directly via s.sessions.lookup — it cannot
 //     reuse resolveToolRoot (which would require a resolvable root the
 //     machine layer does not need) or requireLeadSessionKey (lead-only; note.*
 //     is reachable by any scope, mirroring todo.*/agenda.*).
-func (s *Server) resolveNoteStorePath(toolName string, args map[string]any, meta map[string]any) (string, error) {
+func (s *Server) resolveNoteStore(toolName string, args map[string]any, meta map[string]any) (noteStore, error) {
 	layer, err := noteLayerArg(toolName, args)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	switch layer {
 	case wsnote.LayerMachine:
 		key, _ := args["session_key"].(string)
 		key = strings.TrimSpace(key)
 		if key == "" {
-			return "", fmt.Errorf("%s: session_key is required", toolName)
+			return nil, fmt.Errorf("%s: session_key is required", toolName)
 		}
 		if _, found := s.sessions.lookup(key); !found {
-			return "", fmt.Errorf("%s: unknown_session: session key not found; "+
+			return nil, fmt.Errorf("%s: unknown_session: session key not found; "+
 				"if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
 		}
-		return wsnote.MachinePath(wsconfig.Options{})
+		path, err := wsnote.MachinePath(wsconfig.Options{})
+		if err != nil {
+			return nil, err
+		}
+		return fileNoteStore{path: path}, nil
 	case wsnote.LayerWorktree:
 		root, err := s.resolveToolRoot(args, meta)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return wsnote.WorktreePath(root)
+		path, err := wsnote.WorktreePath(root)
+		if err != nil {
+			return nil, err
+		}
+		return fileNoteStore{path: path}, nil
+	case wsnote.LayerRepo:
+		root, err := s.resolveToolRoot(args, meta)
+		if err != nil {
+			return nil, err
+		}
+		return repoNoteStore{dir: wsnote.RepoDir(root)}, nil
 	default:
-		return "", fmt.Errorf("%s: invalid layer %q: want \"machine\" or \"worktree\"", toolName, layer)
+		return nil, fmt.Errorf("%s: invalid layer %q: want \"machine\", \"worktree\", or \"repo\"", toolName, layer)
 	}
 }
 
@@ -58,8 +112,10 @@ func noteLayerArg(toolName string, args map[string]any) (wsnote.Layer, error) {
 		return wsnote.LayerMachine, nil
 	case wsnote.LayerWorktree:
 		return wsnote.LayerWorktree, nil
+	case wsnote.LayerRepo:
+		return wsnote.LayerRepo, nil
 	default:
-		return "", fmt.Errorf(`%s: layer is required and must be "machine" or "worktree"`, toolName)
+		return "", fmt.Errorf(`%s: layer is required and must be "machine", "worktree", or "repo"`, toolName)
 	}
 }
 
@@ -146,7 +202,7 @@ func noteKeysArg(toolName string, args map[string]any) ([]string, error) {
 
 func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta map[string]any) response {
 	const tool = "note.write"
-	path, err := s.resolveNoteStorePath(tool, args, meta)
+	store, err := s.resolveNoteStore(tool, args, meta)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -157,7 +213,7 @@ func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta m
 	if len(records) == 0 {
 		return toolTextResponse(id, "", fmt.Errorf("%s: notes must be a non-empty array", tool))
 	}
-	if err := wsnote.Write(path, records); err != nil {
+	if err := store.Write(records); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	if wantsJSON(args) {
@@ -168,7 +224,7 @@ func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta m
 
 func (s *Server) handleNoteErase(id json.RawMessage, args map[string]any, meta map[string]any) response {
 	const tool = "note.erase"
-	path, err := s.resolveNoteStorePath(tool, args, meta)
+	store, err := s.resolveNoteStore(tool, args, meta)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -179,7 +235,7 @@ func (s *Server) handleNoteErase(id json.RawMessage, args map[string]any, meta m
 	if len(keys) == 0 {
 		return toolTextResponse(id, "", fmt.Errorf("%s: keys must be a non-empty array", tool))
 	}
-	if err := wsnote.Erase(path, keys); err != nil {
+	if err := store.Erase(keys); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	if wantsJSON(args) {
@@ -188,13 +244,46 @@ func (s *Server) handleNoteErase(id json.RawMessage, args map[string]any, meta m
 	return toolTextResponse(id, formatNoteErase(keys), nil)
 }
 
-func (s *Server) handleNoteSearch(id json.RawMessage, args map[string]any, meta map[string]any) response {
-	const tool = "note.search"
-	path, err := s.resolveNoteStorePath(tool, args, meta)
+// handleNoteMute and handleNoteUnmute mirror handleNoteErase's shape exactly:
+// resolve the layer's store, parse keys, reject an empty list, and dispatch
+// to the store's SetVisible. They never call noteRecordsArg/noteNow — mute
+// and unmute set-state on Visible only and must NOT restamp WrittenAt.
+func (s *Server) handleNoteMute(id json.RawMessage, args map[string]any, meta map[string]any) response {
+	return s.handleNoteSetVisible(id, args, meta, "note.mute", false, formatNoteMute)
+}
+
+func (s *Server) handleNoteUnmute(id json.RawMessage, args map[string]any, meta map[string]any) response {
+	return s.handleNoteSetVisible(id, args, meta, "note.unmute", true, formatNoteUnmute)
+}
+
+func (s *Server) handleNoteSetVisible(id json.RawMessage, args map[string]any, meta map[string]any, tool string, visible bool, format func([]string) string) response {
+	store, err := s.resolveNoteStore(tool, args, meta)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	records, err := wsnote.Load(path)
+	keys, err := noteKeysArg(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	if len(keys) == 0 {
+		return toolTextResponse(id, "", fmt.Errorf("%s: keys must be a non-empty array", tool))
+	}
+	if err := store.SetVisible(keys, visible); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	if wantsJSON(args) {
+		return toolJSONResponse(id, keys, nil)
+	}
+	return toolTextResponse(id, format(keys), nil)
+}
+
+func (s *Server) handleNoteSearch(id json.RawMessage, args map[string]any, meta map[string]any) response {
+	const tool = "note.search"
+	store, err := s.resolveNoteStore(tool, args, meta)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	records, err := store.Load()
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
@@ -223,6 +312,18 @@ func formatNoteWrite(records []wsnote.Record) string {
 func formatNoteErase(keys []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "erased %d note(s):\n", len(keys))
+	for _, key := range keys {
+		fmt.Fprintf(&b, "- %s\n", key)
+	}
+	return b.String()
+}
+
+func formatNoteMute(keys []string) string   { return formatNoteSetVisible("muted", keys) }
+func formatNoteUnmute(keys []string) string { return formatNoteSetVisible("unmuted", keys) }
+
+func formatNoteSetVisible(verb string, keys []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %d note(s):\n", verb, len(keys))
 	for _, key := range keys {
 		fmt.Fprintf(&b, "- %s\n", key)
 	}
