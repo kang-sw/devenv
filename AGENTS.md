@@ -9,8 +9,8 @@ This repo is still mid-migration from a Claude-centered workflow to a
 host-neutral Agents/open-conventions workflow. Treat these as authoritative until
 a ticket replaces them:
 
-- `AGENTS.md` - root behavioral rules and project-specific invariants.
-- `ai-docs/_index.md` - project memory, inventory, specs, tickets, focus.
+- `AGENTS.md` - root behavioral rules, project-specific invariants, and (via
+  `## Project Orientation`) project memory and orientation.
 - `agents-plugin/` - Codex-first plugin distribution candidate.
 - `agents-plugin-tool/` - native MCP/tooling source tree.
 - Root `CLAUDE.md` - compatibility shim whose body is `@AGENTS.md`.
@@ -23,8 +23,11 @@ workflow semantics.
 
 Read at every session start, before other action:
 
-1. **Preamble** - read `ai-docs/_index.md`; keep only context a session must not
-   re-derive.
+1. **Preamble** - repo identity, plugin topology, and canonical flows live in
+   this file's `## Project Orientation` section below; read repo-tracked notes
+   (`ws/note.search(layer: "repo")`) for volatile session context,
+   `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for
+   current status. Keep only context a session must not re-derive.
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored
    machine context.
 3. **Project arc** - run `git log --oneline --graph -50`.
@@ -125,7 +128,8 @@ not stage it unless explicitly requested.
 integration/epic branch or `main` bumps the plugin patch version through
 `agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>`. Never hand-edit the
 version edition points (both `plugin.json` pairs, both `runtime.json`, `main.go`,
-release assets, `_index.md`); the script is the single bump surface. Claude Code
+release assets, this file's `## Project Orientation` version strings); the
+script is the single bump surface. Claude Code
 keys plugin-cache invalidation on the `version` string, so an unchanged version
 serves stale builds even across branch-pin reinstalls. Bump per dev-merge, not
 per ship.
@@ -152,7 +156,9 @@ per ship.
    historical Claude material under `ai-docs/ref/` when needed.
 ## Documentation System
 
-- Project memory and focus: `ai-docs/_index.md`
+- Project orientation: this file's `## Project Orientation` section.
+- Volatile or tracked session notes: the `repo` note layer
+  (`ai-docs/ws-notes/`, written via `ws/note.write(layer: "repo", ...)`).
 - Tickets: `ai-docs/tickets/`
 - Specs: `ai-docs/spec/`
 - Mental models: `ai-docs/mental-model/`
@@ -196,8 +202,68 @@ ai-docs/tickets/.dropped/
   `#### Edition (<short-hash>) - YYYY-MM-DD` for later implementation tweaks.
 - To check ticket completion or prior phase results, use
   `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
-- Check `## Ticket Focus` in `ai-docs/_index.md` before starting implementation; it may include non-ready attention items, but only `ready/` entries are direct implementation targets.
 - All AI-authored ticket content must be English.
+
+## Project Orientation
+
+<!-- Every-session orientation: repo identity, project map/topology, and
+     canonical flows. Keep compact; route deep detail to specs, mental
+     models, or manuals. -->
+
+- **Repo identity.** Meta-workflow repository for workflow documents, skills,
+  agents, plugin packaging, helper commands, MCP tooling, and dev-environment
+  templates. Specs, tickets, and mental models here describe the workflow
+  system itself; downstream application material belongs in downstream
+  projects. Active plugin package: `agents-plugin/` (`ws@0.40.2`). Agentless
+  derivative package: `agents-plugin-wsflow/` (`wsflow@0.40.2`). Native
+  MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
+  `ai-docs/ref/claude-home-legacy.md` and git history.
+- **Project map / topology.**
+  - `./install.sh update` handles first-time install and settings patching on
+    a new machine.
+  - Root `CLAUDE.md` is the only live Claude compatibility shim and points at
+    `AGENTS.md`.
+  - `install.sh` snapshots only `agents-plugin/` for Claude-compatible plugin
+    installs when Claude Code is available; it intentionally does not install
+    wsflow into Claude.
+  - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
+    Codex UI install has verified `ws:lead-write-ticket` and `ws:lead-discuss`.
+  - `agents-plugin-wsflow/` is an agentless derivative package with
+    Codex/Claude manifests, package-local no-agent MCP env, shared launcher
+    copies, a reduced `runtime.json`, thin wsflow skill shims over shared
+    playbooks, and package tests for runtime-contract plus skill-shim drift.
+  - `.agents/plugins/marketplace.json` exposes both `ws` and `wsflow` as local
+    Codex plugin entries; `.claude-plugin/marketplace.json` exposes both
+    packages for manual Claude marketplace installation while `install.sh`
+    still installs only `ws`.
+  - Codex local plugin iteration has no known CLI refresh path; use UI
+    uninstall/install or a fresh Codex session after editing the registered
+    source.
+  - `agents-plugin/.codex-plugin/plugin.json` references plugin-local
+    `.mcp.json` through `"mcpServers": "./.mcp.json"`.
+  - Changed plugin-managed Codex MCP config requires user-performed plugin
+    cache refresh before installed-cache verification.
+  - `claude plugin validate agents-plugin` passes; runtime Claude invocation
+    of `agents-plugin` remains compatibility behavior, not a separate source
+    tree.
+  - `ai-docs/.old/` is the Git-tracked project archive for inactive reference
+    material that should not appear in default file listings.
+  - MCP tool schemas and inventory are runtime-discoverable through
+    `tools/list` and runtime capabilities; do not copy them into project
+    memory or reference docs.
+  - Skill/prompt/agent inventory lives in the `agents-plugin/skills/` source
+    tree and plugin manifest/tests; not duplicated here.
+- **Canonical flows.**
+  ```text
+  Full ceremony:  discuss -> proceed -> implement -> review/docs/final gate
+  Direct:         implement <description>
+  Auto-route:     proceed <ticket-path>
+  Sprint:         sprint -> discuss/explore -> sprint-edit episode? -> episode closure or normal handoff
+  Review:         review [branch] -> verdict -> (discuss -> fix | comment | merge)
+  Recovery:       salvage -> research report -> recovery epic? -> child tickets
+  ```
+  User decides next step at each handoff. `proceed` is the explicit opt-in for
+  auto-chaining through the pipeline.
 
 ## Project Knowledge
 
@@ -219,6 +285,7 @@ ai-docs/tickets/.dropped/
 <!-- Inclusion test: if breaking this rule makes a skill produce wrong results
      AND it applies everywhere, keep it here. Domain-scoped rules belong in
      `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
-     Context goes in `_index.md`; process goes in skills. -->
+     Context goes in this file's `## Project Orientation` section or the
+     `repo` note layer; process goes in skills. -->
 
-<!-- Template Version: v0041 -->
+<!-- Template Version: v0046 -->

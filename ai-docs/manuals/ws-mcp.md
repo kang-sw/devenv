@@ -44,9 +44,9 @@ ws-mcp serve --stdio --root <repo-root>
 ```
 
 `doctor` is a host-independent smoke check. In this repository it verifies the
-repository root, `ai-docs/`, `agents-plugin/`, and `ai-docs/_index.md`;
-downstream projects should rely on MCP tools for bundled conventions rather
-than repository-local source paths.
+repository root, `ai-docs/`, `agents-plugin/`, and `AGENTS.md`; downstream
+projects should rely on MCP tools for bundled conventions rather than
+repository-local source paths.
 
 ## Plugin-Managed Startup
 
