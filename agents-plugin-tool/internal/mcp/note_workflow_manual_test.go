@@ -215,3 +215,61 @@ func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.
 		t.Fatalf("note.search did not retrieve the elided note elide.00: %s", searchResp)
 	}
 }
+
+// TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable is the
+// ticket's core end-to-end verification boundary: write a note, mute it, and
+// confirm workflow_manual's "# Notes" block no longer carries the note's
+// key/value while the muted-count line is present, but note.search still
+// returns the record unchanged.
+func TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable(t *testing.T) {
+	setupWorkflowManualNoteEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "worktree",
+		"notes": []any{map[string]any{"key": "mute.me", "value": "muted content", "priority": 1}},
+	})
+
+	beforeMute := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
+	if !strings.Contains(beforeMute, "mute.me") || !strings.Contains(beforeMute, "muted content") {
+		t.Fatalf("workflow_manual before mute missing the note: %s", beforeMute)
+	}
+
+	callToolWithKey(t, s, 4, key, "note.mute", map[string]any{
+		"layer": "worktree",
+		"keys":  []any{"mute.me"},
+	})
+
+	afterMute := callToolWithKey(t, s, 5, key, "workflow_manual", nil)
+	if strings.Contains(afterMute, "mute.me") || strings.Contains(afterMute, "muted content") {
+		t.Fatalf("workflow_manual after mute still carries the muted note's key/value: %s", afterMute)
+	}
+	if !strings.Contains(afterMute, "1 muted") {
+		t.Fatalf("workflow_manual after mute missing the muted-count line: %s", afterMute)
+	}
+
+	searchResp := callToolWithKey(t, s, 6, key, "note.search", map[string]any{
+		"layer": "worktree",
+		"glob":  "mute.me",
+	})
+	if !strings.Contains(searchResp, "mute.me") || !strings.Contains(searchResp, "muted content") {
+		t.Fatalf("note.search after mute did not still return the muted note: %s", searchResp)
+	}
+
+	// Unmute restores the block.
+	callToolWithKey(t, s, 7, key, "note.unmute", map[string]any{
+		"layer": "worktree",
+		"keys":  []any{"mute.me"},
+	})
+	afterUnmute := callToolWithKey(t, s, 8, key, "workflow_manual", nil)
+	if !strings.Contains(afterUnmute, "mute.me") || !strings.Contains(afterUnmute, "muted content") {
+		t.Fatalf("workflow_manual after unmute did not restore the note: %s", afterUnmute)
+	}
+	if strings.Contains(afterUnmute, "note.search to view") {
+		t.Fatalf("workflow_manual after unmute unexpectedly still shows a muted-count line: %s", afterUnmute)
+	}
+}
