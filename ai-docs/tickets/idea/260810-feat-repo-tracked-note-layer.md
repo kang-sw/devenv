@@ -5,6 +5,7 @@ related:
   260807-feat-note-memory-layers: prerequisite — extends its note.* surface and workflow_manual injection with a third, git-tracked layer
   260807-refactor-dissolve-project-index: consumer — this layer is the landed home for _index.md's tracked `# Session Notes`, without which that content would be demoted to non-tracked
   260730-refactor-retire-goal-fan-out-step-and-session-note: constraint — must not resurrect or build on the retiring session.note surface
+  260811-feat-note-visibility-mute: coordinates — the layer-agnostic `visible`/mute attribute is owned there; this `repo` layer inherits it, and whichever of the two lands second extends the shared record shape
 ---
 
 # Tracked repo note layer — one-key-per-file git-tracked substrate for cross-clone notes
@@ -46,6 +47,10 @@ contract:
 - **`repo` layer, not `git-master`.** The rejected `git-master` cell
   (write-to-another-branch's-index) stays rejected; `repo` is simply the tracked
   layer visible by branch, resolved by ordinary merge.
+- **Visibility is not owned here.** The `visible`/mute attribute across all note
+  layers is authored by `260811-feat-note-visibility-mute`; this ticket adds only
+  the `repo` layer and inherits `visible` when the two converge (see that ticket's
+  coordination note for the record-shape ordering).
 
 ## Prior Art
 
