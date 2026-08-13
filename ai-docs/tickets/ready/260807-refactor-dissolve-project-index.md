@@ -332,3 +332,50 @@ and adds new mechanism only if a real contradiction or hard-dependency surfaces.
 Acceptance: both runs complete on a confirmed-0.40.3 session; any contradiction is
 captured and routed; if a real conflict or hard-dependency is found it is fixed
 here when in scope, otherwise spun into a linked child ticket.
+
+### Result (1ec90d06) - 2026-08-13
+
+Live dogfood of the v0046 migration executed end-to-end on a confirmed 0.40.3-dev
+session (`runtime.info` = `0.40.3-dev`). Both runs completed; zero contradictions
+between the authored surface and live behavior, so nothing was routed.
+
+**Run (a) — migrated-state / idempotency, on devenv itself.** `/ws:lead-bootstrap`
+resolved mode=upgrade with installed tag `v0046` == latest template `v0046`, so
+zero migration items were walkable: no `_index.md`-read step re-added, no file
+re-created, managed sections un-drifted (project-specific supersets preserved),
+index-health-check skipped cleanly (no `ai-docs/_index.md`). Session-start
+injections coexisted with `## Project Orientation` without duplication or
+contradiction. No tracked-file change; captured only as a `repo` note
+(commit `1ec90d06`).
+
+**Run (b) — real v0046 migration, on an un-migrated fixture.** Built a throwaway
+`acmewidgets` fixture (git repo under scratch) at tag `v0045` with a live
+`ai-docs/_index.md` carrying orientation, a runbook, ticket/spec inventory tables,
+and Session Notes (one live + one self-declared-stale). Bound it via `ferrule` and
+verified both migration edges live:
+
+- *Before migration (graceful degrade):* the bootstrap staleness alarm fired at
+  ferrule/`workflow_manual` time (v0045 < v0046); `project_tree` and
+  `workflow_manual` ran without error with `_index.md` present; generated ticket/
+  spec inventories coexisted **additively** with the file's own inventory tables
+  (transitional duplication, not a conflict).
+- *Migration:* `_index.md` orientation → `AGENTS.md ## Project Orientation`;
+  Session Notes → `repo` note layer with the stale flicker note **pruned** (not
+  copied); Release Build runbook → `ai-docs/manuals/release-build.md`; inventory
+  tables dropped (derivable); read-`_index.md` step and the `## Ticket Focus`
+  reader bullet removed; WORKFLOW.md refreshed; `_index.md` deleted; tag
+  `v0045 → v0046` (fixture commit `4ad96c41`).
+- *After migration:* the staleness alarm **cleared** on the same session (recomputes
+  live); the `# Manuals` ambient block now injects the migrated runbook and the
+  `# Notes` block injects the surviving session-note; `project_tree` no longer lists
+  `_index.md`; no live `_index.md`/`ticket focus` reference remains in managed files.
+- *Convergence invariant confirmed:* the upgrade-migrated fixture reached the same
+  `AGENTS.md` shape a fresh scaffold produces — dissolved `## Project Memory`,
+  populated `## Project Orientation`, no `_index.md`, tag `v0046`.
+
+Phase-1 forward note confirmed: no new hard-dependency or mechanism surfaced, so
+Phase 2 stayed a verification pass. Incidental non-findings (not routed): devenv
+still carries a gitignored `ai-docs/_continue.local.md` that v0025 would have
+deleted (forward-only upgrades never re-walk it); the fixture raised a doc-coverage
+alarm because its spec stubs lack frontmatter (a fixture artifact, not v0046
+behavior).

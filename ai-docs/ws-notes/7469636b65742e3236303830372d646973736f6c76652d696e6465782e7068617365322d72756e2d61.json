@@ -1,7 +1,0 @@
-{
-  "key": "ticket.260807-dissolve-index.phase2-run-a",
-  "value": "Phase 2 run (a) [migrated-state/idempotency] DONE on devenv, live 0.40.3-dev session (runtime.info confirmed). /ws:lead-bootstrap upgrade handler = clean no-op: installed tag v0046 == latest template v0046, zero migration items with version\u003einstalled, so NO _index.md read-step re-added and NO file re-created; managed sections un-drifted, project-specific supersets preserved; index-health-check skipped cleanly (no ai-docs/_index.md); no tracked-file change, no commit. Injection/orientation coexistence verified: Project Memory step 1 points at notes/manuals/generated + ## Project Orientation with no duplication/contradiction. No contradictions found -\u003e no idea ticket. Minor pre-existing (out of scope, .local gitignored): ai-docs/_continue.local.md still present though v0025 called for deletion (forward-only upgrade never re-walks it). REMAINING: Phase 2 run (b) = bootstrap on an un-migrated fixture (live _index.md + old tag) to execute v0046 for real + graceful-degrade check; not yet run.",
-  "priority": 1,
-  "written_at": "2026-08-13T01:14:12Z",
-  "visible": true
-}
