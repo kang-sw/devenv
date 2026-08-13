@@ -10,6 +10,7 @@ related:
   260725-idea-retire-ticket-focus-root-regen: absorbs (dropped) — its devenv AGENTS.md/WORKFLOW.md Ticket Focus regen cleanup is folded into this ticket's Phase 1 validate-on-devenv step; the unique section-placement gotcha was transplanted there
   260728-research-index-ticket-table-drift: motivates — documents the hand-maintained _index ticket/spec table drift this dissolution removes by generation
 sage-review-completeness: completed
+completed: 2026-08-13
 ---
 
 # Dissolve _index.md — author the versioned lead-bootstrap dissolution step, validated on devenv
@@ -379,3 +380,8 @@ still carries a gitignored `ai-docs/_continue.local.md` that v0025 would have
 deleted (forward-only upgrades never re-walk it); the fixture raised a doc-coverage
 alarm because its spec stubs lack frontmatter (a fixture artifact, not v0046
 behavior).
+
+
+## Resolution (2026-08-13)
+
+Both phases landed. Phase 1 authored the v0046 lead-bootstrap _index.md dissolution (dual distributions, template/WORKFLOW/rsrc + spec reconciliation) and validated it by dissolving devenv's own _index.md. Phase 2 dogfooded the shipped v0046 step live on a confirmed 0.40.3-dev session: run (a) idempotency no-op on already-dissolved devenv, run (b) a full v0046 migration on an un-migrated fixture (staleness alarm fires before / clears after, ambient # Manuals/# Notes inject migrated content, convergence invariant confirmed). Zero contradictions between the authored surface and live runtime behavior; nothing routed.
