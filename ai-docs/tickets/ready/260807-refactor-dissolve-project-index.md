@@ -287,27 +287,48 @@ scaffolding, trivial repoints, grep+build verified]. Re-review clean.
 > the coexistence checks on an un-migrated project; add a guard only if a new hard
 > dependency surfaces) — no new mechanism expected.
 
-### Phase 2: Un-migrated-downstream coexistence contract
+### Phase 2: Dogfood the v0046 migration on the real new-plugin build
 
-The passive path for a project on the new runtime that keeps a live `_index.md`
-and has not re-bootstrapped. This state must degrade gracefully, and the
-version-gate architecture already supplies the mechanism — so this phase is
-largely verification and spec, adding a guard only if a real hard-dependency
-surfaces.
+Redirected 2026-08-12 (pre-Result, no phase output yet) from a reasoned
+coexistence-contract pass to a live dogfood. Rationale: Phase 1 **authored** the
+v0046 dissolution step and validated it only by hand-editing devenv — the
+`lead-bootstrap` skill's v0046 step has never executed as a real caller, and
+author-time correctness of the template/WORKFLOW/rsrc surface does not prove
+live-runtime correctness once session-start injection (`# Notes`, `# Manuals`,
+generated tables) is layered on. Running the actual new-plugin (0.40.3) bootstrap
+end-to-end is the stronger check, and it **absorbs** the original Phase 2
+coexistence verification by executing it live rather than reasoning about it — so
+the original acceptance criteria are folded into run (b) below, not dropped.
 
-- Verify graceful coexistence: a pre-migration `AGENTS.md` still reads
-  `_index.md`; the file remains; the new ambient injections (`# Notes`,
-  `# Manuals`) and generated tables coexist **additively** (transitional
-  duplication is acceptable, not a conflict); the index-health-check runs only
-  when `_index.md` exists and skips cleanly when it is absent; the staleness alarm
-  nudges the new migration item.
-- Confirm nothing in the runtime or bootstrap flow hard-depends on `_index.md`
-  presence or absence; add a guard only where a real dependency is found.
-- Document the transitional coexistence as a supported configuration in spec
-  (`documentation-system.md` / `workflow-skills.md`).
+**Prerequisite — a live session must actually serve 0.40.3.** Plugin-cache keys
+on the version string, and `260812-research-reload-plugins-keeps-stale-mcp-binary`
+records that `/reload-plugins` can reconnect to the *stale* MCP process. This
+phase cannot start until a session is confirmed running the 0.40.3 build
+(`runtime.info` / tool-surface check), so that friction is on the critical path.
 
-Verification: with a live `_index.md` and an old template version, session start
-succeeds and injections render additively with no tool erroring on `_index.md`
-being present; with a migrated project (no `_index.md`), the health-check and any
-`_index.md` reader skip cleanly. Phase 2 secures the passive path around the active
-migration Phase 1 authors.
+Two bootstrap runs:
+
+- **(a) Re-run bootstrap on already-dissolved devenv** (migrated-state /
+  idempotency path). The upgrade must **not** re-add a `_index.md`-reading step or
+  re-create the file; session-start injections must coexist with
+  `AGENTS.md ## Project Orientation` **without contradiction or duplication**; the
+  index-health-check must skip cleanly given no `_index.md`.
+- **(b) Run bootstrap on an un-migrated fixture** carrying a live `ai-docs/_index.md`
+  and an old template version. This executes the v0046 migration for real, and
+  doubles as the original Phase 2 graceful-degrade check: before migration the
+  ambient injections and generated tables coexist **additively** with the live
+  `_index.md` (transitional duplication is acceptable, not a conflict), the
+  index-health-check runs **because** `_index.md` exists, the staleness alarm
+  nudges the new migration item, and no tool errors on `_index.md` being present;
+  after migration the file is gone and the readers skip cleanly.
+
+Capture every contradiction between the authored surface and live behavior as a
+finding and route it (blocking/goal-relevant → `ready/` under the sage gate,
+incidental → `idea/`). Phase 1 already confirmed no compiled-code hard-dependency
+on `_index.md` and documented the transitional coexistence in spec
+(`documentation-system.md` / `workflow-skills.md`); this phase live-verifies both
+and adds new mechanism only if a real contradiction or hard-dependency surfaces.
+
+Acceptance: both runs complete on a confirmed-0.40.3 session; any contradiction is
+captured and routed; if a real conflict or hard-dependency is found it is fixed
+here when in scope, otherwise spun into a linked child ticket.
