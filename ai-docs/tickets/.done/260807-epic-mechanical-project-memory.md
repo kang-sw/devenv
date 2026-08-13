@@ -9,6 +9,7 @@ related:
   260710-bug-project-index-ticket-focus-stale-status: related — the derivable->generate leg the decomposition child depends on
   260725-idea-retire-ticket-focus-root-regen: related — retires _index.md Ticket Focus regen machinery, part of the derivable->generate leg
   260728-research-index-ticket-table-drift: related — documents the hand-maintained _index table drift this epic removes
+completed: 2026-08-13
 ---
 
 # Mechanical project memory — dissolve _index.md into injected and generated layers
@@ -122,3 +123,8 @@ impl-branch fallback chose preserve-stop-and-ask; the latter is now at `ready/`.
 - Dropped: mechanical injection proves not worth its substrate cost versus a
   slimmed hand-maintained `_index.md`.
 - Deferred: the tracked `repo` note layer and any selective/contextual injection.
+
+
+## Resolution (2026-08-13)
+
+All Completion Criteria met. note-memory Phase 1 shipped (closing 260523-bug-worktree-local-index-missing); the manuals doc tier shipped with ambient injection and the ref/_index procedure migration; the _index.md decomposition is complete and dogfooded live (260807-refactor-dissolve-project-index Phase 2, runs a+b, zero contradictions) — nothing in the dissolved model requires a session-start behavioral read. The deferred tracked repo note layer also landed (260810-feat-repo-tracked-note-layer). All five child tickets are closed.

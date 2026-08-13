@@ -74,7 +74,7 @@ Policy rules:
 ### 5. Documentation
 
 - `{doc-pre-pass}`: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")`.
-- `{doc-commit-gate}`: refresh `_index.md` only for new skills, agents, or major patterns.
+- `{doc-commit-gate}`: if `ai-docs/_index.md` exists, refresh it only for new skills, agents, or major patterns (pre-dissolution coexistence only); otherwise update `AGENTS.md`'s `## Project Orientation` section only when repo identity, topology, or canonical flows changed.
 - Commit spec and mental-model changes separately when both changed.
 
 ### 6. Closeout

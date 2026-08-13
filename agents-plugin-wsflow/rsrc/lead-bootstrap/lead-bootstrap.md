@@ -14,8 +14,8 @@ Mode: user request
 - Never overwrite project-specific sections: Architecture Rules, custom Code Standards entries, custom Project Knowledge entries.
 - Merge surgically; flag unresolved conflicts inline with `<!-- CONFLICT: ... -->`.
 - Every migration item is idempotent; re-running on an already-migrated project produces no changes.
-- Index health checks are advisory; first pass reads `_index.md` only.
-- Index cleanup writes only `ai-docs/_index.md`; semantic migration routes through owning workflow skills.
+- Index health checks are legacy/coexistence-only, apply only when a project still has `ai-docs/_index.md`, and are advisory; first pass reads `_index.md` only.
+- Index cleanup writes only `ai-docs/_index.md`, when present; semantic migration routes through owning workflow skills.
 - Commit each logical unit separately following the repository commit rules.
 - Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
 
@@ -74,6 +74,12 @@ Mode: user request
 6. Commit.
 
 ## On: index health check
+
+`ai-docs/_index.md` is a legacy all-in-one memory file; current projects
+route orientation to `AGENTS.md`, procedures to `ai-docs/manuals/`, session
+notes to the `repo` note layer, and inventories to generated output, and do
+not have one. This flow only runs when a project still has one (gated by
+`## On: invoke` step 6).
 
 1. Read `ai-docs/_index.md`.
 2. Apply **judge: index-scope-drift** as a cheap first pass.

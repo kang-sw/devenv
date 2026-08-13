@@ -5,7 +5,7 @@ completed implementation phase has a reviewable result commit.
 
 ## Invariants
 
-- Wait for `_index.md` refresh and any ticket updates to complete before running the doc-commit gate.
+- Wait for the Doc Pipeline step and any ticket updates to complete before running the doc-commit gate.
 - Doc-commit gate always runs; prior steps may have dirtied `ai-docs/`.
 - Commit message for doc updates follows AGENTS.md commit rules; type is `docs`.
 - Ancestor loading: any agent that reads `ai-docs/mental-model/<domain>/<sub>.md` must read `ai-docs/mental-model/<domain>/index.md` first.
@@ -18,7 +18,7 @@ completed implementation phase has a reviewable result commit.
 
 ## Doc Pipeline
 
-1. Refresh `ai-docs/_index.md` to reflect current inventory, descriptions, and focus state.
+1. If `ai-docs/_index.md` exists, refresh it to reflect current inventory, descriptions, and focus state (pre-dissolution coexistence only - inventory and focus are otherwise generated/derivable and need no refresh). Otherwise, update `AGENTS.md`'s `## Project Orientation` section only when repo identity, topology, or canonical flows actually changed, and record session-scoped updates via `{{.McpNamespace}}/note.write(layer: "repo", ...)`.
 
 ## Doc Commit Gate
 

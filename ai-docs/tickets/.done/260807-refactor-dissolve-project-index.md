@@ -10,6 +10,7 @@ related:
   260725-idea-retire-ticket-focus-root-regen: absorbs (dropped) — its devenv AGENTS.md/WORKFLOW.md Ticket Focus regen cleanup is folded into this ticket's Phase 1 validate-on-devenv step; the unique section-placement gotcha was transplanted there
   260728-research-index-ticket-table-drift: motivates — documents the hand-maintained _index ticket/spec table drift this dissolution removes by generation
 sage-review-completeness: completed
+completed: 2026-08-13
 ---
 
 # Dissolve _index.md — author the versioned lead-bootstrap dissolution step, validated on devenv
@@ -64,19 +65,6 @@ in place:
   into this ticket's Phase 1). The ticket/spec inventory tables `project_tree`
   already emits. `260728-research-index-ticket-table-drift` (`idea/`) `motivates`
   this dissolution but is not a build prerequisite.
-
-## Blocked (2026-08-12) — decision gate, not dependency
-
-All dependency prerequisites are satisfied (see **Prerequisites**), so this is
-advanceable on the merits. It is held only for an explicit human go-ahead:
-Phase 1 is an AGENTS.md **"Always ask"**-grade change — it adds a new
-`AGENTS.template.md` migration-checklist item (modifying migration-checklist
-semantics), rewrites the template's two faces and `lead-bootstrap.md` across
-**both** shipped distributions (`agents-plugin/` and `agents-plugin-wsflow/`),
-reconciles two specs, and deletes `_index.md`. `lead-drain-ready-queue` posture
-preserves any AGENTS.md "Always ask" item as a hard stop even on a goal run, so
-the drain will not dispatch this autonomously. Lift this note on user sign-off
-and dispatch to `lead-proceed`.
 
 ## Decisions
 
@@ -243,27 +231,157 @@ model); a fresh session started with no manual file reads still receives the rep
 orientation it previously depended on `_index.md` for. Gated on all **Blocked on**
 prerequisites landing.
 
-### Phase 2: Un-migrated-downstream coexistence contract
+### Result (b844635a) - 2026-08-12
 
-The passive path for a project on the new runtime that keeps a live `_index.md`
-and has not re-bootstrapped. This state must degrade gracefully, and the
-version-gate architecture already supplies the mechanism — so this phase is
-largely verification and spec, adding a guard only if a real hard-dependency
-surfaces.
+Authored the dissolution as a versioned `lead-bootstrap` migration and validated
+it on devenv. Range `0b7d0f46..b844635a` (impl `f652a0d8..b844635a`).
 
-- Verify graceful coexistence: a pre-migration `AGENTS.md` still reads
-  `_index.md`; the file remains; the new ambient injections (`# Notes`,
-  `# Manuals`) and generated tables coexist **additively** (transitional
-  duplication is acceptable, not a conflict); the index-health-check runs only
-  when `_index.md` exists and skips cleanly when it is absent; the staleness alarm
-  nudges the new migration item.
-- Confirm nothing in the runtime or bootstrap flow hard-depends on `_index.md`
-  presence or absence; add a guard only where a real dependency is found.
-- Document the transitional coexistence as a supported configuration in spec
-  (`documentation-system.md` / `workflow-skills.md`).
+Behavioral delta:
+- New migration-checklist item in both distributions' `AGENTS.template.md` (ws
+  `v0046`, wsflow `v0007` — independent lineages), plus a new `## Project
+  Orientation` template section, a rewritten `## Project Memory` read step, and a
+  fresh-bootstrap scaffold that no longer creates `_index.md`. Both `WORKFLOW.md`
+  master templates and `lead-bootstrap.md` (byte-identical mirror) updated in
+  step; skills manifest regenerated.
+- devenv self-dissolved: `ai-docs/_index.md` deleted, resident orientation moved
+  into devenv's `AGENTS.md` `## Project Orientation`, tracked `# Session Notes`
+  migrated to the `repo` note layer (`ai-docs/ws-notes/`) with the stale closeout
+  pruned, devenv tag `v0041 -> v0046`. Absorbed-260725 residual Ticket Focus refs
+  cleared by regeneration.
+- Specs reconciled: `documentation-system.md {#260505-project-memory-index}`
+  rewritten to the distributed model; `workflow-skills.md` gained
+  `{#260812-bootstrap-index-dissolution}` + coexistence-only health-check framing.
+  Two mental-model drift lines fixed on contact.
 
-Verification: with a live `_index.md` and an old template version, session start
-succeeds and injections render additively with no tool erroring on `_index.md`
-being present; with a migrated project (no `_index.md`), the health-check and any
-`_index.md` reader skip cleanly. Phase 2 secures the passive path around the active
-migration Phase 1 authors.
+Deviations / discoveries beyond the plan:
+- **`_index.md` was not docs-only.** Two live runtime dependents surfaced during
+  edit — `internal/wsdoc/doctor.go` (the `ws-mcp doctor` check) and
+  `scripts/bump-ws-version.sh` (a release-version edition point). Both retargeted
+  to `AGENTS.md`; `AGENTS.md`'s `## Project Orientation` version strings are now
+  the documented bump surface (the edition-point list was updated to match).
+- **The dissolution surface was wider than the plan grep.** Review cycle 1 (Test
+  Critical) found the entire shared `agents-plugin{,-wsflow}/rsrc/` playbook
+  surface + `mental-model-conventions.md` still reading/writing `_index.md`
+  (`reference-discovery`, `executor-wrapup`, `lead-write-spec`, `lead-write-ticket`,
+  `lead-implement`, `impl-playbook`, `lead-goal-fan-out-step`). Cycle 2 relay swept
+  them with **if-present degrade** (context reads fall back to the dissolved homes;
+  doc-pipeline writes are gated on the file existing) so un-migrated downstream
+  projects keep working; the retired Ticket-Focus write was dropped, not gated.
+- **WORKFLOW.md brought into scope** by lead ruling (ticket verification bar +
+  convergence invariant).
+
+Verification: extended `grep` sweeps clean (no unconditional `_index.md`
+read/write remains); `grep -rni "ticket focus"` clean; `_index.md` absent on
+devenv; wsrsrc regen tests, `go build ./...`, and `TestGenerate*Manifest` pass;
+`python3 -m unittest discover agents-plugin-wsflow/tests` 9/10 (the one failure is
+a pre-existing, unrelated `note.mute`/`note.unmute` wsflow tool-registration gap,
+independently reproduced at the base commit — captured as a separate idea ticket).
+
+Review: partitioned (correctness/fit/test). Cycle 1 — fit clean, correctness clean
++2 minor, test 1 Critical + 1 Important. Cycle 2 relay + re-review — Critical
+[resolved], minors [fixed], the no-regression-test Important [accepted: no existing
+scaffolding, trivial repoints, grep+build verified]. Re-review clean.
+
+> Forward: Phase 2 (coexistence contract) is substantially satisfied by this
+> phase's if-present degrade + the compiled-code hard-dependency fixes + the
+> transitional-coexistence spec text. It is reduced to a verification pass (run
+> the coexistence checks on an un-migrated project; add a guard only if a new hard
+> dependency surfaces) — no new mechanism expected.
+
+### Phase 2: Dogfood the v0046 migration on the real new-plugin build
+
+Redirected 2026-08-12 (pre-Result, no phase output yet) from a reasoned
+coexistence-contract pass to a live dogfood. Rationale: Phase 1 **authored** the
+v0046 dissolution step and validated it only by hand-editing devenv — the
+`lead-bootstrap` skill's v0046 step has never executed as a real caller, and
+author-time correctness of the template/WORKFLOW/rsrc surface does not prove
+live-runtime correctness once session-start injection (`# Notes`, `# Manuals`,
+generated tables) is layered on. Running the actual new-plugin (0.40.3) bootstrap
+end-to-end is the stronger check, and it **absorbs** the original Phase 2
+coexistence verification by executing it live rather than reasoning about it — so
+the original acceptance criteria are folded into run (b) below, not dropped.
+
+**Prerequisite — a live session must actually serve 0.40.3.** Plugin-cache keys
+on the version string, and `260812-research-reload-plugins-keeps-stale-mcp-binary`
+records that `/reload-plugins` can reconnect to the *stale* MCP process. This
+phase cannot start until a session is confirmed running the 0.40.3 build
+(`runtime.info` / tool-surface check), so that friction is on the critical path.
+
+Two bootstrap runs:
+
+- **(a) Re-run bootstrap on already-dissolved devenv** (migrated-state /
+  idempotency path). The upgrade must **not** re-add a `_index.md`-reading step or
+  re-create the file; session-start injections must coexist with
+  `AGENTS.md ## Project Orientation` **without contradiction or duplication**; the
+  index-health-check must skip cleanly given no `_index.md`.
+- **(b) Run bootstrap on an un-migrated fixture** carrying a live `ai-docs/_index.md`
+  and an old template version. This executes the v0046 migration for real, and
+  doubles as the original Phase 2 graceful-degrade check: before migration the
+  ambient injections and generated tables coexist **additively** with the live
+  `_index.md` (transitional duplication is acceptable, not a conflict), the
+  index-health-check runs **because** `_index.md` exists, the staleness alarm
+  nudges the new migration item, and no tool errors on `_index.md` being present;
+  after migration the file is gone and the readers skip cleanly.
+
+Capture every contradiction between the authored surface and live behavior as a
+finding and route it (blocking/goal-relevant → `ready/` under the sage gate,
+incidental → `idea/`). Phase 1 already confirmed no compiled-code hard-dependency
+on `_index.md` and documented the transitional coexistence in spec
+(`documentation-system.md` / `workflow-skills.md`); this phase live-verifies both
+and adds new mechanism only if a real contradiction or hard-dependency surfaces.
+
+Acceptance: both runs complete on a confirmed-0.40.3 session; any contradiction is
+captured and routed; if a real conflict or hard-dependency is found it is fixed
+here when in scope, otherwise spun into a linked child ticket.
+
+### Result (1ec90d06) - 2026-08-13
+
+Live dogfood of the v0046 migration executed end-to-end on a confirmed 0.40.3-dev
+session (`runtime.info` = `0.40.3-dev`). Both runs completed; zero contradictions
+between the authored surface and live behavior, so nothing was routed.
+
+**Run (a) — migrated-state / idempotency, on devenv itself.** `/ws:lead-bootstrap`
+resolved mode=upgrade with installed tag `v0046` == latest template `v0046`, so
+zero migration items were walkable: no `_index.md`-read step re-added, no file
+re-created, managed sections un-drifted (project-specific supersets preserved),
+index-health-check skipped cleanly (no `ai-docs/_index.md`). Session-start
+injections coexisted with `## Project Orientation` without duplication or
+contradiction. No tracked-file change; captured only as a `repo` note
+(commit `1ec90d06`).
+
+**Run (b) — real v0046 migration, on an un-migrated fixture.** Built a throwaway
+`acmewidgets` fixture (git repo under scratch) at tag `v0045` with a live
+`ai-docs/_index.md` carrying orientation, a runbook, ticket/spec inventory tables,
+and Session Notes (one live + one self-declared-stale). Bound it via `ferrule` and
+verified both migration edges live:
+
+- *Before migration (graceful degrade):* the bootstrap staleness alarm fired at
+  ferrule/`workflow_manual` time (v0045 < v0046); `project_tree` and
+  `workflow_manual` ran without error with `_index.md` present; generated ticket/
+  spec inventories coexisted **additively** with the file's own inventory tables
+  (transitional duplication, not a conflict).
+- *Migration:* `_index.md` orientation → `AGENTS.md ## Project Orientation`;
+  Session Notes → `repo` note layer with the stale flicker note **pruned** (not
+  copied); Release Build runbook → `ai-docs/manuals/release-build.md`; inventory
+  tables dropped (derivable); read-`_index.md` step and the `## Ticket Focus`
+  reader bullet removed; WORKFLOW.md refreshed; `_index.md` deleted; tag
+  `v0045 → v0046` (fixture commit `4ad96c41`).
+- *After migration:* the staleness alarm **cleared** on the same session (recomputes
+  live); the `# Manuals` ambient block now injects the migrated runbook and the
+  `# Notes` block injects the surviving session-note; `project_tree` no longer lists
+  `_index.md`; no live `_index.md`/`ticket focus` reference remains in managed files.
+- *Convergence invariant confirmed:* the upgrade-migrated fixture reached the same
+  `AGENTS.md` shape a fresh scaffold produces — dissolved `## Project Memory`,
+  populated `## Project Orientation`, no `_index.md`, tag `v0046`.
+
+Phase-1 forward note confirmed: no new hard-dependency or mechanism surfaced, so
+Phase 2 stayed a verification pass. Incidental non-findings (not routed): devenv
+still carries a gitignored `ai-docs/_continue.local.md` that v0025 would have
+deleted (forward-only upgrades never re-walk it); the fixture raised a doc-coverage
+alarm because its spec stubs lack frontmatter (a fixture artifact, not v0046
+behavior).
+
+
+## Resolution (2026-08-13)
+
+Both phases landed. Phase 1 authored the v0046 lead-bootstrap _index.md dissolution (dual distributions, template/WORKFLOW/rsrc + spec reconciliation) and validated it by dissolving devenv's own _index.md. Phase 2 dogfooded the shipped v0046 step live on a confirmed 0.40.3-dev session: run (a) idempotency no-op on already-dissolved devenv, run (b) a full v0046 migration on an un-migrated fixture (staleness alarm fires before / clears after, ambient # Manuals/# Notes inject migrated content, convergence invariant confirmed). Zero contradictions between the authored surface and live runtime behavior; nothing routed.
