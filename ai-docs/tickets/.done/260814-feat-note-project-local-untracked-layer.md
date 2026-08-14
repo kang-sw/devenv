@@ -6,6 +6,7 @@ related:
   260619-feat-ws-layered-config-scope-substrate: prior-art — config's session/project/global scope is the 3-rung precedent and substrate
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-14
 ---
 
 # Project-local untracked note layer (worktree-agnostic, per-project)
@@ -102,3 +103,44 @@ Verify:
   other layers.
 - The re-pointed `_index.local.md` migration guidance names `clone`, not
   `machine`.
+
+### Result (baf8788) - 2026-08-14
+
+Landed the `clone` layer as a fourth file-per-layer note store (one JSON file
+for the whole layer, like `machine`/`worktree`, not per-key like `repo`). The
+`layer` enum gained `"clone"` on all five `note.*` tool schemas, the
+`noteLayerArg`/`resolveNoteStore` dispatch, the ambient `# Notes` injection
+(`wsnote.Compute`), and the `mcp-tools.md` spec (`#260810-note-tools` /
+`#260810-note-injection`, no anchor renamed). `_index.local.md` migration
+guidance re-pointed from `machine` to `clone` in all five bootstrap /
+project-memory docs (both packages' `AGENTS.template.md` + `WORKFLOW.md`, root
+`AGENTS.md`); wsflow mirror text stayed non-ws-aware.
+
+Deviation from the plan's `Codebase Findings`: `wsnote.ClonePath` resolves under
+`Layout.SharedDir` (`proj/<projectKey>/shared/notes.json`), **not**
+`Layout.ProjectDir` directly. For a project's canonical (non-linked) worktree
+`wsstate.layoutFor` sets `WorktreeKey == ProjectKey`, so
+`Layout.WorktreeDir == Layout.ProjectDir`; a store built directly on `ProjectDir`
+would collide byte-for-byte with the `worktree` layer's `notes.json` in the
+common single-worktree case, silently merging the two layers. `SharedDir` is the
+pre-existing collision-avoidance subdirectory `LocksDir` already uses, stays
+nested under `proj/<projectKey>/`, and keeps the project-scoped /
+worktree-agnostic contract. Reasoning documented inline on `ClonePath` and
+captured as a Common Mistakes invariant in
+`ai-docs/mental-model/mcp-runtime.md` (`#260810-note-tools`). Both correctness
+and fit reviewers independently confirmed the substitution in-contract.
+
+Verification: `TestClonePathIsProjectScopedAndWorktreeAgnostic` and
+`TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic` prove the three required
+properties (identical across two worktrees of one repo, distinct from that
+repo's `WorktreePath`, distinct across two unrelated repos);
+`TestWorkflowManualCarriesCloneLayerNote` and the extended
+`TestComputeSortsAndCapsAcrossAllFourLayers` cover ambient injection;
+`TestNoteMuteUnmuteRoundTrip` now loops all four layers. Partitioned review
+(correctness / fit / test) clean after one relay cycle. `go build ./...` clean.
+
+Deferred (unrelated): two pre-existing `internal/mcp` failures
+(`TestWorkflowManualCarriesNotesBlockOnFreshAndContinuePositionedAfterSessionState`,
+`TestWorkflowManualNotesBlockAbsentWhenNoNotesExist`) predate this branch
+(confirmed on base `5f1d720d`) and are untouched here; to be captured as a
+separate idea ticket.
