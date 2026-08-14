@@ -1064,7 +1064,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		"api.list",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
-		"mental_models.list", "mental_models.find", "mental_models.status", "manuals.list", "manuals.find", "references.trace",
+		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
 		"tickets.list", "tickets.find", "tickets.status", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
@@ -1106,7 +1106,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"system_prompt_text\"") {
 		t.Fatalf("tools/list ws.mercenary.register schema missing system_prompt_text: %s", byID["2"])
 	}
-	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "manuals.list", "manuals.find", "references.trace"} {
+	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}

@@ -223,14 +223,15 @@ machine-local details (credentials, IPs, hostnames) go to a gitignored
 A **tracked** manual with no `summary:` frontmatter line is still discovered
 and announced — reported with an explicit no-summary marker, not silently
 dropped — so an author notices and fills in the missing line rather than the
-manual quietly vanishing from the ambient block or discovery tools. A
+manual quietly vanishing from the ambient block. A
 `*.local.md` manual is exempt: it is listed as a bare path line with no summary
 and no no-summary marker, because the suffix already marks it machine-local and
 a gitignored file must not be nagged to add frontmatter.
 
-`ws/manuals.list` and `ws/manuals.find` expose manual path and summary
-metadata without requiring callers to scan the tree manually, mirroring the
-discovery parity `specs.*`/`mental_models.*` already provide.
+The always-on ambient `# Manuals` block in `workflow_manual` output is the
+manuals discovery surface: unlike `specs.*`/`mental_models.*`, manuals have no
+dedicated discovery MCP tools — every manual under `ai-docs/manuals/*.md` is
+already surfaced unconditionally without a separate lookup call.
 
 The manuals-vs-`ref` boundary is a per-file editorial decision made at
 content-migration time, not a schema field: content that benefits from

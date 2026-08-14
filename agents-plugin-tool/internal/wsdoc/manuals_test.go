@@ -85,31 +85,3 @@ func TestManualsListSortsByPathAndIgnoresNonMarkdown(t *testing.T) {
 		t.Fatalf("ManualsList not sorted by path: %#v", got)
 	}
 }
-
-func TestManualsFindFiltersByQueryAcrossSummaryAndBody(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/manuals/deploy.md", "---\nsummary: How to deploy the release pipeline.\n---\n# Deploy\n\nRelease pipeline steps.\n")
-	mustWrite(t, root, "ai-docs/manuals/onboarding.md", "---\nsummary: New teammate onboarding checklist.\n---\n# Onboarding\n")
-
-	got, err := ManualsFind(root, "deploy")
-	if err != nil {
-		t.Fatalf("ManualsFind returned error: %v", err)
-	}
-	if len(got) != 1 || got[0].Path != "ai-docs/manuals/deploy.md" {
-		t.Fatalf("ManualsFind(query=deploy) = %#v", got)
-	}
-}
-
-func TestManualsFindWithEmptyQueryReturnsFullList(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/manuals/deploy.md", "---\nsummary: Deploy notes.\n---\n# Deploy\n")
-	mustWrite(t, root, "ai-docs/manuals/onboarding.md", "---\nsummary: Onboarding notes.\n---\n# Onboarding\n")
-
-	got, err := ManualsFind(root, "")
-	if err != nil {
-		t.Fatalf("ManualsFind returned error: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("ManualsFind(query=\"\") = %#v, want both manuals", got)
-	}
-}
