@@ -4,6 +4,7 @@ related-mental-model:
   - mcp-runtime
 sage-review-completeness: completed
 sage-review-design: completed
+completed: 2026-08-14
 ---
 
 # Make # Manuals an always-on authoring anchor
@@ -200,3 +201,53 @@ Constraints:
 - Keep `ManualsList` and the manuals doc tier itself; only the two MCP
   tools/CLI mirror are retired, not the tier.
 - Version bump is the lead's merge-time step, not part of either phase.
+
+### Result (68f691c6) - 2026-08-14
+
+Delegated implementation on `impl/develop/manuals-retire-list-find` (survey plan
+`97ee12da`). The `manuals.list`/`manuals.find` MCP tools (schema + dispatch),
+their `ws-mcp manuals list|find` CLI mirror, and the now-dead Go surface
+(`ManualsFind`, `formatManuals`) are removed; `ManualsList` and the manuals doc
+tier are kept — `computeManuals` (the Phase 1 ambient block) still consumes
+`ManualsList`. Reversed the `d2c82584` wiring: the two tokens in
+`toolSchemaRequiresSessionKey`, the two `runtimeCapabilityCommandNames()`
+entries, and the tools+commands entries in both `agents-plugin/runtime.json` and
+`agents-plugin-wsflow/runtime.json`. Spec: deleted
+`mcp-tools.md {#260807-manuals-discovery-tools}` and redirected the
+`documentation-system.md {#260807-manuals-document-system}` discovery-surface
+paragraph to name the ambient `# Manuals` block (plus trimmed an adjacent stale
+"or discovery tools" phrase).
+
+Deviations from the ticket text, all found by the survey and all narrowing the
+work rather than expanding it:
+
+- `LeadToolNames()` needed no direct edit — it derives names dynamically from
+  `tools()`, so dropping the two schema entries removes them from
+  `runtime.capabilities` automatically. The ticket's "drop the LeadToolNames
+  session-key list" described the effect, not a separate edit site.
+- The two runtime-capability contract tests
+  (`TestRuntimeCapabilitiesCommandReportsLauncherContractSurface` and
+  `...WsflowContractSurface`, `cmd/ws-mcp/main_test.go`) read their expected sets
+  from the two `runtime.json` files, so they self-corrected — no test-code edit.
+- No wsflow `rsrc/` regen was required: a full grep of `agents-plugin*/rsrc` and
+  `agents-plugin*/skills` found zero references to either tool name.
+- Extra dead surface the ticket did not name but the survey traced: the exported
+  `FormatManuals` wrapper (`internal/mcp/format.go`, only CLI callers), two
+  `ManualsFind` unit tests (`internal/wsdoc/manuals_test.go`), a stale
+  `ManualsList` doc comment naming `formatManuals`, and the two manuals tokens in
+  `internal/mcp/server_test.go`'s tool-name assertion lists (build follow-through).
+
+Verification: `go build`/`go vet`/`gofmt -l` (touched files) clean;
+`internal/mcp`, `internal/wsdoc`, `cmd/ws-mcp` tests pass except two known
+pre-existing failures unrelated to this phase
+(`TestWorkflowManualCarriesNotesBlockOnFreshAndContinuePositionedAfterSessionState`,
+`TestWorkflowManualNotesBlockAbsentWhenNoNotesExist`), confirmed still failing at
+pre-Phase-1 commit `6e12c9a2` — their cause is a naive
+`strings.Index(body, "# Notes")` colliding with the prose heading
+`### Notes / durable memory` (`fbec365f`), not the manuals surface. wsflow tests
+10/10; `spec_index.verify` ok. Correctness and test reviewers both returned
+clean (no findings).
+
+Follow-up (deferred, not blocking): capture an `idea/` ticket for the two
+pre-existing `# Notes` substring-collision test failures so the naive
+`strings.Index` matcher gets a real fix.
