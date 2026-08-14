@@ -132,6 +132,33 @@ Constraints:
   chosen `.local.md` rule requires it); do not alter `# Notes` behavior.
 - Guidance text is AI-authored English.
 
+### Result (525064f) - 2026-08-14
+
+Implemented directly (user chose direct implementation, not delegated). Landed
+in `525064f4`.
+
+- `computeManuals` (`agents-plugin-tool/internal/mcp/manuals_announcement.go`)
+  now renders the always-on anchor: `# Manuals` header + the new
+  `manualsAuthoringGuidance` const paragraph + list-or-`(none yet)`. It returns
+  `""` only on a genuine `ReadDir` error; the empty tier (`ManualsList` →
+  `(nil, nil)`) renders `- (none yet)`. `ManualsList` was left untouched — the
+  `.local.md` rule is a render-branch-only suffix check (`strings.HasSuffix`),
+  emitting a bare `- <path>` line with no summary and no nag.
+- Tests: inverted `TestComputeManualsReturnsEmptyWhenNoManualsExist` →
+  `TestComputeManualsRendersAnchorWhenNoManualsExist` and
+  `TestWorkflowManualManualsBlockAbsentWhenNoManualsExist` →
+  `...IsAlwaysOnWhenNoManualsExist`; added
+  `TestComputeManualsSkipsSummaryForLocalManual`. All manuals tests green;
+  `go build`/`go vet`/`gofmt` clean; spec index ok.
+- Spec: updated `mcp-tools.md {#260807-manuals-ambient-injection}` and
+  `documentation-system.md {#260807-manuals-document-system}` per Spec Impact.
+
+Deviations: none of substance. Note captured for Phase 2 and closeout — the two
+pre-existing mcp failures (`TestWorkflowManualCarriesNotesBlockOnFreshAndContinuePositionedAfterSessionState`,
+`TestWorkflowManualNotesBlockAbsentWhenNoNotesExist`) are unrelated: both stem
+from a naive `strings.Index(body, "# Notes")` that matches the prose
+`### Notes / durable memory` section (added in `fbec365f`), not from this change.
+
 ### Phase 2: Retire manuals.list / manuals.find
 
 Rationale: the manuals tier carries a deliberately minimal single-field
