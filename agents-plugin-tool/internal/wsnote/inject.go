@@ -86,13 +86,7 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 	}
 
 	sort.Slice(visible, func(i, j int) bool {
-		if visible[i].Priority != visible[j].Priority {
-			return visible[i].Priority > visible[j].Priority
-		}
-		if visible[i].WrittenAt != visible[j].WrittenAt {
-			return visible[i].WrittenAt > visible[j].WrittenAt
-		}
-		return visible[i].Key < visible[j].Key
+		return CompareRecords(visible[i].Record, visible[j].Record)
 	})
 
 	// Muted notes never consume a limit slot: capping/eliding operates only on

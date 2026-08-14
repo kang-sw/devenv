@@ -26,7 +26,29 @@ var dateOnlyBound = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 // "2026-08-09" is true — so taken literally it would exclude the entire
 // target day from an inclusive upper bound. A bare-date "then" is therefore
 // widened to the last instant of that day before comparison.
+//
+// The result order matches Compute's comparator exactly (priority desc ->
+// written_at desc -> key asc, via CompareRecords) so a single-layer
+// note.search and a multi-layer note.search never diverge in order, only in
+// whether each record carries a layer tag.
 func Search(records map[string]Record, glob string, from, then string) ([]Record, error) {
+	out, err := FilterRecords(records, glob, from, then)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return CompareRecords(out[i], out[j])
+	})
+	return out, nil
+}
+
+// FilterRecords applies Search's glob/from/then filtering without sorting.
+// It is exported (rather than kept package-private) because the multi-layer
+// note.search merge path lives in package mcp, not wsnote: that path filters
+// each layer independently via this same function before combining and
+// sorting the tagged result once, so the two paths' filtering can never
+// diverge.
+func FilterRecords(records map[string]Record, glob string, from, then string) ([]Record, error) {
 	matchAll := glob == "" || glob == "*"
 
 	thenBound := then
@@ -53,11 +75,20 @@ func Search(records map[string]Record, glob string, from, then string) ([]Record
 		}
 		out = append(out, rec)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Priority != out[j].Priority {
-			return out[i].Priority > out[j].Priority
-		}
-		return out[i].Key < out[j].Key
-	})
 	return out, nil
+}
+
+// CompareRecords reports whether a sorts before b under the shared
+// note-ordering comparator: priority desc -> written_at desc -> key asc.
+// This is the exact comparator Compute (inject.go) uses for the ambient
+// "# Notes" block, shared here so Search's single-layer order and the
+// multi-layer note.search merge order can never diverge from it.
+func CompareRecords(a, b Record) bool {
+	if a.Priority != b.Priority {
+		return a.Priority > b.Priority
+	}
+	if a.WrittenAt != b.WrittenAt {
+		return a.WrittenAt > b.WrittenAt
+	}
+	return a.Key < b.Key
 }

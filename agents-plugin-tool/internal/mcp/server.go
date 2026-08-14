@@ -4343,18 +4343,18 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.search",
-			"description": "Search notes on the machine, worktree, clone, or repo note layer by key glob and optional written_at date range. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"description": "Search notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") searches just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, searches multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to search: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
+					"layer":       enumStringOrArrayProperty(`Optional. Which layer(s) to search: a single "machine"/"worktree"/"clone"/"repo" string, or an array of those. Omit to search all four layers. A single-string call returns a plain, untagged record array; an array or omitted call returns each record tagged with its "layer".`, noteLayerEnumValues),
 					"glob":        stringProperty(`Optional key glob (path.Match syntax, e.g. "ticket.*"). Omit or "*" to match every key.`),
 					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
 					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-				"required": []string{"session_key", "layer"},
+				"required": []string{"session_key"},
 			},
 		},
 		{
@@ -5243,6 +5243,24 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"type":        "string",
 		"description": description,
 		"enum":        values,
+	}
+}
+
+// enumStringOrArrayProperty returns an inputSchema property accepting either
+// a single enum string or an array of that same enum, via "anyOf" — the
+// shape note.search's "layer" argument needs (optional, single-or-array)
+// and no existing helper here covers, since every other enum property in
+// this file is single-shape only.
+func enumStringOrArrayProperty(description string, values []string) map[string]any {
+	return map[string]any{
+		"description": description,
+		"anyOf": []any{
+			enumStringProperty("", values),
+			map[string]any{
+				"type":  "array",
+				"items": enumStringProperty("", values),
+			},
+		},
 	}
 }
 
