@@ -29,7 +29,7 @@ Read at every session start, before other action:
    `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for
    current status. Keep only context a session must not re-derive.
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored
-   machine context.
+   clone context.
 3. **Project arc** - run `git log --oneline --graph -50`.
 4. **Migration anchor** - read
    `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` (under epic

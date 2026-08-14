@@ -416,17 +416,22 @@ are always explicit via `todo.check`.
 ## Note Tools {#260810-note-tools}
 
 `note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.search`
-implement three note-memory layers: the two non-tracked layers from 260807
+implement four note-memory layers: the two non-tracked layers from 260807
 Phase 1 — **machine**
 (PC-global, project-agnostic — lives beside the global ws config file, e.g.
 `~/.ws/notes.json`) and **worktree** (worktree-local, ephemeral — lives under
 the existing per-worktree ws cache directory, so it does not survive worktree
 deletion and is invisible to any other worktree of the same repository) —
-plus the git-tracked **repo** layer from 260810 Phase 1. All three layers
-share the same record shape. The `machine`/`worktree` layers share one
-storage mechanism (one JSON file per whole layer; only the resolved file
-changes between them); the `repo` layer instead stores **one JSON file per
-key** under the tracked `ai-docs/ws-notes/` directory, so merge conflicts
+the git-tracked **repo** layer from 260810 Phase 1, and the non-tracked
+**clone** layer from 260814 Phase 1 (project-scoped, worktree-agnostic —
+lives under the existing per-project ws cache directory, so it is shared by
+every worktree of the same project but invisible to any other project on the
+same machine, and — like `machine`/`worktree` — is never staged by git). All
+four layers share the same record shape. The `machine`/`worktree`/`clone`
+layers share one storage mechanism (one JSON file per whole layer; only the
+resolved file changes between them); the `repo` layer instead stores **one
+JSON file per key** under the tracked `ai-docs/ws-notes/` directory, so merge
+conflicts
 resolve on the filesystem with normal git tooling instead of any
 merge/conflict logic inside MCP — writing/erasing a key writes/removes
 exactly that key's file, and staging/committing it rides the caller's
@@ -443,11 +448,11 @@ sharing no code or store with `session.note`
 (`#260619-session-key-lineage-children`), which is a distinct one-line
 per-child annotation on the session-key store, not a note-memory layer.
 
-All three tools require `session_key` and a `layer` argument (`"machine"`,
-`"worktree"`, or `"repo"`); they carry no `session.`/`config.`/`lead.`
-prefix, so — like `todo.*`/`agenda.*` — they are reachable by any scope
-(lead, delegate, leaf) that holds a session key. The `worktree` and `repo`
-layers both resolve their store location through the same
+All five tools require `session_key` and a `layer` argument (`"machine"`,
+`"worktree"`, `"clone"`, or `"repo"`); they carry no `session.`/`config.`/
+`lead.` prefix, so — like `todo.*`/`agenda.*` — they are reachable by any
+scope (lead, delegate, leaf) that holds a session key. The `worktree`,
+`clone`, and `repo` layers all resolve their store location through the same
 `session_key`-authoritative root resolution every other root-aware tool
 uses. The `machine` layer needs no root, but still requires a `session_key`
 that resolves to a known session — an unrecognized key is rejected with the
@@ -503,11 +508,11 @@ positional-array precedent anywhere in the tool surface.
 
 Storage is an flock-serialized read-modify-write (temp-file + atomic rename),
 reusing the same concurrent-safe-write pattern `wsconfig`'s project/global
-config writers use. The `machine`/`worktree` layers RMW one JSON file per
-layer, each with its own sibling `.lock` file beside the store (never shared
-with the `wsconfig` config lock, even though the machine-layer store lives in
-the same directory as the global config file). The `repo` layer instead
-performs one such flock+temp-file+atomic-rename write per key, scoped to that
+config writers use. The `machine`/`worktree`/`clone` layers RMW one JSON file
+per layer, each with its own sibling `.lock` file beside the store (never
+shared with the `wsconfig` config lock, even though the machine-layer store
+lives in the same directory as the global config file). The `repo` layer
+instead performs one such flock+temp-file+atomic-rename write per key, scoped to that
 key's own file under `ai-docs/ws-notes/` — each key file is independently
 owned, which is the point of one-key-per-file filesystem-level conflict
 resolution. Its per-key lock file lives **outside** the tracked tree (in a
@@ -715,7 +720,7 @@ visible in the ambient block rather than silently omitted.
 `workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
 Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
 `# Notes` block: the highest-priority **visible** notes across the
-`machine`, `worktree`, and `repo` layers (`#260810-note-tools`), up to a
+`machine`, `worktree`, `clone`, and `repo` layers (`#260810-note-tools`), up to a
 fixed cap (20), one line per note as `- [<layer>] <key> (priority <n>,
 <written_at>): <value>`. Muted (`visible: false`) notes are excluded from
 both the block and the cap budget itself — a muted note never consumes one
