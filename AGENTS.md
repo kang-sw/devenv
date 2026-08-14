@@ -97,6 +97,15 @@ files for this migration unless a ticket changes the layout.
   migration checklist semantics, deleting functionality, or changing protocol/API
   semantics.
 
+### Branch Policy
+
+The `main` (release/master) branch is itself a release artifact. Do not push
+routine, non-release work directly to it; frequent non-release pushes to the
+release branch are costly. Land day-to-day work on `develop` or a feature/topic
+branch and push there, reserving `main` for release-worthy merges. Local commits
+on `main` are fine when a flow calls for them, but only push `main` when the
+merge is a release (or the user explicitly asks).
+
 ### Commit Rules
 
 Auto-create one commit per logical unit unless the user asks not to commit.
