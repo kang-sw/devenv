@@ -27,6 +27,8 @@
     "todo.reorder": ">=0.40.3-dev <0.41.0",
     "note.write": ">=0.40.3-dev <0.41.0",
     "note.erase": ">=0.40.3-dev <0.41.0",
+    "note.mute": ">=0.40.3-dev <0.41.0",
+    "note.unmute": ">=0.40.3-dev <0.41.0",
     "note.search": ">=0.40.3-dev <0.41.0",
     "config.show": ">=0.40.3-dev <0.41.0",
     "config.agents_tier": ">=0.40.3-dev <0.41.0",
