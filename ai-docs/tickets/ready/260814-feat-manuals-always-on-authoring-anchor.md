@@ -2,6 +2,8 @@
 title: Make # Manuals an always-on authoring anchor
 related-mental-model:
   - mcp-runtime
+sage-review-completeness: completed
+sage-review-design: completed
 ---
 
 # Make # Manuals an always-on authoring anchor
@@ -85,17 +87,27 @@ out of tracked manuals — write them to a sibling `*.local.md` (gitignored).
 
 ## Spec Impact
 
-Observable `workflow_manual` behavior change (the `# Manuals` block now always
-renders for lead sessions). Update the manuals/workflow_manual behavior contract
-in `ai-docs/spec/` (mcp-tools.md or plugin-runtime.md, whichever owns the
-`# Manuals` ambient-block contract) to state: always-on for lead sessions,
-fixed authoring-guidance paragraph, `- (none yet)` placeholder when empty, and
-the resolved `.local.md` listing rule.
+The manuals contract spans two spec files; both phases must update both, or the
+committed spec set will contradict the landed code. Exact anchors:
 
-Phase 2 additionally removes the `manuals.list`/`manuals.find` tool contract
-from `ai-docs/spec/mcp-tools.md` and records that the always-on ambient
-`# Manuals` block is the manuals discovery surface (the tier keeps its single
-`summary:` schema; only the two query tools are retired).
+- `ai-docs/spec/mcp-tools.md`
+  - `{#260807-manuals-ambient-injection}` (~L717) — the `# Manuals`
+    ambient-block contract. **Phase 1**: state always-on for lead sessions,
+    fixed authoring-guidance paragraph, `- (none yet)` placeholder when empty,
+    and the `.local.md` bare-path (no summary, no nag) rule.
+  - `{#260807-manuals-discovery-tools}` (~L1561) — the `manuals.list`/
+    `manuals.find` tool contract. **Phase 2**: remove this section; record that
+    the always-on ambient `# Manuals` block is the manuals discovery surface.
+- `ai-docs/spec/documentation-system.md`
+  - `{#260807-manuals-document-system}` (~L204-222). **Phase 1**: amend the
+    "no-summary manual is still announced with an explicit no-summary marker"
+    universal claim (~L216) to carve out the `.local.md` no-summary/no-nag
+    exception. **Phase 2**: remove/redirect the "`ws/manuals.list` and
+    `ws/manuals.find` expose manual path and summary" statement (~L220) to name
+    the ambient block as the discovery surface.
+
+The tier keeps its single `summary:` schema; only the two query tools are
+retired.
 
 ## Phases
 
@@ -149,9 +161,10 @@ Goals:
 - Update the exact-match runtime-capability tests
   (`TestRuntimeCapabilitiesCommandReportsLauncherContractSurface` and its
   wsflow counterpart) and any manuals-tool tests.
-- Update `ai-docs/spec/mcp-tools.md` to drop the `manuals.list`/`manuals.find`
-  contract, noting the ambient `# Manuals` block is the manuals discovery
-  surface.
+- Update the spec per `## Spec Impact` Phase 2 scope: remove
+  `mcp-tools.md {#260807-manuals-discovery-tools}` and redirect the
+  `documentation-system.md {#260807-manuals-document-system}` discovery-surface
+  statement to the ambient `# Manuals` block.
 
 Constraints:
 
