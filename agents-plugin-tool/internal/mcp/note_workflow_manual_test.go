@@ -51,13 +51,38 @@ func TestWorkflowManualCarriesNotesBlockOnFreshAndContinuePositionedAfterSession
 	assertNotesAfterSessionState(t, continueResp, "fresh.note", "seen on fresh and continue")
 }
 
+// notesBlockIndex returns the byte offset of the ambient "# Notes" block's
+// heading line (emitted verbatim as "# Notes\n" by wsnote.Compute /
+// inject.go), or -1 when the block is absent. It matches "# Notes" only as a
+// whole line so it does not collide with the prose "### Notes / durable
+// memory" sub-heading in the workflow-manual body, where "# Notes" appears as
+// a substring of "### Notes". A bare strings.Index/Contains("# Notes") matches
+// that prose and makes absence/ordering assertions on the block unsound.
+func notesBlockIndex(body string) int {
+	const heading = "# Notes"
+	for offset := 0; ; {
+		rel := strings.Index(body[offset:], heading)
+		if rel < 0 {
+			return -1
+		}
+		abs := offset + rel
+		atLineStart := abs == 0 || body[abs-1] == '\n'
+		end := abs + len(heading)
+		atLineEnd := end == len(body) || body[end] == '\n'
+		if atLineStart && atLineEnd {
+			return abs
+		}
+		offset = end
+	}
+}
+
 func assertNotesAfterSessionState(t *testing.T, body, wantKey, wantValue string) {
 	t.Helper()
 	sessionIdx := strings.Index(body, "## Session State")
 	if sessionIdx < 0 {
 		t.Fatalf("workflow_manual output missing '## Session State': %s", body)
 	}
-	notesIdx := strings.Index(body, "# Notes")
+	notesIdx := notesBlockIndex(body)
 	if notesIdx < 0 {
 		t.Fatalf("workflow_manual output missing '# Notes' block: %s", body)
 	}
@@ -175,13 +200,13 @@ func TestWorkflowManualNotesBlockAbsentWhenNoNotesExist(t *testing.T) {
 	freshResp := callToolWithKey(t, s, 1, freshBootstrapKey, "workflow_manual", map[string]any{
 		"root": root,
 	})
-	if strings.Contains(freshResp, "# Notes") {
+	if notesBlockIndex(freshResp) >= 0 {
 		t.Fatalf("workflow_manual FRESH-with-root must stay silent with no notes: %s", freshResp)
 	}
 
 	key, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
 	continueResp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
-	if strings.Contains(continueResp, "# Notes") {
+	if notesBlockIndex(continueResp) >= 0 {
 		t.Fatalf("workflow_manual CONTINUE must stay silent with no notes: %s", continueResp)
 	}
 }
@@ -213,7 +238,7 @@ func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.
 	})
 
 	continueResp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
-	if !strings.Contains(continueResp, "# Notes") {
+	if notesBlockIndex(continueResp) < 0 {
 		t.Fatalf("workflow_manual CONTINUE missing '# Notes' block: %s", continueResp)
 	}
 	wantElided := total - notesInjectionCap
@@ -435,7 +460,7 @@ func TestWorkflowManualAllMutedRendersHeadingOnly(t *testing.T) {
 	})
 
 	resp := callToolWithKey(t, s, 4, key, "workflow_manual", nil)
-	if !strings.Contains(resp, "# Notes") {
+	if notesBlockIndex(resp) < 0 {
 		t.Fatalf("workflow_manual with all notes muted = %s, want the block to still render (heading present)", resp)
 	}
 	if strings.Contains(resp, "- [worktree]") {

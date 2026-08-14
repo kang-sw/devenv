@@ -2,6 +2,7 @@
 title: "# Notes workflow_manual tests false-fail on a # Notes substring collision"
 related-mental-model:
   - mcp-runtime
+completed: 2026-08-14
 ---
 
 # `# Notes` workflow_manual tests false-fail on a `# Notes` substring collision
@@ -54,3 +55,17 @@ the same `###`-vs-`#` collision.
 Surfaced during 260814 Phase 2 (retire manuals.list/find) verification, where
 the diagnostic dump showed a leading `# Manuals` block and briefly looked
 manuals-related; it is not.
+
+## Resolution
+
+Fixed directly (bug fix, auto-proceed) rather than deferred: left unfixed it
+breaks CI's `go test ./...` on release. Added a line-anchored `notesBlockIndex`
+helper in `internal/mcp/note_workflow_manual_test.go` that matches `# Notes`
+only as a whole line (start-of-line + end-of-line), so it no longer collides
+with the prose `### Notes / durable memory`. Repointed the two false-failing
+assertions (`assertNotesAfterSessionState` ordering + the no-notes absence
+test) and, for the same root cause, two previously-vacuous presence checks (the
+over-cap elision test and the all-muted test) at the new helper. Full
+`internal/mcp` package and `go test ./...` are green. No product code changed —
+the `# Notes` block behavior was always correct; only the test locator was
+wrong.
