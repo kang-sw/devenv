@@ -62,7 +62,7 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 	s := NewServer(t.TempDir(), "test")
 	_, key := mintRootKey(t, s, 1)
 
-	for _, layer := range []string{"machine", "worktree"} {
+	for _, layer := range []string{"machine", "worktree", "clone"} {
 		t.Run(layer, func(t *testing.T) {
 			writeResp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
 				"layer": layer,
@@ -271,6 +271,50 @@ func TestNoteWorktreeLayerIsolatedAcrossWorktrees(t *testing.T) {
 	}
 }
 
+// TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic verifies the clone
+// layer's headline contract from 260814 Phase 1: a clone-layer note written
+// under one worktree of a project is visible from a SIBLING worktree of the
+// SAME project (worktree-agnostic, unlike the worktree layer, which
+// TestNoteWorktreeLayerIsolatedAcrossWorktrees proves is isolated at exactly
+// this granularity), absent from a DIFFERENT project's key (project-scoped,
+// unlike the machine layer), and never staged by git in the worktree working
+// tree (stored outside it entirely, like machine/worktree — not the repo
+// layer's tracked ai-docs/ws-notes/).
+func TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+
+	mainRoot, linkedRoot := twoWorktreesOfOneRepo(t)
+	keyMain, _ := parseLoginResponse(t, callLogin(t, s, 1, mainRoot, nil))
+	keyLinked, _ := parseLoginResponse(t, callLogin(t, s, 2, linkedRoot, nil))
+	_, keyOther := mintRootKey(t, s, 3)
+
+	callToolWithKey(t, s, 4, keyMain, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": []any{map[string]any{"key": "clone.shared", "value": "visible across worktrees", "priority": 1}},
+	})
+
+	// Visible from the sibling worktree of the same project (worktree-agnostic).
+	searchLinked := callToolWithKey(t, s, 5, keyLinked, "note.search", map[string]any{"layer": "clone", "glob": "clone.shared"})
+	if !strings.Contains(searchLinked, "clone.shared") {
+		t.Fatalf("note.search(clone, linked worktree of the same project) missing the note written from the main worktree: %s", searchLinked)
+	}
+
+	// Absent from a different, unrelated project on the same machine
+	// (project-scoped).
+	searchOther := callToolWithKey(t, s, 6, keyOther, "note.search", map[string]any{"layer": "clone", "glob": "clone.shared"})
+	if strings.Contains(searchOther, "clone.shared") {
+		t.Fatalf("note.search(clone, unrelated project) leaked a note from a different project: %s", searchOther)
+	}
+
+	// Never staged by git: the clone store lives outside the working tree,
+	// same as machine/worktree.
+	status := string(runGitOutput(t, mainRoot, "status", "--porcelain", "-uall"))
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("git status --porcelain in the worktree = %q, want clean (the clone store must live outside the working tree)", status)
+	}
+}
+
 // TestNoteWriteRestampsWrittenAtOnOverwrite verifies the MCP-layer
 // server-side written_at stamping (noteRecordsArg in note_tools.go) actually
 // RECOMPUTES on a full-overwrite write, rather than echoing the prior
@@ -353,7 +397,7 @@ func TestNoteWriteRejectsInvalidLayer(t *testing.T) {
 		"layer": "bogus",
 		"notes": []any{map[string]any{"key": "a", "value": "b"}},
 	})
-	if !strings.Contains(resp, `must be "machine", "worktree", or "repo"`) {
+	if !strings.Contains(resp, `must be "machine", "worktree", "clone", or "repo"`) {
 		t.Fatalf("note.write(layer=bogus) = %s, want a layer-validation error", resp)
 	}
 }
@@ -393,7 +437,7 @@ func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
 }
 
 // TestNoteMuteUnmuteRoundTrip verifies note.mute/note.unmute across all
-// three layers: mute drops a note's visible state to false, unmute restores
+// four layers: mute drops a note's visible state to false, unmute restores
 // it to true, observed via note.search's json format (note.search itself
 // never filters on visible, so this exercises the stored field directly).
 func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
@@ -402,7 +446,7 @@ func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	id := 2
-	for _, layer := range []string{"machine", "worktree", "repo"} {
+	for _, layer := range []string{"machine", "worktree", "clone", "repo"} {
 		t.Run(layer, func(t *testing.T) {
 			noteKey := "mute.roundtrip." + layer
 			callToolWithKey(t, s, id, key, "note.write", map[string]any{
@@ -567,6 +611,251 @@ func TestNoteMuteRejectsEmptyKeys(t *testing.T) {
 	})
 	if !strings.Contains(resp, "non-empty") {
 		t.Fatalf("note.mute(empty keys) = %s, want a non-empty-array error", resp)
+	}
+}
+
+// taggedNoteRecordJSON mirrors taggedNoteRecord's wire shape for test-side
+// decoding. It does NOT embed wsnote.Record: Record's custom UnmarshalJSON
+// gets promoted to any type that embeds it, which hijacks decoding of the
+// OUTER type too (Go's embedding-plus-custom-Unmarshaler gotcha) and would
+// silently leave Layer unset on every decode — this struct lists the fields
+// explicitly instead, purely for test assertions. Production code never
+// unmarshals taggedNoteRecord (only marshals it via toolJSONResponse), so
+// this gotcha is test-only and does not affect the real response wire shape.
+type taggedNoteRecordJSON struct {
+	Key       string       `json:"key"`
+	Value     string       `json:"value"`
+	Priority  int          `json:"priority"`
+	WrittenAt string       `json:"written_at"`
+	Visible   bool         `json:"visible"`
+	Layer     wsnote.Layer `json:"layer"`
+}
+
+// TestNoteSearchOmittedLayerSearchesAllFourTagged verifies note.search's
+// headline multi-layer contract: omitting "layer" entirely searches all four
+// layers and tags each returned record with its originating layer (sub-
+// decision a), in priority-desc order (sub-decision b) — one note per layer,
+// each at a distinct priority so the expected order is unambiguous.
+func TestNoteSearchOmittedLayerSearchesAllFourTagged(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	id := 2
+	writeLayerNote := func(layer string, priority int) {
+		callToolWithKey(t, s, id, key, "note.write", map[string]any{
+			"layer": layer,
+			"notes": []any{map[string]any{"key": "omit.all." + layer, "value": "v-" + layer, "priority": priority}},
+		})
+		id++
+	}
+	writeLayerNote("machine", 4)
+	writeLayerNote("worktree", 3)
+	writeLayerNote("clone", 2)
+	writeLayerNote("repo", 1)
+
+	resp := callToolWithKey(t, s, id, key, "note.search", map[string]any{
+		"glob":   "omit.all.*",
+		"format": "json",
+	})
+	var records []taggedNoteRecordJSON
+	if err := json.Unmarshal([]byte(resp), &records); err != nil {
+		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+	}
+	wantOrder := []struct {
+		key   string
+		layer wsnote.Layer
+	}{
+		{"omit.all.machine", wsnote.LayerMachine},
+		{"omit.all.worktree", wsnote.LayerWorktree},
+		{"omit.all.clone", wsnote.LayerClone},
+		{"omit.all.repo", wsnote.LayerRepo},
+	}
+	if len(records) != len(wantOrder) {
+		t.Fatalf("note.search(no layer) = %d records, want %d: %s", len(records), len(wantOrder), resp)
+	}
+	for i, want := range wantOrder {
+		if records[i].Key != want.key || records[i].Layer != want.layer {
+			t.Fatalf("note.search(no layer)[%d] = {key:%q layer:%q}, want {key:%q layer:%q}; full: %s",
+				i, records[i].Key, records[i].Layer, want.key, want.layer, resp)
+		}
+	}
+}
+
+// TestNoteSearchArrayLayerScopesToThoseLayers verifies an array "layer"
+// argument searches exactly the listed layers and no others.
+func TestNoteSearchArrayLayerScopesToThoseLayers(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	id := 2
+	for _, layer := range []string{"machine", "worktree", "clone", "repo"} {
+		callToolWithKey(t, s, id, key, "note.write", map[string]any{
+			"layer": layer,
+			"notes": []any{map[string]any{"key": "array.scope." + layer, "value": "v", "priority": 1}},
+		})
+		id++
+	}
+
+	resp := callToolWithKey(t, s, id, key, "note.search", map[string]any{
+		"layer":  []any{"clone", "repo"},
+		"glob":   "array.scope.*",
+		"format": "json",
+	})
+	var records []taggedNoteRecordJSON
+	if err := json.Unmarshal([]byte(resp), &records); err != nil {
+		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+	}
+	if len(records) != 2 {
+		t.Fatalf("note.search(layer:[clone,repo]) = %d records, want 2: %s", len(records), resp)
+	}
+	gotLayers := map[wsnote.Layer]bool{}
+	for _, rec := range records {
+		gotLayers[rec.Layer] = true
+	}
+	if !gotLayers[wsnote.LayerClone] || !gotLayers[wsnote.LayerRepo] {
+		t.Fatalf("note.search(layer:[clone,repo]) layers = %v, want exactly {clone, repo}: %s", gotLayers, resp)
+	}
+	if gotLayers[wsnote.LayerMachine] || gotLayers[wsnote.LayerWorktree] {
+		t.Fatalf("note.search(layer:[clone,repo]) leaked an unscoped layer: %v: %s", gotLayers, resp)
+	}
+}
+
+// TestNoteSearchSingleStringLayerStaysUntagged is the sub-decision (a)
+// regression: a single-string "layer" call must keep returning a plain
+// []wsnote.Record with no "layer" key anywhere in the JSON — the exact
+// pre-existing wire shape searchSingleNoteRecord already decodes against —
+// even though the underlying comparator now matches Compute's 3-key order.
+func TestNoteSearchSingleStringLayerStaysUntagged(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": []any{map[string]any{"key": "single.untagged", "value": "v", "priority": 1}},
+	})
+
+	resp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+		"layer":  "clone",
+		"glob":   "single.untagged",
+		"format": "json",
+	})
+	if strings.Contains(resp, `"layer"`) {
+		t.Fatalf("note.search(layer:\"clone\") response contains a \"layer\" key, want the untagged plain-Record shape: %s", resp)
+	}
+	var records []wsnote.Record
+	if err := json.Unmarshal([]byte(resp), &records); err != nil {
+		t.Fatalf("unmarshal note.search json response as plain []wsnote.Record: %v\nresp=%s", err, resp)
+	}
+	if len(records) != 1 || records[0].Key != "single.untagged" {
+		t.Fatalf("note.search(layer:\"clone\") = %#v, want exactly the written record", records)
+	}
+}
+
+// TestNoteSearchMultiLayerIncludesMutedNotes verifies note.search's
+// no-visible-filtering contract (unchanged by this phase) extends to the
+// multi-layer/array path: a muted note still surfaces via an array "layer"
+// search, mirroring the single-layer mute-search precedent
+// (TestNoteMuteUnmuteRoundTrip) at the multi-layer granularity.
+func TestNoteSearchMultiLayerIncludesMutedNotes(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": []any{map[string]any{"key": "muted.multilayer", "value": "v", "priority": 1}},
+	})
+	callToolWithKey(t, s, 3, key, "note.mute", map[string]any{
+		"layer": "clone",
+		"keys":  []any{"muted.multilayer"},
+	})
+
+	resp := callToolWithKey(t, s, 4, key, "note.search", map[string]any{
+		"layer":  []any{"clone", "repo"},
+		"glob":   "muted.multilayer",
+		"format": "json",
+	})
+	var records []taggedNoteRecordJSON
+	if err := json.Unmarshal([]byte(resp), &records); err != nil {
+		t.Fatalf("unmarshal note.search json response: %v\nresp=%s", err, resp)
+	}
+	if len(records) != 1 || records[0].Key != "muted.multilayer" {
+		t.Fatalf("note.search(layer:[clone,repo]) did not return the muted note: %s", resp)
+	}
+	if records[0].Visible {
+		t.Fatalf("note.search(layer:[clone,repo]) returned the note with Visible=true, want the stored muted (false) state preserved: %s", resp)
+	}
+}
+
+// TestNoteSearchArrayVsSingleLayerOrderParity verifies sub-decision (b):
+// layer:"clone" and layer:["clone"] against identical fixture data return
+// byte-identical record order, differing only in tag presence (sub-decision
+// a) — proving both paths route through the same comparator rather than
+// two independently-maintained sort implementations that could drift.
+func TestNoteSearchArrayVsSingleLayerOrderParity(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	notes := []any{
+		map[string]any{"key": "parity.b", "value": "v", "priority": 1},
+		map[string]any{"key": "parity.a", "value": "v", "priority": 1},
+		map[string]any{"key": "parity.high", "value": "v", "priority": 9},
+	}
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": notes,
+	})
+
+	singleResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+		"layer":  "clone",
+		"glob":   "parity.*",
+		"format": "json",
+	})
+	var singleRecords []wsnote.Record
+	if err := json.Unmarshal([]byte(singleResp), &singleRecords); err != nil {
+		t.Fatalf("unmarshal single-layer response: %v\nresp=%s", err, singleResp)
+	}
+
+	arrayResp := callToolWithKey(t, s, 4, key, "note.search", map[string]any{
+		"layer":  []any{"clone"},
+		"glob":   "parity.*",
+		"format": "json",
+	})
+	var arrayRecords []taggedNoteRecordJSON
+	if err := json.Unmarshal([]byte(arrayResp), &arrayRecords); err != nil {
+		t.Fatalf("unmarshal array-layer response: %v\nresp=%s", err, arrayResp)
+	}
+
+	if len(singleRecords) != len(arrayRecords) {
+		t.Fatalf("single-layer returned %d records, array-layer returned %d, want equal counts", len(singleRecords), len(arrayRecords))
+	}
+	for i := range singleRecords {
+		if singleRecords[i].Key != arrayRecords[i].Key {
+			t.Fatalf("order mismatch at [%d]: single=%q array=%q, want identical order (single: %s, array: %s)",
+				i, singleRecords[i].Key, arrayRecords[i].Key, singleResp, arrayResp)
+		}
+		if arrayRecords[i].Layer != wsnote.LayerClone {
+			t.Fatalf("array-layer record[%d] tagged %q, want %q: %s", i, arrayRecords[i].Layer, wsnote.LayerClone, arrayResp)
+		}
+	}
+}
+
+// TestNoteSearchRejectsEmptyLayerArray verifies an empty "layer" array is a
+// caller error, not silently treated as "search nothing" or "search all".
+func TestNoteSearchRejectsEmptyLayerArray(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.search", map[string]any{
+		"layer": []any{},
+	})
+	if !strings.Contains(resp, "non-empty") {
+		t.Fatalf("note.search(layer:[]) = %s, want a non-empty-array error", resp)
 	}
 }
 

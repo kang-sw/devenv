@@ -4,6 +4,7 @@ related:
   260810-note-tools: context — note.mute/unmute are part of the shipped note surface these runtime contracts should cover
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-14
 ---
 
 # wsflow runtime contract omits note.mute / note.unmute (red test on develop)
@@ -47,3 +48,18 @@ agentless capability surface). Apply version-edition changes through
 `agents-plugin-tool/scripts/bump-ws-version.sh` if the contract edit rides a
 version-tied surface, never by hand-editing the edition points. Verify: both
 `agents-plugin/tests` and `agents-plugin-wsflow/tests` pass.
+
+### Result (baf8788) - 2026-08-14
+
+Decision: added `note.mute` / `note.unmute` to **both** packages'
+`runtime.json` (`agents-plugin/` and `agents-plugin-wsflow/`), at the same
+`">=0.40.3-dev <0.41.0"` range as their `note.*` siblings. `note.*` is
+unconditionally live (no `noAgentHiddenTool` gate), so both packages carry the
+identical set; the ws suite did not flag the gap because it lacks the wsflow
+suite's full-agentless-capability assertion, not because of an intentional
+exclusion — no spec change needed (behavior already in `#260810-note-tools`).
+
+Verification: `test_runtime_contract_matches_agentless_capabilities`
+(`agents-plugin-wsflow/tests`) now passes. No version-edition point was
+hand-edited and no `bump-ws-version.sh` run this phase — the patch bump rides
+the merge into `develop` per the AGENTS.md version rule, not this contract edit.

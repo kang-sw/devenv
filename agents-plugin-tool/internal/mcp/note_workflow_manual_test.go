@@ -138,6 +138,30 @@ func TestWorkflowManualCarriesRepoLayerNoteAndErasesCleanly(t *testing.T) {
 	}
 }
 
+// TestWorkflowManualCarriesCloneLayerNote verifies the clone layer's
+// end-to-end ambient-injection contract from 260814 Phase 1: a
+// note.write(layer: "clone") note surfaces in the very next workflow_manual
+// "# Notes" block tagged "[clone]", parallel to the machine/worktree/repo
+// cases covered elsewhere in this file.
+func TestWorkflowManualCarriesCloneLayerNote(t *testing.T) {
+	setupWorkflowManualNoteEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+
+	callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": []any{map[string]any{"key": "clone.manual", "value": "clone-scoped note", "priority": 1}},
+	})
+
+	resp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
+	if !strings.Contains(resp, "[clone] clone.manual") || !strings.Contains(resp, "clone-scoped note") {
+		t.Fatalf("workflow_manual missing clone-layer note: %s", resp)
+	}
+}
+
 // TestWorkflowManualNotesBlockAbsentWhenNoNotesExist verifies the injection is
 // a true no-op (scopeAnnouncement/computeManuals-style silent case) when no
 // note has ever been written on any layer.

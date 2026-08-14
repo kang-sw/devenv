@@ -9,7 +9,7 @@ import (
 )
 
 // layeredRecord tags a Record with the layer it was loaded from, purely for
-// display in the injected block — the three layers never share a namespace
+// display in the injected block — the four layers never share a namespace
 // on disk, so this is not used for identity/dedup.
 type layeredRecord struct {
 	Record
@@ -17,14 +17,15 @@ type layeredRecord struct {
 }
 
 // Compute computes the ambient "# Notes" block: the highest-priority notes
-// across the machine, worktree, and repo layers, up to limit items, or ""
-// when there are no notes at all. Modeled on computeManuals /
+// across the machine, worktree, clone, and repo layers, up to limit items,
+// or "" when there are no notes at all. Modeled on computeManuals /
 // scopeAnnouncement in package mcp: silent-by-design, never blocks
 // workflow_manual from rendering.
 //
 // A resolution error on any layer (including an empty root, which also
-// skips the worktree and repo layers entirely) is treated the same as "no
-// notes on that layer" and degrades to whatever the other layers have —
+// skips the worktree, clone, and repo layers entirely) is treated the same
+// as "no notes on that layer" and degrades to whatever the other layers
+// have —
 // mirroring scopeAnnouncement's "a resolution error is treated the same as
 // inactive" contract — rather than failing the whole block.
 func Compute(root string, opts wsconfig.Options, limit int) string {
@@ -43,6 +44,16 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 			if records, err := Load(worktreePath); err == nil {
 				for _, rec := range records {
 					all = append(all, layeredRecord{Record: rec, Layer: LayerWorktree})
+				}
+			}
+		}
+	}
+
+	if root != "" {
+		if clonePath, err := ClonePath(root); err == nil {
+			if records, err := Load(clonePath); err == nil {
+				for _, rec := range records {
+					all = append(all, layeredRecord{Record: rec, Layer: LayerClone})
 				}
 			}
 		}
@@ -75,13 +86,7 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 	}
 
 	sort.Slice(visible, func(i, j int) bool {
-		if visible[i].Priority != visible[j].Priority {
-			return visible[i].Priority > visible[j].Priority
-		}
-		if visible[i].WrittenAt != visible[j].WrittenAt {
-			return visible[i].WrittenAt > visible[j].WrittenAt
-		}
-		return visible[i].Key < visible[j].Key
+		return CompareRecords(visible[i].Record, visible[j].Record)
 	})
 
 	// Muted notes never consume a limit slot: capping/eliding operates only on

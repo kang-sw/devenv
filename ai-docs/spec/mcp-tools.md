@@ -416,17 +416,22 @@ are always explicit via `todo.check`.
 ## Note Tools {#260810-note-tools}
 
 `note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.search`
-implement three note-memory layers: the two non-tracked layers from 260807
+implement four note-memory layers: the two non-tracked layers from 260807
 Phase 1 — **machine**
 (PC-global, project-agnostic — lives beside the global ws config file, e.g.
 `~/.ws/notes.json`) and **worktree** (worktree-local, ephemeral — lives under
 the existing per-worktree ws cache directory, so it does not survive worktree
 deletion and is invisible to any other worktree of the same repository) —
-plus the git-tracked **repo** layer from 260810 Phase 1. All three layers
-share the same record shape. The `machine`/`worktree` layers share one
-storage mechanism (one JSON file per whole layer; only the resolved file
-changes between them); the `repo` layer instead stores **one JSON file per
-key** under the tracked `ai-docs/ws-notes/` directory, so merge conflicts
+the git-tracked **repo** layer from 260810 Phase 1, and the non-tracked
+**clone** layer from 260814 Phase 1 (project-scoped, worktree-agnostic —
+lives under the existing per-project ws cache directory, so it is shared by
+every worktree of the same project but invisible to any other project on the
+same machine, and — like `machine`/`worktree` — is never staged by git). All
+four layers share the same record shape. The `machine`/`worktree`/`clone`
+layers share one storage mechanism (one JSON file per whole layer; only the
+resolved file changes between them); the `repo` layer instead stores **one
+JSON file per key** under the tracked `ai-docs/ws-notes/` directory, so merge
+conflicts
 resolve on the filesystem with normal git tooling instead of any
 merge/conflict logic inside MCP — writing/erasing a key writes/removes
 exactly that key's file, and staging/committing it rides the caller's
@@ -443,16 +448,20 @@ sharing no code or store with `session.note`
 (`#260619-session-key-lineage-children`), which is a distinct one-line
 per-child annotation on the session-key store, not a note-memory layer.
 
-All three tools require `session_key` and a `layer` argument (`"machine"`,
-`"worktree"`, or `"repo"`); they carry no `session.`/`config.`/`lead.`
-prefix, so — like `todo.*`/`agenda.*` — they are reachable by any scope
-(lead, delegate, leaf) that holds a session key. The `worktree` and `repo`
-layers both resolve their store location through the same
-`session_key`-authoritative root resolution every other root-aware tool
-uses. The `machine` layer needs no root, but still requires a `session_key`
-that resolves to a known session — an unrecognized key is rejected with the
-same `unknown_session` error shape root-aware tools use, even though no root
-is consumed.
+All five tools require `session_key`. `note.write`/`note.erase`/`note.mute`/
+`note.unmute` additionally require a single-string `layer` argument
+(`"machine"`, `"worktree"`, `"clone"`, or `"repo"`) — this asymmetry with
+`note.search` below is by design (read-vs-mutation asymmetry, not an
+inconsistency to "fix" later): a mutation always targets exactly one layer,
+while a search may reasonably span several. None of the five tools carry a
+`session.`/`config.`/`lead.` prefix, so — like `todo.*`/`agenda.*` — they are
+reachable by any scope (lead, delegate, leaf) that holds a session key. The
+`worktree`, `clone`, and `repo` layers all resolve their store location
+through the same `session_key`-authoritative root resolution every other
+root-aware tool uses. The `machine` layer needs no root, but still requires a
+`session_key` that resolves to a known session — an unrecognized key is
+rejected with the same `unknown_session` error shape root-aware tools use,
+even though no root is consumed.
 
 **Wire shape.** A record is `{key, value, priority, written_at, visible}`:
 `key` and `value` are strings, `priority` is an integer (higher = higher
@@ -489,8 +498,8 @@ positional-array precedent anywhere in the tool surface.
   matching `note.erase`'s precedent. Muting excludes a note from the injected
   `# Notes` block and its priority cap (`#260810-note-injection`) without
   erasing it — `note.search` continues to return muted records unchanged.
-- **`note.search(session_key, layer, glob?, from?, then?)`** returns every
-  record on that layer whose `key` matches `glob` (shell-glob syntax, e.g.
+- **`note.search(session_key, layer?, glob?, from?, then?)`** returns every
+  matching record whose `key` matches `glob` (shell-glob syntax, e.g.
   `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
   falls within the inclusive `[from, then]` bound when those are supplied.
   Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
@@ -500,21 +509,38 @@ positional-array precedent anywhere in the tool surface.
   block (`#260810-note-injection`), muted or not — a caller that sees the
   elision or muted-count line uses `note.search` with a narrower glob to read
   a specific elided or muted note.
+  - Unlike the other four tools, `layer` is **optional** here and accepts
+    either a single layer string or an array of layer names. Omitting
+    `layer` searches all four layers, parallel to `#260810-note-injection`'s
+    `Compute` aggregation. A single-string `layer` call (e.g. `layer:
+    "clone"`) keeps today's exact result shape: a plain `wsnote.Record[]`
+    with no layer tag on each record. An array `layer` (e.g. `layer:
+    ["clone", "repo"]`), or an omitted `layer`, tags each returned record
+    with a `layer` field naming the layer it came from — even for a
+    one-element array — mirroring the ambient block's `[<layer>]` line
+    prefix.
+  - Every `note.search` call, single-layer or multi-layer, orders results by
+    the same comparator: priority descending, then `written_at` descending,
+    then `key` ascending — the exact order `#260810-note-injection`'s
+    `Compute` uses for the ambient block. This is one shared comparator, not
+    two independently-maintained ones, so `layer: "clone"` and `layer:
+    ["clone"]` against identical data can never diverge in order — only in
+    whether the tag is present.
 
 Storage is an flock-serialized read-modify-write (temp-file + atomic rename),
 reusing the same concurrent-safe-write pattern `wsconfig`'s project/global
-config writers use. The `machine`/`worktree` layers RMW one JSON file per
-layer, each with its own sibling `.lock` file beside the store (never shared
-with the `wsconfig` config lock, even though the machine-layer store lives in
-the same directory as the global config file). The `repo` layer instead
-performs one such flock+temp-file+atomic-rename write per key, scoped to that
-key's own file under `ai-docs/ws-notes/` — each key file is independently
-owned, which is the point of one-key-per-file filesystem-level conflict
-resolution. Its per-key lock file lives **outside** the tracked tree (in a
-machine-local temp location keyed by a hash of the target path), never as a
-sibling in `ai-docs/ws-notes/`, so the tracked directory only ever contains
-the `.json` key files — no lock or temp residue is committable, which is what
-keeps the layer cleanly git-tracked.
+config writers use. The `machine`/`worktree`/`clone` layers RMW one JSON file
+per layer, each with its own sibling `.lock` file beside the store (never
+shared with the `wsconfig` config lock, even though the machine-layer store
+lives in the same directory as the global config file). The `repo` layer
+instead performs one such flock+temp-file+atomic-rename write per key,
+scoped to that key's own file under `ai-docs/ws-notes/` — each key file is
+independently owned, which is the point of one-key-per-file filesystem-level
+conflict resolution. Its per-key lock file lives **outside** the tracked
+tree (in a machine-local temp location keyed by a hash of the target path),
+never as a sibling in `ai-docs/ws-notes/`, so the tracked directory only
+ever contains the `.json` key files — no lock or temp residue is
+committable, which is what keeps the layer cleanly git-tracked.
 
 There is no CLI mirror for `note.*`: like every other session-keyed tool
 (`todo.*`, `agenda.*`, `enter.*`), its authority model is
@@ -715,7 +741,7 @@ visible in the ambient block rather than silently omitted.
 `workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
 Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
 `# Notes` block: the highest-priority **visible** notes across the
-`machine`, `worktree`, and `repo` layers (`#260810-note-tools`), up to a
+`machine`, `worktree`, `clone`, and `repo` layers (`#260810-note-tools`), up to a
 fixed cap (20), one line per note as `- [<layer>] <key> (priority <n>,
 <written_at>): <value>`. Muted (`visible: false`) notes are excluded from
 both the block and the cap budget itself — a muted note never consumes one

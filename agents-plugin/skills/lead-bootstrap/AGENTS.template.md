@@ -5,7 +5,7 @@
 Read at every session start, before other action:
 
 1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read repo-tracked notes (`ws/note.search(layer: "repo")`) for volatile session context, `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for current status. Keep only context a session must not re-derive.
-2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored machine context.
+2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored clone context.
 3. **Project arc** - run `git log --oneline --graph -50`.
 
 ## Response Discipline
@@ -93,7 +93,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
 ai-docs/
-  _index.local.md    - local memory, .gitignored
+  _index.local.md    - untracked clone-scoped memory, .gitignored
   mental-model.md    - overall mental-model index and optional project reading map
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs

@@ -117,6 +117,39 @@ func TestSearchDateOnlyThenBoundIncludesWholeDay(t *testing.T) {
 	}
 }
 
+// TestSearchOrdersByPriorityThenWrittenAtThenKey verifies Search's result
+// order matches Compute's 3-key comparator (priority desc -> written_at desc
+// -> key asc) exactly, not just the priority-desc/key-asc 2-key order it used
+// before this change. Neither this file nor note_tools_test.go previously
+// asserted order across records that tie on priority but differ on
+// written_at, so this is new coverage, not a regression check.
+func TestSearchOrdersByPriorityThenWrittenAtThenKey(t *testing.T) {
+	records := map[string]Record{
+		// Distinct priority: "high" must sort first regardless of the others.
+		"high": {Key: "high", Priority: 5, WrittenAt: "2026-08-01T00:00:00Z"},
+		// Equal priority (1), distinct written_at: newer written_at first.
+		"newer": {Key: "newer", Priority: 1, WrittenAt: "2026-08-10T00:00:00Z"},
+		"older": {Key: "older", Priority: 1, WrittenAt: "2026-08-06T00:00:00Z"},
+		// Equal priority (1) AND equal written_at: key ascending breaks the tie.
+		"tie-b": {Key: "tie-b", Priority: 1, WrittenAt: "2026-08-05T00:00:00Z"},
+		"tie-a": {Key: "tie-a", Priority: 1, WrittenAt: "2026-08-05T00:00:00Z"},
+	}
+
+	got, err := Search(records, "*", "", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	wantOrder := []string{"high", "newer", "older", "tie-a", "tie-b"}
+	if len(got) != len(wantOrder) {
+		t.Fatalf("Search order = %#v, want %d records", got, len(wantOrder))
+	}
+	for i, wantKey := range wantOrder {
+		if got[i].Key != wantKey {
+			t.Fatalf("Search order[%d] = %q, want %q; full order: %#v", i, got[i].Key, wantKey, got)
+		}
+	}
+}
+
 func TestSearchInvalidGlobFails(t *testing.T) {
 	records := map[string]Record{"a": {Key: "a"}}
 

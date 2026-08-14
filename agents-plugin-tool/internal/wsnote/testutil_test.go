@@ -28,6 +28,19 @@ func initGitFixture(t *testing.T) string {
 	return repo
 }
 
+// twoWorktreesFixture creates a git repo with an initial commit at one temp
+// dir, then links a second worktree of that same repository at another temp
+// dir, returning both roots. Mirrors internal/mcp's twoWorktreesOfOneRepo
+// fixture: required to prove ClonePath is keyed on ProjectKey (shared across
+// worktrees of one repo), not WorktreeKey (which would differ between them).
+func twoWorktreesFixture(t *testing.T) (mainRoot, linkedRoot string) {
+	t.Helper()
+	mainRoot = initGitFixture(t)
+	linkedRoot = filepath.Join(t.TempDir(), "linked")
+	runGit(t, mainRoot, "worktree", "add", "-b", "clone-path-linked", linkedRoot)
+	return mainRoot, linkedRoot
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

@@ -137,6 +137,44 @@ func TestMachinePathIsSiblingOfGlobalConfig(t *testing.T) {
 	}
 }
 
+// TestClonePathIsProjectScopedAndWorktreeAgnostic verifies ClonePath
+// resolves under the project's ProjectDir (not the per-worktree
+// WorktreeDir) and is therefore identical for two worktrees of the same
+// repository, but differs across two unrelated repositories — the clone
+// layer's headline contract from 260814 Phase 1.
+func TestClonePathIsProjectScopedAndWorktreeAgnostic(t *testing.T) {
+	mainRoot, linkedRoot := twoWorktreesFixture(t)
+
+	mainClone, err := ClonePath(mainRoot)
+	if err != nil {
+		t.Fatalf("ClonePath(main): %v", err)
+	}
+	linkedClone, err := ClonePath(linkedRoot)
+	if err != nil {
+		t.Fatalf("ClonePath(linked): %v", err)
+	}
+	if mainClone != linkedClone {
+		t.Fatalf("ClonePath differs across worktrees of one repo: main=%q linked=%q, want identical (project-scoped, not worktree-scoped)", mainClone, linkedClone)
+	}
+
+	mainWorktreePath, err := WorktreePath(mainRoot)
+	if err != nil {
+		t.Fatalf("WorktreePath(main): %v", err)
+	}
+	if mainClone == mainWorktreePath {
+		t.Fatalf("ClonePath == WorktreePath (%q); want ClonePath to resolve under ProjectDir, distinct from the per-worktree store", mainClone)
+	}
+
+	otherRoot := initGitFixture(t)
+	otherClone, err := ClonePath(otherRoot)
+	if err != nil {
+		t.Fatalf("ClonePath(other repo): %v", err)
+	}
+	if otherClone == mainClone {
+		t.Fatalf("ClonePath identical across two unrelated repositories: %q, want distinct per-project paths", otherClone)
+	}
+}
+
 // TestLoadDefaultsVisibleTrueForLegacyRecordMissingField pins the migration
 // contract through the REAL production read path, not a bare
 // json.Unmarshal(&Record{}) probe: a legacy whole-layer store file (the

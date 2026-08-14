@@ -125,6 +125,37 @@ related:
   silent `""` on error) from `computeManuals`/`scopeAnnouncement`; do not
   assume their injection call site is the precedent for a new block's
   placement — read `workflow_manual.go` directly. {#260810-note-tools}
+- Resolving a project-scoped (worktree-agnostic) note layer under
+  `Layout.ProjectDir` directly: `wsstate.layoutFor` sets `WorktreeKey ==
+  ProjectKey` for a project's canonical (non-linked) worktree, so
+  `Layout.WorktreeDir == Layout.ProjectDir` there, and a `<ProjectDir>/notes.json`
+  store collides byte-for-byte with the `worktree` layer's file in the common
+  single-worktree case, silently merging the two layers into one. The `clone`
+  layer (`wsnote.ClonePath`) resolves under `Layout.SharedDir`
+  (`<ProjectDir>/shared/notes.json`) instead — the same collision-avoidance
+  subdirectory `LocksDir` already uses — which stays project-scoped and
+  worktree-agnostic while remaining distinct from the worktree store. Any future
+  project-scoped file store must nest under `SharedDir`, not `ProjectDir`
+  directly. {#260810-note-tools}
+- Changing note ordering in only one of its two consumers: `wsnote.CompareRecords`
+  (priority desc → written_at desc → key asc) is the single ordering used by BOTH
+  the ambient `# Notes` block (`Compute`) and `note.search`'s result set. They were
+  deliberately unified so `layer: "clone"` and `layer: ["clone"]`, and the ambient
+  block vs an explicit search, cannot present the same notes in different orders.
+  Editing the comparator changes every note surface at once; a per-call-site
+  reordering re-introduces exactly the divergence the unification removed. Likewise
+  `note.search`'s multi-layer path and `Compute` share the same filter
+  (`wsnote.FilterRecords`) — but NOT the same missing-store policy: `Compute`
+  degrades a missing layer away silently (ambient block must always render), while
+  `note.search` fails loud on a per-layer resolve/load error (an explicit query is
+  entitled to see failure). Do not "align" those two error policies. {#260810-note-tools}
+- Unmarshaling through a struct that embeds `wsnote.Record`: `Record` has a custom
+  pointer-receiver `UnmarshalJSON`, which Go promotes onto any embedding struct
+  (e.g. an `mcp`-local `taggedNoteRecord{ wsnote.Record; Layer }`), hijacking the
+  outer type's decode. `note.search`'s tagged output type embeds `Record` and is
+  only ever MARSHALED by the server (safe — `Record` has no custom `MarshalJSON`),
+  so tests that decode it must use a separate non-embedding struct with explicit
+  fields, never the embedding type. {#260810-note-tools}
 - Registering the request-goroutine recover-defer BEFORE the `wg.Done`/`cancel`/`requests.Delete` defers (so it does not run first on unwind), or having it silently swallow the panic without both persisting the trace to the crash file AND returning a visible JSON-RPC error — either defeats the mid-session-crash fix. The `wsagent` async worker keeps its own separate `recover()`; do not route request-handler panics through it.
 - Advertising a tool in `tools()` without a dispatch case creates a visible broken tool.
 - Gating a tool at `callTool` and `toolAllowed` but forgetting `LeadToolNames`: tools/list and explicit calls gate correctly, yet `runtime.capabilities` still advertises it and the launcher contract test breaks.

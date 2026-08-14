@@ -29,7 +29,7 @@ Read at every session start, before other action:
    `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for
    current status. Keep only context a session must not re-derive.
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored
-   machine context.
+   clone context.
 3. **Project arc** - run `git log --oneline --graph -50`.
 4. **Migration anchor** - read
    `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` (under epic
@@ -226,8 +226,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Specs, tickets, and mental models here describe the workflow
   system itself; downstream application material belongs in downstream
-  projects. Active plugin package: `agents-plugin/` (`ws@0.40.3`). Agentless
-  derivative package: `agents-plugin-wsflow/` (`wsflow@0.40.3`). Native
+  projects. Active plugin package: `agents-plugin/` (`ws@0.40.4`). Agentless
+  derivative package: `agents-plugin-wsflow/` (`wsflow@0.40.4`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**

@@ -4291,12 +4291,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.write",
-			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. Full-overwrite per key, including priority. Higher integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"description": "Write one or more notes to the machine (PC-global), worktree (worktree-local, ephemeral), clone (project-scoped, worktree-agnostic, untracked), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. Full-overwrite per key, including priority. Higher integer priority is surfaced first in the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to write: "machine" (PC-global, project-agnostic), "worktree" (this worktree only, ephemeral), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"machine", "worktree", "repo"}),
+					"layer":       enumStringProperty(`Which layer to write: "machine" (PC-global, project-agnostic), "worktree" (this worktree only, ephemeral), "clone" (this project's checkouts, worktree-agnostic, untracked), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"machine", "worktree", "clone", "repo"}),
 					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority defaults to 0; higher = higher priority.`),
 				},
 				"required": []string{"session_key", "layer", "notes"},
@@ -4304,12 +4304,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.erase",
-			"description": "Erase notes by key from the machine, worktree, or repo note layer.",
+			"description": "Erase notes by key from the machine, worktree, clone, or repo note layer.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to erase from: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
+					"layer":       enumStringProperty(`Which layer to erase from: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
 					"keys":        stringArrayProperty("Note keys to erase. A missing key is a no-op."),
 				},
 				"required": []string{"session_key", "layer", "keys"},
@@ -4317,12 +4317,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.mute",
-			"description": "Mute notes by key on the machine, worktree, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.search still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
+			"description": "Mute notes by key on the machine, worktree, clone, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.search still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to mute on: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
+					"layer":       enumStringProperty(`Which layer to mute on: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
 					"keys":        stringArrayProperty("Note keys to mute. A missing key is a no-op."),
 				},
 				"required": []string{"session_key", "layer", "keys"},
@@ -4330,12 +4330,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.unmute",
-			"description": "Unmute notes by key on the machine, worktree, or repo note layer: sets visible=true, restoring them to the workflow_manual ambient Notes block. Idempotent (unmuting an already-visible key is a no-op) and never restamps written_at.",
+			"description": "Unmute notes by key on the machine, worktree, clone, or repo note layer: sets visible=true, restoring them to the workflow_manual ambient Notes block. Idempotent (unmuting an already-visible key is a no-op) and never restamps written_at.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to unmute on: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
+					"layer":       enumStringProperty(`Which layer to unmute on: "machine", "worktree", "clone", or "repo".`, []string{"machine", "worktree", "clone", "repo"}),
 					"keys":        stringArrayProperty("Note keys to unmute. A missing key is a no-op."),
 				},
 				"required": []string{"session_key", "layer", "keys"},
@@ -4343,18 +4343,18 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.search",
-			"description": "Search notes on the machine, worktree, or repo note layer by key glob and optional written_at date range. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"description": "Search notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") searches just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, searches multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"layer":       enumStringProperty(`Which layer to search: "machine", "worktree", or "repo".`, []string{"machine", "worktree", "repo"}),
+					"layer":       enumStringOrArrayProperty(`Optional. Which layer(s) to search: a single "machine"/"worktree"/"clone"/"repo" string, or an array of those. Omit to search all four layers. A single-string call returns a plain, untagged record array; an array or omitted call returns each record tagged with its "layer".`, noteLayerEnumValues),
 					"glob":        stringProperty(`Optional key glob (path.Match syntax, e.g. "ticket.*"). Omit or "*" to match every key.`),
 					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
 					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-				"required": []string{"session_key", "layer"},
+				"required": []string{"session_key"},
 			},
 		},
 		{
@@ -5243,6 +5243,24 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"type":        "string",
 		"description": description,
 		"enum":        values,
+	}
+}
+
+// enumStringOrArrayProperty returns an inputSchema property accepting either
+// a single enum string or an array of that same enum, via "anyOf" — the
+// shape note.search's "layer" argument needs (optional, single-or-array)
+// and no existing helper here covers, since every other enum property in
+// this file is single-shape only.
+func enumStringOrArrayProperty(description string, values []string) map[string]any {
+	return map[string]any{
+		"description": description,
+		"anyOf": []any{
+			enumStringProperty("", values),
+			map[string]any{
+				"type":  "array",
+				"items": enumStringProperty("", values),
+			},
+		},
 	}
 }
 

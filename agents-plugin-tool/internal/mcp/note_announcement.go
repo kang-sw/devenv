@@ -13,9 +13,10 @@ import (
 const notesInjectionCap = 20
 
 // computeNotes computes the ambient "# Notes" block for root, merging the
-// machine and worktree layers. Thin wrapper over wsnote.Compute, mirroring
-// computeManuals's shape (see manuals_announcement.go): pure, root-in
-// string-out, silent ("") on any resolution error or empty result.
+// machine, worktree, clone, and repo layers. Thin wrapper over
+// wsnote.Compute, mirroring computeManuals's shape (see
+// manuals_announcement.go): pure, root-in string-out, silent ("") on any
+// resolution error or empty result.
 func computeNotes(root string) string {
 	return wsnote.Compute(root, wsconfig.Options{}, notesInjectionCap)
 }

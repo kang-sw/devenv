@@ -36,6 +36,14 @@ func TestComputeRendersMachineAndWorktreeLayers(t *testing.T) {
 		t.Fatalf("Write worktree: %v", err)
 	}
 
+	clonePath, err := ClonePath(root)
+	if err != nil {
+		t.Fatalf("ClonePath: %v", err)
+	}
+	if err := Write(clonePath, []Record{{Key: "c", Value: "clone note", Priority: 3, WrittenAt: "2026-08-03T00:00:00Z"}}); err != nil {
+		t.Fatalf("Write clone: %v", err)
+	}
+
 	got := Compute(root, opts, 20)
 	if !strings.HasPrefix(got, "# Notes") {
 		t.Fatalf("Compute = %q, want leading '# Notes' header", got)
@@ -46,9 +54,16 @@ func TestComputeRendersMachineAndWorktreeLayers(t *testing.T) {
 	if !strings.Contains(got, "[worktree] w") || !strings.Contains(got, "worktree note") {
 		t.Fatalf("Compute missing worktree note: %q", got)
 	}
-	// Higher priority (worktree, priority 2) renders before machine (priority 1).
+	if !strings.Contains(got, "[clone] c") || !strings.Contains(got, "clone note") {
+		t.Fatalf("Compute missing clone note: %q", got)
+	}
+	// Highest priority (clone, priority 3) renders first, then worktree (2),
+	// then machine (1).
+	if strings.Index(got, "[clone] c") > strings.Index(got, "[worktree] w") {
+		t.Fatalf("Compute order = %q, want higher-priority clone note before worktree note", got)
+	}
 	if strings.Index(got, "[worktree] w") > strings.Index(got, "[machine] m") {
-		t.Fatalf("Compute order = %q, want higher-priority worktree note first", got)
+		t.Fatalf("Compute order = %q, want higher-priority worktree note before machine note", got)
 	}
 }
 
@@ -69,7 +84,7 @@ func TestComputeRendersRepoLayer(t *testing.T) {
 	}
 }
 
-func TestComputeSortsAndCapsAcrossAllThreeLayers(t *testing.T) {
+func TestComputeSortsAndCapsAcrossAllFourLayers(t *testing.T) {
 	configHome := t.TempDir()
 	opts := wsconfig.Options{ConfigHome: configHome}
 	machinePath, err := MachinePath(opts)
@@ -91,18 +106,28 @@ func TestComputeSortsAndCapsAcrossAllThreeLayers(t *testing.T) {
 	if err := RepoWrite(RepoDir(root), []Record{{Key: "r", Value: "repo note", Priority: 3, WrittenAt: "2026-08-03T00:00:00Z"}}); err != nil {
 		t.Fatalf("RepoWrite: %v", err)
 	}
+	clonePath, err := ClonePath(root)
+	if err != nil {
+		t.Fatalf("ClonePath: %v", err)
+	}
+	if err := Write(clonePath, []Record{{Key: "c", Value: "clone note", Priority: 4, WrittenAt: "2026-08-04T00:00:00Z"}}); err != nil {
+		t.Fatalf("Write clone: %v", err)
+	}
 
 	got := Compute(root, opts, 2)
 	if strings.Contains(got, "[machine] m") {
 		t.Fatalf("Compute with limit=2 kept the lowest-priority (machine) note, want it elided: %q", got)
 	}
-	if !strings.Contains(got, "[repo] r") || !strings.Contains(got, "[worktree] w") {
-		t.Fatalf("Compute with limit=2 did not keep the two highest-priority notes across all three layers: %q", got)
+	if strings.Contains(got, "[worktree] w") {
+		t.Fatalf("Compute with limit=2 kept the third-lowest-priority (worktree) note, want it elided: %q", got)
 	}
-	if strings.Index(got, "[repo] r") > strings.Index(got, "[worktree] w") {
-		t.Fatalf("Compute order = %q, want higher-priority repo note (3) before worktree note (2)", got)
+	if !strings.Contains(got, "[clone] c") || !strings.Contains(got, "[repo] r") {
+		t.Fatalf("Compute with limit=2 did not keep the two highest-priority notes across all four layers: %q", got)
 	}
-	if !strings.Contains(got, "1 lower-priority notes elided") {
+	if strings.Index(got, "[clone] c") > strings.Index(got, "[repo] r") {
+		t.Fatalf("Compute order = %q, want higher-priority clone note (4) before repo note (3)", got)
+	}
+	if !strings.Contains(got, "2 lower-priority notes elided") {
 		t.Fatalf("Compute with limit=2 missing elision line: %q", got)
 	}
 }
