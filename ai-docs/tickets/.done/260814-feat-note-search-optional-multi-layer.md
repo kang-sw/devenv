@@ -5,6 +5,7 @@ related:
   260814-feat-note-project-local-untracked-layer: motivates — with four layers, single-layer search forces N calls to reconstruct the ambient block's cross-layer view
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-14
 ---
 
 # note.search — optional / multi-layer `layer` argument
@@ -90,3 +91,43 @@ Verify:
   order (single-layer/array-of-one ordering parity), per the pinned decision.
 - `write`/`erase`/`mute`/`unmute` schemas are unchanged (still required-single
   `layer`).
+
+### Result (4898757) - 2026-08-14
+
+`note.search`'s `layer` is now optional and accepts a single string, an array of
+layer names, or omission (= all four layers). Single-string calls keep today's
+untagged `[]wsnote.Record` shape (sub-decision a); omitted/array calls tag each
+record with its originating `layer` and order the merged set by the shared 3-key
+comparator. Both open sub-decisions were resolved during survey (pre-authorized
+autonomous by sage): (a) single-string stays untagged; (b) all `note.search`
+paths and the ambient `# Notes` block share one comparator
+(`wsnote.CompareRecords`, priority desc → written_at desc → key asc), so
+`layer: "clone"` and `layer: ["clone"]` differ only in tag presence, never order.
+
+Implementation extracted `wsnote.FilterRecords` + `wsnote.CompareRecords` (both
+exported so the `mcp`-package multi-layer merge can call them; `Compute` now
+delegates to `CompareRecords` with byte-identical behavior), split
+`resolveNoteStore` into `resolveNoteStore` + `resolveNoteStoreForLayer`, and
+added `enumStringOrArrayProperty` (the first `anyOf` schema in `server.go`).
+`inject.go` behavior, the four mutation tools, `noteLayerArg`, and search's
+no-`visible`-filter contract are all unchanged. Spec `#260810-note-tools` records
+the optional/array shape, the tag rule, the shared-order rule, and the
+write/erase/mute/unmute required-single-by-design note.
+
+Deviations (all reviewer-confirmed in-contract): `FilterRecords`/`CompareRecords`
+exported rather than the plan's sketched unexported (forced by the cross-package
+caller); `searchNoteLayers` fails loud on a per-layer resolve/load error rather
+than degrading silently like `Compute` (preserves `note.search`'s pre-existing
+fail-loud contract — deliberately NOT aligned with `Compute`).
+
+Verification: `go build ./...` clean; `go test ./internal/wsnote/... ./internal/mcp/...`
+passes except the two pre-existing, unrelated `internal/mcp` note-block-position
+failures (present on base, untouched here). Partitioned review (correctness +
+fit) clean in one cycle, one non-blocking minor each: correctness — the array
+branch's `stringList` silently drops non-string/empty entries before enum
+validation, so a mixed array like `["clone", 42]` is accepted with the junk
+dropped (schema `anyOf` still constrains validating clients); fit — `noteLayerArg`
+and the new `isValidNoteLayer` duplicate a four-value switch. Both recorded as
+optional hardening follow-ups, neither relayed (minor).
+
+Result commit `48987578`; range `63a1531b..48987578`.
