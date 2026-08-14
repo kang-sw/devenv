@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.41.0 - 2026-08-14
+
+### Added
+- **Note visibility mute (`note.mute` / `note.unmute`).** New MCP verbs plus a
+  `visible` field on notes: muted notes are preserved in storage but excluded
+  from ambient `# Notes` injection, giving callers a way to park stale memory
+  without erasing it.
+- **Git-tracked repo note layer.** A `repo` note layer that stores notes inside
+  the tracked tree (`ai-docs/ws-notes/`) with its lock kept outside the tracked
+  dir, so durable per-project memory can ride the git index and travel with
+  clones.
+- **Clone note layer.** A project-scoped, worktree-agnostic `clone` layer for
+  untracked local clone context, decoupled from the per-worktree layer.
+- **Multi-layer `note.search`.** `note.search` accepts an optional/multi-layer
+  selector with a shared 3-key ordering, so one query can span note layers.
+- **Always-on `# Manuals` authoring anchor.** The `# Manuals` block is now an
+  ambient authoring anchor in the workflow manual, and `note.*` durable-memory
+  capture is surfaced through the workflow manual.
+
+### Changed
+- **`_index.md` dissolution.** `ai-docs/_index.md` is dissolved into
+  `AGENTS.md`, the `manuals/` tier, note layers, and generated inventories;
+  `lead-bootstrap` writes to those homes with versioned coexistence degrade.
+
+### Removed
+- **`manuals.list` / `manuals.find` retired.** The manuals discovery MCP tools
+  and their CLI mirror are removed; the ambient `# Manuals` anchor replaces the
+  discovery surface. `manuals.list` remains internally as the anchor's data
+  source only.
+
+### Fixed
+- **wsflow runtime contract drift.** Added `note.mute` / `note.unmute` to both
+  `runtime.json` tool contracts.
+- **Repo-layer note lock relocation.** Moved the repo-layer flock out of the
+  tracked note directory so it never lands in the git index.
+- **Dissolve-index degrade coverage.** Extended the if-present degrade to the
+  shared `rsrc/` conventions surface and dropped a dead bump-script regex.
+
 ## v0.40.0 - 2026-08-11
 
 ### Added
