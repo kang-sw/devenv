@@ -55,8 +55,6 @@ func main() {
 		specsCommand(os.Args[2:])
 	case "mental-models":
 		mentalModelsCommand(os.Args[2:])
-	case "manuals":
-		manualsCommand(os.Args[2:])
 	case "references":
 		referencesCommand(os.Args[2:])
 	case "tools":
@@ -71,10 +69,10 @@ func main() {
 
 func usage() {
 	if mcp.NoAgentMode() {
-		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|specs|mental-models|manuals|references>")
+		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|specs|mental-models|references>")
 		return
 	}
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|mercenary|git|tickets|specs|mental-models|manuals|references>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|mercenary|git|tickets|specs|mental-models|references>")
 }
 
 func doctor(args []string) {
@@ -228,8 +226,6 @@ func runtimeCapabilityCommandNames() []string {
 		"git.log",
 		"git.merge-base",
 		"git.status",
-		"manuals.find",
-		"manuals.list",
 		"mental-models.find",
 		"mental-models.status",
 		"path.generate",
@@ -846,55 +842,6 @@ func mentalModelsStatus(args []string) {
 		return
 	}
 	printTextOrFatal("mental-models status", mcp.FormatMentalModels(result), err)
-}
-
-func manualsCommand(args []string) {
-	if len(args) < 1 {
-		manualsUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "list":
-		manualsList(args[1:])
-	case "find":
-		manualsFind(args[1:])
-	default:
-		manualsUsage()
-		os.Exit(2)
-	}
-}
-
-func manualsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp manuals <list|find>")
-}
-
-func manualsList(args []string) {
-	fs := flag.NewFlagSet("manuals list", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.ManualsList(defaultRoot(*root))
-	if outputJSON(*format) {
-		printJSONOrFatal("manuals list", result, err)
-		return
-	}
-	printTextOrFatal("manuals list", mcp.FormatManuals(result), err)
-}
-
-func manualsFind(args []string) {
-	fs := flag.NewFlagSet("manuals find", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	query := fs.String("query", "", "case-insensitive text query")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.ManualsFind(defaultRoot(*root), *query)
-	if outputJSON(*format) {
-		printJSONOrFatal("manuals find", result, err)
-		return
-	}
-	printTextOrFatal("manuals find", mcp.FormatManuals(result), err)
 }
 
 func referencesCommand(args []string) {

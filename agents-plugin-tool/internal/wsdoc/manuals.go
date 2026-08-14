@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // ManualInfo is one entry under ai-docs/manuals/: a flat, one-line-schema doc
@@ -19,8 +18,8 @@ type ManualInfo struct {
 // the ticket's literal `ai-docs/manuals/*.md` wording) and returns one
 // ManualInfo per .md file, sorted by path. A manual with no `summary:`
 // frontmatter line is still returned with Summary == "" — callers must report
-// it, not drop it (see manuals_announcement.go's computeManuals and
-// formatManuals in package mcp).
+// it, not drop it (see manuals_announcement.go's computeManuals, the sole
+// remaining consumer).
 //
 // Unlike scanMentalModels, a missing ai-docs/manuals/ directory is not an
 // error: it returns (nil, nil), the expected steady state until Phase 2
@@ -53,38 +52,5 @@ func ManualsList(root string) ([]ManualInfo, error) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
-}
-
-// ManualsFind returns ManualsList filtered by query (path + summary fields,
-// plus body text) via the shared matchDocumentQuery helper, or the full list
-// when query is empty. Reuses the tier-agnostic query matcher rather than a
-// manuals-specific substring search.
-func ManualsFind(root, query string) ([]ManualInfo, error) {
-	manuals, err := ManualsList(root)
-	if err != nil {
-		return nil, err
-	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return manuals, nil
-	}
-
-	out := []ManualInfo{}
-	for _, manual := range manuals {
-		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(manual.Path)))
-		if err != nil {
-			return nil, err
-		}
-		candidate := docQueryCandidate{
-			Path:     manual.Path,
-			Fields:   []string{manual.Path, manual.Summary},
-			BodyText: string(raw),
-		}
-		if _, ok := matchDocumentQuery(query, candidate); !ok {
-			continue
-		}
-		out = append(out, manual)
-	}
 	return out, nil
 }

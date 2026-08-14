@@ -1570,16 +1570,6 @@ description, and source metadata.
 stem reference. `mental_models.status` returns path-first metadata for documents
 selected by domain or path.
 
-## Manuals Discovery Tools {#260807-manuals-discovery-tools}
-
-`manuals.list` returns available manual documents (`ai-docs/manuals/*.md`)
-with their path and one-line summary.
-
-`manuals.find` locates manual paths by text query across path, summary, and
-body text. There is no `domain` or `spec_stem` selector — the manuals schema
-carries neither field (see Manuals Document System in the
-documentation-system spec).
-
 ## Reference Trace Tool {#260505-reference-trace-tool}
 
 `references.trace` returns the reference graph reachable from exactly one ticket
