@@ -13,8 +13,8 @@ import (
 
 // noteStore abstracts the per-layer note storage backend so
 // handleNoteWrite/handleNoteErase/handleNoteSearch/handleNoteMute/
-// handleNoteUnmute stay layer-agnostic: the machine/worktree layers store one
-// JSON file per whole layer (fileNoteStore, wrapping
+// handleNoteUnmute stay layer-agnostic: the machine/worktree/clone layers
+// store one JSON file per whole layer (fileNoteStore, wrapping
 // wsnote.Load/Write/Erase/SetVisible), while the repo layer stores one JSON
 // file per key (repoNoteStore, wrapping
 // wsnote.RepoLoad/RepoWrite/RepoErase/RepoSetVisible).
@@ -26,7 +26,7 @@ type noteStore interface {
 }
 
 // fileNoteStore implements noteStore over a single whole-layer JSON file, the
-// storage shape shared by the machine and worktree layers.
+// storage shape shared by the machine, worktree, and clone layers.
 type fileNoteStore struct {
 	path string
 }
@@ -52,12 +52,12 @@ func (r repoNoteStore) SetVisible(keys []string, visible bool) error {
 }
 
 // resolveNoteStore resolves the noteStore backend for the "layer" argument,
-// given the tool's session_key and (worktree/repo layers only) a resolved
-// root. Every note.* call requires a valid session_key, matching the "every
-// ws tool call carries a session key" invariant, even for the machine layer
-// which does not itself need a root:
-//   - "worktree" and "repo" both route through resolveToolRoot, the same
-//     root-resolution path every other root-aware tool uses.
+// given the tool's session_key and (worktree/clone/repo layers only) a
+// resolved root. Every note.* call requires a valid session_key, matching the
+// "every ws tool call carries a session key" invariant, even for the machine
+// layer which does not itself need a root:
+//   - "worktree", "clone", and "repo" all route through resolveToolRoot, the
+//     same root-resolution path every other root-aware tool uses.
 //   - "machine" looks the key up directly via s.sessions.lookup — it cannot
 //     reuse resolveToolRoot (which would require a resolvable root the
 //     machine layer does not need) or requireLeadSessionKey (lead-only; note.*
@@ -93,6 +93,16 @@ func (s *Server) resolveNoteStore(toolName string, args map[string]any, meta map
 			return nil, err
 		}
 		return fileNoteStore{path: path}, nil
+	case wsnote.LayerClone:
+		root, err := s.resolveToolRoot(args, meta)
+		if err != nil {
+			return nil, err
+		}
+		path, err := wsnote.ClonePath(root)
+		if err != nil {
+			return nil, err
+		}
+		return fileNoteStore{path: path}, nil
 	case wsnote.LayerRepo:
 		root, err := s.resolveToolRoot(args, meta)
 		if err != nil {
@@ -100,7 +110,7 @@ func (s *Server) resolveNoteStore(toolName string, args map[string]any, meta map
 		}
 		return repoNoteStore{dir: wsnote.RepoDir(root)}, nil
 	default:
-		return nil, fmt.Errorf("%s: invalid layer %q: want \"machine\", \"worktree\", or \"repo\"", toolName, layer)
+		return nil, fmt.Errorf("%s: invalid layer %q: want \"machine\", \"worktree\", \"clone\", or \"repo\"", toolName, layer)
 	}
 }
 
@@ -112,10 +122,12 @@ func noteLayerArg(toolName string, args map[string]any) (wsnote.Layer, error) {
 		return wsnote.LayerMachine, nil
 	case wsnote.LayerWorktree:
 		return wsnote.LayerWorktree, nil
+	case wsnote.LayerClone:
+		return wsnote.LayerClone, nil
 	case wsnote.LayerRepo:
 		return wsnote.LayerRepo, nil
 	default:
-		return "", fmt.Errorf(`%s: layer is required and must be "machine", "worktree", or "repo"`, toolName)
+		return "", fmt.Errorf(`%s: layer is required and must be "machine", "worktree", "clone", or "repo"`, toolName)
 	}
 }
 

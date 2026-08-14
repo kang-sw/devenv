@@ -21,6 +21,7 @@ const (
 	LayerMachine  Layer = "machine"
 	LayerWorktree Layer = "worktree"
 	LayerRepo     Layer = "repo"
+	LayerClone    Layer = "clone"
 )
 
 // lockTimeout bounds how long a note-store RMW waits to acquire its flock
@@ -46,6 +47,20 @@ func WorktreePath(root string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(layout.WorktreeDir, "notes.json"), nil
+}
+
+// ClonePath resolves the clone-layer note store path: project-scoped and
+// worktree-agnostic, under the existing per-project wsstate cache directory
+// (Layout.ProjectDir) for the canonical root. Unlike WorktreePath, this is
+// shared across every worktree of the same project (keyed on projectKey, not
+// worktreeKey), but still lives outside the working tree, so it is never
+// staged by git.
+func ClonePath(root string) (string, error) {
+	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(layout.ProjectDir, "notes.json"), nil
 }
 
 // RepoDir resolves the repo-layer note store directory: the tracked

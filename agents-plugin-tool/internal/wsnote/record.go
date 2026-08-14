@@ -1,13 +1,17 @@
-// Package wsnote implements three note-memory layers: the two non-tracked
+// Package wsnote implements four note-memory layers: the two non-tracked
 // layers from 260807 Phase 1 — "machine" (PC-global, project-agnostic; lives
 // beside the global ws config file) and "worktree" (worktree-local,
 // ephemeral; lives under the existing wsstate worktree cache directory) —
-// plus the git-tracked "repo" layer from 260810 Phase 1, which stores one
-// file per key under ai-docs/ws-notes/ so merge conflicts resolve on the
-// filesystem with normal git tooling. All three layers share the same
-// record shape; the non-tracked layers share one flock-serialized
-// read-modify-write file per layer, while the repo layer serializes
-// per-key-file writes independently (see repo_store.go).
+// the git-tracked "repo" layer from 260810 Phase 1, which stores one file
+// per key under ai-docs/ws-notes/ so merge conflicts resolve on the
+// filesystem with normal git tooling, and the non-tracked "clone" layer from
+// 260814 Phase 1 (project-scoped, worktree-agnostic; lives under the
+// existing per-project wsstate cache directory, shared across every worktree
+// of the same project but never staged by git). All four layers share the
+// same record shape; the non-tracked layers (machine/worktree/clone) each
+// share one flock-serialized read-modify-write file per layer, while the
+// repo layer serializes per-key-file writes independently (see
+// repo_store.go).
 package wsnote
 
 import "encoding/json"
