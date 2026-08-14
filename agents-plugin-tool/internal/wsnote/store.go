@@ -51,16 +51,27 @@ func WorktreePath(root string) (string, error) {
 
 // ClonePath resolves the clone-layer note store path: project-scoped and
 // worktree-agnostic, under the existing per-project wsstate cache directory
-// (Layout.ProjectDir) for the canonical root. Unlike WorktreePath, this is
-// shared across every worktree of the same project (keyed on projectKey, not
-// worktreeKey), but still lives outside the working tree, so it is never
-// staged by git.
+// for the canonical root. Unlike WorktreePath, this is shared across every
+// worktree of the same project (keyed on projectKey, not worktreeKey), but
+// still lives outside the working tree, so it is never staged by git.
+//
+// This resolves under Layout.SharedDir (ProjectDir's "shared" subdirectory),
+// not Layout.ProjectDir directly: for the canonical (non-linked) worktree of
+// a project, wsstate.layoutFor sets WorktreeKey == ProjectKey, so
+// Layout.WorktreeDir and Layout.ProjectDir are the SAME directory on disk.
+// A ClonePath under ProjectDir directly would therefore collide with
+// WorktreePath's "notes.json" in that (extremely common — every
+// single-worktree project) case, silently merging the clone and worktree
+// layers into one file. SharedDir exists precisely to hold project-wide data
+// that must stay distinct from the canonical worktree's own per-worktree
+// files living in that same physical directory (see LocksDir's identical
+// collision-avoidance use of SharedDir).
 func ClonePath(root string) (string, error) {
 	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(layout.ProjectDir, "notes.json"), nil
+	return filepath.Join(layout.SharedDir, "notes.json"), nil
 }
 
 // RepoDir resolves the repo-layer note store directory: the tracked

@@ -62,7 +62,7 @@ func TestNoteWriteSearchEraseRoundTripPerLayer(t *testing.T) {
 	s := NewServer(t.TempDir(), "test")
 	_, key := mintRootKey(t, s, 1)
 
-	for _, layer := range []string{"machine", "worktree"} {
+	for _, layer := range []string{"machine", "worktree", "clone"} {
 		t.Run(layer, func(t *testing.T) {
 			writeResp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
 				"layer": layer,
@@ -271,6 +271,50 @@ func TestNoteWorktreeLayerIsolatedAcrossWorktrees(t *testing.T) {
 	}
 }
 
+// TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic verifies the clone
+// layer's headline contract from 260814 Phase 1: a clone-layer note written
+// under one worktree of a project is visible from a SIBLING worktree of the
+// SAME project (worktree-agnostic, unlike the worktree layer, which
+// TestNoteWorktreeLayerIsolatedAcrossWorktrees proves is isolated at exactly
+// this granularity), absent from a DIFFERENT project's key (project-scoped,
+// unlike the machine layer), and never staged by git in the worktree working
+// tree (stored outside it entirely, like machine/worktree — not the repo
+// layer's tracked ai-docs/ws-notes/).
+func TestNoteCloneLayerIsProjectScopedAndWorktreeAgnostic(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+
+	mainRoot, linkedRoot := twoWorktreesOfOneRepo(t)
+	keyMain, _ := parseLoginResponse(t, callLogin(t, s, 1, mainRoot, nil))
+	keyLinked, _ := parseLoginResponse(t, callLogin(t, s, 2, linkedRoot, nil))
+	_, keyOther := mintRootKey(t, s, 3)
+
+	callToolWithKey(t, s, 4, keyMain, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": []any{map[string]any{"key": "clone.shared", "value": "visible across worktrees", "priority": 1}},
+	})
+
+	// Visible from the sibling worktree of the same project (worktree-agnostic).
+	searchLinked := callToolWithKey(t, s, 5, keyLinked, "note.search", map[string]any{"layer": "clone", "glob": "clone.shared"})
+	if !strings.Contains(searchLinked, "clone.shared") {
+		t.Fatalf("note.search(clone, linked worktree of the same project) missing the note written from the main worktree: %s", searchLinked)
+	}
+
+	// Absent from a different, unrelated project on the same machine
+	// (project-scoped).
+	searchOther := callToolWithKey(t, s, 6, keyOther, "note.search", map[string]any{"layer": "clone", "glob": "clone.shared"})
+	if strings.Contains(searchOther, "clone.shared") {
+		t.Fatalf("note.search(clone, unrelated project) leaked a note from a different project: %s", searchOther)
+	}
+
+	// Never staged by git: the clone store lives outside the working tree,
+	// same as machine/worktree.
+	status := string(runGitOutput(t, mainRoot, "status", "--porcelain", "-uall"))
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("git status --porcelain in the worktree = %q, want clean (the clone store must live outside the working tree)", status)
+	}
+}
+
 // TestNoteWriteRestampsWrittenAtOnOverwrite verifies the MCP-layer
 // server-side written_at stamping (noteRecordsArg in note_tools.go) actually
 // RECOMPUTES on a full-overwrite write, rather than echoing the prior
@@ -353,7 +397,7 @@ func TestNoteWriteRejectsInvalidLayer(t *testing.T) {
 		"layer": "bogus",
 		"notes": []any{map[string]any{"key": "a", "value": "b"}},
 	})
-	if !strings.Contains(resp, `must be "machine", "worktree", or "repo"`) {
+	if !strings.Contains(resp, `must be "machine", "worktree", "clone", or "repo"`) {
 		t.Fatalf("note.write(layer=bogus) = %s, want a layer-validation error", resp)
 	}
 }
