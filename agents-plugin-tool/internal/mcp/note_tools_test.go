@@ -437,7 +437,7 @@ func TestNoteWriteMachineLayerRejectsEmptySessionKey(t *testing.T) {
 }
 
 // TestNoteMuteUnmuteRoundTrip verifies note.mute/note.unmute across all
-// three layers: mute drops a note's visible state to false, unmute restores
+// four layers: mute drops a note's visible state to false, unmute restores
 // it to true, observed via note.search's json format (note.search itself
 // never filters on visible, so this exercises the stored field directly).
 func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
@@ -446,7 +446,7 @@ func TestNoteMuteUnmuteRoundTrip(t *testing.T) {
 	_, key := mintRootKey(t, s, 1)
 
 	id := 2
-	for _, layer := range []string{"machine", "worktree", "repo"} {
+	for _, layer := range []string{"machine", "worktree", "clone", "repo"} {
 		t.Run(layer, func(t *testing.T) {
 			noteKey := "mute.roundtrip." + layer
 			callToolWithKey(t, s, id, key, "note.write", map[string]any{

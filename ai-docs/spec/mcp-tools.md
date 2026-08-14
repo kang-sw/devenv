@@ -512,14 +512,14 @@ config writers use. The `machine`/`worktree`/`clone` layers RMW one JSON file
 per layer, each with its own sibling `.lock` file beside the store (never
 shared with the `wsconfig` config lock, even though the machine-layer store
 lives in the same directory as the global config file). The `repo` layer
-instead performs one such flock+temp-file+atomic-rename write per key, scoped to that
-key's own file under `ai-docs/ws-notes/` — each key file is independently
-owned, which is the point of one-key-per-file filesystem-level conflict
-resolution. Its per-key lock file lives **outside** the tracked tree (in a
-machine-local temp location keyed by a hash of the target path), never as a
-sibling in `ai-docs/ws-notes/`, so the tracked directory only ever contains
-the `.json` key files — no lock or temp residue is committable, which is what
-keeps the layer cleanly git-tracked.
+instead performs one such flock+temp-file+atomic-rename write per key,
+scoped to that key's own file under `ai-docs/ws-notes/` — each key file is
+independently owned, which is the point of one-key-per-file filesystem-level
+conflict resolution. Its per-key lock file lives **outside** the tracked
+tree (in a machine-local temp location keyed by a hash of the target path),
+never as a sibling in `ai-docs/ws-notes/`, so the tracked directory only
+ever contains the `.json` key files — no lock or temp residue is
+committable, which is what keeps the layer cleanly git-tracked.
 
 There is no CLI mirror for `note.*`: like every other session-keyed tool
 (`todo.*`, `agenda.*`, `enter.*`), its authority model is
