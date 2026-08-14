@@ -92,6 +92,11 @@ in `ai-docs/spec/` (mcp-tools.md or plugin-runtime.md, whichever owns the
 fixed authoring-guidance paragraph, `- (none yet)` placeholder when empty, and
 the resolved `.local.md` listing rule.
 
+Phase 2 additionally removes the `manuals.list`/`manuals.find` tool contract
+from `ai-docs/spec/mcp-tools.md` and records that the always-on ambient
+`# Manuals` block is the manuals discovery surface (the tier keeps its single
+`summary:` schema; only the two query tools are retired).
+
 ## Phases
 
 ### Phase 1: Always-on # Manuals authoring anchor
@@ -114,3 +119,44 @@ Constraints:
 - Keep the change scoped to `computeManuals` (+ `ManualsList` only if the
   chosen `.local.md` rule requires it); do not alter `# Notes` behavior.
 - Guidance text is AI-authored English.
+
+### Phase 2: Retire manuals.list / manuals.find
+
+Rationale: the manuals tier carries a deliberately minimal single-field
+(`summary:`) schema with no applicability predicate, unlike specs/mental-models
+whose rich frontmatter justifies query tooling. `manuals.list`/`manuals.find`
+were added in `d2c82584` purely "for discovery parity"; that parity is
+superficial. Once Phase 1 makes the ambient `# Manuals` block always-on, the
+block fully subsumes `manuals.list`'s discovery role for the lead (the only
+audience that could bootstrap it), so the MCP pair becomes dead surface. This
+is API-surface removal ("Always ask" tier) and is deliberately sequenced after
+Phase 1 so the replacement lands before the removal.
+
+Goals:
+
+- Remove the `manuals.list` and `manuals.find` MCP tools from
+  `server.go` (schema/registration/dispatch) and the CLI mirror
+  (`ws-mcp manuals list|find`).
+- Remove now-dead Go surface: `ManualsFind` and `formatManuals` (only the
+  removed tool/CLI used them). **Keep `ManualsList`** — `computeManuals` (the
+  ambient block) still depends on it.
+- Reverse the manifest/contract wiring `d2c82584` added: drop the manuals
+  entries from `toolSchemaRequiresSessionKey`, the LeadToolNames session-key
+  list, `runtimeCapabilityCommandNames()`, and both `runtime.json`
+  tools+commands sections (ws and wsflow).
+- Regenerate the wsflow `rsrc/` mirror if the removal touches any mirrored
+  surface (regen only; never hand-edit the byte-identical mirror).
+- Update the exact-match runtime-capability tests
+  (`TestRuntimeCapabilitiesCommandReportsLauncherContractSurface` and its
+  wsflow counterpart) and any manuals-tool tests.
+- Update `ai-docs/spec/mcp-tools.md` to drop the `manuals.list`/`manuals.find`
+  contract, noting the ambient `# Manuals` block is the manuals discovery
+  surface.
+
+Constraints:
+
+- Do not remove `manuals.list`/`manuals.find` before Phase 1 lands (the ambient
+  always-on block is the replacement that justifies removal).
+- Keep `ManualsList` and the manuals doc tier itself; only the two MCP
+  tools/CLI mirror are retired, not the tier.
+- Version bump is the lead's merge-time step, not part of either phase.
