@@ -50,21 +50,20 @@ Resolved:
   this ticket (the consumed schema is one field; the ambient anchor covers the
   authoring need for the lead audience).
 
-Open (need user's call before Phase 1):
+Resolved (user's call, this session):
 
-- **[open] `.local.md` in the ambient list.** `ManualsList` currently lists any
-  `*.md`, so `ai-docs/manuals/*.local.md` are listed *and* nagged for a missing
-  `summary:` (`manuals.go:40`, `manuals_announcement.go:31-32`). Options:
-  (a) exclude `*.local.md` from the ambient `# Manuals` catalog (recommended —
-  the block advertises shared/tracked manuals; local files should not be nagged
-  for summaries), keeping `manuals.list`/`manuals.find` behavior unchanged; or
-  (b) exclude `*.local.md` from `ManualsList` entirely (also affects
-  `manuals.list`/`manuals.find`); or (c) keep current behavior (list them).
-  Note: workflow_manual is lead-local, so this is a clarity/nag question, not a
-  cross-clone leak.
-- **[open] Guidance wording.** Draft below; confirm tone/scope.
+- **`.local.md` are listed, with summary rendering skipped entirely.** Because
+  workflow_manual is lead-local, showing a local manual to the session that owns
+  it is useful, not a leak — so local manuals stay in the ambient `# Manuals`
+  list. But they render as a bare `- <path>` line: no summary, **and no
+  "(no summary: …)" nag** (the `.local.md` suffix already implies local; a
+  nag to add frontmatter to a gitignored creds/IP file is wrong). No `(local)`
+  marker — the suffix carries the meaning. Tracked manuals keep the existing
+  `- <path> — <summary>` (with the no-summary nag) behavior unchanged.
+  `manuals.list`/`manuals.find` behavior is unchanged (this rule is
+  ambient-block-only).
 
-Draft guidance text (English, ambient block; final wording pending):
+Confirmed guidance text (English, ambient block):
 
 ```
 # Manuals
@@ -101,7 +100,9 @@ Goals:
 
 - Remove the empty-list early return in `computeManuals`; render header +
   fixed guidance paragraph + list-or-placeholder.
-- Apply the resolved `.local.md` rule (open decision above).
+- Apply the resolved `.local.md` rule: list `*.local.md` as bare `- <path>`
+  lines in the ambient block (no summary, no nag, no marker); tracked manuals
+  keep `- <path> — <summary>` with the existing no-summary nag.
 - Update tests: `manuals_announcement`-level rendering (empty, non-empty,
   no-summary, `.local.md` handling) and the `note_workflow_manual` /
   workflow_manual assembly tests that assert the `# Manuals` block.
