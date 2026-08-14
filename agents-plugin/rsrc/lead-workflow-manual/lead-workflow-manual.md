@@ -146,6 +146,20 @@ Prefer:
 - `{{.McpNamespace}}/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
 - `{{.McpNamespace}}/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
 
+### Notes / durable memory
+
+`{{.McpNamespace}}/note.write` records durable cross-session context;
+`{{.McpNamespace}}/note.search` reads it back, and the ambient `# Notes` block
+surfaces active notes at session start. Write one when a future session would
+otherwise re-derive a fact that has no better home — a non-obvious environment
+quirk, a standing gotcha, or the live consequence of a past decision. Prefer the
+narrowest scope that still reaches the sessions that need it; a note shared
+wider than its readers is noise everywhere else.
+
+Do not note what already has a home: a value derivable from the tree at read
+time, a change's rationale (`## AI Context` on the commit), or a ticket's status
+or plan (the ticket). A note is durable context, not a running log.
+
 ### Git
 
 Use `{{.McpNamespace}}/git.commit` for workflow commits when available. It stages explicit
