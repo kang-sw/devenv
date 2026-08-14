@@ -717,24 +717,36 @@ floor.
 ### Manuals Ambient Injection {#260807-manuals-ambient-injection}
 
 `workflow_manual` (FRESH-with-root and CONTINUE branches only, mirroring the
-Bootstrap Staleness and Doc Coverage warnings above) injects a `# Manuals`
-block listing every manual under `ai-docs/manuals/`: one line per manual,
-`<path> — <summary>`. There is no applicability predicate — every manual's
-path and summary is injected unconditionally; selection/relevance filtering
-is out of scope for this block (see Manuals Document System in the
-documentation-system spec).
+Bootstrap Staleness and Doc Coverage warnings above) injects an always-on
+`# Manuals` block: the `# Manuals` header, a fixed authoring-guidance
+paragraph, then one line per tracked manual under `ai-docs/manuals/`
+(`<path> — <summary>`). Unlike the presence-gated `# Notes` block, this block
+is an ever-present authoring anchor: it renders even when no manual exists yet,
+with a `- (none yet)` placeholder in place of the list. The guidance paragraph
+teaches where shared project procedures live (tracked, one file per procedure
+with a one-line `summary:` frontmatter) and the local/tracked split (write
+machine-local details — credentials, IPs, hostnames — to a gitignored
+`*.local.md` sibling, not into a tracked manual). There is no applicability
+predicate — every tracked manual's path and summary is injected
+unconditionally; selection/relevance filtering is out of scope for this block
+(see Manuals Document System in the documentation-system spec).
 
-The block is silent by design when `ai-docs/manuals/` does not exist or
-contains no `.md` files (the common case until content is migrated into this
-tier), using the same `injectBootstrapStalenessWarning` no-op-when-empty
-injector already used for the scope announcement and the staleness/coverage
-warnings. The `workflow_manual` FRESH-without-root branch never renders this
-block, matching the bootstrap-staleness precedent
+The block returns nothing only on a genuine resolution error (a non-NotExist
+`ai-docs/manuals/` read failure), preserving the scopeAnnouncement-style
+"silent, never blocks `workflow_manual`" doctrine for the error path; a
+missing or empty `ai-docs/manuals/` directory is the common steady state and
+still renders the anchor with the `- (none yet)` placeholder. The
+`workflow_manual` FRESH-without-root branch never renders this block (it has no
+root to resolve manuals from), matching the bootstrap-staleness precedent
 (`#260703-bootstrap-staleness-warning`).
 
-A manual with no `summary:` frontmatter line is still listed, with an
-explicit no-summary marker in place of a bare or blank line, so the gap is
-visible in the ambient block rather than silently omitted.
+A **tracked** manual with no `summary:` frontmatter line is still listed, with
+an explicit no-summary marker in place of a bare or blank line, so the gap is
+visible in the ambient block rather than silently omitted. A `*.local.md`
+manual is instead listed as a bare `- <path>` line — no summary rendered and no
+no-summary marker — because the `.local.md` suffix already marks it
+machine-local and a gitignored creds/IP file must not be nagged to add
+frontmatter.
 
 ### Note Injection {#260810-note-injection}
 

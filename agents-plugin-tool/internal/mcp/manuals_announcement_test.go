@@ -5,11 +5,42 @@ import (
 	"testing"
 )
 
-func TestComputeManualsReturnsEmptyWhenNoManualsExist(t *testing.T) {
+// TestComputeManualsRendersAnchorWhenNoManualsExist verifies the block is an
+// always-on authoring anchor: even with no ai-docs/manuals/ directory, it
+// renders the header, the fixed authoring-guidance paragraph, and a
+// "- (none yet)" placeholder rather than the empty string.
+func TestComputeManualsRendersAnchorWhenNoManualsExist(t *testing.T) {
 	root := t.TempDir()
 
-	if got := computeManuals(root); got != "" {
-		t.Fatalf("computeManuals = %q, want empty string when ai-docs/manuals/ does not exist", got)
+	got := computeManuals(root)
+	if !strings.HasPrefix(got, "# Manuals") {
+		t.Fatalf("computeManuals = %q, want the always-on anchor with a leading '# Manuals' header", got)
+	}
+	if !strings.Contains(got, manualsAuthoringGuidance) {
+		t.Fatalf("computeManuals = %q, want the authoring-guidance paragraph even when no manuals exist", got)
+	}
+	if !strings.Contains(got, "- (none yet)") {
+		t.Fatalf("computeManuals = %q, want a '- (none yet)' placeholder when no manuals exist", got)
+	}
+}
+
+// TestComputeManualsSkipsSummaryForLocalManual verifies a *.local.md manual is
+// listed as a bare `- <path>` line: no summary rendered, and no no-summary nag,
+// even when the local file has no summary frontmatter.
+func TestComputeManualsSkipsSummaryForLocalManual(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/manuals/creds.local.md", "# Local creds\n\nhost: 10.0.0.1\n")
+	mustWrite(t, root, "ai-docs/manuals/notes.local.md", "---\nsummary: Should not be rendered for a local manual.\n---\n# Local\n")
+
+	got := computeManuals(root)
+	if !strings.Contains(got, "- ai-docs/manuals/creds.local.md\n") && !strings.HasSuffix(got, "- ai-docs/manuals/creds.local.md") {
+		t.Fatalf("computeManuals must list the local manual as a bare path line: %q", got)
+	}
+	if strings.Contains(got, "no summary") {
+		t.Fatalf("computeManuals must not nag a *.local.md manual for a missing summary: %q", got)
+	}
+	if strings.Contains(got, "Should not be rendered for a local manual.") {
+		t.Fatalf("computeManuals must not render a *.local.md manual's summary: %q", got)
 	}
 }
 

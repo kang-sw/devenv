@@ -100,11 +100,13 @@ func TestManualsListAndFindMCPToolsReturnFixtureManual(t *testing.T) {
 	}
 }
 
-// TestWorkflowManualManualsBlockAbsentWhenNoManualsExist verifies the
-// injection is a true no-op (scopeAnnouncement-style silent case) when
-// ai-docs/manuals/ does not exist — the common Phase 1 state before any
-// manual is authored.
-func TestWorkflowManualManualsBlockAbsentWhenNoManualsExist(t *testing.T) {
+// TestWorkflowManualManualsBlockIsAlwaysOnWhenNoManualsExist verifies the
+// block is an always-on authoring anchor: even with no ai-docs/manuals/
+// directory, both the FRESH-with-root and CONTINUE branches still carry the
+// "# Manuals" header, the authoring-guidance paragraph, and the "(none yet)"
+// placeholder. (The FRESH-without-root branch, which has no root to resolve
+// manuals from, still never renders the block — unchanged.)
+func TestWorkflowManualManualsBlockIsAlwaysOnWhenNoManualsExist(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
@@ -117,13 +119,19 @@ func TestWorkflowManualManualsBlockAbsentWhenNoManualsExist(t *testing.T) {
 	freshResp := callToolWithKey(t, s, 1, freshBootstrapKey, "workflow_manual", map[string]any{
 		"root": root,
 	})
-	if strings.Contains(freshResp, "# Manuals") {
-		t.Fatalf("workflow_manual FRESH-with-root must stay silent with no manuals: %s", freshResp)
+	if !strings.Contains(freshResp, "# Manuals") || !strings.Contains(freshResp, "- (none yet)") {
+		t.Fatalf("workflow_manual FRESH-with-root must carry the always-on Manuals anchor with a (none yet) placeholder: %s", freshResp)
+	}
+	if !strings.Contains(freshResp, manualsAuthoringGuidance) {
+		t.Fatalf("workflow_manual FRESH-with-root must carry the manuals authoring-guidance paragraph: %s", freshResp)
 	}
 
 	key, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
 	continueResp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
-	if strings.Contains(continueResp, "# Manuals") {
-		t.Fatalf("workflow_manual CONTINUE must stay silent with no manuals: %s", continueResp)
+	if !strings.Contains(continueResp, "# Manuals") || !strings.Contains(continueResp, "- (none yet)") {
+		t.Fatalf("workflow_manual CONTINUE must carry the always-on Manuals anchor with a (none yet) placeholder: %s", continueResp)
+	}
+	if !strings.Contains(continueResp, manualsAuthoringGuidance) {
+		t.Fatalf("workflow_manual CONTINUE must carry the manuals authoring-guidance paragraph: %s", continueResp)
 	}
 }

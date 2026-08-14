@@ -212,10 +212,21 @@ metadata and no applicability predicate: every manual under
 output (see Manuals Ambient Injection in the mcp-tools spec), rather than
 being selected by relevance.
 
-A manual with no `summary:` frontmatter line is still discovered and
-announced — reported with an explicit no-summary marker, not silently
+The ambient `# Manuals` block is always rendered for lead sessions as an
+authoring anchor (header + a fixed authoring-guidance paragraph + the list, or
+a `- (none yet)` placeholder when the tier is empty), not presence-gated like
+`# Notes`; the block's behavioral contract lives in Manuals Ambient Injection
+in the mcp-tools spec. The guidance also teaches the local/tracked split:
+machine-local details (credentials, IPs, hostnames) go to a gitignored
+`*.local.md` sibling rather than into a tracked manual.
+
+A **tracked** manual with no `summary:` frontmatter line is still discovered
+and announced — reported with an explicit no-summary marker, not silently
 dropped — so an author notices and fills in the missing line rather than the
-manual quietly vanishing from the ambient block or discovery tools.
+manual quietly vanishing from the ambient block or discovery tools. A
+`*.local.md` manual is exempt: it is listed as a bare path line with no summary
+and no no-summary marker, because the suffix already marks it machine-local and
+a gitignored file must not be nagged to add frontmatter.
 
 `ws/manuals.list` and `ws/manuals.find` expose manual path and summary
 metadata without requiring callers to scan the tree manually, mirroring the
