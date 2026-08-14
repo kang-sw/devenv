@@ -45,7 +45,9 @@ At ship time:
 - `git status --porcelain` - must be empty before release preparation starts.
 - `python3 -m unittest discover agents-plugin/tests`
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
-- `cd agents-plugin-tool && go test ./...`
+- `cd agents-plugin-tool && go test ./... -count=1` (`-count=1` is required:
+  a cached pass can mask a stale generated artifact that CI catches on a fresh
+  run)
 - `cd agents-plugin-tool && scripts/smoke-ws-mcp.sh ..`
 - `claude plugin validate agents-plugin`
 - `claude plugin validate agents-plugin-wsflow`
@@ -136,6 +138,33 @@ Expected GitHub Actions behavior:
   artifacts without publishing a GitHub release.
 - Tag push runs tests, builds release assets, verifies checksums, creates or
   updates the GitHub release, and uploads `agents-plugin-tool/dist/*`.
+
+## Recovery
+
+If the release workflow fails after the tag push, triage the failure and act
+without a fresh confirmation gate when the fix is autonomously recoverable:
+
+- **Autonomously recoverable (proceed without asking).** The failure is a
+  self-contained fix that carries **no policy or behavior-semantics change** —
+  an "auto-proceed"-tier fix per `AGENTS.md` Approval Protocol. Typical cases:
+  a stale generated artifact (`agents-plugin/skills/manifest.json`, an rsrc
+  mirror), a formatting/lint failure, a mechanical test-locator fix, or a
+  changelog/version-metadata mismatch. Fix it: commit on `develop`,
+  fast-forward `main`, and — **only if no GitHub release was created under the
+  tag** (the workflow failed before the release step) — move the tag to the fix
+  commit and re-push (`git tag -d`, `git push origin :refs/tags/v<version>`,
+  re-tag, `git push origin main --follow-tags`). Loop until the workflow
+  succeeds or the failure stops being autonomously recoverable. Report each
+  recovery iteration in the next status; do not open a confirmation gate for
+  these.
+- **Not autonomously recoverable (stop and surface).** The fix would change
+  workflow semantics, protocol/API surface, the shipped feature set, or the
+  release version; or the root cause is unclear. Surface the failure with a
+  recommendation and wait.
+
+Tag-move rule: moving a tag is permitted **only while no release artifact has
+been published under it**. Once a GitHub release exists for the tag, ship a new
+patch version instead of moving the tag.
 
 ## Post-ship
 
