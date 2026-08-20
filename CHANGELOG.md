@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.41.1 - 2026-08-20
+
+### Changed
+- **Ready-promotion relaxed to dependency closure.** `lead-write-ticket` now
+  lands a ticket in `ready/` when the tickets its earliest unfinished phase
+  block-depends on are in `ready/`, `.done/`, or the same bulk-promotion action —
+  a closed work front that drains in dependency order — instead of refusing
+  `ready/` until every dependency had landed in `.done/`. Dependencies count only
+  through `related: <stem>: prerequisite` / prerequisite `parent:` edges; a
+  prose-only mention or an epic-hierarchy `parent:` does not.
+- **Bulk ready promotion.** A dependency chain can be promoted to `ready/` in one
+  action via the new `## On: Bulk Ready Promotion` handler: prerequisites first,
+  each ticket's spec-address and sage-review gates run, the landed set committed
+  as one unit, the promoted prefix committed on a mid-run block. Cascade Edit now
+  also runs the sage review gate per `ready/`-entering target, closing a latent
+  gap where cascaded promotions skipped it.
+
 ## v0.41.0 - 2026-08-14
 
 ### Added
