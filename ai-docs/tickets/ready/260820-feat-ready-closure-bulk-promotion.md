@@ -5,6 +5,7 @@ spec:
 related-mental-model:
   - workflow-skills
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Relax ready-promotion to dependency-closure + add bulk ready promotion
