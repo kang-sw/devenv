@@ -24,6 +24,7 @@ Scope
 - Read only ticket files selected as edit targets, graph tickets needed for binding-decision review, required conventions, focus updates, and explicitly routed spec/mental-model checks.
 - Review related-ticket decisions by default; cascade (`judge: cascade-ticket-edit`) only for broader board or multi-ticket propagation.
 - Ready promotion requires spec addressing (`judge: spec-address-gate`).
+- Ready landing requires dependency closure (**Dependency Closure Check**).
 
 Movement
 - Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create_empty` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.
@@ -36,7 +37,7 @@ Movement
 2. If `user request` references an existing ticket, read it.
 3. Classify category (`judge: ticket-category`); for a new ticket, choose initial status (`judge: initial-status`). For a proceed-routed actionable `todo/` ticket, set the requested change to ready promotion.
 4. Call `{{.McpNamespace}}/tickets.template(type: "<category>")` for the typed body skeleton.
-5. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
+5. Apply `judge: cascade-ticket-edit` then `judge: bulk-ready-promotion`; if either fires, run **Cascade Edit** or **Bulk Ready Promotion** respectively and stop ordinary single-target routing.
 6. For actionable creation or edits, run **Cross-ticket decision review** before drafting.
 7. For workset creation or edits, verify each existing included ticket's path, current status directory, and stated role; convert missing tickets to planned references or stop on a blocker.
 
@@ -58,7 +59,7 @@ Movement
 ### 4. Verify
 
 1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
-2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check**.
+2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check** and **Dependency Closure Check**.
 
 ### 5. Ground
 
@@ -100,7 +101,7 @@ For each reviewer named by `tickets.sage_gate`, and for each stage the gate repo
 1. `.done/` via `tickets.close` writes `completed:` automatically; a native `git mv` fallback requires adding it manually.
 2. Workset → `ready/` as the only requested change: make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.
 3. Workset → `ready/` combined with other edits: do not move status; keep only the valid content edits.
-4. Deferred `todo/` → `ready/` promotion: move only after **Spec-address Check** passes.
+4. Deferred `todo/` → `ready/` promotion: move only after **Spec-address Check** and **Dependency Closure Check** pass.
 
 ## On: Open Decision Queue
 
@@ -122,6 +123,14 @@ Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promoti
 2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
 3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance.
 4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/`; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
+
+## On: Dependency Closure Check
+
+Applies at every `ready/` landing (new `ready/` creation and `todo/` → `ready/` promotion, single or bulk).
+
+1. Land a ticket in `ready/` only when every ticket the earliest unfinished phase block-depends on is in `ready/`, `.done/`, or the same bulk-promotion set; a later phase's dependency does not block the landing.
+2. Record each blocking dependency as a `related: <stem>: prerequisite` or a prerequisite `parent:` frontmatter edge; a prose-only mention or an epic-hierarchy `parent:` does not count.
+3. If a blocking dependency is outside `ready/`/`.done/` and not in the promotion set: do not move to `ready/`; name the blocking stem and stop.
 
 ## On: Output Handoff
 
@@ -150,9 +159,18 @@ Applies to a single edit target; **Cascade Edit** reuses this logic across multi
 
 1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to the project's active ticket inventory (`{{.McpNamespace}}/tickets.list`, or `ai-docs/_index.md` active inventory when the project has not migrated off it) when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
 2. Apply per-target decision recording per **Cross-ticket decision review**.
-3. Do not promote a target to `ready/` unless the user explicitly asked for ready promotion or routed through `{{.SkillNamespace}}:lead-proceed`; run **Spec-address Check** before commit for any target entering `ready/`.
+3. Do not promote a target to `ready/` unless the user explicitly asked for ready promotion or routed through `{{.SkillNamespace}}:lead-proceed`; for each target entering `ready/`, run **Spec-address Check**, **Dependency Closure Check**, and the **Sage Review Gate** before commit.
 4. Run **Verify** across the edited set; commit one logical documentation unit when the edits are one decision propagation.
 5. Report edited ticket paths; if exactly one actionable implementation ticket is the natural next target, emit `Next Ticket: <path>` before the final artifact line. Always emit the edited/current ticket path as the final `Ticket:` line.
+
+## On: Bulk Ready Promotion
+
+Promotes two or more tickets to `ready/` in one action (`judge: bulk-ready-promotion`).
+
+1. Collect the named tickets plus every prerequisite they block-depend on; run **Dependency Closure Check** over the whole set and stop before any move if a blocking dependency falls outside `ready/`/`.done/` and the set.
+2. Order the set by `related:`/`parent:` prerequisite edges, prerequisites first.
+3. For each ticket in order: move it to `ready/` via `{{.McpNamespace}}/tickets.move(stem, to: "ready")`, then run **Spec-address Check** and the **Sage Review Gate**; on a `block` the gate moves that ticket back and stops the run.
+4. Commit the tickets that landed as one logical unit via `{{.McpNamespace}}/git.commit`, with one `## AI Context` naming the promotion order; if the run stopped on a `block`, that set is the promoted prefix — report which landed and which stopped with the blocker.
 
 ## Judgments
 
@@ -175,7 +193,7 @@ Mechanics: see **On: Spec-address Check**; stop condition is `judge: missing-spe
 `idea/`: exploratory or underspecified.
 `todo/`: accepted actionable backlog, or a non-actionable coordination artifact.
 `ready/`: already spec-addressed.
-Blocked on unlanded work: not `ready/` when the earliest unfinished phase waits on a ticket that has not landed, however complete the spec addressing; name the blocking stem in the ticket.
+Blocked dependency: choose `ready/` only when every blocking dependency is in `ready/`/`.done/` or the same bulk-promotion set; otherwise choose `todo/` — see **Dependency Closure Check**.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`. See the workflow manual's Ticket System Concepts section for what each status directory means.
 
@@ -183,6 +201,11 @@ Uncertain: prefer `idea/`. See the workflow manual's Ticket System Concepts sect
 
 Trigger: user asks to cascade broadly, reorganize a board and children, or update parent and child tickets beyond target-constraining decisions.
 Do not trigger: a ticket merely has `related:` links or default cross-ticket decision review applies.
+
+### judge: bulk-ready-promotion
+
+Trigger: user asks to move two or more tickets to `ready/` in one action.
+Do not trigger: a single ready promotion (ordinary Route path), or a decision-propagation cascade (`judge: cascade-ticket-edit`).
 
 ### judge: needs-open-decision-queue
 

@@ -206,9 +206,11 @@ needs to be actionable. `todo/` is accepted backlog: the intent is
 recoverable and worth doing, but implementation has not started and a spec
 contract may not exist yet. `ready/` is the implementation-ready status: the
 ticket's caller-visible behavior is addressed by a spec (existing or newly
-declared), so a fresh session can proceed without inventing product
-decisions. `.done/` and `.dropped/` are terminal: completed work and
-abandoned scope, respectively.
+declared), and the dependencies blocking its earliest unfinished phase are
+themselves in `ready/` or `.done/` — so the `ready/` set is a closed work front
+that drains in dependency order, and a dependent reaches `ready/` only alongside
+or after its prerequisites (recorded as `related:`/`parent:` edges). `.done/` and
+`.dropped/` are terminal: completed work and abandoned scope, respectively.
 
 ### Type prefix: feat / bug / refactor / chore
 

@@ -677,19 +677,30 @@ ticket makes about it, so it can spot-check the populator's citations without
 becoming a second surveyor.
 {#260729-ticket-reviewer-policy-resolution}
 
-Two authoring rules follow from the corpus checks having something to report.
-`judge: initial-status` refuses `ready/` when the earliest unfinished phase waits
-on a ticket that has not landed, however complete the spec addressing, and names
-the blocking stem — `ready/` means direct implementation target, so a ticket that
-cannot be started is not one. It is cut on the earliest unfinished phase rather
-than the ticket as a whole, because a ticket whose first phase is independent is
-startable regardless of what a later phase waits on. The judge fires before the
-Ground stage runs, so it decides from what the lead has already read; the
-populator's dependency-status decision gap is the backstop for what the lead
-missed, and reaches the user through the Open Decision Queue. This is a separate
-layer from `lead-drain-ready-queue`'s dispatch-time blocker skip: that filter reads the
-`## Blocked (` record a sage stamp writes, keeps a ticket out of a selection, and
-neither depends on nor repairs this rule.
+`judge: initial-status` and every `todo/` → `ready/` promotion defer to one
+gate, `## On: Dependency Closure Check`: a ticket lands in `ready/` only when the
+tickets its earliest unfinished phase block-depends on are already in `ready/`,
+`.done/`, or the same bulk-promotion action. `ready/` is a **closed work front**
+that drains in dependency order — a dependent may sit in `ready/` beside its
+prerequisite — not a set of tickets each startable in isolation; this relaxes an
+earlier bar that refused `ready/` until every dependency had landed in `.done/`.
+The gate is cut on the earliest unfinished phase, because a ticket whose first
+phase is independent is startable regardless of what a later phase waits on, and
+a blocking dependency counts only through a machine-readable
+`related: <stem>: prerequisite` or prerequisite `parent:` edge — never a
+prose-only mention or an epic-hierarchy `parent:`. `judge: initial-status` still
+fires before the Ground stage from what the lead has already read; the
+populator's dependency-status decision gap remains the backstop, reaching the
+user through the Open Decision Queue, and is a separate layer from
+`lead-drain-ready-queue`'s dispatch-time `## Blocked (` skip.
+
+Two or more tickets entering `ready/` in one action route to `## On: Bulk Ready
+Promotion` (`judge: bulk-ready-promotion`), which promotes them
+prerequisites-first — so each closure check passes against an already-promoted
+prerequisite — and commits the tickets that landed as one unit. It is
+deliberately separate from Cascade Edit, whose selection is
+decision-propagation-scoped; Cascade Edit itself now runs the Sage Review Gate,
+not only the Spec-address Check, per `ready/`-entering target.
 
 Epic detail belonging to a child that does not exist yet is recorded as the epic
 skeleton's `- Planned:` entry rather than deferred to a separate invocation.

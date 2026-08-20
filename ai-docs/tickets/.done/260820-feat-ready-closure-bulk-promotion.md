@@ -6,6 +6,7 @@ related-mental-model:
   - workflow-skills
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-20
 ---
 
 # Relax ready-promotion to dependency-closure + add bulk ready promotion
@@ -98,6 +99,34 @@ Verification:
   runtime contract).
 - The `feat` template already carries `related: <stem>: prerequisite` notation,
   so no template change is required.
+
+### Result (a88b75fb) - 2026-08-20
+
+Landed the closed-set ready gate across playbook, spec, and mental model.
+
+- `lead-write-ticket`: `judge: initial-status` closed-set form; new single-sourced
+  `## On: Dependency Closure Check`; new `## On: Bulk Ready Promotion` +
+  `judge: bulk-ready-promotion`; Cascade Edit now runs the Sage Review Gate per
+  `ready/`-entering target. `lead-workflow-manual`: `ready/` redefined as a closed
+  work front draining in dependency order.
+- Regenerated the wsflow byte-identical rsrc mirror and both rsrc manifests.
+- Spec `{#260729-write-ticket-unlanded-dependency-status}` rewritten to the
+  closed-set gate + bulk handler + Cascade sage-gate fix (anchor stem preserved,
+  epic Planned-reference paragraph kept). Mental-model entry added for the
+  closed-work-front invariant and the epic-hierarchy-`parent:` deadlock trap.
+
+Deviations from the plan's sync list:
+
+- Only the spec `{#260729}` actually stated the old unlanded bar. `ticket-conventions`,
+  the `documentation-system` spec/mental-model, and `WORKFLOW.md` state "`ready/` =
+  spec-addressed implementation target" without the unlanded-dependency rule, so
+  they were left unchanged (surgical scope) rather than reworded.
+- No drift-guard test pinned the changed playbook prose, so no test fixup was
+  needed beyond the regenerated manifest/mirror.
+
+Verification: `go test ./internal/wsrsrc -count=1`, `./internal/mcp`, `./internal/wsdoc`
+all green; `go build ./...` clean; `python3 -m unittest discover agents-plugin-wsflow/tests`
+green (10 tests).
 
 ## Spec Impact
 
