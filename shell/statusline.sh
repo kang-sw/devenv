@@ -57,6 +57,23 @@ IFS= read -r -d '' -t 5 input
 # name) can never be misread as control codes.
 ESC=$'\033'
 
+# EPOCHSECONDS is a bash 5 builtin. macOS ships bash 3.2, where it is unset —
+# so derive a NOW once from `date` there (one fork on that platform only) and
+# use it everywhere below. Linux / Git-Bash keep the fork-free builtin path.
+NOW=${EPOCHSECONDS:-$(date +%s)}
+
+# The date pills below lean on gawk's mktime/strftime. macOS ships BSD awk (and
+# some Linux boxes ship mawk); both abort the WHOLE program the instant either
+# function is called, which blanks every derived field — the "no data on Mac"
+# symptom. Probe once: when the functions are missing, the awk program skips the
+# time calls (guarded by `hastime`) and the three date strings are filled by
+# `date` afterward instead. gawk hosts keep the single-awk, zero-date-fork path.
+if awk 'BEGIN { strftime("%H"); mktime("1970 01 01 00 00 00") }' >/dev/null 2>&1; then
+  HAS_AWK_TIME=1
+else
+  HAS_AWK_TIME=0
+fi
+
 # Resolve a jq binary. Claude Code runs this statusline in a non-interactive
 # shell, which does NOT source ~/.zshrc / ~/.bash_profile — so PATH additions
 # that only exist there (e.g. linuxbrew's `brew shellenv`) are absent and a
@@ -65,8 +82,8 @@ ESC=$'\033'
 if command -v jq >/dev/null 2>&1; then
   JQ=jq
 else
-  for _c in /home/linuxbrew/.linuxbrew/bin/jq /usr/local/bin/jq /usr/bin/jq \
-    "$(command -v jq.exe 2>/dev/null)"; do
+  for _c in /home/linuxbrew/.linuxbrew/bin/jq /opt/homebrew/bin/jq \
+    /usr/local/bin/jq /usr/bin/jq "$(command -v jq.exe 2>/dev/null)"; do
     if [[ -n $_c && -x $_c ]]; then
       JQ=$_c
       break
@@ -178,7 +195,8 @@ IFS=$'\x1f' read -r TOKENS_USED_FMT CTX_MAX_FMT OUTPUT_TOKENS_FMT PCT CACHE_HIT 
            -v cread="$CACHE_READ" -v ccreate="$CACHE_CREATE" \
            -v r5="$_RATE_5HR" -v r5reset="$RATE_5HR_RESETS" \
            -v r7="$RATE_7D_RAW" -v r7reset="$RATE_7D_RESETS" \
-           -v nowep="$EPOCHSECONDS" -v iso="$LAST_MSG_ISO" -v rcol="$RCOL" '
+           -v nowep="$NOW" -v iso="$LAST_MSG_ISO" -v rcol="$RCOL" \
+           -v hastime="$HAS_AWK_TIME" '
 function commafy(n,   s, r, l, i) {
   s = sprintf("%d", int(n)); r = ""; l = length(s)
   for (i = 1; i <= l; i++) {
@@ -291,10 +309,33 @@ BEGIN {
     budget_delta(r5, e5, 18000) SEP budget_delta(r7, e7, 604800) SEP \
     pct_color(pct_raw, 38) SEP pct_color(r5i, 38) SEP pct_color(r7i, 38) SEP \
     cache_hit_color SEP r5i SEP r7i SEP \
-    strftime("%HH", r5reset) SEP strftime("%a", r7reset) SEP \
-    iso_to_local_hm(iso) SEP \
+    (hastime ? strftime("%HH", r5reset) : "") SEP \
+    (hastime ? strftime("%a", r7reset) : "") SEP \
+    (hastime ? iso_to_local_hm(iso) : "") SEP \
     make_bar(pct_raw, rcol - 3, " " pct "%")
 }')"
+
+# Fallback for time-function-less awk (macOS BSD awk, mawk): the program left
+# RATE_5HR_RESET_FMT / RATE_7D_TTL / LAST_UPD_ABS empty, so fill them with
+# `date`. BSD `date -r EPOCH` and GNU `date -d @EPOCH` disagree, so try both.
+# This path only forks on platforms without a time-capable awk.
+if ((HAS_AWK_TIME == 0)); then
+  _fmt_epoch() { # $1=epoch  $2=strftime format
+    date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
+  }
+  [[ $RATE_5HR_RESETS =~ ^[0-9]+$ ]] && RATE_5HR_RESET_FMT=$(_fmt_epoch "$RATE_5HR_RESETS" '%HH')
+  [[ $RATE_7D_RESETS =~ ^[0-9]+$ ]] && RATE_7D_TTL=$(_fmt_epoch "$RATE_7D_RESETS" '%a')
+  # Transcript stamps UTC; render as local HH:MM. GNU date parses the ISO when
+  # marked UTC ("...Z"); BSD date needs an explicit UTC parse to epoch first.
+  if [[ $LAST_MSG_ISO =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2} ]]; then
+    _iso="${LAST_MSG_ISO:0:19}"
+    LAST_UPD_ABS=$(date -d "${_iso}Z" +%H:%M 2>/dev/null)
+    if [[ -z $LAST_UPD_ABS ]]; then
+      _iso_ep=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$_iso" +%s 2>/dev/null)
+      [[ -n $_iso_ep ]] && LAST_UPD_ABS=$(date -r "$_iso_ep" +%H:%M 2>/dev/null)
+    fi
+  fi
+fi
 
 # Delta colors: over budget → red, under budget → green
 _DC_5HR=$FG_DIMMER
@@ -353,7 +394,7 @@ if [[ -r $_cache_file ]]; then
       read -r _c_add && read -r _c_del && read -r _c_mod && read -r _c_unt &&
       read -r _c_end
   } <"$_cache_file" 2>/dev/null
-  if [[ $_c_end == OK && $_c_ts =~ ^[0-9]+$ ]] && ((EPOCHSECONDS - _c_ts < 2)); then
+  if [[ $_c_end == OK && $_c_ts =~ ^[0-9]+$ ]] && ((NOW - _c_ts < 2)); then
     BRANCH_NAME=$_c_branch
     GIT_AHEAD=$_c_ahead
     GIT_BEHIND=$_c_behind
@@ -387,7 +428,7 @@ if ((_cache_hit == 0)); then
       [[ $_d == '-' ]] && _d=0
       ((GIT_ADDED += _a, GIT_DELETED += _d, GIT_MODIFIED++))
     done <<<"$(git diff --numstat 2>/dev/null)"
-    printf '%s\n' "$EPOCHSECONDS" "$BRANCH_NAME" "$GIT_AHEAD" "$GIT_BEHIND" \
+    printf '%s\n' "$NOW" "$BRANCH_NAME" "$GIT_AHEAD" "$GIT_BEHIND" \
       "$GIT_ADDED" "$GIT_DELETED" "$GIT_MODIFIED" "$GIT_UNTRACKED" OK \
       >"$_cache_file" 2>/dev/null
   }
