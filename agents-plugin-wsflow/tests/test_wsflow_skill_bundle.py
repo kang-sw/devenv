@@ -230,7 +230,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
         text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version: v0007 -->", text)
+        self.assertIn("<!-- Template Version: v0008 -->", text)
         self.assertIn("This template has package-local version history", text)
 
         # The forbidden markers are derived from the full-plugin lineage's

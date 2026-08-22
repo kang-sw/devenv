@@ -41,6 +41,15 @@ cleanly once it is gone. A migrated project carries no `_index.md`; a
 fresh-bootstrapped project never creates one. Both reach the same
 `AGENTS.md`-anchored shape.
 
+**Local/untracked project memory.** The current model has no standalone
+`ai-docs/_index.local.md` file. Machine-local procedure content (credentials,
+IPs, hostnames, host-specific runbooks) lives in gitignored
+`ai-docs/manuals/*.local.md` siblings alongside the tracked manuals they
+complement. Volatile local context that should not be shared through Git
+lives in the `worktree` or `clone` note layer (`worktree` by default, `clone`
+only when the content is shared across worktrees of the same clone) — never
+in a hand-maintained local index file.
+
 ## Project Old Archive {#260511-project-old-archive}
 
 `ai-docs/.old/` is the tracked project archive for files that are no longer

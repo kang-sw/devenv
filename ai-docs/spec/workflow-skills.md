@@ -1208,6 +1208,20 @@ template body directly. A fresh-bootstrapped project and an upgrade-migrated
 project converge on the same `AGENTS.md` shape, neither carrying an `_index.md`.
 {#260812-bootstrap-index-dissolution}
 
+A companion versioned migration item retires `ai-docs/_index.local.md` the
+same way. On upgrade, `lead-bootstrap` splits the file's content by judgment
+into two regions — machine-local procedure content (credentials, IPs,
+hostnames, host-specific runbooks) into a new gitignored
+`ai-docs/manuals/*.local.md` sibling, and volatile local context into the
+`worktree` note layer by default, or the `clone` layer only when the content
+is judged clone-wide rather than worktree-specific — removes the
+read-`_index.local.md` step, removes the layout-tree entry describing it, and
+deletes the file. On a fresh bootstrap the scaffold no longer creates
+`_index.local.md`. A fresh-bootstrapped project and an upgrade-migrated
+project converge on the same shape, neither carrying an `_index.local.md`,
+mirroring the `_index.md` dissolution above.
+{#260822-bootstrap-index-local-dissolution}
+
 While a project still has an `ai-docs/_index.md` — an un-migrated but supported
 transitional state — bootstrap runs an advisory index health check gated on the
 file existing. The first pass reads only `_index.md`; when candidates exist, it
