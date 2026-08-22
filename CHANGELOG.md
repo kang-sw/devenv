@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.41.2 - 2026-08-22
+
+### Changed
+- **`_index.local.md` dissolved as the local project-memory store.** A new
+  versioned `lead-bootstrap` migration (ws v0047 / wsflow v0008), symmetric with
+  the v0046 `_index.md` dissolution, retires the live read-step across both
+  packages and root `AGENTS.md`. On upgrade it splits an existing
+  `_index.local.md` by content — machine-local procedures to a gitignored
+  `ai-docs/manuals/*.local.md` sibling, volatile context to the `worktree` note
+  layer by default (or `clone` when clone-wide) — then deletes the file; fresh
+  bootstrap never creates one. The two template lineages stay independent by
+  design and are not forced to align. `documentation-system.md` and
+  `workflow-skills.md` gained the matching spec anchors.
+- **Statusline redesigned to a 3-line natural-width layout** with a
+  reasoning-effort indicator and the cost pill relocated to the model row, right
+  of the model.
+
+### Fixed
+- **Statusline renders on macOS BSD awk / bash 3.2**, fixing breakage on the
+  default macOS toolchain.
+
 ## v0.41.1 - 2026-08-20
 
 ### Changed
