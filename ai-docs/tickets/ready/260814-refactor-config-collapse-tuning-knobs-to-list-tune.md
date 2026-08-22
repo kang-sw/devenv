@@ -177,6 +177,63 @@ code (fold into resolver, else registry-backed adapter). Verification: full Go t
 suite green with no tool-surface diff (`runtime.json` and `tools/list` unchanged);
 the wsflow runtime-contract test unchanged and passing.
 
+### Result (d722e864) - 2026-08-23
+
+Caller-visible delta: none — Phase 1 landed as the pure internal refactor. Added
+`agents-plugin-tool/internal/mcp/config_registry.go` as the single per-key config
+registry (5 static entries + a `prompt.*` dynamic template) and rewired every
+consumer to read from it: the dispatch value/selector validators,
+`buildTuningCatalog` (now sourcing field/enum metadata from the registry instead
+of scraping `tools()` schemas), and the three gating tables. Deleted the dead
+scrape helpers (`tuningFieldFromSchema`, `toolInputSchemaDetails`,
+`propertyString`, `propertyStringSlice`).
+
+Decisions resolved against the code:
+- **agents_tier resolver-bypass → adapter fallback** (the ticket's documented
+  fallback, Constraints). Evidence: `wsconfig.SetAgentsTierForHarness` writes a
+  structured `AgentTier{Backend,Model,Effort}` into `cfg.Agents.ModelAliases` — a
+  different `Config` shape than the resolver's flat `cfg.Overrides[key]=string` —
+  and the tool has no scope arg, so a resolver fold would be a capability
+  extension, out of bounds for a behavior-preserving phase. `agents.tier` keeps
+  its direct write (`ResolverBacked:false`); only its enum constants moved into
+  the registry.
+- **Authority derives from `wsconfig.GlobalOnly`**, not a duplicated hardcoded
+  list; gating table 4 (`workflowPreferenceWriterTool`) collapses into a derived
+  view (Decision 6).
+- **`tools()` schema literals left structurally untouched** (shared enum vars),
+  so `tools/list` is byte-for-byte identical (Decision 3 / no-diff bar).
+
+Deviation from plan: added a fail-closed guard (`requireConfigKeyEntry`, tip
+commit d722e864) so a registry miss in the dispatch validators errors instead of
+silently skipping validation via `enumContains(nil, …)` returning true. Closes a
+latent trap Phase 2's `config.tune` (arbitrary runtime keys) would otherwise hit;
+behavior-preserving for Phase 1 (all current names resolve).
+
+Verification: `go build`/`go vet` clean; full Go suite green (with
+`WS_SKILLS_ROOT` set); both `runtime.json` and the ten `config.*` tools/list
+schemas byte-for-byte unchanged (independently diffed at the commit boundaries via
+the built `ws-mcp` binary); wsflow runtime-contract test passes unmodified.
+
+Review: partitioned correctness/fit/test — clean. Two minors: one fixed
+(fail-closed guard above); one accepted — the registry's `GlobalOnly()` /
+`DefaultScope()` methods are inert scaffolding with no Phase 1 call sites, staged
+for Phase 2's scope-routing consumer.
+
+Deferred to Phase 2 (per this ticket's Spec Impact / Constraints): the
+`mcp-runtime` mental-model and `mcp-tools.md` spec rewrites are assigned to the
+Phase 2 external-surface landing, so they are intentionally untouched here rather
+than churned across the phase boundary. A true resolver fold for `agents.tier`
+remains out of this ticket's scope.
+
+> Forward: Phase 2 builds `config.list`/`config.tune` on the registry's currently
+> inert `GlobalOnly()`/`DefaultScope()` methods and must wire scope routing
+> through them; the `agents.tier` adapter (`ResolverBacked:false`) must stay a
+> compound writer, not be flattened.
+
+Pre-existing, unrelated (captured separately as an idea ticket): `go test ./...`
+bare fails without `WS_SKILLS_ROOT` because `TestMain` only defaults
+`WS_RSRC_ROOT` — confirmed identical on the base commit.
+
 ### Phase 2: Swap the surface — add `config.list` + `config.tune`, remove the ten
 
 Add the two new tools consuming the Phase 1 registry, remove all ten per-knob tools
