@@ -117,7 +117,7 @@ type stageOutcome struct {
 
 // SageGate resolves the sage-review gate for a landing, porting the
 // lead-write-ticket gate + per-stage posture prose. resolvedSageReviewConfig is
-// the config.show sage_review value resolved by the caller (used only for the
+// the config.list sage_review value resolved by the caller (used only for the
 // missing/pending config-fallback branch).
 func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string) (SageGateResult, error) {
 	stem := strings.TrimSpace(opts.TicketStem)
@@ -188,7 +188,7 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 }
 
 // resolveConcretePosture returns the effective posture for a stage, applying the
-// missing/pending config.show fallback and persisting the resolved value.
+// missing/pending config.list fallback and persisting the resolved value.
 func resolveConcretePosture(ticketAbs, field, posture, resolvedConfig string) (string, error) {
 	p := strings.TrimSpace(posture)
 	if p == "" || p == "pending" {

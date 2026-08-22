@@ -1477,7 +1477,7 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 		!strings.Contains(err.Error(), "backend invocation failed") ||
 		!strings.Contains(err.Error(), "- claude: "+claudePath) ||
 		!strings.Contains(err.Error(), "re-run ws.mercenary.register") ||
-		!strings.Contains(err.Error(), "config.agents_tier") {
+		!strings.Contains(err.Error(), "config.tune(key: agents.tier)") {
 		t.Fatalf("RunCurrent error = %v", err)
 	}
 	status, err := manager.Status(repo, "impl")
@@ -1551,7 +1551,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		"backend: bogus",
 		"model: bogus-model",
 		"re-run ws.mercenary.register",
-		"config.agents_tier",
+		"config.tune(key: agents.tier)",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("RunCurrent error missing %q:\n%v", want, err)

@@ -1552,7 +1552,7 @@ func backendInvocationError(agent Agent, err error) error {
 		}
 	}
 	b.WriteString("Existing agents keep stored backend/model; re-run ws.mercenary.register with backend/model to switch an existing agent.\n")
-	b.WriteString("Future registrations can change tier defaults with config.agents_tier.\n")
+	b.WriteString("Future registrations can change tier defaults with config.tune(key: agents.tier).\n")
 	return errors.New(b.String())
 }
 

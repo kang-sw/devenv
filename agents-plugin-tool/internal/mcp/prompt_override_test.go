@@ -704,20 +704,20 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	// --- Set override via the real config.prompt.set dispatch ---
 	// Scope: session (explicit) so the test exercises the session-scope write path
 	// and does not touch the project-scope file on disk.
-	setResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
+	setResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
-		"pointId":     "UserPreferenceSection",
+		"key":         "prompt.UserPreferenceSection",
 		"harness":     "claude",
-		"prompt":      overrideText,
+		"value":       overrideText,
 		"scope":       "session",
 	})
 	setText := toolText(t, setResp)
 	// Confirm the tool returned the expected confirmation line.
 	if !strings.Contains(setText, "prompt override set: UserPreferenceSection/claude") {
-		t.Fatalf("config.prompt.set confirmation missing: %s", setText)
+		t.Fatalf("config.tune prompt-set confirmation missing: %s", setText)
 	}
 	if !strings.Contains(setText, "scope: session") {
-		t.Fatalf("config.prompt.set must report session scope: %s", setText)
+		t.Fatalf("config.tune prompt-set must report session scope: %s", setText)
 	}
 
 	// --- Render with the override active ---
@@ -739,17 +739,17 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	// Store an all-bucket override. Since a claude-specific override already exists,
 	// the per-harness key must win and the all-bucket text must not appear.
 	const allOverrideText = "All-harness override — should lose to claude-specific."
-	allSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
+	allSetResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
-		"pointId":     "UserPreferenceSection",
+		"key":         "prompt.UserPreferenceSection",
 		"harness":     "*",
-		"prompt":      allOverrideText,
+		"value":       allOverrideText,
 		"scope":       "session",
 	})
 	allSetText := toolText(t, allSetResp)
 	// Confirm the harness normalization: "*" is stored as "all".
 	if !strings.Contains(allSetText, "prompt override set: UserPreferenceSection/all") {
-		t.Fatalf("config.prompt.set (all bucket) confirmation missing: %s", allSetText)
+		t.Fatalf("config.tune prompt-set (all bucket) confirmation missing: %s", allSetText)
 	}
 
 	// Render again — claude-specific override must still win.
@@ -790,22 +790,22 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 
 	// Seed a project-scope override beneath the session override so the
 	// post-unset fallback lands somewhere concrete rather than the seed default.
-	projectSetResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
+	projectSetResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
-		"pointId":     "UserPreferenceSection",
+		"key":         "prompt.UserPreferenceSection",
 		"harness":     "claude",
-		"prompt":      "project-scope fallback text",
+		"value":       "project-scope fallback text",
 		"scope":       "project",
 	})
 	if !strings.Contains(toolText(t, projectSetResp), "scope: project") {
 		t.Fatalf("project-scope seed set failed: %s", projectSetResp)
 	}
 
-	sessionSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
+	sessionSetResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
-		"pointId":     "UserPreferenceSection",
+		"key":         "prompt.UserPreferenceSection",
 		"harness":     "claude",
-		"prompt":      "session-scope override text",
+		"value":       "session-scope override text",
 		"scope":       "session",
 	})
 	if !strings.Contains(toolText(t, sessionSetResp), "scope: session") {
@@ -823,18 +823,19 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 
 	// Unset at session scope — must not require a global-scope detour and must
 	// not clear the value to empty.
-	unsetResp := callToolOnce(t, s, 3, "config.prompt.unset", map[string]any{
+	unsetResp := callToolOnce(t, s, 3, "config.tune", map[string]any{
 		"session_key": key,
-		"pointId":     "UserPreferenceSection",
+		"key":         "prompt.UserPreferenceSection",
 		"harness":     "claude",
 		"scope":       "session",
+		"reset":       true,
 	})
 	unsetText := toolText(t, unsetResp)
 	if strings.Contains(unsetText, `"isError":true`) {
-		t.Fatalf("config.prompt.unset with scope=session must succeed: %s", unsetResp)
+		t.Fatalf("config.tune prompt-reset with scope=session must succeed: %s", unsetResp)
 	}
 	if !strings.Contains(unsetText, "prompt override cleared: UserPreferenceSection/claude (scope: session)") {
-		t.Fatalf("config.prompt.unset confirmation missing: %s", unsetText)
+		t.Fatalf("config.tune prompt-reset confirmation missing: %s", unsetText)
 	}
 
 	// Falls back to the project-scope value, not to an empty override.
@@ -873,27 +874,30 @@ func TestConfigPromptSetValidationAndDefaultScope(t *testing.T) {
 	}{
 		{
 			label:   "empty session_key",
-			args:    map[string]any{"session_key": "", "pointId": "DelegationSection", "harness": "claude", "prompt": "x"},
+			args:    map[string]any{"session_key": "", "key": "prompt.DelegationSection", "harness": "claude", "value": "x"},
 			wantMsg: "session_key is required",
 		},
 		{
-			label:   "empty pointId",
-			args:    map[string]any{"session_key": key, "pointId": "", "harness": "claude", "prompt": "x"},
-			wantMsg: "pointId must be non-empty",
+			// config.tune folds pointId into the generic key argument, so the
+			// pre-collapse "empty pointId" guard is now the generic "key is
+			// required" guard (config.prompt.set no longer exists).
+			label:   "empty key",
+			args:    map[string]any{"session_key": key, "key": "", "harness": "claude", "value": "x"},
+			wantMsg: "key is required",
 		},
 		{
 			label:   "invalid harness",
-			args:    map[string]any{"session_key": key, "pointId": "DelegationSection", "harness": "vscode", "prompt": "x"},
+			args:    map[string]any{"session_key": key, "key": "prompt.DelegationSection", "harness": "vscode", "value": "x"},
 			wantMsg: "harness must be one of",
 		},
 		{
 			label:   "empty prompt",
-			args:    map[string]any{"session_key": key, "pointId": "DelegationSection", "harness": "claude", "prompt": "   "},
+			args:    map[string]any{"session_key": key, "key": "prompt.DelegationSection", "harness": "claude", "value": "   "},
 			wantMsg: "prompt must be non-empty",
 		},
 	}
 	for i, tc := range negatives {
-		resp := callToolOnce(t, s, 1000+i, "config.prompt.set", tc.args)
+		resp := callToolOnce(t, s, 1000+i, "config.tune", tc.args)
 		if !strings.Contains(resp, `"isError":true`) {
 			t.Errorf("%s: expected isError:true response, got: %s", tc.label, resp)
 		}
@@ -903,22 +907,23 @@ func TestConfigPromptSetValidationAndDefaultScope(t *testing.T) {
 	}
 
 	// --- Default scope: omitting scope resolves to project for unregistered prompt.* keys. ---
-	defResp := callToolOnce(t, s, 1100, "config.prompt.set", map[string]any{
+	defResp := callToolOnce(t, s, 1100, "config.tune", map[string]any{
 		"session_key": key,
-		"pointId":     "DelegationSection",
+		"key":         "prompt.DelegationSection",
 		"harness":     "codex",
-		"prompt":      "default-scope override text",
+		"value":       "default-scope override text",
 	})
 	if defText := toolText(t, defResp); !strings.Contains(defText, "scope: project") {
 		t.Errorf("omitted scope must resolve to project, got: %s", defText)
 	}
 }
 
-// TestConfigPromptListEnumeratesDeclaredPoints verifies the read-only
-// config.prompt listing: it enumerates the two declared override-points in the
-// test tree (SeedSection, ExtSlot) with their descs, annotates the one seeded
-// override with its harness + session scope, shows the unset point as having no
-// overrides, and ends with the ws:lead-tune pointer.
+// TestConfigPromptListEnumeratesDeclaredPoints verifies config.list projects the
+// two declared override-points in the test tree (SeedSection, ExtSlot) as
+// prompt_override knobs carrying their descs, annotates the one seeded override
+// with its harness + session scope in the knob's current value, shows the unset
+// point as having no overrides, and keeps the stable ExtSlot-before-SeedSection
+// ordering. (config.prompt's dedicated listing was subsumed by config.list.)
 func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
 	useLeadProfile(t)
 
@@ -945,37 +950,46 @@ func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
 		t.Fatalf("seed override via resolver: %v", err)
 	}
 
-	resp := callToolOnce(t, s, 1, "config.prompt", map[string]any{
+	catalog := parseTuningCatalogResponse(t, callToolOnce(t, s, 1, "config.list", map[string]any{
 		"session_key": key,
-	})
-	text := toolText(t, resp)
+		"format":      "json",
+	}))
 
-	wantSubstrings := []string{
-		"SeedSection",
-		"a seeded override point",
-		"ExtSlot",
-		"an empty extension slot",
-		"harness=claude scope=session",
-		"(no overrides set)",
-		"ws:lead-tune",
+	seed := requireTuningKnob(t, catalog, "prompt.SeedSection")
+	if seed.Description != "a seeded override point" {
+		t.Errorf("SeedSection knob desc mismatch: %q", seed.Description)
 	}
-	for _, want := range wantSubstrings {
-		if !strings.Contains(text, want) {
-			t.Errorf("config.prompt listing missing %q:\n%s", want, text)
+	if cur := mustMarshalJSON(t, seed.Current); !strings.Contains(cur, `"harness":"claude"`) || !strings.Contains(cur, `"scope":"session"`) {
+		t.Errorf("SeedSection knob must annotate the seeded override harness/scope: %s", cur)
+	}
+
+	ext := requireTuningKnob(t, catalog, "prompt.ExtSlot")
+	if ext.Description != "an empty extension slot" {
+		t.Errorf("ExtSlot knob desc mismatch: %q", ext.Description)
+	}
+	if cur := mustMarshalJSON(t, ext.Current); cur != "[]" && cur != "null" {
+		t.Errorf("ExtSlot knob must carry no overrides: %s", cur)
+	}
+
+	// Ordering is stable: ExtSlot sorts before SeedSection in the knob catalog.
+	idxExt, idxSeed := -1, -1
+	for i := range catalog.Knobs {
+		switch catalog.Knobs[i].ID {
+		case "prompt.ExtSlot":
+			idxExt = i
+		case "prompt.SeedSection":
+			idxSeed = i
 		}
 	}
-
-	// ExtSlot has no override seeded, so its block must carry "(no overrides set)";
-	// SeedSection must carry the seeded annotation. Verify ordering is stable
-	// (ExtSlot sorts before SeedSection).
-	if idxExt, idxSeed := strings.Index(text, "ExtSlot"), strings.Index(text, "SeedSection"); idxExt < 0 || idxSeed < 0 || idxExt > idxSeed {
-		t.Errorf("expected ExtSlot to sort before SeedSection in listing:\n%s", text)
+	if idxExt < 0 || idxSeed < 0 || idxExt > idxSeed {
+		t.Errorf("expected ExtSlot to sort before SeedSection in catalog: ext=%d seed=%d", idxExt, idxSeed)
 	}
 }
 
-// TestConfigPromptListIncludesShippedUserPreferenceSection verifies that the
-// listing discovers shipped override-point markers from the rsrc tree rather
-// than from a curated schema.
+// TestConfigPromptListIncludesShippedUserPreferenceSection verifies that
+// config.list discovers shipped override-point markers from the rsrc tree rather
+// than from a curated schema, and that the removed DelegationSection marker is
+// gone. (config.prompt's dedicated listing was subsumed by config.list.)
 func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 	useLeadProfile(t)
 
@@ -990,26 +1004,17 @@ func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900300, root, nil))
 
-	resp := callToolOnce(t, s, 1, "config.prompt", map[string]any{
+	catalog := parseTuningCatalogResponse(t, callToolOnce(t, s, 1, "config.list", map[string]any{
 		"session_key": key,
-	})
-	text := toolText(t, resp)
+		"format":      "json",
+	}))
 
-	for _, want := range []string{
-		"UserPreferenceSection",
-		"user standing preferences for communication, terminology, and workflow behavior",
-	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("shipped config.prompt listing missing %q:\n%s", want, text)
-		}
+	userPref := requireTuningKnob(t, catalog, "prompt.UserPreferenceSection")
+	if !strings.Contains(userPref.Description, "user standing preferences for communication, terminology, and workflow behavior") {
+		t.Errorf("shipped UserPreferenceSection knob desc missing expected text: %q", userPref.Description)
 	}
-	for _, forbidden := range []string{
-		"DelegationSection",
-		"lead delegation eagerness and context-saving stance",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("shipped config.prompt listing must not expose removed %q:\n%s", forbidden, text)
-		}
+	if knob := findTuningKnob(catalog, "prompt.DelegationSection"); knob != nil {
+		t.Fatalf("shipped config.list must not expose removed DelegationSection marker: %+v", *knob)
 	}
 }
 
@@ -1028,7 +1033,7 @@ func TestConfigTuningShippedPromptKnobsOmitDelegationSection(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900301, root, nil))
 
-	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+	resp := callToolOnce(t, s, 1, "config.list", map[string]any{
 		"session_key": key,
 		"format":      "json",
 	})
@@ -1066,13 +1071,13 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("seed override via resolver: %v", err)
 	}
 
-	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+	resp := callToolOnce(t, s, 1, "config.list", map[string]any{
 		"session_key": key,
 		"format":      "json",
 	})
 	catalog := parseTuningCatalogResponse(t, resp)
 
-	textResp := callToolOnce(t, s, 2, "config.tuning", map[string]any{
+	textResp := callToolOnce(t, s, 2, "config.list", map[string]any{
 		"session_key": key,
 	})
 	text := toolText(t, textResp)
@@ -1088,10 +1093,10 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}
 
 	promptKnob := requireTuningKnob(t, catalog, "prompt.SeedSection")
-	if promptKnob.Writer.Tool != "config.prompt.set" || promptKnob.Writer.FixedArguments["pointId"] != "SeedSection" {
+	if promptKnob.Writer.Tool != "config.tune" || promptKnob.Writer.FixedArguments["key"] != "prompt.SeedSection" {
 		t.Fatalf("prompt knob writer mismatch: %+v", promptKnob.Writer)
 	}
-	if promptKnob.Reset == nil || promptKnob.Reset.Tool != "config.prompt.unset" || promptKnob.Reset.FixedArguments["pointId"] != "SeedSection" {
+	if promptKnob.Reset == nil || promptKnob.Reset.Tool != "config.tune" || promptKnob.Reset.FixedArguments["key"] != "prompt.SeedSection" || promptKnob.Reset.FixedArguments["reset"] != "true" {
 		t.Fatalf("prompt knob reset mismatch: %+v", promptKnob.Reset)
 	}
 	assertFieldEnum(t, promptKnob.SelectorFields, "harness", []string{"claude", "codex", "*"})
@@ -1102,7 +1107,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}
 
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
-	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
+	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch: %+v", subagentKnob.Writer)
 	}
 	assertFieldEnum(t, subagentKnob.ValueFields, "value", []string{"on", "off"})
@@ -1111,7 +1116,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}
 
 	mercenaryKnob := requireTuningKnob(t, catalog, "workflow.prefer_mercenary")
-	if mercenaryKnob.Writer.Tool != "config.workflow_prefer_mercenary" {
+	if mercenaryKnob.Writer.Tool != "config.tune" || mercenaryKnob.Writer.FixedArguments["key"] != "workflow.prefer_mercenary" {
 		t.Fatalf("workflow.prefer_mercenary writer tool mismatch: %+v", mercenaryKnob.Writer)
 	}
 	assertFieldEnum(t, mercenaryKnob.ValueFields, "value", []string{"on", "off", "hide"})
@@ -1123,7 +1128,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}
 
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
-	assertFieldEnum(t, agentsKnob.SelectorFields, "tier", []string{"small", "medium", "large", "xlarge"})
+	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 }
 
@@ -1143,7 +1148,7 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900500, root, nil))
 
-	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+	resp := callToolOnce(t, s, 1, "config.list", map[string]any{
 		"session_key": key,
 		"format":      "json",
 	})
@@ -1151,7 +1156,7 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
-	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
+	if subagentKnob.Writer.Tool != "config.tune" || subagentKnob.Writer.FixedArguments["key"] != "workflow.prefer_subagent" {
 		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
 	}
 	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary"} {
@@ -1161,7 +1166,7 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	}
 
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
-	assertFieldEnum(t, agentsKnob.SelectorFields, "tier", []string{"small", "medium", "large", "xlarge"})
+	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
 }
 

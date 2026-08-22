@@ -162,7 +162,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.show","arguments":{"format":"json"}}}`+"\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.list","arguments":{"format":"json"}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 	}
 	out.Reset()
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.show","arguments":{"format":"json"}}}`+"\n",
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.list","arguments":{"format":"json"}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 
 	out.Reset()
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`+"\n",
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.list","arguments":{}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"small","model":"claude-sonnet-4"}}}`+"\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","value":{"tier":"small","model":"claude-sonnet-4"}}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(byID["1"], "mercenary.register") || !strings.Contains(byID["1"], "mercenary.call") || !strings.Contains(byID["1"], "config.show") {
+	if !strings.Contains(byID["1"], "mercenary.register") || !strings.Contains(byID["1"], "mercenary.call") || !strings.Contains(byID["1"], "config.list") {
 		t.Fatalf("default profile hid lead tools: %s", byID["1"])
 	}
 }
@@ -508,7 +508,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	// tools/list advertises the full lead surface (schema visibility is advisory;
 	// the keyed call gate is the enforcement). Restricted tools remain visible.
 	listResp := callToolsList(t, server)
-	for _, name := range []string{"mercenary.status", "config.agents_tier", "config.show", "runtime.info"} {
+	for _, name := range []string{"mercenary.status", "config.tune", "config.list", "runtime.info"} {
 		if !strings.Contains(listResp, name) {
 			t.Fatalf("tools/list must advertise full lead surface, missing %s: %s", name, listResp)
 		}
@@ -525,19 +525,19 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	if !strings.Contains(deniedStatus, "tool not available") {
 		t.Fatalf("leaf key not rejected for ws.mercenary.status: %s", deniedStatus)
 	}
-	deniedTier := callToolOnce(t, server, 3, "config.agents_tier", map[string]any{
+	deniedTier := callToolOnce(t, server, 3, "config.tune", map[string]any{
 		"session_key": leafKey,
-		"tier":        "small",
-		"model":       "gpt-5.2",
+		"key":         "agents.tier",
+		"value":       map[string]any{"tier": "small", "model": "gpt-5.2"},
 	})
 	if !strings.Contains(deniedTier, "tool not available") {
-		t.Fatalf("leaf key not rejected for config.agents_tier: %s", deniedTier)
+		t.Fatalf("leaf key not rejected for config.tune: %s", deniedTier)
 	}
-	deniedShow := callToolOnce(t, server, 4, "config.show", map[string]any{
+	deniedShow := callToolOnce(t, server, 4, "config.list", map[string]any{
 		"session_key": leafKey,
 	})
 	if !strings.Contains(deniedShow, "tool not available") {
-		t.Fatalf("leaf key not rejected for config.show: %s", deniedShow)
+		t.Fatalf("leaf key not rejected for config.list: %s", deniedShow)
 	}
 
 	// Read-only runtime/cache discovery is permitted for a leaf scope.
@@ -563,7 +563,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
-	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,ws.mercenary.status,config.show")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,ws.mercenary.status,config.list")
 
 	server := NewServer(root, "test")
 	leafKey, err := server.sessions.mint(root, roleLeaf, "")
@@ -585,7 +585,7 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 		t.Fatalf("allowlist+leaf wrongly rejected runtime.info: %s", allowedInfo)
 	}
 
-	// ws.mercenary.status and config.show are allowlisted but DENIED by the leaf scope.
+	// ws.mercenary.status and config.list are allowlisted but DENIED by the leaf scope.
 	// The keyed gate must still reject them — the allowlist cannot regain them.
 	deniedStatus := callToolOnce(t, server, 3, "mercenary.status", map[string]any{
 		"session_key": leafKey,
@@ -594,11 +594,11 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	if !strings.Contains(deniedStatus, "tool not available") {
 		t.Fatalf("allowlist let leaf-denied ws.mercenary.status through: %s", deniedStatus)
 	}
-	deniedShow := callToolOnce(t, server, 4, "config.show", map[string]any{
+	deniedShow := callToolOnce(t, server, 4, "config.list", map[string]any{
 		"session_key": leafKey,
 	})
 	if !strings.Contains(deniedShow, "tool not available") {
-		t.Fatalf("allowlist let leaf-denied config.show through: %s", deniedShow)
+		t.Fatalf("allowlist let leaf-denied config.list through: %s", deniedShow)
 	}
 }
 
@@ -995,7 +995,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
-		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.list","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
 		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
 		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
@@ -1089,14 +1089,18 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if strings.Contains(byID["2"], "session.set_default_root") || strings.Contains(byID["2"], "session.get_default_root") {
 		t.Fatalf("tools/list still advertises session root compatibility tools: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], "config.agents_tier") {
-		t.Fatalf("tools/list missing config.agents_tier: %s", byID["2"])
+	if !strings.Contains(byID["2"], "config.tune") {
+		t.Fatalf("tools/list missing config.tune: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], `"effort"`) || !strings.Contains(byID["2"], `""`) || !strings.Contains(byID["2"], `"xhigh"`) {
-		t.Fatalf("tools/list missing config.agents_tier effort schema values: %s", byID["2"])
+	// The generic config.tune advertises the key-addressed write contract; the
+	// per-key value schema (agents.tier tier/effort domains) is now discoverable
+	// at runtime through config.list's catalog rather than the static tools/list
+	// schema (260814 Phase 2 collapse).
+	if !strings.Contains(byID["2"], `"key"`) || !strings.Contains(byID["2"], "agents.tier") {
+		t.Fatalf("tools/list config.tune schema missing key-addressed write contract: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], "config.show") {
-		t.Fatalf("tools/list missing config.show: %s", byID["2"])
+	if !strings.Contains(byID["2"], "config.list") {
+		t.Fatalf("tools/list missing config.list: %s", byID["2"])
 	}
 	// Unit 4: ws.mercenary.register prompts/tier/model fields removed from schema.
 	// Verify system_prompt_text is still present and prompts is absent.
@@ -1143,7 +1147,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	configText := toolText(t, byID["9"])
 	if !strings.Contains(configText, "path:") || !strings.Contains(configText, `config.json`) || !strings.Contains(configText, "model_aliases:") {
-		t.Fatalf("config.show response missing path/config: %s", byID["9"])
+		t.Fatalf("config.list response missing path/config: %s", byID["9"])
 	}
 	ticketsText := toolText(t, byID["10"])
 	if !strings.Contains(ticketsText, "260503-feat-demo") || !strings.Contains(ticketsText, "mentions_ticket_stem") {
@@ -1264,7 +1268,7 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 
 	out.Reset()
-	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"medium","backend":"codex","model":"gpt-5.4","effort":"medium"}}}`
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","value":{"tier":"medium","backend":"codex","model":"gpt-5.4","effort":"medium"}}}}`
 	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
 		t.Fatalf("ServeStdio config returned error: %v", err)
 	}
@@ -1297,8 +1301,8 @@ func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.
 	var out bytes.Buffer
 	server := NewServer(root, "test")
 	inputs := []string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"medium","harness":"codex","model":"gpt-5.5","effort":"medium"}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"medium","harness":"codex","model":"gpt-5.4"}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":"codex","value":{"tier":"medium","model":"gpt-5.5","effort":"medium"}}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":"codex","value":{"tier":"medium","model":"gpt-5.4"}}}}`,
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
 	}
 	for _, input := range inputs {
@@ -1338,12 +1342,16 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
-	for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail", "config.workflow_prefer_mercenary"} {
+	// config.tune/config.list are generic and always visible; the no-agent cut
+	// for full-ws-only knobs (workflow.prefer_mercenary) now lives per-key inside
+	// config.tune's dispatch and config.list's catalog, not in a hidden per-knob
+	// tool (260814 Phase 2 collapse). See TestPreferMercenaryHiddenInNoAgentMode.
+	for _, hidden := range []string{"mercenary.call", "mercenary.register", "mercenary.debug.tail"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "config.tuning", "config.workflow_prefer_subagent", "config.agents_tier", "tickets.list", "playbook.print", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.list", "playbook.print", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
@@ -1353,9 +1361,6 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	if strings.Contains(list, "Full ws") || strings.Contains(list, "full ws") {
 		t.Fatalf("tools/list retained full-ws-only playbook wording in wsflow mode: %s", list)
-	}
-	if agentsTierEntry := toolEntryTextByName(t, list, "config.agents_tier"); strings.Contains(strings.ToLower(agentsTierEntry), "mercenary") {
-		t.Fatalf("config.agents_tier description/schema leaked mercenary wording in wsflow mode: %s", agentsTierEntry)
 	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
@@ -1497,14 +1502,17 @@ func TestWsflowConfigAgentsTierWriteRoundTripsIntoPlaybookRenderRecommendedModel
 	s.observeHarness("test", "codex")
 	leadKey, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
-	written := callToolOnce(t, s, 2, "config.agents_tier", map[string]any{
-		"tier":    "medium",
+	written := callToolOnce(t, s, 2, "config.tune", map[string]any{
+		"key":     "agents.tier",
 		"harness": "codex",
-		"model":   "gpt-5.7-wsflow-roundtrip",
-		"effort":  "xhigh",
+		"value": map[string]any{
+			"tier":   "medium",
+			"model":  "gpt-5.7-wsflow-roundtrip",
+			"effort": "xhigh",
+		},
 	})
 	if toolIsError(t, written) {
-		t.Fatalf("wsflow config.agents_tier write returned error: %s", written)
+		t.Fatalf("wsflow config.tune agents.tier write returned error: %s", written)
 	}
 
 	rendered := callToolOnce(t, s, 3, "playbook.render", map[string]any{"name": "model-pb", "session_key": leadKey})
@@ -2650,7 +2658,9 @@ func containsResolvedPath(haystack, p string) bool {
 
 // TestMercenaryDefaultHideAndOnVisibility verifies that:
 //   - ws.mercenary.* tools are hidden from tools/list by default (no config),
-//   - config.workflow_prefer_mercenary remains visible so the lead can toggle, and
+//   - the generic config.tune writer remains visible so the lead can still
+//     toggle workflow.prefer_mercenary (the per-knob config.workflow_prefer_mercenary
+//     tool was collapsed into config.tune in 260814 Phase 2), and
 //   - after writing workflow.prefer_mercenary=on to global config, ws.mercenary.*
 //     tools appear in tools/list.
 func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
@@ -2673,8 +2683,8 @@ func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
 	if strings.Contains(listResp, `"name":"ws.lead.prefer_mercenary"`) {
 		t.Fatalf("removed ws.lead.prefer_mercenary must not be visible: %s", listResp)
 	}
-	if !strings.Contains(listResp, `"name":"config.workflow_prefer_mercenary"`) {
-		t.Fatalf("config.workflow_prefer_mercenary must be visible even when mercenary hidden: %s", listResp)
+	if !strings.Contains(listResp, `"name":"config.tune"`) {
+		t.Fatalf("config.tune must be visible even when mercenary hidden (lead toggles workflow.prefer_mercenary through it): %s", listResp)
 	}
 
 	// After enabling: ws.mercenary.* must appear in tools/list.
