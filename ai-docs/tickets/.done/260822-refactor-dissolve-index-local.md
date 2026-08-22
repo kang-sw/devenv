@@ -8,6 +8,7 @@ related:
   260523-bug-worktree-local-index-missing: origin — the machine-local context loss `_index.local.md` caused; retiring it into the auto-injected layers closes it for good
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-22
 ---
 
 # Dissolve _index.local.md — versioned bootstrap step splitting local memory into manuals/*.local.md plus the worktree/clone note layers
@@ -163,3 +164,43 @@ Verify:
   (runtime-contract + skill-shim drift) pass.
 - This repo's root `AGENTS.md` no longer carries the live `_index.local.md`
   read-step.
+
+### Result (7104f09) - 2026-08-22
+
+Landed the versioned `_index.local.md` dissolution, symmetric with the v0046
+`_index.md` step. Retired the live read-step and layout-tree entry from both
+`AGENTS.template.md` files — ws v0046→v0047, wsflow v0007→v0008 (independent
+lineages per `wsflow-mirroring.md ## Bootstrap Template Rules`, not forced to
+align) — each gaining a migration-checklist item that, on upgrade, splits an
+existing file into machine-local `ai-docs/manuals/*.local.md` (procedures) and
+the `worktree`/`clone` note layers (volatile context; `worktree` default,
+`clone` only when clone-wide), then removes the read-step, drops the layout-tree
+entry, deletes the file, and never creates it on fresh bootstrap. Both
+`WORKFLOW.md` copies' layout line re-pointed at the new homes;
+`reference-discovery.md` step 0 dropped the `_index.local.md` clause (kept the
+`_index.md` fallback); the wsflow rsrc mirror and both skills manifests were
+regenerated via `go test`, never hand-edited. Added spec anchors
+`{#260822-bootstrap-index-local-dissolution}` (`workflow-skills.md`) and the
+local/untracked project-memory paragraph (`documentation-system.md
+{#260505-project-memory-index}`).
+
+Validated on devenv: migrated the live `_index.local.md` (SSH
+host/port-forward/rustup — pure machine-local procedure) into
+`ai-docs/manuals/local-machine-context.local.md`, deleted the source, removed
+and renumbered root `AGENTS.md`'s Project Memory read-step, bumped its Template
+Version to v0047, and re-synced `ai-docs/WORKFLOW.md` from the rewritten master.
+
+Deviations (both necessary consequences of the version bump, not scope changes):
+the wsflow test `test_bootstrap_template_uses_wsflow_local_version_lineage`
+fixture was updated v0007→v0008, and `agents-plugin/skills/manifest.json` was
+regenerated for the rsrc-drift contract; neither was enumerated in the plan's
+Codebase Findings but both were required for the plan's own verification
+commands to pass.
+
+Verification: corpus grep across `agents-plugin/`, `agents-plugin-wsflow/`, and
+root `AGENTS.md` finds no live read/description instruction (only the historical
+v0014 line plus the new v0047/v0008 migration items); `_index.local.md` deleted
+and the manual present; `ws/spec_index.verify` ok; wsflow rsrc mirror regen
+yields no diff and `TestWsflowRsrcMirrorUpToDate` passes;
+`agents-plugin-wsflow/tests` 10/10; `agents-plugin-tool` `go test ./...` clean;
+full-scope review returned clean.
