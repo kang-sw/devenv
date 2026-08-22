@@ -478,7 +478,7 @@ func blockedUpwardMoveError(postures sageReviewPostures) error {
 // tickets.sage_gate's `required` -> run result and `recommended` -> ask
 // prompt (tickets_sage.go). Kept as a single constant so the two surfaces
 // cannot drift in wording.
-const sageReviewNonWaivableAdvisory = "sage review is not waivable per ticket (see ws/config.show for the sage_review config); " +
+const sageReviewNonWaivableAdvisory = "sage review is not waivable per ticket (see ws/config.list for the sage_review config); " +
 	"design review checks coherence, right-problem framing, and executability; completeness review checks structure, " +
 	"fields, and clarity — neither judges whether the underlying research itself is settled."
 

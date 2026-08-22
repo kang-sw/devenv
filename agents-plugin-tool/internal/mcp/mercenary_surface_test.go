@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -307,7 +308,7 @@ func TestWorkflowPreferMercenaryWriterSetsGlobalPreference(t *testing.T) {
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 900006, root, nil))
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.workflow_prefer_mercenary","arguments":{"session_key":"` + key + `","value":"on"}}}` + "\n"
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.tune","arguments":{"session_key":"` + key + `","key":"workflow.prefer_mercenary","value":"on"}}}` + "\n"
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatalf("ServeStdio: %v", err)
@@ -319,33 +320,78 @@ func TestWorkflowPreferMercenaryWriterSetsGlobalPreference(t *testing.T) {
 	}
 }
 
+// TestPreferMercenaryHiddenInNoAgentMode verifies the full-ws-only
+// workflow.prefer_mercenary knob is unreachable in no-agent (wsflow) mode.
+// After the 260814 config-surface collapse there is no distinct
+// config.workflow_prefer_mercenary TOOL name to hide from tools/list, so the
+// suppression now lives at two other layers: (a) config.list's catalog omits
+// the knob, and (b) config.tune rejects the key directly with the same
+// agentless-mode error the outer per-tool gate uses.
 func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
+	// tools/list: the generic config tools stay visible; the removed lead tool must not.
+	listInput := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
 	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, listInput, &out); err != nil {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	if strings.Contains(byID["1"], `"name":"ws.lead.prefer_mercenary"`) {
 		t.Fatalf("removed ws.lead.prefer_mercenary must not appear in no-agent mode: %s", byID["1"])
 	}
-	if strings.Contains(byID["1"], `"name":"config.workflow_prefer_mercenary"`) {
-		t.Fatalf("config.workflow_prefer_mercenary must be hidden in no-agent (wsflow) mode: %s", byID["1"])
+	if !strings.Contains(byID["1"], `"name":"config.list"`) || !strings.Contains(byID["1"], `"name":"config.tune"`) {
+		t.Fatalf("config.list/config.tune must remain visible in no-agent mode: %s", byID["1"])
 	}
-	if !strings.Contains(byID["1"], `"name":"config.workflow_prefer_subagent"`) {
-		t.Fatalf("config.workflow_prefer_subagent must remain visible in no-agent mode: %s", byID["1"])
-	}
-	// the bootstrap tool stays visible (wsflow still needs bootstrap).
 	if !strings.Contains(byID["1"], `"name":"ferrule"`) {
 		t.Fatalf("ws.ferrule must remain visible in no-agent mode: %s", byID["1"])
+	}
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 2, root, nil))
+
+	// (a) config.list's knob catalog must omit the full-ws-only knob in no-agent mode.
+	listJSON := toolText(t, callToolOnce(t, server, 3, "config.list", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	}))
+	var listPayload struct {
+		Knobs []struct {
+			ID string `json:"id"`
+		} `json:"knobs"`
+	}
+	if err := json.Unmarshal([]byte(listJSON), &listPayload); err != nil {
+		t.Fatalf("parse config.list JSON: %v\n%s", err, listJSON)
+	}
+	var haveSubagent bool
+	for _, k := range listPayload.Knobs {
+		if k.ID == "workflow.prefer_mercenary" {
+			t.Fatalf("config.list knobs must omit workflow.prefer_mercenary in no-agent (wsflow) mode: %s", listJSON)
+		}
+		if k.ID == "workflow.prefer_subagent" {
+			haveSubagent = true
+		}
+	}
+	if !haveSubagent {
+		t.Fatalf("config.list knobs must keep workflow.prefer_subagent in no-agent mode: %s", listJSON)
+	}
+
+	// (b) config.tune targeting the full-ws-only key directly is rejected with the
+	// agentless-mode error, even though config.tune itself is never tool-hidden.
+	tuneResp := callToolOnce(t, server, 4, "config.tune", map[string]any{
+		"session_key": key,
+		"key":         "workflow.prefer_mercenary",
+		"value":       "on",
+	})
+	if !toolIsError(t, tuneResp) || !strings.Contains(toolText(t, tuneResp), "agentless mode disables agent-backed tool") {
+		t.Fatalf("config.tune(workflow.prefer_mercenary) must be rejected in no-agent mode: %s", tuneResp)
 	}
 }
 
@@ -394,12 +440,12 @@ func TestWorkflowPreferenceWritersRequireLeadSessionKey(t *testing.T) {
 		args map[string]any
 	}{
 		{
-			name: "config.workflow_prefer_mercenary",
-			args: map[string]any{"value": "on"},
+			name: "config.tune",
+			args: map[string]any{"key": "workflow.prefer_mercenary", "value": "on"},
 		},
 		{
-			name: "config.workflow_prefer_subagent",
-			args: map[string]any{"value": "on"},
+			name: "config.tune",
+			args: map[string]any{"key": "workflow.prefer_subagent", "value": "on"},
 		},
 	} {
 		resp := callToolOnce(t, server, 1, tc.name, tc.args)
@@ -421,7 +467,7 @@ func TestWorkflowPreferenceWritersRequireLeadSessionKey(t *testing.T) {
 		}
 	}
 
-	showResp := callToolOnce(t, server, 2, "config.show", map[string]any{"format": "json"})
+	showResp := callToolOnce(t, server, 2, "config.list", map[string]any{"format": "json"})
 	if strings.Contains(toolText(t, showResp), `"scope":"global"`) {
 		t.Fatalf("rejected delegate call must not write global workflow preference: %s", showResp)
 	}

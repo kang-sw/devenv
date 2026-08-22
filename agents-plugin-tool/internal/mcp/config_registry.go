@@ -98,8 +98,8 @@ func (e configKeyEntry) DefaultScope() wsconfig.Scope {
 var configRegistry = []configKeyEntry{
 	{
 		Key:        wsconfig.ItemWorkflowPreferSubagent,
-		WriterTool: "config.workflow_prefer_subagent",
-		ResetTool:  "config.workflow_prefer_subagent",
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
 		ValueFields: []tuningField{{
 			Name:        "value",
 			Description: "Desired mode: on or off. Omit when reset is true.",
@@ -111,7 +111,7 @@ var configRegistry = []configKeyEntry{
 	},
 	{
 		Key:        wsconfig.ItemWorkflowPreferMercenary,
-		WriterTool: "config.workflow_prefer_mercenary",
+		WriterTool: "config.tune",
 		ValueFields: []tuningField{{
 			Name:        "value",
 			Description: "Desired mode: on, off, or hide.",
@@ -124,8 +124,8 @@ var configRegistry = []configKeyEntry{
 	},
 	{
 		Key:        wsconfig.ItemBootstrapAlarm,
-		WriterTool: "config.bootstrap_alarm",
-		ResetTool:  "config.bootstrap_alarm",
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
 		ValueFields: []tuningField{{
 			Name:        "value",
 			Description: "Desired mode: on or off. Omit when reset is true.",
@@ -137,8 +137,8 @@ var configRegistry = []configKeyEntry{
 	},
 	{
 		Key:        wsconfig.ItemDocCoverageAlarm,
-		WriterTool: "config.doc_coverage_alarm",
-		ResetTool:  "config.doc_coverage_alarm",
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
 		ValueFields: []tuningField{{
 			Name:        "value",
 			Description: "Desired mode: on or off. Omit when reset is true.",
@@ -153,20 +153,20 @@ var configRegistry = []configKeyEntry{
 		// entirely (see ResolverBacked doc above), so Key here is the
 		// catalog knob id rather than a wsconfig.Item* constant.
 		Key:        "agents.tier",
-		WriterTool: "config.agents_tier",
+		WriterTool: "config.tune",
 		SelectorFields: []tuningField{
-			{
-				Name:        "tier",
-				Description: "Capability tier to configure.",
-				Enum:        agentsTierEnum,
-				Required:    true,
-			},
 			{
 				Name:        "harness",
 				Description: "Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known.",
 			},
 		},
 		ValueFields: []tuningField{
+			{
+				Name:        "tier",
+				Description: "Capability tier to configure.",
+				Enum:        agentsTierEnum,
+				Required:    true,
+			},
 			{
 				Name:        "backend",
 				Description: "Optional backend name. When omitted, ws infers it from the model when possible.",
@@ -198,8 +198,8 @@ var configRegistry = []configKeyEntry{
 func promptKnobEntry(pointID string) configKeyEntry {
 	return configKeyEntry{
 		Key:        "prompt." + pointID,
-		WriterTool: "config.prompt.set",
-		ResetTool:  "config.prompt.unset",
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
 		SelectorFields: []tuningField{
 			{
 				Name:        "harness",
@@ -244,35 +244,42 @@ func registryEntryByKey(key string) configKeyEntry {
 // prompt.* family resolves via the shared template (pointID is irrelevant to
 // the gating attributes these tables read, so an empty pointID is fine).
 func configKeyEntryForTool(toolName string) (configKeyEntry, bool) {
+	// config.list/config.tune are the post-collapse generic tools (260814
+	// Phase 2), not per-key writers: every registry entry's WriterTool is now
+	// "config.tune", so a naive match would resolve the first entry and wrongly
+	// mark config.tune lead-only / no-agent-hidden. The tool-name-keyed gating
+	// tables must not resolve an entry for them — authority, no-agent, and
+	// session-key requirements are enforced per resolved key inside config.tune's
+	// dispatch instead. Every other config.* tool name was removed with the ten,
+	// so this function now returns false for every live config.* tool; it is kept
+	// because the gating tables still call it for arbitrary tool names.
+	if toolName == "config.list" || toolName == "config.tune" {
+		return configKeyEntry{}, false
+	}
 	for _, entry := range configRegistry {
 		if entry.WriterTool == toolName || (entry.ResetTool != "" && entry.ResetTool == toolName) {
 			return entry, true
 		}
 	}
-	switch toolName {
-	case "config.prompt.set", "config.prompt.unset":
-		return promptKnobEntry(""), true
-	}
 	return configKeyEntry{}, false
 }
 
-// requireConfigKeyEntry resolves the registry entry for a config.* writer or
-// reset tool name, failing closed on a miss instead of the zero-value entry
-// configKeyEntryForTool's ok==false would otherwise let a caller silently
-// proceed with. A zero entry has nil ValueFields/SelectorFields, and
-// enumContains(nil, ...) accepts any value — so a caller that discarded the
-// ok result would validate vacuously (skip validation entirely) rather than
-// reject the write. Every dispatch validator today passes a compile-time-
-// known tool name that is always present in the registry, so the miss branch
-// is unreachable now; it exists so a future caller that resolves an
-// arbitrary runtime key string through this same path (e.g. Phase 2's
-// config.tune) fails closed instead of silently skipping validation.
-func requireConfigKeyEntry(toolName string) (configKeyEntry, error) {
-	entry, ok := configKeyEntryForTool(toolName)
-	if !ok {
-		return configKeyEntry{}, fmt.Errorf("%s: internal error: no config registry entry for this tool", toolName)
+// resolveConfigEntryForKey resolves the registry entry for a config.tune runtime
+// key argument (e.g. "workflow.prefer_subagent", "agents.tier",
+// "prompt.UserPreferenceSection"). Unlike configKeyEntryForTool (keyed by tool
+// name), this is keyed by the config key itself, which is what config.tune's
+// generic dispatch receives. The dynamic prompt.* family resolves through the
+// shared template keyed by the trimmed point id.
+func resolveConfigEntryForKey(key string) (configKeyEntry, bool) {
+	for _, entry := range configRegistry {
+		if entry.Key == key {
+			return entry, true
+		}
 	}
-	return entry, nil
+	if strings.HasPrefix(key, "prompt.") {
+		return promptKnobEntry(strings.TrimPrefix(key, "prompt.")), true
+	}
+	return configKeyEntry{}, false
 }
 
 // fieldEnum returns the declared Enum for the named field within fields, or

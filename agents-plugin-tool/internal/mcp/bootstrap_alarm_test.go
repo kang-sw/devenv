@@ -43,8 +43,8 @@ func TestBootstrapStalenessWarningFiresOnFerrule(t *testing.T) {
 	if !strings.Contains(text, "v0001") || !strings.Contains(text, "v0002") {
 		t.Fatalf("warning must name both installed and latest versions: %s", text)
 	}
-	if !strings.Contains(text, "config.bootstrap_alarm") {
-		t.Fatalf("warning must point to the config.bootstrap_alarm setter: %s", text)
+	if !strings.Contains(text, "config.tune(key: \"bootstrap_alarm\"") {
+		t.Fatalf("warning must point to the config.tune bootstrap_alarm setter: %s", text)
 	}
 }
 
@@ -91,12 +91,13 @@ func TestBootstrapStalenessWarningSuppressedWhenOff(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
-	offResp := callToolOnce(t, s, 2, "config.bootstrap_alarm", map[string]any{
+	offResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "bootstrap_alarm",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, offResp), "bootstrap_alarm: off [scope:global]") {
-		t.Fatalf("config.bootstrap_alarm off call must succeed: %s", offResp)
+		t.Fatalf("config.tune bootstrap_alarm off call must succeed: %s", offResp)
 	}
 
 	suppressedResp := callLogin(t, s, 3, root, nil)
@@ -180,19 +181,20 @@ func TestBootstrapAlarmTuningKnob(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
-	offResp := callToolOnce(t, s, 2, "config.bootstrap_alarm", map[string]any{
+	offResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "bootstrap_alarm",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, offResp), "bootstrap_alarm: off [scope:global]") {
 		t.Fatalf("bootstrap_alarm off call must succeed: %s", offResp)
 	}
 
-	tuningText := toolText(t, callToolOnce(t, s, 3, "config.tuning", map[string]any{
+	tuningText := toolText(t, callToolOnce(t, s, 3, "config.list", map[string]any{
 		"session_key": key,
 	}))
 	if !strings.Contains(tuningText, "bootstrap_alarm") {
-		t.Fatalf("config.tuning must list the bootstrap_alarm knob: %s", tuningText)
+		t.Fatalf("config.list must list the bootstrap_alarm knob: %s", tuningText)
 	}
 	// Scope the "off" assertion to the bootstrap_alarm knob's own block: the
 	// catalog also lists workflow.prefer_subagent, whose builtin default is
@@ -213,16 +215,18 @@ func TestBootstrapAlarmTuningKnob(t *testing.T) {
 		t.Fatalf("config.tuning must report the resolved off value scoped to bootstrap_alarm's own block: %s", bootstrapAlarmBlock)
 	}
 
-	resetResp := callToolOnce(t, s, 4, "config.bootstrap_alarm", map[string]any{
+	resetResp := callToolOnce(t, s, 4, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "bootstrap_alarm",
 		"reset":       true,
 	})
 	if !strings.Contains(toolText(t, resetResp), "bootstrap_alarm: on [scope:builtin]") {
 		t.Fatalf("reset must report the builtin-sourced value: %s", resetResp)
 	}
 
-	conflictResp := callToolOnce(t, s, 5, "config.bootstrap_alarm", map[string]any{
+	conflictResp := callToolOnce(t, s, 5, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "bootstrap_alarm",
 		"value":       "on",
 		"reset":       true,
 	})

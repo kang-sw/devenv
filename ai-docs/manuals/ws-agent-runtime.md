@@ -260,8 +260,8 @@ Backend adapters map aliases to concrete models through defaults and user-local
 configuration in `~/.cache/ws@kang-sw-devenv/config.json`. The default Codex
 aliases are `light` → `gpt-5.6-luna`, `core` → `gpt-5.6-terra`, and `deep` →
 `gpt-5.6-sol`; the default Claude aliases are `haiku`, `sonnet`, and `opus`.
-`config.agents_tier` updates an explicit harness key, the detected MCP session
-harness key, or `default` when no harness is known. Concrete model names
+`config.tune(key: "agents.tier")` updates an explicit harness key, the detected
+MCP session harness key, or `default` when no harness is known. Concrete model names
 override alias mapping for one registration. When
 `backend` is omitted, ws infers the backend from recognizable model names
 (`gpt-*`/`codex` → `codex`, `gemini*` → `gemini`,
@@ -269,8 +269,8 @@ override alias mapping for one registration. When
 `codex`.
 
 Model aliases are also the only user-facing route for named-agent reasoning
-effort selection. Configure effort on an alias with `config.agents_tier` or the
-CLI mirror `ws-mcp config agents-tier`; do not pass effort directly to
+effort selection. Configure effort on an alias with `config.tune(key: "agents.tier")`
+or the CLI mirror `ws-mcp config tune`; do not pass effort directly to
 `agents.register`, `subquery`, prompt frontmatter, or workflow skill calls.
 Portable effort values are `low`, `medium`, `high`, and `xhigh`. Empty, omitted,
 or `none` effort means no backend effort override is stored or sent; updating an
@@ -295,8 +295,8 @@ MCP tools use server `ws` and the following tool names:
 - `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
-- `config.show` — inspect the current user-local configuration and resolved config path without modifying it. Implemented.
-- `config.agents_tier` — compatibility surface for configuring the user-local backend/model mapping for a model alias. Implemented.
+- `config.list` — inspect the current user-local configuration, resolved config path, and tuning-knob catalog without modifying it. Implemented.
+- `config.tune` — generic per-key config writer (subsumes the former per-knob writers, including the `agents.tier` backend/model/effort mapping). Implemented.
 - `path.generate` — allocate writable workflow artifact paths. Implemented for
   cache artifacts `kind: "review"` and `kind: "prompt"`, plus repo-local plan
   artifacts `kind: "plan"` under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`.
@@ -341,7 +341,7 @@ The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
 `ws/agents.result`, `ws/agents.status`, `ws/agents.interrupt`,
 `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`,
-`ws/config.show`, `ws/config.agents_tier`,
+`ws/config.list`, `ws/config.tune`,
 `ws/path.generate`, `ws/api.list`, and `ws/runtime.info`.
 
 `agents.call` acquires a short-lived `current/setup.lock`, writes the prompt

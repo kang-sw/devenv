@@ -75,7 +75,7 @@ for this root.
 <!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
 No standing user preferences are configured for this project. Use conventional
 terminology and default communication style unless project or session
-configuration overrides this slot via `config.prompt.set`.
+configuration overrides this slot via `config.tune`.
 {{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
 

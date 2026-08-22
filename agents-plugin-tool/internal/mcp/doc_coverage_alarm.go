@@ -37,7 +37,7 @@ func docCoverageWarning(root string, resolver *wsconfig.Resolver, sessionKey str
 
 	return "> **Doc coverage is missing.** This project's " + missing +
 		" .md file carrying a frontmatter block. Run lead-forge-spec/lead-forge-mental-model to populate it, or run " +
-		"`config.doc_coverage_alarm(value: \"off\")` to silence this permanently."
+		"`config.tune(key: \"doc_coverage_alarm\", value: \"off\")` to silence this permanently."
 }
 
 // injectDocCoverageWarning prepends warning to body, delegating to the

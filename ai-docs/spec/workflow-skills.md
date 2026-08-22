@@ -92,15 +92,15 @@ routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel ro
 runtime trigger surface that fires when the user signals intent to tune how the
 workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
 so the skill can proactively propose a tune. Its playbook is the tuning manual —
-it loads the `config.tuning` catalog (`#260625-tuning-catalog`) and uses that
-catalog's knob ids, writer tools, field options, and current values to drive
-prompt overrides (`#260620-config-prompt-override-tuning-tools`, including
-`UserPreferenceSection` for standing preferences), workflow preference knobs,
-and `config.agents_tier` without reimplementing their set paths. The always-on
-`lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
-of general-task routing attention. In agentless wsflow the catalog omits the
-full-ws-only knob `workflow.prefer_mercenary`, while keeping shared knobs such
-as `workflow.prefer_subagent` and `config.agents_tier` (now a shared knob
+it loads the `config.list` catalog (`#260625-tuning-catalog`) and uses that
+catalog's knob ids, the `config.tune` write contract, field options, and current
+values to drive prompt overrides (`#260620-config-prompt-override-tuning-tools`,
+including `UserPreferenceSection` for standing preferences), workflow preference
+knobs, and the `agents.tier` knob without reimplementing their set paths. The
+always-on `lead-workflow-manual` carries only a one-line pointer, keeping tuning
+guidance out of general-task routing attention. In agentless wsflow the catalog
+omits the full-ws-only knob `workflow.prefer_mercenary`, while keeping shared
+knobs such as `workflow.prefer_subagent` and `agents.tier` (now a shared knob
 available in both product modes).
 {#260619-lead-tune-workflow-tuning-skill}
 
