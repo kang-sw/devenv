@@ -354,18 +354,23 @@ _layout() {
 
 # ── Pill content for each segment ──
 
-# === L1: [Model [effort]] [Dir] ===
+# === L1: [Model [effort]] [Cost + cache-hit] [Dir] ===
 _PC0="${ESC}[38;5;${FG};1m ${MODEL} ${ESC}[22m"
 [[ -n $EFFORT_LEVEL ]] && _PC0+="${ESC}[38;5;${FG_DIM}m[${EFFORT_LEVEL}] "
 _PBG0=$MODEL_BG
 
-_dir_name="${DIR##*/}"
-_PC1="${ESC}[38;5;${FG}m 📁 ${_dir_name}"
-[[ -n $DIR_REL ]] && _PC1+=" ${ESC}[38;5;${FG_DIM}m${DIR_REL}"
-_PC1+=" "
-_PBG1=$L1_BG
+# Cost, with cache-hit rate tucked in alongside it.
+_PC1="${ESC}[38;5;${COST_FG};1m ${COST_FMT} ${ESC}[22m"
+[[ -n $CACHE_HIT ]] && _PC1+="${CACHE_HIT_COLOR}${CACHE_HIT}% "
+_PBG1=$COST_BG
 
-_layout 2
+_dir_name="${DIR##*/}"
+_PC2="${ESC}[38;5;${FG}m 📁 ${_dir_name}"
+[[ -n $DIR_REL ]] && _PC2+=" ${ESC}[38;5;${FG_DIM}m${DIR_REL}"
+_PC2+=" "
+_PBG2=$L1_BG
+
+_layout 3
 L1=$_LAYOUT_OUT
 
 # === L_GIT: [Branch] [Changes] (optional) ===
@@ -394,7 +399,7 @@ if [[ -n $BRANCH_NAME ]]; then
   L_GIT=$_LAYOUT_OUT
 fi
 
-# === L_TOK: [Tokens] [5h Rate] [7d Rate] [Cost + cache-hit] ===
+# === L_TOK: [Tokens] [5h Rate] [7d Rate] ===
 _PC0="${PCT_COLOR_FWD} ${TOKENS_USED_FMT} ${ESC}[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} "
 _PBG0=$TOKENS_BG
 
@@ -408,12 +413,7 @@ _PC2=" ${RATE_7D_COLOR}${RATE_7D}%${ESC}[38;5;${FG_DIM}m/${ESC}[38;5;${FG}m${RAT
 _PC2+=" "
 _PBG2=$RATE_7D_BG
 
-# Cost, with cache-hit rate tucked in alongside it.
-_PC3="${ESC}[38;5;${COST_FG};1m ${COST_FMT} ${ESC}[22m"
-[[ -n $CACHE_HIT ]] && _PC3+="${CACHE_HIT_COLOR}${CACHE_HIT}% "
-_PBG3=$COST_BG
-
-_layout 4
+_layout 3
 L_TOK=$_LAYOUT_OUT
 
 # Emit
