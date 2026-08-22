@@ -256,6 +256,25 @@ func configKeyEntryForTool(toolName string) (configKeyEntry, bool) {
 	return configKeyEntry{}, false
 }
 
+// requireConfigKeyEntry resolves the registry entry for a config.* writer or
+// reset tool name, failing closed on a miss instead of the zero-value entry
+// configKeyEntryForTool's ok==false would otherwise let a caller silently
+// proceed with. A zero entry has nil ValueFields/SelectorFields, and
+// enumContains(nil, ...) accepts any value — so a caller that discarded the
+// ok result would validate vacuously (skip validation entirely) rather than
+// reject the write. Every dispatch validator today passes a compile-time-
+// known tool name that is always present in the registry, so the miss branch
+// is unreachable now; it exists so a future caller that resolves an
+// arbitrary runtime key string through this same path (e.g. Phase 2's
+// config.tune) fails closed instead of silently skipping validation.
+func requireConfigKeyEntry(toolName string) (configKeyEntry, error) {
+	entry, ok := configKeyEntryForTool(toolName)
+	if !ok {
+		return configKeyEntry{}, fmt.Errorf("%s: internal error: no config registry entry for this tool", toolName)
+	}
+	return entry, nil
+}
+
 // fieldEnum returns the declared Enum for the named field within fields, or
 // nil when the field is absent or declares no enum.
 func fieldEnum(fields []tuningField, name string) []string {

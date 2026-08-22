@@ -715,7 +715,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		value, _ := rawValue.(string)
 		value = strings.ToLower(strings.TrimSpace(value))
-		subagentEntry, _ := configKeyEntryForTool("config.workflow_prefer_subagent")
+		subagentEntry, err := requireConfigKeyEntry("config.workflow_prefer_subagent")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if err := validateEnumValue("config.workflow_prefer_subagent", subagentEntry.ValueFields, "value", value); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -730,7 +733,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		value, _ := params.Arguments["value"].(string)
 		value = strings.ToLower(strings.TrimSpace(value))
-		mercenaryEntry, _ := configKeyEntryForTool("config.workflow_prefer_mercenary")
+		mercenaryEntry, err := requireConfigKeyEntry("config.workflow_prefer_mercenary")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if err := validateEnumValue("config.workflow_prefer_mercenary", mercenaryEntry.ValueFields, "value", value); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -769,7 +775,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		value, _ := rawValue.(string)
 		value = strings.ToLower(strings.TrimSpace(value))
-		bootstrapEntry, _ := configKeyEntryForTool("config.bootstrap_alarm")
+		bootstrapEntry, err := requireConfigKeyEntry("config.bootstrap_alarm")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if err := validateEnumValue("config.bootstrap_alarm", bootstrapEntry.ValueFields, "value", value); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -806,7 +815,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		value, _ := rawValue.(string)
 		value = strings.ToLower(strings.TrimSpace(value))
-		docCoverageEntry, _ := configKeyEntryForTool("config.doc_coverage_alarm")
+		docCoverageEntry, err := requireConfigKeyEntry("config.doc_coverage_alarm")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if err := validateEnumValue("config.doc_coverage_alarm", docCoverageEntry.ValueFields, "value", value); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -839,7 +851,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if strings.TrimSpace(harness) == "" {
 			harness = s.currentHarness()
 		}
-		promptSetEntry, _ := configKeyEntryForTool("config.prompt.set")
+		promptSetEntry, err := requireConfigKeyEntry("config.prompt.set")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if !enumContains(fieldEnum(promptSetEntry.SelectorFields, "harness"), harness) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: harness must be one of claude, codex, or *; got %q", harness))
 		}
@@ -899,7 +914,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if strings.TrimSpace(harness) == "" {
 			harness = s.currentHarness()
 		}
-		promptUnsetEntry, _ := configKeyEntryForTool("config.prompt.unset")
+		promptUnsetEntry, err := requireConfigKeyEntry("config.prompt.unset")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		if !enumContains(fieldEnum(promptUnsetEntry.SelectorFields, "harness"), harness) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: harness must be one of claude, codex, or *; got %q", harness))
 		}
