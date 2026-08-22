@@ -9,6 +9,16 @@ sage-review: required
 
 # sage_review config has no lead-facing setter or tuning catalog knob
 
+> **Premise invalidated by `260814-refactor-config-collapse-tuning-knobs-to-list-tune` (2026-08-23).**
+> This ticket's whole approach — add a `sage_review` writer "surfaced through
+> `config.tuning`" — targets tools that `260814` removes: `config.tuning` and the
+> per-knob setters collapse into `config.list` + `config.tune` backed by a single
+> per-key registry. Pulled back to `idea/`. Re-design is **TBD** and depends on
+> `260814` landing first: once it does, `sage_review` becomes a registry entry
+> (scope choices, accepted values `off|ask|auto`) reachable through `config.tune`,
+> and `lead-tune` routes it via `config.list`. Do not implement this ticket as
+> written; revisit after `260814`.
+
 ## Problem
 
 During dogfood, the user asked to set `sage_review` to `ask` through
