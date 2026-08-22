@@ -91,11 +91,11 @@ else
   done
 fi
 
-# Single jq call to extract all fields (17 → 1 subprocess). Fed by here-string
+# Single jq call to extract all fields (13 → 1 subprocess). Fed by here-string
 # rather than `echo "$input" |` so the pipeline does not add a second process.
-IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
-  DURATION_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
-  RATE_7D_RAW RATE_7D_RESETS CACHE_CREATE CACHE_READ TRANSCRIPT_PATH \
+IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX \
+  _RATE_5HR RATE_5HR_RESETS RATE_7D_RAW RATE_7D_RESETS \
+  CACHE_CREATE CACHE_READ EFFORT_LEVEL \
   <<<"$("$JQ" -r '[
   (.model.display_name // ""),
   (.workspace.current_dir // ""),
@@ -103,40 +103,28 @@ IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS
   (.cost.total_cost_usd // 0),
   ((.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)) // 0),
   (.context_window.context_window_size // 0),
-  (.context_window.total_output_tokens // 0),
-  (.cost.total_duration_ms // 0),
-  (.cost.total_lines_added // 0),
-  (.cost.total_lines_removed // 0),
   (.rate_limits.five_hour.used_percentage // 0),
   (.rate_limits.five_hour.resets_at // 0),
   (.rate_limits.seven_day.used_percentage // 0),
   (.rate_limits.seven_day.resets_at // 0),
   (.context_window.current_usage.cache_creation_input_tokens // 0),
   (.context_window.current_usage.cache_read_input_tokens // 0),
-  (.transcript_path // "")
+  (.effort.level // "")
 ] | join([31] | implode)' <<<"$input")"
 
 # ═══════════════════════════════════════════════════════════
 # Style parameters — edit these to customize appearance
 # ANSI 256-color codes: https://www.ditig.com/256-colors-cheat-sheet
-# (Declared before the awk block because it needs RCOL for the progress bar.)
 # ═══════════════════════════════════════════════════════════
-
-# Layout
-RCOL=70 # Total display width (right edge column)
 
 # Segment backgrounds
 MODEL_BG=53        # Model name (purple)
 L1_BG=235          # Directory
 L_GIT_BG=235       # Git branch
 GIT_CHANGES_BG=236 # Git file changes sub-segment
-L2_BG=234          # Context progress bar
 TOKENS_BG=236      # Token count
 RATE_5H_BG=236     # 5h rate limit
 RATE_7D_BG=236     # Weekly rate limit
-TIME_BG=235        # Wall-clock time
-API_BG=235         # API time
-DELTA_BG=235       # Lines-changed delta
 COST_BG=53         # Cost
 
 # Foreground colors
@@ -155,48 +143,22 @@ GIT_MOD_FG=214    # Modified
 GIT_UNT_FG=75     # Untracked (blue)
 
 # Accents
-COST_FG=184      # Cost (yellow)
-LINES_ADD_FG=75  # Lines added (blue)
-LINES_DEL_FG=204 # Lines removed (pink)
-OUTPUT_TOK_FG=73 # Output token count (dim cyan)
-
-# Last assistant-turn timestamp (for the "output tokens last updated" pill) —
-# read from the transcript itself; no separate state/cache file needed since
-# the transcript already records when output_tokens last changed.
-#
-# Separators are normalized here rather than at the DIR/PROJECT_DIR block far
-# below, because this path is consumed immediately and Windows hands it over
-# backslash-separated like the other paths in the same payload.
-#
-# Read forward (tail | jq) rather than reversed (tac | head | jq): tac is absent
-# on macOS, and reversing puts the newest line first, so a single partially
-# written line — normal while the transcript is being appended to — aborts jq
-# before any timestamp is emitted and blanks the pill. The original's closing
-# `| tail -n 1` is done by ${var##*$'\n'} instead of a third process.
-TRANSCRIPT_PATH="${TRANSCRIPT_PATH//\\//}"
-LAST_MSG_ISO=""
-if [[ -n $TRANSCRIPT_PATH && -r $TRANSCRIPT_PATH ]]; then
-  _ts_all=$(tail -n 30 "$TRANSCRIPT_PATH" 2>/dev/null |
-    "$JQ" -r 'select(.type == "assistant" and .timestamp != null) | .timestamp' 2>/dev/null)
-  LAST_MSG_ISO=${_ts_all##*$'\n'}
-fi
+COST_FG=184 # Cost (yellow)
 
 # ───────────────────────────────────────────────────────────
-# Every derived number, colour and date in one awk program.
-# Replaces 13 awk + 9 date + 6 pct_color subshells.
+# Every derived number and colour in one awk program.
 # Fields come back \x1f-separated, in the order listed at the printf.
-# Date math (iso_to_local_hm) uses gawk's mktime/strftime, so this assumes
-# `awk` resolves to gawk (default on this machine/WSL Ubuntu).
+# Date formatting (reset hour / weekday) uses gawk's strftime; a time-less awk
+# (BSD awk, mawk) leaves those two fields empty for the `date` fallback below.
 # ───────────────────────────────────────────────────────────
-IFS=$'\x1f' read -r TOKENS_USED_FMT CTX_MAX_FMT OUTPUT_TOKENS_FMT PCT CACHE_HIT \
+IFS=$'\x1f' read -r TOKENS_USED_FMT CTX_MAX_FMT CACHE_HIT \
   DELTA_5HR DELTA_7D PCT_COLOR_FWD RATE_5HR_COLOR RATE_7D_COLOR CACHE_HIT_COLOR \
-  RATE_5HR RATE_7D RATE_5HR_RESET_FMT RATE_7D_TTL LAST_UPD_ABS BAR \
-  <<<"$(awk -v tokens="$TOKENS_USED" -v ctxmax="$CTX_MAX" -v outtok="$OUTPUT_TOKENS" \
+  RATE_5HR RATE_7D RATE_5HR_RESET_FMT RATE_7D_TTL \
+  <<<"$(awk -v tokens="$TOKENS_USED" -v ctxmax="$CTX_MAX" \
            -v cread="$CACHE_READ" -v ccreate="$CACHE_CREATE" \
            -v r5="$_RATE_5HR" -v r5reset="$RATE_5HR_RESETS" \
            -v r7="$RATE_7D_RAW" -v r7reset="$RATE_7D_RESETS" \
-           -v nowep="$NOW" -v iso="$LAST_MSG_ISO" -v rcol="$RCOL" \
-           -v hastime="$HAS_AWK_TIME" '
+           -v nowep="$NOW" -v hastime="$HAS_AWK_TIME" '
 function commafy(n,   s, r, l, i) {
   s = sprintf("%d", int(n)); r = ""; l = length(s)
   for (i = 1; i <= l; i++) {
@@ -234,47 +196,6 @@ function budget_delta(used, elapsed, window,   d) {
   if (d < 0) return sprintf("%d%%", d)
   return ""
 }
-function make_bar(p, w, label,   v, filled, full, frac, blk, lbl_len, lpos, out, li, i, idx) {
-  v = p + 0
-  if (v < 0)   v = 0
-  if (v > 100) v = 100
-  filled = v / 100.0 * w
-  full = int(filled)
-  frac = filled - full
-  split("▏ ▎ ▍ ▌ ▋ ▊ ▉ █", blk, " ")
-  lbl_len = length(label)
-  lpos = full + (frac > 0.0625 ? 1 : 0)
-  if (lpos + lbl_len > w) lpos = w - lbl_len
-  if (lpos < 0) lpos = 0
-  out = ""
-  li = 0
-  for (i = 0; i < w; i++) {
-    if (i >= lpos && li < lbl_len) {
-      out = out substr(label, li + 1, 1)
-      li++
-    } else if (i < full) {
-      out = out "█"
-    } else if (i == full && full < w) {
-      idx = int(frac * 8 + 0.5)
-      if (idx >= 8)     out = out "█"
-      else if (idx > 0) out = out blk[idx]
-      else              out = out " "
-    } else {
-      out = out " "
-    }
-  }
-  return out
-}
-# The transcript stamps UTC ("...Z") but mktime() reads local time, so shift by
-# the current UTC offset — the same result `date -d "$iso" +%s` produced.
-function iso_to_local_hm(s,   off, y, mo, d, h, mi, sec) {
-  if (s == "") return ""
-  if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/) return ""
-  off = nowep - mktime(strftime("%Y %m %d %H %M %S", nowep, 1))
-  y = substr(s, 1, 4); mo = substr(s, 6, 2); d   = substr(s, 9, 2)
-  h = substr(s, 12, 2); mi = substr(s, 15, 2); sec = substr(s, 18, 2)
-  return strftime("%H:%M", mktime(y " " mo " " d " " h " " mi " " sec) + off)
-}
 BEGIN {
   SEP = sprintf("%c", 31)
 
@@ -282,7 +203,6 @@ BEGIN {
   # (API used_percentage is integer-only)
   raw     = (ctxmax > 0) ? tokens / ctxmax * 100 : 0
   pct_raw = sprintf("%.2f", raw) + 0
-  pct     = (ctxmax > 0) ? sprintf("%.1f", raw) : "0.0"
 
   # Cache hit rate: cache_read / (cache_read + cache_creation).
   # High = good, so invert before feeding the green→red gradient.
@@ -304,37 +224,24 @@ BEGIN {
   if (e7 < 0)      e7 = 0
   if (e7 > 604800) e7 = 604800
 
-  printf "%s", commafy(tokens) SEP fmtmax(ctxmax) SEP commafy(outtok) SEP \
-    pct SEP cache_hit SEP \
+  printf "%s", commafy(tokens) SEP fmtmax(ctxmax) SEP cache_hit SEP \
     budget_delta(r5, e5, 18000) SEP budget_delta(r7, e7, 604800) SEP \
     pct_color(pct_raw, 38) SEP pct_color(r5i, 38) SEP pct_color(r7i, 38) SEP \
     cache_hit_color SEP r5i SEP r7i SEP \
     (hastime ? strftime("%HH", r5reset) : "") SEP \
-    (hastime ? strftime("%a", r7reset) : "") SEP \
-    (hastime ? iso_to_local_hm(iso) : "") SEP \
-    make_bar(pct_raw, rcol - 3, " " pct "%")
+    (hastime ? strftime("%a", r7reset) : "")
 }')"
 
 # Fallback for time-function-less awk (macOS BSD awk, mawk): the program left
-# RATE_5HR_RESET_FMT / RATE_7D_TTL / LAST_UPD_ABS empty, so fill them with
-# `date`. BSD `date -r EPOCH` and GNU `date -d @EPOCH` disagree, so try both.
-# This path only forks on platforms without a time-capable awk.
+# RATE_5HR_RESET_FMT / RATE_7D_TTL empty, so fill them with `date`. BSD
+# `date -r EPOCH` and GNU `date -d @EPOCH` disagree, so try both. This path
+# only forks on platforms without a time-capable awk.
 if ((HAS_AWK_TIME == 0)); then
   _fmt_epoch() { # $1=epoch  $2=strftime format
     date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
   }
   [[ $RATE_5HR_RESETS =~ ^[0-9]+$ ]] && RATE_5HR_RESET_FMT=$(_fmt_epoch "$RATE_5HR_RESETS" '%HH')
   [[ $RATE_7D_RESETS =~ ^[0-9]+$ ]] && RATE_7D_TTL=$(_fmt_epoch "$RATE_7D_RESETS" '%a')
-  # Transcript stamps UTC; render as local HH:MM. GNU date parses the ISO when
-  # marked UTC ("...Z"); BSD date needs an explicit UTC parse to epoch first.
-  if [[ $LAST_MSG_ISO =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2} ]]; then
-    _iso="${LAST_MSG_ISO:0:19}"
-    LAST_UPD_ABS=$(date -d "${_iso}Z" +%H:%M 2>/dev/null)
-    if [[ -z $LAST_UPD_ABS ]]; then
-      _iso_ep=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$_iso" +%s 2>/dev/null)
-      [[ -n $_iso_ep ]] && LAST_UPD_ABS=$(date -r "$_iso_ep" +%H:%M 2>/dev/null)
-    fi
-  fi
 fi
 
 # Delta colors: over budget → red, under budget → green
@@ -344,18 +251,6 @@ _DC_5HR=$FG_DIMMER
 _DC_7D=$FG_DIMMER
 [[ "$DELTA_7D" == +* ]] && _DC_7D=203
 [[ "$DELTA_7D" == -* ]] && _DC_7D=114
-
-# Time formatting — plain integer arithmetic, no reason to leave the shell
-HRS=$((DURATION_MS / 3600000))
-MINS=$(((DURATION_MS % 3600000) / 60000))
-SECS=$(((DURATION_MS % 60000) / 1000))
-if ((HRS > 0)); then
-  TIME_FMT="${HRS}h ${MINS}m ${SECS}s"
-elif ((MINS > 0)); then
-  TIME_FMT="${MINS}m ${SECS}s"
-else
-  TIME_FMT="${SECS}s"
-fi
 
 # Normalize Windows-style separators so basename/relative-path splitting
 # below (which only recognizes "/") works on backslash paths too.
@@ -440,59 +335,33 @@ RCAP=$'\xee\x82\xb4' # U+E0B4 (right round cap)
 printf -v COST_FMT '$%.2f' "$COST"
 
 # ───────────────────────────────────────────────────────────
-# Layout engine: build pills, compute widths, pad to RCOL
-# Each pill: _PBG<i>=bg  _PC<i>=content  _PW<i>=visible_width
-# _layout <N> writes a line padded to RCOL (proportional fill) to _LAYOUT_OUT.
-# It assigns instead of echoing: `L1=$(_layout 2)` would fork, and per-pill
-# cap helpers that echoed instead of assigning would fork twice more per pill.
-# Both are now plain string interpolation.
+# Layout engine: build pills at their natural width — no alignment/padding.
+# Each pill: _PBG<i>=bg  _PC<i>=content. _layout <N> joins them with a single
+# space gap and writes the line to _LAYOUT_OUT. It assigns instead of echoing:
+# `L1=$(_layout 2)` would fork, and per-pill cap helpers that echoed instead of
+# assigning would fork twice more per pill. Both are now plain interpolation.
 # ───────────────────────────────────────────────────────────
 _layout() {
-  local n=$1 total=0 tw=0 i
+  local n=$1 i line=""
   for ((i = 0; i < n; i++)); do
-    local wv="_PW${i}"
-    total=$((total + ${!wv} + 2))
-    tw=$((tw + ${!wv}))
-  done
-  total=$((total + n - 1)) # inter-pill gaps
-  local remain=$((RCOL - total))
-  [ "$remain" -lt 0 ] && remain=0
-  local line="" used=0
-  for ((i = 0; i < n; i++)); do
-    local bv="_PBG${i}" cv="_PC${i}" wv="_PW${i}"
-    local bg=${!bv} c=${!cv} w=${!wv} pad fill
-    if [ $i -eq $((n - 1)) ]; then
-      pad=$((remain - used))
-    elif [ "$tw" -gt 0 ]; then
-      pad=$((remain * w / tw))
-      used=$((used + pad))
-    else
-      pad=0
-    fi
-    fill=""
-    [ "$pad" -gt 0 ] && printf -v fill '%*s' "$pad" ''
+    local bv="_PBG${i}" cv="_PC${i}"
+    local bg=${!bv} c=${!cv}
     [ $i -gt 0 ] && line+=" "
-    line+="${ESC}[38;5;${bg}m${LCAP}${ESC}[48;5;${bg}m${c}${fill}${ESC}[0m${ESC}[38;5;${bg}m${RCAP}${ESC}[0m"
+    line+="${ESC}[38;5;${bg}m${LCAP}${ESC}[48;5;${bg}m${c}${ESC}[0m${ESC}[38;5;${bg}m${RCAP}${ESC}[0m"
   done
   _LAYOUT_OUT="${ESC}[0m${line}${ESC}[0m"
 }
 
-# ── Pill content + visible width for each segment ──
-# Width formula: count display columns of visible text inside pill
-# (emoji 📁🌿🔄 = 2 cols / 1 char → +1; ⌛️ = 2 cols / 2 chars → +0)
+# ── Pill content for each segment ──
 
-# === L1: [Model] [Dir] ===
+# === L1: [Model [effort]] [Dir] ===
 _PC0="${ESC}[38;5;${FG};1m ${MODEL} ${ESC}[22m"
-_PW0=$((${#MODEL} + 2))
+[[ -n $EFFORT_LEVEL ]] && _PC0+="${ESC}[38;5;${FG_DIM}m[${EFFORT_LEVEL}] "
 _PBG0=$MODEL_BG
 
 _dir_name="${DIR##*/}"
 _PC1="${ESC}[38;5;${FG}m 📁 ${_dir_name}"
-_PW1=$((5 + ${#_dir_name})) # " 📁(2col) name "
-[[ -n $DIR_REL ]] && {
-  _PC1+=" ${ESC}[38;5;${FG_DIM}m${DIR_REL}"
-  _PW1=$((_PW1 + 1 + ${#DIR_REL}))
-}
+[[ -n $DIR_REL ]] && _PC1+=" ${ESC}[38;5;${FG_DIM}m${DIR_REL}"
 _PC1+=" "
 _PBG1=$L1_BG
 
@@ -503,42 +372,21 @@ L1=$_LAYOUT_OUT
 L_GIT=""
 if [[ -n $BRANCH_NAME ]]; then
   _PC0="${ESC}[38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
-  _PW0=$((5 + ${#BRANCH_NAME})) # " 🌿(2col) branch "
-  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && {
-    _PC0+=" ${ESC}[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
-    _PW0=$((_PW0 + 2 + ${#GIT_AHEAD}))
-  }
-  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && {
-    _PC0+=" ${ESC}[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
-    _PW0=$((_PW0 + 2 + ${#GIT_BEHIND}))
-  }
+  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && _PC0+=" ${ESC}[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
+  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && _PC0+=" ${ESC}[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
   _PC0+=" "
   _PBG0=$L_GIT_BG
 
-  _gc="" _gcw=1 # leading space
-  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && {
-    _gc+="${ESC}[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
-    _gcw=$((_gcw + 2 + ${#GIT_ADDED}))
-  }
-  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && {
-    _gc+="${ESC}[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
-    _gcw=$((_gcw + 2 + ${#GIT_DELETED}))
-  }
-  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && {
-    _gc+="${ESC}[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
-    _gcw=$((_gcw + 2 + ${#GIT_MODIFIED}))
-  }
-  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && {
-    _gc+="${ESC}[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
-    _gcw=$((_gcw + 2 + ${#GIT_UNTRACKED}))
-  }
+  _gc=""
+  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && _gc+="${ESC}[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
+  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && _gc+="${ESC}[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
+  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && _gc+="${ESC}[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
+  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && _gc+="${ESC}[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
   if [[ -n $_gc ]]; then
     _PC1=" ${_gc}"
-    _PW1=$_gcw
     _PBG1=$GIT_CHANGES_BG
   else
     _PC1="${ESC}[38;5;${FG_MUTED}m working tree clean "
-    _PW1=20
     _PBG1=$L_GIT_BG
   fi
 
@@ -546,96 +394,33 @@ if [[ -n $BRANCH_NAME ]]; then
   L_GIT=$_LAYOUT_OUT
 fi
 
-# === L2: Context progress bar (special: gradient-colored left cap) ===
-L2="${ESC}[0m${PCT_COLOR_FWD}${LCAP}${ESC}[48;5;${L2_BG}m${BAR} ${ESC}[0m${ESC}[38;5;${L2_BG}m${RCAP}${ESC}[0m${ESC}[0m"
-
-# === L2b: [Tokens] [5h Rate] [7d Rate] [TotalOut] ===
+# === L_TOK: [Tokens] [5h Rate] [7d Rate] [Cost + cache-hit] ===
 _PC0="${PCT_COLOR_FWD} ${TOKENS_USED_FMT} ${ESC}[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} "
-_PW0=$((${#TOKENS_USED_FMT} + ${#CTX_MAX_FMT} + 5)) # " TOK / MAX "
 _PBG0=$TOKENS_BG
 
 _PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%${ESC}[38;5;${FG_DIM}m/${ESC}[38;5;${FG}m${RATE_5HR_RESET_FMT}"
-_PW1=$((4 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/NNH "
-[[ -n $DELTA_5HR ]] && {
-  _PC1+=" ${ESC}[38;5;${_DC_5HR}m(${DELTA_5HR})"
-  _PW1=$((_PW1 + 3 + ${#DELTA_5HR}))
-}
+[[ -n $DELTA_5HR ]] && _PC1+=" ${ESC}[38;5;${_DC_5HR}m(${DELTA_5HR})"
 _PC1+=" "
 _PBG1=$RATE_5H_BG
 
 _PC2=" ${RATE_7D_COLOR}${RATE_7D}%${ESC}[38;5;${FG_DIM}m/${ESC}[38;5;${FG}m${RATE_7D_TTL}"
-_PW2=$((4 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/Day "
-[[ -n $DELTA_7D ]] && {
-  _PC2+=" ${ESC}[38;5;${_DC_7D}m(${DELTA_7D})"
-  _PW2=$((_PW2 + 3 + ${#DELTA_7D}))
-}
+[[ -n $DELTA_7D ]] && _PC2+=" ${ESC}[38;5;${_DC_7D}m(${DELTA_7D})"
 _PC2+=" "
 _PBG2=$RATE_7D_BG
 
-_PC3="${ESC}[38;5;${OUTPUT_TOK_FG}m ↑${OUTPUT_TOKENS_FMT} "
-_PW3=$((3 + ${#OUTPUT_TOKENS_FMT})) # " ↑OUT "
-_PBG3=$TOKENS_BG
+# Cost, with cache-hit rate tucked in alongside it.
+_PC3="${ESC}[38;5;${COST_FG};1m ${COST_FMT} ${ESC}[22m"
+[[ -n $CACHE_HIT ]] && _PC3+="${CACHE_HIT_COLOR}${CACHE_HIT}% "
+_PBG3=$COST_BG
 
 _layout 4
-L2b=$_LAYOUT_OUT
-
-# === L3: [Time+Cache] [Last Update] [Delta?] [Cost] ===
-_n3=0
-
-_PC0="${ESC}[38;5;${FG}m ⌛️ ${TIME_FMT} "
-_PW0=$((5 + ${#TIME_FMT})) # " ⌛️ TIME " (⌛️: 2col/2char → no adj)
-if [[ -n $CACHE_HIT ]]; then
-  _ch_pct="${CACHE_HIT}%"
-  _PC0+="${CACHE_HIT_COLOR}${_ch_pct} "
-  _PW0=$((_PW0 + ${#_ch_pct} + 1))
-fi
-_PBG0=$TIME_BG
-_n3=1
-
-_PC1="${ESC}[38;5;${FG}m 🔄 "
-if [[ -n $LAST_UPD_ABS ]]; then
-  _upd_body="$LAST_UPD_ABS"
-  _PC1+="$LAST_UPD_ABS"
-else
-  _upd_body="--"
-  _PC1+="${ESC}[38;5;${FG_DIM}m--"
-fi
-_PC1+=" "
-_PW1=$((5 + ${#_upd_body})) # " 🔄(+1) BODY " (BODY = "HH:MM" or "--")
-_PBG1=$API_BG
-_n3=2
-
-_dl="" _dlw=1
-[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && {
-  _dl+="${ESC}[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "
-  _dlw=$((_dlw + 2 + ${#LINES_ADDED}))
-}
-[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && {
-  _dl+="${ESC}[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "
-  _dlw=$((_dlw + 2 + ${#LINES_REMOVED}))
-}
-if [[ -n $_dl ]]; then
-  eval "_PC${_n3}=\" \${_dl}\""
-  eval "_PW${_n3}=\$_dlw"
-  eval "_PBG${_n3}=\$DELTA_BG"
-  _n3=$((_n3 + 1))
-fi
-
-eval "_PC${_n3}=\"${ESC}[38;5;\${COST_FG};1m \${COST_FMT} ${ESC}[22m\""
-eval "_PW${_n3}=\$((${#COST_FMT} + 2))"
-eval "_PBG${_n3}=\$COST_BG"
-_n3=$((_n3 + 1))
-
-_layout $_n3
-L3=$_LAYOUT_OUT
+L_TOK=$_LAYOUT_OUT
 
 # Emit
 # printf '%s\n' (not echo -e) so backslash sequences inside dynamic content
 # (directory names, branch names) are never reinterpreted as escapes — the
 # ESC bytes above are already real control characters, not literal text.
-printf '%s\n' "$L2"
-printf '%s\n' "$L2b"
-printf '%s\n' "$L3"
+printf '%s\n' "$L_TOK"
 printf '%s\n' "$L1"
 if [[ -n $L_GIT ]]; then
   printf '%s\n' "$L_GIT"
