@@ -1,5 +1,5 @@
 ---
-title: "Dissolve _index.local.md — versioned bootstrap step splitting clone-scoped local memory into manuals/*.local.md and the clone note layer"
+title: "Dissolve _index.local.md — versioned bootstrap step splitting local memory into manuals/*.local.md plus the worktree/clone note layers"
 related:
   260814-feat-note-project-local-untracked-layer: supersedes — that ticket shipped the `clone` substrate and re-pointed `_index.local.md` migration guidance at `clone` only, but authored no dissolution step and left the live read-steps in place; this ticket splits the target and finishes the retirement
   260807-refactor-dissolve-project-index: precedent — the parallel versioned migration that dissolved the tracked `_index.md`; this mirrors its shape for the untracked sibling
@@ -10,7 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 ---
 
-# Dissolve _index.local.md — versioned bootstrap step splitting clone-scoped local memory into manuals/*.local.md and the clone note layer
+# Dissolve _index.local.md — versioned bootstrap step splitting local memory into manuals/*.local.md plus the worktree/clone note layers
 
 ## Background
 
@@ -21,13 +21,16 @@ The tracked `ai-docs/_index.md` was fully dissolved by epic `260807`: a versione
 deletes the file; fresh bootstrap never creates one. That behavior is specced at
 `workflow-skills.md {#260812-bootstrap-index-dissolution}`.
 
-Its untracked sibling `ai-docs/_index.local.md` — gitignored, clone-scoped
-(project-local, worktree-agnostic) machine memory — was **not** retired in the
-same pass. Ticket `260814-feat-note-project-local-untracked-layer` shipped the
-faithful replacement substrate (the `clone` note layer: project-scoped,
-worktree-agnostic, untracked, ambient-injected via `# Notes`) and re-pointed the
-`_index.local.md` *migration pointer* from `machine` to `clone`, but it authored
-no versioned dissolution step and removed no read-step. As a result
+Its untracked sibling `ai-docs/_index.local.md` — gitignored machine memory,
+*intended* as clone-scoped (project-local, worktree-agnostic) but in practice
+delivered at worktree resolution, since a gitignored working-tree file lives only
+in the worktree that created it and never reaches siblings (the `260523` loss) —
+was **not** retired in the same pass. Ticket
+`260814-feat-note-project-local-untracked-layer` shipped a faithful home for that
+*intended* clone scope (the `clone` note layer: project-scoped, worktree-agnostic,
+untracked, ambient-injected via `# Notes`) and re-pointed the `_index.local.md`
+*migration pointer* from `machine` to `clone`, but it authored no versioned
+dissolution step and removed no read-step. As a result
 `_index.local.md` is still a **live** instruction across the plugin surface,
 asymmetric with how `_index.md` was retired:
 
@@ -51,10 +54,10 @@ removals are missing.
 
 ## Decisions
 
-- **Two-sink split, not the monolithic `clone` target `260814` recorded.**
-  `_index.local.md` content is heterogeneous and splits by shape, mirroring how
-  the tracked `_index.md` dissolution routed procedures to `manuals/` and volatile
-  state to notes:
+- **Content-shaped split across three homes, not the monolithic `clone` target
+  `260814` recorded.** `_index.local.md` content is heterogeneous and splits by
+  shape and scope, mirroring how the tracked `_index.md` dissolution routed
+  procedures to `manuals/` and volatile state to notes:
   - **Machine-local procedures** (credentials, IPs, hostnames, host-specific
     runbooks / access methods) → a gitignored `ai-docs/manuals/*.local.md`
     sibling. This is already the established local/tracked split of the manuals
@@ -63,13 +66,26 @@ removals are missing.
     autonomous choice following the content grouping, the same kind of call the
     v0046 procedure migration already makes; the ticket fixes the sink, not the
     filename.
-  - **Volatile local context / session notes** → the `clone` note layer via
-    `ws/note.write(layer: "clone")`, surfaced by the ambient `# Notes` block.
+  - **Volatile local context / session notes** → a note layer chosen by scope,
+    not one fixed layer: `ws/note.write(layer: "worktree")` by default,
+    `layer: "clone"` when the content is genuinely shared across all worktrees of
+    the local clone. Both surface in the ambient `# Notes` block.
+- **`worktree` is the default resolution; `clone` is the promotion.** A downstream
+  repo that has been keeping local context in `ai-docs/_index.local.md` was
+  de-facto operating at worktree resolution — the gitignored working-tree file
+  lives only in the worktree that created it and never reaches siblings (the
+  `260523` loss). So the behavior-preserving default for un-triaged migrated
+  content is the `worktree` layer; the migrator promotes an item to `clone` only
+  when it judges the content clone-wide by intent. This is a per-item
+  migration-time judgment, like the procedures-vs-context split above.
 - This **supersedes** `260814`'s re-point of the migration pointer to a single
-  `clone` target. Rejected the monolithic `clone` sink: it would dump
-  procedure-shaped local content into the note store — the same category error the
-  tracked `_index.md` dissolution deliberately avoided by giving procedures their
-  own `manuals/` home. `clone` is the correct home only for the note-shaped half.
+  `clone` target. `260814` correctly gave `_index.local.md`'s *intended* clone
+  scope a faithful home (`clone`) but treated the whole file as clone-wide; in
+  practice its content spans worktree- and clone-scoped context plus procedures.
+  Rejected the monolithic `clone` sink on two counts: it would (a) dump
+  procedure-shaped content into the note store — the category error the tracked
+  `_index.md` dissolution avoided by giving procedures their own `manuals/` home —
+  and (b) silently promote worktree-local context to clone-wide visibility.
 - **Symmetry with the `_index.md` dissolution is the design target.** The step
   gets the same shape as v0046: on upgrade, migrate an existing `_index.local.md`
   into the two sinks, remove the read-`_index.local.md` step, and delete the file;
@@ -96,16 +112,18 @@ removals are missing.
   to the tracked-index anchor): a versioned migration retires
   `ai-docs/_index.local.md`. On upgrade `lead-bootstrap` migrates its regions —
   machine-local procedures into a gitignored `ai-docs/manuals/*.local.md` sibling,
-  volatile local context into the `clone` note layer — removes the
-  read-`_index.local.md` step, and deletes the file. Fresh bootstrap never creates
-  `_index.local.md`. Upgrade-migrated and fresh-bootstrapped projects converge on
-  the same shape, neither carrying `_index.local.md`. The step is gated on the file
-  existing (transitional coexistence), like the `_index.md` step.
+  volatile local context into the `worktree` note layer by default (or `clone`
+  when the content is clone-wide) — removes the read-`_index.local.md` step, and
+  deletes the file. Fresh bootstrap never creates `_index.local.md`.
+  Upgrade-migrated and fresh-bootstrapped projects converge on the same shape,
+  neither carrying `_index.local.md`. The step is gated on the file existing
+  (transitional coexistence), like the `_index.md` step.
 - **`documentation-system.md {#260505-project-memory-index}`**: make the
-  local/untracked project-memory home explicit — clone-scoped machine memory lives
-  in the `clone` note layer (volatile context) and `ai-docs/manuals/*.local.md`
-  (machine-local procedures); no standalone `_index.local.md`. Currently this
-  anchor is silent on the untracked local variant.
+  local/untracked project-memory home explicit — machine-local context lives in
+  the `worktree`/`clone` note layers (worktree resolution by default, clone when
+  shared across worktrees) and `ai-docs/manuals/*.local.md` (machine-local
+  procedures); no standalone `_index.local.md`. Currently this anchor is silent on
+  the untracked local variant.
 
 ## Phases
 
@@ -113,10 +131,11 @@ removals are missing.
 
 Author the versioned `lead-bootstrap` dissolution step (next version after v0046)
 in `agents-plugin/skills/lead-bootstrap/AGENTS.template.md`, symmetric with the
-v0046 `_index.md` step: migrate an existing `_index.local.md` into the two sinks
-(machine-local procedures → `manuals/*.local.md`; volatile context → `clone`
-notes), remove the Project Memory read-`_index.local.md` step and the layout-tree
-entry, and stop the fresh-bootstrap scaffold from creating it. Retire the live
+v0046 `_index.md` step: migrate an existing `_index.local.md` into its homes
+(machine-local procedures → `manuals/*.local.md`; volatile context → `worktree`
+notes by default, `clone` notes when clone-wide), remove the Project Memory
+read-`_index.local.md` step and the layout-tree entry, and stop the
+fresh-bootstrap scaffold from creating it. Retire the live
 read-step / description in `WORKFLOW.md` and in
 `rsrc/reference-discovery/reference-discovery.md` (its `_index.md`
 "if not migrated" fallback phrasing may stay; the `_index.local.md` clause goes).
@@ -134,8 +153,8 @@ Verify:
   one.
 - Upgrade migration against a project holding a live `_index.local.md`: its
   procedure content lands in `ai-docs/manuals/*.local.md`, its volatile context in
-  `clone` notes, the read-step is gone, and the file is deleted; the step no-ops
-  cleanly when the file is absent.
+  `worktree` notes by default (`clone` for clone-wide items), the read-step is
+  gone, and the file is deleted; the step no-ops cleanly when the file is absent.
 - Corpus grep across `agents-plugin/`, `agents-plugin-wsflow/`, and root
   `AGENTS.md` finds no live `_index.local.md` read/description instruction (only
   version-history log lines remain).
