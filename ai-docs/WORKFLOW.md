@@ -26,9 +26,14 @@ template rather than relying on a project-local guide override.
 - `AGENTS.md`'s `## Project Orientation` section is the every-session
   orientation: repo identity, project map/topology, and canonical flows. Keep
   it compact; route deep detail to specs, mental models, or manuals.
-- `_index.local.md` is machine-local memory and should be ignored by Git.
 - `manuals/` stores procedures and how-to content, one file per procedure with
-  a `summary:` frontmatter line describing when it applies.
+  a `summary:` frontmatter line describing when it applies; a `*.local.md`
+  sibling (gitignored) holds machine-local procedure content such as
+  credentials, IPs, hostnames, or host-specific runbooks.
+- Volatile local context (not shared through Git) lives in the `worktree` or
+  `clone` note layer, written through `ws/note.write(layer: "worktree" | "clone",
+  ...)` - `worktree` by default, `clone` only when the content is shared
+  across worktrees of the same clone.
 - `ws-notes/` is the git-tracked `repo` note layer, one file per key, written
   through `ws/note.write(layer: "repo", ...)`. It holds volatile or tracked
   session context; prune stale entries qualitatively as the project advances.

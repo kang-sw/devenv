@@ -5,9 +5,8 @@
 Read at every session start, before other action:
 
 1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read repo-tracked notes (`wsflow/note.search(layer: "repo")`) for volatile session context, `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for current status. Keep only context a session must not re-derive.
-2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored clone context.
-3. **Project arc** - run `git log --oneline --graph -50`.
-4. **Recent history** - run `git log -10` for `## AI Context` rationale.
+2. **Project arc** - run `git log --oneline --graph -50`.
+3. **Recent history** - run `git log -10` for `## AI Context` rationale.
 
 ## Response Discipline
 
@@ -94,7 +93,6 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
 ai-docs/
-  _index.local.md    - untracked clone-scoped memory, .gitignored
   mental-model.md    - overall mental-model index and optional project reading map
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
@@ -198,6 +196,20 @@ Adapt structure to the project; this is a starting point, not a schema.
   `AGENTS.md` that still names `_index.md` to point at the new homes instead.
   This is a one-time migration judgment call, not an automated reconciliation;
   do not build staleness-detection tooling for it.
+- v0008: Dissolve `ai-docs/_index.local.md` as the local project memory store.
+  If `ai-docs/_index.local.md` exists: split its content by judgment -
+  machine-local procedure content (credentials, IPs, hostnames, host-specific
+  runbooks) to a new gitignored `ai-docs/manuals/*.local.md` sibling following
+  the manuals convention; volatile local context to
+  `wsflow/note.write(session_key, layer: "worktree", ...)` by default, or
+  `layer: "clone"` only when the content is judged clone-wide (shared across
+  worktrees of the same clone) rather than worktree-specific. Then delete
+  `ai-docs/_index.local.md`, remove its `## Project Memory` read step
+  (renumbering trailing steps), and remove the `_index.local.md` layout-tree
+  entry from this template's MIGRATION scaffold comment above. Fresh bootstrap
+  must never create `ai-docs/_index.local.md`. This is a one-time migration
+  judgment call, not an automated reconciliation; do not build
+  staleness-detection tooling for it.
 -->
 
-<!-- Template Version: v0007 -->
+<!-- Template Version: v0008 -->
