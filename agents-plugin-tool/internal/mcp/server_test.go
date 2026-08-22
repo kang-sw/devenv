@@ -1292,6 +1292,53 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 }
 
+// TestServeStdioConfigAgentsTierAcceptsTierSynonyms guards the 260814 config
+// surface swap against a regression: config.tune must NOT enum-validate the
+// agents.tier `tier` up front. The removed config.agents_tier passed the raw
+// string to SetAgentsTierForHarness, whose normalizedTier accepts documented
+// synonyms (light/core/deep, haiku/sonnet/opus) case/whitespace-insensitively
+// (see wsconfig TestResolveAgentLegacyTierSynonyms). The surviving CLI path
+// still does. So config.tune must too.
+func TestServeStdioConfigAgentsTierAcceptsTierSynonyms(t *testing.T) {
+	cases := []struct {
+		name         string
+		tier         string
+		canonicalKey string
+	}{
+		{"synonym-core", "core", "medium"},
+		{"synonym-deep", "deep", "large"},
+		{"synonym-sonnet", "sonnet", "medium"},
+		{"case-insensitive", "Small", "small"},
+		{"whitespace", "  large  ", "large"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+			server := NewServer(root, "test")
+			var out bytes.Buffer
+			model := "model-" + tc.canonicalKey
+			configInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":"claude","value":{"tier":%q,"model":%q}}}}`, tc.tier, model)
+			if err := server.ServeStdio(context.Background(), strings.NewReader(configInput+"\n"), &out); err != nil {
+				t.Fatalf("ServeStdio config returned error: %v", err)
+			}
+			byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+			resp := byID["2"]
+			if strings.Contains(resp, `"isError":true`) {
+				t.Fatalf("config.tune rejected tier synonym %q (should accept, matching CLI): %s", tc.tier, resp)
+			}
+			// The synonym must normalize to its canonical tier key and store the
+			// harness mapping there. toolText unescapes the inner config JSON.
+			configText := toolText(t, resp)
+			if !strings.Contains(configText, `"`+tc.canonicalKey+`"`) || !strings.Contains(configText, model) {
+				t.Fatalf("config.tune tier synonym %q did not land under canonical tier %q with model %q: %s", tc.tier, tc.canonicalKey, model, configText)
+			}
+		})
+	}
+}
+
 func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-agent-tier-effort-config")

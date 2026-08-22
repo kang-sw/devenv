@@ -886,6 +886,14 @@ func TestConfigPromptSetValidationAndDefaultScope(t *testing.T) {
 			wantMsg: "key is required",
 		},
 		{
+			// A bare "prompt." prefix leaves an empty pointId; config.tune must
+			// reject it rather than write/clear a "prompt..<harness>" override.
+			// Restores the removed config.prompt.set/unset guard (260814).
+			label:   "empty pointId",
+			args:    map[string]any{"session_key": key, "key": "prompt.", "harness": "claude", "value": "x"},
+			wantMsg: "pointId must be non-empty",
+		},
+		{
 			label:   "invalid harness",
 			args:    map[string]any{"session_key": key, "key": "prompt.DelegationSection", "harness": "vscode", "value": "x"},
 			wantMsg: "harness must be one of",

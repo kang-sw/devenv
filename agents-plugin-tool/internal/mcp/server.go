@@ -708,6 +708,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if !ok {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: unknown config key %q; call config.list for supported keys", key))
 		}
+		// prompt.* keys fold the point id into the generic key; a bare "prompt."
+		// leaves an empty point id. The removed config.prompt.set/unset guarded
+		// this with "pointId must be non-empty"; restore that here so config.tune
+		// never writes/clears a "prompt..<harness>" override.
+		if strings.HasPrefix(entry.Key, "prompt.") && strings.TrimSpace(strings.TrimPrefix(entry.Key, "prompt.")) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: pointId must be non-empty"))
+		}
 		// No-agent gate at the KEY level: config.tune itself is never tool-hidden,
 		// so a wsflow caller could otherwise reach a full-ws-only knob through it.
 		// Mirrors the outer callTool per-tool gate's message shape.
@@ -803,10 +810,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			if !valueOK {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier value must be an object with tier/backend/model/effort fields"))
 			}
+			// Tier is intentionally NOT enum-validated here: the removed
+			// config.agents_tier passed the raw string to SetAgentsTierForHarness,
+			// whose normalizedTier owns tier validation and accepts documented
+			// synonyms (light/core/deep, haiku/sonnet/opus) case/whitespace
+			// insensitively. config.list still advertises the canonical enum via
+			// the registry ValueFields; only the write path defers to the setter,
+			// matching both the pre-collapse tool and the surviving CLI path.
 			tier, _ := rawValue["tier"].(string)
-			if err := validateEnumValue("config.tune", entry.ValueFields, "tier", tier); err != nil {
-				return toolTextResponse(req.ID, "", err)
-			}
 			backend, _ := rawValue["backend"].(string)
 			model, _ := rawValue["model"].(string)
 			var cfg wsconfig.Config
