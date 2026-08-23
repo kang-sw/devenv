@@ -1,204 +1,58 @@
 # Ship: ws
 
-The `ws` workflow plugin and native `ws-mcp` runtime, published from
-`agents-plugin/` and `agents-plugin-tool/`.
+Ships the `ws` / `wsflow` plugin packages by promoting `develop` to `main` and
+pushing a `v<version>` tag, which triggers the `ws-mcp release` GitHub Actions
+workflow (`.github/workflows/ws-mcp-release.yml`) to build cross-platform
+`ws-mcp` assets and publish a GitHub release.
 
 ## Version Strategy
 
-Semantic versioning for the Codex-first plugin.
-
-Source of truth:
-- `agents-plugin/.codex-plugin/plugin.json` -> `version`
-- `agents-plugin/runtime.json` -> `plugin_version` and `release_tag`
-
-Version coupling:
-- `agents-plugin/.claude-plugin/plugin.json` mirrors the Codex-first candidate
-  version for compatibility metadata inside `agents-plugin/`.
-- `agents-plugin/runtime.json.release_tag` must be `v<version>`.
-- `agents-plugin/runtime.json.required_mcp`, all runtime tool ranges, and all
-  command ranges must cover `<version>-dev` and stay below the next minor.
-- `agents-plugin-tool/cmd/ws-mcp/main.go` uses `<version>-dev` before tagging;
-  release assets embed `<version>` when built from the tag.
-
-Bump rules:
-- **Minor** (`0.X.0`): new Codex-visible skill, MCP tool family, runtime
-  command family, or plugin-managed install capability.
-- **Patch** (`0.0.X`): behavior change or bug fix to existing skills, MCP
-  tools, runtime, launcher, docs, or packaging with no new public entry point.
-- **Major** (`X.0.0`): breaking change to canonical workflow, plugin layout,
-  MCP protocol expectations, or install/repair contract.
-- **Pre-1.0 policy**: while the latest released major is `0`, breaking changes
-  stay on the `0.x` line and bump the minor version. Do not ship `v1.0.0`
-  unless the user explicitly requests a formal 1.0 release or changes this
-  config first.
-
-At ship time:
-1. Run `git tag --list 'v*' --sort=-v:refname | head -n1`.
-2. Run `git log <last-tag>..HEAD --oneline`.
-3. Classify commits by the bump rules.
-4. If the version must change, run
-   `agents-plugin-tool/scripts/bump-ws-version.sh <version>`.
-5. Verify the changed files named by the bump helper before committing.
+The release version is whatever `develop` currently holds — it is NOT re-derived
+or bumped at ship time. Per-merge patch bumps on `develop`
+(`agents-plugin-tool/scripts/bump-ws-version.sh`) accumulate into the next
+release; `develop -> main` owns no bump. Read the version from
+`agents-plugin/runtime.json` `.plugin_version`; the tag is `.release_tag`
+(`v<plugin_version>`). Ship refuses if `.release_tag != "v" + .plugin_version`
+for either `agents-plugin/runtime.json` or `agents-plugin-wsflow/runtime.json`
+(the workflow enforces the same contract).
 
 ## Pre-flight
 
-- `git status --porcelain` - must be empty before release preparation starts.
-- `python3 -m unittest discover agents-plugin/tests`
-- `python3 -m unittest discover agents-plugin-wsflow/tests`
-- `cd agents-plugin-tool && go test ./... -count=1` (`-count=1` is required:
-  a cached pass can mask a stale generated artifact that CI catches on a fresh
-  run)
-- `cd agents-plugin-tool && scripts/smoke-ws-mcp.sh ..`
-- `claude plugin validate agents-plugin`
-- `claude plugin validate agents-plugin-wsflow`
-- `bash -n install.sh`
-- Confirm `.agents/plugins/marketplace.json` contains both `ws` and `wsflow`
-  local Codex plugin entries when packaging changed.
-- Confirm `.claude-plugin/marketplace.json` contains both `ws` and `wsflow`
-  local Claude marketplace entries when packaging changed.
-- Confirm `install.sh update` snapshots and installs only the `ws` Claude
-  plugin, and does not enable or install `wsflow@kang-sw-devenv`.
-
-## Changelog
-
-Update `CHANGELOG.md` before tagging:
-
-```markdown
-## v<version> - YYYY-MM-DD
-
-### Added
-- <new Codex skill, MCP tool, runtime command, or install capability>
-
-### Changed
-- <behavior change>
-
-### Fixed
-- <bug fix>
-```
-
-One entry per shipped version. Derive content from
-`git log <last-tag>..HEAD --oneline`.
+- `git merge-base --is-ancestor main develop` — develop must be a linear
+  descendant of main (fast-forwardable); abort otherwise.
+- `cd agents-plugin-tool && go test ./...` — all packages green.
+- Release contract: for `agents-plugin/runtime.json` and
+  `agents-plugin-wsflow/runtime.json`, assert `.release_tag == "v" + .plugin_version`.
+- Marketplace sanity: `.plugins[].name` in both
+  `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json` is
+  exactly `ws wsflow`.
 
 ## Build
 
-Local release-asset verification:
-
-```bash
-cd agents-plugin-tool
-scripts/build-release-assets.sh <version>
-host_os=$(uname -s | tr '[:upper:]' '[:lower:]')
-case "$(uname -m)" in arm64|aarch64) host_arch=arm64 ;; x86_64|amd64) host_arch=amd64 ;; esac
-"dist/ws-mcp-${host_os}-${host_arch}" version
-cd dist
-shasum -a 256 -c SHA256SUMS
-```
-
-Notes:
-- Do not commit `agents-plugin-tool/dist/` unless a separate ticket changes the
-  artifact policy.
-- wsflow reuses the same runtime assets. Keep
-  `agents-plugin-wsflow/runtime.json` and package tests aligned with the
-  selected wsflow no-agent runtime surface before tagging.
+- No local build. The tagged push drives `ws-mcp release` on GitHub Actions,
+  which runs tests, validates the plugin release contract, builds release
+  assets (`agents-plugin-tool/scripts/build-release-assets.sh`), and runs the
+  Windows smoke.
 
 ## Tag
 
-Format: `v<version>` (for example, `v0.16.0`)
-
-Command:
-
-```bash
-git tag -a v<version> -m "v<version>"
-```
-
-Do not push the tag until the final confirmation gate.
+Format: `v<version>` (e.g. `v0.42.1`), read from `agents-plugin/runtime.json`
+`.release_tag`. Placed on the `main` tip after the develop promotion.
+Push: yes (final gate).
 
 ## Publish
 
-Publish targets:
-- `origin/main`
-- annotated tag `v<version>`
-- GitHub Actions release assets uploaded by `.github/workflows/ws-mcp-release.yml`
-  when the `v*` tag is pushed
-- Codex GitHub plugin marketplace install from repository
-  `.agents/plugins/marketplace.json` pointing at `./agents-plugin` for `ws`
-  and `./agents-plugin-wsflow` for `wsflow`
-- Claude repository marketplace metadata under `.claude-plugin/marketplace.json`
-  pointing at `./agents-plugin` for `ws` and `./agents-plugin-wsflow` for
-  manual `wsflow` installation
-
-Publish command after explicit final approval:
-
-```bash
-git push origin main --follow-tags
-```
-
-Expected GitHub Actions behavior:
-- Pull requests that touch the workflow, marketplace, plugin, or runtime paths
-  run tests, build release assets, verify checksums, and upload workflow
-  artifacts without publishing a GitHub release.
-- Tag push runs tests, builds release assets, verifies checksums, creates or
-  updates the GitHub release, and uploads `agents-plugin-tool/dist/*`.
-
-## Recovery
-
-If the release workflow fails after the tag push, triage the failure and act
-without a fresh confirmation gate when the fix is autonomously recoverable:
-
-- **Autonomously recoverable (proceed without asking).** The failure is a
-  self-contained fix that carries **no policy or behavior-semantics change** —
-  an "auto-proceed"-tier fix per `AGENTS.md` Approval Protocol. Typical cases:
-  a stale generated artifact (`agents-plugin/skills/manifest.json`, an rsrc
-  mirror), a formatting/lint failure, a mechanical test-locator fix, or a
-  changelog/version-metadata mismatch. Fix it: commit on `develop`,
-  fast-forward `main`, and — **only if no GitHub release was created under the
-  tag** (the workflow failed before the release step) — move the tag to the fix
-  commit and re-push (`git tag -d`, `git push origin :refs/tags/v<version>`,
-  re-tag, `git push origin main --follow-tags`). Loop until the workflow
-  succeeds or the failure stops being autonomously recoverable. Report each
-  recovery iteration in the next status; do not open a confirmation gate for
-  these.
-- **Not autonomously recoverable (stop and surface).** The fix would change
-  workflow semantics, protocol/API surface, the shipped feature set, or the
-  release version; or the root cause is unclear. Surface the failure with a
-  recommendation and wait.
-
-Tag-move rule: moving a tag is permitted **only while no release artifact has
-been published under it**. Once a GitHub release exists for the tag, ship a new
-patch version instead of moving the tag.
+- `git checkout main && git merge --ff-only develop` — promote develop to main
+  (matches the historical release shape: main's tip is develop's tip, no extra
+  merge commit).
+- Final gate: show version, tag, and publish targets; wait for explicit
+  approval.
+- `git push origin main`
+- `git push origin v<version>` — triggers the GitHub release workflow.
 
 ## Post-ship
 
-### Lead-verifiable (run these)
-
-1. Confirm the GitHub Actions workflow succeeds for `v<version>`.
-2. Confirm the GitHub release contains:
-   - `SHA256SUMS`
-   - `ws-mcp-darwin-arm64`
-   - `ws-mcp-darwin-amd64`
-   - `ws-mcp-linux-amd64`
-   - `ws-mcp-linux-arm64`
-   - `ws-mcp-windows-amd64.exe`
-   - `ws-mcp-windows-arm64.exe`
-3. Keep the Claude package untouched unless a separate Claude compatibility ship
-   is requested.
-
-### User-performed (interactive; report as pending, do not attempt)
-
-The lead has no interactive Codex UI or fresh-session access, so these are the
-user's steps, not the lead's. Report them as outstanding for the user, then stop.
-
-4. Dogfood Codex GitHub plugin install from `kang-sw/devenv`.
-5. In a fresh Codex session, confirm:
-   - `ws` plugin is installed from the GitHub marketplace entry
-   - `wsflow` plugin is installed from the GitHub marketplace entry when the
-     agentless derivative is part of the release
-   - `$ws:lead-workflow-manual` is visible
-   - `$wsflow:lead-workflow-manual` is visible when wsflow is installed
-   - MCP server `ws` starts from plugin-managed `.mcp.json`
-   - MCP server `wsflow` starts from plugin-managed `.mcp.json` without
-     named-agent or subquery tools
-   - `runtime.info` reports the shipped version and matching prompt bundle hash
-   - `project_tree` returns `ai-docs/` as its first non-empty line
-6. Optional local dogfood: if a Windows host is available, build the Windows
-   executable and run `ws-mcp-windows-amd64.exe smoke --root <repo>` before
-   relying on the GitHub Actions result.
+- Watch the `ws-mcp release` workflow run for `v<version>` to green (build +
+  publish GitHub release assets, windows-smoke).
+- Return to `develop` (`git checkout develop`). The next develop merge resumes
+  patch bumping from `v<version>`.
