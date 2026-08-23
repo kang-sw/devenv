@@ -285,6 +285,29 @@ func noteKeysArg(toolName string, args map[string]any) ([]string, error) {
 	return out, nil
 }
 
+// noteOversizeThreshold is the byte length (of a note's Value) at or above
+// which note.write's text-mode response appends the relocate/erase
+// discipline challenge. An arbitrary, trivially-tunable implementation
+// constant (mirrors notesInjectionCap's style), not a contract fork.
+const noteOversizeThreshold = 300
+
+// noteOversizeChallenge is the confirmed discipline-nudge text appended to
+// note.write's text-mode response when any written note is oversize. The
+// write itself is always unconditional — this is a post-write nudge, never a
+// gate — and the remediation verbs are relocate/erase, never mute.
+const noteOversizeChallenge = "Large note — keep only if volatile AND homeless AND must-always-stay-in-context; otherwise move it to a ticket/spec/mental-model, or erase. Not mute."
+
+// noteWriteExceedsOversizeThreshold reports whether any record's Value is at
+// or above noteOversizeThreshold bytes.
+func noteWriteExceedsOversizeThreshold(records []wsnote.Record) bool {
+	for _, rec := range records {
+		if len(rec.Value) >= noteOversizeThreshold {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta map[string]any) response {
 	const tool = "note.write"
 	store, err := s.resolveNoteStore(tool, args, meta)
@@ -304,7 +327,11 @@ func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta m
 	if wantsJSON(args) {
 		return toolJSONResponse(id, records, nil)
 	}
-	return toolTextResponse(id, formatNoteWrite(records), nil)
+	text := formatNoteWrite(records)
+	if noteWriteExceedsOversizeThreshold(records) {
+		text += "\n" + noteOversizeChallenge
+	}
+	return toolTextResponse(id, text, nil)
 }
 
 func (s *Server) handleNoteErase(id json.RawMessage, args map[string]any, meta map[string]any) response {

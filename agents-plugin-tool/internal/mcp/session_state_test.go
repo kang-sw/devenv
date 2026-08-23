@@ -3314,6 +3314,7 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 
@@ -3341,6 +3342,7 @@ func TestWorkflowManualFreshModeWithRoot(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 
@@ -3459,6 +3461,7 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5100, root, nil))
@@ -3504,6 +3507,7 @@ func TestWorkflowManualTodoInstructionPreview(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5110, root, nil))
@@ -3703,6 +3707,7 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5500, root, nil))
@@ -3745,6 +3750,43 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	}
 	if !strings.Contains(stateResp, "### Todos") {
 		t.Errorf("workflow_state missing Todos heading:\n%s", stateResp)
+	}
+}
+
+// TestWorkflowStateByteIdenticalToWorkflowManualWhenNotesPresent is the
+// notes-present sibling of TestWorkflowStateReturnsSessionStateOnly: once
+// facet B (260823) makes wsnote.Compute always render a non-empty "# Notes"
+// block, workflow_state's resolved-record branch must append the identical
+// computeNotes(rec.Root) text workflow_manual's CONTINUE branch does, or the
+// two responses silently diverge only when a note actually exists.
+func TestWorkflowStateByteIdenticalToWorkflowManualWhenNotesPresent(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 5505, root, nil))
+
+	callToolWithKey(t, server, 5506, key, "note.write", map[string]any{
+		"layer": "worktree",
+		"notes": []any{map[string]any{"key": "state.parity", "value": "seen by both tools", "priority": 1}},
+	})
+
+	manualResp := callToolWithKey(t, server, 5507, key, "workflow_manual", nil)
+	stateResp := callToolWithKey(t, server, 5508, key, "workflow_state", nil)
+
+	manualIdx := strings.Index(manualResp, "## Session State")
+	if manualIdx < 0 {
+		t.Fatalf("workflow_manual response missing Session State section:\n%s", manualResp)
+	}
+	wantState := manualResp[manualIdx:]
+	if stateResp != wantState {
+		t.Fatalf("workflow_state mismatch with notes present.\ngot:\n%s\nwant (workflow_manual's Session State suffix):\n%s", stateResp, wantState)
+	}
+	if !strings.Contains(stateResp, "state.parity") || !strings.Contains(stateResp, "seen by both tools") {
+		t.Fatalf("workflow_state missing the written note:\n%s", stateResp)
 	}
 }
 

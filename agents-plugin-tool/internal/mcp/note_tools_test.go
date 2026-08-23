@@ -876,3 +876,113 @@ func TestNoteUnmuteRejectsEmptyKeys(t *testing.T) {
 		t.Fatalf("note.unmute(empty keys) = %s, want a non-empty-array error", resp)
 	}
 }
+
+// TestNoteWriteSubThresholdDoesNotAppendOversizeChallenge verifies the
+// oversize-discipline nudge stays absent when every written note's value is
+// below noteOversizeThreshold, and that the note is still written.
+func TestNoteWriteSubThresholdDoesNotAppendOversizeChallenge(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "worktree",
+		"notes": []any{
+			map[string]any{"key": "small.note", "value": strings.Repeat("a", noteOversizeThreshold-1), "priority": 1},
+		},
+	})
+	if !strings.Contains(resp, "small.note") {
+		t.Fatalf("note.write(sub-threshold) confirmation missing key: %s", resp)
+	}
+	if strings.Contains(resp, "Large note") {
+		t.Fatalf("note.write(sub-threshold) unexpectedly appended the oversize challenge: %s", resp)
+	}
+
+	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+		"layer": "worktree",
+		"glob":  "small.note",
+	})
+	if !strings.Contains(searchResp, "small.note") {
+		t.Fatalf("note.write(sub-threshold) note was not actually written: %s", searchResp)
+	}
+}
+
+// TestNoteWriteOversizeAppendsChallengeExactlyOnce verifies a single oversize
+// (>= noteOversizeThreshold bytes) note.write appends the confirmed
+// relocate/erase challenge text exactly once, and the note is still written
+// unconditionally (the nudge never gates the write).
+func TestNoteWriteOversizeAppendsChallengeExactlyOnce(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "worktree",
+		"notes": []any{
+			map[string]any{"key": "big.note", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
+		},
+	})
+	if !strings.Contains(resp, "big.note") {
+		t.Fatalf("note.write(oversize) confirmation missing key: %s", resp)
+	}
+	if got := strings.Count(resp, noteOversizeChallenge); got != 1 {
+		t.Fatalf("note.write(oversize) appended the challenge %d times, want exactly 1: %s", got, resp)
+	}
+	if !strings.Contains(resp, "Not mute.") {
+		t.Fatalf("note.write(oversize) challenge missing the not-mute remediation phrasing: %s", resp)
+	}
+
+	searchResp := callToolWithKey(t, s, 3, key, "note.search", map[string]any{
+		"layer": "worktree",
+		"glob":  "big.note",
+	})
+	if !strings.Contains(searchResp, "big.note") {
+		t.Fatalf("note.write(oversize) note was not actually written: %s", searchResp)
+	}
+}
+
+// TestNoteWriteBatchWithOneOversizeAppendsChallengeOncePerCall verifies a
+// batch write mixing several sub-threshold notes with exactly one oversize
+// note appends the challenge once per call, not once per oversized note.
+func TestNoteWriteBatchWithOneOversizeAppendsChallengeOncePerCall(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "worktree",
+		"notes": []any{
+			map[string]any{"key": "batch.small1", "value": "short", "priority": 1},
+			map[string]any{"key": "batch.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 2},
+			map[string]any{"key": "batch.small2", "value": "also short", "priority": 3},
+		},
+	})
+	if got := strings.Count(resp, noteOversizeChallenge); got != 1 {
+		t.Fatalf("note.write(batch, one oversize) appended the challenge %d times, want exactly 1: %s", got, resp)
+	}
+}
+
+// TestNoteWriteJSONModeOmitsOversizeChallenge verifies the JSON-mode response
+// stays clean structured data with no appended challenge text even when the
+// written note is oversize, mirroring the existing JSON-vs-text nudge
+// asymmetry convention (server.go's git.commit dispatch case).
+func TestNoteWriteJSONModeOmitsOversizeChallenge(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer":  "worktree",
+		"format": "json",
+		"notes": []any{
+			map[string]any{"key": "json.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
+		},
+	})
+	if strings.Contains(resp, "Large note") {
+		t.Fatalf("note.write(oversize, format:json) unexpectedly contains oversize challenge text: %s", resp)
+	}
+	var records []wsnote.Record
+	if err := json.Unmarshal([]byte(resp), &records); err != nil {
+		t.Fatalf("note.write(oversize, format:json) response is not valid JSON: %v\n%s", err, resp)
+	}
+}
