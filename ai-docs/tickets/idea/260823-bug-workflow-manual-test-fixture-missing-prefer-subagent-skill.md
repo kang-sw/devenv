@@ -1,12 +1,18 @@
 ---
-title: "workflow_manual tests fail on missing lead-prefer-subagent SKILL.md fixture"
+title: "workflow_manual render resolves appended posture off an exe-relative skills root under test binaries"
 ---
 
-# workflow_manual tests fail on missing lead-prefer-subagent SKILL.md fixture
+# workflow_manual render resolves appended posture off an exe-relative skills root
 
-## Problem
+## Status
 
-Six tests in `agents-plugin-tool/` fail with an identical error:
+Test symptom RESOLVED (fix (a), commit `4598507b`). This ticket now tracks only
+the latent architectural seam (b) below. Original framing ("missing fixture")
+was wrong; corrected root cause recorded here.
+
+## Original symptom
+
+Six tests in `agents-plugin-tool/` failed with an identical error:
 
 ```
 load appended lead-prefer-subagent: .../skills/lead-prefer-subagent/SKILL.md: no such file or directory
@@ -18,38 +24,61 @@ load appended lead-prefer-subagent: .../skills/lead-prefer-subagent/SKILL.md: no
   `TestWorkflowStateReturnsSessionStateOnly`.
 - `cmd/ws-mcp`: `TestCallCommandColdStartWorkflowManualMintsLeadKey`.
 
-Confirmed pre-existing and unrelated to any single feature branch: the same six
-failures reproduce on a clean base checkout in an isolated worktree. Discovered
-while implementing `260823-feat-notes-postit-discipline` (its
+Discovered while implementing `260823-feat-notes-postit-discipline` (its
 `TestWorkflowStateReturnsSessionStateOnly` coverage was masked by this).
 
-## Suspected cause
+## Corrected root cause
 
-`playbook.print(name: "lead-workflow-manual")` appends the `lead-prefer-subagent`
-posture when the `workflow.prefer_subagent` global preference resolves `on`
-(see mcp-runtime `{#260610-mercenary-delegation-surface}` neighborhood). The
-render path resolves the appended playbook from a skills tree that, in the test
-rsrc/fixture environment, does not contain
-`skills/lead-prefer-subagent/SKILL.md`. So the failures are environment/config
-dependent: they appear when the global config on the dev machine has
-`prefer_subagent=on` (as in the current dogfood setup) and the test rsrc bundle
-lacks that skill file.
+Two independent facts combined:
 
-## Open questions / directions
+1. **Config leak.** The six tests did not pin `WS_CONFIG_HOME`, so they read the
+   dev machine's real `~/.ws/config.json`, where `workflow.prefer_subagent=on`.
+   That turned on the `lead-prefer-subagent` posture append inside
+   `playbook.print(name: "lead-workflow-manual")` — which the tests never
+   intended to exercise.
+2. **Exe-relative seam mismatch (the latent bug (b)).** The append branch in
+   `internal/mcp/playbook_tools.go` (`printPlaybook`, ~L888-909) resolves the
+   appended posture body through `wsrsrc.ResolveSkillsRoot()` +
+   `wsrsrc.LoadSkillBody`, which key off an **exe-relative** skills root — NOT
+   the `rsrcRoot` seam the main body loads through (`wsrsrc.Load(rsrcRoot, ...)`
+   at ~L740). Under `go test` the exe is a temp test binary with no adjacent
+   `skills/` tree, so the append hard-errors even though the seam-pinned main
+   render path is fine.
 
-- Should the workflow-manual render degrade gracefully (skip the append with a
-  warning) when the `lead-prefer-subagent` body cannot be loaded, rather than
-  hard-erroring? A missing optional posture append arguably should not fail the
-  whole manual render.
-- Or is the real fix that the test rsrc/fixture tree must bundle
-  `lead-prefer-subagent/SKILL.md` (test-fixture completeness), and/or that these
-  tests should pin `prefer_subagent` to a known scope instead of reading ambient
-  global config?
-- Determine whether production (installed plugin) is affected or whether this is
-  strictly a test-fixture gap. If production can hit it when the skill file is
-  absent, this is a real robustness bug, not just a test issue.
+So the failure was environment-dependent (machine config `on`) AND rode a real
+seam inconsistency: the manual's main body honors the rsrcRoot seam but its
+appended-posture branch bypasses it.
 
-## Verification when addressed
+## Fix (a) — landed
 
-- `cd agents-plugin-tool && go test ./...` is green regardless of the machine's
-  `workflow.prefer_subagent` global setting.
+`4598507b test(mcp): pin WS_CONFIG_HOME in workflow_manual/state tests for
+hermeticity`. Pinned `WS_CONFIG_HOME` to a per-test temp dir in all six tests
+(5 in `session_state_test.go`, 1 in `cmd/ws-mcp/main_test.go` subprocess env),
+matching the existing sibling convention. `go test ./...` is now green
+regardless of the machine's `workflow.prefer_subagent` global setting. Test
+files only; no production change.
+
+## Remaining open scope — latent seam (b)
+
+`printPlaybook`'s append branch should resolve the appended posture body through
+the same `rsrcRoot` seam the main body uses, instead of exe-relative
+`ResolveSkillsRoot()`. Two directions:
+
+- **Thread the seam:** have the append branch load through `wsrsrc.Load(rsrcRoot,
+  ...)` (or an equivalent seam-aware loader) so a pinned rsrc root governs both
+  the main body and the append uniformly.
+- **Graceful degrade:** if the appended posture body cannot be loaded, skip the
+  append with a warning rather than hard-erroring — a missing optional posture
+  arguably should not fail the whole manual render.
+
+Determine whether production (installed plugin) can hit the exe-relative path
+with an absent skill file; if so this is a real robustness bug, not test-only.
+This is an AGENTS.md "ask first" change (observable render behavior / seam
+semantics) — do not land without sign-off.
+
+## Verification when (b) is addressed
+
+- `printPlaybook` append and main body resolve from the same seam under a pinned
+  `rsrcRoot`; a test that pins the rsrc root but leaves the exe with no adjacent
+  `skills/` tree still renders the appended posture.
+- `cd agents-plugin-tool && go test ./...` stays green.
