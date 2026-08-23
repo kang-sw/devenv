@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.42.0 - 2026-08-23
+
+### Changed
+- **The ten per-knob `config.*` MCP tools collapse into `config.list` (read) +
+  `config.tune` (write).** A breaking change to the config tool surface: the
+  removed tools are `config.show`, `config.tuning`, `config.agents_tier`,
+  `config.bootstrap_alarm`, `config.doc_coverage_alarm`, `config.prompt`,
+  `config.prompt_set`, `config.prompt_unset`, `config.workflow_prefer_mercenary`,
+  and `config.workflow_prefer_subagent`. `config.list` returns the resolved
+  config view plus the full tunable-knob catalog (preserving the old
+  `config.show` and `config.tuning` `format:"json"` payloads and no-agent
+  omission); `config.tune` is the sole writer for scalar knobs, `prompt.*`
+  set/unset, and the `agents.tier` compound value. All per-key rules — allowed
+  scopes, default scope, harness applicability, no-agent (wsflow) visibility,
+  authority/session-key requirements — now derive from a single per-key config
+  registry. `agents.tier` retains its documented tier synonyms
+  (`light`/`core`/`deep`, `haiku`/`sonnet`/`opus`) and case/whitespace tolerance,
+  matching the removed tool. `session_key` is no longer a schema-static required
+  field on config writes; the per-key rule is enforced at dispatch. Both the
+  `ws` and `wsflow` runtime surfaces, the `ws-mcp` CLI, and the
+  spec/mental-model docs are updated in lockstep.
+
 ## v0.41.2 - 2026-08-22
 
 ### Changed
