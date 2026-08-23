@@ -485,7 +485,21 @@ positional-array precedent anywhere in the tool surface.
   written in one call. `note.write` never accepts or mutates `visible`: an
   overwrite of an existing key preserves that key's current `visible` value
   exactly (a muted note stays muted across a content-only overwrite), and a
-  brand new key always initializes `visible: true`.
+  brand new key always initializes `visible: true`. When any note written in a
+  call has a `value` of at least a fixed oversize threshold (a named tunable
+  constant, `300` characters — mirroring the injection cap's named-constant
+  style, `#260810-note-injection`), the **text-format** response additionally
+  carries a one-time discipline challenge appended after the write summary:
+  `Large note — keep only if volatile AND homeless AND
+  must-always-stay-in-context; otherwise move it to a ticket/spec/mental-model,
+  or erase. Not mute.` The challenge fires once per call regardless of how many
+  notes cross the threshold (a batch with several oversized notes still appends
+  it exactly once), and the write itself is unconditional — the note is stored
+  either way. The remediation it names is relocate or erase, never mute; a mute
+  would only leave the content neither in context nor in its proper home. The
+  JSON-format response is unaffected: it returns the written records only and
+  never the challenge, matching the text-only-nudge convention `git.commit`
+  uses for its own reminders.
 - **`note.erase(session_key, layer, keys)`** removes each listed key from that
   layer's store. A missing key is a no-op, matching `todo.erase`'s erase-by-key
   precedent.
@@ -769,11 +783,26 @@ after `## Session State`**, using a plain string append rather than the
 `injectBootstrapStalenessWarning` prepend helper — notes are session-context,
 not a standing warning, so they render alongside the restored agenda/todo
 state a lead just asked to see, not as a banner above the reference material.
-The append is skipped entirely (not appended as an empty block) when there
-are no notes **at all** on any layer, muted or visible — matching the
-silent-when-empty contract of every sibling injection. This empty-skip check
-is distinct from the all-muted case below: it fires only when a layer has no
-notes whatsoever, not merely no visible ones.
+Unlike every sibling injection, the `# Notes` block is **never skipped when
+empty** — it is a user-facing affordance modeled on the always-rendered
+`# Manuals` block, not a machine-computed warning, so it renders in all three
+states within the injecting branches (a deliberate divergence from the
+silent-when-empty contract). The reader is the agent, whose working memory
+resets each turn, so the block and its post-it framing must stay continuously
+visible:
+
+- **No notes on any layer** (the former empty-skip condition, keyed on notes
+  present anywhere — muted or visible — not on zero *visible* notes): the block
+  renders the heading and a single empty-state post-it hint, `No notes. Notes
+  are your short, always-in-context post-it reminders — note.write to pin one,
+  note.erase when it's no longer needed.`, and no bullet lines.
+- **Has visible notes**: the highest-priority visible notes as before, followed
+  by a one-line standing post-it hint, `Post-it reminders: note.write to pin,
+  note.erase when done.`
+- **All-muted** (notes exist but zero visible): heading plus the muted-count
+  line and the same one-line standing hint (see below) — never the "No notes."
+  empty-state hint, since the empty-state text keys off the no-notes-on-any-layer
+  condition, not off zero-visible.
 
 When more visible notes exist than the cap, the block ends with a visible `(N
 lower-priority notes elided — use note.search to retrieve.)` line; the elided
@@ -784,10 +813,14 @@ naming the total muted count; both lines render together when both
 conditions apply, in that order (elision line first, muted line second), and
 either can appear alone. In the all-muted edge case — every note on a layer
 is muted, leaving zero visible notes — the block still renders (heading plus
-the muted-count line, zero bullet lines) rather than being skipped, since the
-layer is not empty, only fully muted. The `workflow_manual`
-FRESH-without-root branch never renders this block, matching the
-bootstrap-staleness precedent (`#260703-bootstrap-staleness-warning`).
+the muted-count line and the one-line standing post-it hint, zero bullet lines)
+rather than being skipped, since the layer is not empty, only fully muted. The
+`workflow_manual` FRESH-without-root branch never renders this block at all
+(empty-state hint included), matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`); the always-render contract applies only
+within the branches that inject the block (`workflow_manual` FRESH-with-root and
+CONTINUE, and the standalone `workflow_state` output, which stays byte-identical
+to `workflow_manual`'s `## Session State` suffix).
 
 ## Config Tools {#260505-config-tools}
 
