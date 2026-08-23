@@ -2,6 +2,7 @@
 title: "# Notes block: always render with a standing post-it hint"
 related:
   260823-feat-note-write-oversize-relocate-nudge: sibling — the positive counterpart; that ticket discourages misfiled/oversize notes, this one teaches the correct short-resident post-it use
+dropped: 2026-08-23
 ---
 
 # # Notes block: always render with a standing post-it hint
@@ -80,3 +81,8 @@ post-it hint) and appends the one-line standing hint when notes are present.
 Update the `mcp-tools.md` note-injection anchor to document always-render plus
 the empty vs non-empty hint. Verify: zero-note session shows the empty hint;
 non-zero session shows the notes list followed by the one-line standing hint.
+
+
+## Resolution (2026-08-23)
+
+Absorbed into 260823-feat-notes-postit-discipline (facet B). Merged with its sibling into one ready ticket at the user's request.

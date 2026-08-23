@@ -1,5 +1,6 @@
 ---
 title: "note.write oversize-note relocate/erase nudge"
+dropped: 2026-08-23
 ---
 
 # note.write oversize-note relocate/erase nudge
@@ -91,3 +92,8 @@ named, trivially-tunable constant (start `~300`). No `workflow_manual` change, n
 session state. Update the `mcp-tools.md` note-tools anchor to document the nudge
 and threshold. Verify: an oversize write returns the challenge; a sub-threshold
 write does not; the note is written either way.
+
+
+## Resolution (2026-08-23)
+
+Absorbed into 260823-feat-notes-postit-discipline (facet A). Merged with its sibling into one ready ticket at the user's request.
