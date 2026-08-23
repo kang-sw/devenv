@@ -5,6 +5,7 @@ related:
   260823-feat-notes-block-standing-postit-hint: absorbed source — merged into this ticket, dropped on landing
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-23
 ---
 
 # Notes post-it discipline — oversize write nudge + always-render standing hint
@@ -163,3 +164,35 @@ Verification:
   per `## Spec Impact`.
 - The two absorbed source idea tickets are moved to `.dropped/`.
 - `go test ./...` and `go vet ./...` in `agents-plugin-tool/` pass.
+
+### Result (79cdbdf9) - 2026-08-23
+
+Both facets landed and passed independent full-scope review clean.
+
+- **Facet A** (`internal/mcp/note_tools.go`): `handleNoteWrite` appends the
+  confirmed relocate/erase challenge to its **text** response when any written
+  note's `value` is `>= noteOversizeThreshold` (named constant, `300`). Fires
+  once per call regardless of batch size; the write is unconditional; the JSON
+  response stays clean (mirrors the `git.commit` text-only-nudge convention).
+- **Facet B** (`internal/wsnote/inject.go`, `internal/mcp/workflow_manual.go`):
+  `wsnote.Compute` always renders — empty-state post-it hint (keyed off the
+  no-notes-on-any-layer predicate `len(all)==0`), has-visible + standing hint,
+  all-muted + standing hint. The two `workflow_manual` `computeNotes` guards
+  were simplified to unconditional appends.
+- **Deviation from ticket text (source-verified, folded into facet B):** the
+  ticket did not anticipate that `handleWorkflowState` never called
+  `computeNotes`. Always-rendering `Compute` would have diverged `workflow_state`
+  from `workflow_manual`'s `## Session State` suffix on every call, breaking
+  `TestWorkflowStateReturnsSessionStateOnly`. Fixed by adding a matching
+  `computeNotes(rec.Root)` append to `handleWorkflowState`; the byte-equality is
+  now a three-site lockstep, recorded in mental-model `mcp-runtime.md`.
+- **Spec:** `mcp-tools.md` `#260810-note-tools` and `#260810-note-injection`
+  anchors updated (commit `8dbc21a4`).
+- **Verification:** `go build`/`go vet`/`gofmt` clean; all new facet A/B tests
+  and updated contract tests pass. `go test ./...` shows 6 **pre-existing**
+  failures (missing `skills/lead-prefer-subagent/SKILL.md` test fixture),
+  confirmed identical on the base branch in an isolated worktree — unrelated to
+  this change. Captured as follow-up idea ticket
+  `260823-bug-workflow-manual-test-fixture-missing-prefer-subagent-skill`.
+- Commits: `76a15996` (facet A), `79cdbdf9` (facet B); plan `5536523e`, spec
+  `8dbc21a4`, mental-model `d896a468`.

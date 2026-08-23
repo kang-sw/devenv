@@ -188,9 +188,13 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 	}
 
 	// 3. Resolved record — render only the Session State section, no manual body.
-	//    Match workflow_manual's exact trailing-newline shape (it appends the
-	//    same renderSessionState output then a final "\n").
-	return toolTextResponse(id, renderSessionState(rec)+"\n", nil)
+	//    Match workflow_manual's exact trailing-newline and notes-append shape
+	//    (its CONTINUE branch appends "\n\n"+computeNotes(rec.Root) after
+	//    renderSessionState, then a final "\n") so workflow_state's output
+	//    stays byte-identical to workflow_manual's "## Session State" suffix
+	//    for every resolved session, per the standing invariant documented at
+	//    ai-docs/mental-model/mcp-runtime.md {#260702-workflow-state-tool}.
+	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root)+"\n", nil)
 }
 
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
@@ -265,9 +269,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
-			if notes := computeNotes(canonical); notes != "" {
-				body += "\n\n" + notes
-			}
+			body += "\n\n" + computeNotes(canonical)
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
@@ -298,9 +300,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
-		if notes := computeNotes(rec.Root); notes != "" {
-			body += "\n\n" + notes
-		}
+		body += "\n\n" + computeNotes(rec.Root)
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
 		}

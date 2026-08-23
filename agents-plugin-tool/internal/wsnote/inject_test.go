@@ -7,12 +7,55 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
-func TestComputeReturnsEmptyWhenNoNotesExist(t *testing.T) {
+func TestComputeRendersEmptyStateHintWhenNoNotesExist(t *testing.T) {
 	opts := wsconfig.Options{ConfigHome: t.TempDir()}
 
 	got := Compute(t.TempDir(), opts, 20)
-	if got != "" {
-		t.Fatalf("Compute = %q, want empty string when no notes exist", got)
+	want := "# Notes\n_No notes. Notes are your short, always-in-context post-it reminders — `note.write` to pin one, `note.erase` when it's no longer needed._"
+	if got != want {
+		t.Fatalf("Compute = %q, want empty-state hint %q", got, want)
+	}
+}
+
+func TestComputeAppendsStandingHintWhenVisible(t *testing.T) {
+	configHome := t.TempDir()
+	opts := wsconfig.Options{ConfigHome: configHome}
+	machinePath, err := MachinePath(opts)
+	if err != nil {
+		t.Fatalf("MachinePath: %v", err)
+	}
+	if err := Write(machinePath, []Record{{Key: "m", Value: "machine note", Priority: 1, WrittenAt: "t"}}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got := Compute("", opts, 20)
+	want := "_Post-it reminders: `note.write` to pin, `note.erase` when done._"
+	if !strings.HasSuffix(got, want) {
+		t.Fatalf("Compute with visible notes = %q, want suffix %q", got, want)
+	}
+}
+
+func TestComputeAppendsStandingHintWhenAllMuted(t *testing.T) {
+	configHome := t.TempDir()
+	opts := wsconfig.Options{ConfigHome: configHome}
+	machinePath, err := MachinePath(opts)
+	if err != nil {
+		t.Fatalf("MachinePath: %v", err)
+	}
+	if err := Write(machinePath, []Record{{Key: "m", Value: "v", Priority: 1, WrittenAt: "t"}}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := SetVisible(machinePath, []string{"m"}, false); err != nil {
+		t.Fatalf("SetVisible(mute): %v", err)
+	}
+
+	got := Compute("", opts, 20)
+	want := "_Post-it reminders: `note.write` to pin, `note.erase` when done._"
+	if !strings.HasSuffix(got, want) {
+		t.Fatalf("Compute with all-muted notes = %q, want suffix %q", got, want)
+	}
+	if strings.Contains(got, "No notes.") {
+		t.Fatalf("Compute with all-muted notes = %q, must not render the empty-state hint", got)
 	}
 }
 

@@ -187,27 +187,36 @@ func TestWorkflowManualCarriesCloneLayerNote(t *testing.T) {
 	}
 }
 
-// TestWorkflowManualNotesBlockAbsentWhenNoNotesExist verifies the injection is
-// a true no-op (scopeAnnouncement/computeManuals-style silent case) when no
-// note has ever been written on any layer.
-func TestWorkflowManualNotesBlockAbsentWhenNoNotesExist(t *testing.T) {
+// TestWorkflowManualNotesBlockRendersEmptyStateHintWhenNoNotesExist verifies
+// the "# Notes" block always renders — a deliberate divergence from the
+// scopeAnnouncement/computeManuals-style silent-when-empty contract — showing
+// the empty-state hint when no note has ever been written on any layer.
+func TestWorkflowManualNotesBlockRendersEmptyStateHintWhenNoNotesExist(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
 	initGit(t, root)
 
 	s := NewServer(root, "test")
 
+	const emptyHint = "No notes. Notes are your short, always-in-context post-it reminders"
+
 	freshResp := callToolWithKey(t, s, 1, freshBootstrapKey, "workflow_manual", map[string]any{
 		"root": root,
 	})
-	if notesBlockIndex(freshResp) >= 0 {
-		t.Fatalf("workflow_manual FRESH-with-root must stay silent with no notes: %s", freshResp)
+	if notesBlockIndex(freshResp) < 0 {
+		t.Fatalf("workflow_manual FRESH-with-root must always render the '# Notes' block, even with no notes: %s", freshResp)
+	}
+	if !strings.Contains(freshResp, emptyHint) {
+		t.Fatalf("workflow_manual FRESH-with-root with no notes missing the empty-state hint: %s", freshResp)
 	}
 
 	key, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
 	continueResp := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
-	if notesBlockIndex(continueResp) >= 0 {
-		t.Fatalf("workflow_manual CONTINUE must stay silent with no notes: %s", continueResp)
+	if notesBlockIndex(continueResp) < 0 {
+		t.Fatalf("workflow_manual CONTINUE must always render the '# Notes' block, even with no notes: %s", continueResp)
+	}
+	if !strings.Contains(continueResp, emptyHint) {
+		t.Fatalf("workflow_manual CONTINUE with no notes missing the empty-state hint: %s", continueResp)
 	}
 }
 

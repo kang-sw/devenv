@@ -70,9 +70,13 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 	// The empty-skip check stays keyed on the UNFILTERED collection (muted or
 	// not, across every layer): this is what distinguishes the all-muted edge
 	// (block still renders — heading + muted line, zero bullet lines) from the
-	// truly-empty edge (block skipped entirely).
+	// truly-empty edge (which now also renders — a deliberate divergence from
+	// sibling injections' silent-when-empty contract: "# Notes" always
+	// renders so the empty-state hint is a discoverable, always-in-context
+	// affordance rather than something the caller must already know to ask
+	// for).
 	if len(all) == 0 {
-		return ""
+		return "# Notes\n_No notes. Notes are your short, always-in-context post-it reminders — `note.write` to pin one, `note.erase` when it's no longer needed._"
 	}
 
 	var visible []layeredRecord
@@ -110,5 +114,6 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 	if muted > 0 {
 		fmt.Fprintf(&sb, "(%d muted — use note.search to view.)\n", muted)
 	}
+	sb.WriteString("_Post-it reminders: `note.write` to pin, `note.erase` when done._\n")
 	return strings.TrimRight(sb.String(), "\n")
 }
