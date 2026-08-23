@@ -76,12 +76,8 @@ func isLeadOnlyTool(name string) bool {
 }
 
 func workflowPreferenceWriterTool(name string) bool {
-	switch name {
-	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm", "config.doc_coverage_alarm":
-		return true
-	default:
-		return false
-	}
+	entry, ok := configKeyEntryForTool(name)
+	return ok && entry.RequiresLeadAuthority
 }
 
 type request struct {
@@ -665,281 +661,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		pattern, _ := params.Arguments["pattern"].(string)
 		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return execRawGrepResponse(req.ID, result, err)
-	case "config.show":
-		sessionKey, _ := params.Arguments["session_key"].(string)
-		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		view, err := wsconfig.ScopedShow(&r, wsconfig.Options{}, strings.TrimSpace(sessionKey))
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, view, err)
-		}
-		return toolTextResponse(req.ID, formatConfigView(view), err)
-	case "config.agents_tier":
-		tier, _ := params.Arguments["tier"].(string)
-		backend, _ := params.Arguments["backend"].(string)
-		model, _ := params.Arguments["model"].(string)
-		harness, _ := params.Arguments["harness"].(string)
-		if strings.TrimSpace(harness) == "" {
-			harness = s.currentHarness()
-		}
-		var cfg wsconfig.Config
-		var err error
-		if effort, ok := params.Arguments["effort"].(string); ok {
-			cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
-		} else {
-			cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
-		}
-		return toolJSONResponse(req.ID, cfg, err)
-
-	case "config.workflow_prefer_subagent":
-		if _, err := s.requireLeadSessionKey("config.workflow_prefer_subagent", params.Arguments); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		reset, _ := params.Arguments["reset"].(bool)
-		rawValue, hasValue := params.Arguments["value"]
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		if reset {
-			if hasValue {
-				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value and reset are mutually exclusive"))
-				}
-			}
-			// Reset means "drop the global override and fall back to the builtin
-			// default" — distinct from explicitly writing the builtin's current
-			// value, which would still shadow a future builtin default change.
-			if err := resolver.Unset(wsconfig.ItemWorkflowPreferSubagent, wsconfig.SetOptions{}); err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
-			}
-			resolved, err := resolver.Get("", wsconfig.ItemWorkflowPreferSubagent)
-			if err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
-			}
-			return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
-		}
-		value, _ := rawValue.(string)
-		value = strings.ToLower(strings.TrimSpace(value))
-		switch value {
-		case "on", "off":
-		default:
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value must be one of on, off; got %q", value))
-		}
-		if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, value, wsconfig.SetOptions{}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:global]\n", value), nil)
-
-	case "config.workflow_prefer_mercenary":
-		if _, err := s.requireLeadSessionKey("config.workflow_prefer_mercenary", params.Arguments); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		value, _ := params.Arguments["value"].(string)
-		value = strings.ToLower(strings.TrimSpace(value))
-		switch value {
-		case "on", "off", "hide":
-		default:
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: value must be one of on, off, hide; got %q", value))
-		}
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, value, wsconfig.SetOptions{}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: %w", err))
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_mercenary: %s [scope:global]\n", value), nil)
-
-	case "config.bootstrap_alarm":
-		if _, err := s.requireLeadSessionKey("config.bootstrap_alarm", params.Arguments); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		reset, _ := params.Arguments["reset"].(bool)
-		rawValue, hasValue := params.Arguments["value"]
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		if reset {
-			if hasValue {
-				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: value and reset are mutually exclusive"))
-				}
-			}
-			// Reset means "drop the global override and fall back to the builtin
-			// default" — distinct from explicitly writing the builtin's current
-			// value, which would still shadow a future builtin default change.
-			if err := resolver.Unset(wsconfig.ItemBootstrapAlarm, wsconfig.SetOptions{}); err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
-			}
-			resolved, err := resolver.Get("", wsconfig.ItemBootstrapAlarm)
-			if err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
-			}
-			return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
-		}
-		value, _ := rawValue.(string)
-		value = strings.ToLower(strings.TrimSpace(value))
-		switch value {
-		case "on", "off":
-		default:
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: value must be one of on, off; got %q", value))
-		}
-		if err := resolver.Set(wsconfig.ItemBootstrapAlarm, value, wsconfig.SetOptions{}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:global]\n", value), nil)
-
-	case "config.doc_coverage_alarm":
-		if _, err := s.requireLeadSessionKey("config.doc_coverage_alarm", params.Arguments); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		reset, _ := params.Arguments["reset"].(bool)
-		rawValue, hasValue := params.Arguments["value"]
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-		if reset {
-			if hasValue {
-				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: value and reset are mutually exclusive"))
-				}
-			}
-			// Reset means "drop the global override and fall back to the builtin
-			// default" — distinct from explicitly writing the builtin's current
-			// value, which would still shadow a future builtin default change.
-			if err := resolver.Unset(wsconfig.ItemDocCoverageAlarm, wsconfig.SetOptions{}); err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
-			}
-			resolved, err := resolver.Get("", wsconfig.ItemDocCoverageAlarm)
-			if err != nil {
-				return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
-			}
-			return toolTextResponse(req.ID, fmt.Sprintf("doc_coverage_alarm: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
-		}
-		value, _ := rawValue.(string)
-		value = strings.ToLower(strings.TrimSpace(value))
-		switch value {
-		case "on", "off":
-		default:
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: value must be one of on, off; got %q", value))
-		}
-		if err := resolver.Set(wsconfig.ItemDocCoverageAlarm, value, wsconfig.SetOptions{}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("doc_coverage_alarm: %s [scope:global]\n", value), nil)
-
-	case "config.prompt.set":
-		// Lead-only setter for prompt override-points. The config.* prefix gate in
-		// roleAllowsTool already blocks delegate and leaf keys, so no extra role
-		// check is needed here (sole keyed-gate-is-authority rule, per mcp-runtime
-		// mental model).
-		sessionKey, _ := params.Arguments["session_key"].(string)
-		sessionKey = strings.TrimSpace(sessionKey)
-		if sessionKey == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: session_key is required"))
-		}
-		pointID, _ := params.Arguments["pointId"].(string)
-		pointID = strings.TrimSpace(pointID)
-		if pointID == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: pointId must be non-empty"))
-		}
-		harness, _ := params.Arguments["harness"].(string)
-		// Normalize the harness value and reject unrecognized inputs.
-		// The caller-visible enum is ["claude","codex","*"]; "*" is stored as "all"
-		// to match the buildOverrideLookup reader which reads prompt.<id>.all.
-		// When omitted, default to the current session's detected harness (matching
-		// config.agents_tier behavior); explicit "*" is still required for all-hosts.
-		if strings.TrimSpace(harness) == "" {
-			harness = s.currentHarness()
-		}
-		switch harness {
-		case "claude", "codex":
-			// accepted as-is
-		case "*":
-			harness = "all"
-		default:
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: harness must be one of claude, codex, or *; got %q", harness))
-		}
-		promptText, _ := params.Arguments["prompt"].(string)
-		if strings.TrimSpace(promptText) == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: prompt must be non-empty"))
-		}
-		// Parse optional scope arg. Empty/absent passes ExplicitScope:"" so the
-		// resolver applies DefaultScope (project for unregistered prompt.* keys).
-		scopeArg, _ := params.Arguments["scope"].(string)
-		var explicitScope wsconfig.Scope
-		if strings.TrimSpace(scopeArg) != "" {
-			explicitScope = wsconfig.Scope(scopeArg)
-		}
-		// Write through the layered config resolver. Use wsconfig.Options{} (ambient
-		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as other config.* tools do; do NOT
-		// call resolveToolRoot (config.* tools are not root-aware per mcp-runtime
-		// mental model).
-		overrideKey := "prompt." + pointID + "." + harness
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-		if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{
-			ExplicitScope: explicitScope,
-			SessionKey:    sessionKey,
-		}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: %w", err))
-		}
-		// Determine the resolved scope for the confirmation message.
-		resolvedScope := explicitScope
-		if resolvedScope == "" {
-			resolvedScope = wsconfig.DefaultScope(overrideKey)
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
-
-	case "config.prompt.unset":
-		// Resets a prompt override to the next-broader scope (or builtin/seed
-		// default) by removing it from the session, project, or global config
-		// layer. Lead-only via the config.* prefix gate (same as config.prompt.set).
-		// The caller's session_key doubles as the target session for a
-		// session-scope unset, matching config.prompt.set's session-scope write.
-		sessionKey, _ := params.Arguments["session_key"].(string)
-		sessionKey = strings.TrimSpace(sessionKey)
-		if sessionKey == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: session_key is required"))
-		}
-		pointID, _ := params.Arguments["pointId"].(string)
-		pointID = strings.TrimSpace(pointID)
-		if pointID == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: pointId must be non-empty"))
-		}
-		harness, _ := params.Arguments["harness"].(string)
-		// When omitted, default to the current session's detected harness (matching
-		// config.agents_tier behavior); explicit "*" is still required for all-hosts.
-		if strings.TrimSpace(harness) == "" {
-			harness = s.currentHarness()
-		}
-		switch harness {
-		case "claude", "codex":
-			// accepted as-is
-		case "*":
-			harness = "all"
-		default:
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: harness must be one of claude, codex, or *; got %q", harness))
-		}
-		scopeArg, _ := params.Arguments["scope"].(string)
-		var explicitScope wsconfig.Scope
-		if strings.TrimSpace(scopeArg) != "" {
-			explicitScope = wsconfig.Scope(scopeArg)
-		}
-		overrideKey := "prompt." + pointID + "." + harness
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-		if err := resolver.Unset(overrideKey, wsconfig.SetOptions{
-			ExplicitScope: explicitScope,
-			SessionKey:    sessionKey,
-		}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: %w", err))
-		}
-		resolvedScope := explicitScope
-		if resolvedScope == "" {
-			resolvedScope = wsconfig.DefaultScope(overrideKey)
-		}
-		return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
-
-	case "config.prompt":
-		// Read-only listing of declared prompt override-points. Lead-only via the
-		// config.* prefix gate (a keyless caller passes, exactly like config.show);
-		// no extra role check is needed here.
+	case "config.list":
+		// Read-only combined config surface (260814 Phase 2): subsumes config.show
+		// (resolved-scope View) AND config.tuning (per-key tuning knob catalog),
+		// preserving BOTH contracts. Lead-only via the config.* prefix gate; a
+		// keyless caller passes exactly like config.show did.
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		sessionKey = strings.TrimSpace(sessionKey)
 		rootOverride, _ := params.Arguments["root_override"].(string)
@@ -947,41 +673,201 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		points, err := scanOverridePoints(rsrcRoot)
+		// config.show path: enumerate every known override key across all scopes.
+		showAdapter := sessionConfigAdapter{s: s.sessions}
+		showResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), showAdapter, showAdapter)
+		view, err := wsconfig.ScopedShow(&showResolver, wsconfig.Options{}, sessionKey)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// Build the resolver exactly as the setter does: ambient Options, not
-		// root-aware (config.* tools resolve from WS_CACHE_HOME/WS_CONFIG_HOME).
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
-		list := buildPromptOverrideListing(points, &resolver, sessionKey)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, list, nil)
+		// config.tuning path: project the per-key writer schema + current values,
+		// with the no-agent full-ws-only cut (today: workflow.prefer_mercenary).
+		catalogAdapter := sessionConfigAdapter{s: s.sessions}
+		catalogResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), catalogAdapter, catalogAdapter)
+		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, NoAgentMode())
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatPromptOverrideListing(list), nil)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, configListView{View: view, Knobs: catalog.Knobs}, nil)
+		}
+		return toolTextResponse(req.ID, formatConfigView(view)+formatTuningCatalog(catalog), nil)
 
-	case "config.tuning":
-		// Read-only catalog of workflow tuning knobs. The catalog is a projection
-		// over existing writer schemas plus dynamic prompt override-point discovery;
-		// it never mutates config itself.
+	case "config.tune":
+		// Generic per-key config writer (260814 Phase 2): subsumes the eight
+		// per-knob writers. The concrete contract for each key is surfaced by
+		// config.list; here we route to the correct write path by the resolved
+		// registry entry. Lead-only for lead-authority keys (enforced below),
+		// otherwise gated by the config.* prefix in roleAllowsTool.
+		key, _ := params.Arguments["key"].(string)
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: key is required"))
+		}
+		entry, ok := resolveConfigEntryForKey(key)
+		if !ok {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: unknown config key %q; call config.list for supported keys", key))
+		}
+		// prompt.* keys fold the point id into the generic key; a bare "prompt."
+		// leaves an empty point id. The removed config.prompt.set/unset guarded
+		// this with "pointId must be non-empty"; restore that here so config.tune
+		// never writes/clears a "prompt..<harness>" override.
+		if strings.HasPrefix(entry.Key, "prompt.") && strings.TrimSpace(strings.TrimPrefix(entry.Key, "prompt.")) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: pointId must be non-empty"))
+		}
+		// No-agent gate at the KEY level: config.tune itself is never tool-hidden,
+		// so a wsflow caller could otherwise reach a full-ws-only knob through it.
+		// Mirrors the outer callTool per-tool gate's message shape.
+		if NoAgentMode() && !entry.NoAgentVisible {
+			return toolTextResponse(req.ID, "", fmt.Errorf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), key))
+		}
+		// Session-key requirement varies per key (no registry field): lead-authority
+		// keys need a lead-scoped key; prompt.* keys need a non-empty (any-scope)
+		// key; agents.tier needs none. Matches the pre-collapse per-tool behavior.
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		sessionKey = strings.TrimSpace(sessionKey)
-		rootOverride, _ := params.Arguments["root_override"].(string)
-		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
+		if entry.RequiresLeadAuthority {
+			if _, err := s.requireLeadSessionKey("config.tune", params.Arguments); err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+		} else if strings.HasPrefix(entry.Key, "prompt.") {
+			if sessionKey == "" {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: session_key is required"))
+			}
 		}
+		// Harness: load-bearing for prompt.* and agents.tier; accepted but ignored
+		// (warning-only, Decision 5) for keys that do not vary by harness.
+		harness, _ := params.Arguments["harness"].(string)
+		harness = strings.TrimSpace(harness)
+		if entry.HarnessApplicable {
+			if harness == "" {
+				harness = s.currentHarness()
+			}
+			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 && !enumContains(harnessEnum, harness) {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: harness must be one of claude, codex, or *; got %q", harness))
+			}
+		}
+		// Scope: parse when non-empty. agents.tier is not resolver-backed and only
+		// writes project scope; resolver-backed keys lean on Resolver.Set/Unset for
+		// global-only + session-key enforcement.
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(strings.TrimSpace(scopeArg))
+		}
+		if entry.Key == "agents.tier" && explicitScope != "" && explicitScope != wsconfig.ScopeProject {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project scope; got %q", explicitScope))
+		}
+		reset, _ := params.Arguments["reset"].(bool)
+		if reset {
+			if entry.ResetTool == "" {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s does not support reset", key))
+			}
+			if rawValue, hasValue := params.Arguments["value"]; hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: value and reset are mutually exclusive"))
+				}
+			}
+			adapter := sessionConfigAdapter{s: s.sessions}
+			if strings.HasPrefix(entry.Key, "prompt.") {
+				// prompt override unset (subsumes config.prompt.unset).
+				pointID := strings.TrimPrefix(entry.Key, "prompt.")
+				storedHarness := harness
+				if storedHarness == "*" {
+					storedHarness = "all"
+				}
+				overrideKey := "prompt." + pointID + "." + storedHarness
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+				if err := resolver.Unset(overrideKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+				}
+				resolvedScope := explicitScope
+				if resolvedScope == "" {
+					resolvedScope = wsconfig.DefaultScope(overrideKey)
+				}
+				return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
+			}
+			// scalar resolver-backed knob reset (subsumes the alarm/preference resets).
+			// Reset means "drop the override and fall back to the builtin default" —
+			// distinct from explicitly writing the builtin's current value.
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			if err := resolver.Unset(entry.Key, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+			}
+			resolved, err := resolver.Get("", entry.Key)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, resolved.Value, resolved.Scope), nil)
+		}
+		// Non-reset write branch, dispatched by key family.
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
-		catalog, err := buildTuningCatalog(rsrcRoot, &resolver, sessionKey, NoAgentMode())
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
+		switch {
+		case entry.Key == "agents.tier":
+			// agents.tier is a compound writer (Decision 9): tier/backend/model/effort
+			// travel inside the value object; harness stays the outer selector.
+			rawValue, valueOK := params.Arguments["value"].(map[string]any)
+			if !valueOK {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier value must be an object with tier/backend/model/effort fields"))
+			}
+			// Tier is intentionally NOT enum-validated here: the removed
+			// config.agents_tier passed the raw string to SetAgentsTierForHarness,
+			// whose normalizedTier owns tier validation and accepts documented
+			// synonyms (light/core/deep, haiku/sonnet/opus) case/whitespace
+			// insensitively. config.list still advertises the canonical enum via
+			// the registry ValueFields; only the write path defers to the setter,
+			// matching both the pre-collapse tool and the surviving CLI path.
+			tier, _ := rawValue["tier"].(string)
+			backend, _ := rawValue["backend"].(string)
+			model, _ := rawValue["model"].(string)
+			var cfg wsconfig.Config
+			var err error
+			if effort, effortOK := rawValue["effort"].(string); effortOK {
+				cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
+			} else {
+				cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
+			}
+			return toolJSONResponse(req.ID, cfg, err)
+		case strings.HasPrefix(entry.Key, "prompt."):
+			// prompt override set (subsumes config.prompt.set). The text lives in the
+			// generic value argument; the harness "*" stores as "all".
+			pointID := strings.TrimPrefix(entry.Key, "prompt.")
+			promptText, _ := params.Arguments["value"].(string)
+			if strings.TrimSpace(promptText) == "" {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: prompt must be non-empty"))
+			}
+			storedHarness := harness
+			if storedHarness == "*" {
+				storedHarness = "all"
+			}
+			overrideKey := "prompt." + pointID + "." + storedHarness
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+			}
+			resolvedScope := explicitScope
+			if resolvedScope == "" {
+				resolvedScope = wsconfig.DefaultScope(overrideKey)
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, storedHarness, resolvedScope), nil)
+		default:
+			// scalar resolver-backed knob (subagent / mercenary / bootstrap_alarm /
+			// doc_coverage_alarm). Resolver.Set enforces global-only + session-key.
+			value, _ := params.Arguments["value"].(string)
+			value = strings.ToLower(strings.TrimSpace(value))
+			if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+			if err := resolver.Set(entry.Key, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
+			}
+			resolvedScope := explicitScope
+			if resolvedScope == "" {
+				resolvedScope = entry.DefaultScope()
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope), nil)
 		}
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, catalog, nil)
-		}
-		return toolTextResponse(req.ID, formatTuningCatalog(catalog), nil)
 
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -2035,6 +1921,16 @@ func formatConfigView(view wsconfig.View) string {
 	return b.String()
 }
 
+// configListView is the combined config.list JSON payload (260814 Phase 2):
+// the embedded wsconfig.View flattens config.show's path/config/
+// resolved_overrides at the top level exactly as config.show emitted them, and
+// Knobs carries config.tuning's per-key catalog under a new "knobs" key. Both
+// contracts are preserved side by side rather than one subsuming the other.
+type configListView struct {
+	wsconfig.View
+	Knobs []tuningKnob `json:"knobs"`
+}
+
 // promptOverrideValue is one resolved override for a declared point: the harness
 // bucket it applies to, the scope it resolved from, and the stored value.
 type promptOverrideValue struct {
@@ -2149,62 +2045,77 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	}
 	promptListing := buildPromptOverrideListing(points, resolver, sessionKey)
 
-	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+3)}
+	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+5)}
+	// appendKnob drives the noAgentMode cut off each entry's NoAgentVisible
+	// flag rather than a positional early-return, so the invariant (today:
+	// only workflow.prefer_mercenary is hidden in no-agent mode) is explicit
+	// per-entry instead of depending on append order.
+	appendKnob := func(entry configKeyEntry, knob tuningKnob) {
+		if noAgentMode && !entry.NoAgentVisible {
+			return
+		}
+		catalog.Knobs = append(catalog.Knobs, knob)
+	}
+
 	for _, p := range promptListing {
-		catalog.Knobs = append(catalog.Knobs, tuningKnob{
-			ID:          "prompt." + p.PointId,
+		entry := promptKnobEntry(p.PointId)
+		appendKnob(entry, tuningKnob{
+			ID:          entry.Key,
 			Kind:        "prompt_override",
 			Description: p.Desc,
 			Writer: tuningWriter{
-				Tool:           "config.prompt.set",
-				FixedArguments: map[string]string{"pointId": p.PointId},
+				Tool:           entry.WriterTool,
+				FixedArguments: map[string]string{"key": entry.Key},
 			},
 			Reset: &tuningWriter{
-				Tool:           "config.prompt.unset",
-				FixedArguments: map[string]string{"pointId": p.PointId},
+				Tool:           entry.ResetTool,
+				FixedArguments: map[string]string{"key": entry.Key, "reset": "true"},
 			},
-			SelectorFields: tuningFieldsFromSchema("config.prompt.set", "harness", "scope"),
-			ValueFields:    tuningFieldsFromSchema("config.prompt.set", "prompt"),
+			SelectorFields: entry.SelectorFields,
+			ValueFields:    entry.ValueFields,
 			Current:        p.Overrides,
 		})
 	}
 
-	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+	subagentEntry := registryEntryByKey(wsconfig.ItemWorkflowPreferSubagent)
+	appendKnob(subagentEntry, tuningKnob{
 		ID:          "workflow.prefer_subagent",
 		Kind:        "workflow_preference",
 		Description: "Select whether the workflow manual loads strict subagent posture.",
-		Writer:      tuningWriter{Tool: "config.workflow_prefer_subagent"},
+		Writer:      tuningWriter{Tool: subagentEntry.WriterTool, FixedArguments: map[string]string{"key": subagentEntry.Key}},
 		Reset: &tuningWriter{
-			Tool:           "config.workflow_prefer_subagent",
-			FixedArguments: map[string]string{"reset": "true"},
+			Tool:           subagentEntry.ResetTool,
+			FixedArguments: map[string]string{"key": subagentEntry.Key, "reset": "true"},
 		},
-		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
+		ValueFields: subagentEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
 	})
 
-	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
+	appendKnob(bootstrapEntry, tuningKnob{
 		ID:          "bootstrap_alarm",
 		Kind:        "workflow_preference",
 		Description: "Select whether the session-bootstrap staleness warning fires when this project's AGENTS.md template is behind the shipped lead-bootstrap template.",
-		Writer:      tuningWriter{Tool: "config.bootstrap_alarm"},
+		Writer:      tuningWriter{Tool: bootstrapEntry.WriterTool, FixedArguments: map[string]string{"key": bootstrapEntry.Key}},
 		Reset: &tuningWriter{
-			Tool:           "config.bootstrap_alarm",
-			FixedArguments: map[string]string{"reset": "true"},
+			Tool:           bootstrapEntry.ResetTool,
+			FixedArguments: map[string]string{"key": bootstrapEntry.Key, "reset": "true"},
 		},
-		ValueFields: tuningFieldsFromSchema("config.bootstrap_alarm", "value"),
+		ValueFields: bootstrapEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
 	})
 
-	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+	docCoverageEntry := registryEntryByKey(wsconfig.ItemDocCoverageAlarm)
+	appendKnob(docCoverageEntry, tuningKnob{
 		ID:          "doc_coverage_alarm",
 		Kind:        "workflow_preference",
 		Description: "Select whether the session-bootstrap doc-coverage warning fires when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file.",
-		Writer:      tuningWriter{Tool: "config.doc_coverage_alarm"},
+		Writer:      tuningWriter{Tool: docCoverageEntry.WriterTool, FixedArguments: map[string]string{"key": docCoverageEntry.Key}},
 		Reset: &tuningWriter{
-			Tool:           "config.doc_coverage_alarm",
-			FixedArguments: map[string]string{"reset": "true"},
+			Tool:           docCoverageEntry.ResetTool,
+			FixedArguments: map[string]string{"key": docCoverageEntry.Key, "reset": "true"},
 		},
-		ValueFields: tuningFieldsFromSchema("config.doc_coverage_alarm", "value"),
+		ValueFields: docCoverageEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemDocCoverageAlarm),
 	})
 
@@ -2212,26 +2123,24 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	if err != nil {
 		return tuningCatalog{}, err
 	}
-	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+	agentsTierEntry := registryEntryByKey("agents.tier")
+	appendKnob(agentsTierEntry, tuningKnob{
 		ID:             "agents.tier",
 		Kind:           "model_tier",
 		Description:    "Configure the backend/model mapping for a ws agent capability tier.",
-		Writer:         tuningWriter{Tool: "config.agents_tier"},
-		SelectorFields: tuningFieldsFromSchema("config.agents_tier", "tier", "harness"),
-		ValueFields:    tuningFieldsFromSchema("config.agents_tier", "backend", "model", "effort"),
+		Writer:         tuningWriter{Tool: agentsTierEntry.WriterTool, FixedArguments: map[string]string{"key": "agents.tier"}},
+		SelectorFields: agentsTierEntry.SelectorFields,
+		ValueFields:    agentsTierEntry.ValueFields,
 		Current:        agentTiers,
 	})
 
-	if noAgentMode {
-		return catalog, nil
-	}
-
-	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+	mercenaryEntry := registryEntryByKey(wsconfig.ItemWorkflowPreferMercenary)
+	appendKnob(mercenaryEntry, tuningKnob{
 		ID:          "workflow.prefer_mercenary",
 		Kind:        "workflow_preference",
 		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
-		Writer:      tuningWriter{Tool: "config.workflow_prefer_mercenary"},
-		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_mercenary", "value"),
+		Writer:      tuningWriter{Tool: mercenaryEntry.WriterTool, FixedArguments: map[string]string{"key": mercenaryEntry.Key}},
+		ValueFields: mercenaryEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
 	})
 
@@ -2281,89 +2190,6 @@ func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
 		}
 	}
 	return rows, nil
-}
-
-func tuningFieldsFromSchema(toolName string, fieldNames ...string) []tuningField {
-	fields := make([]tuningField, 0, len(fieldNames))
-	for _, fieldName := range fieldNames {
-		fields = append(fields, tuningFieldFromSchema(toolName, fieldName))
-	}
-	return fields
-}
-
-func tuningFieldFromSchema(toolName, fieldName string) tuningField {
-	field := tuningField{Name: fieldName}
-	properties, required := toolInputSchemaDetails(toolName)
-	field.Required = required[fieldName]
-	raw, ok := properties[fieldName]
-	if !ok {
-		return field
-	}
-	if description, ok := propertyString(raw, "description"); ok {
-		field.Description = description
-	}
-	if enum := propertyStringSlice(raw, "enum"); len(enum) > 0 {
-		field.Enum = enum
-	}
-	return field
-}
-
-func toolInputSchemaDetails(toolName string) (map[string]any, map[string]bool) {
-	for _, tool := range tools() {
-		name, _ := tool["name"].(string)
-		if name != toolName {
-			continue
-		}
-		schema, _ := tool["inputSchema"].(map[string]any)
-		properties, _ := schema["properties"].(map[string]any)
-		required := map[string]bool{}
-		switch values := schema["required"].(type) {
-		case []string:
-			for _, value := range values {
-				required[value] = true
-			}
-		case []any:
-			for _, value := range values {
-				if text, ok := value.(string); ok {
-					required[text] = true
-				}
-			}
-		}
-		return properties, required
-	}
-	return map[string]any{}, map[string]bool{}
-}
-
-func propertyString(raw any, key string) (string, bool) {
-	switch typed := raw.(type) {
-	case map[string]any:
-		value, ok := typed[key].(string)
-		return value, ok
-	case map[string]string:
-		value, ok := typed[key]
-		return value, ok
-	default:
-		return "", false
-	}
-}
-
-func propertyStringSlice(raw any, key string) []string {
-	switch typed := raw.(type) {
-	case map[string]any:
-		switch values := typed[key].(type) {
-		case []string:
-			return append([]string(nil), values...)
-		case []any:
-			out := make([]string, 0, len(values))
-			for _, value := range values {
-				if text, ok := value.(string); ok {
-					out = append(out, text)
-				}
-			}
-			return out
-		}
-	}
-	return nil
 }
 
 func formatTuningCatalog(catalog tuningCatalog) string {
@@ -3925,126 +3751,31 @@ func tools() []map[string]any {
 			"inputSchema": execRawGrepSchema(),
 		},
 		{
-			"name":        "config.show",
-			"description": "Return the current ws user-local configuration and resolved config path without modifying it. When session_key is supplied, each config override is annotated with the scope it resolved from (session, project, global, or builtin).",
+			"name":        "config.list",
+			"description": "Return the current ws configuration in one read-only view: the resolved config path and per-scope override resolution (session, project, global, builtin) plus the full tuning-knob catalog (each knob's writer, schema-derived field options, allowed/default scope, harness applicability, and current value). Use this to discover every supported config.tune key and its exact write contract. When session_key is supplied, session-scope overrides are included and annotated.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-					"session_key": stringProperty("Optional session key. When supplied, resolved override scopes are included in the output."),
-				},
-			},
-		},
-		{
-			"name":        "config.agents_tier",
-			"description": "Configure the backend/model mapping for a ws agent capability tier.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"tier":    enumStringProperty("Capability tier to configure.", []string{"small", "medium", "large", "xlarge"}),
-					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
-					"model":   stringProperty("Concrete model for this alias."),
-					"effort":  enumStringProperty("Optional portable reasoning effort for this alias. Empty, omitted, or none leaves backend effort unset.", []string{"", "none", "low", "medium", "high", "xhigh"}),
-					"harness": stringProperty("Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known."),
-				},
-				"required": []string{"tier"},
-			},
-		},
-		{
-			"name":        "config.workflow_prefer_subagent",
-			"description": "Set the global workflow preference for loading strict subagent posture with the workflow manual, or reset it back to the builtin default (off) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
-					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
-				},
-			},
-		},
-		{
-			"name":        "config.workflow_prefer_mercenary",
-			"description": "Set the global mercenary delegation preference. 'on' prefers ws.mercenary guidance for implementer/reviewer renders. 'off' keeps native-subagent default guidance while leaving explicit mercenary use available. 'hide' is the builtin default and hides ws.mercenary.* from the public tool surface. Note: tool-list suppression ('hide') requires project or global scope; a session-scope 'hide' suppresses mercenary playbook blocks but does not remove ws.mercenary.* from the tools list.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"value": enumStringProperty("Desired mode: on, off, or hide.", []string{"on", "off", "hide"}),
-				},
-				"required": []string{"value"},
-			},
-		},
-		{
-			"name":        "config.bootstrap_alarm",
-			"description": "Set the global preference for the session-bootstrap staleness warning (fires at ferrule/workflow_manual time when this project's AGENTS.md Template Version tag is behind the shipped lead-bootstrap template), or reset it back to the builtin default (on) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
-					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
-				},
-			},
-		},
-		{
-			"name":        "config.doc_coverage_alarm",
-			"description": "Set the global preference for the session-bootstrap doc-coverage warning (fires at ferrule/workflow_manual time when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file), or reset it back to the builtin default (on) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
-					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
-				},
-			},
-		},
-		{
-			"name":        "config.prompt.set",
-			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate and to support session-scope writes."),
-					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
-					"harness":     enumStringProperty("Harness bucket the override applies to. When omitted, defaults to the current session's detected harness. Use * explicitly for cross-harness (all).", []string{"claude", "codex", "*"}),
-					"prompt":      stringProperty("Override text that replaces the seed block at render time. Must be non-empty."),
-					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
-				},
-				"required": []string{"session_key", "pointId", "prompt"},
-			},
-		},
-		{
-			"name":        "config.prompt.unset",
-			"description": "Reset a stored prompt override for a named override-point and harness bucket back to whatever the next-broader scope (or the inline seed default) resolves to. Never writes an empty-string value — an explicit empty override is a distinct intent covered by config.prompt.set. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate, and required as the target session for a session-scope unset."),
-					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
-					"harness":     enumStringProperty("Harness bucket to clear. When omitted, defaults to the current session's detected harness. Use * explicitly for cross-harness (all).", []string{"claude", "codex", "*"}),
-					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). session clears the caller's session-scoped override.", wsconfig.ScopeSchemaEnum()),
-				},
-				"required": []string{"session_key", "pointId"},
-			},
-		},
-		{
-			"name":        "config.prompt",
-			"description": "List every declared prompt override-point (id + description) found in the shipped playbook tree, with any current override values and the scope each resolved from. Read-only; lead-only via the config.* prefix gate. Points to the ws:lead-tune skill for the tuning how-to.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope overrides are included and annotated."),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+					"session_key":   stringProperty("Optional lead session key. When supplied, resolved override scopes and session-scope prompt overrides are included in the output."),
 					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
 				},
 			},
 		},
 		{
-			"name":        "config.tuning",
-			"description": "Return a read-only catalog of supported ws workflow tuning knobs, including writer tools, schema-derived field options, and current values when available.",
+			"name":        "config.tune",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, prompt.<pointId>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs and an object ({tier, backend, model, effort}) for agents.tier. scope is optional and backstops to the key's declared default; harness is load-bearing for prompt.* and agents.tier and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope prompt overrides and scoped config values are included."),
-					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
-					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
+					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, doc_coverage_alarm, workflow.prefer_mercenary, agents.tier, or prompt.<pointId>. See config.list for the supported set."),
+					"value":       anyProperty("New value. A string for scalar knobs (e.g. on/off), or an object {tier, backend, model, effort} for agents.tier. Omit when reset is true."),
+					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. Global-only keys reject non-global scopes; agents.tier only supports project scope.", wsconfig.ScopeSchemaEnum()),
+					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.* (claude, codex, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
+					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value; only valid for keys that support reset."),
+					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
 				},
+				"required": []string{"key"},
 			},
 		},
 		{
@@ -4418,7 +4149,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.show fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | ask | run); for run, the reviewer(s) to spawn and the mode. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | ask | run); for run, the reviewer(s) to spawn and the mode. Does not spawn reviewers.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4525,7 +4256,7 @@ func tools() []map[string]any {
 					"name":               stringProperty("Agent name."),
 					"backend":            stringProperty("Optional backend name (codex or claude). Uses harness default when omitted."),
 					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/model registration fields."),
-					"tier":               stringProperty("Optional first-class capability tier (small/medium/large/xlarge) to pass through from playbook.render's recommended-tier. Selects the mercenary's model via config.agents_tier; omit to use the default."),
+					"tier":               stringProperty("Optional first-class capability tier (small/medium/large/xlarge) to pass through from playbook.render's recommended-tier. Selects the mercenary's model via config.tune(key: agents.tier); omit to use the default."),
 				},
 				"required": []string{"name"},
 			},
@@ -4698,10 +4429,12 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
-		"mercenary.cancel", "mercenary.print", "mercenary.erase",
-		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm", "config.doc_coverage_alarm":
+		"mercenary.cancel", "mercenary.print", "mercenary.erase":
 		return true
 	default:
+		if entry, ok := configKeyEntryForTool(name); ok {
+			return entry.RequiresLeadAuthority
+		}
 		return false
 	}
 }
@@ -4937,15 +4670,17 @@ func noAgentHiddenTool(name string) bool {
 	if strings.HasPrefix(name, "mercenary.") {
 		return true
 	}
-	switch name {
-	case "config.workflow_prefer_mercenary":
-		// Mercenary render-mode control is ws-only; the agentless wsflow surface
-		// has no mercenary path, so prefer_mercenary is hidden there. The
-		// bootstrap tool stays visible (wsflow still needs session-key bootstrap).
-		return true
-	default:
-		return false
+	// Mercenary render-mode control is ws-only; the agentless wsflow surface
+	// has no mercenary path, so config.workflow_prefer_mercenary (the only
+	// config.* entry with NoAgentVisible: false) is hidden there. Every other
+	// config.* knob, including the bootstrap tool, stays visible (wsflow
+	// still needs session-key bootstrap).
+	if strings.HasPrefix(name, "config.") {
+		if entry, ok := configKeyEntryForTool(name); ok {
+			return !entry.NoAgentVisible
+		}
 	}
+	return false
 }
 
 // wsflowRenderEligibleStems is the exact set of prompt stems that are
@@ -5259,6 +4994,17 @@ func integerProperty(description string) map[string]string {
 func boolProperty(description string) map[string]string {
 	return map[string]string{
 		"type":        "boolean",
+		"description": description,
+	}
+}
+
+// anyProperty describes a parameter with no JSON-Schema "type" constraint (an
+// absent type means "any"), used for config.tune's polymorphic value argument
+// which is a string for scalar knobs and an object for agents.tier. objectProperty
+// hardcodes "type":"object" and stringProperty hardcodes "type":"string", so
+// neither fits a genuinely polymorphic value.
+func anyProperty(description string) map[string]any {
+	return map[string]any{
 		"description": description,
 	}
 }

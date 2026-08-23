@@ -677,7 +677,8 @@ as maximal staleness); or the shipped template's own tag is unreadable or
 malformed (fail-safe — the tool never warns off of an unreadable "latest").
 When the warning does fire, its text names both the installed and latest
 version numbers and instructs the caller to run
-`config.bootstrap_alarm(value: "off")` to silence it permanently. The warning
+`config.tune(key: "bootstrap_alarm", value: "off")` to silence it permanently.
+The warning
 fires on every `ferrule`/`workflow_manual` call while stale — there is no
 once-per-session suppression state, matching the existing precedent of
 per-call injection (e.g. the mercenary agentId tip) rather than the
@@ -705,7 +706,8 @@ file. A missing directory counts as uncovered, not an error — fresh projects
 legitimately lack these directories before `lead-forge-spec`/
 `lead-forge-mental-model` has run. When the warning does fire, its text names
 which area(s) are missing coverage and instructs the caller to run
-`config.doc_coverage_alarm(value: "off")` to silence it permanently. The
+`config.tune(key: "doc_coverage_alarm", value: "off")` to silence it
+permanently. The
 warning fires on every `ferrule`/`workflow_manual` call while uncovered —
 there is no once-per-session suppression state, mirroring
 `#260703-bootstrap-staleness-warning`.
@@ -789,94 +791,111 @@ bootstrap-staleness precedent (`#260703-bootstrap-staleness-warning`).
 
 ## Config Tools {#260505-config-tools}
 
-`config.show` returns the resolved ws user-local configuration path and current
-configuration without modifying it. The default response is compact labeled
-text, and structured JSON remains available for callers that need stable fields.
+The config surface is two generic tools: `config.list` (read) and
+`config.tune(key, value, scope?, harness?, reset?, session_key?)` (write).
+`config.list` subsumes the former `config.show` and `config.tuning`: it returns
+the resolved ws user-local configuration path and current configuration without
+modifying it, plus the tuning-knob catalog (see Tuning Catalog). The default
+response is compact labeled text, and structured JSON remains available for
+callers that need stable fields. `config.tune` subsumes the eight former
+per-knob writers, selecting the target knob by its `key`; `config.list`
+surfaces the exact per-key write contract (value domain, required/optional
+fields, allowed/default scope, harness applicability). Both tools stay lead-only
+via the `config.*` capability-gate prefix; per-key lead-authority and
+session-key requirements are enforced at dispatch rather than in the schema.
 
-`config.agents_tier` is the surface for updating the backend/model/effort mapping
-for a capability tier. Callers provide `tier` as the capability tier name
-(`small`/`medium`/`large`/`xlarge`); the `light`/`core`/`deep` aliases and
-`haiku`/`sonnet`/`opus` provider names are accepted as read-compat synonyms on
-input. A caller may also provide a backend, a concrete model, a portable effort, a
-harness selector, or any combination of those fields. When backend is omitted,
-ws infers it from the model family where possible. Empty effort, omitted effort,
-and `none` store the no-override state; supported non-empty effort values are
-visible through configuration output. The update applies to the explicit harness
-when provided, otherwise the detected MCP session harness when available, and
-otherwise the default tier mapping. This makes `backend` mean the execution
-backend rather than the tier-table key. Available in both full and agentless
-product modes. {#260513-harness-local-agent-tier-config}
+`config.tune(key: "agents.tier", value: {tier, backend, model, effort}, harness?)`
+is the surface for updating the backend/model/effort mapping for a capability
+tier. Unlike the scalar knobs, `agents.tier`'s value is a compound object: `tier`
+travels **inside** the value object alongside `backend`/`model`/`effort`, while
+`harness` stays the outer selector argument. Callers provide `tier` as the
+capability tier name (`small`/`medium`/`large`/`xlarge`); the `light`/`core`/`deep`
+aliases and `haiku`/`sonnet`/`opus` provider names are accepted as read-compat
+synonyms on input. A caller may also provide a backend, a concrete model, a
+portable effort, a harness selector, or any combination of those fields. When
+backend is omitted, ws infers it from the model family where possible. Empty
+effort, omitted effort, and `none` store the no-override state; supported
+non-empty effort values are visible through configuration output. The update
+applies to the explicit harness when provided, otherwise the detected MCP session
+harness when available, and otherwise the default tier mapping. This makes
+`backend` mean the execution backend rather than the tier-table key. `agents.tier`
+is not resolver-backed and only writes project scope (an explicit non-project
+`scope:` is rejected). Available in both full and agentless product modes.
+{#260513-harness-local-agent-tier-config}
 
-`config.workflow_prefer_subagent(session_key, value: "on"|"off")` sets the
-global `"workflow.prefer_subagent"` item, whose builtin default is `off`.
-`config.workflow_prefer_mercenary(session_key, value: "on"|"off"|"hide")` sets
-the global `"workflow.prefer_mercenary"` item, whose builtin default is `hide`.
-Both writer tools require a lead session key for authority but always write the
-global config scope. The former unprefixed `"prefer_mercenary"` entry is not
-migrated; it remains orphaned local state unless a later ticket introduces
+`config.tune(key: "workflow.prefer_subagent", value: "on"|"off", session_key)`
+sets the global `"workflow.prefer_subagent"` item, whose builtin default is
+`off`. `config.tune(key: "workflow.prefer_mercenary", value: "on"|"off"|"hide",
+session_key)` sets the global `"workflow.prefer_mercenary"` item, whose builtin
+default is `hide`. Both keys require a lead session key for authority but always
+write the global config scope. The former unprefixed `"prefer_mercenary"` entry
+is not migrated; it remains orphaned local state unless a later ticket introduces
 migration. `prompt.DelegationSection.*` prompt override keys are likewise not
 migrated.
 
-`config.workflow_prefer_subagent` additionally accepts `reset: true` as an
-alternative to `value`; the two are mutually exclusive. `reset: true` removes
-the global override entirely (rather than writing an explicit value, even the
-builtin's current value) so resolution falls back to `global > builtin` and
-tracks any future change to the builtin default. This mirrors the general
-unset-vs-set distinction in `#260702-unset-means-reset-to-builtin`.
+`config.tune(key: "workflow.prefer_subagent", ...)` additionally accepts
+`reset: true` as an alternative to `value`; the two are mutually exclusive.
+`reset: true` removes the global override entirely (rather than writing an
+explicit value, even the builtin's current value) so resolution falls back to
+`global > builtin` and tracks any future change to the builtin default. This
+mirrors the general unset-vs-set distinction in
+`#260702-unset-means-reset-to-builtin`.
 {#260702-config-unset-reset-to-builtin}
 
-`config.bootstrap_alarm(session_key, value: "on"|"off")` sets the global
-`"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
+`config.tune(key: "bootstrap_alarm", value: "on"|"off", session_key)` sets the
+global `"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
 bootstrap staleness warning (`#260703-bootstrap-staleness-warning`). It
 requires a lead session key for authority, always writes the global config
-scope (global-only, mirroring `config.workflow_prefer_subagent`), and accepts
+scope (global-only, mirroring `workflow.prefer_subagent`), and accepts
 the same mutually-exclusive `reset: true` alternative to `value` with
 identical unset-to-builtin semantics.
 
-`config.doc_coverage_alarm(session_key, value: "on"|"off")` sets the global
-`"doc_coverage_alarm"` item, whose builtin default is `on`; it gates the doc
-coverage warning (`#260707-doc-coverage-warning`). It requires a lead session
-key for authority, always writes the global config scope (global-only,
-mirroring `config.bootstrap_alarm`), and accepts the same mutually-exclusive
+`config.tune(key: "doc_coverage_alarm", value: "on"|"off", session_key)` sets
+the global `"doc_coverage_alarm"` item, whose builtin default is `on`; it gates
+the doc coverage warning (`#260707-doc-coverage-warning`). It requires a lead
+session key for authority, always writes the global config scope (global-only,
+mirroring `bootstrap_alarm`), and accepts the same mutually-exclusive
 `reset: true` alternative to `value` with identical unset-to-builtin
 semantics.
 
 ## Tuning Catalog {#260625-tuning-catalog}
 
-`config.tuning` is a read-only discovery surface for workflow-tuning knobs used
-by `ws:lead-tune`. It returns a compact catalog whose entries describe
-user-facing knobs, their current resolved values when available, the selector
-fields a caller must choose, the value fields a caller may set, and the writer
-tool that performs the actual mutation.
+The tuning-knob catalog is part of `config.list`'s output (it subsumes the
+former standalone `config.tuning` read tool) and is the discovery surface for
+workflow-tuning knobs used by `ws:lead-tune`. It is a compact catalog whose
+entries describe user-facing knobs, their current resolved values when
+available, the selector fields a caller must choose, the value fields a caller
+may set, and the writer that performs the actual mutation — now uniformly
+`config.tune`, with the knob's id carried as the writer's fixed `key` argument.
 
 The catalog is a projection, not a second setter schema. Each entry names a
 small semantic knob id and derives field names, enum values, required fields, and
-descriptions from the existing MCP writer tool schema where possible. Prompt
-override entries derive their point ids from the same shipped override-marker
-scan used by `config.prompt`; model-tier entries derive their fields from
-`config.agents_tier`; workflow-preference entries derive their values from
-`config.workflow_prefer_subagent`, `config.workflow_prefer_mercenary`,
-`config.bootstrap_alarm`, and `config.doc_coverage_alarm`.
+descriptions from the per-key config registry. Prompt override entries derive
+their point ids from the shipped override-marker scan; model-tier entries derive
+their fields from the `agents.tier` registry entry (with `tier` in the value
+fields and `harness` the sole selector); workflow-preference entries derive their
+values from the `workflow.prefer_subagent`, `workflow.prefer_mercenary`,
+`bootstrap_alarm`, and `doc_coverage_alarm` registry entries.
 The shipped `DelegationSection` override marker is removed, so
-`prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
+`prompt.DelegationSection` is absent from the catalog and from prompt-override
 discovery; orphaned stored prompt keys remain ignored.
 
 Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
 structured shape for callers that need to build a proposal or compare runtime
-support: `knobs[]` entries carry `id`, `kind`, `description`, `writer`,
-optional `reset`, `selector_fields`, `value_fields`, and `current`.
-Compatibility-only writer arguments may be omitted from the catalog even when
-they remain accepted by the writer tool; the catalog exposes the canonical
-tuning syntax, not every legacy call shape. Product mode is honored:
-full-ws-only knobs are absent when the runtime is in wsflow/no-agent mode.
+support: each `knobs[]` entry carries `id`, `kind`, `description`, `writer`
+(always `config.tune` with a `key` fixed argument), optional `reset`,
+`selector_fields`, `value_fields`, and `current`. Compatibility-only writer
+arguments may be omitted from the catalog even when they remain accepted; the
+catalog exposes the canonical tuning syntax, not every legacy call shape.
+Product mode is honored: full-ws-only knobs are absent when the runtime is in
+wsflow/no-agent mode.
 
 > [!note] Constraints
-> - `config.tuning` does not mutate config and does not replace
->   `config.prompt.set`, `config.workflow_prefer_mercenary`, or
->   `config.agents_tier`.
-> - Adding a new lead-tune knob requires registering its semantic id and writer
->   tool, but must not copy enum/property schema by hand when that schema already
->   belongs to the writer tool.
+> - `config.list` does not mutate config; it exposes each knob's `config.tune`
+>   write contract rather than replacing it.
+> - Adding a new lead-tune knob requires registering its semantic id in the
+>   per-key config registry, but must not copy enum/property schema by hand when
+>   that schema already belongs to the registry entry.
 > - Prompt override discovery remains marker-driven; the tuning catalog must not
 >   invent or expose prompt `pointId` values absent from the shipped rsrc tree.
 
@@ -895,7 +914,7 @@ names) are accepted as read-compat synonyms on input, folded to the capability
 tiers `light↦small`, `core↦medium`, `deep↦large`; `xlarge` (fable-class) has no
 legacy alias and is independently configurable. Playbook frontmatter declares
 `role:` and `tier:` in the capability vocabulary; a tier resolves directly to a
-concrete backend/model through `config.agents_tier`
+concrete backend/model through `config.tune(key: "agents.tier")`
 (`#260513-harness-local-agent-tier-config`), which is keyed by the capability tier
 (the earlier "remains keyed by `light`/`core`/`deep`" framing is superseded by
 `#260620-tier-vocabulary-collapse-direct-model-map`).
@@ -904,9 +923,10 @@ concrete backend/model through `config.agents_tier`
 The two-vocabulary split is collapsed to a single tier vocabulary. The capability
 vocabulary `small`/`medium`/`large`/`xlarge` is the only tier vocabulary across
 every surface — playbook frontmatter, `playbook.render`, `mercenary.register`,
-and the model-config tool (the `config.agents_tier` surface, re-homed by this
-change rather than by the previously pending `config.model_alias` rename, which
-this supersedes). Config is keyed directly by the capability tier: a tier resolves
+and the model-config tool (the `config.tune(key: "agents.tier")` surface,
+re-homed by this change rather than by the previously pending
+`config.model_alias` rename, which this supersedes). Config is keyed directly by
+the capability tier: a tier resolves
 to its per-harness `(backend, model, effort)` with no intervening
 `light`/`core`/`deep` alias step, and the `firstClassTierToAlias` bridge is
 retired. `xlarge` has an independently configurable mapping instead of folding
@@ -944,8 +964,8 @@ introduces migration.
 Each config item declares a natural **default write scope** in code; items that
 declare nothing fall back to `project`. A write without an explicit scope lands
 in the item's declared default scope. An explicit `scope:` argument on a set
-always wins over the declared default. `get`/`show` report *which scope* a value
-resolved from, so a caller can see whether a value is session-, project-,
+always wins over the declared default. `config.list` reports *which scope* a
+value resolved from, so a caller can see whether a value is session-, project-,
 global-, or builtin-sourced.
 
 Scope storage map:
@@ -967,14 +987,15 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 
 > [!note] Constraints
 > - Scope-awareness is opt-in per config item; this contract does not retrofit
->   the existing `config.agents_tier` surface, which is re-homed under the same
+>   the existing `agents.tier` surface (`config.tune(key: "agents.tier")`), which
+>   is re-homed under the same
 >   model by the capability-tier collapse
 >   (`#260620-tier-vocabulary-collapse-direct-model-map`) rather than here.
 > - Item-level write gating still applies: a scope-aware setter honors an item's
 >   existing role/capability restrictions (not every item is freely settable at
 >   every scope).
 > - The substrate (resolver, default-scope registry, file-lock RMW, global store,
->   shared `scope` schema fragment) and scope-reporting on `config.show` are the
+>   shared `scope` schema fragment) and scope-reporting on `config.list` are the
 >   caller-visible surface today. Per-item scope-aware *set* surfaces arrive as
 >   individual items adopt the model (`"workflow.prefer_mercenary"`
 >   (`#260619-prefer-mercenary-session-scope-item`), prompt overrides); the set
@@ -983,48 +1004,51 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 ### Prompt Override Tuning Tools {#260620-config-prompt-override-tuning-tools}
 
 The prompt-override surface (`#260619-prompt-override-marker-engine`) is tunable
-from inside the MCP through a dedicated `config.prompt.*` namespace, distinct from
-`config.agents_tier`/`config.show`.
+from inside the MCP through the generic `config.tune`/`config.list` tools, keyed
+by `prompt.<point id>` config keys.
 
-`config.prompt.set(point id, harness, prompt, scope?)` stores a prompt override
-keyed by `(point id, harness)`, where `harness` is `claude`, `codex`, or `*`
-(the cross-harness `all` bucket; `*` is stored under the `all` key). The value is
-written through the layered config scope model (`#260619-layered-config-scope-model`)
-under the key `prompt.<point id>.<harness>`: with no `scope`, the write lands in
-the item's declared default scope (`project` for these unregistered `prompt.*`
-keys); an explicit `scope:` argument wins. A `session`-scope write requires the
-caller's `session_key`. The setter is lead-only — delegate and leaf keys are
-blocked by the `config.*` capability-gate prefix — and is visible in both full-ws
-and agentless wsflow modes, since prompt overrides are a mode-neutral rendering
-concern. Once stored, the override is honored at render time by the marker engine
-for the matching `(point id, harness)` and resolved scope.
+`config.tune(key: "prompt.<point id>", value: <text>, harness?, scope?,
+session_key)` stores a prompt override keyed by `(point id, harness)`, where
+`harness` is `claude`, `codex`, or `*` (the cross-harness `all` bucket; `*` is
+stored under the `all` key). The override text travels in the generic `value`
+argument. The value is written through the layered config scope model
+(`#260619-layered-config-scope-model`) under the key `prompt.<point id>.<harness>`:
+with no `scope`, the write lands in the item's declared default scope (`project`
+for these unregistered `prompt.*` keys); an explicit `scope:` argument wins. A
+`prompt.*` write requires the caller's `session_key` (any scope; not lead-scoped),
+which also serves as the target session for a `session`-scope write. The writer is
+lead-only — delegate and leaf keys are blocked by the `config.*` capability-gate
+prefix — and is visible in both full-ws and agentless wsflow modes, since prompt
+overrides are a mode-neutral rendering concern. Once stored, the override is
+honored at render time by the marker engine for the matching `(point id, harness)`
+and resolved scope.
 
-`config.prompt.unset(point id, harness, scope?)` resets a stored prompt
-override back to whatever the next-broader scope (or the inline seed default)
-resolves to; it never writes an empty-string value in place of the removed
-override — an explicit empty override is a distinct intent covered by
-`config.prompt.set` with an empty `prompt` value. `scope` accepts `session`,
-`project`, or `global` (the same enum as `config.prompt.set`); a `session`-scope
-unset requires the caller's `session_key`, matching the setter's session-scope
-write requirement. With no `scope`, the item's declared default scope is used
-(`project` for unregistered `prompt.*` keys). {#260702-unset-means-reset-to-builtin}
+`config.tune(key: "prompt.<point id>", reset: true, harness?, scope?, session_key)`
+resets a stored prompt override back to whatever the next-broader scope (or the
+inline seed default) resolves to; it never writes an empty-string value in place
+of the removed override — an explicit empty override is a distinct intent covered
+by a `config.tune` write with an empty `value`. `scope` accepts `session`,
+`project`, or `global`; a `session`-scope reset requires the caller's
+`session_key`, matching the setter's session-scope write requirement. With no
+`scope`, the item's declared default scope is used (`project` for unregistered
+`prompt.*` keys). {#260702-unset-means-reset-to-builtin}
 
-No-argument `config.prompt()` returns a **data listing**, not a manual: a scan of
-the shipped playbook resource tree for declared override markers (the marker
-grammar from `#260619-prompt-override-marker-engine`) reporting each
-override-point's id and short `desc` together with any current override values per
-harness bucket and the scope each resolved from, ending with a one-line pointer to
-the `ws:lead-tune` workflow-tuning skill (which owns the how-to manual and the
-proactive-proposal trigger). The tuning manual itself is deliberately not rendered
-there, so `config.prompt()` stays a lean data surface. Like `config.show`, it takes
-an optional `session_key` — session-scope overrides are listed and annotated only
-when it is supplied — and is lead-only via the same `config.*` prefix gate (a
-keyless caller passes; delegate and leaf keys are blocked). The listing is keyed on
-the declared markers (orphan `prompt.*` values without a marker are not surfaced),
-and each value's scope is resolved through the layered config scope model.
+`config.list` returns the declared override-points as `prompt_override` catalog
+knobs (`kind: "prompt_override"`), replacing the former standalone `config.prompt`
+listing: a scan of the shipped playbook resource tree for declared override
+markers (the marker grammar from `#260619-prompt-override-marker-engine`) reports
+each override-point's id and short `desc` together with any current override
+values per harness bucket and the scope each resolved from. The `ws:lead-tune`
+skill owns the how-to manual and the proactive-proposal trigger. Like the rest of
+`config.list`, it takes an optional `session_key` — session-scope overrides are
+listed and annotated only when it is supplied — and is lead-only via the same
+`config.*` prefix gate (a keyless caller passes; delegate and leaf keys are
+blocked). The listing is keyed on the declared markers (orphan `prompt.*` values
+without a marker are not surfaced), and each value's scope is resolved through the
+layered config scope model.
 
 > [!note] Constraints
-> - The setter does not introduce its own storage; it writes through the layered
+> - The writer does not introduce its own storage; it writes through the layered
 >   config primitive and inline into the single config file, so the override
 >   surface inherits that file's lock/atomicity story.
 
@@ -1433,7 +1457,7 @@ attached unconditionally rather than only on the writing branches.
 
 Ordinary gate results also carry an `advisory`: the non-waivable statement and
 the review-scope line. It says sage review is not waivable per ticket (pointing
-at `ws/config.show` for the `sage_review` config that governs it), that design
+at `ws/config.list` for the `sage_review` config that governs it), that design
 review checks coherence, right-problem framing, and executability, that
 completeness review checks structure, fields, and clarity, and that neither
 judges whether the underlying research itself is settled. It rides every `run`
@@ -1956,10 +1980,10 @@ Override values resolve through the layered config scope model under the key
 `prompt.<point id>.<harness>`, so a write at any scope through the config layer
 is honored by the resolver's precedence; the point id is the user-facing handle
 even though the body carries it as a marker rather than a template variable. The
-dedicated `config.prompt.set(point id, harness, prompt, scope?)` setter makes the
-override surface tunable from inside the MCP without external docs; a
-self-documenting `config.prompt()` listing makes that surface discoverable from
-inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
+generic `config.tune(key: "prompt.<point id>", value, harness?, scope?)` writer
+makes the override surface tunable from inside the MCP without external docs; the
+`config.list` catalog's `prompt_override` knobs make that surface discoverable
+from inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
 
 Shipped lead workflow-manual override-points include `UserPreferenceSection`, an
 empty extension slot for standing communication, terminology, and workflow
@@ -1980,8 +2004,9 @@ slot for it anymore. `builtinPromptOverrideDefaults()` returns an empty map.
 >   an external comment-processing standard and carries no meaning outside the
 >   playbook surface.
 > - Override-points do not use the `{{.Var}}` template-variable mechanism. The
->   point id lives only as the marker id and the `config.prompt.set` key; the seed
->   default is the inline block body, not a frontmatter default.
+>   point id lives only as the marker id and the `prompt.<point id>` config key
+>   (written via `config.tune`); the seed default is the inline block body, not a
+>   frontmatter default.
 > - Critical-path render mechanics are intentionally NOT exposed as
 >   override-points: the harness-aware continuation tip, the delegate child-key
 >   credential splice, and the `prefer_mercenary` guidance block
@@ -2057,9 +2082,9 @@ tool discovery, runtime capabilities, and explicit calls. `off` exposes the
 mercenary surface but keeps host-native subagents as the default guidance. `on`
 exposes the surface and makes implementer/reviewer renders prefer the
 mercenary-call path. The lead writes this item through
-`config.workflow_prefer_mercenary(session_key, value)`; the writer requires a
-lead session key for authority but writes the global config item because
-keyless tool visibility cannot read session or project state.
+`config.tune(key: "workflow.prefer_mercenary", value, session_key)`; the writer
+requires a lead session key for authority but writes the global config item
+because keyless tool visibility cannot read session or project state.
 
 `ws.lead.prefer_mercenary` is removed with no alias. The old unprefixed
 `"prefer_mercenary"` key remains orphaned local state and is not migrated.
@@ -2103,8 +2128,9 @@ mercenary) is therefore unable to login or spawn, so spawn depth is strictly 1
 reduction only — they are not the enforcement boundary.
 
 > [!note] Constraints
-> - `config.workflow_prefer_mercenary` controls both public mercenary surface
->   visibility and default render guidance. The on-request path is reachable
+> - `workflow.prefer_mercenary` (via `config.tune`) controls both public
+>   mercenary surface visibility and default render guidance. The on-request path
+>   is reachable
 >   only when the value is `off` or `on`; `hide` suppresses the public surface.
 > - Mercenary scope is implementer/reviewer only. Exploration and mental-model
 >   work are native-subagent only and never mint a mercenary.

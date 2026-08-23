@@ -80,7 +80,7 @@ func bootstrapStalenessWarning(root, skillsRoot string, resolver *wsconfig.Resol
 	}
 
 	return fmt.Sprintf(
-		"> **Bootstrap template is stale.** This project's AGENTS.md is at v%04d; the shipped lead-bootstrap template is at v%04d. Re-run lead-bootstrap to pick up the latest workflow template, or run `config.bootstrap_alarm(value: \"off\")` to silence this permanently.",
+		"> **Bootstrap template is stale.** This project's AGENTS.md is at v%04d; the shipped lead-bootstrap template is at v%04d. Re-run lead-bootstrap to pick up the latest workflow template, or run `config.tune(key: \"bootstrap_alarm\", value: \"off\")` to silence this permanently.",
 		installed, latest,
 	)
 }

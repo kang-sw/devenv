@@ -281,7 +281,7 @@ func delegationTip(harness string) string {
 		// Unit 3: always-on mercenary tip — present in every full-ws delegates:true rendering.
 		sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
 		sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
-		sb.WriteString(" `config.workflow_prefer_mercenary`. Pass the session_key received with this prompt and")
+		sb.WriteString(" enabling `workflow.prefer_mercenary`. Pass the session_key received with this prompt and")
 		sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
 		sb.WriteString(" agent id you can resume with the same continuation idiom.")
 	}

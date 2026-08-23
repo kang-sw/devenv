@@ -219,8 +219,8 @@ func runtimeCapabilityCommandNames() []string {
 		"mercenary.status",
 		"mercenary.tail",
 		"mercenary.wait",
-		"config.agents-tier",
-		"config.show",
+		"config.list",
+		"config.tune",
 		"git.commit",
 		"git.diff",
 		"git.log",
@@ -254,7 +254,7 @@ func runtimeCapabilityCommandNames() []string {
 func filterNoAgentCommands(commands []string) []string {
 	out := make([]string, 0, len(commands))
 	for _, command := range commands {
-		if strings.HasPrefix(command, "mercenary.") || command == "config.agents-tier" {
+		if strings.HasPrefix(command, "mercenary.") || command == "config.tune" {
 			continue
 		}
 		out = append(out, command)
@@ -275,11 +275,11 @@ func configCommand(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
-	case "show":
-		configShow(args[1:])
-	case "agents-tier":
-		fatalIfNoAgentCommand("config agents-tier")
-		configAgentsTier(args[1:])
+	case "list":
+		configList(args[1:])
+	case "tune":
+		fatalIfNoAgentCommand("config tune")
+		configTune(args[1:])
 	default:
 		configUsage()
 		os.Exit(2)
@@ -287,24 +287,24 @@ func configCommand(args []string) {
 }
 
 func configUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <show|agents-tier>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <list|tune>")
 }
 
-func configShow(args []string) {
-	fs := flag.NewFlagSet("config show", flag.ExitOnError)
+func configList(args []string) {
+	fs := flag.NewFlagSet("config list", flag.ExitOnError)
 	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	view, err := wsconfig.Show(wsconfig.Options{})
 	if outputJSON(*format) {
-		printJSONOrFatal("config show", view, err)
+		printJSONOrFatal("config list", view, err)
 		return
 	}
-	printTextOrFatal("config show", mcp.FormatConfigView(view), err)
+	printTextOrFatal("config list", mcp.FormatConfigView(view), err)
 }
 
-func configAgentsTier(args []string) {
-	fs := flag.NewFlagSet("config agents-tier", flag.ExitOnError)
+func configTune(args []string) {
+	fs := flag.NewFlagSet("config tune", flag.ExitOnError)
 	tier := fs.String("tier", "", "capability tier: small, medium, large, or xlarge")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
@@ -325,7 +325,7 @@ func configAgentsTier(args []string) {
 	} else {
 		cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness)
 	}
-	printJSONOrFatal("config agents-tier", cfg, err)
+	printJSONOrFatal("config tune", cfg, err)
 }
 
 func path(args []string) {

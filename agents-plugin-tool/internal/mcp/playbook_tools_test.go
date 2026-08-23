@@ -982,11 +982,11 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		t.Fatalf("printPlaybook lead-tune: %v", err)
 	}
 	for _, want := range []string{
-		`ws/config.tuning(session_key: <lead key>)`,
+		`ws/config.list(session_key: <lead key>)`,
 		`"workflow.prefer_subagent"`,
-		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		`"workflow.prefer_mercenary"`,
-		"catalog-provided writer for `\"workflow.prefer_mercenary\"`",
+		"`config.tune` with `key` set to `\"workflow.prefer_mercenary\"`",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -1019,10 +1019,10 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
 	}
 	for _, want := range []string{
-		`wsflow/config.tuning(session_key: <lead key>)`,
+		`wsflow/config.list(session_key: <lead key>)`,
 		"wsflow workflow",
 		`"workflow.prefer_subagent"`,
-		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		"prompt.UserPreferenceSection",
 		"## On: tune model tier",
 		"Map the request to the `agents.tier` catalog knob",

@@ -58,7 +58,7 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 
 	// Registered default-scope items: always enumerate them so callers see their
 	// resolved value (and which scope it came from, including "builtin" when unset).
-	// This ensures registered items appear in config.show output even before any
+	// This ensures registered items appear in config.list output even before any
 	// value has been written to any scope.
 	for k := range scopeRegistry {
 		allKeys[k] = struct{}{}
