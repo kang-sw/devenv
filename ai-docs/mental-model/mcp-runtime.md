@@ -110,21 +110,28 @@ related:
   `injectBootstrapStalenessWarning` by default because `scopeAnnouncement` and
   `computeManuals` both use it: that helper **prepends** (`warning + "\n\n" +
   body`), producing a top-of-body banner. The `# Notes` block
-  (`note.write`/`note.erase`/`note.search`, 260807 Phase 1 —
-  `internal/wsnote`) deliberately **appends** near `## Session State` instead,
-  via a plain guarded string concat (`if notes := computeNotes(root); notes !=
-  "" { body += "\n\n" + notes }`) placed immediately after each branch's
-  `renderSessionState` call in `workflow_manual.go`, not through the prepend
-  helper. The guard is required, not optional: an unconditional `body += "\n\n"
-  + computeNotes(root)` still appends `"\n\n"` even when `computeNotes` returns
-  `""`, corrupting the exact-byte-equality contract between `workflow_manual`'s
-  `## Session State` suffix and `workflow_state`'s standalone output
-  (`{#260702-workflow-state-tool}`) — `injectBootstrapStalenessWarning`'s own
-  no-op path avoids this because it is a real no-op, not an unconditional
-  concat. Mirror only the compute-function *shape* (pure, root-in string-out,
-  silent `""` on error) from `computeManuals`/`scopeAnnouncement`; do not
-  assume their injection call site is the precedent for a new block's
-  placement — read `workflow_manual.go` directly. {#260810-note-tools}
+  (`note.write`/`note.erase`/`note.search`, `internal/wsnote`) deliberately
+  **appends** near `## Session State` instead, placed immediately after each
+  branch's `renderSessionState` call in `workflow_manual.go`, not through the
+  prepend helper. Since 260823 the block is an always-rendered affordance:
+  `computeNotes`/`wsnote.Compute` **never** returns `""` (it renders an
+  empty-state post-it hint when no notes exist on any layer —
+  `#260810-note-injection`), so the former `if notes := computeNotes(root);
+  notes != "" { … }` append guard is gone and both injecting branches
+  (FRESH-with-root, CONTINUE) append unconditionally. The exact-byte-equality
+  contract between `workflow_manual`'s `## Session State` suffix and
+  `workflow_state`'s standalone output (`{#260702-workflow-state-tool}`) is now
+  held not by a shared guard but by keeping **all three** consumers in lockstep:
+  `handleWorkflowState` must append `computeNotes(rec.Root)` with the exact
+  concat shape the two `workflow_manual` branches use. Omitting it — as the code
+  did before 260823, silently safe only while `Compute` could still return `""`
+  — now diverges the two surfaces on *every* call and breaks
+  `TestWorkflowStateReturnsSessionStateOnly`; any future ambient block appended
+  to the session-state suffix inherits this three-site obligation. Mirror only
+  the compute-function *shape* (pure, root-in string-out) from
+  `computeManuals`/`scopeAnnouncement`; do not assume their injection call site
+  is the precedent for a new block's placement — read `workflow_manual.go`
+  directly. {#260810-note-tools} {#260702-workflow-state-tool}
 - Resolving a project-scoped (worktree-agnostic) note layer under
   `Layout.ProjectDir` directly: `wsstate.layoutFor` sets `WorktreeKey ==
   ProjectKey` for a project's canonical (non-linked) worktree, so
