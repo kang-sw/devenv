@@ -3314,6 +3314,7 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 
@@ -3341,6 +3342,7 @@ func TestWorkflowManualFreshModeWithRoot(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 
@@ -3459,6 +3461,7 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5100, root, nil))
@@ -3504,6 +3507,7 @@ func TestWorkflowManualTodoInstructionPreview(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5110, root, nil))
@@ -3703,6 +3707,7 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5500, root, nil))

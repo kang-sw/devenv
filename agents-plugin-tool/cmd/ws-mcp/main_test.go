@@ -1076,7 +1076,7 @@ func TestCallCommandColdStartWorkflowManualMintsLeadKey(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 
 	cmd := exec.Command(bin, "call", "workflow_manual", fmt.Sprintf(`{"session_key":"obsidian-latch","root":%q}`, root))
-	cmd.Env = append(os.Environ(), "WS_CACHE_HOME="+cache)
+	cmd.Env = append(os.Environ(), "WS_CACHE_HOME="+cache, "WS_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("ws-mcp call workflow_manual (cold start) failed: %v\n%s", err, string(out))
