@@ -81,9 +81,14 @@ Settled at the epic level; restated here as implementation constraints:
 ### Phase 1: Ledger format + marker read/append + explicit bootstrap
 
 - Define the dotfile ledger format under `ai-docs/` and the append/read of
-  `<base>..<head>: verdict` entries — with an **optional routed-ticket-stem
-  reference** on non-pass entries (the finding-resolution hand-off, Phase 2);
-  marker = latest entry's through-SHA via line-scoped parse.
+  `<base>..<head>: verdict` entries — with a **routed-ticket-stem reference** on
+  non-pass entries (the finding-resolution hand-off, Phase 2). The append surface
+  **requires a stem on a `block` entry** on the happy path, so an un-routed block
+  is normally unreachable; should a malformed un-routed block ever exist, it is
+  routed by a **corrective append-only follow-up entry** (`<same range>: routed ->
+  <stem>`) — never an in-place edit, so the append-only/never-edit rule and the
+  "un-routed block is un-clearable" forcing function (④) do not deadlock. Marker =
+  latest entry's through-SHA via line-scoped parse.
 - Explicit bootstrap when absent: insert at `HEAD`, surface the
   review-skipped-not-reviewed meaning.
 
@@ -114,10 +119,14 @@ explicitly-invoked action.
   merging a branch to the review-track, **absorb current master into it**, run the
   `lead-review` **range-scenario** (②) over `marker..HEAD`, **fix fatal findings
   before the merge** and route the deferrable ones to tickets, then merge — and
-  **stamp the ledger as the merge's final step** (see Write discipline). If master
-  moved under you (a racer stamped first), **re-absorb** — clean, because this
-  branch holds no ledger line — and re-review the now-smaller delta before
-  stamping. When merges have been skipping review, the lead runs the same range
+  **stamp the ledger as the merge's final step** (see Write discipline). The
+  stamped `<head>` is the **actually-reviewed SHA — the pre-merge reviewed tip**,
+  not the post-merge tip: for an ff merge they coincide; for a no-ff merge the new
+  merge commit's own conflict-resolution content stays *above* the marker and is
+  swept next time (never stamp the post-merge tip as reviewed — that would record
+  un-reviewed merge content as reviewed, breaking ledger honesty). If master moved
+  under you (a racer stamped first), **re-absorb** — clean, because this branch
+  holds no ledger line — and re-review the now-smaller delta before stamping. When merges have been skipping review, the lead runs the same range
   review as a **standalone catch-up sweep** directly on master over the accumulated
   `marker..HEAD` and stamps there. Either way the range review runs through ②; the
   ledger append is owned by this ticket's Phase-1 surface.

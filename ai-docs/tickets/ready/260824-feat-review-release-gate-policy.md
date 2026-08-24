@@ -52,7 +52,10 @@ Settled at the epic level; restated as constraints:
   (idea/todo/ready), and — the **forcing function** — a recorded `block` ledger
   entry with **no routed ticket at all** is itself un-clearable, so a blocking
   finding cannot be dropped on the floor: the gate blocks until it is routed and
-  then resolved. Never cleared by editing the ledger. (An earlier draft named a
+  then resolved. Routing an already-appended un-routed entry is a **corrective
+  append-only follow-up** (`<range>: routed -> <stem>`, per ③), not a ledger edit —
+  so the forcing function is not a permanent wedge. Never cleared by editing the
+  ledger. (An earlier draft named a
   standalone "lead waiver"; it is removed — `.dropped` is the conscious-accept
   path, using existing ticket convention and needing no new config home.)
 - **No-boundary scrutiny is a deliberate trade.** A project that declares no
