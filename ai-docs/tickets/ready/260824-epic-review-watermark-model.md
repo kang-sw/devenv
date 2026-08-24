@@ -126,6 +126,21 @@ config. devenv is one configuration, not the model.
   only where a project declares a release boundary. Ignored advisory nudges are
   safe because the release gate (and, mid-stream, the size/staleness-scaled
   nudge) is the backstop; the size threshold is the pressure-relief valve.
+- **Finding resolution path — arc-review *surfaces and routes*, the ticket
+  system *resolves*.** A sweep/gate is not an inline fix loop: a finding it
+  raises is handed off by **ticketization** (a new `idea/`/`todo/` ticket) or the
+  communication path `lead-review` already defines (its verdict routing —
+  LGTM / NEEDS FIX / OPEN). Resolution is then tracked by the **routed ticket's
+  status**, never by a mutable "resolved" flag in the ledger: a non-pass ledger
+  entry *references* the routed ticket stem, and the append-only ledger stays
+  pure history. The **release gate (④)** consults ledger blocking entries since
+  the last release cross-referenced against those tickets' status — it blocks
+  promotion when a recorded blocking finding's routed ticket is still open (not
+  `.done`), absent an explicit lead waiver. This is the concrete close-path for
+  the marker-always-advances decision: the marker moving past a failing range is
+  safe precisely because the finding lives on as a tracked ticket, not a lost
+  note. Per-phase (①) findings are unaffected — they keep the existing inline
+  implement relay, fixed before the slice lands.
 - **`config` split (three homes):** `AGENTS.md` = tracked structural config
   (review-track branch, release-boundary declaration); `ai-docs/` ledger =
   tracked marker+verdict state; `_review.local.md` = machine-local review

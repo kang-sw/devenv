@@ -55,8 +55,9 @@ Settled at the epic level; restated here as implementation constraints:
 ### Phase 1: Ledger format + marker read/append + explicit bootstrap
 
 - Define the dotfile ledger format under `ai-docs/` and the append/read of
-  `<base>..<head>: verdict` entries; marker = latest entry's through-SHA via
-  line-scoped parse.
+  `<base>..<head>: verdict` entries — with an **optional routed-ticket-stem
+  reference** on non-pass entries (the finding-resolution hand-off, Phase 2);
+  marker = latest entry's through-SHA via line-scoped parse.
 - Explicit bootstrap when absent: insert at `HEAD`, surface the
   review-skipped-not-reviewed meaning.
 
@@ -98,6 +99,14 @@ explicitly-invoked action.
   verdict, not a false "reviewed-clean"; the guard is against recording an
   *un-reviewed* range as reviewed, not against recording a reviewed-but-failing
   range.
+- **Finding hand-off — surface and route, do not fix inline (epic Cross-Child:
+  finding resolution path).** The sweep's job ends at surfacing; a raised finding
+  is routed to a ticket (new `idea/`/`todo/`) or the `lead-review` verdict-routing
+  comm path, and the non-pass ledger entry *references the routed ticket stem*
+  (e.g. `<base>..<head>: block -> 260901-bug-…`). The ledger stays append-only —
+  no mutable "resolved" flag; the routed ticket's status is the resolution record.
+  Mid-stream this is advisory (route and move on); the release gate (④) is where
+  an open routed blocking ticket actually stops promotion.
 - **Nudge scaling metrics (both SHA/commit-based, per the epic's
   SHA-not-timestamp decision):** *size* = commit count across `marker..HEAD`
   (reuse the Deep Review / is-large-diff threshold); *staleness* = commit

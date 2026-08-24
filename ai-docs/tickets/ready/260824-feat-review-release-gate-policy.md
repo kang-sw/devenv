@@ -44,6 +44,10 @@ Settled at the epic level; restated as constraints:
 - **Fallback:** a boundary project with no marker yet can review `main..develop`
   directly (the release branch is itself a natural "reviewed-up-to" proxy) until
   the marker exists.
+- **Finding resolution (epic Cross-Child):** the gate resolves a blocking finding
+  by *routed-ticket status*, not an inline fix or a ledger flag. It blocks while a
+  recorded blocking finding's routed ticket is open, and clears on that ticket's
+  `.done` (or a recorded lead waiver). See Phase 2 gate verdict.
 
 ## Phases
 
@@ -65,13 +69,24 @@ homes have no overlapping ownership.
   review into the promotion path. For devenv: into `lead-ship` pre-flight
   (`ai-docs/ship/ws.md` / `lead-ship` playbook), which today has no review step
   — review the unreviewed range (marker..HEAD, or `main..develop` fallback)
-  before `develop`→`main`, blocking promotion on an unaddressed blocking finding.
+  before `develop`→`main`.
+- **Gate verdict (concrete, per the epic's finding-resolution decision):**
+  promotion is blocked when **either** (a) the just-run range review raises a
+  blocking finding, **or** (b) a blocking finding recorded in the ledger since the
+  last release references a routed ticket that is still open (not `.done`) — in
+  both cases absent an explicit lead waiver. The gate does not read a ledger
+  "resolved" flag (there is none); it cross-references recorded blocking entries
+  against their routed tickets' status. A blocking finding is thus cleared by
+  landing its fix (the routed ticket closes) or by a recorded lead waiver, never
+  by editing the ledger.
 - Downstream without a declared boundary: no gate inserted; advisory-only.
 - Depends on Phase 1, ②, and ③.
 
-Verification: on devenv, ship pre-flight refuses to promote when the unreviewed
-range carries an unresolved blocking finding and proceeds when clean/addressed;
-a no-boundary project's ship/promotion path is unchanged.
+Verification: on devenv, ship pre-flight refuses to promote when the range
+review raises a blocking finding, and also when a ledger blocking entry since the
+last release points at a still-open routed ticket; it proceeds when the range is
+clean, when every such routed ticket is `.done`, or on a recorded lead waiver; a
+no-boundary project's ship/promotion path is unchanged.
 
 ## Spec Impact
 
