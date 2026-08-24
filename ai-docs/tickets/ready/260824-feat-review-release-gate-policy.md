@@ -5,6 +5,7 @@ related:
   260824-feat-lead-review-range-scenario: prerequisite — the gate reviews a range through this scenario
   260824-feat-review-watermark-ledger: prerequisite — the gate reviews the unreviewed range up to the marker
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Review policy config + release gate — AGENTS.md review-track, host-neutral gating, devenv ship gate
@@ -17,6 +18,11 @@ the one mandatory gate — the release boundary — for projects that declare on
 devenv is such a project (`develop`→`main` ship); a messy downstream with no
 release boundary declares none and gets advisory-only review. Depends on the
 range scenario (②) and the marker/ledger (③).
+
+Circled numbers denote the epic's sibling children: ② =
+`260824-feat-lead-review-range-scenario`, ③ =
+`260824-feat-review-watermark-ledger`, ④ = this ticket
+(`260824-feat-review-release-gate-policy`) (see `related:`).
 
 ## Decisions
 

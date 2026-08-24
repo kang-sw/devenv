@@ -6,6 +6,7 @@ related:
   260726-bug-lead-implement-lost-review-relay-cycle-cap: interaction — review-cycle budgets (2 vs 3) are keyed on the review_alloc label this shifts toward single/lead-only
   260729-research-implement-router-prose-only-dimension: motivating incident — documents the unknown/moderate-bias over-escalation this removes
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Per-phase review lightening — remove unknown-risk bias, reaffirm single floor, narrow lead-only
@@ -13,9 +14,11 @@ sage-review-design: completed
 ## Background
 
 The default per-phase review pass over-allocates reviewers. In
-`enter.implement`'s resolver, `materialRisk` treats `unknown` (not just
-`moderate`/`high`) as material, so any un-derived risk fact escalates toward a
-partition. The result is the "three reviewers on a three-line change" pain and
+`enter.implement`'s resolver (`agents-plugin-tool/internal/mcp/implement_resolver.go`,
+which owns `materialRisk`, `implementReviewPartitions`,
+`deriveImplementReviewAlloc`, and `automaticLeadOnlyReviewEligible`),
+`materialRisk` treats `unknown` (not just `moderate`/`high`) as material, so any
+un-derived risk fact escalates toward a partition. The result is the "three reviewers on a three-line change" pain and
 the documented dogfood incident where a two-sentence prose change triggered a
 full partitioned review pass (`260729-research-implement-router-prose-only-dimension`).
 

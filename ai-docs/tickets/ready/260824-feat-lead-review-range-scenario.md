@@ -5,6 +5,7 @@ related:
   260824-feat-review-watermark-ledger: dependent — the marker/ledger sweep consumes this range scenario
   260824-feat-review-release-gate-policy: dependent — the release gate reviews a range through this scenario
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # lead-review range/watermark scenario — parameterize diff selection, add landing lens
@@ -18,6 +19,11 @@ range (`marker..HEAD`) instead. The underlying `git.diff` MCP tool already
 accepts a `range` (`wsgit.DiffOptions.Range`, exposed in the schema); the gap is
 purely that the playbook only knows "branch," never "range." This ticket is the
 **prerequisite** that unblocks the marker/sweep (③) and the release gate (④).
+
+Circled numbers denote the epic's sibling children: ② = this ticket
+(`260824-feat-lead-review-range-scenario`), ③ =
+`260824-feat-review-watermark-ledger`, ④ = `260824-feat-review-release-gate-policy`
+(see `related:`).
 
 ## Decisions
 
