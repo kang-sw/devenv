@@ -33,10 +33,36 @@ Settled at the epic level; restated here as implementation constraints:
   review appends `<base>..<head>: verdict`. Not `AGENTS.md` (a fast-advancing SHA would
   churn the tracked orientation doc), not a git ref, not the note layer. The
   ledger is the single home for both verdict history and the marker.
-- **Marker = the latest ledger entry's through-SHA** — no separate field.
-- **Lookup is line/field-scoped** (parse the last entry). Never derive the
-  marker from "the last commit that modified the ledger" (the file changes for
-  other reasons).
+- **The marker is a line in the ledger file, read by content — not a commit
+  found by walking the graph.** Lookup is line/field-scoped (parse the last
+  entry); the marker is that entry's through-SHA, no separate field. Never derive
+  it from "the last commit that modified the ledger" (the file changes for other
+  reasons), and never by traversing merge parents.
+- **Write discipline — only the review-track branch (master) writes the ledger,
+  and only a review that actually lands stamps it.** Feature/impl branches never
+  append. The stamp is the *final atomic step* of a review that lands on the
+  review-track: either riding a master merge (the primary trigger, Phase 2) or a
+  standalone catch-up sweep run on master. A branch under review never stamps
+  before it wins its merge. Consequence: because master merges are serialized,
+  two ledger appends never race — so the append-only ledger never merge-conflicts
+  (a feature→master absorption brings no competing ledger line; master's version
+  simply wins). This is the concurrency answer the earlier "per-track" note left
+  open.
+- **The review range is set-subtraction, not a parent-path walk.**
+  `marker..HEAD` = `{reachable from HEAD} − {reachable from marker}`. Because the
+  marker sits on the master-side parent of any merge, all already-reviewed history
+  subtracts out in one shot; a two-parent merge commit creates no marker
+  ambiguity. A merging branch thus reviews only its own delta re-contextualized on
+  the current marker (plus the integration/merge commit itself); work another
+  branch already stamped is excluded.
+- **Skip-coverage invariant — the marker rises ONLY by an actual stamping
+  review.** Everything in `(marker, HEAD]` is "not yet reviewed" regardless of how
+  it landed — including a merge that skipped review entirely. The next stamping
+  review (the next branch to merge, or ultimately the release gate ④) inescapably
+  sweeps the whole gap; no skipped merge can masquerade as reviewed. This is what
+  makes an *unforced* merge-time review safe: coverage is guaranteed, only the
+  *timing* is at the lead's discretion, with the growing range + release gate as
+  pressure and backstop.
 - **Range key is a commit SHA, never a wall-clock timestamp.** A human timestamp
   may ride an entry as metadata but must not be the range key.
 - **Bootstrap is explicit, never silent.** When no marker exists, insert one at
@@ -77,14 +103,24 @@ explicitly-invoked action.
   `enter.*` router entrypoints (`enter_implement`, `enter_proceed`) as backstops
   — recompute the *size* of `marker..HEAD` on the review-track branch
   and emit a proportional **advisory** nudge. This stays atomic/cheap:
-  `tickets.close` must not spawn a delegated review. Merges stay native and
-  unobserved; a `post-merge` tool / MCP-mediated merge was rejected at the epic
-  level as redundant given this lazy recompute.
-- **Sweep (separately invoked).** The sweep is a `lead-review` **range-scenario**
-  (②) run over `marker..HEAD`, invoked by the lead (prompted by the nudge), not
-  auto-triggered by a checkpoint. Assign this actor explicitly: the range review
-  runs through ②, and the ledger append is owned by this ticket's Phase-1
-  surface.
+  `tickets.close` must not spawn a delegated review. Merges stay native (no
+  MCP-mediated merge — rejected at the epic level); a merge that skipped its
+  review is caught not by observing the merge but by the **skip-coverage
+  invariant** — the marker did not advance, so the range resurfaces at the next
+  stamping review or the gate. The nudge is the pressure that keeps that range
+  from growing unnoticed.
+- **Trigger — primary: review at master-merge time; fallback: standalone
+  catch-up sweep.** The normal path couples the review to integration: before
+  merging a branch to the review-track, **absorb current master into it**, run the
+  `lead-review` **range-scenario** (②) over `marker..HEAD`, **fix fatal findings
+  before the merge** and route the deferrable ones to tickets, then merge — and
+  **stamp the ledger as the merge's final step** (see Write discipline). If master
+  moved under you (a racer stamped first), **re-absorb** — clean, because this
+  branch holds no ledger line — and re-review the now-smaller delta before
+  stamping. When merges have been skipping review, the lead runs the same range
+  review as a **standalone catch-up sweep** directly on master over the accumulated
+  `marker..HEAD` and stamps there. Either way the range review runs through ②; the
+  ledger append is owned by this ticket's Phase-1 surface.
 - **Marker advances on every completed sweep, regardless of verdict — the
   marker is "reviewed-up-to," never "reviewed-clean."** A completed sweep always
   appends the Phase-1 ledger entry (`<base>..<head>: <verdict>`) recording its
@@ -124,7 +160,14 @@ checkpoint reached without a preceding close still catches the range; a
 separately-invoked sweep runs the range scenario and its ledger append advances
 the marker; **ledger-honesty guard** — an append is reachable only from a
 completed sweep, so no code path records an un-reviewed range as reviewed (a
-checkpoint recompute/nudge, which never runs a review, must never append).
+checkpoint recompute/nudge, which never runs a review, must never append);
+**skip-coverage** — a merge that landed on master without a review leaves the
+marker unmoved, and the next stamping review's `marker..HEAD` range still contains
+that merge's delta (nothing masquerades as reviewed); **serialized-marker /
+no-conflict** — a feature→master absorption introduces no competing ledger line,
+so the ledger never merge-conflicts, and after a race the re-absorbed branch's
+`marker..HEAD` excludes the racer's already-stamped work (set-subtraction) while
+still covering its own delta.
 
 ## Spec Impact
 

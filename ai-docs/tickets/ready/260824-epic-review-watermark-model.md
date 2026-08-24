@@ -114,7 +114,23 @@ config. devenv is one configuration, not the model.
   through-SHA). Not `AGENTS.md` (a fast-advancing SHA would churn the tracked
   orientation doc), not a git ref, not the note layer.
 - **Marker lookup:** always line/field-scoped (last ledger entry). Never derive
-  the marker from "the last commit that modified the ledger/AGENTS.md."
+  the marker from "the last commit that modified the ledger/AGENTS.md," and never
+  by traversing merge parents — the marker is a *file line*, not a commit.
+- **Marker mechanics (serialized-merge model):** the marker lives on and is
+  written **only by the review-track branch (master)**; feature/impl branches
+  never append. A review stamps the ledger as the *final atomic step of landing on
+  master* — riding a master merge (primary trigger) or a standalone catch-up sweep
+  on master — never prematurely on an un-merged branch. The review range is
+  **set-subtraction** (`{reachable from HEAD} − {reachable from marker}`), so the
+  marker sitting on the master-side parent subtracts already-reviewed history in
+  one shot and a two-parent merge creates no ambiguity. Because master merges are
+  serialized and only master writes the ledger, appends never race → the
+  append-only ledger never merge-conflicts. **Skip-coverage invariant:** the
+  marker rises only by an actual stamping review, so anything in `(marker, HEAD]`
+  is unreviewed regardless of how it landed (a review-skipping merge included), and
+  the next stamping review — or the gate — inescapably sweeps it; no skip
+  masquerades as reviewed. (Owned in detail by ③; supersedes any reading of
+  "marker = last entry" as a graph-walk.)
 - **Range key is a commit SHA, never a wall-clock timestamp** (git ranges are
   commit-based; a timestamp maps to a commit only fuzzily). A human-readable
   timestamp may accompany an entry as metadata but must not be the range key.
@@ -135,12 +151,18 @@ config. devenv is one configuration, not the model.
   entry *references* the routed ticket stem, and the append-only ledger stays
   pure history. The **release gate (④)** consults ledger blocking entries since
   the last release cross-referenced against those tickets' status — it blocks
-  promotion when a recorded blocking finding's routed ticket is still open (not
-  `.done`), absent an explicit lead waiver. This is the concrete close-path for
-  the marker-always-advances decision: the marker moving past a failing range is
-  safe precisely because the finding lives on as a tracked ticket, not a lost
-  note. Per-phase (①) findings are unaffected — they keep the existing inline
-  implement relay, fixed before the slice lands.
+  promotion while a recorded blocking finding's routed ticket is *open*, and — the
+  **forcing function** — a `block` entry with **no routed ticket at all** is
+  itself un-clearable, so a blocking finding can never be dropped on the floor. It
+  clears only when the routed ticket is *terminal*: `.done` (fixed) or `.dropped`
+  (a conscious won't-fix/superseded/invalid decision, which already records a
+  rationale by ticket convention). **There is no separate "lead waiver" artifact**
+  — `.dropped` is the conscious-accept path, reusing the ticket lifecycle and
+  needing no new config home. This is the concrete close-path for the
+  marker-always-advances decision: the marker moving past a failing range is safe
+  precisely because the finding lives on as a tracked ticket, not a lost note.
+  Per-phase (①) findings are unaffected — they keep the existing inline implement
+  relay, fixed before the slice lands.
 - **`config` split (three homes):** `AGENTS.md` = tracked structural config
   (review-track branch, release-boundary declaration); `ai-docs/` ledger =
   tracked marker+verdict state; `_review.local.md` = machine-local review
@@ -161,9 +183,22 @@ config. devenv is one configuration, not the model.
   recomputation is live; and devenv's ship path enforces a mandatory range
   review before `develop`→`main`, with the mechanism documented as host-neutral
   policy-driven behavior.
-- Dropped: if dogfooding shows the watermark model does not reduce review
-  overhead versus a simpler `enter.implement` allocation retune (① alone), keep
-  ① and drop ②–④.
+- Risk framing watches **both** directions, not just overhead. Overhead: if
+  dogfooding shows the watermark model does not reduce review load versus ①
+  alone, that is a reason to reconsider ②–④. Under-review (the direction a naive
+  reading misses): if the lightened per-phase floor (①) lets **defects escape to
+  the release** — i.e. the gate/sweep starts catching things per-phase used to —
+  revisit ①'s floor (raise it, or re-widen the partition signals) rather than
+  treating overhead reduction as unqualified success. Instrument both signals in
+  dogfooding.
+- No-boundary trade is explicit and accepted: a project that declares no release
+  boundary has no hard gate and advisory-only sweeps, so with ① lightening
+  per-phase its only mandatory scrutiny is the single per-phase reviewer. This is
+  a stated trade (①'s floor keeps it from "no review"; declaring a boundary opts
+  into the gate), **not** a silent hole — and the "keep ① / drop ②–④" fallback is
+  therefore *not* free: dropping ②–④ removes even the advisory sweep and deepens
+  the no-boundary under-review gap, so that fallback is a last resort, weighed
+  against the defect-escape signal above, not a default.
 - Deferred: MCP-mediated merge for immediate (non-lazy) sweep triggering;
   role→tier delegation tuning (260611); one-gate-vs-separate-posture form of the
   landing lens (captured as a folded required-check in ②, may split later).
