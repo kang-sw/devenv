@@ -327,12 +327,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   target comes solely from `policy.branch.merge_target` — and both are still
   recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
-  partitions from material risk, contracts/public symbols, cross-module/reuse
-  uncertainty, and new or unknown test surfaces. Public-interface surface and
-  existing-test surface alone add no partition. Zero or one automatic partition
-  resolves to `single`; `single` dispatches the delegate-grade generic
-  `reviewer` over the shared full-scope `code-reviewer` contract, while two or
-  more resolve to `partitioned`. Explicit review overrides remain authoritative.
+  partitions only from positive risk signals: material (moderate/high) risk, a
+  new type contract or public symbol, cross-module surface, unconfirmed reuse
+  points, or new-file test surfaces. Unknown or un-derived facts are treated as
+  non-signals and add no partition; public-interface surface and existing-test
+  surface alone likewise add none. Zero or one automatic partition resolves to
+  `single`; `single` dispatches the delegate-grade generic `reviewer` over the
+  shared full-scope `code-reviewer` contract, while two or more resolve to
+  `partitioned`. Explicit review overrides remain authoritative.
   Final-action todo guidance may reuse
   passing full-suite evidence only while code, tests, dependencies, build
   configuration, and generated inputs remain unchanged; documentation-only

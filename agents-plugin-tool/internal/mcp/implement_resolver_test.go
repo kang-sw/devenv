@@ -301,12 +301,134 @@ func TestDeriveImplementReviewAllocProportionalPartitions(t *testing.T) {
 			},
 			want: "partitioned: fit, test",
 		},
+		{
+			name: "all-unknown fact set is a non-signal and lands on single",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: "single",
+		},
+		{
+			name: "correctness risk plus unconfirmed fit yields two partitions",
+			facts: normalizedImplementFacts{
+				Surface: "internal", TestSurface: "existing", ReusePoints: "unconfirmed",
+				CorrectnessRisk: "moderate", FitRisk: "low", TestRisk: "low", SecurityOrContractRisk: "low",
+			},
+			want: "partitioned: correctness, fit",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := deriveImplementReviewAlloc(tc.facts, "delegated"); got != tc.want {
 				t.Fatalf("review allocation = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestImplementReviewPartitionsTreatUnknownAsNonSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		facts normalizedImplementFacts
+		want  []string
+	}{
+		{
+			name: "all-unknown fact set yields zero partitions",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{},
+		},
+		{
+			name: "moderate correctness risk alone signals correctness only",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "moderate", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness"},
+		},
+		{
+			name: "new type contract alone signals correctness only",
+			facts: normalizedImplementFacts{
+				NewTypeContract: "yes",
+				Surface:         "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness"},
+		},
+		{
+			name: "new public symbol alone signals correctness only",
+			facts: normalizedImplementFacts{
+				NewPublicSymbol: "yes",
+				Surface:         "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness"},
+		},
+		{
+			name: "cross-module surface alone signals fit only",
+			facts: normalizedImplementFacts{
+				Surface: "cross-module", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"fit"},
+		},
+		{
+			name: "unconfirmed reuse points alone signals fit only",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unconfirmed",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"fit"},
+		},
+		{
+			name: "new-files test surface alone signals test only",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "new-files", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"test"},
+		},
+		{
+			name: "mixed set surfaces only the signalled partitions",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "new-files", ReusePoints: "unknown",
+				CorrectnessRisk: "high", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness", "test"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := implementReviewPartitions(tc.facts)
+			if len(got) != len(tc.want) {
+				t.Fatalf("partitions = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("partitions = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestAutomaticLeadOnlyReviewEligibleRequiresGenuineLow(t *testing.T) {
+	genuineLow := normalizedImplementFacts{
+		CorrectnessRisk: "low", FitRisk: "low", TestRisk: "low", SecurityOrContractRisk: "low",
+	}
+	if !automaticLeadOnlyReviewEligible(genuineLow, "direct-edit") {
+		t.Fatalf("genuine all-low fact set should qualify for lead-only review")
+	}
+
+	allUnknown := normalizedImplementFacts{
+		CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+	}
+	if automaticLeadOnlyReviewEligible(allUnknown, "direct-edit") {
+		t.Fatalf("all-unknown fact set must not qualify for lead-only review")
+	}
+	if got := deriveImplementReviewAlloc(allUnknown, "direct-edit"); got != "single" {
+		t.Fatalf("all-unknown review alloc = %q, want single (not lead-only, not partitioned)", got)
 	}
 }
 

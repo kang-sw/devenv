@@ -7,6 +7,7 @@ related:
   260729-research-implement-router-prose-only-dimension: motivating incident — documents the unknown/moderate-bias over-escalation this removes
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-25
 ---
 
 # Per-phase review lightening — remove unknown-risk bias, reaffirm single floor, narrow lead-only
@@ -79,6 +80,32 @@ collapses to `single` at `deriveImplementReviewAlloc` — use ≥2 signals to se
 `partitioned:` at the alloc level); a genuine all-`low` set still qualifies for
 `lead-only`; a mixed set adds only the signalled partitions. Update the spec
 prose (see Spec Impact) to match.
+
+### Result (fe940130) - 2026-08-25
+
+`materialRisk` now treats only `moderate`/`high` as material (`unknown` dropped).
+`implementReviewPartitions` no longer fires the fit arm on `ReusePoints ==
+"unknown"` or the test arm on `TestSurface == "unknown"`; each of the three arms
+requires a positive signal (moderate/high risk, new type contract / public
+symbol, `cross-module` surface, `ReusePoints == "unconfirmed"`, or `TestSurface
+== "new-files"`). An all-`unknown`/un-derived fact set therefore yields zero
+partitions and resolves to `single` via `deriveImplementReviewAlloc`.
+`automaticLeadOnlyReviewEligible` was left untouched — it still requires genuine
+`low` on all four risk facts — so the same all-`unknown` set lands on `single`,
+never `lead-only`. The review-cycle budget wiring (260726) was not touched.
+
+- Verification: `go test ./internal/mcp/...` pass (22.5s); `go vet` clean. New
+  coverage: `TestImplementReviewPartitionsTreatUnknownAsNonSignal`,
+  `TestAutomaticLeadOnlyReviewEligibleRequiresGenuineLow`, and two table cases in
+  `TestDeriveImplementReviewAllocProportionalPartitions` (all-unknown→single,
+  ≥2 signals→partitioned, all-low→lead-only, mixed→only signalled partitions).
+- Review: correctness `clean`; fit `non-clean: 1 important` — the omitted spec
+  prose sync — resolved in the doc pre-pass (spec commit 2b5b6be6). No unresolved
+  findings carried.
+- Deviation: the `## Spec Impact` sync landed as a separate `docs(spec)` commit
+  (2b5b6be6) during the doc pre-pass rather than inside the code commit; the fit
+  reviewer flagged its absence from `fe940130`, which is the expected runbook
+  ordering (code then doc), not a defect.
 
 ## Spec Impact
 
