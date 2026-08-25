@@ -18,6 +18,7 @@ Mode: user request
 - Index cleanup writes only `ai-docs/_index.md`, when present; semantic migration routes through owning workflow skills.
 - Commit each logical unit separately following the repository commit rules.
 - Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
+- A project tag above this skill's own `AGENTS.template.md` head, or one that does not parse, is a stop-and-report condition (see `## On: refuse`) enforced only by this instruction and the code-level staleness warning; there is no mechanical block on reconcile/restamp.
 
 ## On: invoke
 
@@ -26,7 +27,8 @@ Mode: user request
 3. Read downstream `CLAUDE.md` if it exists.
 4. Detect mode:
    - **fresh** - neither root file exists.
-   - **upgrade** - `AGENTS.md` has `<!-- Template Version: vNNNN -->`.
+   - **upgrade** - `AGENTS.md` has `<!-- Template Version: vNNNN -->` at or below this skill directory's own `AGENTS.template.md` head.
+   - **refuse** - `AGENTS.md` has a `Template Version` marker whose value is above this skill directory's own `AGENTS.template.md` head, or one that does not parse as `vNNNN` at all.
    - **adopt** - `AGENTS.md` exists without a version tag.
    - **claude-migrate** - `CLAUDE.md` exists and `AGENTS.md` does not.
 5. Execute the matching handler.
@@ -56,6 +58,16 @@ Mode: user request
 7. Ensure `CLAUDE.md` body is `@AGENTS.md`.
 8. Update the template version tag.
 9. Commit.
+
+## On: refuse
+
+1. Stop before making any change.
+2. Do not update `AGENTS.md`, `WORKFLOW.md`, or `CLAUDE.md`.
+3. Do not update the version tag.
+4. Do not commit.
+5. Report the mismatch to the user: the on-disk `AGENTS.md` tag versus this package's own `AGENTS.template.md` head, and whether the tag was above-head or unparseable.
+6. Ask the user how to proceed.
+7. Restate that this refusal is an agent-followed instruction backed by the code-level staleness warning, not a mechanical hard-block on reconcile/restamp.
 
 ## On: adopt
 

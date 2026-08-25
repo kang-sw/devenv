@@ -101,7 +101,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.42.2`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.43.1`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
@@ -139,7 +139,7 @@ agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>
 
 The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, and selected
-documentation references. Development binaries such as `0.42.2-dev` satisfy the
+documentation references. Development binaries such as `0.43.1-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -288,7 +288,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.42.2-dev
+scripts/build-release-assets.sh 0.43.1-dev
 dist/ws-mcp-darwin-arm64 version
 cd dist
 shasum -a 256 -c SHA256SUMS

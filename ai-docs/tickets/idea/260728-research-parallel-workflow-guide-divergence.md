@@ -86,3 +86,21 @@ paragraph.
 - The one-sentence guard already landed; this ticket does not re-litigate it.
 - Converging the two `AGENTS.template.md` lineages, which an existing test
   forbids.
+
+## Resolution Note
+
+Ticket `260825` overrides this ticket's Non-Scope exclusion above: it
+converges the two `AGENTS.template.md` lineages onto one package-neutral
+artifact and one shared migration-ordinal counter (the "existing test
+forbids" guard that Non-Scope cites was itself rewritten to assert the
+opposite — convergence, not divergence), and separately converges the two
+shipped `WORKFLOW.md` template copies to byte-identical content. This
+answers this ticket's "structural equivalence, declared-substitution" open
+question (L66-67) for those two pairs: they are now the generator/equality
+reading, not the divergence-test reading.
+
+This resolves 2 of the 3 near-identical copies this ticket names. The THIRD
+copy — this repo's own `ai-docs/WORKFLOW.md` — is downstream generated
+output of the now-unified template and is not itself converged by `260825`;
+that residual stays open if still relevant to a future triage pass. This
+note does not move this ticket's status.

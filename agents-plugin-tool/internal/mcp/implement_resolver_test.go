@@ -301,12 +301,134 @@ func TestDeriveImplementReviewAllocProportionalPartitions(t *testing.T) {
 			},
 			want: "partitioned: fit, test",
 		},
+		{
+			name: "all-unknown fact set is a non-signal and lands on single",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: "single",
+		},
+		{
+			name: "correctness risk plus unconfirmed fit yields two partitions",
+			facts: normalizedImplementFacts{
+				Surface: "internal", TestSurface: "existing", ReusePoints: "unconfirmed",
+				CorrectnessRisk: "moderate", FitRisk: "low", TestRisk: "low", SecurityOrContractRisk: "low",
+			},
+			want: "partitioned: correctness, fit",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := deriveImplementReviewAlloc(tc.facts, "delegated"); got != tc.want {
 				t.Fatalf("review allocation = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestImplementReviewPartitionsTreatUnknownAsNonSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		facts normalizedImplementFacts
+		want  []string
+	}{
+		{
+			name: "all-unknown fact set yields zero partitions",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{},
+		},
+		{
+			name: "moderate correctness risk alone signals correctness only",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "moderate", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness"},
+		},
+		{
+			name: "new type contract alone signals correctness only",
+			facts: normalizedImplementFacts{
+				NewTypeContract: "yes",
+				Surface:         "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness"},
+		},
+		{
+			name: "new public symbol alone signals correctness only",
+			facts: normalizedImplementFacts{
+				NewPublicSymbol: "yes",
+				Surface:         "unknown", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness"},
+		},
+		{
+			name: "cross-module surface alone signals fit only",
+			facts: normalizedImplementFacts{
+				Surface: "cross-module", TestSurface: "unknown", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"fit"},
+		},
+		{
+			name: "unconfirmed reuse points alone signals fit only",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "unknown", ReusePoints: "unconfirmed",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"fit"},
+		},
+		{
+			name: "new-files test surface alone signals test only",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "new-files", ReusePoints: "unknown",
+				CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"test"},
+		},
+		{
+			name: "mixed set surfaces only the signalled partitions",
+			facts: normalizedImplementFacts{
+				Surface: "unknown", TestSurface: "new-files", ReusePoints: "unknown",
+				CorrectnessRisk: "high", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+			},
+			want: []string{"correctness", "test"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := implementReviewPartitions(tc.facts)
+			if len(got) != len(tc.want) {
+				t.Fatalf("partitions = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("partitions = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestAutomaticLeadOnlyReviewEligibleRequiresGenuineLow(t *testing.T) {
+	genuineLow := normalizedImplementFacts{
+		CorrectnessRisk: "low", FitRisk: "low", TestRisk: "low", SecurityOrContractRisk: "low",
+	}
+	if !automaticLeadOnlyReviewEligible(genuineLow, "direct-edit") {
+		t.Fatalf("genuine all-low fact set should qualify for lead-only review")
+	}
+
+	allUnknown := normalizedImplementFacts{
+		CorrectnessRisk: "unknown", FitRisk: "unknown", TestRisk: "unknown", SecurityOrContractRisk: "unknown",
+	}
+	if automaticLeadOnlyReviewEligible(allUnknown, "direct-edit") {
+		t.Fatalf("all-unknown fact set must not qualify for lead-only review")
+	}
+	if got := deriveImplementReviewAlloc(allUnknown, "direct-edit"); got != "single" {
+		t.Fatalf("all-unknown review alloc = %q, want single (not lead-only, not partitioned)", got)
 	}
 }
 
@@ -417,6 +539,99 @@ func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
 	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "rename" {
 		t.Fatalf("branch action = %q, want rename (allow_rename absent should default to yes)", result.Verdict.BranchPlan.Action)
+	}
+}
+
+func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new", TicketStem: "260900-feat-new-thing"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 2}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("branch action = %q, want stop even with allow_rename=yes; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+	if result.Verdict.BranchPlan.SuspectedOwnerStem != "old" {
+		t.Fatalf("suspected owner stem = %q, want %q", result.Verdict.BranchPlan.SuspectedOwnerStem, "old")
+	}
+	for _, want := range []string{"session context", "explore", "old"} {
+		if !strings.Contains(result.NextInstruction, want) {
+			t.Fatalf("next instruction missing %q: %q", want, result.NextInstruction)
+		}
+	}
+	combined := strings.ToLower(result.Verdict.BranchPlan.Reason + " " + result.NextInstruction)
+	if strings.Contains(combined, "commit content") || strings.Contains(combined, "parsed the commit") {
+		t.Fatalf("stop message must not claim commit-content parsing: reason=%q instruction=%q", result.Verdict.BranchPlan.Reason, result.NextInstruction)
+	}
+}
+
+func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 0}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "rename" {
+		t.Fatalf("branch action = %q, want rename when AheadOfMergeRoot is 0; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+}
+
+func TestResolveImplementSameScopeContinuesRegardlessOfAheadOfMergeRoot(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "old"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 5}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "continue" {
+		t.Fatalf("branch action = %q, want continue when target scope matches current, regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+}
+
+func TestResolveImplementAheadOfMergeRootInertOnCreatePath(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "new"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "goal/some-slug", StartCommit: "abc123", AheadOfMergeRoot: 7}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "create" {
+		t.Fatalf("branch action = %q, want create on non-impl/-prefixed branch regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
 	}
 }
 

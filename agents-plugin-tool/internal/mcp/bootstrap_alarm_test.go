@@ -121,16 +121,28 @@ func TestBootstrapStalenessWarningSilentWithoutTag(t *testing.T) {
 
 	s := NewServer(root, "test")
 	resp := callLogin(t, s, 1, root, nil)
-	if strings.Contains(toolText(t, resp), "Bootstrap template is stale") {
-		t.Fatalf("ferrule must stay silent when the downstream AGENTS.md has no Template Version tag: %s", resp)
+	text := toolText(t, resp)
+	if strings.Contains(text, "Bootstrap template is stale") {
+		t.Fatalf("ferrule must stay silent when the downstream AGENTS.md has no Template Version tag: %s", text)
+	}
+	// The never-opted-in invariant must not leak into either fire direction:
+	// a marker-absent project must emit neither the above-head nor the
+	// unrecognized-tag warning. "code-level detector only" is common to both
+	// fire messages, so its absence guards against a marker-absent false-fire.
+	if strings.Contains(text, "code-level detector only") ||
+		strings.Contains(text, "ahead of this package's own template head") ||
+		strings.Contains(text, "Bootstrap template tag is unrecognized") {
+		t.Fatalf("ferrule must not fire any skew warning when the downstream AGENTS.md has no Template Version marker: %s", text)
 	}
 }
 
 // TestBootstrapStalenessWarningSilentWhenUpToDate verifies the
-// installed-at-or-above-latest boundary: when the downstream AGENTS.md's
-// Template Version tag is equal to, or ahead of, the shipped template's tag,
-// bootstrapStalenessWarning must stay silent (the `installed >= latest`
-// early-return branch).
+// installed-equals-latest boundary: when the downstream AGENTS.md's Template
+// Version tag equals the shipped template's tag, bootstrapStalenessWarning
+// must stay silent (the `installed == latest` branch). The above-head case
+// (installed strictly ahead of latest) is covered separately by
+// TestBootstrapStalenessWarningFiresOnAboveHeadTag — it now fires, inverting
+// the prior silent behavior per the honest version-skew guard.
 func TestBootstrapStalenessWarningSilentWhenUpToDate(t *testing.T) {
 	useLeadProfile(t)
 
@@ -148,21 +160,75 @@ func TestBootstrapStalenessWarningSilentWhenUpToDate(t *testing.T) {
 			t.Fatalf("ferrule must stay silent when installed version equals latest: %s", toolText(t, resp))
 		}
 	})
+}
 
-	t.Run("downstream ahead of latest", func(t *testing.T) {
-		root := t.TempDir()
-		mustWrite(t, root, "AGENTS.md", "# Root\n\n<!-- Template Version: v0003 -->\n")
-		initGit(t, root)
-		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-		t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-		writeTemplateVersionFixture(t, 2)
+// TestBootstrapStalenessWarningFiresOnAboveHeadTag verifies the above-head
+// direction of the version-skew guard: when the downstream AGENTS.md's
+// Template Version tag is strictly ahead of this package's own shipped
+// lead-bootstrap template head, bootstrapStalenessWarning must now fire (this
+// inverts the prior "downstream ahead of latest" silent fixture), name both
+// version numbers, point at the config.tune(bootstrap_alarm) setter, and
+// state the honest-enforcement (detector-only, not a code-enforced block)
+// limit.
+func TestBootstrapStalenessWarningFiresOnAboveHeadTag(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "AGENTS.md", "# Root\n\n<!-- Template Version: v0003 -->\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	writeTemplateVersionFixture(t, 2)
 
-		s := NewServer(root, "test")
-		resp := callLogin(t, s, 1, root, nil)
-		if strings.Contains(toolText(t, resp), "Bootstrap template is stale") {
-			t.Fatalf("ferrule must stay silent when installed version is ahead of latest: %s", toolText(t, resp))
-		}
-	})
+	s := NewServer(root, "test")
+	resp := callLogin(t, s, 1, root, nil)
+	text := toolText(t, resp)
+
+	if !strings.Contains(text, "ahead of this package's own template head") {
+		t.Fatalf("ferrule response must carry the above-head skew warning: %s", text)
+	}
+	if !strings.Contains(text, "v0003") || !strings.Contains(text, "v0002") {
+		t.Fatalf("warning must name both installed and latest versions: %s", text)
+	}
+	if !strings.Contains(text, "config.tune(key: \"bootstrap_alarm\"") {
+		t.Fatalf("warning must point to the config.tune bootstrap_alarm setter: %s", text)
+	}
+	if !strings.Contains(text, "code-level detector only") {
+		t.Fatalf("warning must state the honest-enforcement (detector only, not a code-enforced block) limit: %s", text)
+	}
+}
+
+// TestBootstrapStalenessWarningFiresOnUnparseableTag verifies the
+// unknown/unparseable-tag direction of the version-skew guard: when the
+// downstream AGENTS.md carries a Template Version marker whose value does not
+// parse as `vNNNN`, bootstrapStalenessWarning must fire (distinct from the
+// marker-absent case, which stays silent), name this package's own template
+// head, point at the config.tune(bootstrap_alarm) setter, and state the
+// honest-enforcement limit, without panicking on the malformed value.
+func TestBootstrapStalenessWarningFiresOnUnparseableTag(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "AGENTS.md", "# Root\n\n<!-- Template Version: vXYZ -->\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	writeTemplateVersionFixture(t, 2)
+
+	s := NewServer(root, "test")
+	resp := callLogin(t, s, 1, root, nil)
+	text := toolText(t, resp)
+
+	if !strings.Contains(text, "Bootstrap template tag is unrecognized") {
+		t.Fatalf("ferrule response must carry the unrecognized-tag skew warning: %s", text)
+	}
+	if !strings.Contains(text, "v0002") {
+		t.Fatalf("warning must name this package's own template head: %s", text)
+	}
+	if !strings.Contains(text, "config.tune(key: \"bootstrap_alarm\"") {
+		t.Fatalf("warning must point to the config.tune bootstrap_alarm setter: %s", text)
+	}
+	if !strings.Contains(text, "code-level detector only") {
+		t.Fatalf("warning must state the honest-enforcement (detector only, not a code-enforced block) limit: %s", text)
+	}
 }
 
 // TestBootstrapAlarmTuningKnob verifies config.tuning lists the bootstrap_alarm
