@@ -542,6 +542,99 @@ func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
 	}
 }
 
+func TestResolveImplementAheadOfMergeRootBlocksRenameRegardlessOfAllowRename(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new", TicketStem: "260900-feat-new-thing"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 2}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("branch action = %q, want stop even with allow_rename=yes; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+	if result.Verdict.BranchPlan.SuspectedOwnerStem != "old" {
+		t.Fatalf("suspected owner stem = %q, want %q", result.Verdict.BranchPlan.SuspectedOwnerStem, "old")
+	}
+	for _, want := range []string{"session context", "explore", "old"} {
+		if !strings.Contains(result.NextInstruction, want) {
+			t.Fatalf("next instruction missing %q: %q", want, result.NextInstruction)
+		}
+	}
+	combined := strings.ToLower(result.Verdict.BranchPlan.Reason + " " + result.NextInstruction)
+	if strings.Contains(combined, "commit content") || strings.Contains(combined, "parsed the commit") {
+		t.Fatalf("stop message must not claim commit-content parsing: reason=%q instruction=%q", result.Verdict.BranchPlan.Reason, result.NextInstruction)
+	}
+}
+
+func TestResolveImplementNoAheadOfMergeRootAllowsRename(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 2", ScopeSlug: "new"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 0}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "rename" {
+		t.Fatalf("branch action = %q, want rename when AheadOfMergeRoot is 0; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+}
+
+func TestResolveImplementSameScopeContinuesRegardlessOfAheadOfMergeRoot(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "old"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "impl/root-branch/old", StartCommit: "abc123", AheadOfMergeRoot: 5}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "continue" {
+		t.Fatalf("branch action = %q, want continue when target scope matches current, regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+}
+
+func TestResolveImplementAheadOfMergeRootInertOnCreatePath(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "new"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+	}
+	obs := implementBranchObservation{CurrentBranch: "goal/some-slug", StartCommit: "abc123", AheadOfMergeRoot: 7}
+	result := resolveImplement(input, obs)
+	if result.Verdict.BranchPlan.Action != "create" {
+		t.Fatalf("branch action = %q, want create on non-impl/-prefixed branch regardless of AheadOfMergeRoot; plan=%+v", result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+}
+
 func TestResolveImplementMergeConfirmDefaultsToAskWhenUnset(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},

@@ -180,6 +180,46 @@ Verification: resolver unit tests over the branch-observation matrix — (a) on
 branch ⇒ `create` seamless path unchanged; (e) the stop instruction carries the
 lead-routing guidance. Update the affected spec prose (see Spec Impact).
 
+### Result (3db94261) - 2026-08-25
+
+`observeImplementBranch` now computes a new `AheadOfMergeRoot` count on
+`implementBranchObservation` — merge root derived via the existing
+`implementMergeRootFor` (branch-name encoding), `MergeBase` + `rev-list
+--count mergeBase..HEAD`, fail-open to `0` on any git error, and skipped
+(stays `0`) for rootless/legacy/non-impl branches. `finishImplementBranchPlanTail`
+gains a `stop` branch inserted immediately after the same-target `continue`
+check and **before** the `allow_rename` check, so when `AheadOfMergeRoot > 0`
+and the target scope mismatches, the resolver stops unconditionally (not
+overridable by `allow_rename`). `target.ticket_stem` is threaded into
+`normalizedImplementFacts` (no input-schema change) for the stop reason;
+`implementBranchPlan` gains an additive `SuspectedOwnerStem`
+(`suspected_owner_stem,omitempty`) populated only from `parseImplBranchRoot`
+(branch-name, zero commit-content parsing), which `implementNextInstruction`
+keys on to emit the lead-routing stop guidance (resolve from session context or
+dispatch an explore). `continue`/`create`/`current` actions, the
+`impl/<merge-root>/<stem>` name-encoding, and the goal-branch seamless `create`
+path are unchanged.
+
+- Verification: `go test ./internal/mcp/...` + `go vet ./internal/mcp/...` pass.
+  4 new resolver unit tests cover matrix (a)-(d) plus assertion (e) that neither
+  the stop `Reason` nor `NextInstruction` claims commit-content parsing. Pinned
+  tests (`TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset`,
+  `TestResolveImplementBranchStopOmitsPlannerInstructions`, the `merge target
+  required` stop test) unchanged.
+- Review: partitioned correctness + fit — both verified the code clean on every
+  reviewed point (unconditional stop ordering, fail-open, SAFETY/IDENTITY
+  separation, future-phase fit, no pinned test altered). Both raised the same
+  Important — the Spec Impact prose was omitted from the code commit — resolved
+  in the doc pre-pass (spec commit 119031b3). No unresolved findings.
+- Commits: 350f77c9 (survey plan), 3db94261 (resolver + tests), 119031b3 (spec).
+
+> Forward to Phase 2: `AheadOfMergeRoot` is computed inside
+> `observeImplementBranch` from `obs.CurrentBranch` alone, independent of the
+> `finishImplementBranchPlanTail` call site, so Phase 2's `tickets.close` hook can
+> call `observeImplementBranch` and read the same field directly. `SuspectedOwnerStem`
+> is keyed as a struct field (not a `Reason` substring), so a future stop-message
+> variant will not break the hint.
+
 ### Phase 2: Default no-merge per phase + `tickets.close` merge-review trigger + ticket-declared stop-gate exception
 
 Depends on Phase 1 (deferring merges makes it more likely a run sits on an
