@@ -270,6 +270,55 @@ enforceable corollary in `wsflow-mirroring.md` Bootstrap Template Rules.
 Verification: a diff of each pair's fresh-mode outputs is empty except the
 version tag; enumerate and justify any residual difference.
 
+### Result (52fbf0bc) - 2026-08-25
+
+Converged all four scaffold files to one package-neutral emitted form; the L86
+fix landed in follow-up `103014f7` (see Edition). Verified deltas:
+
+- **`AGENTS.template.md` (both packages).** Emitted-body divergence eliminated:
+  the Preamble note-layer ref (`ws/wsflow.note.search`) → on-disk `ai-docs/ws-notes/`
+  description; the `ai-docs/WORKFLOW.md` pointer → the single fixed
+  capability-detection gate naming both `ws` and `wsflow` (the one deliberate
+  exception); the Inclusion-test comment's skill name dropped (placement
+  heuristic kept); wsflow's stale `git log -10` Project-Memory step trimmed to
+  match ws. Emitted-body diff (MIGRATION blocks stripped) now differs **only** on
+  the `<!-- Template Version: vNNNN -->` line (`v0047` vs `v0008`).
+- **`WORKFLOW.md` (both packages).** Now **fully byte-identical** (this file has
+  no scaffold-only strip blocks). The two copies diverged in real prose (title,
+  intro, Authority-Files bullet, closing-section heading/wording), not just
+  tokens — converged per the default drift→converge ruling. The worktree/clone
+  note-layer bullet was **dropped** per the corollary (plugin-local runtime state,
+  no downstream on-disk path); skill-name routing (Index Health step 7, Manual
+  Fallback) rewritten to on-disk destinations.
+- **`wsflow-mirroring.md`.** Artifact-neutrality invariant + enforceable
+  corollary added to Bootstrap Template Rules, coexisting with the still-accurate
+  "version histories package-local" bullet (that bullet's inversion is Phase 2/4).
+
+Verification evidence: `python3 -m unittest discover agents-plugin-wsflow/tests`
+= 10/10 pass (incl. `test_skill_files_do_not_reference_full_ws_agent_surface` and
+the still-passing `test_bootstrap_template_uses_wsflow_local_version_lineage`);
+no `\bws/|\bws:|\bws\.` glyph in any edited line (remaining matches confined to
+the untouched, out-of-scope MIGRATION CHECKLIST block); `diff` of the two
+`WORKFLOW.md` empty; emitted-body diff of the two `AGENTS.template.md` shows only
+the version-tag line. Discovery worth carrying forward: the forbidden-pattern
+test scans **every** file under `agents-plugin-wsflow/skills/` (incl. these
+templates), so the capability-gate string had to name the packages as bare
+``ws``/``wsflow`` (never the `ws/` glyph) — this constraint binds any future edit
+to these files.
+
+MIGRATION / MIGRATION CHECKLIST blocks and both Template Version tags left
+untouched (counter unification is Phase 2; test inversion + spec-anchor reconcile
+is Phase 4).
+
+#### Edition (103014f7) - 2026-08-25
+
+Fit review (cycle 2) caught that the survey plan omitted the L86
+`write-ticket workflow skill` pointer — one of the four `AGENTS.template.md`
+conversion targets the ticket's Phase 1 itemization explicitly names. Rewrote it
+in both packages, byte-identically, to on-disk phrasing (follow the ticket
+conventions and existing tickets under `ai-docs/tickets/`). Correctness review
+was clean; no findings remain outstanding for Phase 1.
+
 ### Phase 2: Unify the migration version counter (shared lineage)
 
 Relabel wsflow's migration-ordinal lineage onto ws's shared counter (content
