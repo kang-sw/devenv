@@ -402,6 +402,62 @@ extended staleness detection is unit-tested on an above-head tag; wsflow opening
 a shared-head ws project surfaces the warning and the skill leaves artifact + tag
 unchanged; ws opening a below-head project proceeds to a clean re-stamp.
 
+### Result (b119c658) - 2026-08-25
+
+Implemented the honest version-skew guard across both surfaces. Range
+`c5ae91b5..b119c658`: `21055a6f` (feature), `a0267b1f` (skills-manifest regen
+fix), `b119c658` (review-minor test hardening).
+
+Detect/warn (`agents-plugin-tool/internal/mcp/bootstrap_alarm.go`):
+`bootstrapStalenessWarning` now branches five ways with the short-circuit order
+preserved (`bootstrap_alarm off` → silent; marker-absent → silent, never-opted-in
+invariant; `latest` unreadable → fail-safe silent): `!parsed` (marker present but
+value unparseable) → NEW unrecognized-tag fire; `installed > latest` → NEW
+above-head fire; `installed == latest` → silent; `installed < latest` → existing
+stale message, text unchanged. A second looser regex
+(`templateVersionMarker = <!--\s*Template Version:`) distinguishes marker-absent
+from marker-present-but-malformed; the `!parsed`-first ordering is load-bearing
+(an unparseable marker yields `installed==0`, which would otherwise misroute to
+the stale branch). Both new messages name the version number(s), point at
+`config.tune(key: "bootstrap_alarm", value: "off")`, and state the
+honest-enforcement limit ("code-level detector only … lead-bootstrap must stop
+and report rather than auto-fix").
+
+Refuse (`agents-plugin/rsrc/lead-bootstrap/lead-bootstrap.md`, canonical; wsflow
+rsrc mirror regenerated, byte-identical): added an Invariants bullet, split
+`## On: invoke` step-4 mode detection into `upgrade` (at/below head) vs new
+`refuse` (above head OR unparseable), and added a `## On: refuse` section that
+stops before any write and restates the not-a-code-block limit. No Go code
+hard-blocks reconcile — the refuse is skill-instruction-only, per the contract.
+
+Tests: inverted the `"downstream ahead of latest"` silent subtest into
+`TestBootstrapStalenessWarningFiresOnAboveHeadTag`, added
+`TestBootstrapStalenessWarningFiresOnUnparseableTag`, and hardened
+`TestBootstrapStalenessWarningSilentWithoutTag` to also assert no fire-direction
+leaks (review minor). `go test ./internal/mcp/... ./internal/wsrsrc/...` green;
+`python3 -m unittest discover agents-plugin-wsflow/tests` 10/10; gofmt clean.
+
+Regression caught & fixed (`a0267b1f`): Phases 1-2 edited
+`agents-plugin/skills/lead-bootstrap/AGENTS.template.md` + `WORKFLOW.md` but did
+not regenerate `agents-plugin/skills/manifest.json`, leaving
+`TestSkillsManifestDriftIsVisible` red on this branch (green on develop).
+Regenerated via `WSRSRC_REGEN_SKILLS=1 … TestGenerateRealSkillsManifest` (only
+the two lead-bootstrap hashes changed). Root cause: the Phase 1/2 test-review
+partitions ran the wsflow Python suite but not the Go `internal/wsrsrc` drift
+suite; template-touching phases must run the Go drift suite too (carried to
+Phase 4 doc work + final report).
+
+Review: fit clean; correctness clean +1 minor (no-tag test strength — fixed
+inline in `b119c658`); test clean. No Critical/Important; no relay.
+
+Deferred to Phase 4 (branch merges as one unit after Phase 4): `mcp-tools.md
+#260703` spec text now must document the above-head/unknown-tag warning
+direction; plus the counter/convergence spec+doc reconcile and the new
+`wsflow-mirroring.md` skills-manifest-regen documentation item.
+
+Merge deferred: this phase did NOT merge; the single develop merge + version
+bump happens after Phase 4.
+
 ### Phase 4: Invert the guard test and reconcile specs/docs
 
 Rewrite `test_bootstrap_template_uses_wsflow_local_version_lineage` to assert
