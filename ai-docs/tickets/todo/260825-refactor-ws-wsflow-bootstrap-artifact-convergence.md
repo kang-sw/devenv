@@ -54,15 +54,18 @@ wsflow-bootstrapped project (tag `v0008`, which is wsflow's *head*) opened by
   wsflow's consolidated `v0001..v0008`), but that block lives inside a
   scaffold-only `<!-- MIGRATION CHECKLIST ... -->` comment never written
   downstream; convergence is measured on the emitted (fresh-mode) output.
-  - **`AGENTS.template.md` emitted body — tool-namespace tokens only.** It
-    differs by (a) `ws/`/`wsflow/` MCP-tool token substitutions at a few
-    locations (the `## Project Memory` Preamble and note-layer references
-    `ws/note.write`/`ws/note.search`) and (b) a stale un-trimmed step (wsflow
-    kept `git log -10` as a Project-Memory step that ws trimmed at
-    `v0042`/`v0043`). Its only *skill* reference (`ws:lead-add-rule`) sits inside
-    an HTML comment (the Inclusion-test authoring note), not emitted prose — no
-    skill invocation reaches the downstream body (the other `ws:`-prefixed skill
-    entries are all inside the scaffold-only MIGRATION CHECKLIST).
+  - **`AGENTS.template.md` emitted body — exactly two plugin references survive
+    downstream.** Most `ws/`/`ws:` tokens live in blocks stripped at emit time:
+    the `ai-docs/` set-up block (`ws/note.write` at the file's L99/L115) is inside
+    a `<!-- MIGRATION: ... delete this block -->` comment, and the remaining `ws:`
+    skill entries are inside the scaffold-only MIGRATION CHECKLIST. What actually
+    reaches a downstream `AGENTS.md` is (a) one tool ref —
+    `ws/note.search(layer: "repo")` in the Preamble (L7) — and (b) one *skill*
+    name — `ws:lead-add-rule` — inside the Inclusion-test comment (L121-125),
+    which migration entry `v0010` explicitly keeps **permanently** downstream, so
+    it is emitted, not scaffold. The wsflow copy substitutes both tokens
+    (`wsflow/note.search`, `wsflow:lead-add-rule`) and additionally kept a stale
+    `git log -10` Project-Memory step that ws trimmed at `v0042`/`v0043`.
   - **`WORKFLOW.md` emitted prose — both tool and skill references, plus genuine
     divergence.** It is copied downstream wholesale and references both MCP tools
     (`ws/note.write`, L34/L38) and skills (`ws:lead-forge-spec`,
@@ -105,9 +108,17 @@ wsflow-bootstrapped project (tag `v0008`, which is wsflow's *head*) opened by
   capability is **relocated to the runtime skills**, never left as artifact
   drift. Default ruling for any divergence is "drift → converge".
 - **Package-neutral reference notation differs by artifact, per audience.**
-  - `AGENTS.md` (read by every agent, plugin or not): keep the primitive
-    references but strip the package namespace — bare `note.write` /
-    `note.search`, resolved against the agent's installed ws/wsflow namespace.
+  - `AGENTS.md` (read by every agent, plugin or not):
+    - *Tool/primitive refs* (the Preamble's `ws/note.search`): keep the pointer
+      but strip the package namespace — bare `note.search`, resolved against the
+      agent's installed ws/wsflow namespace.
+    - *Skill names* (the Inclusion-test comment's `ws:lead-add-rule`): **removed,
+      not neutralized** — a downstream `AGENTS.md` should not name a plugin skill,
+      and the rule-placement guidance it carries duplicates what the runtime
+      (`workflow_manual` / the `lead-add-rule` skill) already loads for a plugin
+      agent. Keep the host-neutral placement test itself (which rules stay in this
+      file vs. move to a mental-model domain-rules doc); drop the `via
+      ws:lead-add-rule` mechanism tail.
     The emitted body is byte-identical across packages modulo the version tag.
   - `WORKFLOW.md` (charter: fallback guide for a maintainer working *without* ws
     skills or MCP tools): plugin-namespaced references are meaningless to its
@@ -214,9 +225,11 @@ in `AGENTS.template.md`, strip the package namespace from primitive references
 ws; in `WORKFLOW.md`, **remove** every plugin-namespaced skill/tool reference —
 rewrite skill routing as the manual activity it stands for and tool references as
 the on-disk file paths they operate on — then reconcile the residual prose
-divergence. Confirm whether fresh-mode strips the `AGENTS.template.md`
-Inclusion-test HTML comment (carrying the lone `ws:lead-add-rule` ref); if it
-survives downstream, neutralize/remove it too. Apply the default ruling to any
+divergence. In `AGENTS.template.md`, the Inclusion-test comment is emitted
+downstream (migration `v0010` keeps it permanently), so its skill name
+`ws:lead-add-rule` is drift: **remove the skill name** and keep the host-neutral
+placement test (which rules stay in `AGENTS.md` vs. move to a mental-model
+domain-rules doc). Apply the default ruling to any
 further difference surfaced during the convergence diff — **drift → converge**,
 unless the content is capability-bound, in which case **relocate it to the
 runtime skills** (record any relocation). Establish and document the artifact-neutrality invariant +
