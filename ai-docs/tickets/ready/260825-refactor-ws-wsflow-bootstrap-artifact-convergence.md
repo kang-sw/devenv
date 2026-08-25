@@ -483,3 +483,61 @@ the template and the WORKFLOW.md guide. Depends on Phases 1-3 (the enforced stat
 must exist before the test pins it). Verification: the inverted test fails on any
 re-introduced fingerprint/drift in either pair and on a counter split; specs no
 longer assert package-local version lineage.
+
+### Result (b6f774d3) - 2026-08-25
+
+Commit range `3fa36f7d..b6f774d3` (5 commits) on
+`impl/develop/bootstrap-artifact-converge`.
+
+Test inverted + renamed
+`test_bootstrap_template_uses_wsflow_local_version_lineage` →
+`test_bootstrap_scaffolds_emit_converged_output_across_packages`. A new
+`_emit_fresh_body` helper strips exactly the two scaffold-only comment blocks
+(`<!-- MIGRATION: ... -->` and `<!-- MIGRATION CHECKLIST ... -->`, both
+non-greedy DOTALL) and nothing else — the Inclusion-test comment and the
+`<!-- Template Version: v0047 -->` tag survive the strip. The test asserts
+(a) emitted-body identity of the two `AGENTS.template.md` copies, (b) shared
+parseable `vNNNN` tag head, (c) raw byte-identity of the two `WORKFLOW.md`
+copies.
+
+Docs/specs reconciled: `spec/workflow-skills.md {#260513-wsflow-agentless-skill-surface}`
+inverted to the shared-counter/package-neutral contract;
+`spec/mcp-tools.md {#260703-bootstrap-staleness-warning}` keeps the still-accurate
+package-local *detection-mechanism* sentence and adds a new paragraph for the
+Phase-3 fail-loud above-head/unrecognized-tag directions (quoting the real
+`bootstrap_alarm.go` message shapes and the code-level-detector-only honesty
+limit); `manuals/wsflow-mirroring.md` inverted both Bootstrap Template Rules
+bullets (including the L293 backlog-copy bullet, which was beyond the ticket's
+literal pointers but now directly false) and added a skills-manifest-regen gate
+item (`WSRSRC_REGEN_SKILLS=1 … TestGenerateRealSkillsManifest`, guarded by
+`TestSkillsManifestDriftIsVisible`, distinct from the rsrc-manifest regen);
+`mental-model/workflow-skills.md` L85/L110/L119 inverted (anchors preserved,
+commit marked `(mental-model-updated)`); `260728` idea ticket gained a
+`## Resolution Note` scoped precisely to 2 of its 3 named copies (status left in
+`idea/`).
+
+Verification: `python3 -m unittest discover agents-plugin-wsflow/tests` = 10/10
+green (rename is 1-for-1). The test reviewer independently ran four mutation
+experiments, all correctly biting: counter-split (`v0047`→`v0046`) → fails (a);
+body-drift outside stripped blocks → fails (a); `WORKFLOW.md` raw drift → fails
+(c); tag removed from both copies → passes (a), fails (b) — proving each
+assertion earns its place. `ws/spec_index.verify` = ok; forbidden-pattern test
+still passes over the enlarged token-substituted checklist; no dangling
+old-test-name reference in live code (only frozen ticket/plan records).
+
+Review (cycle 1, no relay): correctness clean, fit clean, test clean. Three
+non-blocking minors carried, none actioned: redundant tag-value assertion (also
+guards presence — kept); optional `## Spec`/`## Ticket Updates` commit trailers
+omitted (explicitly optional); `_emit_fresh_body` is a regex proxy for
+`lead-bootstrap.md`'s natural-language `## On: fresh` strip step — if the real
+fresh-mode emit ever diverges from those two regexes the test's notion of
+"emitted body" could drift (inside the plan's documentation-asserted boundary,
+noted for maintainers).
+
+Deferred follow-up: the third `WORKFLOW.md`-family copy this ticket does not
+converge — this repo's own downstream `ai-docs/WORKFLOW.md` — stays open per the
+`260728` Resolution Note.
+
+Merge: this Result commits on the branch; the single `develop` merge + plugin
+version bump follow immediately after (branch merges as one unit, per the branch
+strategy). All four phases complete — ticket moves to `.done/` at close.
