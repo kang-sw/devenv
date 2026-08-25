@@ -107,26 +107,25 @@ wsflow-bootstrapped project (tag `v0008`, which is wsflow's *head*) opened by
   convergence, any artifact content that would need to differ by agent
   capability is **relocated to the runtime skills**, never left as artifact
   drift. Default ruling for any divergence is "drift → converge".
-- **Package-neutral reference notation differs by artifact, per audience.**
-  - `AGENTS.md` (read by every agent, plugin or not):
-    - *Tool/primitive refs* (the Preamble's `ws/note.search`): keep the pointer
-      but strip the package namespace — bare `note.search`, resolved against the
-      agent's installed ws/wsflow namespace.
-    - *Skill names* (the Inclusion-test comment's `ws:lead-add-rule`): **removed,
-      not neutralized** — a downstream `AGENTS.md` should not name a plugin skill,
-      and the rule-placement guidance it carries duplicates what the runtime
-      (`workflow_manual` / the `lead-add-rule` skill) already loads for a plugin
-      agent. Keep the host-neutral placement test itself (which rules stay in this
-      file vs. move to a mental-model domain-rules doc); drop the `via
-      ws:lead-add-rule` mechanism tail.
-    The emitted body is byte-identical across packages modulo the version tag.
-  - `WORKFLOW.md` (charter: fallback guide for a maintainer working *without* ws
-    skills or MCP tools): plugin-namespaced references are meaningless to its
-    audience, so they are **removed, not neutralized**. Skill routing
-    (`ws:lead-forge-spec` etc.) is rewritten as the manual activity it stands
-    for; MCP-tool references (`ws/note.write`) are rewritten to the on-disk file
-    paths they operate on (e.g. the `ai-docs/ws-notes/` `repo` note layer). No
-    `ws`/`wsflow` skill or tool name survives in `WORKFLOW.md`.
+- **No `ws`/`wsflow` skill or tool name survives in either emitted artifact.**
+  The earlier split (neutralize tool refs in `AGENTS.md`, remove them only in
+  `WORKFLOW.md`) is dropped: a bare primitive like `note.search` is still dead
+  for a non-plugin reader (the tool is not installed) and redundant for a plugin
+  reader (the runtime `workflow_manual` already loads it), so keeping the name
+  buys nothing. In **both** `AGENTS.md` and `WORKFLOW.md`, every
+  plugin-namespaced reference is **removed** and rewritten to what a reader
+  without the plugin can act on:
+  - note-layer refs → the on-disk location (the `repo` layer is
+    `ai-docs/ws-notes/`, one file per key);
+  - skill routing (`ws:lead-forge-spec`, `ws:lead-add-rule`, …) → the manual
+    activity it stands for, keeping any host-neutral test it carried (e.g. the
+    Inclusion-test rule-placement heuristic) without the skill name;
+  - a mechanism with no downstream on-disk meaning at all (e.g. the
+    worktree/clone note layer, which is plugin-local runtime state) is
+    capability-bound content: **drop it from the artifact** per the corollary
+    rather than invent a fake path.
+  Result: both emitted bodies are byte-identical across packages modulo the
+  version tag, and carry no package fingerprint of any kind.
 - **Shared migration counter follows by construction.** One package-neutral
   artifact ⇒ one converged template ⇒ one shared version lineage. This is a
   **relabel, not a replay**: the audit proved the content is already aligned, so
@@ -219,17 +218,19 @@ modulo the version tag**, across both scaffolded files:
 and `{agents-plugin,agents-plugin-wsflow}/skills/lead-bootstrap/WORKFLOW.md`. The
 known `AGENTS.template.md` divergence is small (a few tool-namespace token
 locations + the `git log -10` drift; see Background); diff the `WORKFLOW.md` pair
-to enumerate its divergence. Apply the notation rule per artifact (see Decisions):
-in `AGENTS.template.md`, strip the package namespace from primitive references
-(bare `note.write`/`note.search`) and trim the wsflow `git log -10` drift to match
-ws; in `WORKFLOW.md`, **remove** every plugin-namespaced skill/tool reference —
-rewrite skill routing as the manual activity it stands for and tool references as
-the on-disk file paths they operate on — then reconcile the residual prose
-divergence. In `AGENTS.template.md`, the Inclusion-test comment is emitted
-downstream (migration `v0010` keeps it permanently), so its skill name
-`ws:lead-add-rule` is drift: **remove the skill name** and keep the host-neutral
-placement test (which rules stay in `AGENTS.md` vs. move to a mental-model
-domain-rules doc). Apply the default ruling to any
+to enumerate its divergence. Apply the unified removal rule (see Decisions) to both artifacts: **remove every
+`ws`/`wsflow` skill and tool name** and rewrite each reference to what a
+plugin-less reader can act on — note-layer refs to the on-disk path
+(`ai-docs/ws-notes/` for the `repo` layer), skill routing to the manual activity
+(keeping any host-neutral test, e.g. the Inclusion-test rule-placement
+heuristic), and any plugin-only mechanism with no downstream on-disk meaning (the
+worktree/clone note layer) dropped per the corollary. Concretely, the emitted
+references to eliminate are: in `AGENTS.template.md`, the Preamble's
+`ws/note.search` (L7) and the Inclusion-test comment's `ws:lead-add-rule` (L123,
+emitted permanently via migration `v0010`); in `WORKFLOW.md`, `ws/note.write`
+(L34/L38) and the `ws:lead-forge-spec`/`ws:lead-forge-mental-model`/`ws:lead-discuss`
+routing (L141-144). Also trim the wsflow `git log -10` drift to match ws, and
+reconcile the residual `WORKFLOW.md` prose divergence. Apply the default ruling to any
 further difference surfaced during the convergence diff — **drift → converge**,
 unless the content is capability-bound, in which case **relocate it to the
 runtime skills** (record any relocation). Establish and document the artifact-neutrality invariant +
