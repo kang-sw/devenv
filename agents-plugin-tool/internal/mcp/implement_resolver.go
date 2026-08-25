@@ -438,6 +438,32 @@ func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) int {
 	return count
 }
 
+// implementCloseMergeReviewNudge computes the tickets.close merge-review
+// advisory: closing a ticket while the current branch is an unmerged
+// impl/<root>/<stem> branch leaves that branch's work unreviewed-and-merged,
+// so the close response nudges the lead to review-and-merge it into <root>
+// after the close-move commit lands. tickets.close itself never merges or
+// commits (see {#260620-ticket-close-tool}), so this is advisory text only,
+// computed from the pre-close-commit git state via observeImplementBranch's
+// existing AheadOfMergeRoot observation (Phase 1) — no new git-observation
+// code, and no marker/schema/code path for the ticket-declared stop-gate
+// exception, which stays ordinary lead judgment outside this hook. Failing
+// open to "" on any git error, a non-impl branch, or a merged/clean impl
+// branch keeps this from ever blocking or erroring the close call, and
+// leaves room for epic 260824's later review-watermark hook to compose
+// without rework.
+func implementCloseMergeReviewNudge(root string) string {
+	obs, err := observeImplementBranch(root, "")
+	if err != nil {
+		return ""
+	}
+	mergeRoot, stem, ok := parseImplBranchRoot(obs.CurrentBranch)
+	if !ok || obs.AheadOfMergeRoot <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("This tool performed no merge. After the close-move commit for this ticket lands, review and merge %s into %s.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
+}
+
 func observeImplementBranch(root string, targetBranch string) (implementBranchObservation, error) {
 	client := wsgit.NewClient()
 	status, err := client.Status(context.Background(), root)
