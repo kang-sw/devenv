@@ -341,6 +341,48 @@ content is the precondition for a single lineage). Verification: fresh wsflow an
 fresh ws bootstraps emit the same head ordinal; opening a fresh wsflow project
 with ws produces no artifact change and re-stamps to head.
 
+### Result (ee4bc6a5) - 2026-08-25
+
+Unified wsflow's migration ordinal onto ws's shared `v0001..v0047` lineage.
+`agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md` now carries ws's
+full checklist relabeled by token substitution (`ws:`→`wsflow:`, `ws/`→`wsflow/`)
+plus a single equivalence-note paragraph recording that wsflow's former
+consolidated `v0001..v0008` baseline (lineage reset `599fb453`) is equivalent
+through ws `v0047`; the old "package-local version history" header line was
+replaced with ws's header wording ("Skip obsoleted items."). Tag bumped
+`v0008`→`v0047`.
+
+Verification (all confirmed by review, correctness partition clean): the two
+`AGENTS.template.md` copies now emit **byte-identical** fresh-mode bodies
+including the `v0047` tag (scaffold MIGRATION comment blocks stripped, then
+diffed → empty); the raw wsflow checklist normalized `wsflow*`→`ws*` equals ws's
+except the intended equivalence note and a v0036 accuracy reword (`ws runtime`→
+`ws or wsflow runtime`). Token hygiene: `grep -nE '\bws/|\bws:|\bws\.'` on the
+wsflow template returns zero matches (forbidden-pattern gate holds over the
+enlarged block). Two axes stay decoupled: `bump-ws-version.sh` references no
+`Template Version`/`vNNNN` ordinal. Suite `python3 -m unittest discover
+agents-plugin-wsflow/tests` = 10/10 green.
+
+Test coupling handled: `test_bootstrap_template_uses_wsflow_local_version_lineage`
+had four divergence-enforcing assertions (v0008 tag, package-local header text,
+full-tag exclusion, leaked-bullet scan) invalidated by unification. Per plan they
+were trimmed to a minimal structural check (method kept, not renamed, no positive
+convergence assertions added) to keep the suite green; the positive
+convergence-assertion rewrite is Phase 4's charter.
+
+Deferred to Phase 4 (per this ticket's Phase 4 body, so develop never sees the
+intra-branch doc-drift window — this ticket merges as one unit after Phase 4):
+spec anchors `workflow-skills.md #260513` and `mcp-tools.md #260703`,
+`wsflow-mirroring.md` L291-292 inversion, mental-model `workflow-skills.md`
+inversion, the `260728` Non-Scope override note, and the convergence-assertion
+test rewrite.
+
+Review: correctness clean; fit clean +1 minor (commit AI-Context rationale for
+the v0036 reword slightly imprecise — bare `ws runtime` would not have tripped
+the guard; edit itself sound, no action); test clean +2 minor (trimmed test is
+near-no-op until Phase 4; no committed test yet pins the convergence — both
+explicitly Phase 4-owned). No Critical/Important findings; no relay needed.
+
 ### Phase 3: Fail-loud version-skew guard (above-head / unknown tag)
 
 Guard a tag **above the running package's own template head**, or absent from its
