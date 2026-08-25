@@ -42,13 +42,12 @@ func Words() []string {
 	return out
 }
 
-// Generate mints a single word-chain session key: 4 random words from the
-// embedded EFF large wordlist followed by a zero-padded 2-digit numeric suffix,
-// all joined by hyphens (e.g. "amber-tide-fox-river-42"). The key format is
-// opaque to callers; do not parse it.
+// Generate mints a single word-chain session key: 3 random words from the
+// embedded EFF large wordlist, joined by hyphens (e.g. "amber-tide-fox"). The
+// key format is opaque to callers; do not parse it.
 func Generate() (string, error) {
 	poolSize := big.NewInt(int64(len(wordPool)))
-	var words [4]string
+	var words [3]string
 	for i := range words {
 		n, err := rand.Int(rand.Reader, poolSize)
 		if err != nil {
@@ -56,11 +55,7 @@ func Generate() (string, error) {
 		}
 		words[i] = wordPool[n.Int64()]
 	}
-	suffix, err := rand.Int(rand.Reader, big.NewInt(100))
-	if err != nil {
-		return "", fmt.Errorf("wskey: crypto/rand failed: %w", err)
-	}
-	return fmt.Sprintf("%s-%s-%s-%s-%02d", words[0], words[1], words[2], words[3], suffix.Int64()), nil
+	return fmt.Sprintf("%s-%s-%s", words[0], words[1], words[2]), nil
 }
 
 // GenerateUnique mints a key that the provided exists predicate does not report

@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// sessionKeyPattern validates the word-chain session key format: 4 lowercase words + 2-digit suffix.
-var sessionKeyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){3}-[0-9]{2}$`)
+// sessionKeyPattern validates the word-chain session key format: 3 lowercase words.
+var sessionKeyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){2}$`)
 
 // callLogin issues a ws.ferrule (session-bootstrap) MCP call and returns the raw response line.
 func callLogin(t *testing.T, server *Server, id int, root string, extra map[string]any) string {
