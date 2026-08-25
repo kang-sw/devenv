@@ -269,6 +269,13 @@ identical to canonical — including `manifest.json`.
   Both `-count=1` flags are mandatory; without them, go's test cache silently
   skips the write side effect. Omitting step 2 is the process gap that caused
   `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`.
+- **Skills manifest is a separate gate.** Editing any file under
+  `agents-plugin/skills/` (including the `lead-bootstrap` templates) requires
+  its own regen, distinct from the rsrc-manifest regen above:
+  `WSRSRC_REGEN_SKILLS=1 go test ./internal/wsrsrc/... -count=1 -run
+  TestGenerateRealSkillsManifest`, guarded by `TestSkillsManifestDriftIsVisible`.
+  Ticket `260825`'s Phase 3 regression hit exactly this gap (a skills-tree
+  template edit landed without the skills-manifest regen).
 - **Runtime:** the wsflow launcher's `apply_rsrc_root_env` sets `WS_RSRC_ROOT` to
   the sibling `rsrc/` when present, so the committed copy is resolved with no
   launcher change.
@@ -288,9 +295,14 @@ renders, never as a divergent body of a shared stem.
 - Treat `lead-bootstrap` as a mirrored skill: behavior changes require checking
   both `agents-plugin/skills/lead-bootstrap/` and
   `agents-plugin-wsflow/skills/lead-bootstrap/`.
-- Keep bootstrap template version histories package-local; matching behavior
-  changes may use different version numbers in each package.
-- Do not copy the full bootstrap migration backlog into the wsflow template.
+- Bootstrap template version history is a single shared migration-ordinal
+  lineage across both packages; a behavior change bumps the shared
+  `<!-- Template Version: vNNNN -->` counter once and both packages emit the
+  same head.
+- The wsflow template's `MIGRATION CHECKLIST` carries the full ws migration
+  backlog, token-substituted (`ws:`→`wsflow:`, `ws/`→`wsflow/`), plus one
+  equivalence-note paragraph recording which ws version wsflow's former
+  consolidated baseline was equivalent through.
 - When a bootstrap baseline changes for both packages, update both templates in
   one logical change or record why one package is not applicable.
 - **Artifact neutrality invariant.** The downstream artifact (`AGENTS.md` +
