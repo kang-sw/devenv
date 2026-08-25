@@ -83,7 +83,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 
 - Project state and cross-session context live in `ai-docs/`.
 - Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; read it only if the `ws` or `wsflow` `workflow-manual` MCP tool is not in your toolbox. It is explanatory and does not override plugin runtime or MCP parser behavior.
-- Before creating or editing tickets, load the write-ticket workflow skill for conventions.
+- Before creating or editing tickets, follow the ticket conventions and the shape of existing tickets under `ai-docs/tickets/`.
 - Reference tickets by stem only, never full path; stems survive status moves.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
