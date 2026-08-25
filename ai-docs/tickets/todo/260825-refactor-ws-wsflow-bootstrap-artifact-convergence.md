@@ -124,8 +124,19 @@ wsflow-bootstrapped project (tag `v0008`, which is wsflow's *head*) opened by
     worktree/clone note layer, which is plugin-local runtime state) is
     capability-bound content: **drop it from the artifact** per the corollary
     rather than invent a fake path.
+
+  **One deliberate exception — a capability-detection gate.** The `AGENTS.md`
+  pointer to `ai-docs/WORKFLOW.md` keeps a conditional naming the `ws`/`wsflow`
+  `workflow-manual` MCP tool: *read `WORKFLOW.md` only if that tool is not in your
+  toolbox.* `WORKFLOW.md` is correct **only** for a plugin-less agent, so without
+  this gate a plugin-equipped agent could follow its manual-fallback guidance and
+  malfunction. The gate names both packages (`ws`/`wsflow`) in one fixed string,
+  so both templates still emit it identically — byte-identity is preserved, and
+  it is self-neutralizing (an agent lacking the tool simply reads the guide).
+
   Result: both emitted bodies are byte-identical across packages modulo the
-  version tag, and carry no package fingerprint of any kind.
+  version tag, and carry no package fingerprint beyond that single intentional
+  gate.
 - **Shared migration counter follows by construction.** One package-neutral
   artifact ⇒ one converged template ⇒ one shared version lineage. This is a
   **relabel, not a replay**: the audit proved the content is already aligned, so
@@ -228,8 +239,11 @@ worktree/clone note layer) dropped per the corollary. Concretely, the emitted fi
 to eliminate are both namespaced refs (`ws/`, `ws:`) **and** bare `ws`/`wsflow`
 words in prose:
 - `AGENTS.template.md`: the Preamble's `ws/note.search` (L7) → the
-  `ai-docs/ws-notes/` path; the bare `ws runtime` in Project Knowledge (L85) →
-  neutral; the Inclusion-test comment's `ws:lead-add-rule` (L123, emitted
+  `ai-docs/ws-notes/` path; the `ai-docs/WORKFLOW.md` pointer carrying bare `ws
+  runtime` (L85) → rewrite as the **capability-gated conditional** (read
+  `WORKFLOW.md` only when the `ws`/`wsflow` `workflow-manual` MCP tool is absent) —
+  the one intentionally retained tool name, per the Decisions exception; the
+  Inclusion-test comment's `ws:lead-add-rule` (L123, emitted
   permanently via migration `v0010`) → drop the skill name, keep the placement
   test; the generic `write-ticket workflow skill` pointer (L86) → the ticket
   conventions.
