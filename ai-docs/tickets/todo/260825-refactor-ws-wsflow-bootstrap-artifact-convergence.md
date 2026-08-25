@@ -224,13 +224,29 @@ plugin-less reader can act on — note-layer refs to the on-disk path
 (`ai-docs/ws-notes/` for the `repo` layer), skill routing to the manual activity
 (keeping any host-neutral test, e.g. the Inclusion-test rule-placement
 heuristic), and any plugin-only mechanism with no downstream on-disk meaning (the
-worktree/clone note layer) dropped per the corollary. Concretely, the emitted
-references to eliminate are: in `AGENTS.template.md`, the Preamble's
-`ws/note.search` (L7) and the Inclusion-test comment's `ws:lead-add-rule` (L123,
-emitted permanently via migration `v0010`); in `WORKFLOW.md`, `ws/note.write`
-(L34/L38) and the `ws:lead-forge-spec`/`ws:lead-forge-mental-model`/`ws:lead-discuss`
-routing (L141-144). Also trim the wsflow `git log -10` drift to match ws, and
-reconcile the residual `WORKFLOW.md` prose divergence. Apply the default ruling to any
+worktree/clone note layer) dropped per the corollary. Concretely, the emitted fingerprints
+to eliminate are both namespaced refs (`ws/`, `ws:`) **and** bare `ws`/`wsflow`
+words in prose:
+- `AGENTS.template.md`: the Preamble's `ws/note.search` (L7) → the
+  `ai-docs/ws-notes/` path; the bare `ws runtime` in Project Knowledge (L85) →
+  neutral; the Inclusion-test comment's `ws:lead-add-rule` (L123, emitted
+  permanently via migration `v0010`) → drop the skill name, keep the placement
+  test; the generic `write-ticket workflow skill` pointer (L86) → the ticket
+  conventions.
+- `WORKFLOW.md` (copied wholesale, so every line is emitted): the title `# ws
+  Workflow Guide` (L1) and the bare `ws skills`/`ws tooling`/`ws verification
+  tools` prose (L4/L9/L78/L158/L165) → neutral; the `repo` note-layer
+  `ws/note.write` (L37-38) → the `ai-docs/ws-notes/` path; the worktree/clone
+  note-layer bullet (L33-36) → **dropped** per the corollary (plugin-local
+  runtime state, no downstream on-disk path); the
+  `ws:lead-forge-spec`/`ws:lead-forge-mental-model`/`ws:lead-discuss` routing
+  (L141-144) → the manual activity into `ai-docs/spec/`, `ai-docs/mental-model/`,
+  and the ticket body.
+
+The `ai-docs/ws-notes/` directory name itself stays (both packages already write
+there — a shared path, not a per-package fingerprint; renaming it is a
+downstream-breaking change out of scope). Also trim the wsflow `git log -10`
+drift to match ws, and reconcile any residual `WORKFLOW.md` prose divergence. Apply the default ruling to any
 further difference surfaced during the convergence diff — **drift → converge**,
 unless the content is capability-bound, in which case **relocate it to the
 runtime skills** (record any relocation). Establish and document the artifact-neutrality invariant +
