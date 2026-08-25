@@ -229,39 +229,14 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
+        # Ticket 260825 Phase 2 unified wsflow's migration ordinal onto ws's
+        # shared v0001..v0047 lineage, so the package-local-divergence
+        # assertions this test used to make are no longer true by design.
+        # Phase 4 (ticket 260825) rewrites this into a positive convergence
+        # assertion (identical fresh-mode emitted body + shared head across
+        # both packages) plus guard-detection coverage; left minimal until then.
         text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version: v0008 -->", text)
-        self.assertIn("This template has package-local version history", text)
-
-        # The forbidden markers are derived from the full-plugin lineage's
-        # *current* state rather than pinned to a literal version, so this
-        # guard keeps working as both lineages gain versions without a hand
-        # edit. A hardcoded literal (e.g. "v0038") only catches contamination
-        # from that one exact version and goes silent on every later one.
-        full_text = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(
-            encoding="utf-8"
-        )
-
-        full_tag_match = re.search(r"<!-- Template Version: v\d{4} -->", full_text)
-        self.assertIsNotNone(
-            full_tag_match, "full-plugin AGENTS.template.md is missing its version tag"
-        )
-        self.assertNotIn(full_tag_match.group(0), text)
-
-        # Compare on bullet *content*, not bullet number: both lineages number
-        # their changelogs independently starting at v0001, so wsflow's own
-        # v0001-v0006 bullets legitimately share numbers with (differently
-        # worded) full-plugin bullets. A number-only check would either miss
-        # real contamination or false-positive on the wsflow copy's own
-        # history. Matching full lines instead catches a leaked bullet from
-        # any full-plugin version - including the current highest one - while
-        # leaving wsflow's own same-numbered bullets untouched.
-        full_bullet_lines = re.findall(r"(?m)^- v\d{4}:.*$", full_text)
-        self.assertTrue(
-            full_bullet_lines, "full-plugin AGENTS.template.md has no changelog bullets to compare"
-        )
-        leaked_bullets = [line for line in full_bullet_lines if line in text]
-        self.assertEqual(leaked_bullets, [])
+        self.assertIn("<!-- Template Version:", text)
 
 
 if __name__ == "__main__":
