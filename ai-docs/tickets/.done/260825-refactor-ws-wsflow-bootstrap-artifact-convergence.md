@@ -9,6 +9,7 @@ spec:
   - 260703-bootstrap-staleness-warning
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-25
 ---
 
 # Converge ws/wsflow bootstrap into one package-neutral artifact with a shared migration version counter
@@ -541,3 +542,8 @@ converge — this repo's own downstream `ai-docs/WORKFLOW.md` — stays open per
 Merge: this Result commits on the branch; the single `develop` merge + plugin
 version bump follow immediately after (branch merges as one unit, per the branch
 strategy). All four phases complete — ticket moves to `.done/` at close.
+
+
+## Resolution (2026-08-25)
+
+All 4 phases landed on develop via one deferred merge (5b295f91) + version bump 0.42.2 (9316ef78). ws and wsflow lead-bootstrap now emit one package-neutral downstream artifact on a shared migration-ordinal lineage (both heads v0047); a fail-loud version-skew guard fires on above-head/unrecognized downstream tags (code-level detector backed by a lead-bootstrap ## On: refuse instruction, not a mechanical block); the guard test is inverted to assert cross-package convergence and independently proven to bite on drift and counter-split. Specs (#260513-wsflow-agentless-skill-surface, #260703-bootstrap-staleness-warning), wsflow-mirroring.md, mental-model/workflow-skills.md, and the 260728 Non-Scope cross-reference are reconciled. Residual (out of scope, tracked in 260728 Resolution Note): this repo's own downstream ai-docs/WORKFLOW.md — the third WORKFLOW-family copy — is not converged by 260825.
