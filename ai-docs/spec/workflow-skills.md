@@ -250,11 +250,14 @@ wsflow exclusion rationale. The wsflow skill-bundle verification path checks
 inventory, forbidden full ws agent references, thin-shim shape, and shared
 playbook coverage; it does not require text identity with full ws skill shims.
 
-wsflow bootstrap uses package-local template version history. Its downstream
-`AGENTS.template.md` starts at `v0001` for the wsflow baseline and does not
-replay the full bootstrap migration backlog. Bootstrap behavior changes remain
-mirroring-sensitive: maintainers check both packages and bump each package's
-template version only when that package receives the behavior change.
+wsflow bootstrap emits a package-neutral downstream artifact converged with
+the full ws package: `AGENTS.template.md` and `WORKFLOW.md` produce identical
+emitted output across both packages modulo the shared
+`<!-- Template Version: vNNNN -->` tag, and both packages share one
+migration-ordinal lineage (wsflow no longer runs a separate `v0001..v0008`
+counter). Bootstrap behavior changes remain mirroring-sensitive: maintainers
+check both packages and bump the shared template version once for a change
+either package receives.
 
 ## wsflow Converged Implementation Spine {#260529-wsflow-converged-implement-spine}
 
