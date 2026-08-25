@@ -650,10 +650,10 @@ func implementReviewPartitions(n normalizedImplementFacts) []string {
 	if materialRisk(n.CorrectnessRisk) || materialRisk(n.SecurityOrContractRisk) || n.NewTypeContract == "yes" || n.NewPublicSymbol == "yes" {
 		parts = append(parts, "correctness")
 	}
-	if materialRisk(n.FitRisk) || n.Surface == "cross-module" || n.ReusePoints == "unconfirmed" || n.ReusePoints == "unknown" {
+	if materialRisk(n.FitRisk) || n.Surface == "cross-module" || n.ReusePoints == "unconfirmed" {
 		parts = append(parts, "fit")
 	}
-	if materialRisk(n.TestRisk) || n.TestSurface == "new-files" || n.TestSurface == "unknown" {
+	if materialRisk(n.TestRisk) || n.TestSurface == "new-files" {
 		parts = append(parts, "test")
 	}
 	return parts
@@ -668,7 +668,7 @@ func partitionedReviewAlloc(n normalizedImplementFacts) string {
 }
 
 func materialRisk(value string) bool {
-	return value == "moderate" || value == "high" || value == "unknown"
+	return value == "moderate" || value == "high"
 }
 
 func deriveImplementDocMode(n normalizedImplementFacts) string {
