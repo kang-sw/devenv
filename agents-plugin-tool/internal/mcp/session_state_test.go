@@ -417,29 +417,40 @@ func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
 	}
 }
 
+// TestDeriveImplementTodoInstructionsMergeConfirmSkip covers Phase 2's flip:
+// the default final-action/merge outcome is continue-on-branch without
+// merging, for every BranchPlan.Action (continue and create both stand in
+// for "any phase", since this package carries no phase-index field); an
+// explicit merge choice still honors MergeConfirm ask/skip for that chosen
+// merge only.
 func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
-	skip := deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  "delegated",
-		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
-		PlanDepth:   "survey",
-		ReviewAlloc: "single",
-		NeedReview:  true,
-		DocMode:     "standard",
-		NeedDoc:     true,
-	})
-	finalAction := requireInstruction(t, todoByKey(t, skip, "final-action-gate"))
-	if !strings.Contains(finalAction, "without asking for approval") {
-		t.Fatalf("final-action-gate instruction with merge_confirm=skip should drop the approval ask: %q", finalAction)
-	}
-	if strings.Contains(finalAction, "before asking for final action approval") {
-		t.Fatalf("final-action-gate instruction with merge_confirm=skip still asks for approval: %q", finalAction)
-	}
-	merge := requireInstruction(t, todoByKey(t, skip, "merge"))
-	if strings.Contains(merge, "After user approval") {
-		t.Fatalf("merge instruction with merge_confirm=skip should not require approval: %q", merge)
-	}
-	if !strings.Contains(merge, "without asking for user approval") {
-		t.Fatalf("merge instruction with merge_confirm=skip missing auto-merge guidance: %q", merge)
+	for _, action := range []string{"continue", "create"} {
+		skip := deriveImplementTodosFromVerdict(implementTodoVerdict{
+			Delegation:  "delegated",
+			BranchPlan:  implementBranchPlan{Action: action, CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
+			PlanDepth:   "survey",
+			ReviewAlloc: "single",
+			NeedReview:  true,
+			DocMode:     "standard",
+			NeedDoc:     true,
+		})
+		finalAction := requireInstruction(t, todoByKey(t, skip, "final-action-gate"))
+		if !strings.Contains(finalAction, "default no-merge outcome") {
+			t.Fatalf("[action=%s] final-action-gate instruction should default to no-merge: %q", action, finalAction)
+		}
+		if !strings.Contains(finalAction, "without asking for approval") {
+			t.Fatalf("[action=%s] final-action-gate instruction with merge_confirm=skip should describe the explicit-merge no-approval path: %q", action, finalAction)
+		}
+		merge := requireInstruction(t, todoByKey(t, skip, "merge"))
+		if strings.Contains(merge, "After user approval") {
+			t.Fatalf("[action=%s] merge instruction with merge_confirm=skip should not require approval when a merge is chosen: %q", action, merge)
+		}
+		if !strings.Contains(merge, "without asking for user approval") {
+			t.Fatalf("[action=%s] merge instruction with merge_confirm=skip missing explicit-merge no-approval guidance: %q", action, merge)
+		}
+		if !strings.Contains(merge, "runs only when a merge was explicitly chosen") || !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
+			t.Fatalf("[action=%s] merge instruction should be opt-in with no-merge default stated: %q", action, merge)
+		}
 	}
 
 	skippedDocs := deriveImplementTodosFromVerdict(implementTodoVerdict{
@@ -453,39 +464,44 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 		NeedDoc:     false,
 	})
 	skippedFinal := requireInstruction(t, todoByKey(t, skippedDocs, "final-action-gate"))
-	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation tracked in follow-up", "without asking for approval"} {
+	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation tracked in follow-up", "default no-merge outcome", "without asking for approval"} {
 		if !strings.Contains(skippedFinal, want) {
 			t.Fatalf("skipped-doc merge_confirm=skip final action missing %q: %q", want, skippedFinal)
 		}
 	}
-	if strings.Contains(skippedFinal, "before asking for final action approval") {
-		t.Fatalf("skipped-doc merge_confirm=skip final action still asks for approval: %q", skippedFinal)
-	}
 
-	ask := deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  "delegated",
-		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo", MergeConfirm: "ask"},
-		PlanDepth:   "survey",
-		ReviewAlloc: "single",
-		NeedReview:  true,
-		DocMode:     "standard",
-		NeedDoc:     true,
-	})
-	if got := requireInstruction(t, todoByKey(t, ask, "merge")); !strings.Contains(got, "After user approval") {
-		t.Fatalf("merge instruction with merge_confirm=ask should still require approval: %q", got)
-	}
-
-	absent := deriveImplementTodosFromVerdict(implementTodoVerdict{
-		Delegation:  "delegated",
-		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
-		PlanDepth:   "survey",
-		ReviewAlloc: "single",
-		NeedReview:  true,
-		DocMode:     "standard",
-		NeedDoc:     true,
-	})
-	if got := requireInstruction(t, todoByKey(t, absent, "merge")); !strings.Contains(got, "After user approval") {
-		t.Fatalf("merge instruction with merge_confirm absent should default to requiring approval: %q", got)
+	for _, tc := range []struct {
+		name         string
+		mergeConfirm string
+	}{
+		{"ask", "ask"},
+		{"absent", ""},
+	} {
+		for _, action := range []string{"continue", "create"} {
+			verdict := deriveImplementTodosFromVerdict(implementTodoVerdict{
+				Delegation:  "delegated",
+				BranchPlan:  implementBranchPlan{Action: action, CurrentBranch: "implement/demo", MergeConfirm: tc.mergeConfirm},
+				PlanDepth:   "survey",
+				ReviewAlloc: "single",
+				NeedReview:  true,
+				DocMode:     "standard",
+				NeedDoc:     true,
+			})
+			finalAction := requireInstruction(t, todoByKey(t, verdict, "final-action-gate"))
+			if !strings.Contains(finalAction, "default no-merge outcome") {
+				t.Fatalf("[mergeConfirm=%s action=%s] final-action-gate instruction should default to no-merge: %q", tc.name, action, finalAction)
+			}
+			if !strings.Contains(finalAction, "ask for approval before performing it") {
+				t.Fatalf("[mergeConfirm=%s action=%s] final-action-gate instruction should still require approval for an explicitly chosen merge: %q", tc.name, action, finalAction)
+			}
+			merge := requireInstruction(t, todoByKey(t, verdict, "merge"))
+			if !strings.Contains(merge, "after user approval") {
+				t.Fatalf("[mergeConfirm=%s action=%s] merge instruction with merge_confirm=%s should still require approval when a merge is chosen: %q", tc.name, action, tc.mergeConfirm, merge)
+			}
+			if !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
+				t.Fatalf("[mergeConfirm=%s action=%s] merge instruction should state no-merge as the default outcome: %q", tc.name, action, merge)
+			}
+		}
 	}
 }
 
@@ -2213,7 +2229,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			}
 			finalAction := requireInstruction(t, todoByKey(t, record.Todos, "final-action-gate"))
 			merge := requireInstruction(t, todoByKey(t, record.Todos, "merge"))
-			if !strings.Contains(finalAction, "final action approval") || !strings.Contains(merge, "After user approval") {
+			if !strings.Contains(finalAction, "default no-merge outcome") || !strings.Contains(merge, "continuing on the branch without merging is the default outcome") {
 				t.Fatalf("standard merge instructions changed: final=%q merge=%q", finalAction, merge)
 			}
 		})
@@ -2509,6 +2525,111 @@ func TestServeStdioTicketsCloseUnresolvedPhaseStatesSoftWarnNextInstruction(t *t
 	})
 	if !strings.Contains(closeResp, "next_instruction: This is a soft warning only (no block)") {
 		t.Fatalf("tickets.close response missing unresolved-phase next_instruction: %s", closeResp)
+	}
+}
+
+// TestServeStdioTicketsCloseMergeReviewNudgeOnUnmergedImplBranch covers the
+// Phase 2 merge-review trigger: closing a ticket while the current branch is
+// an impl/<root>/<stem> branch carrying commits ahead of its merge root must
+// surface a next_instruction nudging review-and-merge of that branch into
+// the merge root. tickets.close itself performs no merge (real git branches
+// are built here — the first integration coverage of the real
+// aheadOfMergeRootCount rev-list path; Phase 1 covered it only via
+// hand-built implementBranchObservation unit tests).
+func TestServeStdioTicketsCloseMergeReviewNudgeOnUnmergedImplBranch(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	runGit(t, root, "checkout", "-b", "root-branch")
+	mustWrite(t, root, "README.md", "root\n")
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "root commit")
+
+	runGit(t, root, "checkout", "-b", "impl/root-branch/close-nudge")
+	mustWrite(t, root, "impl-file.txt", "impl\n")
+	runGit(t, root, "add", "impl-file.txt")
+	runGit(t, root, "commit", "-m", "impl commit")
+
+	stem := "260101-feat-close-merge-review-nudge"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: Merge review nudge\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	closeResp := callToolWithKey(t, server, 2, key, "tickets.close", map[string]any{
+		"stem":   stem,
+		"status": "done",
+	})
+	if !strings.Contains(closeResp, "next_instruction:") {
+		t.Fatalf("tickets.close response missing merge-review next_instruction: %s", closeResp)
+	}
+	for _, want := range []string{"impl/root-branch/close-nudge", "root-branch"} {
+		if !strings.Contains(closeResp, want) {
+			t.Fatalf("tickets.close merge-review next_instruction missing %q: %s", want, closeResp)
+		}
+	}
+}
+
+// TestServeStdioTicketsCloseNoMergeReviewNudgeWhenImplBranchClean is the
+// merged/clean counterpart: closing on an impl/<root>/<stem> branch with no
+// commits ahead of its merge root (identical to root) must not surface a
+// merge-review next_instruction.
+func TestServeStdioTicketsCloseNoMergeReviewNudgeWhenImplBranchClean(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	runGit(t, root, "checkout", "-b", "root-branch")
+	mustWrite(t, root, "README.md", "root\n")
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "root commit")
+
+	runGit(t, root, "checkout", "-b", "impl/root-branch/clean-nudge")
+
+	stem := "260101-feat-close-no-merge-review-nudge-clean"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: No merge review nudge\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	closeResp := callToolWithKey(t, server, 2, key, "tickets.close", map[string]any{
+		"stem":   stem,
+		"status": "done",
+	})
+	if strings.Contains(closeResp, "next_instruction:") {
+		t.Fatalf("tickets.close on a clean impl branch should carry no next_instruction: %s", closeResp)
+	}
+}
+
+// TestServeStdioTicketsCloseNoMergeReviewNudgeOnPlainBranch covers the
+// non-impl case: closing on a plain (never impl/-prefixed) branch must not
+// surface a merge-review next_instruction, even with prior commits.
+func TestServeStdioTicketsCloseNoMergeReviewNudgeOnPlainBranch(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	runGit(t, root, "checkout", "-b", "feature/plain-branch")
+	mustWrite(t, root, "README.md", "root\n")
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "plain commit")
+
+	stem := "260101-feat-close-no-merge-review-nudge-plain"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: No merge review nudge\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	closeResp := callToolWithKey(t, server, 2, key, "tickets.close", map[string]any{
+		"stem":   stem,
+		"status": "done",
+	})
+	if strings.Contains(closeResp, "next_instruction:") {
+		t.Fatalf("tickets.close on a plain non-impl branch should carry no next_instruction: %s", closeResp)
 	}
 }
 

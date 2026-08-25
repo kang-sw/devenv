@@ -1241,7 +1241,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatTicketMutate("closed", result), nil)
+		text := formatTicketMutate("closed", result)
+		if nudge := implementCloseMergeReviewNudge(root); nudge != "" {
+			text += "next_instruction: " + nudge + "\n"
+		}
+		return toolTextResponse(req.ID, text, nil)
 	case "tickets.move":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
