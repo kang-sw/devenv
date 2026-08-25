@@ -6,7 +6,9 @@ related:
   260523-bug-implement-merge-target-discovery: substrate — established the impl/<merge-root>/<stem> name-encoding the start gate parses
   260711-feat-current-branch-low-ceremony: precedent — the `current` no-branch/no-merge action shows the verdict engine already carries a low-ceremony branch action
   260824-epic-review-watermark-model: complementary (not parent) — coarser per-ticket merge cadence makes each ticket-done merge a single mainstream-integration moment the epic's marker/sweep keys on
+  260824-feat-review-watermark-ledger: coordination — both hook tickets.close as a checkpoint; at that checkpoint the order is merge-review (this ticket) then marker/sweep recompute (that ticket), so the two close-hooks must coexist and be ordered
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Single-ticket-scoped impl branch — relation-aware start gate and ticket-done merge deferral
@@ -82,7 +84,11 @@ ticket while on an unmerged impl branch is blocked (non-goal) or seamlessly land
   - **L3 (lead explore, fallback):** on an L1 stop the resolver emits guidance
     routing identity resolution to the lead — resolve from context, or dispatch an
     explore comparing the branch's commit history to the target ticket, then
-    re-invoke. Any commit-stem hint in the stop message is best-effort and never
+    re-invoke. This commit-history inspection is **lead-side judgment, never
+    resolver code**, so it does not contradict the resolver's
+    zero-commit-content-parsing rule. The resolver's own stop-message hint is
+    limited to the branch-name-encoded stem (`parseImplBranchRoot`) plus
+    `target.ticket_stem` — zero commit parsing — and is best-effort, never
     load-bearing.
 - **`enter.implement` already receives `target.ticket_stem`** (server.go input
   schema) but the branch planner does not consume it — so the mechanical safety
@@ -92,22 +98,50 @@ ticket while on an unmerged impl branch is blocked (non-goal) or seamlessly land
   `create` path plus the goal drain's `merge_confirm: skip` already lands each
   ticket into the goal staging branch; the start gate must not add friction there.
   Only the non-goal, unmerged, cross-ticket case blocks.
-- **Merge deferral to ticket completion.** `lead-proceed` computes the target
-  phase (first phase with no `### Result`); it will additionally pass a
-  "this run completes the ticket's last unfinished phase" signal to
-  `enter.implement`. The merge gate fires only when that signal is set; otherwise
-  the per-phase final action defaults to continue-on-branch without a merge.
+- **Merge deferral via a `tickets.close` review trigger (not a proceed→implement
+  completion signal).** The per-phase final action defaults to continue-on-branch
+  with no merge (the final-action gate's explicit merge option stays available for
+  a caller who wants to merge early). The deferred merge is caught at
+  `tickets.close`: closing a ticket while on an unmerged `impl/*` branch surfaces a
+  merge-review nudge. Rationale: "this ticket is being closed" is a stronger, more
+  mechanical "work complete, land it" signal than proceed inferring "this is the
+  last unfinished phase," and `tickets.close` is an already-hit deterministic MCP
+  checkpoint (the same one epic ③ uses for sweep recompute) — so no honor-system
+  and no proceed→implement signal plumbing.
+  - **Rejected: the proceed→implement completion signal** (earlier design of this
+    ticket). It tied the trigger to proceed reasoning about phase topology; the
+    close-time checkpoint is simpler and more robust (260630 diet — drop machinery
+    that does not earn its cost).
+  - **Rejected: keeping both as defense-in-depth.** Redundant given the close
+    checkpoint is mechanically reliable; two triggers is exactly the machinery the
+    diet direction removes.
+- **`tickets.close` emits guidance, never performs the merge.** It is a thin mover;
+  native merge stays lead-driven. The nudge reuses Phase 1's ahead-of-merge-root
+  observation to detect the unmerged impl branch and returns a `next_instruction`;
+  the lead sequences the merge (delegating exploration if needed). Ordering note:
+  the close stages the `.done` move commit onto the impl branch and the nudge guides
+  "after this close commit, merge `impl/<root>/<stem>` into `<root>`" — but that
+  merge is a native lead action performed *after* `tickets.close` returns (the
+  nudge fires precisely because the branch is still unmerged). So epic ③'s
+  marker/sweep recompute, if it runs synchronously inside the same close call, does
+  **not** see the just-landed range at that checkpoint; correctness does not depend
+  on it doing so — ③ is advisory and its marker advances only on an actual stamping
+  review, so the deferred range is captured at a later checkpoint (see ③'s
+  skip-coverage invariant and its enter.*/session-start backstops).
 - **Exception = ticket-declared user stop gate.** A phase may declare an explicit
   user direct-execution / verification gate (normally noted in the ticket). At such
   a phase the run stops for the user regardless of the merge-deferral default.
-  Agents judge this normally when undeclared; the declaration is the override.
+  Agents judge this normally when undeclared; the declaration is the override. This
+  reuses existing lead judgment over free-form phase prose — **no new marker format
+  or code path** is introduced by this ticket; the declaration is ordinary phase
+  text the lead already reads, not a schema field.
 
 ## Constraints
 
 - Preserve the existing `continue` / `create` / `current` verdict actions and the
   `impl/<merge-root>/<stem>` name-encoding; this ticket re-tunes the mismatch
-  action and adds a completion-aware merge trigger, it does not rewrite the branch
-  model.
+  action and adds a `tickets.close` merge-review trigger, it does not rewrite the
+  branch model.
 - Do not introduce a numeric merge/phase count input; keep the resolver
   fact-and-observation driven (consistent with 260627).
 - Host-neutral: the single-ticket-scope invariant and the goal/non-goal split must
@@ -131,7 +165,8 @@ Approach:
   the ahead-of-merge-root observation to the branch-observation fact set the MCP
   layer builds (alongside the existing upstream/ahead/behind observation).
 - Emit a stop `next_instruction` that routes identity resolution to the lead
-  (L2 context / L3 explore) and names the suspected owning work as a best-effort,
+  (L2 context / L3 explore) and names the suspected owning work by the
+  branch-name-encoded stem only (no commit-content parsing) as a best-effort,
   non-load-bearing hint.
 - Consume `target.ticket_stem` where it sharpens the guidance message; do not make
   the safety decision depend on stem parsing.
@@ -145,52 +180,66 @@ Verification: resolver unit tests over the branch-observation matrix — (a) on
 branch ⇒ `create` seamless path unchanged; (e) the stop instruction carries the
 lead-routing guidance. Update the affected spec prose (see Spec Impact).
 
-### Phase 2: Ticket-done merge deferral and ticket-declared stop-gate exception
+### Phase 2: Default no-merge per phase + `tickets.close` merge-review trigger + ticket-declared stop-gate exception
 
 Depends on Phase 1 (deferring merges makes it more likely a run sits on an
 unmerged impl branch across tickets, so the Phase 1 safety block must be in place
 first for the deferral to be safe).
 
 Goal: within one ticket, phases accumulate on the single impl branch without a
-per-phase merge; the merge gate fires only when the run completes the ticket's last
-unfinished phase, or when the phase declares an explicit user stop gate.
+per-phase merge; the deferred merge is reviewed at `tickets.close`; a
+ticket-declared per-phase user stop gate overrides the no-merge default.
 
 Approach:
-- `lead-proceed` (proceed resolver / skill) computes and passes a
-  ticket-completion signal ("this run's target is the last unfinished phase") to
-  `enter.implement`.
-- `enter.implement`'s final-action / merge instruction fires the merge gate only
-  when the completion signal is set; otherwise the default per-phase final action
-  is continue-on-branch with no merge. Existing `merge_confirm` semantics (ask vs
-  skip) still apply *when* the gate fires.
+- Change the per-phase final-action default (the merge instruction in
+  `session_state.go`'s implement final action) so the default is
+  continue-on-branch with **no** merge; the gate's explicit merge option stays
+  available for a caller who wants to merge early, and `merge_confirm` semantics
+  (ask vs skip) apply only when a merge is actually chosen. Do **not** add a
+  proceed→implement completion signal.
+- Add a merge-review trigger to `tickets.close`: when closing a ticket while the
+  current branch is an `impl/*` branch with unmerged commits ahead of its merge
+  root (Phase 1's observation), return a `next_instruction` nudging a merge review
+  of `impl/<root>/<stem>` into `<root>`, sequenced after the close move commit. The
+  tool performs no merge; the lead acts (delegating exploration if needed).
 - Honor a ticket-declared per-phase user stop gate as an override that stops the
-  run at that phase irrespective of the deferral default.
-- Verify the goal-drain interaction: under a goal drain, deferral yields one merge
-  into the goal staging branch at ticket completion (closer to 260707's intended
-  "one confirmed merge at queue-empty") rather than a per-phase staging merge —
-  confirm no regression against the staging model.
+  run at that phase irrespective of the no-merge default.
+- Verify the goal-drain interaction: under a goal drain the per-phase default is
+  already no-merge, so the deferred merge lands at close/queue drain — confirm the
+  goal staging model (260707) still yields its intended per-ticket merge and that
+  the close nudge does not double-fire against an already-merged goal branch.
+- Coordinate with epic ③ (`260824-feat-review-watermark-ledger`), which also hooks
+  `tickets.close`. Both hooks run while the branch is still unmerged (the merge is a
+  native lead action after close returns), so ③'s recompute at that call does not
+  see the just-landed range; correctness rests on ③'s laziness (advisory recompute,
+  marker advances only on a real stamping review, later-checkpoint backstops), not
+  on same-call ordering. Settle the exact hook order/measurement with ③'s
+  implementer so the two close-hooks compose without double-firing or false
+  confidence.
 
-Verification: proceed-resolver tests that the completion signal is set only on the
-last unfinished phase; implement-resolver / session-state tests that the merge
-instruction is emitted only under the completion signal (and under a declared stop
-gate), and that intermediate phases resolve to continue-without-merge; a
-goal-drain path test that the per-ticket staging merge still occurs once at
-completion. Update the affected spec prose (see Spec Impact).
+Verification: session-state / implement-resolver tests that intermediate and final
+phases both default to continue-without-merge (no auto-merge) and that the manual
+merge option still resolves when explicitly chosen; `tickets.close` tests that an
+unmerged `impl/*` current branch yields the merge-review nudge while a merged/clean
+or non-impl branch yields none; a goal-drain path test that the staging merge still
+occurs once and the nudge does not double-fire. Update the affected spec prose (see
+Spec Impact).
 
 ## Spec Impact
 
-Target: `ai-docs/spec/mcp-tools.md`, the `enter.implement` branch-plan and
-merge-confirmation description (currently around the branch-action resolution and
-the "merge confirmation defaults to asking unless the caller explicitly passes
-`policy.branch.merge_confirm: skip`" sentence), plus any `lead-proceed` phase-scope
-description that must now mention the ticket-completion signal.
+Target: `ai-docs/spec/mcp-tools.md` — (1) the `enter.implement` branch-plan and
+merge-confirmation description (branch-action resolution and the "merge
+confirmation defaults to asking unless the caller explicitly passes
+`policy.branch.merge_confirm: skip`" sentence), and (2) the `tickets.close`
+description, which gains the impl-branch merge-review trigger.
 
 Expected caller-visible changes:
 - Entering on an `impl/*` branch with unmerged work and a mismatched scope now
   resolves to `stop` (safety block) rather than a rename; `rename` remains only for
   the no-unmerged-work relabel case.
-- The merge gate is emitted only at ticket completion (last unfinished phase) or a
-  declared per-phase stop gate; intermediate phases continue on the branch without
-  a merge. `merge_confirm` semantics are unchanged when the gate fires.
-- A new ticket-completion signal flows from `lead-proceed` to `enter.implement`;
-  document its derivation (first phase with no `### Result` == last unfinished).
+- The per-phase final action defaults to continue-on-branch with no merge; a merge
+  happens only when explicitly chosen at the gate or reviewed at close.
+  `merge_confirm` semantics are unchanged when a merge is chosen.
+- `tickets.close` now returns a merge-review nudge when the current branch is an
+  unmerged `impl/*` branch, sequenced after the close move commit; it performs no
+  merge itself. No proceed→implement completion signal is introduced.
