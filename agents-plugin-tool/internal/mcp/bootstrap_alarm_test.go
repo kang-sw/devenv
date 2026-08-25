@@ -121,8 +121,18 @@ func TestBootstrapStalenessWarningSilentWithoutTag(t *testing.T) {
 
 	s := NewServer(root, "test")
 	resp := callLogin(t, s, 1, root, nil)
-	if strings.Contains(toolText(t, resp), "Bootstrap template is stale") {
-		t.Fatalf("ferrule must stay silent when the downstream AGENTS.md has no Template Version tag: %s", resp)
+	text := toolText(t, resp)
+	if strings.Contains(text, "Bootstrap template is stale") {
+		t.Fatalf("ferrule must stay silent when the downstream AGENTS.md has no Template Version tag: %s", text)
+	}
+	// The never-opted-in invariant must not leak into either fire direction:
+	// a marker-absent project must emit neither the above-head nor the
+	// unrecognized-tag warning. "code-level detector only" is common to both
+	// fire messages, so its absence guards against a marker-absent false-fire.
+	if strings.Contains(text, "code-level detector only") ||
+		strings.Contains(text, "ahead of this package's own template head") ||
+		strings.Contains(text, "Bootstrap template tag is unrecognized") {
+		t.Fatalf("ferrule must not fire any skew warning when the downstream AGENTS.md has no Template Version marker: %s", text)
 	}
 }
 
