@@ -90,6 +90,19 @@ FORBIDDEN_PATTERNS = {
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 
+# Mirrors lead-bootstrap.md's `## On: fresh` step 1: strip only the two
+# scaffold-only comment blocks before comparing emitted output across
+# packages. The Inclusion-test comment is migration-v0010-permanent
+# downstream content and must NOT be stripped.
+_MIGRATION_SETUP_BLOCK = re.compile(r"<!-- MIGRATION:.*?-->\n*", re.DOTALL)
+_MIGRATION_CHECKLIST_BLOCK = re.compile(r"<!-- MIGRATION CHECKLIST.*?-->\n*", re.DOTALL)
+
+
+def _emit_fresh_body(raw_template_text: str) -> str:
+    text = _MIGRATION_SETUP_BLOCK.sub("", raw_template_text)
+    text = _MIGRATION_CHECKLIST_BLOCK.sub("", text)
+    return text
+
 
 class WsflowSkillBundleTest(unittest.TestCase):
     def test_shipped_skill_inventory_is_converged(self):
@@ -228,15 +241,28 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 missing.append(skill)
         self.assertEqual(missing, [])
 
-    def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
-        # Ticket 260825 Phase 2 unified wsflow's migration ordinal onto ws's
-        # shared v0001..v0047 lineage, so the package-local-divergence
-        # assertions this test used to make are no longer true by design.
-        # Phase 4 (ticket 260825) rewrites this into a positive convergence
-        # assertion (identical fresh-mode emitted body + shared head across
-        # both packages) plus guard-detection coverage; left minimal until then.
-        text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version:", text)
+    def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
+        # Ticket 260825 Phase 4: assert positive convergence. Both packages'
+        # AGENTS.template.md emit byte-identical fresh-mode bodies (stripping
+        # only the scaffold-only MIGRATION blocks, mirroring lead-bootstrap.md's
+        # `## On: fresh` step 1) and share one migration-ordinal tag; WORKFLOW.md
+        # has no strip blocks and is compared raw.
+        ws_agents_raw = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
+        wsflow_agents_raw = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
+        ws_emitted = _emit_fresh_body(ws_agents_raw)
+        wsflow_emitted = _emit_fresh_body(wsflow_agents_raw)
+        self.assertEqual(ws_emitted, wsflow_emitted)
+
+        tag_pattern = re.compile(r"<!-- Template Version: (v\d+) -->")
+        ws_tag = tag_pattern.search(ws_emitted)
+        wsflow_tag = tag_pattern.search(wsflow_emitted)
+        self.assertIsNotNone(ws_tag)
+        self.assertIsNotNone(wsflow_tag)
+        self.assertEqual(ws_tag.group(1), wsflow_tag.group(1))
+
+        ws_workflow = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "WORKFLOW.md").read_text(encoding="utf-8")
+        wsflow_workflow = (SKILLS_DIR / "lead-bootstrap" / "WORKFLOW.md").read_text(encoding="utf-8")
+        self.assertEqual(ws_workflow, wsflow_workflow)
 
 
 if __name__ == "__main__":
