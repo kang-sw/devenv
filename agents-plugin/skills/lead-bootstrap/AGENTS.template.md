@@ -4,7 +4,7 @@
 
 Read at every session start, before other action:
 
-1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read repo-tracked notes (`ws/note.search(layer: "repo")`) for volatile session context, `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for current status. Keep only context a session must not re-derive.
+1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read the `repo` note layer at `ai-docs/ws-notes/` (one file per key) for volatile session context, `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for current status. Keep only context a session must not re-derive.
 2. **Project arc** - run `git log --oneline --graph -50`.
 
 ## Response Discipline
@@ -82,7 +82,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 ## Project Knowledge
 
 - Project state and cross-session context live in `ai-docs/`.
-- Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or MCP parser behavior.
+- Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; read it only if the `ws` or `wsflow` `workflow-manual` MCP tool is not in your toolbox. It is explanatory and does not override plugin runtime or MCP parser behavior.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by stem only, never full path; stems survive status moves.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
@@ -120,7 +120,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 
 <!-- Inclusion test: if breaking this rule makes a skill produce wrong results
      AND it applies everywhere, keep it here. Domain-scoped rules belong in
-     `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
+     `ai-docs/mental-model/<domain>.md ## Domain Rules`.
      Context goes in this file's `## Project Orientation` section or the
      `repo` note layer; process goes in skills. -->
 

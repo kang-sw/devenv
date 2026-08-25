@@ -293,6 +293,15 @@ renders, never as a divergent body of a shared stem.
 - Do not copy the full bootstrap migration backlog into the wsflow template.
 - When a bootstrap baseline changes for both packages, update both templates in
   one logical change or record why one package is not applicable.
+- **Artifact neutrality invariant.** The downstream artifact (`AGENTS.md` +
+  `ai-docs/WORKFLOW.md`) the bootstrap scaffolds produce is package-neutral:
+  `ws` and `wsflow` emit identical content modulo the `<!-- Template Version:
+  vNNNN -->` tag; only the runtime workflow (agents vs. no agents) differs.
+- **Enforceable corollary.** Capability-specific content must be relocated to
+  runtime skills, never left as artifact drift; default ruling for any
+  divergence in `AGENTS.template.md`/`WORKFLOW.md` is "drift → converge," with
+  one deliberate exception: the single fixed capability-detection gate string
+  naming both `ws` and `wsflow` for the `ai-docs/WORKFLOW.md` pointer.
 
 ## Static Verification
 
