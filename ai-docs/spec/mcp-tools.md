@@ -274,8 +274,13 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
   implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
-  branch rename is allowed; branch rename defaults to allowed unless the
-  caller explicitly withholds consent (`policy.branch.allow_rename: no`); and
+  branch rename is allowed; branch rename defaults to allowed only when the
+  current implementation branch carries no unmerged commits ahead of its merge
+  root — when it does and the caller's target scope differs from the branch's,
+  the resolver stops with a safety block (routing branch-identity resolution to
+  the lead) regardless of `allow_rename`, which cannot override it; otherwise
+  rename defaults to allowed unless the caller explicitly withholds consent
+  (`policy.branch.allow_rename: no`); and
   whether the caller's own merge-approval ask may be skipped for this merge;
   merge confirmation defaults to asking unless the caller explicitly passes
   `policy.branch.merge_confirm: skip`. The
