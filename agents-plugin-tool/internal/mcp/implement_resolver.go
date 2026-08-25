@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -110,14 +111,15 @@ type implementVerdict struct {
 }
 
 type implementBranchPlan struct {
-	Action        string   `json:"action"`
-	CurrentBranch string   `json:"current_branch"`
-	TargetBranch  string   `json:"target_branch,omitempty"`
-	MergeTarget   string   `json:"merge_target,omitempty"`
-	MergeConfirm  string   `json:"merge_confirm,omitempty"`
-	StartCommit   string   `json:"start_commit,omitempty"`
-	Reason        string   `json:"reason"`
-	Warnings      []string `json:"warnings"`
+	Action             string   `json:"action"`
+	CurrentBranch      string   `json:"current_branch"`
+	TargetBranch       string   `json:"target_branch,omitempty"`
+	MergeTarget        string   `json:"merge_target,omitempty"`
+	MergeConfirm       string   `json:"merge_confirm,omitempty"`
+	StartCommit        string   `json:"start_commit,omitempty"`
+	Reason             string   `json:"reason"`
+	Warnings           []string `json:"warnings"`
+	SuspectedOwnerStem string   `json:"suspected_owner_stem,omitempty"`
 }
 
 type implementAgenda struct {
@@ -143,6 +145,7 @@ type implementBranchObservation struct {
 	Behind               int
 	TargetExists         bool
 	MergeRootRefConflict string
+	AheadOfMergeRoot     int
 }
 
 type normalizedImplementFacts struct {
@@ -170,6 +173,7 @@ type normalizedImplementFacts struct {
 	AllowRename               string
 	MergeConfirmPolicy        string
 	ScopeSlug                 string
+	TicketStem                string
 }
 
 func parseImplementInput(args map[string]any) (implementInput, error) {
@@ -412,6 +416,54 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 	return out, nil
 }
 
+// aheadOfMergeRootCount returns the number of commits currentBranch carries
+// ahead of mergeRoot's merge-base with currentBranch. It fails open to 0 on
+// any git error (unresolvable ref, unrelated histories): an infra failure
+// here is out of the ticket's test matrix, not a normal false-negative risk
+// case, consistent with the existing err == nil truthy pattern this file
+// already uses for TargetExists/MergeRootRefConflict.
+func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) int {
+	result, err := wsgit.NewClient().MergeBase(context.Background(), root, mergeRoot, currentBranch)
+	if err != nil {
+		return 0
+	}
+	out, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
+	if err != nil {
+		return 0
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
+// implementCloseMergeReviewNudge computes the tickets.close merge-review
+// advisory: closing a ticket while the current branch is an unmerged
+// impl/<root>/<stem> branch leaves that branch's work unreviewed-and-merged,
+// so the close response nudges the lead to review-and-merge it into <root>
+// after the close-move commit lands. tickets.close itself never merges or
+// commits (see {#260620-ticket-close-tool}), so this is advisory text only,
+// computed from the pre-close-commit git state via observeImplementBranch's
+// existing AheadOfMergeRoot observation (Phase 1) — no new git-observation
+// code, and no marker/schema/code path for the ticket-declared stop-gate
+// exception, which stays ordinary lead judgment outside this hook. Failing
+// open to "" on any git error, a non-impl branch, or a merged/clean impl
+// branch keeps this from ever blocking or erroring the close call, and
+// leaves room for epic 260824's later review-watermark hook to compose
+// without rework.
+func implementCloseMergeReviewNudge(root string) string {
+	obs, err := observeImplementBranch(root, "")
+	if err != nil {
+		return ""
+	}
+	mergeRoot, stem, ok := parseImplBranchRoot(obs.CurrentBranch)
+	if !ok || obs.AheadOfMergeRoot <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("This tool performed no merge. After the close-move commit for this ticket lands, review and merge %s into %s.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
+}
+
 func observeImplementBranch(root string, targetBranch string) (implementBranchObservation, error) {
 	client := wsgit.NewClient()
 	status, err := client.Status(context.Background(), root)
@@ -424,6 +476,12 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 		Upstream:      status.Branch.Upstream,
 		Ahead:         status.Branch.Ahead,
 		Behind:        status.Branch.Behind,
+	}
+	if validObservedBranch(obs.CurrentBranch) {
+		mergeRoot := implementMergeRootFor(obs.CurrentBranch)
+		if mergeRoot != "" && mergeRoot != obs.CurrentBranch {
+			obs.AheadOfMergeRoot = aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+		}
 	}
 	if targetBranch != "" {
 		if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
@@ -534,6 +592,7 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		AllowRename:               factOr(policy.Branch.AllowRename, "yes"),
 		MergeConfirmPolicy:        factOr(policy.Branch.MergeConfirm, "ask"),
 		ScopeSlug:                 strings.TrimSpace(input.Target.ScopeSlug),
+		TicketStem:                strings.TrimSpace(input.Target.TicketStem),
 	}
 	if n.ScopeSlug == "" {
 		n.ScopeSlug = slugifyImplementScope(firstNonEmpty(input.Target.ScopeLabel, input.Target.TicketStem, input.Target.Label, "implementation"))
@@ -650,10 +709,10 @@ func implementReviewPartitions(n normalizedImplementFacts) []string {
 	if materialRisk(n.CorrectnessRisk) || materialRisk(n.SecurityOrContractRisk) || n.NewTypeContract == "yes" || n.NewPublicSymbol == "yes" {
 		parts = append(parts, "correctness")
 	}
-	if materialRisk(n.FitRisk) || n.Surface == "cross-module" || n.ReusePoints == "unconfirmed" || n.ReusePoints == "unknown" {
+	if materialRisk(n.FitRisk) || n.Surface == "cross-module" || n.ReusePoints == "unconfirmed" {
 		parts = append(parts, "fit")
 	}
-	if materialRisk(n.TestRisk) || n.TestSurface == "new-files" || n.TestSurface == "unknown" {
+	if materialRisk(n.TestRisk) || n.TestSurface == "new-files" {
 		parts = append(parts, "test")
 	}
 	return parts
@@ -668,7 +727,7 @@ func partitionedReviewAlloc(n normalizedImplementFacts) string {
 }
 
 func materialRisk(value string) bool {
-	return value == "moderate" || value == "high" || value == "unknown"
+	return value == "moderate" || value == "high"
 }
 
 func deriveImplementDocMode(n normalizedImplementFacts) string {
@@ -823,6 +882,15 @@ func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImpleme
 		plan.Reason = "current implementation branch matches target scope"
 		return plan
 	}
+	if obs.AheadOfMergeRoot > 0 {
+		_, suspectedStem, _ := parseImplBranchRoot(obs.CurrentBranch)
+		plan.Action = "stop"
+		plan.SuspectedOwnerStem = firstNonEmpty(suspectedStem, "unknown")
+		plan.Reason = fmt.Sprintf(
+			"current implementation branch has %d unmerged commit(s) ahead of merge root %q and target scope %q differs from suspected prior work %q; starting here would mix ticket work (not overridable by allow_rename)",
+			obs.AheadOfMergeRoot, plan.MergeTarget, firstNonEmpty(n.TicketStem, "unspecified"), plan.SuspectedOwnerStem)
+		return plan
+	}
 	if n.AllowRename != "yes" {
 		plan.Action = "stop"
 		plan.Reason = "current implementation branch differs from target scope and rename is not allowed"
@@ -847,6 +915,11 @@ func implementNextInstruction(verdict implementVerdict) string {
 	nextAfterBranch := implementNextAfterBranch(verdict)
 	switch verdict.BranchPlan.Action {
 	case "stop":
+		if verdict.BranchPlan.SuspectedOwnerStem != "" {
+			return fmt.Sprintf(
+				"Stop before source edits. Do not rename over unmerged work. Resolve branch identity from session context, or dispatch an explore comparing %s's commit history to the target ticket, then re-invoke enter.implement. Suspected prior owner (branch-name encoded, best-effort): %s.",
+				verdict.BranchPlan.CurrentBranch, verdict.BranchPlan.SuspectedOwnerStem)
+		}
 		return "Stop before source edits. Report the branch safety blocker in Branch Action and ask for the missing policy or branch cleanup."
 	case "create":
 		return fmt.Sprintf("Create %s from %s before source edits, then %s", verdict.BranchPlan.TargetBranch, verdict.BranchPlan.MergeTarget, nextAfterBranch)

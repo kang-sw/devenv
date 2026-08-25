@@ -9,6 +9,7 @@ related:
   260824-feat-review-watermark-ledger: coordination — both hook tickets.close as a checkpoint; at that checkpoint the order is merge-review (this ticket) then marker/sweep recompute (that ticket), so the two close-hooks must coexist and be ordered
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-25
 ---
 
 # Single-ticket-scoped impl branch — relation-aware start gate and ticket-done merge deferral
@@ -180,6 +181,46 @@ Verification: resolver unit tests over the branch-observation matrix — (a) on
 branch ⇒ `create` seamless path unchanged; (e) the stop instruction carries the
 lead-routing guidance. Update the affected spec prose (see Spec Impact).
 
+### Result (3db94261) - 2026-08-25
+
+`observeImplementBranch` now computes a new `AheadOfMergeRoot` count on
+`implementBranchObservation` — merge root derived via the existing
+`implementMergeRootFor` (branch-name encoding), `MergeBase` + `rev-list
+--count mergeBase..HEAD`, fail-open to `0` on any git error, and skipped
+(stays `0`) for rootless/legacy/non-impl branches. `finishImplementBranchPlanTail`
+gains a `stop` branch inserted immediately after the same-target `continue`
+check and **before** the `allow_rename` check, so when `AheadOfMergeRoot > 0`
+and the target scope mismatches, the resolver stops unconditionally (not
+overridable by `allow_rename`). `target.ticket_stem` is threaded into
+`normalizedImplementFacts` (no input-schema change) for the stop reason;
+`implementBranchPlan` gains an additive `SuspectedOwnerStem`
+(`suspected_owner_stem,omitempty`) populated only from `parseImplBranchRoot`
+(branch-name, zero commit-content parsing), which `implementNextInstruction`
+keys on to emit the lead-routing stop guidance (resolve from session context or
+dispatch an explore). `continue`/`create`/`current` actions, the
+`impl/<merge-root>/<stem>` name-encoding, and the goal-branch seamless `create`
+path are unchanged.
+
+- Verification: `go test ./internal/mcp/...` + `go vet ./internal/mcp/...` pass.
+  4 new resolver unit tests cover matrix (a)-(d) plus assertion (e) that neither
+  the stop `Reason` nor `NextInstruction` claims commit-content parsing. Pinned
+  tests (`TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset`,
+  `TestResolveImplementBranchStopOmitsPlannerInstructions`, the `merge target
+  required` stop test) unchanged.
+- Review: partitioned correctness + fit — both verified the code clean on every
+  reviewed point (unconditional stop ordering, fail-open, SAFETY/IDENTITY
+  separation, future-phase fit, no pinned test altered). Both raised the same
+  Important — the Spec Impact prose was omitted from the code commit — resolved
+  in the doc pre-pass (spec commit 119031b3). No unresolved findings.
+- Commits: 350f77c9 (survey plan), 3db94261 (resolver + tests), 119031b3 (spec).
+
+> Forward to Phase 2: `AheadOfMergeRoot` is computed inside
+> `observeImplementBranch` from `obs.CurrentBranch` alone, independent of the
+> `finishImplementBranchPlanTail` call site, so Phase 2's `tickets.close` hook can
+> call `observeImplementBranch` and read the same field directly. `SuspectedOwnerStem`
+> is keyed as a struct field (not a `Reason` substring), so a future stop-message
+> variant will not break the hint.
+
 ### Phase 2: Default no-merge per phase + `tickets.close` merge-review trigger + ticket-declared stop-gate exception
 
 Depends on Phase 1 (deferring merges makes it more likely a run sits on an
@@ -224,6 +265,55 @@ unmerged `impl/*` current branch yields the merge-review nudge while a merged/cl
 or non-impl branch yields none; a goal-drain path test that the staging merge still
 occurs once and the nudge does not double-fire. Update the affected spec prose (see
 Spec Impact).
+
+### Result (819c5b56) - 2026-08-25
+
+Landed via delegated-survey lead-implement (plan `ea839c22`, code+tests
+`819c5b56`, spec doc-pre-pass `12ca2f4f`).
+
+- Per-phase final-action default flipped to continue-on-branch **without**
+  merging: `implementFinalActionInstruction`/`implementMergeInstruction`
+  (`session_state.go`) rewritten to report the retained branch + commit range as
+  the default outcome, with an explicit merge kept as a caller-chosen option
+  whose approval is gated by `MergeConfirm` (`skip` drops the ask, else asks) —
+  never a default merge trigger. No phase-index field and no proceed→implement
+  completion signal were added; the flip is uniform because `implementTodoVerdict`
+  carries no phase position, so the same instruction functions run for every
+  phase.
+- `tickets.close` merge-review nudge added: `implementCloseMergeReviewNudge`
+  (`implement_resolver.go`) reuses Phase 1's `observeImplementBranch`/
+  `AheadOfMergeRoot`/`parseImplBranchRoot` as-is (no new git-observation code),
+  and `server.go`'s `tickets.close` case appends a second `next_instruction` line
+  when the current branch is an unmerged `impl/<root>/<stem>`. It fails open to
+  `""` on git error, non-impl branch, or clean/merged branch; `tickets.move` and
+  `formatTicketMutate`'s signature are untouched. The tool still performs no
+  merge and no commit; the nudge text tells the lead to review-and-merge after
+  the close-move commit lands.
+- Ticket-declared per-phase user stop gate: implemented as **no code** — ordinary
+  lead judgment over free-form phase prose, no new marker/schema/code path (per
+  the Decisions boundary).
+- Epic ③ (`260824-feat-review-watermark-ledger`, unimplemented) coordination:
+  the `tickets.close` hook is a standalone guidance-only `next_instruction` keyed
+  on the impl-branch observation, so ③'s later hook composes without rework.
+- Tests (update-in-place, not additive):
+  `TestDeriveImplementTodoInstructionsMergeConfirmSkip` now covers the no-merge
+  default across both `continue` and `create` `BranchPlan.Action` plus an
+  explicit-merge choice honoring `MergeConfirm`; three new real-git
+  `TestServeStdioTicketsCloseMergeReviewNudge*` integration tests (unmerged /
+  clean / non-impl) give the first integration coverage of the real
+  `aheadOfMergeRootCount` rev-list path. `go test ./internal/mcp/...` ok, `go vet`
+  clean.
+- Partitioned review (correctness=opus, fit=sonnet, test=sonnet): all clean. One
+  accepted test-hygiene Minor (a redundant `"root-branch"` substring assertion
+  subsumed by the full `impl/root-branch/...` check — no independent coverage,
+  not a defect); left as-is.
+
+> Forward: the goal-drain staging model was verified by read-check only
+> (`lead-drain-ready-queue` / `lead-goal-fan-out-step` already gate merge as a
+> single lead-approved once-per-unit action), not by a new goal-drain path test —
+> the no-double-fire property rests on the nudge failing open on `goal/*` branches
+> (`AheadOfMergeRoot` computes 0 for a non-`impl/*` branch), which the non-impl
+> integration case exercises directly.
 
 ## Spec Impact
 

@@ -274,11 +274,21 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
   implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
-  branch rename is allowed; branch rename defaults to allowed unless the
-  caller explicitly withholds consent (`policy.branch.allow_rename: no`); and
-  whether the caller's own merge-approval ask may be skipped for this merge;
-  merge confirmation defaults to asking unless the caller explicitly passes
-  `policy.branch.merge_confirm: skip`. The
+  branch rename is allowed; branch rename defaults to allowed only when the
+  current implementation branch carries no unmerged commits ahead of its merge
+  root — when it does and the caller's target scope differs from the branch's,
+  the resolver stops with a safety block (routing branch-identity resolution to
+  the lead) regardless of `allow_rename`, which cannot override it; otherwise
+  rename defaults to allowed unless the caller explicitly withholds consent
+  (`policy.branch.allow_rename: no`); and
+  whether the caller's own merge-approval ask may be skipped for a merge that
+  is explicitly chosen. The per-phase final action defaults to continuing on the
+  branch and reporting its retained commit range **without merging**, for every
+  phase (the resolver carries no phase-index field, so the default is uniform);
+  an explicit merge stays available as a caller-chosen option — at the
+  final-action gate or later at `tickets.close` review — and
+  `policy.branch.merge_confirm` governs approval for that chosen merge only
+  (`skip` drops the ask, asking otherwise), never a default merge trigger. The
   resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
@@ -327,12 +337,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   target comes solely from `policy.branch.merge_target` — and both are still
   recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
-  partitions from material risk, contracts/public symbols, cross-module/reuse
-  uncertainty, and new or unknown test surfaces. Public-interface surface and
-  existing-test surface alone add no partition. Zero or one automatic partition
-  resolves to `single`; `single` dispatches the delegate-grade generic
-  `reviewer` over the shared full-scope `code-reviewer` contract, while two or
-  more resolve to `partitioned`. Explicit review overrides remain authoritative.
+  partitions only from positive risk signals: material (moderate/high) risk, a
+  new type contract or public symbol, cross-module surface, unconfirmed reuse
+  points, or new-file test surfaces. Unknown or un-derived facts are treated as
+  non-signals and add no partition; public-interface surface and existing-test
+  surface alone likewise add none. Zero or one automatic partition resolves to
+  `single`; `single` dispatches the delegate-grade generic `reviewer` over the
+  shared full-scope `code-reviewer` contract, while two or more resolve to
+  `partitioned`. Explicit review overrides remain authoritative.
   Final-action todo guidance may reuse
   passing full-suite evidence only while code, tests, dependencies, build
   configuration, and generated inputs remain unchanged; documentation-only
@@ -1194,7 +1206,14 @@ completeness: closing with an unresolved `### Phase N: <title>` heading (one
 with no `### Result` heading before the next Phase heading or EOF, and not
 marked `[dropped]`) returns a soft, non-blocking tip naming the unresolved
 phase(s) — never a hard block, mirroring `tickets.move`'s ready-gate spec-
-address tip. Under an active worktree sparse-checkout the scope pre-flight runs
+address tip. Closing while the current branch is an `impl/<root>/<stem>` branch
+that still carries unmerged commits ahead of its merge root additionally returns
+a second, independent soft `next_instruction` nudging the lead to review and
+merge that branch into `<root>` after the close-move commit lands; this reuses
+the `enter.implement` ahead-of-merge-root observation, is advisory only, and the
+tool itself performs no merge (consistent with never committing). The nudge is
+absent on a merged or clean impl branch and on any non-`impl/*` branch. Under an
+active worktree sparse-checkout the scope pre-flight runs
 before the frontmatter and `## Resolution` writes
 (`#260806-worktree-sparse-checkout-ticket-scope`).
 {#260620-ticket-close-tool}
