@@ -6,7 +6,9 @@ related:
   260622-bug-wsflow-launcher-coldload-divergence: adjacent ws/wsflow divergence class (launcher), same "divergence is drift, not intended" posture
 spec:
   - 260513-wsflow-agentless-skill-surface
+  - 260703-bootstrap-staleness-warning
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Converge ws/wsflow bootstrap into one package-neutral artifact with a shared migration version counter
@@ -316,11 +318,16 @@ Rewrite `test_bootstrap_template_uses_wsflow_local_version_lineage` to assert
 `WORKFLOW.md`): each emits identical package-neutral output modulo the version
 tag, and the shared counter head matches. The comparison runs on the **emitted
 (fresh-mode) body**, not the raw template: the test must apply the same
-fresh-mode emit transform `lead-bootstrap.md` uses — strip the scaffold-only HTML
-comments (the `<!-- MIGRATION CHECKLIST -->` block Phase 2 keeps in the raw file,
-plus the Inclusion-test note per Phase 1's fresh-mode confirmation) — to each raw
-template before diffing, so the retained ws `v0001..v0047` checklist does not
-false-fail the convergence assertion. Add coverage for the fail-loud guard's
+fresh-mode emit transform `lead-bootstrap.md` uses — strip only the scaffold-only
+HTML comments that carry an explicit non-copy instruction (the
+`<!-- MIGRATION: ... delete this block -->` `ai-docs/` set-up block and the
+`<!-- MIGRATION CHECKLIST ... -->` block Phase 2 keeps in the raw file, whose own
+header reads "NEVER copy into a project AGENTS.md") — to each raw template before
+diffing, so the retained ws `v0001..v0047` checklist does not false-fail the
+convergence assertion. The Inclusion-test comment is **not** among the stripped
+scaffold: migration `v0010` keeps it permanently downstream and it carries no
+non-copy marker, so it stays in the emitted body the test diffs, with its
+skill-name token neutralized per Phase 1. Add coverage for the fail-loud guard's
 code-level detection (the skill-instruction refuse is asserted by documentation,
 not a unit test — see Phase 3's enforcement contract).
 Update the spec anchors named in `## Spec Impact` and the `wsflow-mirroring.md`
