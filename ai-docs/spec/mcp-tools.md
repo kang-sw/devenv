@@ -699,6 +699,18 @@ per-call injection (e.g. the mercenary agentId tip) rather than the
 per-`project_tree`-call anti-pattern this repo's Decisions section warns
 against.
 
+The warning also fires fail-loud in two ahead-of-head directions: when the
+downstream tag is strictly ahead of the running package's own template head
+("Bootstrap template tag is ahead of this package's own template head",
+naming both the installed and this package's head version numbers), or when
+the downstream tag does not parse as `vNNNN` ("Bootstrap template tag is
+unrecognized", naming the parse failure and this package's head version
+number). Both fire directions point at
+`config.tune(key: "bootstrap_alarm", value: "off")` to silence permanently and
+state the same honest-enforcement limit: this is a code-level detector only,
+backed by a skill-level refuse instruction in `lead-bootstrap` (its
+`## On: refuse` step), not a mechanical hard-block on reconcile/restamp.
+
 Changing `lead-bootstrap`'s own upgrade/migration procedure is out of scope for
 this warning; it only detects and reports staleness.
 

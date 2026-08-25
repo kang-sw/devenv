@@ -270,6 +270,55 @@ enforceable corollary in `wsflow-mirroring.md` Bootstrap Template Rules.
 Verification: a diff of each pair's fresh-mode outputs is empty except the
 version tag; enumerate and justify any residual difference.
 
+### Result (52fbf0bc) - 2026-08-25
+
+Converged all four scaffold files to one package-neutral emitted form; the L86
+fix landed in follow-up `103014f7` (see Edition). Verified deltas:
+
+- **`AGENTS.template.md` (both packages).** Emitted-body divergence eliminated:
+  the Preamble note-layer ref (`ws/wsflow.note.search`) → on-disk `ai-docs/ws-notes/`
+  description; the `ai-docs/WORKFLOW.md` pointer → the single fixed
+  capability-detection gate naming both `ws` and `wsflow` (the one deliberate
+  exception); the Inclusion-test comment's skill name dropped (placement
+  heuristic kept); wsflow's stale `git log -10` Project-Memory step trimmed to
+  match ws. Emitted-body diff (MIGRATION blocks stripped) now differs **only** on
+  the `<!-- Template Version: vNNNN -->` line (`v0047` vs `v0008`).
+- **`WORKFLOW.md` (both packages).** Now **fully byte-identical** (this file has
+  no scaffold-only strip blocks). The two copies diverged in real prose (title,
+  intro, Authority-Files bullet, closing-section heading/wording), not just
+  tokens — converged per the default drift→converge ruling. The worktree/clone
+  note-layer bullet was **dropped** per the corollary (plugin-local runtime state,
+  no downstream on-disk path); skill-name routing (Index Health step 7, Manual
+  Fallback) rewritten to on-disk destinations.
+- **`wsflow-mirroring.md`.** Artifact-neutrality invariant + enforceable
+  corollary added to Bootstrap Template Rules, coexisting with the still-accurate
+  "version histories package-local" bullet (that bullet's inversion is Phase 2/4).
+
+Verification evidence: `python3 -m unittest discover agents-plugin-wsflow/tests`
+= 10/10 pass (incl. `test_skill_files_do_not_reference_full_ws_agent_surface` and
+the still-passing `test_bootstrap_template_uses_wsflow_local_version_lineage`);
+no `\bws/|\bws:|\bws\.` glyph in any edited line (remaining matches confined to
+the untouched, out-of-scope MIGRATION CHECKLIST block); `diff` of the two
+`WORKFLOW.md` empty; emitted-body diff of the two `AGENTS.template.md` shows only
+the version-tag line. Discovery worth carrying forward: the forbidden-pattern
+test scans **every** file under `agents-plugin-wsflow/skills/` (incl. these
+templates), so the capability-gate string had to name the packages as bare
+``ws``/``wsflow`` (never the `ws/` glyph) — this constraint binds any future edit
+to these files.
+
+MIGRATION / MIGRATION CHECKLIST blocks and both Template Version tags left
+untouched (counter unification is Phase 2; test inversion + spec-anchor reconcile
+is Phase 4).
+
+#### Edition (103014f7) - 2026-08-25
+
+Fit review (cycle 2) caught that the survey plan omitted the L86
+`write-ticket workflow skill` pointer — one of the four `AGENTS.template.md`
+conversion targets the ticket's Phase 1 itemization explicitly names. Rewrote it
+in both packages, byte-identically, to on-disk phrasing (follow the ticket
+conventions and existing tickets under `ai-docs/tickets/`). Correctness review
+was clean; no findings remain outstanding for Phase 1.
+
 ### Phase 2: Unify the migration version counter (shared lineage)
 
 Relabel wsflow's migration-ordinal lineage onto ws's shared counter (content
@@ -292,6 +341,48 @@ content is the precondition for a single lineage). Verification: fresh wsflow an
 fresh ws bootstraps emit the same head ordinal; opening a fresh wsflow project
 with ws produces no artifact change and re-stamps to head.
 
+### Result (ee4bc6a5) - 2026-08-25
+
+Unified wsflow's migration ordinal onto ws's shared `v0001..v0047` lineage.
+`agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md` now carries ws's
+full checklist relabeled by token substitution (`ws:`→`wsflow:`, `ws/`→`wsflow/`)
+plus a single equivalence-note paragraph recording that wsflow's former
+consolidated `v0001..v0008` baseline (lineage reset `599fb453`) is equivalent
+through ws `v0047`; the old "package-local version history" header line was
+replaced with ws's header wording ("Skip obsoleted items."). Tag bumped
+`v0008`→`v0047`.
+
+Verification (all confirmed by review, correctness partition clean): the two
+`AGENTS.template.md` copies now emit **byte-identical** fresh-mode bodies
+including the `v0047` tag (scaffold MIGRATION comment blocks stripped, then
+diffed → empty); the raw wsflow checklist normalized `wsflow*`→`ws*` equals ws's
+except the intended equivalence note and a v0036 accuracy reword (`ws runtime`→
+`ws or wsflow runtime`). Token hygiene: `grep -nE '\bws/|\bws:|\bws\.'` on the
+wsflow template returns zero matches (forbidden-pattern gate holds over the
+enlarged block). Two axes stay decoupled: `bump-ws-version.sh` references no
+`Template Version`/`vNNNN` ordinal. Suite `python3 -m unittest discover
+agents-plugin-wsflow/tests` = 10/10 green.
+
+Test coupling handled: `test_bootstrap_template_uses_wsflow_local_version_lineage`
+had four divergence-enforcing assertions (v0008 tag, package-local header text,
+full-tag exclusion, leaked-bullet scan) invalidated by unification. Per plan they
+were trimmed to a minimal structural check (method kept, not renamed, no positive
+convergence assertions added) to keep the suite green; the positive
+convergence-assertion rewrite is Phase 4's charter.
+
+Deferred to Phase 4 (per this ticket's Phase 4 body, so develop never sees the
+intra-branch doc-drift window — this ticket merges as one unit after Phase 4):
+spec anchors `workflow-skills.md #260513` and `mcp-tools.md #260703`,
+`wsflow-mirroring.md` L291-292 inversion, mental-model `workflow-skills.md`
+inversion, the `260728` Non-Scope override note, and the convergence-assertion
+test rewrite.
+
+Review: correctness clean; fit clean +1 minor (commit AI-Context rationale for
+the v0036 reword slightly imprecise — bare `ws runtime` would not have tripped
+the guard; edit itself sound, no action); test clean +2 minor (trimmed test is
+near-no-op until Phase 4; no committed test yet pins the convergence — both
+explicitly Phase 4-owned). No Critical/Important findings; no relay needed.
+
 ### Phase 3: Fail-loud version-skew guard (above-head / unknown tag)
 
 Guard a tag **above the running package's own template head**, or absent from its
@@ -310,6 +401,62 @@ template head" is well-defined against the shared counter). Verification: the
 extended staleness detection is unit-tested on an above-head tag; wsflow opening
 a shared-head ws project surfaces the warning and the skill leaves artifact + tag
 unchanged; ws opening a below-head project proceeds to a clean re-stamp.
+
+### Result (b119c658) - 2026-08-25
+
+Implemented the honest version-skew guard across both surfaces. Range
+`c5ae91b5..b119c658`: `21055a6f` (feature), `a0267b1f` (skills-manifest regen
+fix), `b119c658` (review-minor test hardening).
+
+Detect/warn (`agents-plugin-tool/internal/mcp/bootstrap_alarm.go`):
+`bootstrapStalenessWarning` now branches five ways with the short-circuit order
+preserved (`bootstrap_alarm off` → silent; marker-absent → silent, never-opted-in
+invariant; `latest` unreadable → fail-safe silent): `!parsed` (marker present but
+value unparseable) → NEW unrecognized-tag fire; `installed > latest` → NEW
+above-head fire; `installed == latest` → silent; `installed < latest` → existing
+stale message, text unchanged. A second looser regex
+(`templateVersionMarker = <!--\s*Template Version:`) distinguishes marker-absent
+from marker-present-but-malformed; the `!parsed`-first ordering is load-bearing
+(an unparseable marker yields `installed==0`, which would otherwise misroute to
+the stale branch). Both new messages name the version number(s), point at
+`config.tune(key: "bootstrap_alarm", value: "off")`, and state the
+honest-enforcement limit ("code-level detector only … lead-bootstrap must stop
+and report rather than auto-fix").
+
+Refuse (`agents-plugin/rsrc/lead-bootstrap/lead-bootstrap.md`, canonical; wsflow
+rsrc mirror regenerated, byte-identical): added an Invariants bullet, split
+`## On: invoke` step-4 mode detection into `upgrade` (at/below head) vs new
+`refuse` (above head OR unparseable), and added a `## On: refuse` section that
+stops before any write and restates the not-a-code-block limit. No Go code
+hard-blocks reconcile — the refuse is skill-instruction-only, per the contract.
+
+Tests: inverted the `"downstream ahead of latest"` silent subtest into
+`TestBootstrapStalenessWarningFiresOnAboveHeadTag`, added
+`TestBootstrapStalenessWarningFiresOnUnparseableTag`, and hardened
+`TestBootstrapStalenessWarningSilentWithoutTag` to also assert no fire-direction
+leaks (review minor). `go test ./internal/mcp/... ./internal/wsrsrc/...` green;
+`python3 -m unittest discover agents-plugin-wsflow/tests` 10/10; gofmt clean.
+
+Regression caught & fixed (`a0267b1f`): Phases 1-2 edited
+`agents-plugin/skills/lead-bootstrap/AGENTS.template.md` + `WORKFLOW.md` but did
+not regenerate `agents-plugin/skills/manifest.json`, leaving
+`TestSkillsManifestDriftIsVisible` red on this branch (green on develop).
+Regenerated via `WSRSRC_REGEN_SKILLS=1 … TestGenerateRealSkillsManifest` (only
+the two lead-bootstrap hashes changed). Root cause: the Phase 1/2 test-review
+partitions ran the wsflow Python suite but not the Go `internal/wsrsrc` drift
+suite; template-touching phases must run the Go drift suite too (carried to
+Phase 4 doc work + final report).
+
+Review: fit clean; correctness clean +1 minor (no-tag test strength — fixed
+inline in `b119c658`); test clean. No Critical/Important; no relay.
+
+Deferred to Phase 4 (branch merges as one unit after Phase 4): `mcp-tools.md
+#260703` spec text now must document the above-head/unknown-tag warning
+direction; plus the counter/convergence spec+doc reconcile and the new
+`wsflow-mirroring.md` skills-manifest-regen documentation item.
+
+Merge deferred: this phase did NOT merge; the single develop merge + version
+bump happens after Phase 4.
 
 ### Phase 4: Invert the guard test and reconcile specs/docs
 
@@ -336,3 +483,61 @@ the template and the WORKFLOW.md guide. Depends on Phases 1-3 (the enforced stat
 must exist before the test pins it). Verification: the inverted test fails on any
 re-introduced fingerprint/drift in either pair and on a counter split; specs no
 longer assert package-local version lineage.
+
+### Result (b6f774d3) - 2026-08-25
+
+Commit range `3fa36f7d..b6f774d3` (5 commits) on
+`impl/develop/bootstrap-artifact-converge`.
+
+Test inverted + renamed
+`test_bootstrap_template_uses_wsflow_local_version_lineage` →
+`test_bootstrap_scaffolds_emit_converged_output_across_packages`. A new
+`_emit_fresh_body` helper strips exactly the two scaffold-only comment blocks
+(`<!-- MIGRATION: ... -->` and `<!-- MIGRATION CHECKLIST ... -->`, both
+non-greedy DOTALL) and nothing else — the Inclusion-test comment and the
+`<!-- Template Version: v0047 -->` tag survive the strip. The test asserts
+(a) emitted-body identity of the two `AGENTS.template.md` copies, (b) shared
+parseable `vNNNN` tag head, (c) raw byte-identity of the two `WORKFLOW.md`
+copies.
+
+Docs/specs reconciled: `spec/workflow-skills.md {#260513-wsflow-agentless-skill-surface}`
+inverted to the shared-counter/package-neutral contract;
+`spec/mcp-tools.md {#260703-bootstrap-staleness-warning}` keeps the still-accurate
+package-local *detection-mechanism* sentence and adds a new paragraph for the
+Phase-3 fail-loud above-head/unrecognized-tag directions (quoting the real
+`bootstrap_alarm.go` message shapes and the code-level-detector-only honesty
+limit); `manuals/wsflow-mirroring.md` inverted both Bootstrap Template Rules
+bullets (including the L293 backlog-copy bullet, which was beyond the ticket's
+literal pointers but now directly false) and added a skills-manifest-regen gate
+item (`WSRSRC_REGEN_SKILLS=1 … TestGenerateRealSkillsManifest`, guarded by
+`TestSkillsManifestDriftIsVisible`, distinct from the rsrc-manifest regen);
+`mental-model/workflow-skills.md` L85/L110/L119 inverted (anchors preserved,
+commit marked `(mental-model-updated)`); `260728` idea ticket gained a
+`## Resolution Note` scoped precisely to 2 of its 3 named copies (status left in
+`idea/`).
+
+Verification: `python3 -m unittest discover agents-plugin-wsflow/tests` = 10/10
+green (rename is 1-for-1). The test reviewer independently ran four mutation
+experiments, all correctly biting: counter-split (`v0047`→`v0046`) → fails (a);
+body-drift outside stripped blocks → fails (a); `WORKFLOW.md` raw drift → fails
+(c); tag removed from both copies → passes (a), fails (b) — proving each
+assertion earns its place. `ws/spec_index.verify` = ok; forbidden-pattern test
+still passes over the enlarged token-substituted checklist; no dangling
+old-test-name reference in live code (only frozen ticket/plan records).
+
+Review (cycle 1, no relay): correctness clean, fit clean, test clean. Three
+non-blocking minors carried, none actioned: redundant tag-value assertion (also
+guards presence — kept); optional `## Spec`/`## Ticket Updates` commit trailers
+omitted (explicitly optional); `_emit_fresh_body` is a regex proxy for
+`lead-bootstrap.md`'s natural-language `## On: fresh` strip step — if the real
+fresh-mode emit ever diverges from those two regexes the test's notion of
+"emitted body" could drift (inside the plan's documentation-asserted boundary,
+noted for maintainers).
+
+Deferred follow-up: the third `WORKFLOW.md`-family copy this ticket does not
+converge — this repo's own downstream `ai-docs/WORKFLOW.md` — stays open per the
+`260728` Resolution Note.
+
+Merge: this Result commits on the branch; the single `develop` merge + plugin
+version bump follow immediately after (branch merges as one unit, per the branch
+strategy). All four phases complete — ticket moves to `.done/` at close.
