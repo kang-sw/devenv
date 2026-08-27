@@ -329,9 +329,19 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   name-rooted `impl/<merge-root>/<stem>` branch, the root parsed from the
   branch name itself (name-authoritative — a diverging caller
   `policy.branch.merge_target` is reconciled to the name-root with a warning,
-  never silently honored); `<stem>` keeps the <=15 characters recommendation
-  (trailing `-` trimmed) and stays single-segment (any `/` in a
-  caller-supplied `target.scope_slug` is sanitized away). A rootless
+  never silently honored); `<stem>` is derived by target kind. {#260827-ticket-stem-word-key-branch}
+  For a **ticket target** (the call carries a `target.ticket_stem`), `<stem>` is
+  a deterministic three-word key derived from the ticket stem alone — a stable
+  hash indexed into a fixed short-word sub-pool, joined by hyphens (e.g.
+  `jot-pug-mossy`). It is identical on every re-entry for the same ticket, so
+  successive phases of one ticket resolve to `continue` on the one branch; it is
+  authoritative over any caller-supplied `target.scope_slug`, which is ignored
+  (with a warning) for ticket targets rather than allowed to drift the stem per
+  phase. For an **inline target** (no `ticket_stem`), `<stem>` keeps the prior
+  behavior: the caller-supplied or label-derived slug, held to the <=15 characters
+  recommendation (trailing `-` trimmed) and single-segment (any `/` sanitized
+  away). The word-key is bounded to roughly 17 characters, a deliberate overshoot
+  of the soft <=15 recommendation. A rootless
   `impl/<stem>` branch or any legacy `implement/<scope-slug>` branch already
   in progress keeps the original stop-and-ask behavior unchanged — merge
   target comes solely from `policy.branch.merge_target` — and both are still

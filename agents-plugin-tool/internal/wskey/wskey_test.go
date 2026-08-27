@@ -93,3 +93,63 @@ func TestGenerateUniqueExhaustionError(t *testing.T) {
 		t.Fatal("GenerateUnique should return an error when all candidates are rejected")
 	}
 }
+
+// TestDeriveDeterministic verifies that Derive is a pure function of its
+// inputs: the same seed and word count always produce the same key.
+func TestDeriveDeterministic(t *testing.T) {
+	a := Derive("260900-feat-x", 3)
+	b := Derive("260900-feat-x", 3)
+	if a != b {
+		t.Fatalf("Derive() not deterministic: %q != %q", a, b)
+	}
+}
+
+// TestDeriveDifferentSeedsDiffer verifies that a representative set of
+// distinct seeds produce distinct keys, catching a broken/constant
+// derivation. This is not a strict collision guarantee.
+func TestDeriveDifferentSeedsDiffer(t *testing.T) {
+	seeds := []string{
+		"260900-feat-x",
+		"260900-feat-y",
+		"260901-bug-z",
+		"alpha",
+		"beta",
+	}
+	seen := make(map[string]string, len(seeds))
+	for _, seed := range seeds {
+		key := Derive(seed, 3)
+		if other, ok := seen[key]; ok {
+			t.Fatalf("Derive(%q) and Derive(%q) both produced %q", seed, other, key)
+		}
+		seen[key] = seed
+	}
+}
+
+// TestDeriveLengthBound verifies the derived key (words=3, <=5-char sub-pool)
+// never exceeds the worst-case bound of 5+1+5+1+5=17 characters.
+func TestDeriveLengthBound(t *testing.T) {
+	seeds := []string{"a", "b", "c", "260900-feat-x", "some-longer-seed-value"}
+	for _, seed := range seeds {
+		key := Derive(seed, 3)
+		if len(key) > 17 {
+			t.Fatalf("Derive(%q) = %q, length %d exceeds worst-case bound 17", seed, key, len(key))
+		}
+		if !keyPattern.MatchString(key) {
+			t.Fatalf("Derive(%q) = %q does not match expected pattern ^[a-z]+(-[a-z]+){2}$", seed, key)
+		}
+	}
+}
+
+// TestDeriveShortSubPoolCount pins the collision-space claim: exactly 1476 of
+// the 7772 embedded words are <=5 characters.
+func TestDeriveShortSubPoolCount(t *testing.T) {
+	var count int
+	for _, w := range Words() {
+		if len(w) <= 5 {
+			count++
+		}
+	}
+	if count != 1476 {
+		t.Fatalf("expected 1476 words with length <= 5, got %d", count)
+	}
+}
