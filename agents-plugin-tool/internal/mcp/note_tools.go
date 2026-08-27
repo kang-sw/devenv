@@ -295,7 +295,7 @@ const noteOversizeThreshold = 300
 // note.write's text-mode response when any written note is oversize. The
 // write itself is always unconditional — this is a post-write nudge, never a
 // gate — and the remediation verbs are relocate/erase, never mute.
-const noteOversizeChallenge = "Large note — keep only if volatile AND homeless AND must-always-stay-in-context; otherwise move it to a ticket/spec/mental-model, or erase. Not mute."
+const noteOversizeChallenge = "Large note (≥300 bytes; saved). Prefer: move the detail into a ticket/spec/mental-model and keep a <300-byte pointer here, or erase. Keep the full text only if it's volatile AND homeless AND must-always-stay-in-context. Not mute."
 
 // noteWriteExceedsOversizeThreshold reports whether any record's Value is at
 // or above noteOversizeThreshold bytes.

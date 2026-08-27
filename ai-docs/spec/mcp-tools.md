@@ -509,12 +509,13 @@ positional-array precedent anywhere in the tool surface.
   exactly (a muted note stays muted across a content-only overwrite), and a
   brand new key always initializes `visible: true`. When any note written in a
   call has a `value` of at least a fixed oversize threshold (a named tunable
-  constant, `300` characters — mirroring the injection cap's named-constant
+  constant, `300` bytes — mirroring the injection cap's named-constant
   style, `#260810-note-injection`), the **text-format** response additionally
   carries a one-time discipline challenge appended after the write summary:
-  `Large note — keep only if volatile AND homeless AND
-  must-always-stay-in-context; otherwise move it to a ticket/spec/mental-model,
-  or erase. Not mute.` The challenge fires once per call regardless of how many
+  `Large note (≥300 bytes; saved). Prefer: move the detail into a
+  ticket/spec/mental-model and keep a <300-byte pointer here, or erase. Keep the
+  full text only if it's volatile AND homeless AND must-always-stay-in-context.
+  Not mute.` The challenge fires once per call regardless of how many
   notes cross the threshold (a batch with several oversized notes still appends
   it exactly once), and the write itself is unconditional — the note is stored
   either way. The remediation it names is relocate or erase, never mute; a mute
