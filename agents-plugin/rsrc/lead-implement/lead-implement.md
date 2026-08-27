@@ -80,8 +80,8 @@ Policy rules:
 ### 6. Closeout
 
 - After doc-closeout compaction, verify final tree equivalence, or report skipped.
-- `{final-action-gate}` report: changes, branch, merge target, docs, ticket Result hash, review, tests, deviations, disputes, skipped closeout.
-- Stop for the user's choice: merge, new slice, or stop.
+- `{final-action-gate}` report: changes, branch, merge target, docs, ticket Result hash, remaining phases or ticket-complete, review, tests, deviations, disputes, skipped closeout.
+- Stop for the user's choice: merge or stop; offer a next-slice continuation only when this ticket still has an unfinished phase.
 
 ### 7. Merge
 
