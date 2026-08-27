@@ -142,6 +142,35 @@ Verification (resolver + wskey unit tests):
   path is used unchanged (no word-key); assert the inline stem is not a word-key.
 - `Generate()` (random session key) behavior unchanged.
 
+### Result (d32d091c) - 2026-08-27
+
+`wskey.Derive(seed, words)` added over a build-time `shortWordPool` (the 1476
+`<=5`-char words of the 7772-entry EFF pool), hashing the seed and indexing the
+sub-pool — additive alongside the random `Generate()`, which is untouched. In
+`normalizeImplementFacts`, a non-empty `target.ticket_stem` now unconditionally
+sets the branch stem to `wskey.Derive(ticket_stem, 3)`, **overriding** any
+caller-supplied `target.scope_slug` (with an ignored-scope_slug warning). Gated
+on `TicketStem != ""` (not `Kind == "ticket"`) because existing callers set
+`Kind: "ticket"` without a stem and rely on the slug path. Inline targets keep
+the existing `slugifyImplementScope` path. `finishImplementBranchPlanTail`'s
+`currentBranch == targetBranch` comparison and the L1 `AheadOfMergeRoot` stop are
+untouched — same ticket across phases now yields the same stem (L0 `continue`),
+different ticket still stops.
+
+- Verification: `go build ./...`, `go vet ./...`, `go test ./internal/wskey/...
+  ./internal/mcp/...` all pass (full output read). Added 4 wskey tests
+  (determinism, distinct-seeds, length bound, sub-pool count = 1476) and 4
+  resolver tests (same-stem continue, different-stem stop, scope_slug override,
+  inline unaffected).
+- Deviation: the survey's test-impact scan covered only
+  `implement_resolver_test.go`; `session_state_test.go`'s shared
+  `implementReadyArgs` fixture also sets `ticket_stem`+`scope_slug`, so 3
+  integration assertions there were updated to the derived stem `jot-pug-mossy`
+  (intended behavior surfacing, not scope creep).
+- Review: partitioned correctness (opus) + fit (sonnet), both `clean`, no relays.
+- Commits: 1a0c115a (survey plan), d32d091c (code + tests), a5f36572 (spec sync,
+  anchor `{#260827-ticket-stem-word-key-branch}`).
+
 ## Spec Impact
 
 Target: `ai-docs/spec/mcp-tools.md` — the `enter.implement` branch-plan prose
