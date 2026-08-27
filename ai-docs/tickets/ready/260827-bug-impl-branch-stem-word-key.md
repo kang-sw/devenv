@@ -5,6 +5,7 @@ related:
   260626-feat-session-key-format-and-retention: substrate — owns the EFF wordlist generator (internal/wskey) this ticket adds a deterministic derivation to
 related-mental-model:
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Deterministic word-key impl-branch stem — repair the never-matching continue path
@@ -67,11 +68,14 @@ defect composes them into an always-stop.
     fallback, not the choice.** It hits the literal `<=15` recommendation but with
     a single-digit-hundred-million margin; `<=5`/3-word is chosen for the far
     larger margin at trivial length cost.
-- **Seed = `firstNonEmpty(target.ticket_stem, normalized_label)`.** Ticket
-  targets derive deterministically (fixes the bug). Inline targets fall back to a
-  normalized label: length stays bounded, determinism is only as stable as the
-  label. Low-ceremony inline uses the `current` action (no impl branch), so is
-  unaffected; the residual inline case is no worse than today.
+- **Word-key derivation applies to ticket targets only; inline targets keep the
+  current slug.** The deterministic derivation uses `seed = target.ticket_stem`.
+  Inline targets (no `ticket_stem`) retain the existing
+  `slugifyImplementScope`-derived, human-readable slug **unchanged** — no word-key.
+  Rationale: inline has no stable identity to hash (its label is agent free-text,
+  so hashing buys no determinism, only opacity), the bug is ticket-specific, and
+  low-ceremony inline uses the `current` action (no impl branch) anyway. So inline
+  branch naming is exactly as today; only ticket-targeted stems become word-keys.
 - **Collision analysis (why `<=5`/3-word is safe).** The harmful event is a
   *false negative*: two different tickets hash to the same key, L0 falsely
   `continue`s, and two tickets' work mixes onto one branch (the exact cost
@@ -116,14 +120,13 @@ Approach:
   variant that accepts a max word length), hashing the seed and indexing the
   embedded pool — reusing the existing wordlist, leaving `Generate()` untouched.
 - In `implement_resolver.go`, when the target carries a `ticket_stem`, produce the
-  impl-branch stem from `wskey.Derive(seed, 3)` with
-  `seed = firstNonEmpty(ticket_stem, normalized_label)`. For a ticket target the
-  derivation is **authoritative** — it must win over a caller-supplied
+  impl-branch stem from `wskey.Derive(target.ticket_stem, 3)`. For a ticket target
+  the derivation is **authoritative** — it must win over a caller-supplied
   `target.scope_slug` too, not only the empty-`scope_slug` fallback at the current
   `slugifyImplementScope(ScopeLabel|…)` line; otherwise an agent that sets
-  `scope_slug` directly re-introduces the per-phase drift this ticket removes. Keep
-  the current slug path only for inline targets without a stable identity (or feed
-  the normalized label as the seed).
+  `scope_slug` directly re-introduces the per-phase drift this ticket removes.
+- Leave the inline-target path (no `ticket_stem`) exactly as today: the existing
+  `slugifyImplementScope` label-derived slug, no word-key.
 - Optionally add secondary guidance (skill/convention text) that impl-branch
   stems are identity-derived and phase suffixes never belong in a branch name.
 
@@ -135,6 +138,8 @@ Verification (resolver + wskey unit tests):
   keys.
 - Length bound: derived stem `<=17` chars; sub-pool word count assertion (1476
   words at `<=5` chars) to pin the collision space.
+- Inline target (no `ticket_stem`) → the existing `slugifyImplementScope` slug
+  path is used unchanged (no word-key); assert the inline stem is not a word-key.
 - `Generate()` (random session key) behavior unchanged.
 
 ## Spec Impact
