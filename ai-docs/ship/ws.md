@@ -7,11 +7,12 @@ workflow (`.github/workflows/ws-mcp-release.yml`) to build cross-platform
 
 ## Version Strategy
 
-The release version is whatever `develop` currently holds — it is NOT re-derived
-or bumped at ship time. Per-merge patch bumps on `develop`
-(`agents-plugin-tool/scripts/bump-ws-version.sh`) accumulate into the next
-release; `develop -> main` owns no bump. Read the version from
-`agents-plugin/runtime.json` `.plugin_version`; the tag is `.release_tag`
+Each ship owns exactly one patch-version bump. After confirming that local
+`develop` contains `origin/develop`, read the current version from
+`agents-plugin/runtime.json` `.plugin_version`, increment its patch component,
+and run `agents-plugin-tool/scripts/bump-ws-version.sh <next-version>`. Commit
+the script-generated version edits on `develop` before testing or tagging.
+Ordinary merges into `develop` do not bump the version. The tag is `.release_tag`
 (`v<plugin_version>`). Ship refuses if `.release_tag != "v" + .plugin_version`
 for either `agents-plugin/runtime.json` or `agents-plugin-wsflow/runtime.json`
 (the workflow enforces the same contract).
@@ -29,13 +30,14 @@ freshly fetched state.
 - Develop is up to date: `git merge-base --is-ancestor origin/develop develop` —
   local `develop` must contain all of `origin/develop`. If it fails,
   `origin/develop` advanced (a parallel ship or merge): **stop and reconcile
-  first** — `git merge origin/develop` into `develop`, re-bump the plugin version
-  through `bump-ws-version.sh` (the reconciliation merge into develop owns a
-  bump), re-run tests, then restart Pre-flight. Never promote a `develop` that is
-  behind `origin/develop`.
+  first** — `git merge origin/develop` into `develop`, then restart Pre-flight.
+  Never promote a `develop` that is behind `origin/develop`.
+- Bump the next patch version through `bump-ws-version.sh` and commit the
+  generated version edits on `develop`.
 - Version tag unclaimed: `git ls-remote --tags origin v<version>` is empty for the
-  version `develop` currently holds. A non-empty result means that version was
-  already shipped remotely; re-bump `develop` to the next patch before shipping.
+  bumped version. A non-empty result means a concurrent release claimed the
+  version; increment the patch again, commit the regenerated version edits,
+  re-run tests, and restart the tag check.
 - `git merge-base --is-ancestor main develop` — develop must be a linear
   descendant of main (fast-forwardable); abort otherwise.
 - `cd agents-plugin-tool && go test ./...` — all packages green.
@@ -78,4 +80,5 @@ push — all pushes below are reversible-only-before-they-run.
 - Watch the `ws-mcp release` workflow run for `v<version>` to green (build +
   publish GitHub release assets, windows-smoke).
 - Return to `develop` (`git checkout develop`). The next develop merge resumes
-  patch bumping from `v<version>`.
+  normal development without a version bump; the next ship owns the next patch
+  bump.
