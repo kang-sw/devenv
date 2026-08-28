@@ -36,7 +36,7 @@ func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageRevi
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		return sageReviewFreshness{}, nil
 	}
-	currentRaw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ticketRel)))
+	currentRaw, err := sageReviewCurrentTicketContent(root, ticketRel)
 	if err != nil {
 		return sageReviewFreshness{}, nil
 	}
@@ -69,19 +69,18 @@ func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageRevi
 }
 
 func sageReviewStageBaseline(root, ticketRel, stage string) (commit, text string, ok bool, err error) {
-	logOut, err := sageGitOutput(root, "log", "--follow", "--format=%H", "--", ticketRel)
+	history, err := sageReviewTicketHistory(root, ticketRel)
 	if err != nil {
 		return "", "", false, nil
 	}
-	commits := nonEmptyLines(string(logOut))
-	if len(commits) == 0 {
+	if len(history) == 0 {
 		return "", "", false, nil
 	}
 	field := "sage-review-" + stage
 	var previous string
-	for i := len(commits) - 1; i >= 0; i-- {
-		hash := commits[i]
-		raw, showErr := sageGitOutput(root, "show", hash+":"+ticketRel)
+	for i := len(history) - 1; i >= 0; i-- {
+		entry := history[i]
+		raw, showErr := sageGitOutput(root, "show", entry.Commit+":"+entry.Path)
 		if showErr != nil {
 			continue
 		}
@@ -91,22 +90,94 @@ func sageReviewStageBaseline(root, ticketRel, stage string) (commit, text string
 			current = completeness
 		}
 		if current == "completed" && previous != "completed" {
-			return hash, string(raw), true, nil
+			return entry.Commit, string(raw), true, nil
 		}
 		previous = current
 	}
-	for _, hash := range commits {
-		raw, showErr := sageGitOutput(root, "show", hash+":"+ticketRel)
+	for _, entry := range history {
+		raw, showErr := sageGitOutput(root, "show", entry.Commit+":"+entry.Path)
 		if showErr != nil {
 			continue
 		}
 		design, completeness := effectiveSageReviewPostures(frontmatterFromText(string(raw)))
 		if (field == "sage-review-design" && design == "completed") ||
 			(field == "sage-review-completeness" && completeness == "completed") {
-			return hash, string(raw), true, nil
+			return entry.Commit, string(raw), true, nil
 		}
 	}
 	return "", "", false, nil
+}
+
+type sageReviewHistoryEntry struct {
+	Commit string
+	Path   string
+}
+
+func sageReviewTicketHistory(root, ticketRel string) ([]sageReviewHistoryEntry, error) {
+	logOut, err := sageGitOutput(root, "log", "--follow", "--find-renames", "--format=%H", "--name-status", "--", ticketRel)
+	if err != nil {
+		return nil, err
+	}
+	var entries []sageReviewHistoryEntry
+	currentPath := ticketRel
+	var currentCommit string
+	var commitPath string
+	var olderPath string
+	flush := func() {
+		if currentCommit == "" {
+			return
+		}
+		if commitPath == "" {
+			commitPath = currentPath
+		}
+		entries = append(entries, sageReviewHistoryEntry{Commit: currentCommit, Path: commitPath})
+		if olderPath != "" {
+			currentPath = olderPath
+		}
+	}
+	for _, line := range strings.Split(string(logOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if isFullCommitHash(line) {
+			flush()
+			currentCommit = line
+			commitPath = ""
+			olderPath = ""
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		status := fields[0]
+		if (strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C")) && len(fields) >= 3 {
+			oldPath := filepath.ToSlash(fields[1])
+			newPath := filepath.ToSlash(fields[2])
+			if newPath == currentPath {
+				commitPath = newPath
+				olderPath = oldPath
+			}
+			continue
+		}
+		path := filepath.ToSlash(fields[len(fields)-1])
+		if path == currentPath {
+			commitPath = path
+		}
+	}
+	flush()
+	return entries, nil
+}
+
+func sageReviewCurrentTicketContent(root, ticketRel string) ([]byte, error) {
+	if staged, err := sageGitOutput(root, "diff", "--cached", "--name-only", "--", ticketRel); err == nil && strings.TrimSpace(string(staged)) != "" {
+		return sageGitOutput(root, "show", ":"+ticketRel)
+	}
+	if unstaged, err := sageGitOutput(root, "diff", "--name-only", "--", ticketRel); err == nil && strings.TrimSpace(string(unstaged)) != "" {
+		return os.ReadFile(filepath.Join(root, filepath.FromSlash(ticketRel)))
+	}
+	return os.ReadFile(filepath.Join(root, filepath.FromSlash(ticketRel)))
 }
 
 func normalizeTicketForSageFreshness(text string) string {
@@ -149,6 +220,18 @@ func nonEmptyLines(text string) []string {
 		}
 	}
 	return lines
+}
+
+func isFullCommitHash(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func uniqueSageStages(stages []string) []string {

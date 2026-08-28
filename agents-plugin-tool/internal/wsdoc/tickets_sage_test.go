@@ -442,6 +442,29 @@ func TestSageGateWarnsOnUncommittedPostStampEdit(t *testing.T) {
 	}
 }
 
+func TestSageGateWarnsOnStagedOnlyPostStampEdit(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-staged"
+	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "stamp review")
+	staged := "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nStaged change.\n"
+	if err := os.WriteFile(path, []byte(staged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", rel)
+	runGit(t, root, "restore", "--worktree", rel)
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" || strings.Join(res.FreshnessStages, ",") != "design" {
+		t.Fatalf("result = %+v, want staged design freshness check", res)
+	}
+}
+
 func TestSageGateFreshnessIsStageSpecific(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-stage"
@@ -510,6 +533,41 @@ func TestSageGateFreshnessIgnoresSageOnlyAndStatusOnlyChanges(t *testing.T) {
 			t.Fatalf("result = %+v, want skip for pure status move", res)
 		}
 	})
+}
+
+func TestSageGateFreshnessFollowsStatusMoveThenContentEdit(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-moveedit"
+	writeSageTicket(t, root, stem, map[string]string{
+		"sage-review-design":       "completed",
+		"sage-review-completeness": "completed",
+	})
+	initSageFreshnessRepo(t, root)
+	baseline := commitSageFreshnessRepo(t, root, "stamp review")
+	oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+	newRel := filepath.Join("ai-docs", "tickets", "ready", stem+".md")
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(newRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "mv", oldRel, newRel)
+	if err := os.WriteFile(filepath.Join(root, newRel), []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody changed in move.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitSageFreshnessRepo(t, root, "move and edit")
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" {
+		t.Fatalf("action = %q, want check_review_required", res.Action)
+	}
+	if strings.Join(res.FreshnessStages, ",") != "design,completeness" {
+		t.Fatalf("freshness stages = %v, want design+completeness", res.FreshnessStages)
+	}
+	if res.ReviewBaseline != shortCommit(baseline) {
+		t.Fatalf("baseline = %q, want pre-move baseline %q", res.ReviewBaseline, shortCommit(baseline))
+	}
 }
 
 // TestSageRecordCountsIssueResolutions pins the autonomous/missing tally that
