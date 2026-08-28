@@ -131,19 +131,6 @@ When a spec heading `{#slug}` changes, include
 Keep unrelated untracked files out of commits. `.codex` may exist locally; do
 not stage it unless explicitly requested.
 
-**Version bump on merge into `develop`.** `develop` is the default integration
-branch; routine work merges there, not into `main`. Every merge into `develop`
-(from any feature, topic, `impl/*`, or `goal/*` branch) bumps the plugin patch
-version through `agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>`. Never
-hand-edit the version edition points (both `plugin.json` pairs, both
-`runtime.json`, `main.go`, release assets, this file's `## Project Orientation`
-version strings); the script is the single bump surface. Claude Code keys
-plugin-cache invalidation on the `version` string, so an unchanged version
-serves stale builds even across branch-pin reinstalls — bump per merge so each
-dogfood build is distinct. `develop -> main` happens only at shipping, which
-owns the release version through the ship procedure, so no bump rides that
-merge.
-
 ### Context Window Discipline
 
 - Source code is ground truth; load only docs relevant to the task.
