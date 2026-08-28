@@ -211,17 +211,6 @@ func sageGitOutput(root string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-func nonEmptyLines(text string) []string {
-	var lines []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return lines
-}
-
 func isFullCommitHash(value string) bool {
 	if len(value) != 40 {
 		return false
