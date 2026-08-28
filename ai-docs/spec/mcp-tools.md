@@ -1363,7 +1363,12 @@ sage-review posture presence and terminal value, close-date field presence for
 are hard findings that fail the verdict (`OK: false`). Missing spec addressing on
 a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
 failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
-a hard block is separate deferred scope. An unresolved `### Phase N:` heading
+a hard block is separate deferred scope. A ready ticket whose completed
+sage-review stage is stale against the Git commit that first recorded that
+completed posture also emits a soft `sage-review-freshness` **warning**; the
+warning names the affected stage(s), the review baseline commit, and the
+instruction to inspect the ticket diff and decide whether to rerun that Sage
+stage. An unresolved `### Phase N:` heading
 (no `### Result` before the next Phase heading or EOF, not marked `[dropped]`)
 on a `.done`/`.dropped` ticket is likewise a soft **warning** only, matching
 `tickets.close`'s own tip — the SOFT seed of the 260723 Phase 2 must-not-forget
@@ -1506,8 +1511,9 @@ in place.
 `lead-write-ticket` playbook calls to run the gate above; both require
 `session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
 decision for a ticket and returns
-`{ action, ask_prompt?, reviewers?, mode?, advisory? }` where `action` is one of
-`skip`, `stop_blocked`, `ask`, or `run`. It owns posture resolution, the
+`{ action, ask_prompt?, reviewers?, mode?, advisory?, freshness_stages?, review_baseline?, review_instruction? }`
+where `action` is one of `skip`, `stop_blocked`, `ask`, `run`, or
+`check_review_required`. It owns posture resolution, the
 legacy single-field `sage-review:` migration, the
 `sage_review` config fallback, the category×stage matrix, and
 standalone-versus-combined mode selection. For `ask` it returns the exact
@@ -1517,6 +1523,18 @@ answer never resolves another stage. A declined `ask` persists `skipped` for
 that stage; a config-fallback resolution likewise persists the resolved
 posture. The tool never spawns reviewers — for `run` it names the reviewer(s)
 to dispatch and leaves spawning to the lead.
+
+For a completed design or completeness stage, `tickets.sage_gate` performs an
+additive Git-inferred freshness check before returning a terminal skip. It finds
+the commit that made the relevant stage's Sage posture become `completed`,
+compares the current ticket content against that baseline, and returns
+`check_review_required` when any non-Sage-posture content changed. The result
+names the affected completed stage(s), the review baseline commit, and an
+instruction to inspect the diff and decide whether to rerun those stage(s). The
+comparison deliberately does not judge prose meaning: it ignores only
+Sage-owned posture fields (`sage-review`, `sage-review-design`,
+`sage-review-completeness`) and pure ticket path/status moves. Missing Git
+history or an unreadable historical blob degrades to the prior no-warning path.
 
 `tickets.sage_gate` **commits nothing and returns no commit metadata**. This is
 a caller-visible contract change: the ask-decline path previously produced a
@@ -1772,10 +1790,11 @@ returned instead; no commit is written and `HEAD` does not move. This makes the
 verify floor non-bypassable for ticket-touching commits — a hand-edited ticket
 that never went through a mutation tool is still caught at commit — closing the
 direct-file-edit bypass that prose-only guardrails left open. A soft warning
-(missing spec addressing, unresolved phases) does not block the commit; it lands
-with the warning surfaced as an advisory line in the commit response, and the
-commit result is otherwise unchanged. Advisories are text-mode only, following
-the todo re-injection precedent (`#260626-git-commit-todo-reinjection`):
+(missing spec addressing, stale completed Sage review, unresolved phases) does
+not block the commit; it lands with the warning surfaced as an advisory line in
+the commit response, and the commit result is otherwise unchanged. Advisories
+are text-mode only, following the todo re-injection precedent
+(`#260626-git-commit-todo-reinjection`):
 structured JSON output carries no advisory field. Both `git.commit` entry points
 — the MCP tool and the `ws-mcp git commit` CLI mirror — surface the same
 advisories, since they share one gate. The cross-file ticket-graph advisories

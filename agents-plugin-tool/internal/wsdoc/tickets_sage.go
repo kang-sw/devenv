@@ -42,7 +42,7 @@ type SageGateOptions struct {
 // SageGateResult is the gate decision. Action is the primary control value the
 // caller follows; the remaining fields are populated per action.
 type SageGateResult struct {
-	Action    string   // "skip" | "stop_blocked" | "ask" | "run"
+	Action    string   // "skip" | "stop_blocked" | "ask" | "run" | "check_review_required"
 	AskPrompt string   // populated when Action == "ask"
 	Reviewers []string // populated when Action == "run"; subset of {"design","completeness"}
 	Mode      string   // "standalone" | "combined"; populated when Action == "run"
@@ -57,6 +57,10 @@ type SageGateResult struct {
 	// which posture produced it, so the text is attached uniformly rather
 	// than only on the "required" branch.
 	Advisory string
+
+	FreshnessStages   []string // populated when Action == "check_review_required"
+	ReviewBaseline    string   // populated when Action == "check_review_required"
+	ReviewInstruction string   // populated when Action == "check_review_required"
 }
 
 // SageIssue is one reviewer-reported issue row.
@@ -159,6 +163,13 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 			return SageGateResult{Action: "skip"}, nil
 		}
 		design, _ := effectiveSageReviewPostures(frontmatter(ticketAbs))
+		if design == "completed" {
+			if result, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}); err != nil {
+				return SageGateResult{}, err
+			} else if result.Action != "" {
+				return result, nil
+			}
+		}
 		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, resolvedSageReviewConfig, answer)
 	}
 
@@ -171,6 +182,13 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	if designRequired && !completenessRequired {
 		// epic: design-only. Skip when design posture is already terminal.
 		if design == "completed" || design == "skipped" {
+			if design == "completed" {
+				if result, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}); err != nil {
+					return SageGateResult{}, err
+				} else if result.Action != "" {
+					return result, nil
+				}
+			}
 			return SageGateResult{Action: "skip"}, nil
 		}
 		return sageGateStandalone(ticketAbs, "design", "sage-review-design", design, resolvedSageReviewConfig, answer)
@@ -179,6 +197,20 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	// Both stages required.
 	if design == "completed" || design == "skipped" {
 		// Design already terminal: completeness stage stands alone.
+		var completed []string
+		if design == "completed" {
+			completed = append(completed, "design")
+		}
+		if completeness == "completed" {
+			completed = append(completed, "completeness")
+		}
+		if len(completed) > 0 {
+			if result, err := sageGateFreshnessResult(root, ticketRel, completed); err != nil {
+				return SageGateResult{}, err
+			} else if result.Action != "" {
+				return result, nil
+			}
+		}
 		return sageGateStandalone(ticketAbs, "completeness", "sage-review-completeness", completeness, resolvedSageReviewConfig, answer)
 	}
 	// Design not yet terminal: the never-skippable design invariant fires for a

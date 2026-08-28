@@ -107,6 +107,24 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 	if !strings.Contains(runOut, "advisory: Sage review is not waivable") {
 		t.Fatalf("formatSageGate advisory must be capitalized:\n%s", runOut)
 	}
+
+	checkOut := formatSageGate(wsdoc.SageGateResult{
+		Action:            "check_review_required",
+		FreshnessStages:   []string{"design", "completeness"},
+		ReviewBaseline:    "abc12345",
+		ReviewInstruction: "Inspect the ticket diff against abc12345 and decide whether to rerun sage design and completeness review.",
+	})
+	for _, want := range []string{
+		"action: check_review_required",
+		"freshness_stages: design, completeness",
+		"review_baseline: abc12345",
+		"review_instruction: Inspect the ticket diff",
+		"decide whether to rerun the listed sage review stage(s)",
+	} {
+		if !strings.Contains(checkOut, want) {
+			t.Fatalf("formatSageGate freshness output missing %q:\n%s", want, checkOut)
+		}
+	}
 }
 
 func TestFormatSageRecordRoundTrip(t *testing.T) {
@@ -306,6 +324,41 @@ func TestServeStdioSageGateDispatch(t *testing.T) {
 	// wsdoc.SageGateResult struct field.
 	if !strings.Contains(resp, "advisory: Sage review is not waivable") {
 		t.Fatalf("sage_gate dispatch response missing advisory line:\n%s", resp)
+	}
+}
+
+func TestServeStdioSageGateDetectsStaleCompletedReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	ticketRel := filepath.Join("ai-docs", "tickets", "ready", "260101-feat-stale.md")
+	mustWrite(t, root, ticketRel,
+		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nBody.\n")
+	initGit(t, root)
+	runGit(t, root, "add", ticketRel)
+	runGit(t, root, "commit", "-m", "stamp review")
+	mustWrite(t, root, ticketRel,
+		"---\ntitle: Sage\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\nChanged body.\n")
+	runGit(t, root, "add", ticketRel)
+	runGit(t, root, "commit", "-m", "edit after review")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 9707, root, nil))
+
+	resp := callToolWithKey(t, server, 9708, key, "tickets.sage_gate", map[string]any{
+		"stem":    "260101-feat-stale",
+		"landing": "ready",
+	})
+	for _, want := range []string{
+		"action: check_review_required",
+		"freshness_stages: design, completeness",
+		"review_baseline:",
+		"review_instruction: Inspect the ticket diff",
+	} {
+		if !strings.Contains(resp, want) {
+			t.Fatalf("sage_gate stale response missing %q:\n%s", want, resp)
+		}
 	}
 }
 

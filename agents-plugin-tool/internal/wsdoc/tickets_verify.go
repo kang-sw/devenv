@@ -163,6 +163,16 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 			}
 			addFinding("ready-sage-posture", err.Error())
 		}
+		var completed []string
+		if designRequired && design == "completed" {
+			completed = append(completed, "design")
+		}
+		if completenessRequired && completeness == "completed" {
+			completed = append(completed, "completeness")
+		}
+		if freshness, err := sageReviewFreshnessCheck(root, "ai-docs/tickets/"+status+"/"+stem+".md", completed); err == nil && len(freshness.Stages) > 0 {
+			addWarning("sage-review-freshness", sageReviewFreshnessWarningMessage(freshness))
+		}
 	}
 
 	if status == ".done" || status == ".dropped" {
@@ -184,6 +194,10 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 			addWarning("spec-address", warning)
 		}
 	}
+}
+
+func sageReviewFreshnessWarningMessage(freshness sageReviewFreshness) string {
+	return fmt.Sprintf("completed sage review may be stale for stage(s): %s; review baseline: %s; %s", strings.Join(freshness.Stages, ", "), freshness.Baseline, freshness.Instruction)
 }
 
 // ticketFrontmatterFenceProblem scans raw ticket text directly for a well

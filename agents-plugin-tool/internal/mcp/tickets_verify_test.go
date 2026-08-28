@@ -143,3 +143,51 @@ func TestTicketsVerifySpecAddressWarningDoesNotBlockCommit(t *testing.T) {
 		t.Fatalf("git.commit blocked a ticket whose only problem is the soft-warn spec-address guardrail: %s", byID["2"])
 	}
 }
+
+func TestTicketsVerifySageFreshnessWarningDoesNotBlockCommit(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+
+	path := "ai-docs/tickets/ready/260723-feat-stale-review.md"
+	body := "---\n" +
+		"title: Stale review\n" +
+		"sage-review-design: completed\n" +
+		"sage-review-completeness: completed\n" +
+		"spec:\n" +
+		"  260101-demo: covered\n" +
+		"---\n\nBody.\n"
+	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Demo {#260101-demo}\n")
+	mustWrite(t, root, path, body)
+	runGit(t, root, "add", "ai-docs")
+	runGit(t, root, "commit", "-m", "stamp review")
+	mustWrite(t, root, path, strings.Replace(body, "Body.\n", "Body changed after review.\n", 1))
+
+	server := NewServer(root, "test")
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.verify","arguments":{"paths":["` + path + `"]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["` + path + `"],"title":"docs(ticket): edit stale review ticket","ai_context":["User intent: prove sage freshness warnings stay non-blocking."]}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+
+	verifyText := toolText(t, byID["1"])
+	if !strings.Contains(verifyText, "verify: PASS") {
+		t.Fatalf("tickets.verify text = %q, want PASS", verifyText)
+	}
+	if !strings.Contains(verifyText, "WARN [sage-review-freshness]") || !strings.Contains(verifyText, "review baseline:") {
+		t.Fatalf("tickets.verify text = %q, want sage freshness warning", verifyText)
+	}
+
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("git.commit blocked a sage freshness soft warning: %s", byID["2"])
+	}
+	commitText := toolText(t, byID["2"])
+	if !strings.Contains(commitText, "commit: ") || !strings.Contains(commitText, "advisories:\n") || !strings.Contains(commitText, "WARN [sage-review-freshness]") {
+		t.Fatalf("git.commit text response missing freshness advisory: %q", commitText)
+	}
+}
