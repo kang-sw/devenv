@@ -2701,6 +2701,15 @@ func formatSageGate(result wsdoc.SageGateResult) string {
 	if result.Advisory != "" {
 		fmt.Fprintf(&b, "advisory: %s\n", capitalizeFirst(result.Advisory))
 	}
+	if len(result.FreshnessStages) > 0 {
+		fmt.Fprintf(&b, "freshness_stages: %s\n", strings.Join(result.FreshnessStages, ", "))
+	}
+	if result.ReviewBaseline != "" {
+		fmt.Fprintf(&b, "review_baseline: %s\n", result.ReviewBaseline)
+	}
+	if result.ReviewInstruction != "" {
+		fmt.Fprintf(&b, "review_instruction: %s\n", result.ReviewInstruction)
+	}
 	b.WriteString(sageGateNextInstruction(result))
 	return b.String()
 }
@@ -2757,6 +2766,8 @@ func sageGateNextInstruction(result wsdoc.SageGateResult) string {
 		return "next_instruction: Relay ask_prompt to the user, then call tickets.sage_gate again with the same stem/landing plus answer=yes|no." + sageGatePostureUncommittedNote
 	case "run":
 		return "next_instruction: Spawn the listed reviewer(s) via On: Reviewer Spawn, then call tickets.sage_stamp(stem, stage, verdicts) with stage=" + sageStageForReviewers(result) + "." + sageGatePostureUncommittedNote
+	case "check_review_required":
+		return "next_instruction: Inspect the ticket diff against review_baseline and decide whether to rerun the listed sage review stage(s); do not treat the prior completed review as current until that decision is made." + sageGatePostureUncommittedNote
 	default:
 		return "next_instruction: Unrecognized action; stop and report."
 	}
