@@ -8,11 +8,10 @@ Target: user request
 
 ## Invariants
 
-- Route only; do not implement or plan here.
+- Keep a direct execution within the requested scope; stop before it expands.
 - Reload `{{.McpNamespace}}/workflow_manual` after session compaction; recover key via `{{.SkillNamespace}}:lead-revive` if lost. Fresh start: call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")`.
-- Build route facts from conversation state and workflow artifacts only; do not inspect source code.
-- Always route code-editing work through `lead-implement` via `{{.McpNamespace}}/playbook.print`.
-- Follow `Next:` from `enter.proceed` exactly; do not add route-specific prose.
+- Limit pre-route source reads to explicitly requested paths and direct-execution judgment.
+- Treat an `enter.proceed` verdict as authoritative; follow its `Next:` exactly.
 
 ## On: invoke
 
@@ -20,14 +19,18 @@ Target: user request
    continuation occurred since, call only `{{.McpNamespace}}/git.status(session_key: <key>)`.
    Otherwise call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` and
    `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
-2. If the target references a ticket, read it. Apply judgments and resolve facts.
-3. Scope resolution before calling:
+2. For an inline target, apply `judge: direct-execution`.
+   - On `Yes`, state the reason, perform and verify the bounded request
+     directly, then return without calling `enter.proceed`.
+3. If the target references a ticket, read it. Apply remaining judgments and
+   resolve facts.
+4. Scope resolution before calling:
    - Unfinished phase = first phase with no `### Result` section; use it when the user names none.
    - Every phase has `### Result` → `scope_blocked=no-unfinished-phase`; do not route to promotion.
    - Container ticket (epic/workset) → `scope_blocked=container-ticket`.
    - Two or more explicit phases in one request → `scope_blocked=multiple-explicit-phases`.
-4. Call `{{.McpNamespace}}/enter.proceed(session_key: <key>, target: ..., facts: ...)`.
-5. Follow `Next:` exactly.
+5. Call `{{.McpNamespace}}/enter.proceed(session_key: <key>, target: ..., facts: ...)`.
+6. Follow `Next:` exactly.
 
 ## Judgments
 
@@ -37,6 +40,14 @@ Target: user request
 |----------|------|
 | No | Target does not name a concrete change, observable outcome, or accepted implementation direction |
 | Yes | Target gives enough implementation intent to route without another design turn |
+
+### judge: direct-execution
+
+| Decision | When |
+|----------|------|
+| Yes | The inline request has clear local scope and verification, and neither planning nor independent review materially improves the outcome. |
+| No | A ticket phase, unresolved choice, contract or canonical-flow impact, broad scope, or requested review is present. |
+| Unknown | Treat as No. |
 
 ### judge: discussion-needed
 
@@ -56,7 +67,6 @@ Target: user request
 
 ## Doctrine
 
-Proceed optimizes for **full-pipeline routing accuracy**. Conversation state and
-artifacts are the finite signal: use them to choose readiness stages, not to
-perform code-editing stages. When a rule is ambiguous, apply whichever
-interpretation better preserves the user's ability to intervene at any pipeline stage.
+Proceed optimizes for **workflow attention**: reserve the full pipeline for work
+where planning or independent review changes the outcome; complete bounded work
+directly when it does not. When ambiguous, preserve the user's intervention point.

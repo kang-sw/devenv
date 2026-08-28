@@ -999,11 +999,18 @@ nobody wrote in the first place.
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
-`lead-proceed` is the first step for implementation tasks. It is route-only: it
-reads conversation state and existing workflow artifacts, then continues through
-the needed pipeline stages without reading source code or performing
-implementation work. When workflow primitive context is not already active, it
-loads `lead-workflow-manual` before routing.
+`lead-proceed` is the first step for implementation tasks. An inline request
+whose local scope and verification are clear, and for which neither planning nor
+independent review materially improves the outcome, may take a direct-execution
+early return. It states the reason, performs and verifies the bounded request,
+and returns without calling `enter.proceed`, leaving the session agenda and todos
+unchanged. The judgment may inspect only explicitly requested paths; unknown or
+expanded scope uses normal routing. {#260828-proceed-direct-execution-early-return}
+
+All other targets are route-only: `lead-proceed` reads conversation state and
+existing workflow artifacts, then continues through the needed pipeline stages
+without source inspection or implementation work. When workflow primitive context
+is not already active, it loads `lead-workflow-manual` before routing.
 
 When handoff stages are needed, their order is fixed:
 
@@ -1069,13 +1076,13 @@ Verdict, stops when the anchor is missing, and treats absent binding anchor
 decisions as missing settled decisions.
 {#260513-proceed-ticket-freshness-gate}
 
-Implementation always routes through `lead-implement` with the selected scope as
-a hard scope boundary. `lead-proceed` does not rejudge general ticket quality,
-mutate ticket structure, decide delegated plan depth, or invoke implementation
-primitives before `lead-implement`; it requests phase or ticket slicing only
-when scope resolution blocks safe implementation. Public or cross-module
-contract checkpoints are expressed through the delegated `lead-implement`
-implementation plan.
+Except for a direct-execution early return, implementation routes through
+`lead-implement` with the selected scope as a hard scope boundary.
+`lead-proceed` does not rejudge general ticket quality, mutate ticket structure,
+decide delegated plan depth, or invoke implementation primitives before
+`lead-implement`; it requests phase or ticket slicing only when scope resolution
+blocks safe implementation. Public or cross-module contract checkpoints are
+expressed through the delegated `lead-implement` implementation plan.
 
 `lead-implement` also loads the native-subagent pivot anchor before editing when
 the target touches plugin architecture, host-neutral migration, spawn-removal,
@@ -1087,7 +1094,7 @@ plan as task input, may read additional documents listed in the plan, and must
 not read the ticket directly unless the plan's `Escalations` section explicitly
 authorizes ticket-file reading.
 
-Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
+For every normal route, `lead-proceed` calls `ws.enter.proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one
 `NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
 deterministic route-row precedence, normalization warnings, raw verdict text,
@@ -1103,9 +1110,9 @@ route context and enter `ws.enter.proceed` again instead of continuing from an
 old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
 `lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
-implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
-judges, compute direct/delegated execution mode, compute branch mode, or inspect
-source.
+implementation-tool use. Outside the direct-execution judgment, `lead-proceed`
+does not apply sibling `lead-implement` judges, compute direct/delegated
+execution mode, compute branch mode, or inspect source.
 `lead-implement` owns those decisions when the handoff executes by calling
 `ws.enter.implement` after fact gathering. wsflow mirrors the same route-only
 proceed boundary without pre-applying `wsflow:lead-implement` branch or
