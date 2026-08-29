@@ -4,8 +4,9 @@ parent: 260824-epic-review-watermark-model
 related:
   260824-feat-lead-review-range-scenario: prerequisite — the gate reviews a range through this scenario
   260824-feat-review-watermark-ledger: prerequisite — the gate reviews the unreviewed range up to the marker
-sage-review-design: completed
-sage-review-completeness: completed
+  260829-research-review-watermark-multi-maintainer-model: revises this ticket — re-keys the gate range to the last stable release tag (squash-robust), demotes the precise marker to advisory, adds the rendezvous-backend config field; the forcing function and mandatory boundary review are unchanged
+sage-review-design: pending
+sage-review-completeness: pending
 ---
 
 # Review policy config + release gate — AGENTS.md review-track, host-neutral gating, devenv ship gate
@@ -29,11 +30,24 @@ Circled numbers denote the epic's sibling children: ② =
 Settled at the epic level; restated as constraints:
 
 - **config split (three homes):** `AGENTS.md` (tracked, per-track) declares the
-  review-track branch and whether a release boundary exists; the `ai-docs/`
-  ledger holds marker+verdict state; `_review.local.md` holds machine-local
-  review mechanics. Do not put the review-track branch in `_review.local.md`
-  (it is a shared structural fact, and local config is gitignored) or the marker
-  in `AGENTS.md` (churn).
+  review-track branch, whether a release boundary exists, **and (2026-08-29,
+  `260829`) which rendezvous backend the project uses — `platform` (GitHub branch
+  protection) or `canary` (any-git ledger conflict)**; the `ai-docs/` ledger
+  holds marker+verdict state; `_review.local.md` holds machine-local review
+  mechanics. Do not put the review-track branch in `_review.local.md` (it is a
+  shared structural fact, and local config is gitignored) or the marker in
+  `AGENTS.md` (churn).
+- **Gate range is keyed to the last stable release tag, not the precise marker
+  (2026-08-29, `260829`).** The hard gate reviews `<last-release-tag>..HEAD`.
+  Rationale: tags are not orphaned by squash/rebase, so the gate is **squash-robust
+  by construction** and sweeps everything since the last release regardless of how
+  it landed (skip-coverage at release granularity). The precise SHA marker is
+  **demoted to the advisory mid-stream nudge layer** (sizing the checkpoint nudge),
+  where squash imprecision is harmless. The forcing function (below) is unchanged —
+  it keys off recorded `block` entries and their routed tickets, not off the
+  marker. Note this is a *review-mandate* re-key, **not** a demotion of the gate to
+  advisory: a boundary project still runs a mandatory review and the forcing
+  function still hard-blocks; only the *range selector* changes from marker to tag.
 - **Host-neutral first:** never encode devenv's `develop`/`main`/ship shape as
   the mechanism. Gating is opt-in; absence of a declared boundary means
   advisory-only, not "no review."
@@ -41,9 +55,10 @@ Settled at the epic level; restated as constraints:
   `workflow_manual` surfaces a **non-blocking** "configure this first" nudge at
   most **once per session** (session-scoped, not per-checkpoint), not a hard
   block.
-- **Fallback:** a boundary project with no marker yet can review `main..develop`
-  directly (the release branch is itself a natural "reviewed-up-to" proxy) until
-  the marker exists.
+- **Fallback:** a boundary project with no release tag or marker yet can review
+  `main..develop` directly (the release branch is itself a natural "reviewed-up-to"
+  proxy) until a tag/marker exists. Once stable release tags exist, `<tag>..HEAD`
+  is the gate range (above).
 - **Finding resolution (epic Cross-Child) — the ticket lifecycle resolves; there
   is no separate "waiver" artifact.** A blocking finding clears when its routed
   ticket reaches a *terminal* state: `.done` (fixed) or `.dropped` (a conscious
@@ -71,8 +86,12 @@ Settled at the epic level; restated as constraints:
 ### Phase 1: Policy config surface (AGENTS.md + _review.local.md) + workflow_manual nudge
 
 - Define the `AGENTS.md` fields: review-track branch, release-boundary
-  declaration (present/absent). Define the `_review.local.md` review-mechanics
-  home (already exists; note the split so nothing double-owns).
+  declaration (present/absent), **and rendezvous backend (`platform` | `canary`,
+  2026-08-29 `260829`)**. When `platform`, document the recommended GitHub
+  branch-protection set (require-up-to-date + dismiss-stale-approvals +
+  required-checks + disable squash/rebase; merge queue at scale). Define the
+  `_review.local.md` review-mechanics home (already exists; note the split so
+  nothing double-owns).
 - `workflow_manual` scans for the review-track config and emits a non-blocking,
   scoped nudge when unset.
 
@@ -85,8 +104,9 @@ homes have no overlapping ownership.
 - For a project that declares a release boundary, insert a **mandatory** range
   review into the promotion path. For devenv: into `lead-ship` pre-flight
   (`ai-docs/ship/ws.md` / `lead-ship` playbook), which today has no review step
-  — review the unreviewed range (marker..HEAD, or `main..develop` fallback)
-  before `develop`→`main`.
+  — review the unreviewed range (**`<last-release-tag>..HEAD`**, squash-robust per
+  `260829`; `main..develop` fallback when no tag/marker exists yet) before
+  `develop`→`main`.
 - **Gate verdict (concrete, per the epic's finding-resolution decision):**
   promotion is blocked when **any** of: (a) the just-run range review raises a
   blocking finding; (b) a `block` ledger entry since the last release references a
@@ -96,8 +116,8 @@ homes have no overlapping ownership.
   is *terminal* — `.done` (fixed) or `.dropped` (consciously accepted). The gate
   cross-references recorded blocking entries against their routed tickets' status;
   there is no ledger "resolved" flag and no separate waiver record.
-- **Promotion atomicity (pin-and-re-assert).** The gate reviews `marker..HEAD`
-  and then the ship flow ff-merges. Record the reviewed through-SHA and assert the
+- **Promotion atomicity (pin-and-re-assert).** The gate reviews the gate range
+  (`<tag>..HEAD`) and then the ship flow ff-merges. Record the reviewed through-SHA and assert the
   review-track tip still equals it at merge time; if the tip moved, re-absorb and
   re-review the delta before promoting (the ③ race path). For devenv's serial
   local ship this holds trivially, but the premise is named rather than assumed so

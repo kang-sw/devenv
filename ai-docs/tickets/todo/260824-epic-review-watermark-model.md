@@ -5,7 +5,8 @@ related:
   260627-feat-enter-implement-deterministic-verdict-engine: substrate — owns the deterministic review_alloc derivation that child ①modifies
   260726-bug-lead-implement-lost-review-relay-cycle-cap: interaction — review-cycle budgets are keyed on the review_alloc label child ①shifts toward single/lead-only
   260611-research-ws-per-role-delegation-tuning-config: adjacent axis — role→tier tuning, distinct from this epic's count/scope axis; no conflict
-sage-review-design: completed
+  260829-research-review-watermark-multi-maintainer-model: source of the 2026-08-29 multi-maintainer re-adjustment (canary, no-squash, taxonomy, two backends, ④ tag-keying)
+sage-review-design: pending
 ---
 
 # Time-series watermark review model — altitude-calibrated review keyed to mainstream integration
@@ -47,6 +48,17 @@ Three-layer defense this produces:
 Host-neutral principle: the **mechanism** (marker + range review + sweep) is
 universal; the **gating policy** (whether/where review blocks) is per-project
 config. devenv is one configuration, not the model.
+
+Collaboration-concurrency axis (added by the 2026-08-29 multi-maintainer
+re-adjustment; see research `260829-research-review-watermark-multi-maintainer-model`):
+"host-neutral" originally covered harness (Claude/Codex) and branch topology, but
+**not multiple maintainers integrating in parallel** (merges landing through
+platform UIs outside any ws session). The model's baseline stays the
+**single-maintainer serial path** (devenv); **multi-maintainer support is an
+opt-in capability layer that stays dormant for the serial case** — the ledger
+canary, the no-squash/SHA-preservation constraint, and the platform-enforcement
+backend all no-op unless concurrent maintainers actually exist. This is a
+generalization, not an overturn: the serial baseline is unchanged.
 
 ## Non-Scope
 
@@ -97,15 +109,20 @@ config. devenv is one configuration, not the model.
   post-merge by construction; `workflow_manual` at session start; `enter.*` as
   backstops) rather than caught at merge time. Depends on ②.
 - Planned ④`feat`/`chore`: **project policy + release gate.** `AGENTS.md`
-  (tracked, per-track) declares the review-track branch and whether a release
-  boundary exists; `workflow_manual` surfaces a non-blocking "configure this
-  first" nudge when unset. `_review.local.md` holds review mechanics. For a
-  project that declares a boundary, insert a mandatory range review into the
-  promotion path — for devenv, into `lead-ship` pre-flight (which today has no
-  review step), reviewing the unreviewed range before `develop`→`main`.
-  Downstream without a boundary: advisory-only. Depends on ②(and ③for the
-  marker; a boundary project can fall back to `main..develop` when no marker
-  exists yet).
+  (tracked, per-track) declares the review-track branch, whether a release
+  boundary exists, **and (2026-08-29) which rendezvous backend the project uses
+  (platform / any-git canary).** `workflow_manual` surfaces a non-blocking
+  "configure this first" nudge when unset. `_review.local.md` holds review
+  mechanics. For a project that declares a boundary, insert a mandatory range
+  review into the promotion path — for devenv, into `lead-ship` pre-flight (which
+  today has no review step), reviewing the unreviewed range before
+  `develop`→`main`. **The gate range is keyed off the last stable release tag
+  (`<tag>..HEAD`), not the precise marker — tags survive squash/rebase, so the
+  gate is squash-robust; the precise marker is demoted to the advisory mid-stream
+  nudge layer.** The forcing function (un-routed/open block entries block
+  promotion) is unchanged. Downstream without a boundary: advisory-only. Depends
+  on ②(and ③for the marker; a boundary project can fall back to `main..develop`
+  when no tag/marker exists yet).
 
 ## Cross-Child Decisions
 
@@ -125,7 +142,12 @@ config. devenv is one configuration, not the model.
   marker sitting on the master-side parent subtracts already-reviewed history in
   one shot and a two-parent merge creates no ambiguity. Because master merges are
   serialized and only master writes the ledger, appends never race → the
-  append-only ledger never merge-conflicts. **Skip-coverage invariant:** the
+  append-only ledger never merge-conflicts **in the single-maintainer serial
+  case**. In the multi-maintainer concurrent case that serialization does not
+  hold, and the resulting ledger tail conflict is **not a bug but the intended
+  canary rendezvous** (see the Multi-maintainer decisions below): two branches
+  that both stamp without one absorbing the other necessarily collide on the
+  ledger tail, forcing a STOP. **Skip-coverage invariant:** the
   marker rises only by an actual stamping review, so anything in `(marker, HEAD]`
   is unreviewed regardless of how it landed (a review-skipping merge included), and
   the next stamping review — or the gate — inescapably sweeps it; no skip
@@ -175,6 +197,68 @@ config. devenv is one configuration, not the model.
   expectations for ③/④must guard against recording unreviewed ranges as
   reviewed.
 
+### Multi-maintainer decisions (2026-08-29 re-adjustment)
+
+Added from research `260829-research-review-watermark-multi-maintainer-model`.
+These generalize the model to concurrent maintainers **without** changing the
+single-maintainer serial baseline; each is dormant in the serial case.
+
+- **Mechanical-vs-convention taxonomy — the organizing rule.** The line between
+  "must be mechanically enforced" and "convention is acceptable" is drawn by
+  *failure mode*: a safety invariant (violating it opens a **coverage hole →
+  under-review**) must be mechanical; an efficiency optimization (violating it
+  only causes **over-review = wasted effort**, never under-review) may be a
+  convention.
+
+  | Property | Must be mechanical? | Why |
+  |---|---|---|
+  | Coverage of brute commits | Yes | Violation = missed review (under-review). Already mechanical by construction: marker advances only on a stamp (skip-coverage). |
+  | Rendezvous (concurrent branches re-integrate + re-review) | Nice-to-have | Violation only re-reviews the same range = over-review. Canary forces the STOP mechanically; re-review is convention (or platform-enforced). |
+  | No-squash on review-track | No | Violation orphans the marker → next range simply re-covers the orphaned span = over-review, never under-review. |
+
+  Proof the two efficiency layers are safe as conventions: an orphaned or ignored
+  marker still leaves every brute commit inside `(marker, HEAD]`, so coverage is
+  untouched — only cost rises. **Only coverage must be airtight, and it already
+  is.**
+
+- **Ledger canary (opt-in-free rendezvous for concurrent landings).** Because
+  every wsflow landing appends to the ledger tail, two branches that both stamp
+  without one absorbing the other **necessarily** produce a textual merge
+  conflict on the ledger (git cannot auto-merge two inserts at the same anchor).
+  This forces a STOP — the later branch cannot land until it resolves the
+  conflict, i.e. integrates the other's work. Works identically on GitHub (its
+  merge/squash/rebase all run `git merge` and report the conflict) with **no
+  branch-protection config required**. Dormant in the serial case (no concurrent
+  writers). Owned in detail by ③, including a **self-documenting ledger banner**
+  so the resolver sees a THINK prompt at the conflict site. Honest limit: the
+  canary forces STOP, not THINK — a resolver can `checkout --theirs` and proceed;
+  this is physically irreducible in plain git and is mitigated (not closed) by the
+  banner and, where available, the platform backend.
+
+- **SHA preservation / no-squash on the review-track (efficiency convention).**
+  Squash/rebase landings rewrite the reviewed commit to a new SHA, orphaning the
+  marker. Review-track landings are constrained to **ff or merge-commit** (both
+  preserve the SHA); squash/rebase are forbidden **on the review-track**. This is
+  a convention because violating it only causes over-review. Landing topology:
+  **Merge 1 `HEAD <- master`** (absorb master, resolve here, review the resolved
+  commit R, append the ledger as a separate final commit L) then **Merge 2
+  `master <- HEAD`** (SHA-preserving land: ff preferred locally, "create a merge
+  commit" on GitHub). The ledger entry's `<head>` is R (the reviewed commit),
+  never L. "Always force no-ff regardless of ff-ability" is an over-constraint and
+  is rejected — the real invariant is SHA preservation, which ff and no-ff both
+  satisfy.
+
+- **Two enforcement backends for rendezvous (per-project choice).**
+  *Platform-enforced (GitHub, preferred where available):* branch protection
+  (`require branches up to date` + `dismiss stale approvals on new commits` +
+  `require status checks` + disable squash/rebase; merge queue at scale) — forces
+  STOP **and** re-review (closes the canary's STOP-not-THINK gap). *Platform-
+  independent (any git, no config):* the ledger canary — forces STOP only,
+  re-review is convention. A project declares which backend it uses (④ config
+  surface). Both leave coverage (the only mandatory-mechanical invariant)
+  untouched; they differ only in how strongly they enforce the efficiency
+  rendezvous.
+
 ## Completion Criteria
 
 - Done: ①–④ landed — per-phase default resolves to single/lead-only for
@@ -190,7 +274,10 @@ config. devenv is one configuration, not the model.
   the release** — i.e. the gate/sweep starts catching things per-phase used to —
   revisit ①'s floor (raise it, or re-widen the partition signals) rather than
   treating overhead reduction as unqualified success. Instrument both signals in
-  dogfooding.
+  dogfooding. Multi-maintainer axis: watch whether the canary fires at the right
+  moments (concurrent branches that skipped absorption) without false positives in
+  the serial case, and whether a resolver actually re-reviews after a canary STOP
+  rather than blindly `checkout --theirs`.
 - No-boundary trade is explicit and accepted: a project that declares no release
   boundary has no hard gate and advisory-only sweeps, so with ① lightening
   per-phase its only mandatory scrutiny is the single per-phase reviewer. This is
@@ -201,4 +288,8 @@ config. devenv is one configuration, not the model.
   against the defect-escape signal above, not a default.
 - Deferred: MCP-mediated merge for immediate (non-lazy) sweep triggering;
   role→tier delegation tuning (260611); one-gate-vs-separate-posture form of the
-  landing lens (captured as a folded required-check in ②, may split later).
+  landing lens (captured as a folded required-check in ②, may split later); the
+  concrete recommended GitHub branch-protection / merge-queue configuration set
+  (multi-maintainer backend, `260829` open question); the git-naive brute-only
+  persona relief valve (agent-proposed/agent-run review at checkpoints) — split
+  to its own research ticket, not folded here.

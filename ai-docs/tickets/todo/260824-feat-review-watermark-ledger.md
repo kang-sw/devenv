@@ -4,8 +4,9 @@ parent: 260824-epic-review-watermark-model
 related:
   260824-feat-lead-review-range-scenario: prerequisite — the sweep reviews marker..HEAD through the range scenario
   260726-feat-enter-verdict-scenario-output: adjacent — enter.* output/agenda surface where checkpoint nudges may render
-sage-review-design: completed
-sage-review-completeness: completed
+  260829-research-review-watermark-multi-maintainer-model: revises this ticket — adds the ledger canary, self-documenting banner, and no-squash/landing-topology constraint; retains marker + skip-coverage
+sage-review-design: pending
+sage-review-completeness: pending
 ---
 
 # Review watermark marker + dotfile ledger + advisory sweep with lazy checkpoint recompute
@@ -47,7 +48,10 @@ Settled at the epic level; restated here as implementation constraints:
   two ledger appends never race — so the append-only ledger never merge-conflicts
   (a feature→master absorption brings no competing ledger line; master's version
   simply wins). This is the concurrency answer the earlier "per-track" note left
-  open.
+  open **for the single-maintainer serial case**. In the multi-maintainer
+  concurrent case (added 2026-08-29, `260829`) that serialization does not hold,
+  and the ledger tail conflict is repurposed as the **canary** — see the new
+  Multi-maintainer constraints below.
 - **The review range is set-subtraction, not a parent-path walk.**
   `marker..HEAD` = `{reachable from HEAD} − {reachable from marker}`. Because the
   marker sits on the master-side parent of any merge, all already-reviewed history
@@ -75,6 +79,43 @@ Settled at the epic level; restated here as implementation constraints:
 - **Ledger honesty:** an entry recorded as reviewed without an actual review is
   false confidence. Verification must guard against recording unreviewed ranges
   as reviewed.
+
+### Multi-maintainer constraints (2026-08-29, from `260829`)
+
+Dormant in the single-maintainer serial case; they only activate when concurrent
+maintainers exist. They retain the marker + skip-coverage above unchanged.
+
+- **Ledger canary.** Every landing appends to the ledger tail, so two branches
+  that both stamp without one absorbing the other **necessarily** merge-conflict
+  on the tail (git cannot auto-merge two inserts at the same anchor). This forces
+  a STOP: the later branch cannot land until it resolves the conflict, i.e.
+  integrates the other's work. Identical on GitHub (merge/squash/rebase all run
+  `git merge`), **no branch-protection config required**. It is the mechanical
+  rendezvous for concurrent landings; the serial case never triggers it.
+- **Self-documenting ledger banner.** The ledger file carries an inline advisory
+  banner at the top (and/or near the tail anchor) so a conflict resolver sees a
+  THINK prompt at exactly the conflict site, e.g.:
+  `# ⚠ If you are resolving a CONFLICT here, two branches reviewed independently —`
+  `#   do NOT checkout --theirs and move on; re-run side-effect checks on the`
+  `#   integrated state and append a fresh verdict.`
+  Honest limit: this converts a forced STOP into a *prompted* THINK but cannot
+  mechanically force the re-review — that gap is physically irreducible in plain
+  git (see `260829`); the banner is the load-bearing soft mitigation for the
+  any-git backend.
+- **No-squash / landing topology (SHA preservation).** Squash/rebase landings
+  rewrite the reviewed commit to a new SHA and orphan the marker, so review-track
+  landings are constrained to **ff or merge-commit** (both preserve the SHA);
+  squash/rebase are forbidden on the review-track. Topology: **Merge 1
+  `HEAD <- master`** absorbs master and resolves conflicts *inside the reviewed
+  range*, the resolved commit **R** is reviewed, then the ledger entry is appended
+  as a **separate final commit L** (parent R); **Merge 2 `master <- HEAD`** lands
+  R SHA-preservingly (ff preferred locally, "create a merge commit" on GitHub).
+  The ledger entry's `<head>` is **R** (the reviewed commit), never L and never a
+  random hash — this resolves the chicken-egg that an entry cannot point at its
+  own edit commit. This is a **convention** (violating it only causes over-review,
+  never under-review — the mechanical-vs-convention taxonomy at the epic), so it
+  is guidance hardened by config where a platform allows (disable squash/rebase),
+  not a mechanical block in plain git.
 
 ## Phases
 
@@ -177,6 +218,30 @@ no-conflict** — a feature→master absorption introduces no competing ledger l
 so the ledger never merge-conflicts, and after a race the re-absorbed branch's
 `marker..HEAD` excludes the racer's already-stamped work (set-subtraction) while
 still covering its own delta.
+
+### Phase 3: Multi-maintainer canary + banner + no-squash constraint (2026-08-29)
+
+Dormant for the serial baseline; activates only under concurrent maintainers.
+Depends on Phases 1–2.
+
+- Emit the **self-documenting banner** as part of the Phase-1 ledger format
+  (top-of-file, and/or a comment adjacent to the tail append anchor) so a git
+  conflict surfaces it verbatim to the resolver.
+- Document the **canary** as an intended property, not a new mechanism: the
+  Phase-1 tail-append format already produces the conflict; this phase names it,
+  specifies that resolving it means integrating the other branch's work, and
+  (optional hardening) that the resolution append a fresh verdict entry over the
+  re-integrated range for a CI check to validate.
+- State the **no-squash / landing-topology** constraint (ff or merge-commit on
+  the review-track; entry `<head>` = reviewed commit R, not the bookkeeping
+  commit L) as review-track guidance, with the platform-config hardening (disable
+  squash/rebase) owned by ④'s policy surface.
+
+Verification: two branches that both stamp without absorbing each other produce a
+ledger tail conflict (canary fires); the serial single-writer path never
+conflicts (no false positive); the banner text appears in the conflicted region;
+a squash landing on the review-track orphans the marker and the next range simply
+re-covers the orphaned span (over-review, never under-review — coverage intact).
 
 ## Spec Impact
 

@@ -6,6 +6,7 @@ related:
   260824-feat-lead-review-range-scenario: this child (②, range scenario + landing lens) is established as independent and preserved unchanged by this research
   260824-feat-review-release-gate-policy: revises this child (④) to key the hard gate off stable release tags and ticket status rather than a precise ledger marker
   260729-research-implement-router-prose-only-dimension: motivating "default review pass too heavy" incident that seeded the parent epic
+  260829-research-review-checkpoint-relief-valve: sibling — the git-naive brute-only persona relief valve split off from this ticket to keep the multi-maintainer axis single-concern
 ---
 
 # Multi-maintainer review-watermark model — coverage-as-mechanical invariant, ledger canary, host-split enforcement
