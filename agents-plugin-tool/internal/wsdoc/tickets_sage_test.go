@@ -1,6 +1,8 @@
 package wsdoc
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -361,6 +363,210 @@ func TestSageGateMissingPersistsResolvedPosture(t *testing.T) {
 	body := readFileString(t, path)
 	if !strings.Contains(body, "sage-review-design: required") {
 		t.Fatalf("config-fallback did not persist required posture:\n%s", body)
+	}
+}
+
+func initSageFreshnessRepo(t *testing.T, root string) {
+	t.Helper()
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+}
+
+func commitSageFreshnessRepo(t *testing.T, root, message string) string {
+	t.Helper()
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", message)
+	return strings.TrimSpace(string(runGitOutputSage(t, root, "rev-parse", "HEAD")))
+}
+
+func runGitOutputSage(t *testing.T, root string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
+	return out
+}
+
+func TestSageGateWarnsWhenCompletedReviewIsStale(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-stale"
+	path := writeSageTicket(t, root, stem, map[string]string{
+		"sage-review-design":       "completed",
+		"sage-review-completeness": "completed",
+	})
+	initSageFreshnessRepo(t, root)
+	baseline := commitSageFreshnessRepo(t, root, "stamp review")
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody text changed.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitSageFreshnessRepo(t, root, "edit after review")
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" {
+		t.Fatalf("action = %q, want check_review_required", res.Action)
+	}
+	if strings.Join(res.FreshnessStages, ",") != "design,completeness" {
+		t.Fatalf("freshness stages = %v, want design+completeness", res.FreshnessStages)
+	}
+	if res.ReviewBaseline != shortCommit(baseline) {
+		t.Fatalf("baseline = %q, want %q", res.ReviewBaseline, shortCommit(baseline))
+	}
+	if !strings.Contains(res.ReviewInstruction, "Inspect the ticket diff") {
+		t.Fatalf("instruction = %q, want diff inspection guidance", res.ReviewInstruction)
+	}
+}
+
+func TestSageGateWarnsOnUncommittedPostStampEdit(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-uncommitted"
+	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "stamp review")
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nUncommitted change.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" || strings.Join(res.FreshnessStages, ",") != "design" {
+		t.Fatalf("result = %+v, want design freshness check", res)
+	}
+}
+
+func TestSageGateWarnsOnStagedOnlyPostStampEdit(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-staged"
+	rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+	path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "completed"})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "stamp review")
+	staged := "---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nStaged change.\n"
+	if err := os.WriteFile(path, []byte(staged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", rel)
+	runGit(t, root, "restore", "--worktree", rel)
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" || strings.Join(res.FreshnessStages, ",") != "design" {
+		t.Fatalf("result = %+v, want staged design freshness check", res)
+	}
+}
+
+func TestSageGateFreshnessIsStageSpecific(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-stage"
+	path := writeSageTicket(t, root, stem, map[string]string{
+		"sage-review-design":       "completed",
+		"sage-review-completeness": "required",
+	})
+	initSageFreshnessRepo(t, root)
+	commitSageFreshnessRepo(t, root, "design completed")
+	if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: required\n---\n\n# Sample\n\nChanged before completeness.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" || strings.Join(res.FreshnessStages, ",") != "design" {
+		t.Fatalf("result = %+v, want only design freshness check", res)
+	}
+}
+
+func TestSageGateFreshnessIgnoresSageOnlyAndStatusOnlyChanges(t *testing.T) {
+	t.Run("sage-posture-only", func(t *testing.T) {
+		root := t.TempDir()
+		stem := "260101-feat-sageonly"
+		path := writeSageTicket(t, root, stem, map[string]string{"sage-review-design": "required"})
+		initSageFreshnessRepo(t, root)
+		commitSageFreshnessRepo(t, root, "ticket before review")
+		if err := os.WriteFile(path, []byte("---\ntitle: Sample\nsage-review-design: completed\n---\n\n# Sample\n\nBody text.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		commitSageFreshnessRepo(t, root, "stamp review")
+
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "todo"}, "auto")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "skip" {
+			t.Fatalf("result = %+v, want skip", res)
+		}
+	})
+
+	t.Run("status-move-only", func(t *testing.T) {
+		root := t.TempDir()
+		stem := "260101-feat-moveonly"
+		writeSageTicket(t, root, stem, map[string]string{
+			"sage-review-design":       "completed",
+			"sage-review-completeness": "completed",
+		})
+		initSageFreshnessRepo(t, root)
+		commitSageFreshnessRepo(t, root, "stamp review")
+		oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+		newRel := filepath.Join("ai-docs", "tickets", "ready", stem+".md")
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(newRel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "mv", oldRel, newRel)
+		commitSageFreshnessRepo(t, root, "move to ready")
+
+		res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+		if err != nil {
+			t.Fatalf("SageGate: %v", err)
+		}
+		if res.Action != "skip" {
+			t.Fatalf("result = %+v, want skip for pure status move", res)
+		}
+	})
+}
+
+func TestSageGateFreshnessFollowsStatusMoveThenContentEdit(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-moveedit"
+	writeSageTicket(t, root, stem, map[string]string{
+		"sage-review-design":       "completed",
+		"sage-review-completeness": "completed",
+	})
+	initSageFreshnessRepo(t, root)
+	baseline := commitSageFreshnessRepo(t, root, "stamp review")
+	oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+	newRel := filepath.Join("ai-docs", "tickets", "ready", stem+".md")
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(newRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "mv", oldRel, newRel)
+	if err := os.WriteFile(filepath.Join(root, newRel), []byte("---\ntitle: Sample\nsage-review-design: completed\nsage-review-completeness: completed\n---\n\n# Sample\n\nBody changed in move.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitSageFreshnessRepo(t, root, "move and edit")
+
+	res, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatalf("SageGate: %v", err)
+	}
+	if res.Action != "check_review_required" {
+		t.Fatalf("action = %q, want check_review_required", res.Action)
+	}
+	if strings.Join(res.FreshnessStages, ",") != "design,completeness" {
+		t.Fatalf("freshness stages = %v, want design+completeness", res.FreshnessStages)
+	}
+	if res.ReviewBaseline != shortCommit(baseline) {
+		t.Fatalf("baseline = %q, want pre-move baseline %q", res.ReviewBaseline, shortCommit(baseline))
 	}
 }
 

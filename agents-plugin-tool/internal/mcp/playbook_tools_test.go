@@ -2651,13 +2651,16 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "full-pipeline routing accuracy") {
-		t.Errorf("body %q: expected doctrine text 'full-pipeline routing accuracy'", body)
+	if !strings.Contains(body, "workflow attention") {
+		t.Errorf("body %q: expected doctrine text 'workflow attention'", body)
 	}
 	for _, want := range []string{
 		`enter.proceed`,
 		"Follow `Next:` exactly",
-		"Follow `Next:` from `enter.proceed` exactly",
+		"Treat an `enter.proceed` verdict as authoritative",
+		"judge: direct-execution",
+		"- On `Yes`",
+		"return without calling `enter.proceed`",
 		"scope_blocked=no-unfinished-phase",
 		"scope_blocked=container-ticket",
 		"scope_blocked=multiple-explicit-phases",
@@ -2855,7 +2858,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 		},
 		{
 			skill:    "lead-proceed",
-			wantAll:  []string{"enter.proceed", "Follow `Next:` from `enter.proceed` exactly", "Follow `Next:` exactly"},
+			wantAll:  []string{"enter.proceed", "Treat an `enter.proceed` verdict as authoritative", "Follow `Next:` exactly"},
 			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 	}
