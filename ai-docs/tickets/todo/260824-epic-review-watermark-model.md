@@ -6,6 +6,7 @@ related:
   260726-bug-lead-implement-lost-review-relay-cycle-cap: interaction — review-cycle budgets are keyed on the review_alloc label child ①shifts toward single/lead-only
   260611-research-ws-per-role-delegation-tuning-config: adjacent axis — role→tier tuning, distinct from this epic's count/scope axis; no conflict
   260829-research-review-watermark-multi-maintainer-model: source of the 2026-08-29 multi-maintainer re-adjustment (canary, no-squash, taxonomy, two backends, ④ tag-keying)
+  260829-research-review-checkpoint-relief-valve: source of the 2026-08-30 slice-coverage calibration draft decision (two-altitude distinction + raw-vs-slice-covered nudge severity, no second marker file); full valve design stays in that research
 sage-review-design: completed
 ---
 
@@ -259,6 +260,48 @@ single-maintainer serial baseline; each is dormant in the serial case.
   untouched; they differ only in how strongly they enforce the efficiency
   rendezvous.
 
+### Slice-coverage calibration (2026-08-30 DRAFT — pending sage design vetting)
+
+Drafted from research `260829-research-review-checkpoint-relief-valve` (the
+git-naive brute-only persona). **Not yet accepted for implementation**; recorded
+here as a cross-child invariant for sage to vet, because it relates ①'s
+per-phase review to ③'s advisory nudge. If sage/user reject it, it reverts to
+research-only.
+
+- **Two review altitudes stay distinct; the integration marker must never advance
+  on a slice review.** ① per-phase review is *deliberately local* (one slice's
+  diff in isolation); the integration marker (③) means "reviewed up to
+  integration" and captures cross-slice/whole-arc coverage ① structurally cannot.
+  Advancing the integration marker on an ① review would record integration
+  coverage that never happened — the exact false-confidence the ledger-honesty
+  invariant forbids. So the tempting "let ① advance the marker to quiet the nag"
+  shortcut is **rejected**; the arc-review gap the nudge points at is real.
+- **The advisory nudge (③) should calibrate severity by a slice-coverage signal.**
+  Because the brute persona's backlog *did* get ① review (only integration review
+  is missing), a single escalating siren that treats "①-covered backlog" the same
+  as "raw, ceremony-skipping backlog" trains the git-naive user to ignore all
+  nudges — including the loud raw case that matters (cry wolf). The nudge reads a
+  slice-coverage signal and scales raw (louder) vs slice-covered (gentler).
+- **The slice-coverage signal is NOT a second marker file** (rejected: a second
+  shared-file append point = a second merge-conflict surface + complexity). Two
+  options with **no shared-file conflict surface**, both carried forward unchosen:
+  **(a)** infer from the ws phase-result commit footprint in the range; **(b)** an
+  altitude-labeled `Reviewed-slice:` commit trailer (squash-fragile, but only
+  needs to survive the pre-integration window, so bounded). Whichever, the label
+  must name its *slice* altitude, never bare "reviewed."
+- **Taxonomy placement — a convention, not a mechanical requirement** (per the
+  mechanical-vs-convention organizing rule above). The slice-coverage signal only
+  scales *nudge severity*; violating or misreading it (e.g. option (a) treating
+  "ceremony ran" as "① passed" and under-nagging a raw range) causes only
+  over/under-nag, **never under-review** — coverage stays airtight via
+  skip-coverage (the marker still advances only on a real stamping review, so any
+  mis-labeled range is still swept by the next stamping review or the gate). So a
+  convention is acceptable; the a/b choice and the ceremony≈pass question are
+  efficiency tuning, settleable at implementation.
+- **Landing site:** ③ (`260824-feat-review-watermark-ledger`), Phase 2's nudge
+  scaling, absorbs this **only if/when the relief-valve research is accepted**;
+  ③'s just-vetted design is intentionally left untouched until then.
+
 ## Completion Criteria
 
 - Done: ①–④ landed — per-phase default resolves to single/lead-only for
@@ -291,5 +334,8 @@ single-maintainer serial baseline; each is dormant in the serial case.
   landing lens (captured as a folded required-check in ②, may split later); the
   concrete recommended GitHub branch-protection / merge-queue configuration set
   (multi-maintainer backend, `260829` open question); the git-naive brute-only
-  persona relief valve (agent-proposed/agent-run review at checkpoints) — split
-  to its own research ticket, not folded here.
+  persona relief valve (agent-proposed/agent-run review at checkpoints) — full
+  design stays in research `260829-research-review-checkpoint-relief-valve`; only
+  its cross-child spine (two-altitude distinction + slice-coverage nudge
+  calibration, see the Slice-coverage calibration decision above) is drafted into
+  this epic pending sage design vetting.

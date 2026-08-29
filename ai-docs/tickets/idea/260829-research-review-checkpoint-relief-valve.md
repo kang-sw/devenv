@@ -49,6 +49,13 @@ Traced against the current implementation (Explore, 2026-08-29):
   becomes pure noise. The semantic wrinkle: ① review genuinely ran, so the work is
   not meaningfully "unreviewed," yet the marker/sweep layer nags as if it were.
 
+**Cold re-verification (2026-08-30).** All four code claims above were
+independently re-checked against current source in a fresh review pass (not
+trusting the 2026-08-29 line refs): **all four CONFIRMED**, only minor line
+drift, none refuted — including the linchpin (`lead-review` checks out the target
+branch and diffs the working tree at `lead-review.md:34,39`; it takes no `A..B`
+range, so the "② must land first" prerequisite is a real hard dependency).
+
 ## Why this is a nuisance, not a safety hole (settled this session)
 
 - **Mixed team (brute contributor + aware maintainer):** brute commits sit in
@@ -100,6 +107,75 @@ user* on assent — turning a nag no one can act on into a one-word relief valve
   subagents**, never a lead-inline shortcut, or the persona ends up reviewing its
   own work.
 
+### Purpose is (A) coverage, not (B) noise (2026-08-30 re-discussion)
+
+The re-discussion tested whether this valve exists to **(A)** close a real
+coverage gap or **(B)** merely quiet a bookkeeping-artifact nag. **Settled: (A).**
+Slice review (①) is *deliberately* local — it inspects one phase's diff in
+isolation and structurally cannot see cross-slice interactions (phase N+1 breaks
+phase N's assumption), whole-arc flow/consistency, or the integration seam
+between slices. Arc/integration review over `marker..HEAD` is a **genuinely
+different altitude**, so the gap the nudge points at is real, not a bookkeeping
+artifact. **This kills the tempting "just let ① advance the integration marker"
+shortcut:** advancing the integration marker on a slice review would record
+"reviewed up to integration" when only slice review ran — the exact
+false-confidence / masquerade failure the epic's ledger-honesty invariant
+forbids. The two review altitudes must stay distinct.
+
+### Nudge-severity calibration + slice-coverage signal (2026-08-30 re-discussion)
+
+Because the gap is real (A) **but** this persona's backlog *did* get ① slice
+review, two backlog states carry different risk and the nudge should not treat
+them identically:
+
+- **raw backlog** (no ① ran — e.g. hand commits that skipped ws ceremony
+  entirely): higher risk, louder nudge warranted.
+- **slice-covered backlog** (① ran per slice, only arc/integration review is
+  missing — the brute persona's case): real gap but one altitude lower; a gentler
+  nudge.
+
+A single escalating siren that conflates them trains the git-naive user to ignore
+*all* nudges — including the loud raw-backlog case that actually matters (cry
+wolf). So the nudge should read a **slice-coverage signal** and scale severity by
+the raw-vs-slice-covered split.
+
+**Mechanism — no second marker file.** A separate "slice-coverage marker" file
+(the first idea floated) was rejected: it adds a second shared-file append point
+and therefore a second merge-conflict surface, and extra complexity. Two
+lighter options that add **no shared-file conflict surface** (each commit's own
+message is private to that commit) are carried forward, both documented, neither
+chosen here:
+
+- **(a) Footprint inference — zero new convention.** The recompute infers
+  slice-coverage from whether the range contains **ws-generated phase-result
+  commits** (the ws commit footprint, incl. `## AI Context`). A range full of ws
+  phase-result commits = slice-covered; a range of raw hand commits = raw.
+  Simplest, but approximates "ceremony ran" ≈ "① passed" (see open questions).
+- **(b) Explicit altitude-labeled trailer.** The guaranteed phase-result commit
+  (a ws-ceremony run always produces one) carries an explicit
+  `Reviewed-slice: <verdict>` trailer. More honest about the actual ① verdict;
+  costs one commit-message convention and is **squash-fragile** (below).
+
+**Discipline — the label must name its altitude.** Whichever option, the signal
+must read as *slice*-coverage, never bare "reviewed" — a bare "reviewed" that the
+recompute mistakes for integration coverage recreates the (A)-shortcut masquerade
+above. Keep it lexically distinct from the integration marker.
+
+**Two catches, both bounded:**
+
+- **Squash-fragility (option b).** A commit-message trailer is erased by
+  squash/rebase — the same fragility that pushed the release gate (④) onto tags.
+  It is **acceptable here** because the slice-coverage signal only needs to live
+  in the *pre-integration window* (while the brute dev is still stacking commits
+  on their branch); once work integrates, the integration marker + gate take over
+  and the slice signal is no longer consulted. Post-integration unreliability is
+  harmless.
+- **Inline-path asymmetry.** "A phase-result commit always happens" holds for the
+  `discuss → proceed` ceremony path, but the low-ceremony **inline** path (verified
+  Claim 4: direct commit on the current branch, no ticket) produces **no**
+  phase-result commit. So the signal covers ceremony work, not pure inline work —
+  the same asymmetry already noted for the trigger surfaces; it does not get worse.
+
 ## Hard prerequisite
 
 **② (`260824-feat-lead-review-range-scenario`) must land first.** Today
@@ -109,14 +185,27 @@ user* on assent — turning a nag no one can act on into a one-word relief valve
 range review. The same key (②) unlocks both this persona relief and the
 multi-maintainer sweep.
 
-## Open questions for the clean-session re-discussion
+## Open questions
 
+Carried into implementation (the 2026-08-30 re-discussion settled purpose (A),
+severity calibration, and the no-second-file mechanism; these remain open):
+
+- **Slice-coverage signal: footprint inference (a) vs explicit trailer (b)** —
+  both documented above, unchosen. Lean toward starting with (a) footprint
+  inference (zero new convention); (b) only if the calibration proves it needs the
+  actual ① verdict, not just "ceremony ran."
+- **Does a landed phase-result commit imply ① *passed*?** Option (a)'s
+  ceremony≈pass approximation holds only if a phase result does not land while an ①
+  concern is still open. Confirm against source at implementation time (① concerns
+  are expected to resolve in the implement relay before the phase result commits —
+  verify).
 - The exact proposal phrasing and the threshold at which passive FYI becomes an
   active proposal (reuse ③'s size/staleness scale; where is the passive→propose
-  cutoff?).
-- Whether the direct-on-current-branch path (b) needs its own marker-advancing
-  path, since it never produces an `impl/*` branch for the existing nudge to key
-  on.
+  cutoff, and how does the raw-vs-slice-covered split shift it?).
+- The pure inline path (direct-on-current-branch, no phase-result commit) has
+  neither an `impl/*` branch for the existing `tickets.close` nudge nor a
+  phase-result footprint — how is its (rarer, ceremony-skipping) backlog surfaced,
+  if at all?
 - Whether "no-boundary + no-review-track" should additionally *quiet* the nudge
   (fallback if the active proposal is still too noisy) vs. always offering to run.
 - How the agent-run relief review records its verdict/stamp in the ledger when the
