@@ -6,7 +6,7 @@ related:
   260726-bug-lead-implement-lost-review-relay-cycle-cap: interaction — review-cycle budgets are keyed on the review_alloc label child ①shifts toward single/lead-only
   260611-research-ws-per-role-delegation-tuning-config: adjacent axis — role→tier tuning, distinct from this epic's count/scope axis; no conflict
   260829-research-review-watermark-multi-maintainer-model: source of the 2026-08-29 multi-maintainer re-adjustment (canary, no-squash, taxonomy, two backends, ④ tag-keying)
-sage-review-design: pending
+sage-review-design: completed
 ---
 
 # Time-series watermark review model — altitude-calibrated review keyed to mainstream integration

@@ -5,7 +5,7 @@ related:
   260824-feat-lead-review-range-scenario: prerequisite — the gate reviews a range through this scenario
   260824-feat-review-watermark-ledger: prerequisite — the gate reviews the unreviewed range up to the marker
   260829-research-review-watermark-multi-maintainer-model: revises this ticket — re-keys the gate range to the last stable release tag (squash-robust), demotes the precise marker to advisory, adds the rendezvous-backend config field; the forcing function and mandatory boundary review are unchanged
-sage-review-design: pending
+sage-review-design: completed
 sage-review-completeness: pending
 ---
 
@@ -89,9 +89,14 @@ Settled at the epic level; restated as constraints:
   declaration (present/absent), **and rendezvous backend (`platform` | `canary`,
   2026-08-29 `260829`)**. When `platform`, document the recommended GitHub
   branch-protection set (require-up-to-date + dismiss-stale-approvals +
-  required-checks + disable squash/rebase; merge queue at scale). Define the
-  `_review.local.md` review-mechanics home (already exists; note the split so
-  nothing double-owns).
+  required-checks + disable squash/rebase; merge queue at scale). **Release-tag
+  identification (design review, 2026-08-29):** Phase 2's `<tag>..HEAD` range needs
+  to know which tags are release tags. The gate identifies the last release tag via
+  a tag-glob (default `v*`, resolved with `git describe --tags --match '<glob>'`),
+  derivable for devenv from `ai-docs/ship/ws.md`'s `v<version>` scheme; a boundary
+  project whose tags use a different namespace declares its release-tag glob
+  alongside the boundary declaration. Define the `_review.local.md`
+  review-mechanics home (already exists; note the split so nothing double-owns).
 - `workflow_manual` scans for the review-track config and emits a non-blocking,
   scoped nudge when unset.
 

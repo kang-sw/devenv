@@ -5,7 +5,7 @@ related:
   260824-feat-lead-review-range-scenario: prerequisite — the sweep reviews marker..HEAD through the range scenario
   260726-feat-enter-verdict-scenario-output: adjacent — enter.* output/agenda surface where checkpoint nudges may render
   260829-research-review-watermark-multi-maintainer-model: revises this ticket — adds the ledger canary, self-documenting banner, and no-squash/landing-topology constraint; retains marker + skip-coverage
-sage-review-design: pending
+sage-review-design: completed
 sage-review-completeness: pending
 ---
 
@@ -129,7 +129,12 @@ maintainers exist. They retain the marker + skip-coverage above unchanged.
   routed by a **corrective append-only follow-up entry** (`<same range>: routed ->
   <stem>`) — never an in-place edit, so the append-only/never-edit rule and the
   "un-routed block is un-clearable" forcing function (④) do not deadlock. Marker =
-  latest entry's through-SHA via line-scoped parse.
+  latest entry's through-SHA via line-scoped parse. **The parser must skip
+  non-entry lines — comments/banners included** (design review, 2026-08-29): Phase
+  3 adds a top-of-file self-documenting banner and a tail-anchor comment, so the
+  "latest entry" scan must ignore `#`-comment/banner lines or it would parse the
+  banner as the latest entry and yield a garbage marker SHA. Design the parser for
+  this from the start, not as a Phase-3 retrofit.
 - Explicit bootstrap when absent: insert at `HEAD`, surface the
   review-skipped-not-reviewed meaning.
 
@@ -148,7 +153,16 @@ explicitly-invoked action.
   before the ticket closes), `workflow_manual` at session start, and the
   `enter.*` router entrypoints (`enter_implement`, `enter_proceed`) as backstops
   — recompute the *size* of `marker..HEAD` on the review-track branch
-  and emit a proportional **advisory** nudge. This stays atomic/cheap:
+  and emit a proportional **advisory** nudge. **Pre-④ review-track fallback
+  (design review, 2026-08-29):** ④ owns the `AGENTS.md` review-track-branch
+  declaration and does not exist when this ticket lands, so the recompute must not
+  hard-depend on it. When the declaration is absent, default to the git default
+  branch (`main`/`master`) as the review-track; if the current HEAD is not that
+  branch, the recompute still runs against the default branch's tip, not the
+  feature branch's HEAD, so a feature branch's own un-landed commits do not inflate
+  the reported unreviewed size. Because the nudge is advisory-only, any such
+  defensible default is safe; ④ later replaces the fallback with the declared
+  branch. This stays atomic/cheap:
   `tickets.close` must not spawn a delegated review. Merges stay native (no
   MCP-mediated merge — rejected at the epic level); a merge that skipped its
   review is caught not by observing the merge but by the **skip-coverage
