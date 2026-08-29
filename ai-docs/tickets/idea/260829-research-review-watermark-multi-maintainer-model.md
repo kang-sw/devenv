@@ -161,14 +161,24 @@ harmless.
 
 ## Honest residual limits
 
-- **Canary forces STOP, not THINK.** Pure git can force conflict resolution but
-  cannot force an actual semantic re-review; a resolver may `checkout --theirs`
-  the ledger and proceed. Mitigations: require the resolution to append a fresh
-  verdict entry (CI-validated), and/or rely on the GitHub backend (dismiss-stale
-  approvals) where available.
+- **Canary forces STOP, not THINK (physically irreducible).** Pure git can force
+  conflict resolution but cannot force an actual semantic re-review; a resolver may
+  `checkout --theirs` the ledger and proceed. This gap cannot be closed
+  mechanically in plain git — accepted as a hard limit. Best soft mitigations, in
+  order of strength: (a) rely on the GitHub backend (dismiss-stale-approvals +
+  required up-to-date checks) where available; (b) **self-documenting ledger** —
+  the ledger carries an inline advisory banner (e.g.
+  `# ⚠ If you are resolving a CONFLICT here, two branches reviewed independently —
+  do NOT checkout --theirs and move on; re-run side-effect checks on the
+  integrated state and append a fresh verdict`) so the THINK prompt lands in the
+  resolver's face at exactly the moment of conflict, which is the only leverage
+  point pure git offers; (c) require the resolution to append a fresh verdict entry
+  (CI-validated). (b) is config-free and is the load-bearer for the any-git
+  backend; (a)/(c) harden it where the platform/CI allows.
 - **Squash still causes over-review** if the review-track's own landing squashes
   despite the convention — safe (never under-review), but wasteful. No-squash is
-  the (soft) cure.
+  the (soft) cure. **User-accepted this session: waste is the safe failure
+  direction; no further mechanical action is warranted here.**
 
 ## Scope boundary vs. the epic
 
