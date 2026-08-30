@@ -15,8 +15,13 @@ related:
   Caller-visible contract spec'd at `{#260830-review-watermark-ledger-tools}`.
 - `checkpoint.go` — cheap, read-only staleness nudge. Spec'd at
   `{#260830-review-watermark-checkpoint-nudge}`.
-- `track.go`, `config.go` — review-track branch resolution and the
-  `_review.local.md` staleness knob read by `checkpoint.go`.
+- `track.go`, `config.go`, `agents_config.go` — review-track branch
+  resolution (`ResolveTrack` prefers the `AGENTS.md` `### Review Policy`
+  `review-track` declaration over the git-default heuristic when set), the
+  `_review.local.md` staleness knob read by `checkpoint.go`, and the
+  fail-open `AGENTS.md` review-policy reader (`ReadAgentsReviewPolicy`).
+  Caller-visible contract spec'd at
+  `{#260830-review-policy-config-surface}`.
 - Ticket `260824-feat-review-watermark-ledger`, `## Decisions` →
   `### Multi-maintainer constraints` — design authority for the canary,
   banner, and landing-topology reasoning below. This reasoning is
