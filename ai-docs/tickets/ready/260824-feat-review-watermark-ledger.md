@@ -143,6 +143,46 @@ Verification: append/read round-trips; marker resolves to the last entry's
 through-SHA under line-scoped parse even when the ledger file was touched by an
 unrelated edit; bootstrap on an empty ledger emits the explicit surface.
 
+### Result (30e94921) - 2026-08-30
+
+New package `agents-plugin-tool/internal/wsreview` (`ledger.go` +
+`ledger_test.go`) delivering the Phase-1 primitives as composable Go functions
+with no MCP/checkpoint wiring: `LedgerPath`, `Entry{Base,Head,Verdict,Ref}`,
+`ParseLatest` (line-scoped, keeps the last regex match, skips `#`-comment/banner
+and any non-entry line from the start — Phase-3 banner-ready), `Read`
+(missing file = `(zero,false,nil)`, not an error), `Append` (O_APPEND-only,
+never mutates existing lines; validates SHA-shaped Base/Head, known verdict
+token, `Ref` non-empty iff `Verdict==block`, and `Ref` shape `^\S+$`), and
+`Bootstrap` (idempotent; seeds `<HEAD>..<HEAD>: bootstrap` at real
+`git rev-parse HEAD` only when zero parseable entries exist).
+
+- **Lead adjudication — block-only stem:** the routed-ticket-stem requirement is
+  enforced on `block` entries only; `concern`/`pass` accept an empty `Ref`. The
+  ticket's normative "requires a stem on a block entry" and ④'s block-only
+  release-gate forcing function scope the requirement to `block`; requiring it on
+  non-blocking `concern` would over-constrain. Locked by tests.
+- **Bootstrap line shape:** a distinct `bootstrap` verdict token self-documents
+  "review-skipped, not reviewed" with the marker resolving cleanly to HEAD (the
+  ticket left the exact shape open).
+- **Format:** plain-text line-oriented (not JSON/flock RMW) so concurrent appends
+  textually git-conflict as the Phase-3 canary; only wsnote's
+  missing-file=empty read contract was reused, not its encoding/write path.
+
+Verification: `go test ./internal/wsreview/...` (10 tests) + `go build ./...` +
+`go vet` clean — round-trips, banner-skip before/after entries, marker unaffected
+by an unrelated edit, real-git-repo bootstrap + idempotency + banner-only
+re-trigger, block-without-stem rejection, concern-without-stem success,
+whitespace-`Ref` rejection, and append-only corrective `routed` entry. Test
+honesty confirmed by reviewer mutation testing (4 mutations all caught).
+
+Partitioned review clean (correctness=opus, fit/test=sonnet); 2 minors surfaced
+and both fixed in-cycle (Append `Ref`-shape guard closing the round-trip
+invariant; banner-only Bootstrap coverage). No unresolved findings.
+
+Deferred by ticket design (not gaps): spec entries for the caller-visible
+checkpoint-nudge behavior belong to Phase 2 (this phase ships no MCP surface); a
+ledger-domain mental-model lands with the Phase-3 canary.
+
 ### Phase 2: Checkpoint nudge (cheap) + separately-invoked sweep
 
 **Two distinct mechanisms — do not conflate them.** A checkpoint never
