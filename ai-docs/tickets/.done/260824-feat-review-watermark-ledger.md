@@ -8,6 +8,7 @@ related:
   260829-research-review-watermark-multi-maintainer-model: revises this ticket — adds the ledger canary, self-documenting banner, and no-squash/landing-topology constraint; retains marker + skip-coverage
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Review watermark marker + dotfile ledger + advisory sweep with lazy checkpoint recompute
@@ -143,6 +144,46 @@ Verification: append/read round-trips; marker resolves to the last entry's
 through-SHA under line-scoped parse even when the ledger file was touched by an
 unrelated edit; bootstrap on an empty ledger emits the explicit surface.
 
+### Result (30e94921) - 2026-08-30
+
+New package `agents-plugin-tool/internal/wsreview` (`ledger.go` +
+`ledger_test.go`) delivering the Phase-1 primitives as composable Go functions
+with no MCP/checkpoint wiring: `LedgerPath`, `Entry{Base,Head,Verdict,Ref}`,
+`ParseLatest` (line-scoped, keeps the last regex match, skips `#`-comment/banner
+and any non-entry line from the start — Phase-3 banner-ready), `Read`
+(missing file = `(zero,false,nil)`, not an error), `Append` (O_APPEND-only,
+never mutates existing lines; validates SHA-shaped Base/Head, known verdict
+token, `Ref` non-empty iff `Verdict==block`, and `Ref` shape `^\S+$`), and
+`Bootstrap` (idempotent; seeds `<HEAD>..<HEAD>: bootstrap` at real
+`git rev-parse HEAD` only when zero parseable entries exist).
+
+- **Lead adjudication — block-only stem:** the routed-ticket-stem requirement is
+  enforced on `block` entries only; `concern`/`pass` accept an empty `Ref`. The
+  ticket's normative "requires a stem on a block entry" and ④'s block-only
+  release-gate forcing function scope the requirement to `block`; requiring it on
+  non-blocking `concern` would over-constrain. Locked by tests.
+- **Bootstrap line shape:** a distinct `bootstrap` verdict token self-documents
+  "review-skipped, not reviewed" with the marker resolving cleanly to HEAD (the
+  ticket left the exact shape open).
+- **Format:** plain-text line-oriented (not JSON/flock RMW) so concurrent appends
+  textually git-conflict as the Phase-3 canary; only wsnote's
+  missing-file=empty read contract was reused, not its encoding/write path.
+
+Verification: `go test ./internal/wsreview/...` (10 tests) + `go build ./...` +
+`go vet` clean — round-trips, banner-skip before/after entries, marker unaffected
+by an unrelated edit, real-git-repo bootstrap + idempotency + banner-only
+re-trigger, block-without-stem rejection, concern-without-stem success,
+whitespace-`Ref` rejection, and append-only corrective `routed` entry. Test
+honesty confirmed by reviewer mutation testing (4 mutations all caught).
+
+Partitioned review clean (correctness=opus, fit/test=sonnet); 2 minors surfaced
+and both fixed in-cycle (Append `Ref`-shape guard closing the round-trip
+invariant; banner-only Bootstrap coverage). No unresolved findings.
+
+Deferred by ticket design (not gaps): spec entries for the caller-visible
+checkpoint-nudge behavior belong to Phase 2 (this phase ships no MCP surface); a
+ledger-domain mental-model lands with the Phase-3 canary.
+
 ### Phase 2: Checkpoint nudge (cheap) + separately-invoked sweep
 
 **Two distinct mechanisms — do not conflate them.** A checkpoint never
@@ -234,6 +275,61 @@ so the ledger never merge-conflicts, and after a race the re-absorbed branch's
 `marker..HEAD` excludes the racer's already-stamped work (set-subtraction) while
 still covering its own delta.
 
+### Result (b16e3b29) - 2026-08-30
+
+Both Phase-2 mechanisms landed, composing the Phase-1 primitives without
+touching them. **Cheap checkpoint recompute+nudge:** `wsreview.CheckpointNudge`
+(`checkpoint.go`, pure/root-in/string-out/fail-open, modeled on
+`doc_coverage_alarm.go`) calls `wsreview.Read` only — never `Bootstrap`/`Append`
+— and is wired at all four checkpoint call sites (`tickets.close`,
+`workflow_manual` FRESH-with-root + CONTINUE, `enter.implement` both the
+new-target and legacy `handleEnter` branches, `enter.proceed`); the
+FRESH-no-root branch stays unwired. Review-track resolution (`track.go`) falls
+back to `origin/HEAD` → local `main`/`master`, and staleness reads a
+`_review.local.md` knob (`config.go`). **Separately-invoked sweep:** two new
+MCP tools — `review.marker` (reads latest entry; `bootstrap:true` is the sole
+caller-opted-in seed trigger) and `review.stamp` (append-only, delegates
+`Append`'s SHA/block-requires-ref validation) — plus a range-scenario-only
+stamp step added to `lead-review.md` (mirrored to wsflow), registered in both
+`runtime.json` manifests, MCP-only (no CLI mirror).
+
+- **Lead adjudications (recorded on the plan):** checkpoint stays read-only
+  (ledger-honesty guard); *size* reuses the is-large-diff magnitude (20)
+  reinterpreted as a commit-count analog (`SizeThresholdCommits`, no diff stat);
+  *staleness* default pinned to **10 commits** (`DefaultStalenessCommits`),
+  deliberately below 20 so the two thresholds are non-degenerate; the two new
+  tools are ticket-scoped (sweep-stamps-ledger is sage-settled), spec entries
+  authored in this phase's doc step.
+- **Marker = latest entry's `Head`, not `Base`.** A review-cycle Important
+  caught the sweep's stamp step sourcing `base` from the marker entry's `Base`
+  field, which from the 2nd sweep on would pin `base` to the original bootstrap
+  commit and record false overlapping ranges. Fixed (b16e3b29): the stamp
+  records the range scenario's own invocation `<base>..<head>` — the exact span
+  reviewed — and `review.marker(bootstrap:true)` is retained only to seed an
+  empty ledger, its return no longer feeding the stamp.
+
+Verification: `go build ./...` + `go vet ./...` clean; `go test
+./internal/wsreview/...` (21 tests, 13 new) and `go test ./internal/mcp/...`
+(11 new watermark integration tests) pass; full-module `go test ./...` green
+including `cmd/ws-mcp` tool-surface and `wsrsrc` golden/mirror-drift guards. The
+ledger-honesty guard is asserted directly and non-vacuously: no-ledger →
+`os.Stat` confirms the file is never created; quiet range → byte-for-byte file
+equality across the call.
+
+Partitioned review: test clean; correctness clean + 3 carried minors
+(threshold-ordering matches adjudicated intent; `context.Background()` reuses
+the existing `aheadOfMergeRootCount` convention; `track.go` `TrimPrefix` edge
+unreachable in practice); fit surfaced 1 Important (the base-field bug above),
+fixed and confirmed `[resolved]` on re-review. No unresolved findings. Spec
+entries landed (900c8c5f): `#260830-review-watermark-ledger-tools`,
+`#260830-review-watermark-checkpoint-nudge` (mcp-tools.md),
+`#260830-review-range-scenario-ledger-stamp` (workflow-skills.md);
+`spec_index_verify` ok. No mental-model authored — both candidate invariants
+(marker=Head, ledger-honesty guard) are now captured in the authoritative spec.
+
+Ticket stays in `ready/`: Phase 3 (multi-maintainer canary + banner + no-squash)
+remains.
+
 ### Phase 3: Multi-maintainer canary + banner + no-squash constraint (2026-08-29)
 
 Dormant for the serial baseline; activates only under concurrent maintainers.
@@ -257,6 +353,58 @@ ledger tail conflict (canary fires); the serial single-writer path never
 conflicts (no false positive); the banner text appears in the conflicted region;
 a squash landing on the review-track orphans the marker and the next range simply
 re-covers the orphaned span (over-review, never under-review — coverage intact).
+
+### Result (aa97b785) - 2026-08-30
+
+Banner emission landed; the canary and no-squash/landing-topology are captured as
+documentation (a new ledger-domain mental-model), not new code. `wsreview.Append`
+now emits a `#`-prefixed self-documenting banner **once, at first physical file
+creation**, inside its single existing `O_APPEND|O_CREATE|O_WRONLY` open
+(`os.Stat` metadata check before the open selects first-creation; banner+entry
+concatenated in memory and written in one `WriteString` — no read-modify-write,
+Phase-1 append-only preserved). Emission lives in `Append`, not `Bootstrap`, so
+the banner is guaranteed even on the `review.stamp`→`Append` path that never calls
+`Bootstrap`. The Phase-1 parser already skips `#`-comment lines, so the banner
+never shifts the marker.
+
+- **Lead adjudication — banner placement.** Top-of-file, once, in `Append`'s
+  create path. A merge-conflict resolver opens the full file (and thus sees the
+  banner), append-only stays simplest, and the ticket permits top-only ("and/or")
+  and frames the banner as a soft mitigation over a physically irreducible gap.
+  The richer per-entry tail-comment design (banner text stays literally inside the
+  conflict markers on a *mature* ledger — top-of-file only coincides with the tail
+  for the concurrent-first-creation add/add case) is a real but **deferred**
+  hardening, recorded as a known limitation in the new mental-model, not silently
+  dropped.
+- **Scope split.** The code slice was banner + tests only; the canary/no-squash
+  design reasoning was authored in the doc pipeline: a one-sentence banner note in
+  `spec/mcp-tools.md` (`#260830-review-watermark-ledger-tools`, commit 7235c352)
+  and the deferred ledger-domain mental-model
+  `ai-docs/mental-model/review-watermark-ledger.md` (commit fc1d727c), covering the
+  canary as a designed STOP-not-corruption property, the banner known limitation,
+  the Merge-1/R/L/Merge-2 no-squash landing topology (entry `<head>` = reviewed
+  commit R, never bookkeeping commit L), and marker-resolves-from-content (why a
+  squash-orphaned marker fails safe into over-review, never under-review).
+
+Verification: `go build ./...` + `go vet ./...` clean; `go test
+./internal/wsreview/...` 22 tests pass, including the new real-git
+`TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot` (two branches
+independently `Append` from a no-ledger ancestor → real add/add conflict with the
+full banner text asserted *within* the `<<<<<<<`..`>>>>>>>` region; serial path
+stays conflict-free) and `TestAppendFirstCreationEmitsBannerOnce`;
+`TestRoutedCorrectiveEntryAppendsWithoutEditingEarlierBlock` updated to strip the
+banner prefix and still assert earlier-block byte-intactness.
+
+Partitioned review (correctness=opus, fit=sonnet) both clean; no Critical/Important.
+Two carried minors, non-blocking: the serial-path test uses a fast-forward merge
+(demonstrates no-false-positive only weakly — a non-ff serial sequence would be
+stronger), and the banner constant has no trailing blank line before the first
+entry (readability). Both recorded as optional follow-up polish; correctness
+confirmed the `os.Stat` first-creation TOCTOU is benign (advisory, single
+review-track writer by design — worst case a duplicated banner, never a lost entry
+or corrupted marker).
+
+**Ticket complete — all three phases landed; moving `ready/` → `.done/`.**
 
 ## Spec Impact
 

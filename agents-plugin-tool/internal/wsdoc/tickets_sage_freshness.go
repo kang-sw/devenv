@@ -2,6 +2,8 @@ package wsdoc
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,9 +43,24 @@ func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageRevi
 		return sageReviewFreshness{}, nil
 	}
 	currentClean := normalizeTicketForSageFreshness(string(currentRaw))
+	currentDigest := sageReviewBodyDigest(string(currentRaw))
+	currentFM := frontmatterFromText(string(currentRaw))
 	var affected []string
 	var baselines []string
 	for _, stage := range uniqueSageStages(stages) {
+		field := "sage-review-" + stage
+		if recorded, ok := currentFM[field+"-reviewed"].(string); ok && strings.TrimSpace(recorded) != "" {
+			// Primary path: compare the recorded digest against the current body
+			// digest directly. No git walk on this path.
+			if strings.TrimSpace(recorded) == currentDigest {
+				continue
+			}
+			affected = append(affected, stage)
+			baselines = append(baselines, "the last recorded digest")
+			continue
+		}
+		// Fallback (legacy, no recorded digest): git-history baseline corrected
+		// to the latest completed-transition, body-only compared.
 		baseline, baselineRaw, ok, err := sageReviewStageBaseline(root, ticketRel, stage)
 		if err != nil {
 			return sageReviewFreshness{}, err
@@ -77,9 +94,12 @@ func sageReviewStageBaseline(root, ticketRel, stage string) (commit, text string
 		return "", "", false, nil
 	}
 	field := "sage-review-" + stage
-	var previous string
-	for i := len(history) - 1; i >= 0; i-- {
-		entry := history[i]
+
+	// Precompute each entry's stage posture once (history[0] = newest).
+	postures := make([]string, len(history))
+	raws := make([]string, len(history))
+	have := make([]bool, len(history))
+	for i, entry := range history {
 		raw, showErr := sageGitOutput(root, "show", entry.Commit+":"+entry.Path)
 		if showErr != nil {
 			continue
@@ -89,20 +109,29 @@ func sageReviewStageBaseline(root, ticketRel, stage string) (commit, text string
 		if field == "sage-review-completeness" {
 			current = completeness
 		}
-		if current == "completed" && previous != "completed" {
-			return entry.Commit, string(raw), true, nil
-		}
-		previous = current
+		postures[i] = current
+		raws[i] = string(raw)
+		have[i] = true
 	}
-	for _, entry := range history {
-		raw, showErr := sageGitOutput(root, "show", entry.Commit+":"+entry.Path)
-		if showErr != nil {
+
+	// Scan newest -> oldest for the latest completed-transition edge: the
+	// first index i where postures[i] == "completed" and the next-older
+	// entry (postures[i+1], or the "" sentinel when i is the oldest index)
+	// is != "completed". This generalizes the prior "born completed"
+	// sentinel trick to the newest-first direction, so a single-transition
+	// ticket still resolves to its sole edge while a multi-transition ticket
+	// (reset -> re-stamp) resolves to the latest edge instead of the
+	// earliest.
+	for i := 0; i < len(history); i++ {
+		if !have[i] || postures[i] != "completed" {
 			continue
 		}
-		design, completeness := effectiveSageReviewPostures(frontmatterFromText(string(raw)))
-		if (field == "sage-review-design" && design == "completed") ||
-			(field == "sage-review-completeness" && completeness == "completed") {
-			return entry.Commit, string(raw), true, nil
+		next := ""
+		if i+1 < len(history) && have[i+1] {
+			next = postures[i+1]
+		}
+		if next != "completed" {
+			return history[i].Commit, raws[i], true, nil
 		}
 	}
 	return "", "", false, nil
@@ -180,26 +209,46 @@ func sageReviewCurrentTicketContent(root, ticketRel string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(root, filepath.FromSlash(ticketRel)))
 }
 
+// normalizeTicketForSageFreshness returns the markdown body below the
+// frontmatter fence, trimmed. The whole frontmatter block is excluded (not
+// just sage-review* keys) so any frontmatter-only edit (title, related,
+// sage-review* postures/digests, ...) never perturbs the freshness/digest
+// comparison. When the text has no leading `---` fence, or the closing fence
+// is missing, the whole trimmed text is returned instead — a graceful
+// degrade for malformed input rather than collapsing to "" (which would
+// falsely equate all malformed tickets as identical).
 func normalizeTicketForSageFreshness(text string) string {
 	lines := strings.Split(text, "\n")
-	inFrontmatter := len(lines) > 0 && strings.TrimSpace(lines[0]) == "---"
-	for i, line := range lines {
-		if i == 0 && inFrontmatter {
-			continue
-		}
-		if inFrontmatter && strings.TrimSpace(line) == "---" {
-			inFrontmatter = false
-			continue
-		}
-		if inFrontmatter && !strings.HasPrefix(line, " ") {
-			key := strings.TrimSpace(strings.SplitN(line, ":", 2)[0])
-			switch key {
-			case "sage-review", "sage-review-design", "sage-review-completeness":
-				lines[i] = ""
-			}
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return strings.TrimSpace(text)
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
 		}
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	return strings.TrimSpace(text)
+}
+
+// sageReviewBodyDigest computes the sha256 of the body-only normalized text,
+// truncated to a fixed 16-hex-char prefix. Shared by the write path
+// (tickets_sage.go, on every completed stamp) and the freshness read path
+// (sageReviewFreshnessCheck's primary digest comparison) so both agree on
+// what "the digest" means.
+func sageReviewBodyDigest(text string) string {
+	sum := sha256.Sum256([]byte(normalizeTicketForSageFreshness(text)))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// sageReviewCurrentBodyDigest reads the ticket file on disk and returns its
+// body digest. This is the entry point tickets_sage.go's write path calls
+// when stamping a stage completed.
+func sageReviewCurrentBodyDigest(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return sageReviewBodyDigest(string(raw)), nil
 }
 
 func sageGitOutput(root string, args ...string) ([]byte, error) {

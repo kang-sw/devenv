@@ -8,40 +8,55 @@ Target: user request
 
 ## Invariants
 
-- Load `ai-docs/_review.local.md` before any review step; run setup if absent.
+Config Load
+- Branch scenario: load `ai-docs/_review.local.md` before any review step; run setup if absent.
+- Range scenario: load `ai-docs/_review.local.md` if present; if absent, proceed on built-in Review Phases / Landing Lens / Deep Review defaults and never run setup.
+- A present config's Review Phases, Checklist, Blocked Paths, and Deep Review sections are honored by both scenarios; `## Landing Lens` is honored by the range scenario only — branch scenario ignores it even if present.
+
+Landing Lens
+- Range scenario runs a required `landing` phase — convention adherence plus spec/mental-model update completeness — using config text if `## Landing Lens` is present, else the built-in default.
+- Branch scenario never runs the `landing` phase; no config section re-enables it there.
+
 - Never push, force-push, or modify remote branches without user confirmation.
-- Record the current branch before checkout; offer to restore it after review.
+- Branch scenario: record the current branch before checkout; offer to restore it after review.
 - Workflow mutations (fixes, commits) are lead-owned; route through `{{.SkillNamespace}}:lead-discuss` and the lead-implement procedure.
 - All written artifacts (review config, findings) must be in English regardless of conversation language.
 
-## On: invoke [branch?]
+## On: invoke [branch?] [range: <base>..<head>]
+
+Determine scenario kind first: `range` argument supplied → range scenario; `branch` argument or default → branch scenario. `range` and `branch` are mutually exclusive; if both are supplied, range takes precedence. Each sub-step below follows the branch matching the determined scenario.
 
 ### 1. Load config
 
 1. Check for `ai-docs/_review.local.md`.
-2. If absent → go to **On: setup**.
-3. Load all sections present: Remote, Branch Naming, Review Phases, Checklist, Blocked Paths, Comment Method, Merge Approval Method, Notification Method, Contributor Workflow, Deep Review.
+2. Branch scenario, absent → go to **On: setup**.
+3. Range scenario, absent → proceed on the built-in Review Phases / Landing Lens / Deep Review defaults from **On: setup**'s Review Config Template; never go to **On: setup**.
+4. If present (either scenario): load all sections present: Remote, Branch Naming, Review Phases, Landing Lens, Checklist, Blocked Paths, Comment Method, Merge Approval Method, Notification Method, Contributor Workflow, Deep Review. Range scenario ignores Remote, Branch Naming, Comment Method, Merge Approval Method, Notification Method, and Contributor Workflow — none apply to a checkout-free review. Branch scenario ignores Landing Lens regardless of Contributor Workflow — it is a range-scenario-only check, not a contributor-type exception.
 
-### 2. Identify branch
+### 2. Identify branch (branch scenario only)
 
 1. If `branch` argument provided, use it.
 2. Else → go to **On: branch discovery**.
+3. Range scenario: skip this sub-step — the caller-supplied `base..head` is the identified target.
 
 ### 3. Prepare
 
-1. Record `<current-branch>`.
-2. Run fetch per Remote config.
-3. Checkout target branch.
-4. Apply `judge: has-blocked-paths` → if any blocked path found in diff, emit BLOCKED verdict and stop.
+1. Branch scenario: record `<current-branch>`.
+2. Branch scenario: run fetch per Remote config.
+3. Branch scenario: checkout target branch.
+4. Apply `judge: has-blocked-paths` against the target diff (branch scenario: post-checkout diff; range scenario: `range: <base>..<head>` diff, no checkout) → if any blocked path found, emit BLOCKED verdict and stop.
 
 ### 4. Review
 
-1. Run `{{.McpNamespace}}/git.diff(mode: "stat")` → present scope summary.
+1. Branch scenario: run `{{.McpNamespace}}/git.diff(mode: "stat")` → present scope summary.
+   Range scenario: run `{{.McpNamespace}}/git.diff(range: "<base>..<head>", mode: "stat")` → present scope summary; use `{{.McpNamespace}}/git.log(range: "<base>..<head>")` for commit enumeration.
 2. Apply `judge: follows-ws-workflow` → determine intention analysis path.
 3. Apply `judge: is-large-diff` → determine phase execution depth.
-4. Run review phases in order: intent, alignment, risk, then any custom phases from config.
+4. Run review phases in order: intent, alignment, risk, then any custom phases from config. Range scenario also runs the required `landing` phase last (see Invariants: Landing Lens).
 5. Apply `judge: has-checklist` → present checklist items; collect user confirmation per item.
-6. Aggregate findings → emit verdict in **On: verdict**.
+6. Aggregate findings → determine verdict (BLOCKED / LGTM / NEEDS FIX / OPEN).
+7. Range scenario only: call `{{.McpNamespace}}/review.marker(bootstrap: true)` first, only to seed a baseline entry when the ledger is empty — its returned entry does not feed the stamp below. Map the step-6 verdict to a ledger token (LGTM → `pass`; NEEDS FIX → `concern` or `block` by severity; OPEN → `concern`), then call `{{.McpNamespace}}/review.stamp(base: <range's own invocation base argument>, head: <range's own invocation head argument>, verdict: <mapped token>, ref: <routed ticket stem, required only when verdict is block>)` — the invocation's own `<base>..<head>` (from **On: invoke**) IS the range just reviewed; record it verbatim, never the marker entry's Base (which drifts to the original bootstrap commit on every sweep after the first). Fires for every completed range-scenario verdict from this step, regardless of which `On: verdict` branch follows; branch scenario never calls this. This step is the ledger's single writer: only this step, via `review.stamp`, ever advances the review-watermark frontier — no other skill or gate calls `review.stamp`. The frontier resolves to the last clearing verdict (`pass`, `concern`, or the `bootstrap` floor); a `block` or `routed` entry never advances it, so a stamped `block` (or its `routed` corrective follow-up) holds the frontier at whatever clearing entry preceded it until a later sweep clears the range with `pass` or `concern`.
+8. Proceed to **On: verdict**.
 
 ---
 
@@ -82,6 +97,14 @@ Commit messages and ## AI Context match the stated ticket or MR purpose.
 Diff is consistent with ai-docs/spec and mental-model docs.
 ### risk
 No breaking changes, security issues, or missing tests without justification.
+
+## Landing Lens                        ← optional to customize; range scenario always runs it (built-in default below if omitted); branch scenario never runs it
+Diff follows repo conventions (AGENTS.md, skill-authoring, wsflow-mirroring
+where applicable). Caller-visible behavior changes have a matching spec update
+(spec describes caller-visible behavior); workflow-system modification-relevant
+changes have a matching mental-model update (mental model captures
+modification-relevant operational knowledge) — each doc updated per its own
+function, not just "any doc touched."
 
 ## Checklist                           ← optional
 - [ ] <gate item>
@@ -160,11 +183,11 @@ Intent is unclear or architectural judgment is required before a fix decision.
 ### judge: has-blocked-paths
 
 Fires when `## Blocked Paths` is present in config.
-Check diff for matching paths immediately after checkout; emit BLOCKED before running review phases.
+Check the target diff for matching paths before running review phases (branch scenario: post-checkout; range scenario: `range: <base>..<head>` diff, no checkout); emit BLOCKED if any match.
 
 ### judge: follows-ws-workflow
 
-Auto-detect from commit log of the target branch:
+Auto-detect from the commit log (branch scenario: target branch; range scenario: `range: <base>..<head>` log):
 - **YES**: all commits have `## AI Context` sections and use conventional commit format.
 - **PARTIAL** (some commits qualify): treat as NO (conservative).
 - **NO**: plain commit messages without structured AI context.

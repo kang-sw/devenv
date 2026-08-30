@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
@@ -287,6 +289,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
+			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
+			if nudge := reviewTrackNudge(canonical); nudge != "" {
+				body = injectReviewTrackNudge(body, nudge)
+				_ = s.sessions.setReviewTrackNudgeShown(mintedKey)
+			}
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -319,6 +326,13 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			}
 			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
+			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), rec.Root))
+			if !rec.ReviewTrackNudgeShown {
+				if nudge := reviewTrackNudge(rec.Root); nudge != "" {
+					body = injectReviewTrackNudge(body, nudge)
+					_ = s.sessions.setReviewTrackNudgeShown(key)
+				}
+			}
 		}
 	}
 

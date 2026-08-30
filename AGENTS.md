@@ -104,6 +104,25 @@ branch and push there, reserving `main` for release-worthy merges. Local commits
 on `main` are fine when a flow calls for them, but only push `main` when the
 merge is a release (or the user explicitly asks).
 
+### Review Policy
+
+```text
+review-track: develop
+release-boundary: present
+rendezvous-backend: canary
+```
+
+`review-track` is the branch the review sweep tracks (work lands and is
+reviewed on `develop`; shipping is `develop` -> `main`). `release-boundary:
+present` declares that this project has a real `develop` -> `main` release
+step, gated by the `lead-ship` release gate (`ai-docs/spec/workflow-skills.md`
+`{#260830-review-policy-config-surface}`): before promoting `develop` to
+`main`, ship reads the review-watermark frontier head and requires the range
+since it to be clear. `rendezvous-backend: canary` uses the append-only
+review-ledger canary (no GitHub branch-protection config needed) rather than
+the `platform` backend, matching this project's current
+single-maintainer-serial posture.
+
 ### Commit Rules
 
 Auto-create one commit per logical unit unless the user asks not to commit.

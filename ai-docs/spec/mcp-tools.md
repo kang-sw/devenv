@@ -130,9 +130,18 @@ a subagent that did not inherit the lead's process, or a lead that restarted
 mid-delegation — resolves a key by reading its file, so session continuity does
 not depend on a shared in-memory registry.
 
-`login` is a bootstrap verb only: there is no logout and no eviction (rows are a
-tiny `(word-chain key, root path)` bounded by the number of distinct roots a
-fleet touches).
+`login` is a bootstrap verb only: there is no logout, but records do age out.
+Every successful keyed resolution — root-aware calls, lead-only keyed tools,
+and the session-state read seams (`agenda`/`todo`/`note` reads, including the
+seams that bypass `lookup` and read the record directly) — refreshes the
+record file's mtime, throttled to at most once per hour so a burst of calls
+against the same session issues one `Chtimes`, not one per call. `ferrule`
+piggybacks a best-effort prune scan on its own bootstrap call, gated to at most
+once per 24h by a marker file in `keys/`: the scan deletes any `keys/*.json`
+record whose mtime is older than 30 days. Pruning is mtime-only (record
+contents are never parsed), so a malformed record cannot crash the scan and is
+pruned/kept purely on file age like any other record; a record touched by
+recent activity survives regardless of how old the session itself is.
 
 Every keyed call honors an `unknown_session` recovery contract: when a key has no
 record file (a genuinely unknown or path-unsafe key, or state cleared by deleting
@@ -166,9 +175,10 @@ Gating).
 >   invocation by subagents that share the lead's MCP connection; it is not a hard
 >   barrier (a name-aware caller can still keyless-bootstrap).
 > - The store is filesystem-backed (one record file per key under a flat `keys/`
->   directory) and survives a server restart. There is still no logout and no
->   automatic eviction, though deleting a key file is now a physically possible
->   removal path (deferred).
+>   directory) and survives a server restart. There is still no logout, but
+>   eviction is no longer deferred: activity touches a record's mtime (1h
+>   guard) and `ferrule` prunes records idle past 30 days (≤ once per 24h
+>   scan cadence) — see the touch/prune lifecycle described above.
 
 ### Session-Key Lineage And Child Enumeration {#260619-session-key-lineage-children}
 
@@ -1364,11 +1374,21 @@ are hard findings that fail the verdict (`OK: false`). Missing spec addressing o
 a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
 failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
 a hard block is separate deferred scope. A ready ticket whose completed
-sage-review stage is stale against the Git commit that first recorded that
-completed posture also emits a soft `sage-review-freshness` **warning**; the
-warning names the affected stage(s), the review baseline commit, and the
-instruction to inspect the ticket diff and decide whether to rerun that Sage
-stage. An unresolved `### Phase N:` heading
+sage-review stage is stale also emits a soft `sage-review-freshness`
+**warning**; the warning names the affected stage(s), the review baseline,
+and the instruction to inspect the ticket diff and decide whether to rerun
+that Sage stage. Freshness is decided primarily by comparing a
+`sage-review-<stage>-reviewed` digest recorded at stamp time (sha256 of the
+body-only normalized ticket, truncated to a 16-hex-character prefix) against
+the current body's digest — no Git walk when a digest is recorded. A legacy
+ticket with no recorded digest falls back to the Git commit that most
+recently recorded that stage's completed posture — the latest
+completed-transition, not the first, so a reset-then-re-stamped ticket
+resolves against its newest stamp. Both paths compare the same body-only
+normalization: the markdown below the frontmatter fence, trimmed, so the
+whole frontmatter block — including the new `-reviewed` field itself — is
+excluded, and a frontmatter-only edit (`title:`, `related:`, any
+`sage-review*` posture) never trips staleness. An unresolved `### Phase N:` heading
 (no `### Result` before the next Phase heading or EOF, not marked `[dropped]`)
 on a `.done`/`.dropped` ticket is likewise a soft **warning** only, matching
 `tickets.close`'s own tip — the SOFT seed of the 260723 Phase 2 must-not-forget
@@ -1525,16 +1545,32 @@ posture. The tool never spawns reviewers — for `run` it names the reviewer(s)
 to dispatch and leaves spawning to the lead.
 
 For a completed design or completeness stage, `tickets.sage_gate` performs an
-additive Git-inferred freshness check before returning a terminal skip. It finds
-the commit that made the relevant stage's Sage posture become `completed`,
-compares the current ticket content against that baseline, and returns
-`check_review_required` when any non-Sage-posture content changed. The result
-names the affected completed stage(s), the review baseline commit, and an
-instruction to inspect the diff and decide whether to rerun those stage(s). The
-comparison deliberately does not judge prose meaning: it ignores only
-Sage-owned posture fields (`sage-review`, `sage-review-design`,
-`sage-review-completeness`) and pure ticket path/status moves. Missing Git
-history or an unreadable historical blob degrades to the prior no-warning path.
+additive freshness check before returning a terminal skip.
+`tickets.sage_stamp` records a `sage-review-<stage>-reviewed` digest (sha256
+of the body-only normalized ticket, truncated to a 16-hex-character prefix)
+alongside every `completed` posture it writes; when that digest is present,
+freshness compares it directly against the current body's digest with no Git
+walk at all — equal is fresh, differing returns `check_review_required` with
+`review_baseline` set to a non-commit sentinel (`the last recorded digest`)
+since no commit was inspected on this path. A legacy ticket with no recorded
+digest falls back to the Git commit that most recently recorded that stage's
+`completed` posture — the latest completed-transition, not the first, so a
+ticket that was reset to a non-terminal posture and later re-stamped resolves
+against its newest stamp rather than a stale earlier one — and compares body
+content the same way. Both paths use the identical body-only normalization:
+the markdown below the frontmatter fence, trimmed, so the whole frontmatter
+block (the new `-reviewed` field, `sage-review`/`sage-review-design`/
+`sage-review-completeness`, `title`, `related`, and everything else in it) is
+excluded from the comparison — a frontmatter-only edit never trips
+staleness, and the new field can never perturb posture parsing or its own
+digest. The result names the affected completed stage(s), the review
+baseline (a digest sentinel or a commit), and an instruction to inspect the
+diff and decide whether to rerun those stage(s). Missing Git history or an
+unreadable historical blob on the fallback path degrades to the prior
+no-warning path. Backward compatibility is by construction: a ticket stamped
+before this change has no recorded digest, so it resolves through the
+fallback until its next `tickets.sage_stamp` call records one — no migration
+pass touches existing tickets.
 
 `tickets.sage_gate` **commits nothing and returns no commit metadata**. This is
 a caller-visible contract change: the ask-decline path previously produced a
@@ -1840,6 +1876,118 @@ count uses the same whitespace-trim blankness rule as the error condition
 above, not a raw non-empty-string count, so it accurately reads zero for an
 all-whitespace array instead of miscounting blank entries as content.
 {#260725-git-commit-ai-context-condition-reporting}
+
+## Review Watermark Ledger Tools {#260830-review-watermark-ledger-tools}
+
+The review-watermark ledger is a single tracked, append-only text file
+(`ai-docs/.review-ledger.md`) recording review verdicts per reviewed commit
+range, so "what has already been reviewed" resolves by reading the ledger's
+last entry rather than by graph-walking or asking Git which commit last
+touched a file. Each entry is one line, `<base>..<head>: <verdict>[ ->
+<ref>]`, with `verdict` one of `pass`, `concern`, `block`, `routed`, or
+`bootstrap`. A freshly created ledger file begins with a `#`-prefixed
+self-documenting banner — a canary advisory addressed to whoever resolves a
+merge conflict on the ledger's tail (two branches that reviewed and appended
+independently), telling them to integrate both branches' reviewed ranges rather
+than blindly discard one side; the banner and every other `#`-comment line are
+skipped when resolving the latest entry, so they never shift the marker. Two
+tools are the sole caller-visible way to grow the ledger; neither has a CLI
+mirror (`#260505-cli-mirror-coverage`).
+
+`review.marker` reads the ledger's **frontier** entry — the last *clearing*
+entry (verdict `pass`, `concern`, or the `bootstrap` floor), skipping any
+trailing `block` or `routed` entry rather than reporting the raw latest
+line — and returns it as `review ledger latest entry:
+<base>..<head>: <verdict>[ -> <ref>]`. A `block` or `routed` tail therefore
+never advances what `review.marker` reports; the frontier holds at whatever
+clearing entry preceded it until a later sweep stamps a `pass` or `concern`
+covering the range. An empty ledger (missing file, or a file with zero
+parseable entries, or one whose only entries are `block`/`routed`) returns
+`review ledger has no entry yet; call review.marker(bootstrap: true) to
+establish a baseline` instead. The optional `bootstrap` boolean is the
+**sole caller-opted-in trigger** that may grow the ledger from this tool: when
+`true` and the ledger has zero parseable entries, it resolves the working
+root's current `HEAD` and appends a `<HEAD>..<HEAD>: bootstrap` entry,
+returning `bootstrapped review ledger baseline: <base>..<head>: bootstrap`.
+When `bootstrap: true` is passed but the ledger already has a resolvable
+frontier entry, the call is a no-op — it returns the existing frontier entry
+exactly as a bare read would, never a second bootstrap line and never an
+error.
+
+An optional `format: "json"` argument switches the response to a structured
+`{base, head, verdict, ref, found}` object built from the same frontier
+entry, mirroring `tickets.status`'s `format=json` convention
+(`wantsJSON`/`toolJSONResponse`). This is the bare-SHA, no-string-scraping
+output a caller like the `lead-ship` release gate consumes to resolve
+`<frontier-head>..HEAD` without parsing the text-mode sentence.
+
+`review.stamp` appends one verdict entry, recording a completed sweep over an
+explicit `base`/`head` range. `base`, `head`, and `verdict` are required;
+`ref` (a routed ticket stem) is required only when `verdict` is `block`, and
+optional for every other verdict. The ledger file is append-only at the
+storage layer, not just by convention — an append opens the file
+`O_APPEND|O_CREATE|O_WRONLY` and never reads or rewrites an existing line, so
+no call to this tool can alter or drop a prior entry. `base` and `head` are
+validated as SHA-shaped (7-40 lowercase hex characters); an out-of-shape
+value, an unknown `verdict` token, or a `block` verdict with an empty `ref`
+is rejected before any write, surfaced verbatim as a tool error. On success
+the tool returns `stamped review ledger: <base>..<head>: <verdict>[ ->
+<ref>]`.
+
+Ledger-honesty guard: `review.marker` and `review.stamp` are the **only**
+tools that mutate the ledger. The checkpoint nudge described below reads the
+ledger only — it never bootstraps and never appends — so a caller can trust
+that the ledger only grows through an explicit, caller-opted-in
+`review.marker(bootstrap: true)` or `review.stamp` call, never as a side
+effect of routine session activity.
+
+### Review Watermark Checkpoint Nudge {#260830-review-watermark-checkpoint-nudge}
+
+Four tools each surface a cheap, read-only advisory when the review-watermark
+ledger looks stale relative to the project's review track (the resolved
+default branch — `origin/HEAD`'s target, else local `main`, else local
+`master`): `tickets.close`, `workflow_manual` (FRESH-with-root and CONTINUE
+branches only), `enter.implement` (both direct and delegated branches), and
+`enter.proceed`. The nudge is fail-open and purely advisory: it never blocks
+the call it rides on, and a resolution failure (no review track, no
+readable ledger) silently produces no text rather than an error.
+
+The check reads the ledger's frontier entry (`wsreview.Frontier`, never
+`wsreview.Bootstrap` or `wsreview.Append` — this is the read-only half of the
+ledger-honesty guard above) — the same last-clearing-entry resolution
+`review.marker` uses, so a tail `block` or `routed` entry shifts the nudge's
+origin back to the last `pass`/`concern`/`bootstrap` entry rather than the
+raw latest line — and, when found, counts commits between the entry's `head`
+(the marker — the ledger's own resumption point, not its `base`) and the
+review track's tip. Three states:
+
+- **No ledger entry at all**: `no review ledger yet for this project; run a
+  sweep (lead-review range: <base>..<head>) to establish a baseline`.
+- **Behind the size threshold** (>= 20 commits ahead of the marker): a
+  "large-accumulation" nudge naming the count and recommending a sweep soon.
+  20 is a commit-count analog of `lead-review`'s Deep Review/is-large-diff
+  file-and-line magnitude — a deliberate unit reinterpretation, not a shared
+  constant, since this check must stay a `git rev-list --count` call and
+  never compute a diff stat.
+- **Behind the staleness threshold** (>= a configurable commit count, default
+  10, and below the size threshold): a gentler nudge that a sweep "would
+  refresh it." The staleness count is read from a `## Checkpoint Nudge` /
+  `staleness: <N> commits` line in the machine-local, gitignored
+  `ai-docs/_review.local.md`; a missing file, section, or malformed value
+  fails open to the default of 10. Because the size threshold is checked
+  first, raising the staleness knob above 20 cannot suppress the
+  large-accumulation nudge — the knob only tunes the sub-20 band.
+- **Fresh** (below the staleness threshold): no text.
+
+Each of the four call sites injects the same advisory text, differing only in
+presentation. `tickets.close`, `enter.implement`, and `enter.proceed` prefix
+it `review-watermark: ` and append it to their own response text (the
+text-mode raw verdict, for the latter two). The two `workflow_manual`
+branches instead prepend it unprefixed as a top-of-body banner block, using
+the same no-op-when-empty injector used for the Bootstrap Staleness, Doc
+Coverage, Manuals Ambient, and scope-announcement blocks
+(`#260703-bootstrap-staleness-warning`) — so an empty advisory renders
+nothing, matching those siblings' silent-when-quiet contract.
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 

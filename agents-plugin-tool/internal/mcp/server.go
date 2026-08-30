@@ -22,6 +22,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -1245,7 +1246,65 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if nudge := implementCloseMergeReviewNudge(root); nudge != "" {
 			text += "next_instruction: " + nudge + "\n"
 		}
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), root); reviewNudge != "" {
+			text += "review-watermark: " + reviewNudge + "\n"
+		}
 		return toolTextResponse(req.ID, text, nil)
+	case "review.marker":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if boolArgument(params.Arguments["bootstrap"]) {
+			_, created, err := wsreview.Bootstrap(context.Background(), root)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			// Re-resolve via the frontier — a just-created bootstrap entry is
+			// itself a clearing/floor verdict, so this is a no-behavior-change
+			// simplification for the reported entry, not a special case: both
+			// the created and no-op branches read the same frontier function.
+			// The created/no-op wording distinction is preserved, only the
+			// entry-lookup path is unified.
+			entry, found, err := wsreview.Frontier(root)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, reviewMarkerJSONValue(entry, found), nil)
+			}
+			if !found {
+				return toolTextResponse(req.ID, "review ledger has no entry yet; call review.marker(bootstrap: true) to establish a baseline\n", nil)
+			}
+			if created {
+				return toolTextResponse(req.ID, fmt.Sprintf("bootstrapped review ledger baseline: %s..%s: %s\n", entry.Base, entry.Head, entry.Verdict), nil)
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("review ledger latest entry: %s..%s: %s%s\n", entry.Base, entry.Head, entry.Verdict, reviewRefSuffix(entry.Ref)), nil)
+		}
+		entry, found, err := wsreview.Frontier(root)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, reviewMarkerJSONValue(entry, found), nil)
+		}
+		if !found {
+			return toolTextResponse(req.ID, "review ledger has no entry yet; call review.marker(bootstrap: true) to establish a baseline\n", nil)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("review ledger latest entry: %s..%s: %s%s\n", entry.Base, entry.Head, entry.Verdict, reviewRefSuffix(entry.Ref)), nil)
+	case "review.stamp":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		base, _ := params.Arguments["base"].(string)
+		head, _ := params.Arguments["head"].(string)
+		verdict, _ := params.Arguments["verdict"].(string)
+		ref, _ := params.Arguments["ref"].(string)
+		if err := wsreview.Append(root, wsreview.Entry{Base: base, Head: head, Verdict: verdict, Ref: ref}); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("stamped review ledger: %s..%s: %s%s\n", base, head, verdict, reviewRefSuffix(ref)), nil)
 	case "tickets.move":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1690,6 +1749,12 @@ func canonicalSetupRoot(root string) (string, error) {
 // ephemeral session key, store the {root, scope} entry in the registry, and
 // return the key to the caller.
 func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) response {
+	// Best-effort prune of stale key records, throttled to at most once per
+	// pruneScanCadence internally. Piggybacks on every bootstrap call rather
+	// than a dedicated tool or background goroutine; a prune hiccup must never
+	// fail bootstrap, so its result is intentionally discarded.
+	s.sessions.maybePrune()
+
 	rootArg, _ := arguments["root"].(string)
 	if strings.TrimSpace(rootArg) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: root is required"))
@@ -4116,6 +4181,31 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "review.marker",
+			"description": "Read the review-watermark ledger's frontier entry — the last clearing (pass/concern/bootstrap) entry; a trailing block/routed tail does not advance it — as base..head: verdict[ -> ref]. Optional bootstrap=true creates a baseline entry at current HEAD when no entry exists yet (idempotent on repeat) — the only caller-opted-in bootstrap trigger; a bare marker read never bootstraps. Defaults to compact text; use format=json for structured base/head/verdict/ref/found output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"bootstrap": boolProperty("When true and no ledger entry exists, create a baseline bootstrap entry at current HEAD. No-op (returns the existing entry) when one already exists."),
+					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
+			},
+		},
+		{
+			"name":        "review.stamp",
+			"description": "Append a verdict entry to the review-watermark ledger, recording a completed sweep over base..head. Verdict is one of pass, concern, block, routed, bootstrap; ref (a routed ticket stem) is required when verdict is block.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"base":    stringProperty("Reviewed range's base commit (SHA-shaped)."),
+					"head":    stringProperty("Reviewed range's head commit (SHA-shaped)."),
+					"verdict": stringProperty("One of: pass, concern, block, routed, bootstrap."),
+					"ref":     stringProperty("Routed ticket stem. Required when verdict is block; optional otherwise."),
+				},
+				"required": []string{"base", "head", "verdict"},
+			},
+		},
+		{
 			"name":        "tickets.move",
 			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves stamp or validate a resolved sage-review posture from config. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
 			"inputSchema": map[string]any{
@@ -4856,6 +4946,30 @@ func int64FromArgument(value any, fallback int64) int64 {
 		}
 	}
 	return fallback
+}
+
+// reviewRefSuffix renders a ledger entry's optional routed-ticket-stem Ref
+// as its display-text " -> <ref>" tail, or "" when Ref is empty.
+func reviewRefSuffix(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	return " -> " + ref
+}
+
+// reviewMarkerJSON is review.marker's format=json structured output: the
+// bare-SHA/structured frontier head a caller (the lead-ship gate, in
+// particular) consumes without string-scraping the text-mode response.
+type reviewMarkerJSON struct {
+	Base    string `json:"base"`
+	Head    string `json:"head"`
+	Verdict string `json:"verdict"`
+	Ref     string `json:"ref,omitempty"`
+	Found   bool   `json:"found"`
+}
+
+func reviewMarkerJSONValue(entry wsreview.Entry, found bool) reviewMarkerJSON {
+	return reviewMarkerJSON{Base: entry.Base, Head: entry.Head, Verdict: entry.Verdict, Ref: entry.Ref, Found: found}
 }
 
 func stringList(value any) []string {

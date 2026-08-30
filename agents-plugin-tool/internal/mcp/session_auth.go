@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -63,9 +64,36 @@ type sessionRecord struct {
 	// "clear the note" write is just writing an empty string, not a separate
 	// verb. See session_state.go's handleSessionNote.
 	Note string `json:"note,omitempty"`
+	// ReviewTrackNudgeShown marks that the review-track config nudge (see
+	// review_track_alarm.go) has already fired once for this session. Added as
+	// an additive field; older records parse with the zero value (false), so
+	// the nudge still fires on the first workflow_manual call after an
+	// upgrade — the correct "not shown yet" behavior.
+	ReviewTrackNudgeShown bool `json:"review_track_nudge_shown,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
+
+// touchGuardWindow throttles touch() so a burst of keyed calls against the same
+// session only issues one Chtimes per window, not one per call.
+//
+// pruneScanCadence bounds how often maybePrune() actually walks keys/: a scan
+// is skipped if the prune marker was refreshed less than this long ago.
+//
+// keyRetentionAge is the mtime age past which a key record file is pruned.
+// Touch keeps active sessions' mtimes fresh, so retention only bites records
+// that have gone genuinely idle for this long.
+const (
+	touchGuardWindow = time.Hour
+	pruneScanCadence = 24 * time.Hour
+	keyRetentionAge  = 30 * 24 * time.Hour
+)
+
+// pruneMarkerName is a bookkeeping file (not a session key) placed directly in
+// keys/ to record when the last prune scan ran. It deliberately has a
+// non-".json" extension so children's directory walk (which filters to
+// ".json" entries) and mint's key namespace both ignore it automatically.
+const pruneMarkerName = ".prune-marker"
 
 // sessionKeyFilenamePattern bounds which key strings may become a file path. It
 // is deliberately a path-safety guard (no separators, no dots, lowercase alnum +
@@ -79,7 +107,11 @@ var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 // the source of truth, not the process: a fresh MCP server instance (or a lead
 // that restarted mid-delegation) resolves a key by reading its file, so session
 // continuity no longer depends on a shared in-memory registry. There is no
-// eviction or logout; deleting the file is the only physical removal.
+// logout, but records do age out: every successful keyed resolution touches a
+// record's mtime (see touch, guarded to at most once per touchGuardWindow),
+// and maybePrune deletes records whose mtime exceeds keyRetentionAge, scanned
+// at most once per pruneScanCadence. Deleting the file remains the only
+// immediate/manual removal path.
 //
 // The flat layout (keys/<key>.json) is required by the access pattern: a caller
 // presents only the opaque key, never its root, so the file path must be
@@ -178,6 +210,7 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 	if !ok {
 		return sessionEntry{}, false
 	}
+	s.touch(dir, key)
 	return sessionEntry{
 		root:   record.Root,
 		scope:  toolRole(record.Scope),
@@ -224,6 +257,10 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 	if _, ok := records[parentKey]; !ok {
 		return []sessionChild{}, nil
 	}
+	// Touch only parentKey's own record: this is a read of parentKey's activity,
+	// not of every other session visited while walking the directory to build
+	// the adjacency map.
+	s.touch(dir, parentKey)
 
 	type queued struct {
 		key   string
@@ -286,6 +323,18 @@ func (s *sessionStore) setNote(targetKey, text string) error {
 	})
 }
 
+// setReviewTrackNudgeShown marks the review-track config nudge as already
+// fired for targetKey's own session record, via the same atomic
+// read-modify-write primitive as setNote. Called by the workflow_manual
+// wiring sites (review_track_alarm.go) immediately after a non-empty nudge is
+// injected, so a later same-session call does not repeat it.
+func (s *sessionStore) setReviewTrackNudgeShown(targetKey string) error {
+	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
+		r.ReviewTrackNudgeShown = true
+		return nil
+	})
+}
+
 // getOverride returns the Overrides entry for the given item key in the session
 // record identified by sessionKey. Returns ("", false) when the session is not
 // found, the key is path-unsafe, or the item is absent.
@@ -304,6 +353,7 @@ func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	s.touch(dir, sessionKey)
 	if record.Overrides == nil {
 		return "", false
 	}
@@ -322,7 +372,11 @@ func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.readRecord(dir, sessionKey)
-	if !ok || len(record.Overrides) == 0 {
+	if !ok {
+		return nil
+	}
+	s.touch(dir, sessionKey)
+	if len(record.Overrides) == 0 {
 		return nil
 	}
 	keys := make([]string, 0, len(record.Overrides))
@@ -376,6 +430,26 @@ func (s *sessionStore) deleteOverride(sessionKey, itemKey string) error {
 	}
 	delete(record.Overrides, itemKey)
 	return s.writeRecordAtomic(dir, sessionKey, record)
+}
+
+// touch refreshes the mtime of key's record file to mark it as recently
+// active, unless it was already touched within touchGuardWindow (throttling a
+// burst of keyed calls to at most one Chtimes per window). Best-effort: stat
+// and Chtimes failures are ignored, matching the non-fatal style of the other
+// read-only session lookups. Callers are expected to have already validated
+// key via a prior readRecord success (mint/readRecord already applies
+// sessionKeyFilenamePattern), so touch does not re-derive that guard.
+func (s *sessionStore) touch(dir, key string) {
+	path := s.keyPath(dir, key)
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if time.Since(info.ModTime()) < touchGuardWindow {
+		return
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
 }
 
 func (s *sessionStore) readRecord(dir, key string) (sessionRecord, bool) {
