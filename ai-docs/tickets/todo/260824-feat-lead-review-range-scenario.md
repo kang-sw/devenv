@@ -39,6 +39,26 @@ Circled numbers denote the epic's sibling children: ② = this ticket
   spec/mental-model updates they were never expected to author. Captured as a
   folded required-check; whether it later splits into its own separate posture is
   deferred (epic Deferred note).
+- **Config-load behavior is scenario-scoped (2026-08-30 discuss).** Today's
+  Invariant "load `ai-docs/_review.local.md`; **run setup if absent**" forces a
+  9-question interactive setup when the config file is missing. That is correct
+  only for the **branch/PR scenario** — an explicit human invocation whose config
+  is dominated by **collaboration/remote mechanics** (Remote fetch, Branch Naming,
+  Comment/Merge-Approval/Notification Method, Contributor Workflow) that only
+  interactive setup can supply. The **range scenario** is caller-invoked (the
+  sweep/gate in ③/④), touches no checkout/remote/merge, and needs only
+  **review-substance** settings that **already ship with built-in defaults**
+  (intent/alignment/risk phases, deep-review threshold 20 files/500 lines, plus
+  the landing lens). Therefore the range scenario **runs on built-in defaults when
+  `_review.local.md` is absent and never forces interactive setup**; it still
+  *respects* the config's review-substance sections when present. Forced setup
+  stays exclusive to the branch scenario. Rationale: the automated sweep/gate path
+  — and the git-naive brute-persona relief valve that rides it
+  (`260829-research-review-checkpoint-relief-valve`) — must not be blocked by an
+  interactive setup, and the collaboration/remote half of the config is
+  meaningless for a checkout-free range review. This makes "range mode × config
+  presence" genuinely orthogonal (the prior coupling was a branch-scenario
+  assumption baked into a shared Invariant).
 
 ## Phases
 
@@ -53,7 +73,11 @@ Circled numbers denote the epic's sibling children: ② = this ticket
 
 Verification: a range scenario over a known `base..head` produces the same
 phase/verdict flow as a branch scenario over the equivalent branch diff;
-`is-large-diff`/Deep Review threshold still trips on a large range.
+`is-large-diff`/Deep Review threshold still trips on a large range. **A range
+scenario with no `ai-docs/_review.local.md` present runs on built-in defaults and
+never enters `On: setup`; the branch/PR scenario with no config still forces
+setup as today; a present config's review-substance sections are honored by
+both.**
 
 ### Phase 2: Landing lens as a review-config required-check
 
@@ -71,5 +95,7 @@ convention-conformant, doc-complete diff passes it.
 Target: the `lead-review` behavior area in `ai-docs/spec/workflow-skills.md`.
 Expected caller-visible change: `lead-review` gains a range/watermark scenario
 (diff selected by explicit `base..head` rather than only branch checkout) and a
-landing-lens required-check in its review config. No change to verdict
-vocabulary or the existing branch scenario.
+landing-lens required-check in its review config. The range scenario runs on
+built-in review-substance defaults when `_review.local.md` is absent and never
+forces interactive setup (setup-when-absent stays exclusive to the branch/PR
+scenario). No change to verdict vocabulary or the existing branch scenario.
