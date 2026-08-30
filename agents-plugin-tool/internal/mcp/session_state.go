@@ -769,7 +769,12 @@ func (s *sessionStore) readState(sessionKey string) (sessionRecord, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.readRecord(dir, sessionKey)
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return sessionRecord{}, false
+	}
+	s.touch(dir, sessionKey)
+	return record, true
 }
 
 // setAgenda upserts an agenda blob under key.

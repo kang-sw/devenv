@@ -1690,6 +1690,12 @@ func canonicalSetupRoot(root string) (string, error) {
 // ephemeral session key, store the {root, scope} entry in the registry, and
 // return the key to the caller.
 func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) response {
+	// Best-effort prune of stale key records, throttled to at most once per
+	// pruneScanCadence internally. Piggybacks on every bootstrap call rather
+	// than a dedicated tool or background goroutine; a prune hiccup must never
+	// fail bootstrap, so its result is intentionally discarded.
+	s.sessions.maybePrune()
+
 	rootArg, _ := arguments["root"].(string)
 	if strings.TrimSpace(rootArg) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: root is required"))

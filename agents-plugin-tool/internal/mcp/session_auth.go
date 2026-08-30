@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -66,6 +67,27 @@ type sessionRecord struct {
 }
 
 const sessionRecordSchemaVersion = 1
+
+// touchGuardWindow throttles touch() so a burst of keyed calls against the same
+// session only issues one Chtimes per window, not one per call.
+//
+// pruneScanCadence bounds how often maybePrune() actually walks keys/: a scan
+// is skipped if the prune marker was refreshed less than this long ago.
+//
+// keyRetentionAge is the mtime age past which a key record file is pruned.
+// Touch keeps active sessions' mtimes fresh, so retention only bites records
+// that have gone genuinely idle for this long.
+const (
+	touchGuardWindow = time.Hour
+	pruneScanCadence = 24 * time.Hour
+	keyRetentionAge  = 30 * 24 * time.Hour
+)
+
+// pruneMarkerName is a bookkeeping file (not a session key) placed directly in
+// keys/ to record when the last prune scan ran. It deliberately has a
+// non-".json" extension so children's directory walk (which filters to
+// ".json" entries) and mint's key namespace both ignore it automatically.
+const pruneMarkerName = ".prune-marker"
 
 // sessionKeyFilenamePattern bounds which key strings may become a file path. It
 // is deliberately a path-safety guard (no separators, no dots, lowercase alnum +
@@ -178,6 +200,7 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 	if !ok {
 		return sessionEntry{}, false
 	}
+	s.touch(dir, key)
 	return sessionEntry{
 		root:   record.Root,
 		scope:  toolRole(record.Scope),
@@ -224,6 +247,10 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 	if _, ok := records[parentKey]; !ok {
 		return []sessionChild{}, nil
 	}
+	// Touch only parentKey's own record: this is a read of parentKey's activity,
+	// not of every other session visited while walking the directory to build
+	// the adjacency map.
+	s.touch(dir, parentKey)
 
 	type queued struct {
 		key   string
@@ -304,6 +331,7 @@ func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	s.touch(dir, sessionKey)
 	if record.Overrides == nil {
 		return "", false
 	}
@@ -322,7 +350,11 @@ func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.readRecord(dir, sessionKey)
-	if !ok || len(record.Overrides) == 0 {
+	if !ok {
+		return nil
+	}
+	s.touch(dir, sessionKey)
+	if len(record.Overrides) == 0 {
 		return nil
 	}
 	keys := make([]string, 0, len(record.Overrides))
@@ -376,6 +408,26 @@ func (s *sessionStore) deleteOverride(sessionKey, itemKey string) error {
 	}
 	delete(record.Overrides, itemKey)
 	return s.writeRecordAtomic(dir, sessionKey, record)
+}
+
+// touch refreshes the mtime of key's record file to mark it as recently
+// active, unless it was already touched within touchGuardWindow (throttling a
+// burst of keyed calls to at most one Chtimes per window). Best-effort: stat
+// and Chtimes failures are ignored, matching the non-fatal style of the other
+// read-only session lookups. Callers are expected to have already validated
+// key via a prior readRecord success (mint/readRecord already applies
+// sessionKeyFilenamePattern), so touch does not re-derive that guard.
+func (s *sessionStore) touch(dir, key string) {
+	path := s.keyPath(dir, key)
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if time.Since(info.ModTime()) < touchGuardWindow {
+		return
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
 }
 
 func (s *sessionStore) readRecord(dir, key string) (sessionRecord, bool) {
