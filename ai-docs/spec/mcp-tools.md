@@ -1877,6 +1877,95 @@ above, not a raw non-empty-string count, so it accurately reads zero for an
 all-whitespace array instead of miscounting blank entries as content.
 {#260725-git-commit-ai-context-condition-reporting}
 
+## Review Watermark Ledger Tools {#260830-review-watermark-ledger-tools}
+
+The review-watermark ledger is a single tracked, append-only text file
+(`ai-docs/.review-ledger.md`) recording review verdicts per reviewed commit
+range, so "what has already been reviewed" resolves by reading the ledger's
+last entry rather than by graph-walking or asking Git which commit last
+touched a file. Each entry is one line, `<base>..<head>: <verdict>[ ->
+<ref>]`, with `verdict` one of `pass`, `concern`, `block`, `routed`, or
+`bootstrap`. Two tools are the sole caller-visible way to grow the ledger;
+neither has a CLI mirror (`#260505-cli-mirror-coverage`).
+
+`review.marker` reads the ledger's latest entry and returns it as
+`review ledger latest entry: <base>..<head>: <verdict>[ -> <ref>]`. An empty
+ledger (missing file, or a file with zero parseable entries) returns
+`review ledger has no entry yet; call review.marker(bootstrap: true) to
+establish a baseline` instead. The optional `bootstrap` boolean is the
+**sole caller-opted-in trigger** that may grow the ledger from this tool: when
+`true` and the ledger has zero parseable entries, it resolves the working
+root's current `HEAD` and appends a `<HEAD>..<HEAD>: bootstrap` entry,
+returning `bootstrapped review ledger baseline: <base>..<head>: bootstrap`.
+When `bootstrap: true` is passed but the ledger already has an entry, the call
+is a no-op — it returns the existing latest entry exactly as a bare read
+would, never a second bootstrap line and never an error.
+
+`review.stamp` appends one verdict entry, recording a completed sweep over an
+explicit `base`/`head` range. `base`, `head`, and `verdict` are required;
+`ref` (a routed ticket stem) is required only when `verdict` is `block`, and
+optional for every other verdict. The ledger file is append-only at the
+storage layer, not just by convention — an append opens the file
+`O_APPEND|O_CREATE|O_WRONLY` and never reads or rewrites an existing line, so
+no call to this tool can alter or drop a prior entry. `base` and `head` are
+validated as SHA-shaped (7-40 lowercase hex characters); an out-of-shape
+value, an unknown `verdict` token, or a `block` verdict with an empty `ref`
+is rejected before any write, surfaced verbatim as a tool error. On success
+the tool returns `stamped review ledger: <base>..<head>: <verdict>[ ->
+<ref>]`.
+
+Ledger-honesty guard: `review.marker` and `review.stamp` are the **only**
+tools that mutate the ledger. The checkpoint nudge described below reads the
+ledger only — it never bootstraps and never appends — so a caller can trust
+that the ledger only grows through an explicit, caller-opted-in
+`review.marker(bootstrap: true)` or `review.stamp` call, never as a side
+effect of routine session activity.
+
+### Review Watermark Checkpoint Nudge {#260830-review-watermark-checkpoint-nudge}
+
+Four tools each surface a cheap, read-only advisory when the review-watermark
+ledger looks stale relative to the project's review track (the resolved
+default branch — `origin/HEAD`'s target, else local `main`, else local
+`master`): `tickets.close`, `workflow_manual` (FRESH-with-root and CONTINUE
+branches only), `enter.implement` (both direct and delegated branches), and
+`enter.proceed`. The nudge is fail-open and purely advisory: it never blocks
+the call it rides on, and a resolution failure (no review track, no
+readable ledger) silently produces no text rather than an error.
+
+The check reads the ledger's latest entry (`wsreview.Read`, never
+`wsreview.Bootstrap` or `wsreview.Append` — this is the read-only half of the
+ledger-honesty guard above) and, when found, counts commits between the
+entry's `head` (the marker — the ledger's own resumption point, not its
+`base`) and the review track's tip. Three states:
+
+- **No ledger entry at all**: `no review ledger yet for this project; run a
+  sweep (lead-review range: <base>..<head>) to establish a baseline`.
+- **Behind the size threshold** (>= 20 commits ahead of the marker): a
+  "large-accumulation" nudge naming the count and recommending a sweep soon.
+  20 is a commit-count analog of `lead-review`'s Deep Review/is-large-diff
+  file-and-line magnitude — a deliberate unit reinterpretation, not a shared
+  constant, since this check must stay a `git rev-list --count` call and
+  never compute a diff stat.
+- **Behind the staleness threshold** (>= a configurable commit count, default
+  10, and below the size threshold): a gentler nudge that a sweep "would
+  refresh it." The staleness count is read from a `## Checkpoint Nudge` /
+  `staleness: <N> commits` line in the machine-local, gitignored
+  `ai-docs/_review.local.md`; a missing file, section, or malformed value
+  fails open to the default of 10. Because the size threshold is checked
+  first, raising the staleness knob above 20 cannot suppress the
+  large-accumulation nudge — the knob only tunes the sub-20 band.
+- **Fresh** (below the staleness threshold): no text.
+
+Each of the four call sites injects the same advisory text, differing only in
+presentation. `tickets.close`, `enter.implement`, and `enter.proceed` prefix
+it `review-watermark: ` and append it to their own response text (the
+text-mode raw verdict, for the latter two). The two `workflow_manual`
+branches instead prepend it unprefixed as a top-of-body banner block, using
+the same no-op-when-empty injector used for the Bootstrap Staleness, Doc
+Coverage, Manuals Ambient, and scope-announcement blocks
+(`#260703-bootstrap-staleness-warning`) — so an empty advisory renders
+nothing, matching those siblings' silent-when-quiet contract.
+
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
 `path.generate` allocates writable workflow artifact paths so workflow agents can

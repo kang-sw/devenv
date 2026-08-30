@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kang-sw/devenv/internal/wsreview"
 )
 
 // session_state.go implements the session state machine layered onto the
@@ -1018,6 +1021,11 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	text := fmt.Sprintf("entered %s mode; todo list replaced (%d items)\n%s\n", mode, len(todos), renderTodos(todos, false))
+	if record, ok := s.sessions.readState(sessionKey); ok {
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			text += "review-watermark: " + reviewNudge + "\n"
+		}
+	}
 	return toolTextResponse(id, text, nil)
 }
 
@@ -1069,7 +1077,11 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			text, err := implementResultJSON(result)
 			return toolTextResponse(id, text, err)
 		}
-		return toolTextResponse(id, result.Raw, nil)
+		raw := result.Raw
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			raw += "review-watermark: " + reviewNudge + "\n"
+		}
+		return toolTextResponse(id, raw, nil)
 	}
 
 	needReview, _ := args["need_review"].(bool)
@@ -1155,7 +1167,13 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 		text, err := proceedResultJSON(result)
 		return toolTextResponse(id, text, err)
 	}
-	return toolTextResponse(id, result.Raw, nil)
+	raw := result.Raw
+	if record, ok := s.sessions.readState(sessionKey); ok {
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			raw += "review-watermark: " + reviewNudge + "\n"
+		}
+	}
+	return toolTextResponse(id, raw, nil)
 }
 
 func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) response {

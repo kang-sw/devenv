@@ -54,7 +54,9 @@ Determine scenario kind first: `range` argument supplied → range scenario; `br
 3. Apply `judge: is-large-diff` → determine phase execution depth.
 4. Run review phases in order: intent, alignment, risk, then any custom phases from config. Range scenario also runs the required `landing` phase last (see Invariants: Landing Lens).
 5. Apply `judge: has-checklist` → present checklist items; collect user confirmation per item.
-6. Aggregate findings → emit verdict in **On: verdict**.
+6. Aggregate findings → determine verdict (BLOCKED / LGTM / NEEDS FIX / OPEN).
+7. Range scenario only: call `{{.McpNamespace}}/review.marker(bootstrap: true)` first, only to seed a baseline entry when the ledger is empty — its returned entry does not feed the stamp below. Map the step-6 verdict to a ledger token (LGTM → `pass`; NEEDS FIX → `concern` or `block` by severity; OPEN → `concern`), then call `{{.McpNamespace}}/review.stamp(base: <range's own invocation base argument>, head: <range's own invocation head argument>, verdict: <mapped token>, ref: <routed ticket stem, required only when verdict is block>)` — the invocation's own `<base>..<head>` (from **On: invoke**) IS the range just reviewed; record it verbatim, never the marker entry's Base (which drifts to the original bootstrap commit on every sweep after the first). Fires for every completed range-scenario verdict from this step, regardless of which `On: verdict` branch follows; branch scenario never calls this.
+8. Proceed to **On: verdict**.
 
 ---
 
