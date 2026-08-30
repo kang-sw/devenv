@@ -6,7 +6,7 @@ related:
   260824-feat-review-watermark-ledger: prerequisite — the gate reviews the unreviewed range up to the marker
   260829-research-review-watermark-multi-maintainer-model: revises this ticket — re-keys the gate range to the last stable release tag (squash-robust), demotes the precise marker to advisory, adds the rendezvous-backend config field; the forcing function and mandatory boundary review are unchanged
 sage-review-design: completed
-sage-review-completeness: pending
+sage-review-completeness: completed
 ---
 
 # Review policy config + release gate — AGENTS.md review-track, host-neutral gating, devenv ship gate

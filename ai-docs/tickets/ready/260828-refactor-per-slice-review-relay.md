@@ -9,6 +9,7 @@ related-mental-model:
   - workflow-skills
   - mcp-runtime
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Per-slice review — one repair relay with Critical-only re-review
