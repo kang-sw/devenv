@@ -120,3 +120,50 @@ Acceptance:
   deletion, and retention of recently touched records.
 - Update `mcp-tools` and `mcp-runtime` docs from "no automatic eviction" to the
   new touch/prune lifecycle.
+
+### Result (42f4d4f5) - 2026-08-30
+
+Landed on `impl/goal/develop/copper-lantern-drizzle/perch-dust-purse` across
+`fddc207a` (implementation + tests), `2465fbc9` (docs), and `42f4d4f5` (review
+fix).
+
+- **Touch.** A central `sessionStore.touch(dir, key)` helper stats the record
+  and, when `time.Since(mtime) >= touchGuardWindow`, calls `os.Chtimes` (no
+  shell-out, cross-platform). It is invoked from every read-only seam that
+  bypasses the write path: `lookup`, `readState`, `getOverride`,
+  `listOverrideKeys`, and `children` (parent key only, never the scanned
+  entries). Write paths keep relying on `writeRecordAtomic`'s temp+rename mtime
+  refresh, so no redundant touch was added there.
+- **Prune.** New `internal/mcp/session_prune.go` `maybePrune()` is marker-gated
+  (`.prune-marker`, scans at most once per `pruneScanCadence`), deletes
+  `keys/*.json` records whose mtime is older than `keyRetentionAge`, never parses
+  record JSON (malformed files cannot crash it and are judged on age only), and
+  excludes the marker itself. Wired into `handleLeadLogin` (`ws.ferrule`) as a
+  best-effort call whose result is discarded, so it cannot fail bootstrap.
+- **Constants (concrete, tests assert by symbol):** `touchGuardWindow = 1h`,
+  `pruneScanCadence = 24h`, `keyRetentionAge = 30 * 24h`.
+- **Docs.** `ai-docs/spec/mcp-tools.md` and `ai-docs/mental-model/mcp-runtime.md`
+  rewritten from "no automatic eviction" to the touch/prune lifecycle; the
+  `sessionStore` type doc comment updated to match.
+
+Deviation: `getOverride`/`listOverrideKeys` are exercised via direct
+`sessionStore` method calls rather than the MCP `session_config` surface, because
+those adapter methods are trivial pass-throughs and the only session-writable MCP
+entry point would have required test-only wiring outside scope. `lookup` and
+`readState` are covered via the real MCP surface (`ferrule`, `todo.list`).
+
+Review (partitioned: correctness / fit / test). One Important test finding —
+`TestReadStateTouchesRecordViaMCPTodoList` was false-confidence (the pre-dispatch
+keyed-capability gate's `lookup()` touches the record before `readState`'s own
+touch runs, so the MCP-surface test passed even with `readState`'s touch removed)
+— resolved by dropping it; the sibling direct-call `TestReadStateTouchesRecord`
+isolates the seam and was regression-verified to fail when the touch is removed.
+Accepted minors (no change): prune/`lookup` TOCTOU window (negligible, benign
+re-login), `deleteOverride` no-op path not refreshing mtime (out-of-scope edge),
+and the touch-guard exact-boundary test (optional hardening).
+
+Verification: `go build ./...` clean; `go test ./internal/mcp/...` green (44.8s);
+full `go test ./...` green across all 12 packages at `fddc207a`, `internal/mcp`
+re-verified green after the review fix (`42f4d4f5`).
+
+This was the last unfinished phase; the ticket is complete.
