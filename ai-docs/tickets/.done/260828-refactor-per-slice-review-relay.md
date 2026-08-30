@@ -10,6 +10,7 @@ related-mental-model:
   - mcp-runtime
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Per-slice review — one repair relay with Critical-only re-review
@@ -118,6 +119,45 @@ no-Critical closeout after one relay; Critical causes exactly one scoped
 re-review; an unresolved Critical does not schedule another relay; and the
 generated instruction gives the lead an explicit hard-stop handoff with durable
 evidence paths.
+
+### Result (4575f634) - 2026-08-30
+
+`implementReviewInstruction` (`agents-plugin-tool/internal/mcp/session_state.go`)
+now generates one shared clause set — disposition-marker requirement, a single
+repair relay then closeout, and a Critical-only branch (one relay ->
+Critical-scoped review #2 -> hard stop with durable evidence paths, never a third
+relay) — across the `single`, `partitioned:`, and bare-`partitioned` allocations;
+the branches differ only in reviewer-dispatch wording. The three multi-cycle-budget
+consts (`implementReviewFinalCycleClause`, `implementReviewAdjudicationClause`,
+`implementReviewElevatedRelayClause`) were removed unconditionally: the one-relay
+model has a single relay slot across both sub-paths, leaving the adjudicator's
+"before the next review" and the elevated delegate's "next relay" triggers
+unreachable (lead adjudication on the survey plan, 30-1808). The `lead-only`
+branch is byte-for-byte unchanged and stays relay-vocab-free. `lead-implement.md`
+prose (adjudicator/elevated routing at L107/L111/L188-195) was reconciled and the
+`agents-plugin-wsflow` rsrc mirror + both `manifest.json` hashes regenerated.
+
+- Deviation: `playbook_tools_test.go`'s `TestPlaybookPrintGoldenLeadImplement`
+  (not in the plan's file list) golden-pinned the removed adjudicator/elevated
+  prose; updated in the same commit to forbidden-token pins — a mechanical
+  consequence of the authorized prose removal (plan step 6 grep surfaced it), not
+  a new design decision.
+- Design boundary: the `review-adjudicator`/`implementer-elevated` rsrc playbook
+  files were retained (deleting functionality is AGENTS.md "Always ask"); they are
+  now dormant — not invoked by the per-slice loop. If they prove fully orphaned, a
+  follow-up `idea/` ticket should decide their removal.
+- Verification: `go build ./... && go vet ./...` clean; `go test ./...` full
+  suite green; `agents-plugin-wsflow` python tests 10/10. Partitioned review
+  clean — correctness (opus) clean, fit (sonnet) clean, test (sonnet) clean with
+  one carried minor, mutation-tested to rule out false-green. Zero relays.
+- Carried minor (non-blocking, no change): `TestDeriveImplementTodoInstructionsCriticalReviewBranch`'s
+  name implies a distinct runtime code path, but the instruction is generated once
+  before review #1 runs, so its real incremental value is the negative pin against
+  a third relay — accurate by design.
+- Docs: spec `{#260612-reviewer-allocation-tier-default}` and the
+  `{#260619-stateless-implement-review-continuity}` backstop sentence rewritten to
+  the one-relay model; mental-model `review-adjudicator`/`implementer-elevated`
+  bullets marked retained-but-dormant.
 
 ## Spec Impact
 
