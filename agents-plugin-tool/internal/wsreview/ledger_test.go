@@ -136,12 +136,77 @@ func TestBootstrapCreatesEntryAtHEADAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestBootstrapRetriggersOnBannerOnlyLedger(t *testing.T) {
+	root := t.TempDir()
+	sha := reviewTestInitGitWithCommit(t, root)
+
+	// Seed a banner-only ledger: file present, but zero parseable entries.
+	banner := "# banner line, no real entry yet\n# another comment line\n"
+	if err := os.MkdirAll(filepath.Dir(LedgerPath(root)), 0o755); err != nil {
+		t.Fatalf("create ai-docs dir: %v", err)
+	}
+	if err := os.WriteFile(LedgerPath(root), []byte(banner), 0o644); err != nil {
+		t.Fatalf("write banner-only ledger: %v", err)
+	}
+
+	// Both Read and ParseLatest must report found == false on a banner-only
+	// ledger — this is the "present but zero parseable entries" branch, not
+	// the file-missing branch.
+	entry, found, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read on banner-only ledger failed: %v", err)
+	}
+	if found {
+		t.Fatalf("Read on a banner-only ledger should report found = false, got entry %+v", entry)
+	}
+	if _, found := ParseLatest(banner); found {
+		t.Fatalf("ParseLatest on banner-only content should report found = false")
+	}
+
+	bootstrapped, created, err := Bootstrap(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Bootstrap on banner-only ledger failed: %v", err)
+	}
+	if !created {
+		t.Fatalf("Bootstrap on a banner-only (present but zero-parseable) ledger should report created = true")
+	}
+	want := Entry{Base: sha, Head: sha, Verdict: VerdictBootstrap}
+	if bootstrapped != want {
+		t.Fatalf("Bootstrap entry mismatch: got %+v, want %+v", bootstrapped, want)
+	}
+
+	// The pre-existing banner lines must survive untouched (append-only).
+	raw, err := os.ReadFile(LedgerPath(root))
+	if err != nil {
+		t.Fatalf("read raw ledger file: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), banner) {
+		t.Fatalf("pre-existing banner lines were not preserved; got raw content:\n%s", raw)
+	}
+}
+
 func TestAppendBlockWithEmptyRefFails(t *testing.T) {
 	root := t.TempDir()
 
 	err := Append(root, Entry{Base: "abc1234", Head: "def5678", Verdict: VerdictBlock})
 	if err == nil {
 		t.Fatalf("Append with Verdict=block and empty Ref should have failed")
+	}
+}
+
+func TestAppendWithWhitespaceRefFails(t *testing.T) {
+	root := t.TempDir()
+
+	err := Append(root, Entry{Base: "abc1234", Head: "def5678", Verdict: VerdictBlock, Ref: "260901 bug example"})
+	if err == nil {
+		t.Fatalf("Append with a whitespace-bearing Ref should have failed")
+	}
+
+	// A newline-bearing Ref must also be rejected (would otherwise emit two
+	// physical lines and corrupt the one-entry-per-line contract).
+	err = Append(root, Entry{Base: "abc1234", Head: "def5678", Verdict: VerdictConcern, Ref: "260901-bug\nexample"})
+	if err == nil {
+		t.Fatalf("Append with a newline-bearing Ref should have failed")
 	}
 }
 

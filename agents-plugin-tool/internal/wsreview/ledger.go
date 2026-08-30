@@ -118,6 +118,9 @@ func Append(root string, e Entry) error {
 	if e.Verdict == VerdictBlock && strings.TrimSpace(e.Ref) == "" {
 		return fmt.Errorf("review ledger append: verdict %q requires a non-empty Ref (routed ticket stem)", VerdictBlock)
 	}
+	if e.Ref != "" && !refShapeRE.MatchString(e.Ref) {
+		return fmt.Errorf("review ledger append: Ref must not contain whitespace or newlines: %q", e.Ref)
+	}
 
 	path := LedgerPath(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -139,6 +142,14 @@ func Append(root string, e Entry) error {
 // shaLikeRE bounds Base/Head validation to the same SHA shape the parser
 // accepts, so a validated Append always round-trips through ParseLatest.
 var shaLikeRE = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// refShapeRE bounds Ref validation to a single non-whitespace token,
+// matching entryLineRE's own `(\S+)` capture for the ref tail. Without this,
+// a whitespace-bearing Ref would emit a line ParseLatest can't match (the
+// entry silently drops off the tail as an unparseable line — an invisible
+// marker-drop, not a load error), and a newline-bearing Ref would emit two
+// physical lines, corrupting the append-only one-entry-per-line contract.
+var refShapeRE = regexp.MustCompile(`^\S+$`)
 
 func formatEntry(e Entry) string {
 	if e.Ref != "" {
