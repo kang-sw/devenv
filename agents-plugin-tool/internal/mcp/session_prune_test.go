@@ -91,36 +91,16 @@ func TestReadStateTouchesRecord(t *testing.T) {
 	}
 }
 
-// TestReadStateTouchesRecordViaMCPTodoList exercises the same readState seam
-// through the actual MCP surface (ws.todo.list) rather than calling the Go
-// method directly, matching how a real caller would trigger the touch.
-func TestReadStateTouchesRecordViaMCPTodoList(t *testing.T) {
-	useLeadProfile(t)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	root := t.TempDir()
-	initGit(t, root)
-	server := NewServer(root, "test")
-
-	resp := callLogin(t, server, 1, root, nil)
-	if toolIsError(t, resp) {
-		t.Fatalf("ws.ferrule returned isError: %s", resp)
-	}
-	key, _ := parseLoginResponse(t, resp)
-
-	dir, _ := server.sessions.keysDir()
-	path := server.sessions.keyPath(dir, key)
-	backdateMtime(t, path, touchGuardWindow+time.Minute)
-	staleMtime := mtimeOf(t, path)
-
-	listResp := callToolWithKey(t, server, 2, key, "todo.list", nil)
-	if listResp == "" {
-		t.Fatalf("todo.list returned empty response")
-	}
-	refreshed := mtimeOf(t, path)
-	if !refreshed.After(staleMtime) {
-		t.Fatalf("todo.list (readState) did not refresh mtime: before=%v after=%v", staleMtime, refreshed)
-	}
-}
+// Note: an MCP-surface variant of the readState touch test (driving it via
+// ws.todo.list) was deliberately not added here. server.go's pre-dispatch
+// keyed-capability gate (server.go:512-518) calls s.sessions.lookup(keyStr)
+// for every keyed call, and lookup() itself touches — so a record's mtime is
+// already refreshed by the gate before readState's own touch call in the
+// dispatched tool handler runs. That would make such a test pass even if
+// readState's own s.touch line were deleted, i.e. false confidence in
+// exactly the line it claims to cover. TestReadStateTouchesRecord above
+// calls readState directly, independent of the gate, and is the correct
+// place to pin this seam's behavior.
 
 // TestGetOverrideAndListOverrideKeysTouchRecord covers the two override-read
 // seams (session_config_adapter's wsconfig.SessionReader path) named

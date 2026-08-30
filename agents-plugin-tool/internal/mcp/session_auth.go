@@ -101,7 +101,11 @@ var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 // the source of truth, not the process: a fresh MCP server instance (or a lead
 // that restarted mid-delegation) resolves a key by reading its file, so session
 // continuity no longer depends on a shared in-memory registry. There is no
-// eviction or logout; deleting the file is the only physical removal.
+// logout, but records do age out: every successful keyed resolution touches a
+// record's mtime (see touch, guarded to at most once per touchGuardWindow),
+// and maybePrune deletes records whose mtime exceeds keyRetentionAge, scanned
+// at most once per pruneScanCadence. Deleting the file remains the only
+// immediate/manual removal path.
 //
 // The flat layout (keys/<key>.json) is required by the access pattern: a caller
 // presents only the opaque key, never its root, so the file path must be
