@@ -104,11 +104,11 @@ Run after a confirmed merge to reduce branch accumulation.
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier` as dispatch metadata.
 2. For `implementer`, pass only file-first render inputs: `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`; `RoleModel` is declared in the prompt and tool-injected from tier metadata.
 3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text.
-4. Collect the normal completion report. If `ResultExpectations` names an output file, additionally require the output-file path plus a short summary. `review-adjudicator` returns one verdict line per dispute instead of a completion report; collect those lines and act on each verdict.
+4. Collect the normal completion report. If `ResultExpectations` names an output file, additionally require the output-file path plus a short summary.
 <!-- ws:full-only:start -->
 5. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->
-6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; `implementer-elevated` gets **Review relay dispatch** when the review Instruction's capacity or root-cause condition fires for that relay; `review-adjudicator` gets the plan path, review paths, implementer disposition record, commit range under review, review cycle, and the authority inputs for the target kind; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
+6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
 ### Plan contract
 
@@ -184,10 +184,6 @@ Instructions:
 Render `implementer-relay` with declared inputs: PlanPath, ReviewCycle,
 CommitRange, ReviewPaths, DispositionNotes, VerificationHint, and
 ResultExpectations. Capture prompt path and recommended-tier.
-
-When the review Instruction's capacity or root-cause condition fired for this
-relay, render `implementer-elevated` in place of `implementer-relay`, with those
-same declared inputs plus PriorFixCommits and PriorDispositions.
 
 Rendered review relay prompt: <prompt-path>
 

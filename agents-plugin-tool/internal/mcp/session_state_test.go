@@ -244,76 +244,70 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
 		t.Fatalf("review instruction missing selected partitions: %q", review)
 	}
-	if !strings.Contains(review, "Reviewer prompt frame") || !strings.Contains(review, "Review relay and Re-review prompts") {
+	if !strings.Contains(review, "Reviewer prompt frame") || !strings.Contains(review, "Review relay dispatch") || !strings.Contains(review, "Re-review prompt") {
 		t.Fatalf("review instruction missing named template guidance: %q", review)
 	}
 	if strings.Contains(review, "fit") {
 		t.Fatalf("review instruction mentioned unselected fit partition: %q", review)
 	}
-	for _, want := range []string{
-		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
-		"the initial review is cycle 1, so relay at most twice",
-		"stop relaying and continue to the remaining todos",
-		"carrying each unresolved finding with its disposition into the final report",
-		"the budget ends relaying, not the run",
-		"[maintained]",
-		"[escalate: <reason>]",
-		"Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract",
-		"passing an empty string for the authority inputs the target kind does not use",
-		"Adjudication runs inside the current relay slot and consumes no review cycle",
-		"On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one",
-		"on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run",
-		"An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report",
-		"[out-of-scope: <reason>] leaves the relay list, costs no relay",
-		"carried into the final report as unresolved by decision",
-		"Adjudicate at most once per relay slot",
-	} {
+	for _, want := range implementOrdinaryRelayWants() {
 		if !strings.Contains(review, want) {
 			t.Fatalf("partitioned review instruction missing %q: %q", want, review)
 		}
 	}
-	for _, want := range implementElevatedRelayWants() {
-		if !strings.Contains(review, want) {
-			t.Fatalf("partitioned review instruction missing elevated-relay routing %q: %q", want, review)
-		}
-	}
-	for _, forbidden := range implementElevatedRelayForbidden() {
+	for _, forbidden := range implementOrdinaryRelayForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("partitioned review instruction retained superseded relay wording %q: %q", forbidden, review)
+			t.Fatalf("partitioned review instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
 		}
 	}
 }
 
-// implementElevatedRelayWants pins the routing rules that send a relay to
-// `implementer-elevated`. Each entry is load-bearing:
-//   - the capacity condition is stated positively on a [fixed]-then-[unresolved]
-//     finding, so settled dispositions do not trip it;
-//   - it fires after one failed relay, since the budget's last relay is the only
-//     slot the elevated delegate can still act in;
-//   - the root-cause condition is worded on newly surfaced findings, because
-//     recurrence of the same finding is already the capacity condition;
-//   - precedence dispatches one relay, not two, when both signals coincide.
-func implementElevatedRelayWants() []string {
+// implementOrdinaryRelayWants pins the one-relay + Critical-branch clause set
+// every review-dispatching allocation shape (single, partitioned, bare
+// partitioned) shares. Each entry is load-bearing:
+//   - the disposition-marker set is exhaustive and file-first (a marker per
+//     finding, not a copied finding body);
+//   - the relay clause fires exactly once, with no cycle-budget language, since
+//     there is exactly one relay slot in the model;
+//   - the Critical branch reuses that same relay slot rather than adding one,
+//     and terminates in a hard stop with durable evidence paths rather than a
+//     third relay.
+func implementOrdinaryRelayWants() []string {
 	return []string{
-		"Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]",
-		"the exclusion targets reviewer-invented churn, not unresolved carryover",
-		"Capacity: A finding the implementer reported [fixed] that the next review returns [unresolved] or still reports non-clean routes the next relay to `implementer-elevated` instead of `implementer-relay`",
-		"after one such failed relay rather than two, because the last relay is the only slot left to act in",
-		"Excluded: A finding carrying [won't fix], [deferred], [out-of-scope], or an open [escalate: <reason>] is a settled decision, not a failed fix attempt, and never triggers the capacity condition",
-		"Root-cause: A newly surfaced finding whose root cause matches an already-relayed finding routes the next relay to `implementer-elevated` too",
-		"independent of the cycle count and without waiting for the same finding to recur",
-		"Elevated inputs: Render `implementer-elevated` with the relay's declared inputs plus PriorFixCommits and PriorDispositions",
-		"Precedence: When an adjudicator override and a capacity or root-cause signal apply to the same relay, dispatch `implementer-elevated` once carrying the override list; never dispatch two relays for one cycle",
+		"Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns",
+		"[fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]",
+		"carry each disposition into the final report",
+		"Relay every non-clean Critical/Important finding from review #1 exactly once with the Review relay dispatch",
+		"stop relaying and continue to the remaining todos",
+		"each finding's recorded disposition carried into the final report",
+		"No review #2 follows by default",
+		"Critical exception: if review #1 reports any Critical finding, follow the same relay with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
+		"do not schedule a further relay after review #2 regardless of its result",
+		"a Critical finding still non-clean after review #2 stops the slice from merging",
+		"report the hard stop to the user with the review findings paths and disposition notes as durable evidence",
+		"wait for direction rather than relaying again",
 	}
 }
 
-// implementElevatedRelayForbidden pins the superseded wording out of existence.
-// "only for genuinely new" read literally forbade the exact relay the capacity
-// condition exists to route, so its survival anywhere would re-close that route.
-func implementElevatedRelayForbidden() []string {
+// implementOrdinaryRelayForbidden pins the superseded multi-cycle-budget and
+// adjudication/elevated-relay vocabulary out of existence on the ordinary
+// review-dispatching path: the new model has exactly one relay slot, shared by
+// the ordinary and Critical sub-paths, so neither delegate has a reachable
+// trigger anywhere in generated review instructions.
+func implementOrdinaryRelayForbidden() []string {
 	return []string{
-		"only for genuinely new non-clean Critical/Important findings",
-		"only for genuinely new",
+		"review cycles for this implementation slice",
+		"budget",
+		"cycle 1",
+		"relay at most",
+		"review-adjudicator",
+		"implementer-elevated",
+		"[maintained]",
+		"Adjudicate at most once per relay slot",
+		"Capacity:",
+		"Root-cause:",
+		"Elevated inputs:",
+		"Precedence:",
 	}
 }
 
@@ -331,36 +325,14 @@ func TestDeriveImplementTodoInstructionsBarePartitionedReviewFallback(t *testing
 	if !strings.Contains(review, "Dispatch the selected reviewers") {
 		t.Fatalf("bare partitioned alloc did not reach the fallback review instruction: %q", review)
 	}
-	for _, want := range []string{
-		"Budget 3 review cycles for this implementation slice as a whole, not per partition",
-		"the initial review is cycle 1, so relay at most twice",
-		"stop relaying and continue to the remaining todos",
-		"carrying each unresolved finding with its disposition into the final report",
-		"the budget ends relaying, not the run",
-		"[maintained]",
-		"[escalate: <reason>]",
-		"Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract",
-		"passing an empty string for the authority inputs the target kind does not use",
-		"Adjudication runs inside the current relay slot and consumes no review cycle",
-		"On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one",
-		"on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run",
-		"An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report",
-		"[out-of-scope: <reason>] leaves the relay list, costs no relay",
-		"carried into the final report as unresolved by decision",
-		"Adjudicate at most once per relay slot",
-	} {
+	for _, want := range implementOrdinaryRelayWants() {
 		if !strings.Contains(review, want) {
 			t.Fatalf("fallback review instruction missing %q: %q", want, review)
 		}
 	}
-	for _, want := range implementElevatedRelayWants() {
-		if !strings.Contains(review, want) {
-			t.Fatalf("fallback review instruction missing elevated-relay routing %q: %q", want, review)
-		}
-	}
-	for _, forbidden := range implementElevatedRelayForbidden() {
+	for _, forbidden := range implementOrdinaryRelayForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("fallback review instruction retained superseded relay wording %q: %q", forbidden, review)
+			t.Fatalf("fallback review instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
 		}
 	}
 }
@@ -1978,15 +1950,12 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	review := readTodoInstruction(t, server, 3, key, "review")
 	for _, want := range []string{
 		"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path",
-		"Relay only new non-clean Critical/Important findings",
-		"Budget 2 review cycles for this implementation slice",
-		"the initial review is cycle 1, so relay at most once",
-		"stop relaying and continue to the remaining todos",
-		"carrying each unresolved finding with its disposition into the final report",
-		"the budget ends relaying, not the run",
-		"With no adjudication slot at this budget",
-		"[escalate: <reason>] here is your own accept-or-defer call rather than a delegate dispatch",
 	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
+		}
+	}
+	for _, want := range implementOrdinaryRelayWants() {
 		if !strings.Contains(review, want) {
 			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
 		}
@@ -1994,19 +1963,46 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	if strings.Contains(review, "reviewers") {
 		t.Fatalf("single-review todo instruction = %q", review)
 	}
-	// The 2-cycle budget has no relay left to ship an override into, so the single
-	// branch names the [escalate] degradation instead of dispatching the delegate.
-	if strings.Contains(review, "review-adjudicator") {
-		t.Fatalf("single-review todo instruction dispatched the adjudicator delegate despite having no adjudication slot: %q", review)
-	}
-	// The 2-cycle budget affords one relay, so a [fixed]-then-[unresolved] finding is
-	// first observable at the terminal cycle-2 review, with no relay left to route to
-	// the elevated delegate. Naming the condition here would advertise an unreachable
-	// dispatch, so the single branch stays free of it.
-	for _, forbidden := range []string{"implementer-elevated", "Capacity:", "Root-cause:", "Elevated inputs:", "Precedence:"} {
+	// The new model has exactly one relay slot shared by the ordinary and Critical
+	// sub-paths, so the adjudicator/elevated delegates have no reachable trigger on
+	// any allocation shape, single included.
+	for _, forbidden := range implementOrdinaryRelayForbidden() {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("single-review todo instruction leaked elevated-relay routing %q: %q\n"+
-				"the single budget has no relay left after the failure becomes observable", forbidden, review)
+			t.Fatalf("single-review todo instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
+		}
+	}
+}
+
+// TestDeriveImplementTodoInstructionsCriticalReviewBranch pins the Critical-only
+// branch text at the generation source (independent of allocation shape, since
+// the clause is shared): one relay, then a Critical-scoped review #2, then a
+// hard stop with durable evidence paths on a still-Critical result — with no
+// further relay scheduled anywhere in that sequence.
+func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     false,
+	})
+	review := requireInstruction(t, todoByKey(t, got, "review"))
+	for _, want := range []string{
+		"Critical exception: if review #1 reports any Critical finding, follow the same relay with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
+		"do not schedule a further relay after review #2 regardless of its result",
+		"a Critical finding still non-clean after review #2 stops the slice from merging",
+		"report the hard stop to the user with the review findings paths and disposition notes as durable evidence",
+		"wait for direction rather than relaying again",
+	} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("Critical-branch review instruction missing %q: %q", want, review)
+		}
+	}
+	for _, forbidden := range []string{"review #3", "third relay", "another relay after review #2"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatalf("Critical-branch review instruction implies a second relay %q: %q", forbidden, review)
 		}
 	}
 }

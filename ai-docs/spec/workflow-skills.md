@@ -833,32 +833,21 @@ first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
 correctness `large`, fit and test `medium` — raised for unusually subtle risk.
 When a delegate playbook declares its own `tier:`, the `recommended-tier`
 returned by `playbook.render` is authoritative for that delegate and the table is
-the allocation default. The review budget counts review cycles, not relays, and
-is per implementation slice: 2 cycles for single-reviewer, 3 cycles for
-partitioned, where the lead may arbitrate a contested finding through the
-`review-adjudicator` delegate. Adjudication runs inside a relay slot, consumes no
-review cycle, is bounded to one per slot, and returns one verdict per dispute:
-uphold the refusal, override it, or record it as a scope deferral carried into
-the final report. Overriding a maintained refusal ships the fix as the next relay
-and spends that cycle; overriding a mid-relay escalation returns the verdict
-inside the current slot and spends nothing. The single-reviewer budget has no
-adjudication slot. A relay routes to the `implementer-elevated` delegate —
-declared `tier: large`, and rendered with the relay inputs plus the prior cycles'
-fix commits and dispositions — instead of `implementer-relay` when a finding the
-implementer reported fixed is returned unresolved or still non-clean by the next
-review, or when a newly surfaced finding shares a root cause with an
-already-relayed one. The first condition fires after one such failed relay rather
-than two, because the budget's last relay is the only slot the elevated delegate
-can still act in, and a finding carrying a settled disposition (won't-fix,
-deferred, out-of-scope, or an open escalation) is a decision rather than a failed
-fix attempt and never triggers it. When an adjudicator override and either
-elevated-routing condition apply to the same relay, the lead dispatches
-`implementer-elevated` once carrying the override list, never two relays for one
-cycle. The initial review is cycle 1, so
-the budget permits one fewer relay than its cycle count. The last budgeted cycle
-completes the run rather than halting it: the lead stops relaying, proceeds to
-closeout, and carries unresolved findings with their dispositions into the
-final report.
+the allocation default. The per-slice review loop is one repair relay, not a
+multi-cycle budget: review #1, then a single relay that dispositions its
+findings, then closeout — no default review #2. Every non-clean Critical or
+Important finding from review #1 carries exactly one disposition marker in that
+relay: `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or
+`[escalate: <reason>]`. The one exception is a Critical finding: when review #1
+surfaces any Critical, the single relay is followed by a Critical-scoped review
+#2, and a Critical still standing after that review is a hard stop — the slice
+does not merge and the finding is escalated with its durable evidence (the
+review findings paths and disposition notes), never a third relay. Because the
+model has exactly one relay slot across both the ordinary and Critical paths, the
+per-slice loop no longer routes to the `review-adjudicator` or
+`implementer-elevated` delegates: their multi-cycle triggers ("before the next
+review", "the next relay") have no reachable slot to fire into. The delegate
+playbooks remain in the tree but this loop does not invoke them.
 {#260612-reviewer-allocation-tier-default}
 
 Delegates in the review fix-loop are stateless by contract: each implementer and
@@ -878,13 +867,12 @@ full findings, reports the severity verdict, reviews the current diff per its
 charter, and is not asked to classify regression-vs-preexisting. The lead
 enforces convergence by dedup against the durable disposition record — a settled
 finding is not re-relayed, while genuinely new Critical/Important findings and
-findings reported fixed that a re-review returns unresolved are — layered over
-the review-cycle budget as the backstop for the pathological case of a reviewer
-inventing new findings each cycle. Unresolved carryover is not a settled
-disposition: dedup bars re-litigating a decision the record already carries
-(won't-fix, deferred, out-of-scope, or an open escalation), and the budget
-separately bounds reviewer-invented churn, so neither rule suppresses the relay
-of a fix that did not hold.
+findings reported fixed that a re-review returns unresolved are. Unresolved
+carryover is not a settled disposition: dedup bars re-litigating a decision the
+record already carries (won't-fix, deferred, out-of-scope, or an open
+escalation), while the single relay slot — rather than a multi-cycle budget —
+naturally bounds reviewer-invented churn, so neither rule suppresses the relay of
+a fix that did not hold.
 Delegated review-fix relay is file-first: the lead renders the
 `implementer-relay` playbook with declared inputs for plan path, review cycle,
 current commit range, non-clean review paths, disposition notes, verification
