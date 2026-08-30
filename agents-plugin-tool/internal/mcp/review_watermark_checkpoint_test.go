@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -364,6 +365,73 @@ func TestServeStdioReviewStampRoundTripsThroughMarker(t *testing.T) {
 	marker := callToolWithKey(t, server, 3, key, "review.marker", nil)
 	if !strings.Contains(marker, base) || !strings.Contains(marker, head) || !strings.Contains(marker, "pass") {
 		t.Fatalf("review.marker should round-trip the stamped entry: %s", marker)
+	}
+}
+
+// TestServeStdioReviewMarkerReportsFrontierNotRawTailAfterBlock pins the
+// frontier switch at the MCP boundary: after a pass-then-block sequence,
+// review.marker (bare read) must still report the pass entry — the
+// frontier — not the trailing block entry.
+func TestServeStdioReviewMarkerReportsFrontierNotRawTailAfterBlock(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	reviewNudgeTestRepo(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	passBase := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	passHead := reviewNudgeTestCommit(t, root, "pass-head")
+	if err := wsreview.Append(root, wsreview.Entry{Base: passBase, Head: passHead, Verdict: wsreview.VerdictPass}); err != nil {
+		t.Fatalf("seed pass entry: %v", err)
+	}
+	blockHead := reviewNudgeTestCommit(t, root, "block-head")
+	if err := wsreview.Append(root, wsreview.Entry{Base: passHead, Head: blockHead, Verdict: wsreview.VerdictBlock, Ref: "260901-bug-example"}); err != nil {
+		t.Fatalf("seed trailing block entry: %v", err)
+	}
+
+	resp := callToolWithKey(t, server, 2, key, "review.marker", nil)
+	if !strings.Contains(resp, passHead) || !strings.Contains(resp, "pass") {
+		t.Fatalf("review.marker should report the frontier (pass) entry, not the trailing block: %s", resp)
+	}
+	if strings.Contains(resp, blockHead) {
+		t.Fatalf("review.marker should not report the trailing block entry's head: %s", resp)
+	}
+}
+
+// TestServeStdioReviewMarkerFormatJSONReturnsStructuredFrontier covers the
+// new format=json output: structured base/head/verdict fields, sourced from
+// the frontier so a caller (the lead-ship gate) can consume the head without
+// string-scraping.
+func TestServeStdioReviewMarkerFormatJSONReturnsStructuredFrontier(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	reviewNudgeTestRepo(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	base := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	head := reviewNudgeTestCommit(t, root, "extra")
+	if err := wsreview.Append(root, wsreview.Entry{Base: base, Head: head, Verdict: wsreview.VerdictPass}); err != nil {
+		t.Fatalf("seed pass entry: %v", err)
+	}
+
+	resp := callToolWithKey(t, server, 2, key, "review.marker", map[string]any{"format": "json"})
+	var got struct {
+		Base    string `json:"base"`
+		Head    string `json:"head"`
+		Verdict string `json:"verdict"`
+		Ref     string `json:"ref"`
+		Found   bool   `json:"found"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(resp)), &got); err != nil {
+		t.Fatalf("review.marker(format: json) did not return valid JSON: %v\nresponse: %s", err, resp)
+	}
+	if got.Base != base || got.Head != head || got.Verdict != wsreview.VerdictPass || !got.Found {
+		t.Fatalf("review.marker(format: json) = %+v, want base=%q head=%q verdict=pass found=true", got, base, head)
 	}
 }
 
