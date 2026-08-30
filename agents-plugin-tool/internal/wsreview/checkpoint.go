@@ -22,19 +22,21 @@ const SizeThresholdCommits = 20
 //
 // It is pure, root-in/string-out, and fail-open — mirroring
 // doc_coverage_alarm.go's docCoverageWarning shape — and it NEVER spawns a
-// review and NEVER appends to the ledger; it only reads (wsreview.Read, not
-// wsreview.Bootstrap). This is the ledger-honesty guard: a checkpoint
+// review and NEVER appends to the ledger; it only reads (wsreview.Frontier,
+// not wsreview.Bootstrap). This is the ledger-honesty guard: a checkpoint
 // recompute/nudge must never grow the ledger file. Only the explicit,
 // caller-opted-in review.marker(bootstrap: true) tool (invoked by the
 // separately-run sweep) may bootstrap.
 //
 // Composition:
-//  1. Read (never Bootstrap) the ledger's latest entry; no entry found
-//     returns a short baseline-missing advisory, with no write. This is
-//     track-independent: establishing a baseline uses HEAD (wsreview.Bootstrap),
-//     not the review-track, so a project with no resolvable track (no
-//     origin/HEAD, no main/master) must still be told to establish one —
-//     260830-bug-review-nudge-trackless-bootstrap-gap.
+//  1. Resolve (never Bootstrap) the ledger's frontier entry — the last
+//     clearing (pass/concern/bootstrap) entry, skipping any trailing
+//     block/routed tail; no entry found returns a short baseline-missing
+//     advisory, with no write. This is track-independent: establishing a
+//     baseline uses HEAD (wsreview.Bootstrap), not the review-track, so a
+//     project with no resolvable track (no origin/HEAD, no main/master) must
+//     still be told to establish one — 260830-bug-review-nudge-trackless-
+//     bootstrap-gap.
 //  2. entry found: resolve the pre-④ review-track branch (ResolveTrack); any
 //     failure silently skips only the behind-track advisory ("") — the
 //     staleness/size arms measure distance behind the track tip and genuinely
@@ -47,7 +49,7 @@ const SizeThresholdCommits = 20
 //     (StalenessKnob), returning "" when the range is small and fresh
 //     (quiet).
 func CheckpointNudge(ctx context.Context, root string) string {
-	entry, found, err := Read(root)
+	entry, found, err := Frontier(root)
 	if err != nil {
 		return ""
 	}
