@@ -130,9 +130,18 @@ a subagent that did not inherit the lead's process, or a lead that restarted
 mid-delegation — resolves a key by reading its file, so session continuity does
 not depend on a shared in-memory registry.
 
-`login` is a bootstrap verb only: there is no logout and no eviction (rows are a
-tiny `(word-chain key, root path)` bounded by the number of distinct roots a
-fleet touches).
+`login` is a bootstrap verb only: there is no logout, but records do age out.
+Every successful keyed resolution — root-aware calls, lead-only keyed tools,
+and the session-state read seams (`agenda`/`todo`/`note` reads, including the
+seams that bypass `lookup` and read the record directly) — refreshes the
+record file's mtime, throttled to at most once per hour so a burst of calls
+against the same session issues one `Chtimes`, not one per call. `ferrule`
+piggybacks a best-effort prune scan on its own bootstrap call, gated to at most
+once per 24h by a marker file in `keys/`: the scan deletes any `keys/*.json`
+record whose mtime is older than 30 days. Pruning is mtime-only (record
+contents are never parsed), so a malformed record cannot crash the scan and is
+pruned/kept purely on file age like any other record; a record touched by
+recent activity survives regardless of how old the session itself is.
 
 Every keyed call honors an `unknown_session` recovery contract: when a key has no
 record file (a genuinely unknown or path-unsafe key, or state cleared by deleting
@@ -166,9 +175,10 @@ Gating).
 >   invocation by subagents that share the lead's MCP connection; it is not a hard
 >   barrier (a name-aware caller can still keyless-bootstrap).
 > - The store is filesystem-backed (one record file per key under a flat `keys/`
->   directory) and survives a server restart. There is still no logout and no
->   automatic eviction, though deleting a key file is now a physically possible
->   removal path (deferred).
+>   directory) and survives a server restart. There is still no logout, but
+>   eviction is no longer deferred: activity touches a record's mtime (1h
+>   guard) and `ferrule` prunes records idle past 30 days (≤ once per 24h
+>   scan cadence) — see the touch/prune lifecycle described above.
 
 ### Session-Key Lineage And Child Enumeration {#260619-session-key-lineage-children}
 
