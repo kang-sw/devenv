@@ -17,6 +17,7 @@ source, and tests for behavioral truth.
 | Named agents, worktree-scoped registry metadata, backend behavior | `spec/named-agent-runtime.md` | `mental-model/named-agent-runtime.md`, `manuals/ws-agent-runtime.md` |
 | API documentation cache and manager sessions | `spec/api-documentation-cache.md` | `mental-model/api-documentation-cache.md` |
 | Personal shell/editor/tmux/Claude dashboard tooling | `spec/developer-environment-tools.md` | `mental-model/developer-environment-tools.md` |
+| Review-watermark ledger, canary, multi-maintainer landing topology | `spec/mcp-tools.md` (`#260830-review-watermark-ledger-tools`) | `mental-model/review-watermark-ledger.md` |
 
 ## Domains
 
@@ -32,6 +33,7 @@ source, and tests for behavioral truth.
 | claude-compatibility | `mental-model/claude-compatibility.md` | Claude shim, agents-plugin compatibility metadata, installer snapshot, retired legacy boundaries |
 | developer-environment-tools | `mental-model/developer-environment-tools.md` | install.sh, shell/editor config, tmux helpers, Claude TUIs |
 | prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt loading (wsprompt/go:embed), call-time rsrc playbook loading (wsrsrc/filesystem), delegate orientation, bundle metadata |
+| review-watermark-ledger | `mental-model/review-watermark-ledger.md` | Append-only review-verdict ledger, marker resolution, checkpoint nudge, multi-maintainer canary/landing-topology design reasoning |
 
 ## Directory Hierarchy
 

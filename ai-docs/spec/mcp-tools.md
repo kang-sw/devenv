@@ -1885,8 +1885,14 @@ range, so "what has already been reviewed" resolves by reading the ledger's
 last entry rather than by graph-walking or asking Git which commit last
 touched a file. Each entry is one line, `<base>..<head>: <verdict>[ ->
 <ref>]`, with `verdict` one of `pass`, `concern`, `block`, `routed`, or
-`bootstrap`. Two tools are the sole caller-visible way to grow the ledger;
-neither has a CLI mirror (`#260505-cli-mirror-coverage`).
+`bootstrap`. A freshly created ledger file begins with a `#`-prefixed
+self-documenting banner — a canary advisory addressed to whoever resolves a
+merge conflict on the ledger's tail (two branches that reviewed and appended
+independently), telling them to integrate both branches' reviewed ranges rather
+than blindly discard one side; the banner and every other `#`-comment line are
+skipped when resolving the latest entry, so they never shift the marker. Two
+tools are the sole caller-visible way to grow the ledger; neither has a CLI
+mirror (`#260505-cli-mirror-coverage`).
 
 `review.marker` reads the ledger's latest entry and returns it as
 `review ledger latest entry: <base>..<head>: <verdict>[ -> <ref>]`. An empty

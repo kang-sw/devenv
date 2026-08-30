@@ -8,6 +8,7 @@ related:
   260829-research-review-watermark-multi-maintainer-model: revises this ticket — adds the ledger canary, self-documenting banner, and no-squash/landing-topology constraint; retains marker + skip-coverage
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Review watermark marker + dotfile ledger + advisory sweep with lazy checkpoint recompute
@@ -352,6 +353,58 @@ ledger tail conflict (canary fires); the serial single-writer path never
 conflicts (no false positive); the banner text appears in the conflicted region;
 a squash landing on the review-track orphans the marker and the next range simply
 re-covers the orphaned span (over-review, never under-review — coverage intact).
+
+### Result (aa97b785) - 2026-08-30
+
+Banner emission landed; the canary and no-squash/landing-topology are captured as
+documentation (a new ledger-domain mental-model), not new code. `wsreview.Append`
+now emits a `#`-prefixed self-documenting banner **once, at first physical file
+creation**, inside its single existing `O_APPEND|O_CREATE|O_WRONLY` open
+(`os.Stat` metadata check before the open selects first-creation; banner+entry
+concatenated in memory and written in one `WriteString` — no read-modify-write,
+Phase-1 append-only preserved). Emission lives in `Append`, not `Bootstrap`, so
+the banner is guaranteed even on the `review.stamp`→`Append` path that never calls
+`Bootstrap`. The Phase-1 parser already skips `#`-comment lines, so the banner
+never shifts the marker.
+
+- **Lead adjudication — banner placement.** Top-of-file, once, in `Append`'s
+  create path. A merge-conflict resolver opens the full file (and thus sees the
+  banner), append-only stays simplest, and the ticket permits top-only ("and/or")
+  and frames the banner as a soft mitigation over a physically irreducible gap.
+  The richer per-entry tail-comment design (banner text stays literally inside the
+  conflict markers on a *mature* ledger — top-of-file only coincides with the tail
+  for the concurrent-first-creation add/add case) is a real but **deferred**
+  hardening, recorded as a known limitation in the new mental-model, not silently
+  dropped.
+- **Scope split.** The code slice was banner + tests only; the canary/no-squash
+  design reasoning was authored in the doc pipeline: a one-sentence banner note in
+  `spec/mcp-tools.md` (`#260830-review-watermark-ledger-tools`, commit 7235c352)
+  and the deferred ledger-domain mental-model
+  `ai-docs/mental-model/review-watermark-ledger.md` (commit fc1d727c), covering the
+  canary as a designed STOP-not-corruption property, the banner known limitation,
+  the Merge-1/R/L/Merge-2 no-squash landing topology (entry `<head>` = reviewed
+  commit R, never bookkeeping commit L), and marker-resolves-from-content (why a
+  squash-orphaned marker fails safe into over-review, never under-review).
+
+Verification: `go build ./...` + `go vet ./...` clean; `go test
+./internal/wsreview/...` 22 tests pass, including the new real-git
+`TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot` (two branches
+independently `Append` from a no-ledger ancestor → real add/add conflict with the
+full banner text asserted *within* the `<<<<<<<`..`>>>>>>>` region; serial path
+stays conflict-free) and `TestAppendFirstCreationEmitsBannerOnce`;
+`TestRoutedCorrectiveEntryAppendsWithoutEditingEarlierBlock` updated to strip the
+banner prefix and still assert earlier-block byte-intactness.
+
+Partitioned review (correctness=opus, fit=sonnet) both clean; no Critical/Important.
+Two carried minors, non-blocking: the serial-path test uses a fast-forward merge
+(demonstrates no-false-positive only weakly — a non-ff serial sequence would be
+stronger), and the banner constant has no trailing blank line before the first
+entry (readability). Both recorded as optional follow-up polish; correctness
+confirmed the `os.Stat` first-creation TOCTOU is benign (advisory, single
+review-track writer by design — worst case a duplicated banner, never a lost entry
+or corrupted marker).
+
+**Ticket complete — all three phases landed; moving `ready/` → `.done/`.**
 
 ## Spec Impact
 

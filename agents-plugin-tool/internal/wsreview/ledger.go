@@ -38,6 +38,34 @@ const (
 	VerdictBootstrap = "bootstrap"
 )
 
+// ledgerBanner is written exactly once, as a #-prefixed block, at the
+// ledger's first physical file creation — inside Append's single
+// O_CREATE|O_WRONLY open (see Append), never on any later append. Every
+// line here is skipped by entryLineRE (see its doc comment), so the banner
+// is invisible to ParseLatest.
+//
+// It documents the Phase-3 canary in place: a git conflict in this file's
+// tail is an intended property of the append-only format, not corruption.
+// Two branches that each review and append independently — without either
+// absorbing the other's write first — produce overlapping tail insertions
+// that git cannot auto-merge. Whoever resolves the conflict must integrate
+// BOTH branches' reviewed ranges; blindly taking "ours" or "theirs"
+// (`checkout --ours` / `--theirs`) would silently drop one branch's
+// review.
+const ledgerBanner = `# review-watermark ledger — append-only, one entry per line.
+#
+# A git conflict in this file's tail is expected, not corruption: it means
+# two branches each reviewed and appended independently, without either
+# absorbing the other's write first (the intended canary). Resolve it by
+# integrating BOTH branches' reviewed ranges — never by blindly taking
+# "ours" or "theirs" (checkout --ours / --theirs), which would silently
+# drop one branch's review.
+#
+# Optional hardening: once resolved, append a fresh verdict entry covering
+# the re-integrated range, so a future check can see continuous coverage
+# rather than relying on the merge alone.
+`
+
 // entryLineRE matches one well-formed ledger entry line:
 //
 //	<base>..<head>: <verdict>[ -> <ref>]
@@ -96,6 +124,15 @@ func Read(root string) (Entry, bool, error) {
 // structural, not just documented: the file is opened with
 // O_APPEND|O_CREATE|O_WRONLY and only ever written to, never read-modified.
 //
+// Append is the sole physical file-creation point for the ledger (Bootstrap
+// creates nothing itself — it calls Append when no entry is found). On the
+// first physical creation only, Append writes ledgerBanner immediately
+// ahead of the formatted entry line, in the same O_CREATE|O_WRONLY open —
+// still a single write, no read-modify-write. This guarantees the banner
+// lands on every creation path, including a bare stamp-triggered Append
+// that never goes through Bootstrap. A pre-existing file (even one with
+// zero parseable entries, e.g. banner-only) never gets a second banner.
+//
 // Validation: Base and Head must be non-empty SHA-shaped strings, Verdict
 // must be a known token, and Ref must be non-empty whenever Verdict is
 // block — the ticket's explicit "the append surface requires a stem on a
@@ -127,13 +164,26 @@ func Append(root string, e Entry) error {
 		return fmt.Errorf("create review ledger dir: %w", err)
 	}
 
+	// Determine first-physical-creation before opening: the banner must be
+	// emitted exactly once, at the moment the file itself comes into
+	// existence. os.Stat here reads only metadata, never file content —
+	// this is not a read-modify-write of the ledger.
+	firstCreate := false
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		firstCreate = true
+	}
+
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open review ledger %s: %w", path, err)
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString(formatEntry(e)); err != nil {
+	out := formatEntry(e)
+	if firstCreate {
+		out = ledgerBanner + out
+	}
+	if _, err := f.WriteString(out); err != nil {
 		return fmt.Errorf("write review ledger %s: %w", path, err)
 	}
 	return nil
