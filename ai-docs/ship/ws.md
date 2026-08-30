@@ -28,12 +28,23 @@ freshly fetched state.
 - **Release gate** (this project declares `release-boundary: present` in
   `AGENTS.md` `### Review Policy` — see `lead-ship`'s Release gate section):
   call `review.marker(format: json)` to resolve the review-watermark
-  frontier's `head`, then run `git rev-list --count <frontier-head>..develop`.
-  Empty — proceed. Non-empty — trigger `lead-review` over
-  `range: <frontier-head>..develop`; if it still doesn't clear, surface a
-  strong recommendation and stop for an explicit decision. An override
-  proceeds without stamping the marker (only `lead-review`'s own
-  `review.stamp` step ever advances it).
+  frontier. Check `found` **first, before any rev-list call** — an empty
+  `head` substituted into `git rev-list --count <frontier-head>..develop`
+  resolves the empty side to `develop`'s own tip and silently reports `0`,
+  which would wrongly read as clear.
+  - `found: false` (no ledger entry yet — this project's first ship): treat
+    all prior history as review-skipped, **not clear**, and **stop for an
+    explicit decision** between (i) `review.marker(bootstrap: true)` to
+    accept prior history as unreviewed (seeds `<HEAD>..<HEAD>`, equivalent to
+    an override, nothing reviewed) or (ii) an explicit `lead-review` over
+    `range: <chosen-base>..develop` for a human-supplied base, which stamps
+    and advances the marker. These do not compose.
+  - `found: true`: run `git rev-list --count <frontier-head>..develop`.
+    Empty — proceed. Non-empty — trigger `lead-review` over
+    `range: <frontier-head>..develop`; if it still doesn't clear, surface a
+    strong recommendation and stop for an explicit decision.
+  - An override at either stop proceeds without stamping the marker (only
+    `lead-review`'s own `review.stamp` step ever advances it).
 - `git fetch origin --tags` — refresh remote-tracking refs and tags before any
   other check.
 - Develop is up to date: `git merge-base --is-ancestor origin/develop develop` —

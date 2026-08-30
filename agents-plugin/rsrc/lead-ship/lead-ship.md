@@ -32,13 +32,17 @@ Config naming:
 
 Un-omittable, user-overridable. Applies only when the loaded project's `AGENTS.md` `### Review Policy` section declares `release-boundary: present`, read as plain prose the same way this skill and `ws.md`-style configs already read project config text — no MCP tool resolves this field. `release-boundary: absent` (or the field unset) skips this section entirely; that project's ship path is unchanged. Run this before **3. Execute** step 1 (Pre-flight), not as one of its bullets — a Pre-flight bullet is defeatable by a config that simply omits it, which is exactly what this gate must not be.
 
-1. Call `{{.McpNamespace}}/review.marker(format: json)` to resolve the review-watermark frontier's `head` (the bare/structured output — never string-scrape the text-mode response).
-2. Run `git rev-list --count <frontier-head>..HEAD`.
-3. Empty (`0`) — proceed to **3. Execute**.
-4. Non-empty — trigger `{{.SkillNamespace}}:lead-review` over `range: <frontier-head>..HEAD`.
+1. Call `{{.McpNamespace}}/review.marker(format: json)` to resolve the review-watermark frontier — read its structured `found` field first, never infer emptiness from the rev-list count below (an empty `head` substituted into `git rev-list --count <frontier-head>..HEAD` resolves the empty side to `HEAD` and silently reports `0`, which would wrongly read as clear).
+2. `found: false` (no ledger entry at all — the common first-ship state on a project that was never bootstrapped) — treat all prior history as review-skipped: **not clear**. **Stop for an explicit user decision** offering exactly these two choices, which do not compose:
+   - **(i) Bootstrap** — call `review.marker(bootstrap: true)` to seed `<HEAD>..<HEAD>` as an explicit accept of all prior history as unreviewed (equivalent to an override, not a review; nothing gets reviewed).
+   - **(ii) Review** — ask for an explicit base (repo root or a named commit; the empty ledger supplies none), then trigger `{{.SkillNamespace}}:lead-review` over `range: <chosen-base>..HEAD`, which stamps and advances the marker.
+   Either choice, once complete, proceeds to **3. Execute**; declining stops here without shipping.
+3. `found: true` — run `git rev-list --count <frontier-head>..HEAD`.
+4. Empty (`0`) — proceed to **3. Execute**.
+5. Non-empty — trigger `{{.SkillNamespace}}:lead-review` over `range: <frontier-head>..HEAD`.
    - Clears (the range now reviews clean) — proceed to **3. Execute**.
    - Still not clear — surface a strong recommendation against proceeding and **stop for an explicit user decision**.
-5. On an explicit user override: proceed to **3. Execute** anyway. This gate never calls `review.stamp` — the marker stays exactly where it was found; only `{{.SkillNamespace}}:lead-review`'s own step 7 ever advances it (single-writer invariant). No audit record of the override is required or written by this mechanism.
+6. On an explicit user override (from step 5's stop): proceed to **3. Execute** anyway. This gate never calls `review.stamp` itself — the marker only ever advances through `{{.SkillNamespace}}:lead-review`'s own step 7 (single-writer invariant), whether that happens via step 2(ii)'s explicit review or step 5's triggered review; an override leaves the marker exactly where the gate found it. No audit record of the override is required or written by this mechanism.
 
 ### 3. Execute
 
