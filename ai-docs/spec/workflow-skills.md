@@ -1189,6 +1189,42 @@ from the same ledger (`#260830-review-watermark-checkpoint-nudge`). That
 nudge is advisory only: it never blocks the call it rides on, and it never
 appends to the ledger — only `review.marker` and `review.stamp` mutate it.
 
+### Review Policy Config Surface {#260830-review-policy-config-surface}
+
+Whether and where review *blocks* is per-project policy declared across three
+non-overlapping config homes: tracked, per-track structural facts live in
+`AGENTS.md`; marker and verdict state lives in the `ai-docs/` review-watermark
+ledger; machine-local review mechanics (remote access, blocked paths, review
+phases) live in the gitignored `_review.local.md`. The homes do not double-own:
+the review-track branch is a shared structural fact and never lives in
+`_review.local.md`, and the volatile marker never lives in `AGENTS.md`.
+
+`AGENTS.md` declares the review policy under a `### Review Policy` section as
+`key: value` lines, parsed fail-open (a missing file, missing section, missing
+field, or malformed value degrades to the field's default, never an error):
+
+- `review-track: <branch>` — the branch whose reviews stamp the ledger. When
+  set, it takes precedence over the git-heuristic default (`origin/HEAD`, then
+  local `main`, then `master`) that resolves the review track when the field is
+  absent.
+- `release-boundary: present | absent` — whether the project has a release
+  promotion boundary. `absent` (the default) means advisory-only review with no
+  hard gate; a declared boundary is what a subsequent release-gate capability
+  keys its mandatory review off.
+- `rendezvous-backend: platform | canary` — how concurrent maintainers
+  rendezvous on review state. `canary` (the default; needs no external config)
+  relies on the append-only ledger's git-conflict canary; `platform` relies on
+  host branch protection, for which the recommended set is require-branches-up-
+  to-date, dismiss-stale-approvals, required-checks, and disabled squash/rebase
+  (plus a merge queue at scale).
+- `release-tag-glob: <glob>` — the tag namespace identifying release tags,
+  resolved with `git describe --tags --match '<glob>'`. Defaults to `v*`.
+
+When the `review-track` field is unset, `workflow_manual` surfaces a
+non-blocking, session-scoped nudge advising the project to configure a review
+track; the nudge fires at most once per session (not once per checkpoint) and
+never blocks the call it rides on.
+
 `lead-review` scales review depth automatically. When commits lack `## AI
 Context` and conventional commit format (`judge: follows-ws-workflow` does not
 fire), subagent analysis infers intention before phases run. When diff size
