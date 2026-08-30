@@ -1374,11 +1374,21 @@ are hard findings that fail the verdict (`OK: false`). Missing spec addressing o
 a ready-landing non-exempt ticket is a soft **warning** only — surfaced but never
 failing the verdict, matching the `tickets.move` ready-gate tip; promoting it to
 a hard block is separate deferred scope. A ready ticket whose completed
-sage-review stage is stale against the Git commit that first recorded that
-completed posture also emits a soft `sage-review-freshness` **warning**; the
-warning names the affected stage(s), the review baseline commit, and the
-instruction to inspect the ticket diff and decide whether to rerun that Sage
-stage. An unresolved `### Phase N:` heading
+sage-review stage is stale also emits a soft `sage-review-freshness`
+**warning**; the warning names the affected stage(s), the review baseline,
+and the instruction to inspect the ticket diff and decide whether to rerun
+that Sage stage. Freshness is decided primarily by comparing a
+`sage-review-<stage>-reviewed` digest recorded at stamp time (sha256 of the
+body-only normalized ticket, truncated to a 16-hex-character prefix) against
+the current body's digest — no Git walk when a digest is recorded. A legacy
+ticket with no recorded digest falls back to the Git commit that most
+recently recorded that stage's completed posture — the latest
+completed-transition, not the first, so a reset-then-re-stamped ticket
+resolves against its newest stamp. Both paths compare the same body-only
+normalization: the markdown below the frontmatter fence, trimmed, so the
+whole frontmatter block — including the new `-reviewed` field itself — is
+excluded, and a frontmatter-only edit (`title:`, `related:`, any
+`sage-review*` posture) never trips staleness. An unresolved `### Phase N:` heading
 (no `### Result` before the next Phase heading or EOF, not marked `[dropped]`)
 on a `.done`/`.dropped` ticket is likewise a soft **warning** only, matching
 `tickets.close`'s own tip — the SOFT seed of the 260723 Phase 2 must-not-forget
@@ -1535,16 +1545,32 @@ posture. The tool never spawns reviewers — for `run` it names the reviewer(s)
 to dispatch and leaves spawning to the lead.
 
 For a completed design or completeness stage, `tickets.sage_gate` performs an
-additive Git-inferred freshness check before returning a terminal skip. It finds
-the commit that made the relevant stage's Sage posture become `completed`,
-compares the current ticket content against that baseline, and returns
-`check_review_required` when any non-Sage-posture content changed. The result
-names the affected completed stage(s), the review baseline commit, and an
-instruction to inspect the diff and decide whether to rerun those stage(s). The
-comparison deliberately does not judge prose meaning: it ignores only
-Sage-owned posture fields (`sage-review`, `sage-review-design`,
-`sage-review-completeness`) and pure ticket path/status moves. Missing Git
-history or an unreadable historical blob degrades to the prior no-warning path.
+additive freshness check before returning a terminal skip.
+`tickets.sage_stamp` records a `sage-review-<stage>-reviewed` digest (sha256
+of the body-only normalized ticket, truncated to a 16-hex-character prefix)
+alongside every `completed` posture it writes; when that digest is present,
+freshness compares it directly against the current body's digest with no Git
+walk at all — equal is fresh, differing returns `check_review_required` with
+`review_baseline` set to a non-commit sentinel (`the last recorded digest`)
+since no commit was inspected on this path. A legacy ticket with no recorded
+digest falls back to the Git commit that most recently recorded that stage's
+`completed` posture — the latest completed-transition, not the first, so a
+ticket that was reset to a non-terminal posture and later re-stamped resolves
+against its newest stamp rather than a stale earlier one — and compares body
+content the same way. Both paths use the identical body-only normalization:
+the markdown below the frontmatter fence, trimmed, so the whole frontmatter
+block (the new `-reviewed` field, `sage-review`/`sage-review-design`/
+`sage-review-completeness`, `title`, `related`, and everything else in it) is
+excluded from the comparison — a frontmatter-only edit never trips
+staleness, and the new field can never perturb posture parsing or its own
+digest. The result names the affected completed stage(s), the review
+baseline (a digest sentinel or a commit), and an instruction to inspect the
+diff and decide whether to rerun those stage(s). Missing Git history or an
+unreadable historical blob on the fallback path degrades to the prior
+no-warning path. Backward compatibility is by construction: a ticket stamped
+before this change has no recorded digest, so it resolves through the
+fallback until its next `tickets.sage_stamp` call records one — no migration
+pass touches existing tickets.
 
 `tickets.sage_gate` **commits nothing and returns no commit metadata**. This is
 a caller-visible contract change: the ask-decline path previously produced a

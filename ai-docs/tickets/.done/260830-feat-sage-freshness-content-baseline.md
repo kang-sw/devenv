@@ -6,6 +6,7 @@ related:
   260824-feat-review-release-gate-policy: unblocked by this — same stale-flag wedge at ready promotion
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Sage freshness content baseline — record reviewed-body digest so a re-stamp clears staleness
@@ -134,6 +135,44 @@ Verification:
   **not** mark the stage stale.
 - Existing freshness tests (single-transition stale/uncommitted/staged/status-move
   cases) stay green under body-only normalization.
+
+### Result (29cb2795) - 2026-08-30
+
+Landed on `impl/goal/develop/copper-lantern-drizzle/yam-corny-elite`, range
+`29cb2795^..3b33136e` (two commits: `29cb2795` code+tests, `3b33136e` spec).
+
+- **Digest write on stamp.** Both completed-posture write sites in
+  `SageRecord` (`sageRecordSingle`, `sageRecordCombined`,
+  `agents-plugin-tool/internal/wsdoc/tickets_sage.go`) now emit a sibling
+  `sage-review-<stage>-reviewed: <digest>` alongside every `completed` posture,
+  where `<digest>` is sha256 of the body-only-normalized ticket truncated to a
+  fixed 16-hex prefix.
+- **Digest-primary freshness, git fallback corrected to latest.**
+  `sageReviewFreshnessCheck` compares the recorded digest against the current
+  body digest with **no git walk** when the field is present; absent it,
+  `sageReviewStageBaseline` (`tickets_sage_freshness.go`) now resolves the
+  **latest** completed-transition (rewritten from earliest, newest→oldest
+  precompute-then-scan) so a committed reset→re-stamp advances the baseline.
+- **Body-only normalization.** `normalizeTicketForSageFreshness` now excludes
+  the **whole** frontmatter block (was: strip only `sage-review*` keys), shared
+  by both the digest and fallback paths so they agree. A frontmatter-only edit
+  (`title:`, `related:`) no longer triggers staleness.
+- **Backward compatible.** Absent digest → fallback; legacy tickets self-heal on
+  their next stamp; no migration pass. The new field is read by exact key only
+  and never perturbs posture parsing.
+- **Spec.** `ai-docs/spec/mcp-tools.md` updated in two spots (`tickets.verify`
+  freshness-warning summary and `tickets.sage_gate` mechanism paragraph) to
+  match; no `ticket-conventions.md` edit (it carries no sage mentions).
+
+Verification: `go build ./...` clean; `go test ./...` (agents-plugin-tool) all
+`ok`; the three new tests (`TestSageGateDigestRestampClearsFreshness`,
+`TestSageGateLegacyFallbackFollowsLatestTransition`,
+`TestSageGateFrontmatterOnlyEditStaysFresh`) each map to a ticket verification
+bullet and the test reviewer confirmed all three **fail** against the reverted
+`29cb2795^` production code; the pre-existing `TestSageGate*` suite is
+unmodified and green. All three review partitions (correctness/fit/test) clean —
+one non-blocking correctness minor (a rare staged≠worktree state degrades to the
+git fallback rather than the digest compare; safe, no wrong verdict).
 
 ## Spec Impact
 
