@@ -1121,16 +1121,30 @@ execution judgments.
 
 ## Review Workflow Skills {#260513-review-workflow-skills}
 
-`lead-review` reviews a pull request or merge request branch. It loads
-`ai-docs/_review.local.md` for environment configuration (remote access method,
-branch naming, review phases, blocked paths, comment and merge methods, and
-contributor workflow); when no config exists, it interviews the user and writes
-the config before proceeding. The config is machine-local and gitignored.
+`lead-review` reviews either a pull/merge request branch (branch scenario,
+default or via a `branch` argument) or a caller-supplied `base..head` range
+(range scenario, via a `range` argument) instead of a checked-out branch — the
+caller owns minting the range marker; `lead-review` only consumes it. Both
+scenarios run the same downstream phase, judge, and verdict machinery; only
+target diff selection differs.
+
+It loads `ai-docs/_review.local.md` for environment configuration (remote
+access method, branch naming, review phases, blocked paths, comment and merge
+methods, and contributor workflow). Config-load is scenario-scoped: the branch
+scenario, absent config, interviews the user and writes the config before
+proceeding (unchanged today); the range scenario, absent config, proceeds on
+built-in review-substance defaults (intent/alignment/risk phase text, the Deep
+Review threshold) and never enters the setup interview, since a range review
+touches no checkout, remote, or merge and the collaboration/remote config half
+is meaningless to it. When a config file is present, both scenarios honor its
+review-substance sections (Review Phases, Checklist, Deep Review); the config
+is machine-local and gitignored.
 
 Branch discovery uses the configured remote access method (glab, API token, git
 fetch, or equivalent); if no branch argument is supplied, `lead-review` lists
 available branches filtered by any configured naming pattern and asks the user to
-select one.
+select one. Branch discovery does not apply to the range scenario — the
+caller-supplied `base..head` is already the identified target.
 
 Review phases run in order — intent, alignment, risk, and any configured custom
 phases — producing one of four verdicts: BLOCKED (a blocked path was found

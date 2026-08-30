@@ -8,35 +8,44 @@ Target: user request
 
 ## Invariants
 
-- Load `ai-docs/_review.local.md` before any review step; run setup if absent.
+Config Load
+- Branch scenario: load `ai-docs/_review.local.md` before any review step; run setup if absent.
+- Range scenario: load `ai-docs/_review.local.md` if present; if absent, proceed on built-in Review Phases / Deep Review defaults and never run setup.
+- A present config's Review Phases, Checklist, Blocked Paths, and Deep Review sections are honored by both scenarios.
+
 - Never push, force-push, or modify remote branches without user confirmation.
-- Record the current branch before checkout; offer to restore it after review.
+- Branch scenario: record the current branch before checkout; offer to restore it after review.
 - Workflow mutations (fixes, commits) are lead-owned; route through `{{.SkillNamespace}}:lead-discuss` and the lead-implement procedure.
 - All written artifacts (review config, findings) must be in English regardless of conversation language.
 
-## On: invoke [branch?]
+## On: invoke [branch?] [range: <base>..<head>]
+
+Determine scenario kind first: `range` argument supplied → range scenario; `branch` argument or default → branch scenario. `range` and `branch` are mutually exclusive; if both are supplied, range takes precedence. Each sub-step below follows the branch matching the determined scenario.
 
 ### 1. Load config
 
 1. Check for `ai-docs/_review.local.md`.
-2. If absent → go to **On: setup**.
-3. Load all sections present: Remote, Branch Naming, Review Phases, Checklist, Blocked Paths, Comment Method, Merge Approval Method, Notification Method, Contributor Workflow, Deep Review.
+2. Branch scenario, absent → go to **On: setup**.
+3. Range scenario, absent → proceed on the built-in Review Phases / Deep Review defaults from **On: setup**'s Review Config Template; never go to **On: setup**.
+4. If present (either scenario): load all sections present: Remote, Branch Naming, Review Phases, Checklist, Blocked Paths, Comment Method, Merge Approval Method, Notification Method, Contributor Workflow, Deep Review. Range scenario ignores Remote, Branch Naming, Comment Method, Merge Approval Method, Notification Method, and Contributor Workflow — none apply to a checkout-free review.
 
-### 2. Identify branch
+### 2. Identify branch (branch scenario only)
 
 1. If `branch` argument provided, use it.
 2. Else → go to **On: branch discovery**.
+3. Range scenario: skip this sub-step — the caller-supplied `base..head` is the identified target.
 
 ### 3. Prepare
 
-1. Record `<current-branch>`.
-2. Run fetch per Remote config.
-3. Checkout target branch.
-4. Apply `judge: has-blocked-paths` → if any blocked path found in diff, emit BLOCKED verdict and stop.
+1. Branch scenario: record `<current-branch>`.
+2. Branch scenario: run fetch per Remote config.
+3. Branch scenario: checkout target branch.
+4. Apply `judge: has-blocked-paths` against the target diff (branch scenario: post-checkout diff; range scenario: `range: <base>..<head>` diff, no checkout) → if any blocked path found, emit BLOCKED verdict and stop.
 
 ### 4. Review
 
-1. Run `{{.McpNamespace}}/git.diff(mode: "stat")` → present scope summary.
+1. Branch scenario: run `{{.McpNamespace}}/git.diff(mode: "stat")` → present scope summary.
+   Range scenario: run `{{.McpNamespace}}/git.diff(range: "<base>..<head>", mode: "stat")` → present scope summary; use `{{.McpNamespace}}/git.log(range: "<base>..<head>")` for commit enumeration.
 2. Apply `judge: follows-ws-workflow` → determine intention analysis path.
 3. Apply `judge: is-large-diff` → determine phase execution depth.
 4. Run review phases in order: intent, alignment, risk, then any custom phases from config.
@@ -160,11 +169,11 @@ Intent is unclear or architectural judgment is required before a fix decision.
 ### judge: has-blocked-paths
 
 Fires when `## Blocked Paths` is present in config.
-Check diff for matching paths immediately after checkout; emit BLOCKED before running review phases.
+Check the target diff for matching paths before running review phases (branch scenario: post-checkout; range scenario: `range: <base>..<head>` diff, no checkout); emit BLOCKED if any match.
 
 ### judge: follows-ws-workflow
 
-Auto-detect from commit log of the target branch:
+Auto-detect from the commit log (branch scenario: target branch; range scenario: `range: <base>..<head>` log):
 - **YES**: all commits have `## AI Context` sections and use conventional commit format.
 - **PARTIAL** (some commits qualify): treat as NO (conservative).
 - **NO**: plain commit messages without structured AI context.
