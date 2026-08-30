@@ -124,6 +124,12 @@ generalization, not an overturn: the serial baseline is unchanged.
   promotion) is unchanged. Downstream without a boundary: advisory-only. Depends
   on ②(and ③for the marker; a boundary project can fall back to `main..develop`
   when no tag/marker exists yet).
+- Planned ⑤`refactor`: **per-slice review relay simplification**
+  (`260828-refactor-per-slice-review-relay`). Replace the multi-cycle per-slice
+  relay loop with a single repair relay plus a Critical-only re-review, so slice
+  review does not assume a fixed integration boundary. Touches the same
+  per-slice-review closeout that later watermark work stamps. Independent of the
+  marker/ledger mechanics; sequenced with the epic as a review-model cleanup.
 
 ## Cross-Child Decisions
 
@@ -312,7 +318,8 @@ research-only.
   landing lens; the ledger/marker + advisory sweep with lazy checkpoint
   recomputation is live; and devenv's ship path enforces a mandatory range
   review before `develop`→`main`, with the mechanism documented as host-neutral
-  policy-driven behavior.
+  policy-driven behavior. ⑤ (per-slice relay simplification) lands alongside as
+  a review-model cleanup, not a gating dependency of ①–④.
 - Risk framing watches **both** directions, not just overhead. Overhead: if
   dogfooding shows the watermark model does not reduce review load versus ①
   alone, that is a reason to reconsider ②–④. Under-review (the direction a naive

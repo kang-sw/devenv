@@ -4,9 +4,10 @@ parent: 260824-epic-review-watermark-model
 related:
   260824-feat-lead-review-range-scenario: prerequisite — the sweep reviews marker..HEAD through the range scenario
   260726-feat-enter-verdict-scenario-output: adjacent — enter.* output/agenda surface where checkpoint nudges may render
+  260824-feat-review-release-gate-policy: dependent — ④ owns the release gate that blocks promotion on an unresolved routed non-pass ledger entry; Phase 2's checkpoint recompute keeps a pre-④ fallback until ④ is implemented
   260829-research-review-watermark-multi-maintainer-model: revises this ticket — adds the ledger canary, self-documenting banner, and no-squash/landing-topology constraint; retains marker + skip-coverage
 sage-review-design: completed
-sage-review-completeness: pending
+sage-review-completeness: completed
 ---
 
 # Review watermark marker + dotfile ledger + advisory sweep with lazy checkpoint recompute
