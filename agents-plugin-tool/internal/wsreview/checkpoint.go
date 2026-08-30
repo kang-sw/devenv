@@ -29,29 +29,35 @@ const SizeThresholdCommits = 20
 // separately-run sweep) may bootstrap.
 //
 // Composition:
-//  1. resolve the pre-④ review-track branch (ResolveTrack); any failure
-//     silently skips the nudge ("").
-//  2. Read (never Bootstrap) the ledger's latest entry; no entry found
-//     returns a short baseline-missing advisory, with no write.
-//  3. entry found: compute commits ahead of the marker over
-//     marker.Head..track-tip, reusing aheadOfMergeRootCount's rev-list
-//     --count-via-merge-base shape (implement_resolver.go:420-436) instead
-//     of inventing a new git call pattern.
+//  1. Read (never Bootstrap) the ledger's latest entry; no entry found
+//     returns a short baseline-missing advisory, with no write. This is
+//     track-independent: establishing a baseline uses HEAD (wsreview.Bootstrap),
+//     not the review-track, so a project with no resolvable track (no
+//     origin/HEAD, no main/master) must still be told to establish one —
+//     260830-bug-review-nudge-trackless-bootstrap-gap.
+//  2. entry found: resolve the pre-④ review-track branch (ResolveTrack); any
+//     failure silently skips only the behind-track advisory ("") — the
+//     staleness/size arms measure distance behind the track tip and genuinely
+//     need it, but the baseline prompt above does not.
+//  3. compute commits ahead of the marker over marker.Head..track-tip,
+//     reusing aheadOfMergeRootCount's rev-list --count-via-merge-base shape
+//     (implement_resolver.go:420-436) instead of inventing a new git call
+//     pattern.
 //  4. scale the advisory by SizeThresholdCommits and the staleness knob
 //     (StalenessKnob), returning "" when the range is small and fresh
 //     (quiet).
 func CheckpointNudge(ctx context.Context, root string) string {
-	track, err := ResolveTrack(ctx, root)
-	if err != nil {
-		return ""
-	}
-
 	entry, found, err := Read(root)
 	if err != nil {
 		return ""
 	}
 	if !found {
 		return "no review ledger yet for this project; run a sweep (lead-review range: <base>..<head>) to establish a baseline"
+	}
+
+	track, err := ResolveTrack(ctx, root)
+	if err != nil {
+		return ""
 	}
 
 	count := commitsAheadOfMarker(ctx, root, entry.Head, track)

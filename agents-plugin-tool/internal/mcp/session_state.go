@@ -1154,17 +1154,22 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 	if err := s.sessions.enterMode(sessionKey, "proceed", rawAgenda, todos); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
+	// Append the review-watermark nudge to result.Raw before branching on
+	// format, so the JSON result's Raw field mirrors the text output exactly
+	// (TestEnterProceedJSONIncludesRawVerdict). Appending only in the text
+	// branch left the two formats out of parity whenever the nudge is
+	// non-empty — latent until 260830 made the baseline arm reachable on
+	// trackless repos.
+	if record, ok := s.sessions.readState(sessionKey); ok {
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			result.Raw += "review-watermark: " + reviewNudge + "\n"
+		}
+	}
 	if input.Format == "json" {
 		text, err := proceedResultJSON(result)
 		return toolTextResponse(id, text, err)
 	}
-	raw := result.Raw
-	if record, ok := s.sessions.readState(sessionKey); ok {
-		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
-			raw += "review-watermark: " + reviewNudge + "\n"
-		}
-	}
-	return toolTextResponse(id, raw, nil)
+	return toolTextResponse(id, result.Raw, nil)
 }
 
 func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) response {

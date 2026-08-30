@@ -110,12 +110,38 @@ func TestCheckpointNudgeLargeRangeUsesSizeThreshold(t *testing.T) {
 	}
 }
 
-func TestCheckpointNudgeSkipsSilentlyWhenTrackUnresolvable(t *testing.T) {
+// TestCheckpointNudgeSkipsBehindTrackArmWhenTrackUnresolvable: with a ledger
+// already seeded, an unresolvable review-track (branch that is not
+// main/master and has no origin/HEAD) skips only the "N commits behind
+// <track>" advisory — that arm genuinely needs the track — returning "".
+func TestCheckpointNudgeSkipsBehindTrackArmWhenTrackUnresolvable(t *testing.T) {
+	root := t.TempDir()
+	reviewTestInitRepoOnBranch(t, root, "feature-only")
+	head := strings.TrimSpace(string(reviewTestRunGitOutput(t, root, "rev-parse", "HEAD")))
+	if err := Append(root, Entry{Base: head, Head: head, Verdict: VerdictPass}); err != nil {
+		t.Fatalf("seed ledger: %v", err)
+	}
+
+	got := CheckpointNudge(context.Background(), root)
+	if got != "" {
+		t.Fatalf("CheckpointNudge with a ledger but no resolvable track = %q, want \"\" (behind-track arm skipped)", got)
+	}
+}
+
+// TestCheckpointNudgeSurfacesBaselineWithoutTrack pins the fix for
+// 260830-bug-review-nudge-trackless-bootstrap-gap: the baseline-missing
+// prompt no longer gates on ResolveTrack, so a project with no resolvable
+// review-track AND no ledger is still told to establish a baseline (and the
+// ledger file is still never written by the nudge).
+func TestCheckpointNudgeSurfacesBaselineWithoutTrack(t *testing.T) {
 	root := t.TempDir()
 	reviewTestInitRepoOnBranch(t, root, "feature-only")
 
 	got := CheckpointNudge(context.Background(), root)
-	if got != "" {
-		t.Fatalf("CheckpointNudge with no resolvable track = %q, want \"\" (fail open)", got)
+	if !strings.Contains(got, "no review ledger yet") {
+		t.Fatalf("CheckpointNudge with no track and no ledger = %q, want the baseline-missing advisory", got)
+	}
+	if _, err := os.Stat(LedgerPath(root)); !os.IsNotExist(err) {
+		t.Fatalf("CheckpointNudge must never create the ledger file on the no-ledger path; stat err = %v", err)
 	}
 }

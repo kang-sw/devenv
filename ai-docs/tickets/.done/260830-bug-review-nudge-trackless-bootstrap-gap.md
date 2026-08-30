@@ -4,6 +4,7 @@ related:
   260824-feat-review-release-gate-policy: introduced ReadAgentsReviewPolicy + ResolveTrack precedence and the review-track config nudge; this gap is in the surrounding nudge wiring
 related-mental-model:
   - review-watermark-ledger
+completed: 2026-08-30
 ---
 
 # Review baseline nudge is unreachable on trackless projects
@@ -71,3 +72,44 @@ precisely the unconfigured projects that most need onboarding.
   (still-blocked) mandatory release gate of
   `260824-feat-review-release-gate-policy` Phase 2 — but the same trackless /
   `absent` bootstrapping question should inform that gate's design (R5).
+
+## Resolution (2026-08-30, directly fixed)
+
+Fixed directly (user-approved minimal direction, not promoted through the ticket
+ceremony):
+
+- `wsreview/checkpoint.go` `CheckpointNudge`: read the ledger **before**
+  resolving the track. The "no review ledger yet ... establish a baseline"
+  prompt now fires regardless of track resolution (baselining uses HEAD, not the
+  track); `ResolveTrack` failure now silently skips **only** the "N commits
+  behind <track>" staleness/size arms.
+- `mcp/review_track_alarm.go` `reviewTrackNudge`: reworded so it no longer
+  promises heuristic fallback coverage that does not exist when the repo has no
+  `origin/HEAD`/`main`/`master`.
+- Tests: rewrote `TestCheckpointNudgeSkipsSilentlyWhenTrackUnresolvable` (which
+  had pinned the buggy "trackless => silent" behavior) into
+  `...SkipsBehindTrackArmWhenTrackUnresolvable` (ledger seeded, no track => "");
+  added `TestCheckpointNudgeSurfacesBaselineWithoutTrack` (no track + no ledger
+  => baseline advisory, still no file write).
+
+Adjacent fix surfaced during verification (in-scope, same nudge plumbing):
+
+- `mcp/session_state.go` `handleEnterProceed` appended the watermark line only in
+  the text branch, so the JSON result's `Raw` field silently diverged from the
+  text output whenever the nudge was non-empty. Hoisted the append before the
+  format branch so `TestEnterProceedJSONIncludesRawVerdict`'s parity holds for
+  any non-empty nudge, not just the (previously masked) empty case.
+
+Known sibling issue left for a follow-up (NOT fixed here, out of approved scope,
+no failing test): the identical text-only watermark append exists in
+`handleEnterImplement`'s target path (`session_state.go` ~L1067-1075) — the
+`enter.implement` JSON path (`implementResultJSON`) omits the watermark line the
+text path adds. Same one-line hoist would fix it; capture separately if it
+matters.
+
+Onboarding-recurrence note (answers the once-per-session concern): the
+`reviewTrackNudge` config hint is once-per-session (`ReviewTrackNudgeShown`), so
+a missed session loses it until the next session. The `CheckpointNudge` baseline
+prompt is **not** session-gated — it recurs on every proceed/manual load until a
+ledger exists — so with this fix the trackless onboarding path is persistently
+prompted, not shown-once.
