@@ -440,7 +440,11 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 
 	// pass or concern resolved to pass.
 	res.Posture[field] = "completed"
-	if err := writeFrontmatterField(ticketAbs, map[string]string{field: "completed"}); err != nil {
+	digest, err := sageReviewCurrentBodyDigest(ticketAbs)
+	if err != nil {
+		return SageRecordResult{}, err
+	}
+	if err := writeFrontmatterField(ticketAbs, map[string]string{field: "completed", field + "-reviewed": digest}); err != nil {
 		return SageRecordResult{}, err
 	}
 	return res, nil
@@ -492,7 +496,16 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 
 	res.Posture["sage-review-design"] = "completed"
 	res.Posture["sage-review-completeness"] = "completed"
-	if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "completed", "sage-review-completeness": "completed"}); err != nil {
+	digest, err := sageReviewCurrentBodyDigest(ticketAbs)
+	if err != nil {
+		return SageRecordResult{}, err
+	}
+	if err := writeFrontmatterField(ticketAbs, map[string]string{
+		"sage-review-design":                "completed",
+		"sage-review-completeness":          "completed",
+		"sage-review-design-reviewed":       digest,
+		"sage-review-completeness-reviewed": digest,
+	}); err != nil {
 		return SageRecordResult{}, err
 	}
 	return res, nil
