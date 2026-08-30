@@ -4,33 +4,34 @@ parent: 260824-epic-review-watermark-model
 related:
   260824-feat-lead-review-range-scenario: prerequisite — the gate reviews a range through this scenario
   260824-feat-review-watermark-ledger: prerequisite — the gate reviews the unreviewed range up to the marker
-  260829-research-review-watermark-multi-maintainer-model: revises this ticket — re-keys the gate range to the last stable release tag (squash-robust), demotes the precise marker to advisory, adds the rendezvous-backend config field; the forcing function and mandatory boundary review are unchanged
+  260829-research-review-watermark-multi-maintainer-model: informed this ticket — contributed the rendezvous-backend config field (kept). Its tag-keyed gate-range re-key is SUPERSEDED (2026-08-30, `## Decisions`) by the ship/review decoupling: the gate range returns to the review marker (frontier), relying on the already-required no-squash/rebase convention rather than tag-robustness.
 sage-review-design: completed
 sage-review-completeness: completed
 ---
 
 # Review policy config + release gate — AGENTS.md review-track, host-neutral gating, devenv ship gate
 
-## Blocked (2026-08-30)
+## Sign-off (2026-08-30)
 
-Phase 1 is done (`### Result (ac3b7356)`). **Phase 2 is paused pending user
-sign-off** on two mechanism decisions surfaced by the research plan
-`ai-docs/.plans/2026-08/30-1751-260824-review-release-gate-policy-p2.md` — both
-are AGENTS.md "Always ask" items a goal-run lead cannot self-authorize:
+Phase 1 is done (`### Result (ac3b7356)`). Phase 2 was paused pending user
+sign-off; the user resolved it in a discuss session that **redesigned the
+mechanism** rather than simply approving the paused plan. Ratified outcome (see
+`## Decisions`, revised bullets dated 2026-08-30):
 
-- **R2 — new `review.gate` MCP tool** (new public MCP API surface). Lead
-  recommends APPROVE (Go/MCP split avoids forking the ledger grammar into
-  `lead-ship` bash; matches Phase 1 precedent).
-- **R5 — mandatory gate as a generic `lead-ship` playbook branch**, which amends
-  the "ship config is the single source of truth" Invariant (observable
-  canonical-flow change). Lead recommends APPROVE (a config-only bullet is
-  defeatable by omission, breaking the ticket's forcing-function ethos).
+- **R5 approved, reshaped** — the mandatory gate lives as a `lead-ship` playbook
+  branch (un-omittable), but its stop is a **strong recommendation the user can
+  explicitly override**, not an absolute hard-block. Override defers, never
+  waives.
+- **R2 (new `review.gate` MCP tool) DROPPED** — under full ship/review
+  decoupling the gate reduces to existing `review.marker` + one `git rev-list`,
+  so no new MCP surface is justified.
+- **`release-tag-glob` REMOVED** — the gate no longer keys its range to a
+  release tag; the marker (frontier) is the sole anchor. This supersedes
+  260829's tag re-key and its no-tag fallback (former R5-sub).
 
-R1/R3/R4 are lead-ratified in the plan; R5-sub (no-tag fallback) and R6-sub
-(wsflow condition-(a) parity) are lead-recommended, contingent on R5/R2. On
-sign-off (or a redirect), remove this note and re-enter Phase 2 implementation
-from the ratified plan. The independent ready ticket ⑤ `260828` is unaffected
-and continues to drain.
+The paused plan `ai-docs/.plans/2026-08/30-1751-260824-review-release-gate-policy-p2.md`
+is superseded by this redesign (see its appended supersession note). Phase 2 is
+re-scoped below.
 
 ## Background
 
@@ -58,17 +59,66 @@ Settled at the epic level; restated as constraints:
   mechanics. Do not put the review-track branch in `_review.local.md` (it is a
   shared structural fact, and local config is gitignored) or the marker in
   `AGENTS.md` (churn).
-- **Gate range is keyed to the last stable release tag, not the precise marker
-  (2026-08-29, `260829`).** The hard gate reviews `<last-release-tag>..HEAD`.
-  Rationale: tags are not orphaned by squash/rebase, so the gate is **squash-robust
-  by construction** and sweeps everything since the last release regardless of how
-  it landed (skip-coverage at release granularity). The precise SHA marker is
-  **demoted to the advisory mid-stream nudge layer** (sizing the checkpoint nudge),
-  where squash imprecision is harmless. The forcing function (below) is unchanged —
-  it keys off recorded `block` entries and their routed tickets, not off the
-  marker. Note this is a *review-mandate* re-key, **not** a demotion of the gate to
-  advisory: a boundary project still runs a mandatory review and the forcing
-  function still hard-blocks; only the *range selector* changes from marker to tag.
+- **Ship and review are fully decoupled; the review marker is the sole gate
+  anchor (2026-08-30, supersedes 260829's tag re-key).** `lead-ship` *triggers*
+  `lead-review` but nothing about ship — tag, merge, or override — feeds back
+  into the review range. The gate reviews **`<marker>..HEAD`**, where `marker`
+  is the review frontier, not a release tag. Dependency flows one way:
+  `ship → review → marker`, never the reverse.
+- **Single-writer marker invariant.** The review marker advances **only** when
+  `lead-review` completes and stamps (via `review.stamp`); `review.marker(bootstrap:
+  true)` seeds the first entry. Nothing else — not `lead-ship`, not an override —
+  ever advances it. (Enforced by convention + the frontier rule below, not by a
+  new lock.)
+- **Frontier = last *clearing* entry.** Marker resolution advances the frontier
+  only past `pass`/`concern` entries; `block` and incomplete/absent reviews do
+  **not** advance it. All five ledger tokens are classified explicitly (per sage
+  design review, 2026-08-30): **`pass`/`concern` = clearing** (advance the
+  frontier); **`block` = non-clearing** (holds it); **`routed` = non-clearing** —
+  the corrective `<range>: routed -> <stem>` append (③) shares the blocked range's
+  head SHA, so treating it as clearing would advance the frontier to an
+  un-reviewed tip and silently defeat the forcing function; **`bootstrap` = the
+  baseline floor** — it is a resolvable frontier base (so `<marker>..HEAD` always
+  has a base once seeded) but represents "nothing reviewed yet," not a clearing
+  review. Consequence: an unresolved block holds the frontier, so
+  `<marker>..HEAD` keeps re-including that range until a review actually passes —
+  the forcing function is the non-advancing marker itself, not a ledger/ticket
+  cross-check. `CheckpointNudge` and the ship gate share this one resolver.
+  (Relies on the already-required no-squash/rebase convention on the review
+  track — `review-watermark-ledger.md` — so the frontier SHA stays live; this is
+  why tag-robustness is no longer needed.)
+- **`review.gate` MCP tool is NOT added (R2 dropped).** With the above, the
+  ship-time check is `review.marker` (existing) + `git rev-list --count
+  <marker>..HEAD`; a non-empty count means "not clear." No release-tag
+  resolution, no `block`-entry enumeration, no ticket-status cross-check at ship —
+  so no new MCP surface.
+- **`release-tag-glob` config field is removed.** Phase 1 shipped it
+  (`ac3b7356`); Phase 2 removes it from the `AGENTS.md` `### Review Policy`
+  reader (`ReadAgentsReviewPolicy`) and from devenv's own policy, since the gate
+  no longer reads release tags. `release-boundary` (present|absent) still governs
+  whether the gate fires; `rendezvous-backend` still selects the no-squash/rebase
+  enforcement path (`platform` branch-protection vs `canary` convention).
+- **Override defers, never waives; durable recording is NOT required (2026-08-30).**
+  When the gate is not clear, `lead-ship` surfaces a strong recommendation and
+  stops for an **explicit** user decision; the user may override and proceed.
+  "Never silent" is satisfied at **decision time** — the gate always runs, always
+  surfaces the block, and only a conscious human act passes it. Because the
+  override never stamps, the marker does not advance, so the un-reviewed range
+  automatically rolls into the next `lead-review` (batched "몰아서" catch-up) —
+  this non-advancing marker, not any log, is the "cannot drop on the floor"
+  guarantee. A durable audit record is therefore **not part of the host-neutral
+  mechanism**: the gate requires and defines no audit home. Rationale for
+  dropping it: recording adds no correctness (eventual review is already
+  guaranteed), a "ship promotion commit" home is not host-neutral (a downstream
+  with no release-branch topology has no such commit), and where accountability
+  matters most it already exists elsewhere (`platform` backend → GitHub logs the
+  required-check bypass; `canary` → single-maintainer-serial). A boundary project
+  MAY optionally record overrides in a project-local home that fits its topology,
+  but the mechanism neither requires nor specifies one. (Earlier drafts recorded
+  to a "ship log"; that targeted a drop-on-the-floor risk the decoupled model now
+  resolves structurally.) Still strictly stronger than the rejected config-bullet
+  alternative (defeatable by silent omission): the gate is un-omittable and always
+  surfaces.
 - **Host-neutral first:** never encode devenv's `develop`/`main`/ship shape as
   the mechanism. Gating is opt-in; absence of a declared boundary means
   advisory-only, not "no review."
@@ -76,10 +126,21 @@ Settled at the epic level; restated as constraints:
   `workflow_manual` surfaces a **non-blocking** "configure this first" nudge at
   most **once per session** (session-scoped, not per-checkpoint), not a hard
   block.
-- **Fallback:** a boundary project with no release tag or marker yet can review
-  `main..develop` directly (the release branch is itself a natural "reviewed-up-to"
-  proxy) until a tag/marker exists. Once stable release tags exist, `<tag>..HEAD`
-  is the gate range (above).
+- **Empty/no-marker ledger (revised 2026-08-30, supersedes the tag-model
+  "Fallback").** When `review.marker` reports no entry (a boundary project whose
+  ledger was never bootstrapped — the common first-ship state), the gate treats
+  all prior history as review-skipped: **not clear**, so it **stops for an
+  explicit decision** rather than passing silently. It never auto-bootstraps and
+  proceeds (that would silently pass all prior history). The human's explicit
+  choices are: **(i)** consciously bootstrap the baseline at HEAD — an explicit
+  accept of prior history as unreviewed, seeding the marker so future gates work
+  (equivalent to an override, not a review); or **(ii)** run a review over an
+  explicitly chosen base (repo root or a named commit), which stamps and advances
+  the marker. Note bootstrap and "review the shipped range" do **not** compose:
+  bootstrap seeds `<HEAD>..<HEAD>` (empty range, nothing reviewed), whereas a
+  review needs a non-HEAD base the empty ledger cannot supply — hence the base is
+  a human input on first ship, never a tag-keyed or `main..develop` fallback (the
+  marker is the sole anchor). (The former tag-model bullet is deleted.)
 - **Finding resolution (epic Cross-Child) — the ticket lifecycle resolves; there
   is no separate "waiver" artifact.** A blocking finding clears when its routed
   ticket reaches a *terminal* state: `.done` (fixed) or `.dropped` (a conscious
@@ -94,6 +155,15 @@ Settled at the epic level; restated as constraints:
   ledger. (An earlier draft named a
   standalone "lead waiver"; it is removed — `.dropped` is the conscious-accept
   path, using existing ticket convention and needing no new config home.)
+  **Revised (2026-08-30): the gate no longer cross-checks routed-ticket status.**
+  Under the frontier rule above, a `block` does not advance the marker, so the
+  blocked range keeps re-surfacing in `<marker>..HEAD` until a review passes —
+  the non-advancing marker *is* the "cannot drop on the floor" guarantee, and
+  clearing happens by a genuine passing review, not by a routed ticket reaching
+  terminal. The routed ticket (③'s `block`-requires-`ref` invariant) is retained
+  as fix-tracking bookkeeping, not as the gate-clearing mechanism. Whether to
+  relax `block`-requires-`ref` now that gate-clearing no longer depends on it is
+  an open implementation question for Phase 2 / sage review, not settled here.
 - **No-boundary scrutiny is a deliberate trade.** A project that declares no
   release boundary gets no hard gate and (per ③) advisory-only sweeps, while
   per-phase review is simultaneously lightened (①) — so its only *mandatory*
@@ -180,45 +250,100 @@ upgrade. No downstream project gets these fields until a follow-up addresses it 
 route as a follow-up child under epic `260824-epic-review-watermark-model` or fold
 into Phase 2 rollout.
 
-### Phase 2: Mandatory release gate (devenv ship)
+### Phase 2: Mandatory release gate (devenv ship) — decoupled marker model
 
-- For a project that declares a release boundary, insert a **mandatory** range
-  review into the promotion path. For devenv: into `lead-ship` pre-flight
-  (`ai-docs/ship/ws.md` / `lead-ship` playbook), which today has no review step
-  — review the unreviewed range (**`<last-release-tag>..HEAD`**, squash-robust per
-  `260829`; `main..develop` fallback when no tag/marker exists yet) before
-  `develop`→`main`.
-- **Gate verdict (concrete, per the epic's finding-resolution decision):**
-  promotion is blocked when **any** of: (a) the just-run range review raises a
-  blocking finding; (b) a `block` ledger entry since the last release references a
-  routed ticket still *open* (not terminal); or (c) a `block` ledger entry since
-  the last release has **no routed ticket** (un-routed → un-clearable, forcing the
-  finding to be captured). It clears only when every such finding's routed ticket
-  is *terminal* — `.done` (fixed) or `.dropped` (consciously accepted). The gate
-  cross-references recorded blocking entries against their routed tickets' status;
-  there is no ledger "resolved" flag and no separate waiver record.
-- **Promotion atomicity (pin-and-re-assert).** The gate reviews the gate range
-  (`<tag>..HEAD`) and then the ship flow ff-merges. Record the reviewed through-SHA and assert the
-  review-track tip still equals it at merge time; if the tip moved, re-absorb and
-  re-review the delta before promoting (the ③ race path). For devenv's serial
-  local ship this holds trivially, but the premise is named rather than assumed so
-  the host-neutral generalization to any boundary project is safe.
+Re-scoped 2026-08-30 (see `## Sign-off` and revised `## Decisions`). Four
+deliverables; no new MCP tool.
+
+1. **Marker-resolution refactor (`wsreview`, internal — no MCP surface).**
+   Resolve the review frontier as the last *clearing* (`pass`/`concern`) entry,
+   so `block`/incomplete reviews do not advance it. Expose it through one shared
+   internal resolver consumed by both `CheckpointNudge` and the ship gate. This
+   changes what "the marker" means for `review.marker`'s returned entry — verify
+   `CheckpointNudge`'s existing tests still hold and add frontier-vs-block-entry
+   coverage.
+2. **`lead-ship` gate branch (R5, playbook — un-omittable, overridable).** In
+   the shared `agents-plugin/rsrc/lead-ship/lead-ship.md`, add a generic branch:
+   *if `release-boundary: present`*, before `develop`→`main`, read the frontier
+   **head SHA** from `review.marker` and compute `git rev-list --count
+   <frontier-head>..HEAD`. Empty → proceed. Non-empty → trigger `lead-review`
+   over `<frontier-head>..HEAD`; if still not clear (review blocking, or user
+   declines to complete it), surface a **strong recommendation** and stop for an
+   **explicit** user decision. On override: proceed — the marker stays put,
+   deferring the range to the next review. No durable audit record is required or
+   defined by the mechanism (see the "Override defers" decision); a boundary
+   project may optionally record overrides in a project-local home, but Phase 2
+   adds none. Amend the "ship config is the single source of truth" Invariant to
+   carve out this un-omittable gate. Regen the wsflow rsrc mirror.
+   - **Marker read must not string-scrape (sage design review).** To keep the
+     doc-map's "agent never hand-parses the ledger" honest, obtain a bare/
+     structured head from `review.marker` (add a bare-SHA or `--format json`
+     accessor to the existing tool if it only returns a formatted line — a small
+     output addition to an existing tool, not a new tool), and have `review.marker`
+     return the **frontier** (last clearing entry, deliverable 1), not the raw
+     latest entry.
+3. **Drop `release-tag-glob`.** Remove the field from `ReadAgentsReviewPolicy`
+   (`wsreview/agents_config.go`) and from devenv's `AGENTS.md ### Review Policy`;
+   remove the `git describe --match <glob>` machinery entirely (it was never
+   consumed — Phase 1 only parsed the field). Keep `release-boundary` and
+   `rendezvous-backend`.
+4. **devenv concrete wiring (`ai-docs/ship/ws.md`).** Place the gate in ship
+   pre-flight ordering. Single-maintainer-serial + `canary`, so the pin-and-
+   re-assert race below holds trivially, but wire it so the host-neutral branch
+   is exercised.
+
+- **Promotion atomicity (pin-and-re-assert, R4 — retained).** Record the
+  reviewed through-SHA; immediately before `git merge --ff-only develop`,
+  re-assert `git rev-parse develop` still equals it. A moved tip aborts and
+  re-runs the gate over the delta before promoting (the ③ race path). Named
+  rather than assumed so the host-neutral generalization is safe.
 - Downstream without a declared boundary: no gate inserted; advisory-only.
 - Depends on Phase 1, ②, and ③.
 
-Verification: on devenv, ship pre-flight refuses to promote when the range review
-raises a blocking finding, when a ledger `block` entry since the last release
-points at a still-open routed ticket, or when such an entry has no routed ticket
-at all; it proceeds when the range is clean and every such finding's routed ticket
-is terminal (`.done` or `.dropped`); the reviewed through-SHA is re-asserted at
-ff-merge time (a moved tip forces re-review before promotion); a no-boundary
-project's ship/promotion path is unchanged.
+**Doc-map (where the agent-facing guidance attaches):**
+- `lead-review.md` (step 7, already the sole marker writer): add the
+  single-writer invariant + which verdicts advance the frontier. Extends
+  existing text.
+- `lead-ship.md`: the new gate branch + the negative invariant "ship never
+  advances the marker."
+- `ai-docs/ship/ws.md`: concrete pre-flight placement (no tag content).
+- **NOT** `lead-workflow-manual` — marker behavior is skill-specific
+  (lead-review/lead-ship), not a general primitive; marker *interpretation* is
+  in code, so the agent never hand-parses the ledger.
+- spec `mcp-tools.md`: frontier resolution contract (`review.marker` returns the
+  frontier, not the raw latest entry) + drop tag-glob refs. Also reconcile the
+  nudge anchor `#260830-review-watermark-checkpoint-nudge` — it still says
+  `CheckpointNudge` reads "the ledger's latest entry (the marker)"; it now counts
+  from the last clearing entry, so a tail `block` changes the nudge origin.
+  `workflow-skills.md`: lead-ship gate + lead-review sole-writer; clean the
+  Phase-1 entry of `review.gate`/tag-glob traces.
+- mental-model `review-watermark-ledger.md`: frontier=clearing-entry + the
+  single-writer/decoupling rationale.
+
+Verification: on devenv, ship pre-flight stops for an explicit decision when
+`<marker>..HEAD` is non-empty and the triggered review does not clear it; it
+proceeds silently when the range is empty; an override proceeds and leaves the
+marker unadvanced (next `lead-review` re-includes the deferred range), with no
+audit record required by the mechanism; the reviewed through-SHA is re-asserted at ff-merge time (a moved
+tip forces re-review); a no-boundary project's ship path is unchanged; the
+frontier resolver does not advance past a `block` entry.
 
 ## Spec Impact
 
-Target: `ai-docs/spec/workflow-skills.md` (lead-ship gains a pre-flight range
-review for boundary projects; the review-track/boundary config contract) and the
-`ai-docs/ship/ws.md` config. New caller-visible behavior: a mandatory review
-gate at the declared release boundary (devenv ship), host-neutral advisory-only
-elsewhere; `AGENTS.md` review-track/boundary fields and the `workflow_manual`
-nudge.
+Targets:
+- `ai-docs/spec/workflow-skills.md` — `lead-ship` gains an un-omittable,
+  user-overridable pre-flight review gate for `release-boundary: present`
+  projects, keyed to `<marker>..HEAD`; `lead-review` documented as the sole
+  marker advancer. Clean the Phase-1 entry (`#260830-review-policy-config-surface`)
+  of `review.gate`/`release-tag-glob` traces.
+- `ai-docs/spec/mcp-tools.md` — frontier resolution contract (`review.marker`
+  returns the last *clearing* entry) **and its new bare-SHA/`--format json` head
+  output** (a caller-visible output addition, not a new tool); drop
+  `release-tag-glob` references.
+- `ai-docs/ship/ws.md` — devenv pre-flight gate placement.
+
+New caller-visible behavior: a mandatory-but-overridable review gate at the
+declared release boundary (devenv ship), host-neutral advisory-only elsewhere;
+override defers (marker unadvanced; no audit record required by the mechanism).
+Removed caller-visible surface: `release-tag-glob` config field (shipped in Phase
+1, removed here); no `review.gate` MCP tool is added.

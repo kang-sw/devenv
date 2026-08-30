@@ -432,3 +432,31 @@ If the user rejects R2 and/or R5, the fallback direction is the recorded
 rejected alternative (R2→playbook-prose orchestration of raw git/tickets.status;
 R5→config-only Pre-flight bullet), which changes the executor sequencing but not
 the ratified R1/R3/R4 correctness constraints.
+
+## Superseding Decision (2026-08-30) — ship/review decoupling
+
+This plan is **superseded** by a discuss-session redesign captured on the ticket
+`260824-feat-review-release-gate-policy` (`## Sign-off` + revised `## Decisions`,
+2026-08-30). The user ratified R5 but reshaped the whole mechanism:
+
+- **Ship and review are fully decoupled.** `lead-ship` triggers `lead-review`;
+  nothing about ship (tag, merge, override) feeds back into the review range.
+- **The gate range returns to `<marker>..HEAD`** (the review frontier), NOT the
+  last release tag. This reverses 260829's tag re-key and its squash-robustness
+  rationale, relying instead on the already-required no-squash/rebase convention.
+- **Marker = last *clearing* entry** (single-writer: only `lead-review` advances
+  it; `block`/incomplete do not). The non-advancing marker is itself the forcing
+  function, so the b/c `block`-entry + routed-ticket cross-check (R1/R3 machinery
+  in this plan) is no longer the gate mechanism.
+- **R2 (`review.gate` MCP tool) DROPPED** — the check is `review.marker` + one
+  `git rev-list`; no new MCP surface.
+- **`release-tag-glob` REMOVED** — no tag reading; R5-sub (no-tag fallback) is
+  moot.
+- **R5 stop is a strong recommendation the user can explicitly override**, not an
+  absolute hard-block. Override defers (marker unadvanced, next review batches the
+  range) and is recorded to ship's own log, never the review ledger.
+
+Re-scoped Phase 2 (four deliverables + retained R4 pin-and-re-assert) lives on
+the ticket. R4 is retained; R1/R3's ledger-cross-check and R6-sub's b/c-only
+wsflow parity are largely dissolved by the frontier model — treat this plan's
+executor sequencing as historical, not the implementation contract.
