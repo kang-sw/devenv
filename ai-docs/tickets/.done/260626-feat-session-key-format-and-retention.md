@@ -7,6 +7,7 @@ related-mental-model:
   - mcp-runtime
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Session key format and retention cleanup
