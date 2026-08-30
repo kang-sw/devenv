@@ -328,6 +328,58 @@ audit record required by the mechanism; the reviewed through-SHA is re-asserted 
 tip forces re-review); a no-boundary project's ship path is unchanged; the
 frontier resolver does not advance past a `block` entry.
 
+### Result (80e5dc1d) - 2026-08-30
+
+Implemented on `impl/goal/develop/copper-lantern-drizzle/flock-calm-speed`,
+range `9c36958a..80e5dc1d` (survey plan `30-2239-...-p2.md`). All four
+deliverables + R4 + the doc-map landed.
+
+- **Frontier resolver** (`wsreview.ParseFrontier`/`Frontier`, new read-side
+  siblings; `ParseLatest`/`Read`/`Bootstrap` untouched): resolves the last
+  *clearing* entry, skipping `block`/`routed` via an explicit allow-list,
+  with `bootstrap` as the floor and `found=false` on an empty/all-block
+  ledger. `CheckpointNudge` switched `Read`→`Frontier`, so a trailing `block`
+  now shifts the nudge origin to the last clearing entry.
+- **`review.marker` output** gained a `format: json` mode (reusing the
+  `tickets.status` `wantsJSON`/`toolJSONResponse` pattern — output addition to
+  the existing tool, no new MCP tool) reporting the frontier `Entry`
+  (`base`/`head`/`verdict`/`ref`/`found`) from both handler branches.
+- **`lead-ship` gate** (own `### 2. Release gate` numbered section, renumbering
+  Execute to `### 3.`; wsflow mirror byte-identical): un-omittable via an
+  amended single-source-of-truth Invariant carve-out, user-overridable. Reads
+  `found` first (guarding the empty-`head`→`rev-list`→silent-`0` footgun), then
+  branches: `found=false` → stop for an explicit decision with the two
+  non-composing options (i bootstrap-accept / ii review-from-chosen-base);
+  `found=true` → `rev-list --count <frontier-head>..HEAD` → empty proceeds,
+  non-empty triggers `lead-review`, still-not-clear stops for override. The
+  gate never calls `review.stamp` — `lead-review` step 7 is the sole marker
+  writer (invariant now stated in both skills + the mental model).
+- **`release-tag-glob` dropped** entirely from `ReadAgentsReviewPolicy` and
+  devenv's `AGENTS.md`; grep-confirmed zero remaining references (the
+  `git describe --match` machinery never existed — only a doc comment).
+- **devenv wiring** (`ai-docs/ship/ws.md`): gate in Pre-flight; R4
+  pin-and-re-assert in Publish immediately before the ff-only merge.
+
+Deviations (both docs-only, accepted): (1) the gate is its own numbered
+section rather than a Pre-flight bullet — required by R5 un-omittability
+(a bullet is defeatable by config omission); fit review confirmed this is the
+file's own established idiom. (2) the R4 through-SHA is pinned at the *end* of
+Pre-flight (after the version-bump commit) rather than at gate time, so the
+ship's own mechanical bump does not trip R4; correctness review confirmed no
+coverage gap (an external `origin` arrival is caught by the existing
+"develop up to date" check, which restarts Pre-flight and re-runs the gate).
+
+Verification: `go build`/`go vet` clean; `go test ./...` all packages ok; new
+frontier/`format:json`/nudge-origin/all-block-no-floor tests added and passing;
+wsflow rsrc mirror + manifests regenerated (`-count=1`), drift guards + wsflow
+Python suite green; `spec_index_verify` clean. Review: 1 critical (empty-ledger
+silent-pass, ticket-binding-decision violation, reproducible on devenv's own
+first ship) + 2 minors, all resolved across two relay cycles.
+
+Deferred (not blockers): the interactive ship dry-run (live skill invocation,
+exercised naturally at the next real ship); and the ledger
+`block`-requires-`ref` invariant relaxation, explicitly left open by this phase.
+
 ## Spec Impact
 
 Targets:
