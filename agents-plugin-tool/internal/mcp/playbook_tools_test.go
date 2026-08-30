@@ -2507,18 +2507,10 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
 		"Rendered review relay prompt: <prompt-path>",
-		// The conditional elevated target on the same relay template. Without it the
-		// review Instruction names a delegate the dispatch surface cannot reach.
-		"`implementer-elevated` gets **Review relay dispatch** when the review Instruction's capacity or root-cause condition fires for that relay",
-		"When the review Instruction's capacity or root-cause condition fired for this\nrelay, render `implementer-elevated` in place of `implementer-relay`, with those\nsame declared inputs plus PriorFixCommits and PriorDispositions.",
 		// The symmetric re-review ask. Without it a [fixed] item that did not land
 		// carries no token, so the capacity condition would have to be inferred from
 		// prose — and an inferred routing condition does not fire.
 		"For each [fixed], respond [resolved] or [unresolved: <short reason>].",
-		// Backfilled adjudicator entries: the mapping enumerated every other delegate,
-		// and the completion step did not describe the per-dispute verdict-line return.
-		"`review-adjudicator` gets the plan path, review paths, implementer disposition record, commit range under review, review cycle, and the authority inputs for the target kind",
-		"`review-adjudicator` returns one verdict line per dispute instead of a completion report; collect those lines and act on each verdict.",
 		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
 		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
@@ -2533,6 +2525,21 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	}
 	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
 		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
+	}
+	// Per-slice review relay (260828 Phase 1): the generated review Instruction now
+	// has exactly one relay slot, shared by the ordinary and Critical sub-paths, so
+	// neither adjudicator nor elevated-implementer routing has a reachable trigger
+	// anywhere in the generated text. The lead-implement playbook prose that named
+	// those triggers was removed in the same change; it must not resurface.
+	for _, forbidden := range []string{
+		"implementer-elevated` gets **Review relay dispatch**",
+		"When the review Instruction's capacity or root-cause condition fired",
+		"review-adjudicator` gets the plan path, review paths, implementer disposition record",
+		"review-adjudicator` returns one verdict line per dispute",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render retained unreachable adjudicator/elevated routing prose %q:\n%s", forbidden, body)
+		}
 	}
 	for _, forbidden := range []string{
 		"Brief template",
