@@ -36,15 +36,19 @@ freshly fetched state.
     all prior history as review-skipped, **not clear**, and **stop for an
     explicit decision** between (i) `review.marker(bootstrap: true)` to
     accept prior history as unreviewed (seeds `<HEAD>..<HEAD>`, equivalent to
-    an override, nothing reviewed) or (ii) an explicit `lead-review` over
+    an override, nothing reviewed — this is itself the explicit accept, so it
+    proceeds directly) or (ii) an explicit `lead-review` over
     `range: <chosen-base>..develop` for a human-supplied base, which stamps
-    and advances the marker. These do not compose.
+    and advances the marker. These do not compose. Option (ii) is a real
+    review, not an accept-as-is: apply the same clears/not-clear handling as
+    the `found: true` branch below to its outcome — a `block`/non-clearing
+    result must stop for another explicit decision, not auto-proceed.
   - `found: true`: run `git rev-list --count <frontier-head>..develop`.
     Empty — proceed. Non-empty — trigger `lead-review` over
     `range: <frontier-head>..develop`; if it still doesn't clear, surface a
     strong recommendation and stop for an explicit decision.
-  - An override at either stop proceeds without stamping the marker (only
-    `lead-review`'s own `review.stamp` step ever advances it).
+  - An override at any of these stops proceeds without stamping the marker
+    (only `lead-review`'s own `review.stamp` step ever advances it).
 - `git fetch origin --tags` — refresh remote-tracking refs and tags before any
   other check.
 - Develop is up to date: `git merge-base --is-ancestor origin/develop develop` —
