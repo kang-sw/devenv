@@ -58,6 +58,8 @@
     "tickets.sage_gate": ">=0.43.7-dev <0.44.0",
     "tickets.sage_stamp": ">=0.43.7-dev <0.44.0",
     "tickets.verify": ">=0.43.7-dev <0.44.0",
+    "review.marker": ">=0.43.7-dev <0.44.0",
+    "review.stamp": ">=0.43.7-dev <0.44.0",
     "path.generate": ">=0.43.7-dev <0.44.0",
     "workflow_manual": ">=0.43.7-dev <0.44.0",
     "workflow_state": ">=0.43.7-dev <0.44.0",
