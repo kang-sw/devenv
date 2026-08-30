@@ -1,5 +1,167 @@
 # Changelog
 
+## v0.42.0 - 2026-08-23
+
+### Changed
+- **The ten per-knob `config.*` MCP tools collapse into `config.list` (read) +
+  `config.tune` (write).** A breaking change to the config tool surface: the
+  removed tools are `config.show`, `config.tuning`, `config.agents_tier`,
+  `config.bootstrap_alarm`, `config.doc_coverage_alarm`, `config.prompt`,
+  `config.prompt_set`, `config.prompt_unset`, `config.workflow_prefer_mercenary`,
+  and `config.workflow_prefer_subagent`. `config.list` returns the resolved
+  config view plus the full tunable-knob catalog (preserving the old
+  `config.show` and `config.tuning` `format:"json"` payloads and no-agent
+  omission); `config.tune` is the sole writer for scalar knobs, `prompt.*`
+  set/unset, and the `agents.tier` compound value. All per-key rules — allowed
+  scopes, default scope, harness applicability, no-agent (wsflow) visibility,
+  authority/session-key requirements — now derive from a single per-key config
+  registry. `agents.tier` retains its documented tier synonyms
+  (`light`/`core`/`deep`, `haiku`/`sonnet`/`opus`) and case/whitespace tolerance,
+  matching the removed tool. `session_key` is no longer a schema-static required
+  field on config writes; the per-key rule is enforced at dispatch. Both the
+  `ws` and `wsflow` runtime surfaces, the `ws-mcp` CLI, and the
+  spec/mental-model docs are updated in lockstep.
+
+## v0.41.2 - 2026-08-22
+
+### Changed
+- **`_index.local.md` dissolved as the local project-memory store.** A new
+  versioned `lead-bootstrap` migration (ws v0047 / wsflow v0008), symmetric with
+  the v0046 `_index.md` dissolution, retires the live read-step across both
+  packages and root `AGENTS.md`. On upgrade it splits an existing
+  `_index.local.md` by content — machine-local procedures to a gitignored
+  `ai-docs/manuals/*.local.md` sibling, volatile context to the `worktree` note
+  layer by default (or `clone` when clone-wide) — then deletes the file; fresh
+  bootstrap never creates one. The two template lineages stay independent by
+  design and are not forced to align. `documentation-system.md` and
+  `workflow-skills.md` gained the matching spec anchors.
+- **Statusline redesigned to a 3-line natural-width layout** with a
+  reasoning-effort indicator and the cost pill relocated to the model row, right
+  of the model.
+
+### Fixed
+- **Statusline renders on macOS BSD awk / bash 3.2**, fixing breakage on the
+  default macOS toolchain.
+
+## v0.41.1 - 2026-08-20
+
+### Changed
+- **Ready-promotion relaxed to dependency closure.** `lead-write-ticket` now
+  lands a ticket in `ready/` when the tickets its earliest unfinished phase
+  block-depends on are in `ready/`, `.done/`, or the same bulk-promotion action —
+  a closed work front that drains in dependency order — instead of refusing
+  `ready/` until every dependency had landed in `.done/`. Dependencies count only
+  through `related: <stem>: prerequisite` / prerequisite `parent:` edges; a
+  prose-only mention or an epic-hierarchy `parent:` does not.
+- **Bulk ready promotion.** A dependency chain can be promoted to `ready/` in one
+  action via the new `## On: Bulk Ready Promotion` handler: prerequisites first,
+  each ticket's spec-address and sage-review gates run, the landed set committed
+  as one unit, the promoted prefix committed on a mid-run block. Cascade Edit now
+  also runs the sage review gate per `ready/`-entering target, closing a latent
+  gap where cascaded promotions skipped it.
+
+## v0.41.0 - 2026-08-14
+
+### Added
+- **Note visibility mute (`note.mute` / `note.unmute`).** New MCP verbs plus a
+  `visible` field on notes: muted notes are preserved in storage but excluded
+  from ambient `# Notes` injection, giving callers a way to park stale memory
+  without erasing it.
+- **Git-tracked repo note layer.** A `repo` note layer that stores notes inside
+  the tracked tree (`ai-docs/ws-notes/`) with its lock kept outside the tracked
+  dir, so durable per-project memory can ride the git index and travel with
+  clones.
+- **Clone note layer.** A project-scoped, worktree-agnostic `clone` layer for
+  untracked local clone context, decoupled from the per-worktree layer.
+- **Multi-layer `note.search`.** `note.search` accepts an optional/multi-layer
+  selector with a shared 3-key ordering, so one query can span note layers.
+- **Always-on `# Manuals` authoring anchor.** The `# Manuals` block is now an
+  ambient authoring anchor in the workflow manual, and `note.*` durable-memory
+  capture is surfaced through the workflow manual.
+
+### Changed
+- **`_index.md` dissolution.** `ai-docs/_index.md` is dissolved into
+  `AGENTS.md`, the `manuals/` tier, note layers, and generated inventories;
+  `lead-bootstrap` writes to those homes with versioned coexistence degrade.
+
+### Removed
+- **`manuals.list` / `manuals.find` retired.** The manuals discovery MCP tools
+  and their CLI mirror are removed; the ambient `# Manuals` anchor replaces the
+  discovery surface. `manuals.list` remains internally as the anchor's data
+  source only.
+
+### Fixed
+- **wsflow runtime contract drift.** Added `note.mute` / `note.unmute` to both
+  `runtime.json` tool contracts.
+- **Repo-layer note lock relocation.** Moved the repo-layer flock out of the
+  tracked note directory so it never lands in the git index.
+- **Dissolve-index degrade coverage.** Extended the if-present degrade to the
+  shared `rsrc/` conventions surface and dropped a dead bump-script regex.
+
+## v0.40.0 - 2026-08-11
+
+### Added
+- **Note-memory layers (`note.write` / `note.erase` / `note.search`).** A new
+  MCP tool family backing non-tracked, per-machine and per-worktree note memory.
+  Notes are key-addressed, overwrite-on-write, and ambiently injected into the
+  workflow manual under a `# Notes` section; `note.search` supports glob key
+  patterns and inclusive `from`/`then` date bounds. This gives a worktree a
+  stable scratch memory that survives session churn without riding the git
+  index, and closes the worktree-local-index gap.
+- **`manuals/` documentation tier.** A dedicated procedure-manual tier with MCP
+  discovery and ambient `# Manuals` injection into the workflow manual, distinct
+  from static `ref/`. Six live procedure references were migrated `ref/ ->
+  manuals/`, and `lead-bootstrap` routes procedure findings into it.
+- **Idea-ticket attention policy.** `idea/` tickets are brought into a scoped
+  worktree's topic view via add-only sparse staging, and `project_tree` folds
+  orphan `idea/` tickets into a single hidden-count line while rendering
+  parented epic-children and all `ready/`/`todo/` in full. Full idea bodies stay
+  reachable via `tickets.list(status:"idea")`.
+
+### Changed
+- **Implement branches encode their merge base.** The implement-branch resolver
+  now names branches `impl/<merge-root>/<stem>`, mirroring the goal-branch
+  convention so an impl branch declares the base it merges into and merge-target
+  discovery is unambiguous.
+
+### Fixed
+- **Statusline resolves `jq` explicitly** instead of relying on `PATH`, so it no
+  longer breaks under a stripped environment.
+- **Skills manifest drift** for `lead-scope-worktree` regenerated; the
+  skills-manifest is a third regen surface that had gone stale.
+- **`note.search` date bound** `then` is now inclusive of the whole day, and the
+  `written_at` re-stamp path is covered via an injectable clock.
+
+## v0.39.0 - 2026-08-07
+
+### Added
+- **`ws:lead-scope-worktree`** — a new entry skill that scopes a worktree's
+  ticket board to one work line via `git sparse-checkout --no-cone`, hiding
+  out-of-topic `ready/`/`todo/` tickets while `idea/` stays visible. It always
+  discusses the target with the user first, derives the pattern set from that
+  conversation, applies it, verifies by listing the affected directories, and
+  offers `git sparse-checkout disable` restore. Its reference manual lives at
+  `ai-docs/ref/worktree-ticket-scope.md`.
+- **`workflow_manual` sparse-checkout scope announcement.** When
+  `core.sparseCheckout` is active, `workflow_manual` now renders the active
+  scope and names the hidden ticket stems in both its FRESH-with-root and
+  CONTINUE branches; its output is byte-unchanged when the scope is unset.
+
+### Changed
+- **Index-aware ticket board resolution for scoped worktrees.** Ticket board
+  tools resolve tickets hidden by a worktree sparse-checkout scope from the
+  index rather than the working tree, so scoped worktrees no longer under-report
+  the board. Cross-scope ticket moves refuse as true atomic no-ops, and the
+  filter-off path stays byte-identical to the unscoped behavior.
+- **`mcp-server-repair` skill description** retuned to the agent's own failure
+  vocabulary so self-invocation triggers on the symptoms an agent actually
+  reports.
+- **Statusline** consolidates its subprocess forks per render.
+
+### Removed
+- **ws-dashboard** source tree and its documentation, completing the dashboard
+  drop sweep; the board was reconciled and the archived tree removed.
+
 ## v0.38.0 - 2026-07-30
 
 ### Added

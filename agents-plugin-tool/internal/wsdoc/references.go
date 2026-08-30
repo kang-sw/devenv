@@ -31,7 +31,10 @@ func ReferencesTrace(root string, opts ReferenceTraceOptions) (*ReferenceTrace, 
 }
 
 func traceTicketReferences(root, ticketStem string) (*ReferenceTrace, error) {
-	ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: ticketStem, IncludeDone: true, IncludeDropped: true})
+	// Resolve: references.trace is a resolution surface end to end — every
+	// branch answers "what does this stem point at", so a stem hidden by a
+	// worktree scope must still resolve.
+	ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: ticketStem, IncludeDone: true, IncludeDropped: true, Resolve: true})
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +68,10 @@ func traceSpecReferences(root, specStem string) (*ReferenceTrace, error) {
 		IncludeDropped:     true,
 		MentionsTicketStem: "",
 		Query:              specStem,
+		// Resolve: this query form must supply hidden bodies from the index
+		// rather than skip them, or the spec branch stops matching tickets this
+		// worktree does not check out.
+		Resolve: true,
 	})
 	if err != nil {
 		return nil, err
@@ -78,8 +85,26 @@ func traceSpecReferences(root, specStem string) (*ReferenceTrace, error) {
 	return trace, nil
 }
 
+// ticketsFromSpecRefs resolves every referenced stem from ONE board scan rather
+// than one TicketsStatus call per stem. Each per-stem call constructed a fresh
+// ticketScope (there is no cross-call memoization, by design), so under an
+// active scope a spec referenced by N tickets cost ~2N git subprocesses on top
+// of the N full-board rescans that were already there. The lookup below
+// reproduces TicketsStatus's answer exactly: same scan options, same sorted
+// order, first-wins per stem — which is what "the first ticket whose stem
+// matches" already meant.
 func ticketsFromSpecRefs(root string, specs []SpecInfo) []TicketInfo {
 	out := []TicketInfo{}
+	tickets, err := scanTickets(root, ticketScanOptions{IncludeDone: true, IncludeDropped: true, Resolve: resolveFull})
+	if err != nil {
+		return out
+	}
+	byStem := make(map[string]TicketInfo, len(tickets))
+	for _, ticket := range tickets {
+		if _, ok := byStem[ticket.Stem]; !ok {
+			byStem[ticket.Stem] = ticket
+		}
+	}
 	seen := map[string]bool{}
 	for _, spec := range specs {
 		for _, stem := range spec.TicketRefs {
@@ -87,11 +112,14 @@ func ticketsFromSpecRefs(root string, specs []SpecInfo) []TicketInfo {
 				continue
 			}
 			seen[stem] = true
-			ticket, err := TicketsStatus(root, TicketStatusOptions{TicketStem: stem, IncludeDone: true, IncludeDropped: true})
-			if err != nil {
+			// Mirrors TicketsStatus's stem-shape rejection, which returned an
+			// error that this loop skipped.
+			if !ticketStemRE.MatchString(strings.TrimSpace(stem)) {
 				continue
 			}
-			out = append(out, *ticket)
+			if ticket, ok := byStem[stem]; ok {
+				out = append(out, ticket)
+			}
 		}
 	}
 	return out

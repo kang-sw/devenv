@@ -14,8 +14,8 @@ Scope
 - Tuning tools are lead-only and require the lead `session_key`; a delegate or leaf key cannot tune.
 
 Surface
-- Treat `config.tuning` as the source of supported knob ids, writer tools, field options, and current values.
-- Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.tuning`.
+- Treat `config.list` as the source of supported knob ids, the `config.tune` write contract, field options, and current values.
+- Treat prompt override-point ids as valid only when they appear as `prompt.<pointId>` knobs in `config.list`.
 - State that any tuning request that does not map to one of this playbook's handlers is not yet supported.
 
 Storage
@@ -25,7 +25,7 @@ Storage
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/config.tuning(session_key: <lead key>)` to load supported knobs, writer tools, field options, and current values.
+1. Call `{{.McpNamespace}}/config.list(session_key: <lead key>)` to load supported knobs, the `config.tune` write contract, field options, and current values.
 2. If the user states a standing workflow preference but does not explicitly ask to tune, apply `judge: proactive-propose` before selecting a handler.
 3. Apply `judge: tune-target` to route the request to one catalog knob.
 4. Follow that knob's handler using only catalog-provided writer and field metadata, including required drafting and confirmation before writing.
@@ -33,11 +33,11 @@ Storage
 
 ## On: tune prompt override
 
-1. Map the request to a `prompt.<pointId>` knob from the `config.tuning()` catalog; if no listed point matches, show prompt knobs and ask.
+1. Map the request to a `prompt.<pointId>` knob from the `config.list()` catalog; if no listed point matches, show prompt knobs and ask.
 2. Draft or restate the override text for user approval, proposing concise text when the user's desired wording is clear. State the model: a stored override replaces that point's seed block for the matching `(pointId, harness)`; a point shipped with an empty seed contributes new text at that point rather than replacing shipped guidance.
 3. Choose all exposed selector fields, including `harness` or `scope` when present; use `n/a` for selector fields the catalog does not expose.
 4. Confirm `(knob, writer, harness, scope, text)` per the Tuning Proposal template.
-5. Call the catalog writer tool with the knob's fixed arguments, `session_key`, selected selector fields, and the override text in the catalog-specified prompt/text field.
+5. Call `config.tune` with the knob's id as `key`, `session_key`, the selected selector fields, and the override text as `value`.
 6. Report the stored knob/harness/scope; note it applies at the next playbook render, not retroactively.
 
 Examples:
@@ -48,7 +48,7 @@ Examples:
 1. Map the request to the `"workflow.prefer_subagent"` catalog knob.
 2. Choose the new state from the catalog value field.
 3. Confirm the Tuning Proposal with the selected value.
-4. Call the catalog-provided writer for `"workflow.prefer_subagent"` with `session_key` and the selected value.
+4. Call `config.tune` with `key` set to `"workflow.prefer_subagent"`, `session_key`, and the selected value.
 5. Report the global state and that it applies to the next workflow-manual load.
 
 <!-- ws:full-only:start -->
@@ -57,7 +57,7 @@ Examples:
 1. Map the request to the `"workflow.prefer_mercenary"` catalog knob.
 2. Choose the new state from the catalog value field.
 3. Confirm the Tuning Proposal with the selected value.
-4. Call the catalog-provided writer for `"workflow.prefer_mercenary"` with `session_key` and the selected value.
+4. Call `config.tune` with `key` set to `"workflow.prefer_mercenary"`, `session_key`, and the selected value.
 5. Report the global state and that it controls both mercenary visibility and default render guidance.
 <!-- ws:full-only:end -->
 
@@ -66,7 +66,7 @@ Examples:
 1. Map the request to the `agents.tier` catalog knob.
 2. Choose the required tier field and any applicable optional `harness`, `backend`, `model`, and `effort` fields from the catalog metadata.
 3. Confirm the Tuning Proposal with the selected fields.
-4. Call the catalog writer tool with `session_key` and the selected fields.
+4. Call `config.tune` with `key` set to `agents.tier`, `session_key`, and the selected fields (`tier` plus optional `backend`/`model`/`effort`) as the `value` object.
 5. Report the tier and, when returned by the writer/catalog, its resolved backend/model.
 
 ## On: unsupported axis

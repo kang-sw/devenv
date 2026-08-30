@@ -571,7 +571,7 @@ const implementReviewFinalCycleClause = "After the last budgeted cycle returns, 
 // has no remaining relay, and lead-only never relays at all.
 //
 // One rule per sentence behind a leading token label. The unbroken-paragraph form this
-// replaced was skipped under attention pressure (the `ai-docs/ref/skill-authoring.md` reader model),
+// replaced was skipped under attention pressure (the `ai-docs/manuals/skill-authoring.md` reader model),
 // and the clause now carries enough rules that the labels are the only index into them.
 const implementReviewAdjudicationClause = "Trigger: When a re-review answers [maintained] on a contested won't-fix, or the implementer answers [escalate: <reason>] mid-relay, adjudicate before the next review; skip this step when neither answer appeared. Dispatch: Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract; supply every one, passing an empty string for the authority inputs the target kind does not use, then dispatch the rendered prompt and parse its one verdict line per dispute. Cost: Adjudication runs inside the current relay slot and consumes no review cycle. Override: On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one; on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run. Accept: An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report. Out-of-scope: An [out-of-scope: <reason>] leaves the relay list, costs no relay, and is carried into the final report as unresolved by decision with its stated reason. Bound: Adjudicate at most once per relay slot: a second escalation in the same slot is not re-adjudicated and reaches the next review as-is."
 
@@ -629,32 +629,47 @@ func implementDocCloseoutInstruction(verdict implementTodoVerdict) string {
 	return "Run documentation closeout compaction only for a safe documentation-only branch-tip suffix; otherwise record the skipped compaction status."
 }
 
+// implementFinalActionInstruction's default outcome is continue-on-branch
+// without merging (modeled on implementCompletionInstruction's no-merge
+// phrasing), for every phase — this package carries no phase-index/position
+// field, so the same wording applies regardless of where in a multi-phase
+// run this gate falls. An explicit merge stays available as a caller-chosen
+// option; verdict.BranchPlan.MergeConfirm governs approval for that chosen
+// merge only ("skip" drops the ask, "ask"/absent requires it) and no longer
+// gates an always-happening merge. tickets.close later surfaces its own
+// merge-review nudge if the branch is left unmerged.
 func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	skipConfirm := strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip")
 	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify review disposition"
-	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
-		if skipConfirm {
-			return fmt.Sprintf("%s and skipped documentation policy, then proceed to merge without asking for approval (caller merge confirm is skip): %s.", verification, firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
-		}
-		return fmt.Sprintf("%s and skipped documentation policy before asking for final action approval: %s.", verification, firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
-	}
+	var mergeOption string
 	if skipConfirm {
-		return verification + " and standard documentation closeout, then proceed to merge without asking for approval (caller merge confirm is skip)."
+		mergeOption = "If a merge is explicitly chosen instead, perform it without asking for approval (caller merge confirm is skip)."
+	} else {
+		mergeOption = "If a merge is explicitly chosen instead, ask for approval before performing it."
 	}
-	return verification + " and standard documentation closeout before asking for final action approval."
+	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
+		return fmt.Sprintf("%s and skipped documentation policy, then report the retained branch and commit range as the default no-merge outcome: %s. %s", verification, firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"), mergeOption)
+	}
+	return fmt.Sprintf("%s and standard documentation closeout, then report the retained branch and commit range as the default no-merge outcome. %s", verification, mergeOption)
 }
 
+// implementMergeInstruction is opt-in: this step runs only when a merge was
+// explicitly chosen, either at the final-action gate above or later during
+// tickets.close review. verdict.BranchPlan.MergeConfirm governs approval for
+// that chosen merge only ("skip" drops the ask, "ask"/absent requires it);
+// it is not a trigger for merging by default. Continuing on the branch
+// without merging remains the default outcome for every phase.
 func implementMergeInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not merge while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip") {
-		return "Caller merge confirm is skip: perform the selected final action against the verdict merge target without asking for user approval, and preserve the workflow-owned merge record."
+		return "This step runs only when a merge was explicitly chosen at the final action gate or later at tickets.close review; when chosen, perform it against the verdict merge target without asking for user approval (caller merge confirm is skip) and preserve the workflow-owned merge record. Otherwise skip this step: continuing on the branch without merging is the default outcome."
 	}
-	return "After user approval, perform the selected final action against the verdict merge target and preserve the workflow-owned merge record."
+	return "This step runs only when a merge was explicitly chosen at the final action gate or later at tickets.close review; when chosen, perform it against the verdict merge target after user approval and preserve the workflow-owned merge record. Otherwise skip this step: continuing on the branch without merging is the default outcome."
 }
 
 func implementCompletionInstruction(verdict implementTodoVerdict) string {
@@ -1017,7 +1032,11 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
 		normalized, _ := normalizeImplementFacts(input)
-		targetBranch := implementTargetBranchName(normalized.ScopeSlug)
+		peek, err := observeImplementBranch(record.Root, "")
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
+		}
+		targetBranch := implementTargetBranchName(implementMergeRootFor(peek.CurrentBranch), normalized.ScopeSlug)
 		obs, err := observeImplementBranch(record.Root, targetBranch)
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))

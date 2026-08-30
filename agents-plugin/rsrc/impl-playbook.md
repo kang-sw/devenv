@@ -35,7 +35,7 @@ Never patch tests to match broken implementation or vice versa.
 
 ## §Verify
 
-Run the project's test suite(s) and build step (`ai-docs/_index.md` for commands).
+Run the project's test suite(s) and build step (commands live in `AGENTS.md`'s `## Project Orientation` section or `ai-docs/manuals/`; `ai-docs/_index.md` when the project has not migrated off it).
 Reuse passing full-suite evidence only while its covered source inputs (code,
 tests, dependencies, build configuration, and generated inputs) are unchanged.
 Documentation-only commits require only project checks covering the edited docs;

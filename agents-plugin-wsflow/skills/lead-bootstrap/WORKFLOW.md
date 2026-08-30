@@ -1,12 +1,12 @@
-# wsflow Workflow Guide
+# Workflow Guide
 
 This guide is copied to `ai-docs/WORKFLOW.md` by bootstrap so a
-maintainer can preserve the project shape during manual workflow maintenance.
-It is an explanation and manual fallback only: editing this file does not change
-wsflow MCP parser behavior, plugin/runtime semantics, ticket status logic, spec
-indexing, or any other machine contract.
+maintainer can preserve the project shape when plugin skills or MCP tools are not
+available. It is an explanation and manual fallback only: editing this file does
+not change MCP parser behavior, plugin/runtime semantics, ticket status logic,
+spec indexing, or any other machine contract.
 
-When this guide and installed wsflow tooling disagree, treat the installed plugin,
+When this guide and installed plugin tooling disagree, treat the installed plugin,
 runtime, and bundled conventions as canonical. Update the upstream bootstrap
 template rather than relying on a project-local guide override.
 
@@ -16,17 +16,23 @@ template rather than relying on a project-local guide override.
 - `CLAUDE.md` exists only for Claude compatibility and should contain
   `@AGENTS.md` when the project has migrated to the host-neutral context.
 - `ai-docs/WORKFLOW.md` is this pinned guide for plugin-less
-  maintenance. Keep root context short; put durable project context in
-  `ai-docs/_index.md` and workflow-system changes in upstream tooling.
+  maintenance. Keep root context short; put durable project orientation in
+  `AGENTS.md`'s `## Project Orientation` section, procedures in
+  `ai-docs/manuals/`, volatile session context in the `repo` note layer, and
+  workflow-system changes in upstream tooling.
 
 ## `ai-docs/` Layout
 
-- `_index.md` is the session-start memory and active focus. Prune aggressively:
-  completed work belongs in Git history, not the index.
-- `_index.md` should keep compact orientation: summary, stack, workspace,
-  conventions, build/test commands, operational pitfalls, current focus, and
-  short session notes.
-- `_index.local.md` is machine-local memory and should be ignored by Git.
+- `AGENTS.md`'s `## Project Orientation` section is the every-session
+  orientation: repo identity, project map/topology, and canonical flows. Keep
+  it compact; route deep detail to specs, mental models, or manuals.
+- `manuals/` stores procedures and how-to content, one file per procedure with
+  a `summary:` frontmatter line describing when it applies; a `*.local.md`
+  sibling (gitignored) holds machine-local procedure content such as
+  credentials, IPs, hostnames, or host-specific runbooks.
+- `ws-notes/` is the git-tracked `repo` note layer, one file per key. It holds
+  volatile or tracked session context; prune stale entries qualitatively as
+  the project advances.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
 - `spec/` stores caller-visible behavior specs with stable stem anchors.
@@ -65,7 +71,7 @@ template rather than relying on a project-local guide override.
   keeps it rather than deleting it.
 - If stem-generation or duplicate-anchor tools are unavailable, choose a clear
   date-prefixed stem manually, search the spec tree for duplicates, and verify
-  with wsflow tooling when it becomes available.
+  with plugin tooling when it becomes available.
 
 ## Mental Models
 
@@ -83,10 +89,19 @@ template rather than relying on a project-local guide override.
 
 ## Index Health
 
-When candidates exist, bootstrap reports `_index.md` scope-drift candidates as
+`ai-docs/_index.md` is a legacy all-in-one memory file. Current projects route
+every-session orientation into `AGENTS.md`'s `## Project Orientation` section,
+procedures into `ai-docs/manuals/`, volatile or tracked session context into
+the `repo` note layer, and ticket/spec inventory into generated project-tree
+output; they do not have an `_index.md`. This section only applies to a
+project that still has one, until it runs the bootstrap migration item that
+dissolves it.
+
+When `ai-docs/_index.md` exists, bootstrap reports scope-drift candidates as
 an advisory health note and asks whether to clean up now, defer cleanup, or
-route semantic follow-up. The first pass reads `_index.md` only; it does not
-load the full spec or mental-model corpus and does not move semantic content.
+migrate to the current model. The first pass reads `_index.md` only; it does
+not load the full spec or mental-model corpus and does not move semantic
+content.
 
 Common drift candidates:
 
@@ -99,7 +114,11 @@ Common drift candidates:
 - stable task/topic reading maps mixed into `_index.md`;
 - long duplicated spec, mental-model, module, or ticket indexes.
 
-When a maintainer approves `_index.md` cleanup:
+When a maintainer approves cleanup, prefer the dissolution migration (move
+`_index.md` content into `AGENTS.md`'s `## Project Orientation`, the `repo`
+note layer, and `ai-docs/manuals/`, then delete `_index.md`) over a partial
+in-place compaction. If a maintainer only wants a lighter compaction pass
+instead of full dissolution:
 
 1. Preserve the memory-policy comment.
 2. Keep project summary, stack, top-level workspace, build/test commands,
@@ -114,11 +133,10 @@ When a maintainer approves `_index.md` cleanup:
 6. Compact source-derived detail to source pointers, static material to
    `ai-docs/ref/` or API-doc pointers, work history to Git or ticket archives,
    and duplicated maps to start-here pointers.
-7. Route deeper semantic work through the owning workflow: behavior to
-   `wsflow:lead-forge-spec` or `wsflow:lead-write-spec`, modification knowledge
-   to `wsflow:lead-forge-mental-model`, ticket readiness/status wording to
-   `wsflow:lead-write-ticket`, and ambiguous
-   direction to `wsflow:lead-discuss`.
+7. Route deeper semantic work through the owning workflow: behavior into
+   `ai-docs/spec/`, modification knowledge into `ai-docs/mental-model/`,
+   ticket readiness/status wording into the ticket body, and ambiguous
+   direction to a discussion pass.
 
 ## Commit Traceability
 
@@ -130,14 +148,14 @@ When a maintainer approves `_index.md` cleanup:
   spec stems. If a spec anchor is renamed, record
   `renamed-spec: <old-stem> -> <new-stem>`.
 
-## Manual Maintenance
+## Manual Fallback
 
-When maintaining workflow docs manually:
+When workflow skills, MCP tools, or Claude compatibility commands are unavailable:
 
-1. Read `AGENTS.md`, `_index.md`, this guide, and the relevant current docs.
+1. Read `AGENTS.md`, this guide, and the relevant current docs.
 2. Use existing nearby tickets, specs, and mental models as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
 4. Keep generated AI docs and commit messages in English unless a human-facing
    product string requires another language.
-5. Verify with plain Git and shell commands, then run wsflow verification tools
-   when the workflow change reaches normal tooling.
+5. Verify with plain Git and shell commands, then re-run plugin verification
+   tools when they become available.

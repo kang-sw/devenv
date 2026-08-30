@@ -982,11 +982,11 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		t.Fatalf("printPlaybook lead-tune: %v", err)
 	}
 	for _, want := range []string{
-		`ws/config.tuning(session_key: <lead key>)`,
+		`ws/config.list(session_key: <lead key>)`,
 		`"workflow.prefer_subagent"`,
-		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		`"workflow.prefer_mercenary"`,
-		"catalog-provided writer for `\"workflow.prefer_mercenary\"`",
+		"`config.tune` with `key` set to `\"workflow.prefer_mercenary\"`",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -1019,10 +1019,10 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
 	}
 	for _, want := range []string{
-		`wsflow/config.tuning(session_key: <lead key>)`,
+		`wsflow/config.list(session_key: <lead key>)`,
 		"wsflow workflow",
 		`"workflow.prefer_subagent"`,
-		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		"`config.tune` with `key` set to `\"workflow.prefer_subagent\"`",
 		"prompt.UserPreferenceSection",
 		"## On: tune model tier",
 		"Map the request to the `agents.tier` catalog knob",
@@ -2764,7 +2764,7 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 
 // TestSkillAuthoringRelocatedOutOfRsrc replaces the former
 // TestPlaybookPrintGoldenLeadSkillAuthoring golden. The authoring manual is no
-// longer a shipped playbook: it moved to ai-docs/ref/skill-authoring.md, which
+// longer a shipped playbook: it moved to ai-docs/manuals/skill-authoring.md, which
 // AGENTS.md binds as a mandatory pre-edit read. The relocation is only safe
 // while the content actually survives at the new path, so this asserts the
 // destination carries the doctrine text the old golden checked, and that the
@@ -2777,7 +2777,7 @@ func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 		t.Error("lead-skill-authoring must no longer resolve as an rsrc playbook")
 	}
 
-	relocated := filepath.Join("..", "..", "..", "ai-docs", "ref", "skill-authoring.md")
+	relocated := filepath.Join("..", "..", "..", "ai-docs", "manuals", "skill-authoring.md")
 	raw, err := os.ReadFile(relocated)
 	if err != nil {
 		t.Fatalf("relocated authoring manual missing: %v", err)
@@ -2786,9 +2786,14 @@ func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 	if !strings.Contains(body, "executability under pressure") {
 		t.Error("relocated manual lost the doctrine text 'executability under pressure'")
 	}
-	// The playbook-serving frontmatter has no meaning outside rsrc and must be gone.
-	if strings.HasPrefix(body, "---") {
-		t.Error("relocated manual still carries playbook frontmatter")
+	// The manual carries manuals-tier `summary:` frontmatter, not the
+	// rsrc playbook-serving frontmatter (`kind:`, `delegates:`, etc.) which
+	// has no meaning outside rsrc and must not have come along with the move.
+	if !strings.Contains(body, "summary:") {
+		t.Error("relocated manual is missing manuals-tier `summary:` frontmatter")
+	}
+	if strings.Contains(body, "kind:") {
+		t.Error("relocated manual still carries rsrc playbook-serving frontmatter")
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 // substitutionMirroredSkills is the curated, bounded list of skills eligible
 // for substitution-mirrored generation: only skills explicitly and
 // deliberately migrated out of playbook.print. This is not a blanket
-// auto-mirror mechanism — see ai-docs/ref/wsflow-mirroring.md.
+// auto-mirror mechanism — see ai-docs/manuals/wsflow-mirroring.md.
 var substitutionMirroredSkills = []string{
 	"lead-drain-ready-queue",
 	"lead-prefer-subagent",
@@ -190,6 +190,25 @@ func TestWsCliSubstitutionPattern(t *testing.T) {
 		"Run wsflow-cli tools, never ws-mcp directly, and do not touch ws-plugin.\n"
 	if out != want {
 		t.Fatalf("ws-cli substitution mismatch:\ngot:  %q\nwant: %q", out, want)
+	}
+}
+
+// TestWsMCPSubstitutionPattern proves the "ws MCP" literal-token substitution
+// fires on the space-separated prose token while leaving the "ws-mcp" binary
+// name untouched, and does not degenerate into a bare-"ws" rule.
+func TestWsMCPSubstitutionPattern(t *testing.T) {
+	source := "---\nname: fixture\n---\n\n" +
+		"The ws MCP server is not running; run ws-mcp-launcher.py directly. " +
+		"Do not confuse ws-mcp with the ws workflow itself.\n"
+	out, err := GenerateWsflowSkillBody(source)
+	if err != nil {
+		t.Fatalf("expected guard to accept fixture, got error: %v", err)
+	}
+	want := "---\nname: fixture\n---\n\n" +
+		"The wsflow MCP server is not running; run ws-mcp-launcher.py directly. " +
+		"Do not confuse ws-mcp with the ws workflow itself.\n"
+	if out != want {
+		t.Fatalf("ws MCP substitution mismatch:\ngot:  %q\nwant: %q", out, want)
 	}
 }
 

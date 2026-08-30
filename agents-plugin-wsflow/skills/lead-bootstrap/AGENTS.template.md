@@ -4,10 +4,8 @@
 
 Read at every session start, before other action:
 
-1. **Preamble** - read `ai-docs/_index.md`; keep only context a session must not re-derive.
-2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored machine context.
-3. **Project arc** - run `git log --oneline --graph -50`.
-4. **Recent history** - run `git log -10` for `## AI Context` rationale.
+1. **Preamble** - repo identity, project map/topology, and canonical flows live in this file's `## Project Orientation` section below; read the `repo` note layer at `ai-docs/ws-notes/` (one file per key) for volatile session context, `ai-docs/manuals/` for procedures, and generated ticket/spec inventories for current status. Keep only context a session must not re-derive.
+2. **Project arc** - run `git log --oneline --graph -50`.
 
 ## Response Discipline
 
@@ -71,11 +69,21 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 1. **Headless-testable architecture.** Domain logic and state live in framework-agnostic layers testable without a display. UI layers stay thin: no branching logic, state ownership, or domain knowledge.
 -->
 
+## Project Orientation
+
+<!-- Every-session orientation an AI session needs without re-deriving it each
+     time: repo identity, project map/topology, and canonical flows. Keep
+     compact; route deep detail to specs, mental models, or manuals. -->
+
+- **Repo identity.** [Project-specific summary: what this repo is, its scope boundaries.]
+- **Project map / topology.** [Project-specific: key directories/packages and their roles.]
+- **Canonical flows.** [Project-specific: named workflows, entry points, or pipelines, if any.]
+
 ## Project Knowledge
 
 - Project state and cross-session context live in `ai-docs/`.
-- Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; it is explanatory and does not override wsflow runtime or wsflow MCP parser behavior.
-- Before creating or editing tickets, load the write-ticket workflow skill for conventions.
+- Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; read it only if the `ws` or `wsflow` `workflow-manual` MCP tool is not in your toolbox. It is explanatory and does not override plugin runtime or MCP parser behavior.
+- Before creating or editing tickets, follow the ticket conventions and the shape of existing tickets under `ai-docs/tickets/`.
 - Reference tickets by stem only, never full path; stems survive status moves.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
@@ -84,11 +92,11 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
 ai-docs/
-  _index.md          - session-start context and focus
-  _index.local.md    - local memory, .gitignored
   mental-model.md    - overall mental-model index and optional project reading map
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
+  manuals/           - procedures and how-to content (one file per procedure, `summary:` frontmatter)
+  ws-notes/          - git-tracked repo note layer (one file per key), written via wsflow/note.write(layer: "repo")
   .old/              - tracked project archive hidden from default listings
   ref/               - static reference material
   WORKFLOW.md        - plugin-less maintenance guide
@@ -98,57 +106,89 @@ CLAUDE.md compatibility shim:
 
   @AGENTS.md
 
-_index.md should cover project summary, stack, workspace, conventions,
-build/test commands, operational pitfalls, current focus, and 2-5 lines of
-session notes. Do not list `.done/` or `.dropped/` tickets; use git history.
-Deep source narratives, behavior inventories, extension recipes, dependency
-notes, stable project reading maps, and completed history are scope-drift
-candidates; keep only compact pointers here and route semantic extraction
-through the owning workflow.
-
-_index.md must start with:
-
-  <!-- Memory policy: prune aggressively as project advances. Completed
-       work belongs in git history, not here. Keep only what an AI session
-       needs to orient itself and pick up work. If it's derivable from
-       code or git log, delete it from this file. --\>
+Populate this template's `## Project Orientation` section directly with repo
+identity, project map/topology, and canonical flows; do not create a separate
+`_index.md` orientation document. Route procedures and how-to content to
+`ai-docs/manuals/`. Ticket and spec inventories are source-derivable; do not
+hand-maintain a table for them. Volatile or tracked session context (open
+threads, session notes) goes to the `repo` note layer via
+`wsflow/note.write(layer: "repo", ...)`, one key per topic, pruned
+qualitatively as it goes stale.
 
 Adapt structure to the project; this is a starting point, not a schema.
 -->
 
 <!-- Inclusion test: if breaking this rule makes a skill produce wrong results
      AND it applies everywhere, keep it here. Domain-scoped rules belong in
-     `ai-docs/mental-model/<domain>.md ## Domain Rules` via `wsflow:lead-add-rule`.
-     Context goes in `_index.md`; process goes in skills. -->
+     `ai-docs/mental-model/<domain>.md ## Domain Rules`.
+     Context goes in this file's `## Project Orientation` section or the
+     `repo` note layer; process goes in skills. -->
 
 <!-- MIGRATION CHECKLIST
      Template-internal. NEVER copy into a project AGENTS.md; only the Template
      Version tag belongs there. Read the tag at the bottom, apply items with
-     version > current in order, then update the tag.
-     This template has package-local version history; apply only entries listed here.
+     version > current in order, then update the tag. Skip obsoleted items.
      Preserve project-specific Architecture Rules and standards; merge
      surgically and mark conflicts instead of overwriting.
 
-- v0001: Align `AGENTS.md` with the initial wsflow baseline: Project Memory,
-  Response Discipline, Workflow, Architecture Rules, Project Knowledge, the
-  inclusion-test comment, and the Template Version tag.
-- v0001: Ensure `CLAUDE.md` contains `@AGENTS.md`.
-- v0001: Ensure `ai-docs/WORKFLOW.md` exists from the bootstrap workflow guide.
-- v0001: Ensure `ai-docs/` has `_index.md`, `mental-model.md`,
-  `mental-model/`, `spec/`, `ref/`, `.old/`, and tickets status directories:
-  `idea/`, `todo/`, `ready/`, `.done/`, `.dropped/`.
-- v0001: Ensure `.gitignore` includes `ai-docs/**/*.local.md` and
-  `ai-docs/.deps/`.
-- v0002: If `ai-docs/_index.md` looks like an old all-in-one
+     Equivalence note: through v0008, this template tracked a wsflow-local
+     consolidated baseline (its own independent v0001..v0008 numbering,
+     folded from the ws lineage reset in commit 599fb453). That baseline is
+     equivalent through ws v0047 below - the convergence audit for ticket
+     260825 found no ws checklist entry through v0047 that applies beyond
+     what the baseline already established. From here this checklist shares
+     ws's single lineage instead of numbering independently; the entries
+     below are the full ws `v0001..v0047` checklist with ws-prefixed tool
+     tokens substituted for the wsflow-prefixed equivalents.
+
+- v0001: If `ai-docs/_memory.md` exists, merge useful content into `_index.md`, then delete it.
+- v0002: [obsoleted]
+- v0003: If tickets lack `plans:` frontmatter, add entries only for phases with existing plan docs. Keep discussion decisions in tickets; codebase-derived detail belongs in plans.
+- v0004: Remove `plans:` entries with `null`; absence means "not yet created".
+- v0005: Add `parent:` frontmatter for epic relationships where applicable. Epic tickets use category `epic`.
+- v0006: Rename old plan paths `YYMM/DD-HHMM.<name>.md` to `YYYY-MM/DD-hhmm.<name>.md` with `git mv`.
+- v0007: [obsoleted]
+- v0008: [obsoleted by v0014]
+- v0009: If Commit Rules lack `## Ticket Updates`, add it.
+- v0010: If the Inclusion test comment above is missing, add it and keep it permanently.
+- v0011: If no `<!-- Template Version: ... --\>` tag exists, review v0001-v0010, resolve applicable items, then add the tag to the managed context file.
+- v0012: [obsoleted by v0014]
+- v0013: Add the memory-policy comment to the top of `ai-docs/_index.md`; keep it permanently. Remove done/dropped ticket references.
+- v0014: Replace session-start lines with `## Project Memory`; add `ai-docs/_index.local.md` to `.gitignore`.
+- v0015: Move Project Summary, Tech Stack, and Workspace from CLAUDE.md to `_index.md`; keep CLAUDE.md behavioral.
+- v0016: Add the ticket completion check rule to Project Knowledge if missing.
+- v0017: Convert Project Knowledge paragraphs to bullets.
+- v0018: For GUI/TUI projects, add the headless-testable Architecture Rule if missing.
+- v0019: Replace per-file `ai-docs/*.local.md` ignores with `ai-docs/**/*.local.md`.
+- v0020: Convert ticket `related:` list format to map format across all ticket statuses.
+- v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then run mental-model-updater to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
+- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `wsflow/playbook.print(name: "lead-write-spec")` to rebuild `features:` frontmatter.
+- v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
+- v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`.
+- v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.
+- v0026: If specs exist but no `{#YYMMDD-slug}` anchor exists, suggest `wsflow:lead-forge-spec`; do not edit specs automatically.
+- v0027: If mental-model docs exist but embed no spec stem, suggest `wsflow:lead-forge-mental-model`; do not edit mental models automatically.
+- v0028: Reclassify domain-scoped rules from `## Architecture Rules` or `_index.md` into `ai-docs/mental-model/<domain>.md ## Domain Rules` via `wsflow:lead-add-rule`.
+- v0029: If `ai-docs/tickets/wip/` exists, `git mv` tickets to `todo/`, remove empty `wip/`, add `## Ticket Queue` if absent, then use `wsflow:lead-discuss` to agree order.
+- v0030: Rename archive dirs to dot-prefix via `git mv`: `tickets/done` -> `.done`, `tickets/dropped` -> `.dropped`, `ai-docs/plans` -> `.plans`; update references.
+- v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; local API documentation cache data belongs under `ai-docs/.deps/`.
+- v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
+- v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
+- v0034: Treat `AGENTS.md` as the canonical managed template target.
+- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research`, non-`workset` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec addressing; keep `epic`, `research`, `workset`, missing-spec-address, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `wsflow:lead-discuss`.
+- v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws or wsflow runtime or MCP parser behavior.
+- v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
+- v0038: Create `ai-docs/.old/` as the tracked project archive for files kept only as possible future reference and hidden from default listings. Move legacy spec archives with `git mv`: `ai-docs/ref/old-spec` or `ai-docs/old-spec` -> `ai-docs/.old/spec`; move `ai-docs/old` -> `ai-docs/.old/misc` when present and not already project-specific.
+- v0039: If `ai-docs/_index.md` looks like an old all-in-one
   architecture digest, report an index health note and ask whether to clean up
   `_index.md`. Do not move semantic content into specs or mental models from
   bootstrap; the lead compacts `_index.md` only after user approval and only when an
   owning document already preserves the meaning.
-- v0003: Treat stable task/topic -> document routing maps as candidates for
+- v0040: Treat stable task/topic -> document routing maps as candidates for
   `ai-docs/mental-model.md ## Project Reading Map` during later
   mental-model work. Bootstrap may report the drift, but must not move mixed
   status or feature inventory automatically.
-- v0004: Replace `_index.md ## Ticket Queue` with `## Ticket Focus`. If both
+- v0041: Replace `_index.md ## Ticket Queue` with `## Ticket Focus`. If both
   sections exist, preserve `Ticket Focus` and remove `Ticket Queue`; if only
   `Ticket Queue` exists, move the entries already listed in that section into
   `Ticket Focus` preserving order, then remove `Ticket Queue`. Update managed
@@ -157,8 +197,10 @@ Adapt structure to the project; this is a starting point, not a schema.
   wording, reorder, or promote ticket status. If any migrated entry still lacks
   clear status or readiness wording, report that a follow-up `lead-write-ticket`
   focus cleanup is needed.
-- v0005: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
-- v0006: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
+- v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
+- v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
+- v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
+- v0045: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
   all three forms: `🚧 <Feature Name>` headings at any level (`#` through
   `######`), `> [!<keyword>] Planned 🚧` body callouts under any alphabetic
   callout keyword (`note`, `warning`, and the like), and `- 🚧 <name>` items in
@@ -173,6 +215,37 @@ Adapt structure to the project; this is a starting point, not a schema.
   on the retained text, and update mental-model files that cross-reference a
   changed anchor in the same commit. Planned behavior no longer belongs in a
   spec; it lives in the owning ticket's `## Spec Impact`.
+- v0046: Dissolve `ai-docs/_index.md` as the project memory store. If
+  `ai-docs/_index.md` exists: migrate its repo-identity, project-map/topology,
+  and canonical-flow content into this file's `## Project Orientation` section
+  (create the section first if a prior migration or manual addition has not
+  already added it); migrate its `## Session Notes` (or equivalent volatile
+  history) into the `repo` note layer via `wsflow/note.write(layer: "repo", ...)`,
+  one key per topic, pruning entries that read as stale rather than copying
+  them verbatim; drop remaining sections that are duplicate, derivable, or
+  already homed elsewhere - procedure/how-to content to `ai-docs/manuals/`
+  (only if not already covered by an existing manual), ticket/spec inventory
+  tables (derivable via generated project-tree output), moment-in-time state
+  such as branch-verification reminders, and any runtime/MCP/prompt/agent/skill
+  surface description already duplicated in `ai-docs/manuals/` or the source
+  tree. Then delete `ai-docs/_index.md` and remove the `_index.md`-reading step
+  from `## Project Memory` (or equivalent). Update any project-memory pointer
+  bullet elsewhere in `AGENTS.md` that still names `_index.md` to point at the
+  new homes instead. This is a one-time migration judgment call, not an
+  automated reconciliation; do not build staleness-detection tooling for it.
+- v0047: Dissolve `ai-docs/_index.local.md` as the local project memory store.
+  If `ai-docs/_index.local.md` exists: split its content by judgment -
+  machine-local procedure content (credentials, IPs, hostnames, host-specific
+  runbooks) to a new gitignored `ai-docs/manuals/*.local.md` sibling following
+  the manuals convention; volatile local context to `wsflow/note.write(session_key,
+  layer: "worktree", ...)` by default, or `layer: "clone"` only when the
+  content is judged clone-wide (shared across worktrees of the same clone)
+  rather than worktree-specific. Then delete `ai-docs/_index.local.md`, remove
+  its `## Project Memory` read step (renumbering trailing steps), and remove
+  the `_index.local.md` layout-tree entry from this template's MIGRATION
+  scaffold comment above. Fresh bootstrap must never create
+  `ai-docs/_index.local.md`. This is a one-time migration judgment call, not an
+  automated reconciliation; do not build staleness-detection tooling for it.
 -->
 
-<!-- Template Version: v0006 -->
+<!-- Template Version: v0047 -->

@@ -78,3 +78,25 @@ Deprioritized: the user backlogged this ticket during the workflow-dogfood-bugs
 workset drain — recent hotfixes have made this class of install clutter rare
 in practice, and the immediate 2026-07-03 symptom was worked around manually.
 Stays in `todo/` as accepted backlog; not pushed to `ready/` for now.
+
+## Recurrence (2026-08-12)
+
+Reproduced deterministically, one minor behind this time: right after shipping
+ws `0.40.0`, a fresh session's `ws/*` tools were missing and the launcher failed
+with the same "local devenv runtime was forced but no compatible local runtime
+could be installed". Installed snapshot `runtime.json` was still `0.39.0`
+(`required_mcp: ">=0.39.0-dev <0.40.0"`) while the live source built `0.40.0-dev`;
+`version_compatible(allow_same_minor=True)` tolerates only patch drift within a
+minor, so a **minor** bump exceeds it and hard-fails. Fix was `./install.sh update`,
+which re-syncs `agents-plugin/` into the snapshot (bringing `runtime.json` to
+`0.40.0`) and reinstalls the plugin — the snapshot re-sync, not a CLI plugin
+update, is what clears it.
+
+Classification (user, 2026-08-12): this is a **known limitation** of the devenv
+dogfood loop, not a defect to prioritize. In this repo a ship bump predictably
+leaves the installed snapshot one minor behind the live source until
+`install.sh update` re-syncs it, and forgetting that step is a routine
+self-inflicted trip the user owns and clears manually. Recorded here as a data
+point, not as pressure to promote the ticket; it stays deprioritized in `todo/`.
+Research Direction #3 (a pre-session source-vs-installed self-check) remains the
+option if this is ever revisited, but nothing here asks to.

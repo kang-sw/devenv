@@ -188,9 +188,13 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 	}
 
 	// 3. Resolved record — render only the Session State section, no manual body.
-	//    Match workflow_manual's exact trailing-newline shape (it appends the
-	//    same renderSessionState output then a final "\n").
-	return toolTextResponse(id, renderSessionState(rec)+"\n", nil)
+	//    Match workflow_manual's exact trailing-newline and notes-append shape
+	//    (its CONTINUE branch appends "\n\n"+computeNotes(rec.Root) after
+	//    renderSessionState, then a final "\n") so workflow_state's output
+	//    stays byte-identical to workflow_manual's "## Session State" suffix
+	//    for every resolved session, per the standing invariant documented at
+	//    ai-docs/mental-model/mcp-runtime.md {#260702-workflow-state-tool}.
+	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root)+"\n", nil)
 }
 
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
@@ -265,6 +269,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
+			body += "\n\n" + computeNotes(canonical)
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
@@ -280,6 +285,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := docCoverageWarning(canonical, &warningResolver, mintedKey)
 				body = injectDocCoverageWarning(body, warning)
 			}
+			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(canonical))
+			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -293,6 +300,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
+		body += "\n\n" + computeNotes(rec.Root)
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
 		}
@@ -309,6 +317,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := docCoverageWarning(rec.Root, &warningResolver, key)
 				body = injectDocCoverageWarning(body, warning)
 			}
+			body = injectBootstrapStalenessWarning(body, scopeAnnouncement(rec.Root))
+			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 		}
 	}
 

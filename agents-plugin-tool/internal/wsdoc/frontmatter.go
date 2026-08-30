@@ -10,7 +10,13 @@ func frontmatter(path string) map[string]any {
 	if err != nil {
 		return nil
 	}
-	text := string(data)
+	return frontmatterFromText(string(data))
+}
+
+// frontmatterFromText is the parser itself, split out from the path wrapper so
+// a ticket body that never touched the filesystem — an index blob read through
+// ticketScope — parses identically.
+func frontmatterFromText(text string) map[string]any {
 	if !strings.HasPrefix(text, "---") {
 		return nil
 	}

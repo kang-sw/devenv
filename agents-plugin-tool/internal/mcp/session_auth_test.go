@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// sessionKeyPattern validates the word-chain session key format: 4 lowercase words + 2-digit suffix.
-var sessionKeyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){3}-[0-9]{2}$`)
+// sessionKeyPattern validates the word-chain session key format: 3 lowercase words.
+var sessionKeyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){2}$`)
 
 // callLogin issues a ws.ferrule (session-bootstrap) MCP call and returns the raw response line.
 func callLogin(t *testing.T, server *Server, id int, root string, extra map[string]any) string {
@@ -490,30 +490,31 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	})
 	assertGateError(t, "leaf/git.commit", deniedLeafResp, -32601)
 
-	// delegate key: config.agents_tier must be denied with -32601 (config.* prefix).
+	// delegate key: config.tune must be denied with -32601 (config.* prefix).
 	// ws.mercenary.* tools are also blocked for delegates but hit actorGate before the
 	// keyed gate, producing a toolTextResponse error rather than -32601.
-	deniedDelegateResp := callToolOnce(t, server, 2, "config.agents_tier", map[string]any{
+	deniedDelegateResp := callToolOnce(t, server, 2, "config.tune", map[string]any{
 		"session_key": delegateKey,
-		"tier":        "core",
+		"key":         "agents.tier",
+		"value":       map[string]any{"tier": "core"},
 	})
-	assertGateError(t, "delegate/config.agents_tier", deniedDelegateResp, -32601)
+	assertGateError(t, "delegate/config.tune agents.tier", deniedDelegateResp, -32601)
 
-	// delegate key: config.prompt.set must be denied with -32601 (same config.* prefix gate).
-	deniedPromptSetResp := callToolOnce(t, server, 5, "config.prompt.set", map[string]any{
+	// delegate key: config.tune for a prompt override must be denied with -32601 (same config.* prefix gate).
+	deniedPromptSetResp := callToolOnce(t, server, 5, "config.tune", map[string]any{
 		"session_key": delegateKey,
-		"pointId":     "DelegationSection",
+		"key":         "prompt.DelegationSection",
 		"harness":     "claude",
-		"prompt":      "should be blocked before any write",
+		"value":       "should be blocked before any write",
 	})
-	assertGateError(t, "delegate/config.prompt.set", deniedPromptSetResp, -32601)
+	assertGateError(t, "delegate/config.tune prompt", deniedPromptSetResp, -32601)
 
-	// delegate key: config.prompt (read-only listing) must also be denied with
+	// delegate key: config.list (read-only listing) must also be denied with
 	// -32601 (same config.* prefix gate).
-	deniedPromptListResp := callToolOnce(t, server, 6, "config.prompt", map[string]any{
+	deniedPromptListResp := callToolOnce(t, server, 6, "config.list", map[string]any{
 		"session_key": delegateKey,
 	})
-	assertGateError(t, "delegate/config.prompt", deniedPromptListResp, -32601)
+	assertGateError(t, "delegate/config.list", deniedPromptListResp, -32601)
 
 	// Non-lead key calling the bootstrap tool must be denied (self-bootstrap escalation block).
 	deniedLoginResp := callToolOnce(t, server, 3, "ferrule", map[string]any{

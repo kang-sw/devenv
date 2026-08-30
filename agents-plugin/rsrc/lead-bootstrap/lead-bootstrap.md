@@ -14,10 +14,11 @@ Mode: user request
 - Never overwrite project-specific sections: Architecture Rules, custom Code Standards entries, custom Project Knowledge entries.
 - Merge surgically; flag unresolved conflicts inline with `<!-- CONFLICT: ... -->`.
 - Every migration item is idempotent; re-running on an already-migrated project produces no changes.
-- Index health checks are advisory; first pass reads `_index.md` only.
-- Index cleanup writes only `ai-docs/_index.md`; semantic migration routes through owning workflow skills.
+- Index health checks are legacy/coexistence-only, apply only when a project still has `ai-docs/_index.md`, and are advisory; first pass reads `_index.md` only.
+- Index cleanup writes only `ai-docs/_index.md`, when present; semantic migration routes through owning workflow skills.
 - Commit each logical unit separately following the repository commit rules.
 - Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
+- A project tag above this skill's own `AGENTS.template.md` head, or one that does not parse, is a stop-and-report condition (see `## On: refuse`) enforced only by this instruction and the code-level staleness warning; there is no mechanical block on reconcile/restamp.
 
 ## On: invoke
 
@@ -26,7 +27,8 @@ Mode: user request
 3. Read downstream `CLAUDE.md` if it exists.
 4. Detect mode:
    - **fresh** - neither root file exists.
-   - **upgrade** - `AGENTS.md` has `<!-- Template Version: vNNNN -->`.
+   - **upgrade** - `AGENTS.md` has `<!-- Template Version: vNNNN -->` at or below this skill directory's own `AGENTS.template.md` head.
+   - **refuse** - `AGENTS.md` has a `Template Version` marker whose value is above this skill directory's own `AGENTS.template.md` head, or one that does not parse as `vNNNN` at all.
    - **adopt** - `AGENTS.md` exists without a version tag.
    - **claude-migrate** - `CLAUDE.md` exists and `AGENTS.md` does not.
 5. Execute the matching handler.
@@ -57,6 +59,16 @@ Mode: user request
 8. Update the template version tag.
 9. Commit.
 
+## On: refuse
+
+1. Stop before making any change.
+2. Do not update `AGENTS.md`, `WORKFLOW.md`, or `CLAUDE.md`.
+3. Do not update the version tag.
+4. Do not commit.
+5. Report the mismatch to the user: the on-disk `AGENTS.md` tag versus this package's own `AGENTS.template.md` head, and whether the tag was above-head or unparseable.
+6. Ask the user how to proceed.
+7. Restate that this refusal is an agent-followed instruction backed by the code-level staleness warning, not a mechanical hard-block on reconcile/restamp.
+
 ## On: adopt
 
 1. Audit v0001 through latest against current project state.
@@ -75,6 +87,12 @@ Mode: user request
 
 ## On: index health check
 
+`ai-docs/_index.md` is a legacy all-in-one memory file; current projects
+route orientation to `AGENTS.md`, procedures to `ai-docs/manuals/`, session
+notes to the `repo` note layer, and inventories to generated output, and do
+not have one. This flow only runs when a project still has one (gated by
+`## On: invoke` step 6).
+
 1. Read `ai-docs/_index.md`.
 2. Apply **judge: index-scope-drift** as a cheap first pass.
 3. Do not read the full spec or mental-model corpus for this pass.
@@ -89,6 +107,7 @@ Mode: user request
 | Behavior coverage | `{{.SkillNamespace}}:lead-forge-spec` or the lead-write-spec procedure |
 | Modification knowledge | `{{.SkillNamespace}}:lead-forge-mental-model` |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
+| Procedure or how-to content (has a one-line applicability description) | Move to `ai-docs/manuals/` with a `summary:` frontmatter line equal to that description |
 | Project reading map | `{{.SkillNamespace}}:lead-forge-mental-model` or `{{.SkillNamespace}}:lead-discuss` when mixed with status claims |
 | Focus or ticket ordering | the lead-write-ticket procedure |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |

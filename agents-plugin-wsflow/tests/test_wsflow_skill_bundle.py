@@ -35,6 +35,7 @@ EXPECTED_SKILLS = {
     "lead-write-ticket",
     "lead-prefer-subagent",
     "lead-revive",
+    "lead-scope-worktree",
     "mcp-server-repair",
 }
 
@@ -70,6 +71,7 @@ POINTER_TAIL_TITLES = {
     "lead-check-blockers": "Check Blockers",
     "lead-update-spec": "Update Spec",
     "lead-workflow-manual": "Workflow Manual",
+    "lead-scope-worktree": "Scope Worktree",
 }
 
 FORBIDDEN_PATTERNS = {
@@ -87,6 +89,19 @@ FORBIDDEN_PATTERNS = {
     "retired salvage skill": re.compile(r"\blead-salvage\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
+
+# Mirrors lead-bootstrap.md's `## On: fresh` step 1: strip only the two
+# scaffold-only comment blocks before comparing emitted output across
+# packages. The Inclusion-test comment is migration-v0010-permanent
+# downstream content and must NOT be stripped.
+_MIGRATION_SETUP_BLOCK = re.compile(r"<!-- MIGRATION:.*?-->\n*", re.DOTALL)
+_MIGRATION_CHECKLIST_BLOCK = re.compile(r"<!-- MIGRATION CHECKLIST.*?-->\n*", re.DOTALL)
+
+
+def _emit_fresh_body(raw_template_text: str) -> str:
+    text = _MIGRATION_SETUP_BLOCK.sub("", raw_template_text)
+    text = _MIGRATION_CHECKLIST_BLOCK.sub("", text)
+    return text
 
 
 class WsflowSkillBundleTest(unittest.TestCase):
@@ -226,40 +241,28 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 missing.append(skill)
         self.assertEqual(missing, [])
 
-    def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
-        text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version: v0006 -->", text)
-        self.assertIn("This template has package-local version history", text)
+    def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
+        # Ticket 260825 Phase 4: assert positive convergence. Both packages'
+        # AGENTS.template.md emit byte-identical fresh-mode bodies (stripping
+        # only the scaffold-only MIGRATION blocks, mirroring lead-bootstrap.md's
+        # `## On: fresh` step 1) and share one migration-ordinal tag; WORKFLOW.md
+        # has no strip blocks and is compared raw.
+        ws_agents_raw = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
+        wsflow_agents_raw = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
+        ws_emitted = _emit_fresh_body(ws_agents_raw)
+        wsflow_emitted = _emit_fresh_body(wsflow_agents_raw)
+        self.assertEqual(ws_emitted, wsflow_emitted)
 
-        # The forbidden markers are derived from the full-plugin lineage's
-        # *current* state rather than pinned to a literal version, so this
-        # guard keeps working as both lineages gain versions without a hand
-        # edit. A hardcoded literal (e.g. "v0038") only catches contamination
-        # from that one exact version and goes silent on every later one.
-        full_text = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(
-            encoding="utf-8"
-        )
+        tag_pattern = re.compile(r"<!-- Template Version: (v\d+) -->")
+        ws_tag = tag_pattern.search(ws_emitted)
+        wsflow_tag = tag_pattern.search(wsflow_emitted)
+        self.assertIsNotNone(ws_tag)
+        self.assertIsNotNone(wsflow_tag)
+        self.assertEqual(ws_tag.group(1), wsflow_tag.group(1))
 
-        full_tag_match = re.search(r"<!-- Template Version: v\d{4} -->", full_text)
-        self.assertIsNotNone(
-            full_tag_match, "full-plugin AGENTS.template.md is missing its version tag"
-        )
-        self.assertNotIn(full_tag_match.group(0), text)
-
-        # Compare on bullet *content*, not bullet number: both lineages number
-        # their changelogs independently starting at v0001, so wsflow's own
-        # v0001-v0006 bullets legitimately share numbers with (differently
-        # worded) full-plugin bullets. A number-only check would either miss
-        # real contamination or false-positive on the wsflow copy's own
-        # history. Matching full lines instead catches a leaked bullet from
-        # any full-plugin version - including the current highest one - while
-        # leaving wsflow's own same-numbered bullets untouched.
-        full_bullet_lines = re.findall(r"(?m)^- v\d{4}:.*$", full_text)
-        self.assertTrue(
-            full_bullet_lines, "full-plugin AGENTS.template.md has no changelog bullets to compare"
-        )
-        leaked_bullets = [line for line in full_bullet_lines if line in text]
-        self.assertEqual(leaked_bullets, [])
+        ws_workflow = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "WORKFLOW.md").read_text(encoding="utf-8")
+        wsflow_workflow = (SKILLS_DIR / "lead-bootstrap" / "WORKFLOW.md").read_text(encoding="utf-8")
+        self.assertEqual(ws_workflow, wsflow_workflow)
 
 
 if __name__ == "__main__":

@@ -10,16 +10,45 @@ set of structured document systems for behavior, work tracking, operational
 knowledge, and cross-reference discovery. It is designed for host-neutral access
 through MCP discovery tools and convention documents.
 
-## Project Memory Index {#260505-project-memory-index}
+## Project Memory {#260505-project-memory-index}
 
-`ai-docs/_index.md` is the project memory and active inventory document. It
-records the repository purpose, plugin topology, read-before-edit references,
-implemented runtime surfaces, prompt and skill inventory, current spec list,
-active ticket list, and compact session notes.
+Project memory — the repository purpose, plugin topology, procedure references,
+runtime surfaces, inventories, and session notes a future session should not
+re-derive — is distributed across purpose-specific homes rather than one
+hand-maintained file:
 
-The index is intentionally bounded: completed and dropped ticket history lives
-in the ticket archive directories and Git history, while the index keeps the
-current focus and context a future session should not have to re-derive.
+- **Every-session orientation** (repo identity, plugin topology, canonical
+  flows, documentation-system routing) lives in the `AGENTS.md` body, which the
+  host injects every session.
+- **Session notes and volatile state** live in the note layers, injected into
+  the workflow manual rather than file-read; tracked cross-clone notes use the
+  `repo` layer.
+- **Procedures** live in `manuals/`, ambient-injected and indexed by the
+  generated `# Manuals` list.
+- **Derivable inventories** (ticket and spec tables, status/focus) are generated
+  (`project_tree`), not hand-copied.
+
+`ai-docs/_index.md` — formerly the single project-memory-and-inventory document —
+is retired by a versioned `lead-bootstrap` migration that moves each region to
+its home and deletes the file.
+
+**Transitional coexistence.** A project on the current runtime that has not yet
+run the dissolution migration keeps a live `ai-docs/_index.md`, and that is a
+supported configuration: the new ambient injections (`# Notes`, `# Manuals`) and
+the generated tables coexist additively with it, and every workflow step that
+reads or maintains `_index.md` does so only while the file exists, degrading
+cleanly once it is gone. A migrated project carries no `_index.md`; a
+fresh-bootstrapped project never creates one. Both reach the same
+`AGENTS.md`-anchored shape.
+
+**Local/untracked project memory.** The current model has no standalone
+`ai-docs/_index.local.md` file. Machine-local procedure content (credentials,
+IPs, hostnames, host-specific runbooks) lives in gitignored
+`ai-docs/manuals/*.local.md` siblings alongside the tracked manuals they
+complement. Volatile local context that should not be shared through Git
+lives in the `worktree` or `clone` note layer (`worktree` by default, `clone`
+only when the content is shared across worktrees of the same clone) — never
+in a hand-maintained local index file.
 
 ## Project Old Archive {#260511-project-old-archive}
 
@@ -180,6 +209,47 @@ visible before work begins.
 `ws/mental_models.status` expose domain, path, description, sources, spec
 references, snippets, and hierarchy hints without requiring callers to scan the
 tree manually.
+
+## Manuals Document System {#260807-manuals-document-system}
+
+`ai-docs/manuals/` is a flat, ambient-injection doc tier for short,
+path-addressable operational manuals. Each file's frontmatter carries exactly
+one field, `summary:` — a one-line description of the manual's purpose.
+Unlike mental-model documents, manuals carry no domain/sources/spec-refs
+metadata and no applicability predicate: every manual under
+`ai-docs/manuals/*.md` is announced unconditionally in `workflow_manual`
+output (see Manuals Ambient Injection in the mcp-tools spec), rather than
+being selected by relevance.
+
+The ambient `# Manuals` block is always rendered for lead sessions as an
+authoring anchor (header + a fixed authoring-guidance paragraph + the list, or
+a `- (none yet)` placeholder when the tier is empty), not presence-gated like
+`# Notes`; the block's behavioral contract lives in Manuals Ambient Injection
+in the mcp-tools spec. The guidance also teaches the local/tracked split:
+machine-local details (credentials, IPs, hostnames) go to a gitignored
+`*.local.md` sibling rather than into a tracked manual.
+
+A **tracked** manual with no `summary:` frontmatter line is still discovered
+and announced — reported with an explicit no-summary marker, not silently
+dropped — so an author notices and fills in the missing line rather than the
+manual quietly vanishing from the ambient block. A
+`*.local.md` manual is exempt: it is listed as a bare path line with no summary
+and no no-summary marker, because the suffix already marks it machine-local and
+a gitignored file must not be nagged to add frontmatter.
+
+The always-on ambient `# Manuals` block in `workflow_manual` output is the
+manuals discovery surface: unlike `specs.*`/`mental_models.*`, manuals have no
+dedicated discovery MCP tools — every manual under `ai-docs/manuals/*.md` is
+already surfaced unconditionally without a separate lookup call.
+
+The manuals-vs-`ref` boundary is a per-file editorial decision made at
+content-migration time, not a schema field: content that benefits from
+ambient, always-surfaced discovery (short, frequently needed procedures)
+belongs under `ai-docs/manuals/`; longer or rarely needed reference material
+stays under `ai-docs/ref/`, reachable only by explicit lookup. The initial
+migration of applicable `ai-docs/ref/`/`ai-docs/_index.md` procedure content
+into this tier has landed; further content moves between the two tiers
+follow the same per-file editorial decision as new docs are authored.
 
 ## Mental-Model Update Context Annotation {#260518-mental-model-update-context-annotation}
 

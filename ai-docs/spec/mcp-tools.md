@@ -274,11 +274,21 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
   implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
-  branch rename is allowed; branch rename defaults to allowed unless the
-  caller explicitly withholds consent (`policy.branch.allow_rename: no`); and
-  whether the caller's own merge-approval ask may be skipped for this merge;
-  merge confirmation defaults to asking unless the caller explicitly passes
-  `policy.branch.merge_confirm: skip`. The
+  branch rename is allowed; branch rename defaults to allowed only when the
+  current implementation branch carries no unmerged commits ahead of its merge
+  root — when it does and the caller's target scope differs from the branch's,
+  the resolver stops with a safety block (routing branch-identity resolution to
+  the lead) regardless of `allow_rename`, which cannot override it; otherwise
+  rename defaults to allowed unless the caller explicitly withholds consent
+  (`policy.branch.allow_rename: no`); and
+  whether the caller's own merge-approval ask may be skipped for a merge that
+  is explicitly chosen. The per-phase final action defaults to continuing on the
+  branch and reporting its retained commit range **without merging**, for every
+  phase (the resolver carries no phase-index field, so the default is uniform);
+  an explicit merge stays available as a caller-chosen option — at the
+  final-action gate or later at `tickets.close` review — and
+  `policy.branch.merge_confirm` governs approval for that chosen merge only
+  (`skip` drops the ask, asking otherwise), never a default merge trigger. The
   resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
@@ -313,17 +323,28 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   ignored (not on an implementation branch: impl/*, or legacy implement/*);
   derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
   the applicability rule sees that the field was read and deliberately not
-  applied. Fresh implementation branches are created under the `impl/<stem>`
-  convention, with `<stem>` <=15 characters recommended (trailing `-`
-  trimmed); legacy `implement/<scope-slug>` branches already in progress are
-  still recognized as implementation branches for continue/rename purposes.
+  applied. Fresh implementation branches are created under the
+  `impl/<merge-root>/<stem>` convention: `<merge-root>` is the current branch
+  at creation time (may itself contain `/`) or, on re-entry onto an already
+  name-rooted `impl/<merge-root>/<stem>` branch, the root parsed from the
+  branch name itself (name-authoritative — a diverging caller
+  `policy.branch.merge_target` is reconciled to the name-root with a warning,
+  never silently honored); `<stem>` keeps the <=15 characters recommendation
+  (trailing `-` trimmed) and stays single-segment (any `/` in a
+  caller-supplied `target.scope_slug` is sanitized away). A rootless
+  `impl/<stem>` branch or any legacy `implement/<scope-slug>` branch already
+  in progress keeps the original stop-and-ask behavior unchanged — merge
+  target comes solely from `policy.branch.merge_target` — and both are still
+  recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
-  partitions from material risk, contracts/public symbols, cross-module/reuse
-  uncertainty, and new or unknown test surfaces. Public-interface surface and
-  existing-test surface alone add no partition. Zero or one automatic partition
-  resolves to `single`; `single` dispatches the delegate-grade generic
-  `reviewer` over the shared full-scope `code-reviewer` contract, while two or
-  more resolve to `partitioned`. Explicit review overrides remain authoritative.
+  partitions only from positive risk signals: material (moderate/high) risk, a
+  new type contract or public symbol, cross-module surface, unconfirmed reuse
+  points, or new-file test surfaces. Unknown or un-derived facts are treated as
+  non-signals and add no partition; public-interface surface and existing-test
+  surface alone likewise add none. Zero or one automatic partition resolves to
+  `single`; `single` dispatches the delegate-grade generic `reviewer` over the
+  shared full-scope `code-reviewer` contract, while two or more resolve to
+  `partitioned`. Explicit review overrides remain authoritative.
   Final-action todo guidance may reuse
   passing full-suite evidence only while code, tests, dependencies, build
   configuration, and generated inputs remain unchanged; documentation-only
@@ -404,6 +425,154 @@ add an indented `...+` marker line to distinguish hidden instruction payloads fr
 instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
 are always explicit via `todo.check`.
 
+## Note Tools {#260810-note-tools}
+
+`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.search`
+implement four note-memory layers: the two non-tracked layers from 260807
+Phase 1 — **machine**
+(PC-global, project-agnostic — lives beside the global ws config file, e.g.
+`~/.ws/notes.json`) and **worktree** (worktree-local, ephemeral — lives under
+the existing per-worktree ws cache directory, so it does not survive worktree
+deletion and is invisible to any other worktree of the same repository) —
+the git-tracked **repo** layer from 260810 Phase 1, and the non-tracked
+**clone** layer from 260814 Phase 1 (project-scoped, worktree-agnostic —
+lives under the existing per-project ws cache directory, so it is shared by
+every worktree of the same project but invisible to any other project on the
+same machine, and — like `machine`/`worktree` — is never staged by git). All
+four layers share the same record shape. The `machine`/`worktree`/`clone`
+layers share one storage mechanism (one JSON file per whole layer; only the
+resolved file changes between them); the `repo` layer instead stores **one
+JSON file per key** under the tracked `ai-docs/ws-notes/` directory, so merge
+conflicts
+resolve on the filesystem with normal git tooling instead of any
+merge/conflict logic inside MCP — writing/erasing a key writes/removes
+exactly that key's file, and staging/committing it rides the caller's
+ordinary `git.commit` flow; no new git-mutation MCP verb is added anywhere in
+this family (260605 pivot constraint). A note key can contain arbitrary
+characters (including `/` and `.`), so the repo layer encodes each key into
+its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
+key `a/b.c` becomes `612f622e63.json`) — deterministic across every
+clone/OS/locale, collision-free, and immune to the slash/dot-as-path hazard,
+since hex output only ever contains `[0-9a-f]`. The filename is purely a
+storage detail: `note.search`/`workflow_manual` always report the record's
+real `key` field, never the encoded filename. This is a fresh surface,
+sharing no code or store with `session.note`
+(`#260619-session-key-lineage-children`), which is a distinct one-line
+per-child annotation on the session-key store, not a note-memory layer.
+
+All five tools require `session_key`. `note.write`/`note.erase`/`note.mute`/
+`note.unmute` additionally require a single-string `layer` argument
+(`"machine"`, `"worktree"`, `"clone"`, or `"repo"`) — this asymmetry with
+`note.search` below is by design (read-vs-mutation asymmetry, not an
+inconsistency to "fix" later): a mutation always targets exactly one layer,
+while a search may reasonably span several. None of the five tools carry a
+`session.`/`config.`/`lead.` prefix, so — like `todo.*`/`agenda.*` — they are
+reachable by any scope (lead, delegate, leaf) that holds a session key. The
+`worktree`, `clone`, and `repo` layers all resolve their store location
+through the same `session_key`-authoritative root resolution every other
+root-aware tool uses. The `machine` layer needs no root, but still requires a
+`session_key` that resolves to a known session — an unrecognized key is
+rejected with the same `unknown_session` error shape root-aware tools use,
+even though no root is consumed.
+
+**Wire shape.** A record is `{key, value, priority, written_at, visible}`:
+`key` and `value` are strings, `priority` is an integer (higher = higher
+priority, default `0`), `written_at` is an RFC3339 timestamp stamped
+server-side at write time (never caller-supplied), and `visible` is a boolean
+gating inclusion in the injected `# Notes` block (`#260810-note-injection`) —
+default `true`, mutated only by `note.mute`/`note.unmute`. A record stored
+before `visible` existed has no such key in its on-disk JSON at all; that
+absence decodes as `true` (visible), a migration-safe default handled by a
+custom unmarshaler rather than plain `encoding/json` zero-value decoding
+(which would default an absent bool to `false` — the opposite of the required
+contract). `note.write`'s `notes` argument is an **array of `{"key", "value",
+"priority"}` objects** — not an array of positional `[key, value, priority]`
+tuples, and never `visible` — matching the universal named-JSON-object
+convention every other MCP tool argument in this codebase uses; there is no
+positional-array precedent anywhere in the tool surface.
+
+- **`note.write(session_key, layer, notes)`** performs a full overwrite per
+  key: writing an existing key replaces its `value` and `priority` in one
+  step (there is no separate priority-update verb). Multiple notes may be
+  written in one call. `note.write` never accepts or mutates `visible`: an
+  overwrite of an existing key preserves that key's current `visible` value
+  exactly (a muted note stays muted across a content-only overwrite), and a
+  brand new key always initializes `visible: true`. When any note written in a
+  call has a `value` of at least a fixed oversize threshold (a named tunable
+  constant, `300` bytes — mirroring the injection cap's named-constant
+  style, `#260810-note-injection`), the **text-format** response additionally
+  carries a one-time discipline challenge appended after the write summary:
+  `Large note (≥300 bytes; saved). Prefer: move the detail into a
+  ticket/spec/mental-model and keep a <300-byte pointer here, or erase. Keep the
+  full text only if it's volatile AND homeless AND must-always-stay-in-context.
+  Not mute.` The challenge fires once per call regardless of how many
+  notes cross the threshold (a batch with several oversized notes still appends
+  it exactly once), and the write itself is unconditional — the note is stored
+  either way. The remediation it names is relocate or erase, never mute; a mute
+  would only leave the content neither in context nor in its proper home. The
+  JSON-format response is unaffected: it returns the written records only and
+  never the challenge, matching the text-only-nudge convention `git.commit`
+  uses for its own reminders.
+- **`note.erase(session_key, layer, keys)`** removes each listed key from that
+  layer's store. A missing key is a no-op, matching `todo.erase`'s erase-by-key
+  precedent.
+- **`note.mute(session_key, layer, keys)`** / **`note.unmute(session_key,
+  layer, keys)`** set `visible` to `false`/`true` for each listed key,
+  reusing the same flock-serialized read-modify-write as `note.write`/
+  `note.erase`. Both are idempotent set-state operations (muting an
+  already-muted key, or unmuting an already-visible one, is a no-op) and
+  never touch `written_at` or any other field. A missing key is a no-op,
+  matching `note.erase`'s precedent. Muting excludes a note from the injected
+  `# Notes` block and its priority cap (`#260810-note-injection`) without
+  erasing it — `note.search` continues to return muted records unchanged.
+- **`note.search(session_key, layer?, glob?, from?, then?)`** returns every
+  matching record whose `key` matches `glob` (shell-glob syntax, e.g.
+  `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
+  falls within the inclusive `[from, then]` bound when those are supplied.
+  Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
+  `"2026-08-01"`), compared as strings. `note.search` applies no `visible`
+  filtering — muted records are returned unchanged alongside visible ones.
+  This is the retrieval path for notes elided from the ambient `# Notes`
+  block (`#260810-note-injection`), muted or not — a caller that sees the
+  elision or muted-count line uses `note.search` with a narrower glob to read
+  a specific elided or muted note.
+  - Unlike the other four tools, `layer` is **optional** here and accepts
+    either a single layer string or an array of layer names. Omitting
+    `layer` searches all four layers, parallel to `#260810-note-injection`'s
+    `Compute` aggregation. A single-string `layer` call (e.g. `layer:
+    "clone"`) keeps today's exact result shape: a plain `wsnote.Record[]`
+    with no layer tag on each record. An array `layer` (e.g. `layer:
+    ["clone", "repo"]`), or an omitted `layer`, tags each returned record
+    with a `layer` field naming the layer it came from — even for a
+    one-element array — mirroring the ambient block's `[<layer>]` line
+    prefix.
+  - Every `note.search` call, single-layer or multi-layer, orders results by
+    the same comparator: priority descending, then `written_at` descending,
+    then `key` ascending — the exact order `#260810-note-injection`'s
+    `Compute` uses for the ambient block. This is one shared comparator, not
+    two independently-maintained ones, so `layer: "clone"` and `layer:
+    ["clone"]` against identical data can never diverge in order — only in
+    whether the tag is present.
+
+Storage is an flock-serialized read-modify-write (temp-file + atomic rename),
+reusing the same concurrent-safe-write pattern `wsconfig`'s project/global
+config writers use. The `machine`/`worktree`/`clone` layers RMW one JSON file
+per layer, each with its own sibling `.lock` file beside the store (never
+shared with the `wsconfig` config lock, even though the machine-layer store
+lives in the same directory as the global config file). The `repo` layer
+instead performs one such flock+temp-file+atomic-rename write per key,
+scoped to that key's own file under `ai-docs/ws-notes/` — each key file is
+independently owned, which is the point of one-key-per-file filesystem-level
+conflict resolution. Its per-key lock file lives **outside** the tracked
+tree (in a machine-local temp location keyed by a hash of the target path),
+never as a sibling in `ai-docs/ws-notes/`, so the tracked directory only
+ever contains the `.json` key files — no lock or temp residue is
+committable, which is what keeps the layer cleanly git-tracked.
+
+There is no CLI mirror for `note.*`: like every other session-keyed tool
+(`todo.*`, `agenda.*`, `enter.*`), its authority model is
+`session_key`-only, and the CLI takes `--root`, not `--session_key`.
+
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
 `workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
@@ -449,6 +618,19 @@ mode-gating marker that only this tool's handler consumes; it is independent of 
 prompt override-marker engine and the product-mode markers. The handler owns mode
 branching and the Session State scaffolding only; all manual prose lives in the
 rsrc.
+
+When `core.sparseCheckout` is set for the working root, both **fresh with
+root** and **continue** additionally render a sparse-checkout scope
+announcement — a short block naming the hidden ticket count and stems under
+`ai-docs/tickets/ready/`, `ai-docs/tickets/todo/`, and `ai-docs/tickets/idea/`,
+pointing to `ai-docs/ref/worktree-ticket-scope.md`, the `git sparse-checkout
+disable` restore path, and a `git sparse-checkout list` pointer to the
+worktree's active re-include patterns — using the same
+`injectBootstrapStalenessWarning` no-op-when-empty injector already used for
+the bootstrap-staleness and doc-coverage warnings. With `core.sparseCheckout`
+unset, or in **fresh without root**, this block does not render and output is
+unchanged from before this addition.
+{#260810-scope-announcement-idea-inclusion}
 
 The rendered manual body carries a **Ticket System Concepts** grounding section
 (status-directory meaning, type-prefix categorization, sage-review rationale and
@@ -522,12 +704,25 @@ as maximal staleness); or the shipped template's own tag is unreadable or
 malformed (fail-safe — the tool never warns off of an unreadable "latest").
 When the warning does fire, its text names both the installed and latest
 version numbers and instructs the caller to run
-`config.bootstrap_alarm(value: "off")` to silence it permanently. The warning
+`config.tune(key: "bootstrap_alarm", value: "off")` to silence it permanently.
+The warning
 fires on every `ferrule`/`workflow_manual` call while stale — there is no
 once-per-session suppression state, matching the existing precedent of
 per-call injection (e.g. the mercenary agentId tip) rather than the
 per-`project_tree`-call anti-pattern this repo's Decisions section warns
 against.
+
+The warning also fires fail-loud in two ahead-of-head directions: when the
+downstream tag is strictly ahead of the running package's own template head
+("Bootstrap template tag is ahead of this package's own template head",
+naming both the installed and this package's head version numbers), or when
+the downstream tag does not parse as `vNNNN` ("Bootstrap template tag is
+unrecognized", naming the parse failure and this package's head version
+number). Both fire directions point at
+`config.tune(key: "bootstrap_alarm", value: "off")` to silence permanently and
+state the same honest-enforcement limit: this is a code-level detector only,
+backed by a skill-level refuse instruction in `lead-bootstrap` (its
+`## On: refuse` step), not a mechanical hard-block on reconcile/restamp.
 
 Changing `lead-bootstrap`'s own upgrade/migration procedure is out of scope for
 this warning; it only detects and reports staleness.
@@ -550,7 +745,8 @@ file. A missing directory counts as uncovered, not an error — fresh projects
 legitimately lack these directories before `lead-forge-spec`/
 `lead-forge-mental-model` has run. When the warning does fire, its text names
 which area(s) are missing coverage and instructs the caller to run
-`config.doc_coverage_alarm(value: "off")` to silence it permanently. The
+`config.tune(key: "doc_coverage_alarm", value: "off")` to silence it
+permanently. The
 warning fires on every `ferrule`/`workflow_manual` call while uncovered —
 there is no once-per-session suppression state, mirroring
 `#260703-bootstrap-staleness-warning`.
@@ -559,96 +755,205 @@ Whether a project's spec/mental-model authoring is otherwise complete is out
 of scope for this warning; it only detects the presence-of-any-frontmatter-file
 floor.
 
+### Manuals Ambient Injection {#260807-manuals-ambient-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, mirroring the
+Bootstrap Staleness and Doc Coverage warnings above) injects an always-on
+`# Manuals` block: the `# Manuals` header, a fixed authoring-guidance
+paragraph, then one line per tracked manual under `ai-docs/manuals/`
+(`<path> — <summary>`). Unlike the presence-gated `# Notes` block, this block
+is an ever-present authoring anchor: it renders even when no manual exists yet,
+with a `- (none yet)` placeholder in place of the list. The guidance paragraph
+teaches where shared project procedures live (tracked, one file per procedure
+with a one-line `summary:` frontmatter) and the local/tracked split (write
+machine-local details — credentials, IPs, hostnames — to a gitignored
+`*.local.md` sibling, not into a tracked manual). There is no applicability
+predicate — every tracked manual's path and summary is injected
+unconditionally; selection/relevance filtering is out of scope for this block
+(see Manuals Document System in the documentation-system spec).
+
+The block returns nothing only on a genuine resolution error (a non-NotExist
+`ai-docs/manuals/` read failure), preserving the scopeAnnouncement-style
+"silent, never blocks `workflow_manual`" doctrine for the error path; a
+missing or empty `ai-docs/manuals/` directory is the common steady state and
+still renders the anchor with the `- (none yet)` placeholder. The
+`workflow_manual` FRESH-without-root branch never renders this block (it has no
+root to resolve manuals from), matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+A **tracked** manual with no `summary:` frontmatter line is still listed, with
+an explicit no-summary marker in place of a bare or blank line, so the gap is
+visible in the ambient block rather than silently omitted. A `*.local.md`
+manual is instead listed as a bare `- <path>` line — no summary rendered and no
+no-summary marker — because the `.local.md` suffix already marks it
+machine-local and a gitignored creds/IP file must not be nagged to add
+frontmatter.
+
+### Note Injection {#260810-note-injection}
+
+`workflow_manual` (FRESH-with-root and CONTINUE branches only, matching the
+Bootstrap Staleness/Doc Coverage/Manuals Ambient precedents above) injects a
+`# Notes` block: the highest-priority **visible** notes across the
+`machine`, `worktree`, `clone`, and `repo` layers (`#260810-note-tools`), up to a
+fixed cap (20), one line per note as `- [<layer>] <key> (priority <n>,
+<written_at>): <value>`. Muted (`visible: false`) notes are excluded from
+both the block and the cap budget itself — a muted note never consumes one
+of the 20 slots, so muting a note can free a slot for a previously elided
+visible one.
+
+**Placement is the one deliberate divergence from its Manuals/scope/staleness
+siblings**: those three are all *prepended* ahead of the manual body as
+top-of-body banners. The `# Notes` block is instead **appended immediately
+after `## Session State`**, using a plain string append rather than the
+`injectBootstrapStalenessWarning` prepend helper — notes are session-context,
+not a standing warning, so they render alongside the restored agenda/todo
+state a lead just asked to see, not as a banner above the reference material.
+Unlike every sibling injection, the `# Notes` block is **never skipped when
+empty** — it is a user-facing affordance modeled on the always-rendered
+`# Manuals` block, not a machine-computed warning, so it renders in all three
+states within the injecting branches (a deliberate divergence from the
+silent-when-empty contract). The reader is the agent, whose working memory
+resets each turn, so the block and its post-it framing must stay continuously
+visible:
+
+- **No notes on any layer** (the former empty-skip condition, keyed on notes
+  present anywhere — muted or visible — not on zero *visible* notes): the block
+  renders the heading and a single empty-state post-it hint, `No notes. Notes
+  are your short, always-in-context post-it reminders — note.write to pin one,
+  note.erase when it's no longer needed.`, and no bullet lines.
+- **Has visible notes**: the highest-priority visible notes as before, followed
+  by a one-line standing post-it hint, `Post-it reminders: note.write to pin,
+  note.erase when done.`
+- **All-muted** (notes exist but zero visible): heading plus the muted-count
+  line and the same one-line standing hint (see below) — never the "No notes."
+  empty-state hint, since the empty-state text keys off the no-notes-on-any-layer
+  condition, not off zero-visible.
+
+When more visible notes exist than the cap, the block ends with a visible `(N
+lower-priority notes elided — use note.search to retrieve.)` line; the elided
+notes are never dropped, only deferred to an explicit `note.search` call
+(`#260810-note-tools`). Independently, whenever any note across any layer is
+muted, the block ends with a `(N muted — use note.search to view.)` line
+naming the total muted count; both lines render together when both
+conditions apply, in that order (elision line first, muted line second), and
+either can appear alone. In the all-muted edge case — every note on a layer
+is muted, leaving zero visible notes — the block still renders (heading plus
+the muted-count line and the one-line standing post-it hint, zero bullet lines)
+rather than being skipped, since the layer is not empty, only fully muted. The
+`workflow_manual` FRESH-without-root branch never renders this block at all
+(empty-state hint included), matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`); the always-render contract applies only
+within the branches that inject the block (`workflow_manual` FRESH-with-root and
+CONTINUE, and the standalone `workflow_state` output, which stays byte-identical
+to `workflow_manual`'s `## Session State` suffix).
+
 ## Config Tools {#260505-config-tools}
 
-`config.show` returns the resolved ws user-local configuration path and current
-configuration without modifying it. The default response is compact labeled
-text, and structured JSON remains available for callers that need stable fields.
+The config surface is two generic tools: `config.list` (read) and
+`config.tune(key, value, scope?, harness?, reset?, session_key?)` (write).
+`config.list` subsumes the former `config.show` and `config.tuning`: it returns
+the resolved ws user-local configuration path and current configuration without
+modifying it, plus the tuning-knob catalog (see Tuning Catalog). The default
+response is compact labeled text, and structured JSON remains available for
+callers that need stable fields. `config.tune` subsumes the eight former
+per-knob writers, selecting the target knob by its `key`; `config.list`
+surfaces the exact per-key write contract (value domain, required/optional
+fields, allowed/default scope, harness applicability). Both tools stay lead-only
+via the `config.*` capability-gate prefix; per-key lead-authority and
+session-key requirements are enforced at dispatch rather than in the schema.
 
-`config.agents_tier` is the surface for updating the backend/model/effort mapping
-for a capability tier. Callers provide `tier` as the capability tier name
-(`small`/`medium`/`large`/`xlarge`); the `light`/`core`/`deep` aliases and
-`haiku`/`sonnet`/`opus` provider names are accepted as read-compat synonyms on
-input. A caller may also provide a backend, a concrete model, a portable effort, a
-harness selector, or any combination of those fields. When backend is omitted,
-ws infers it from the model family where possible. Empty effort, omitted effort,
-and `none` store the no-override state; supported non-empty effort values are
-visible through configuration output. The update applies to the explicit harness
-when provided, otherwise the detected MCP session harness when available, and
-otherwise the default tier mapping. This makes `backend` mean the execution
-backend rather than the tier-table key. Available in both full and agentless
-product modes. {#260513-harness-local-agent-tier-config}
+`config.tune(key: "agents.tier", value: {tier, backend, model, effort}, harness?)`
+is the surface for updating the backend/model/effort mapping for a capability
+tier. Unlike the scalar knobs, `agents.tier`'s value is a compound object: `tier`
+travels **inside** the value object alongside `backend`/`model`/`effort`, while
+`harness` stays the outer selector argument. Callers provide `tier` as the
+capability tier name (`small`/`medium`/`large`/`xlarge`); the `light`/`core`/`deep`
+aliases and `haiku`/`sonnet`/`opus` provider names are accepted as read-compat
+synonyms on input. A caller may also provide a backend, a concrete model, a
+portable effort, a harness selector, or any combination of those fields. When
+backend is omitted, ws infers it from the model family where possible. Empty
+effort, omitted effort, and `none` store the no-override state; supported
+non-empty effort values are visible through configuration output. The update
+applies to the explicit harness when provided, otherwise the detected MCP session
+harness when available, and otherwise the default tier mapping. This makes
+`backend` mean the execution backend rather than the tier-table key. `agents.tier`
+is not resolver-backed and only writes project scope (an explicit non-project
+`scope:` is rejected). Available in both full and agentless product modes.
+{#260513-harness-local-agent-tier-config}
 
-`config.workflow_prefer_subagent(session_key, value: "on"|"off")` sets the
-global `"workflow.prefer_subagent"` item, whose builtin default is `off`.
-`config.workflow_prefer_mercenary(session_key, value: "on"|"off"|"hide")` sets
-the global `"workflow.prefer_mercenary"` item, whose builtin default is `hide`.
-Both writer tools require a lead session key for authority but always write the
-global config scope. The former unprefixed `"prefer_mercenary"` entry is not
-migrated; it remains orphaned local state unless a later ticket introduces
+`config.tune(key: "workflow.prefer_subagent", value: "on"|"off", session_key)`
+sets the global `"workflow.prefer_subagent"` item, whose builtin default is
+`off`. `config.tune(key: "workflow.prefer_mercenary", value: "on"|"off"|"hide",
+session_key)` sets the global `"workflow.prefer_mercenary"` item, whose builtin
+default is `hide`. Both keys require a lead session key for authority but always
+write the global config scope. The former unprefixed `"prefer_mercenary"` entry
+is not migrated; it remains orphaned local state unless a later ticket introduces
 migration. `prompt.DelegationSection.*` prompt override keys are likewise not
 migrated.
 
-`config.workflow_prefer_subagent` additionally accepts `reset: true` as an
-alternative to `value`; the two are mutually exclusive. `reset: true` removes
-the global override entirely (rather than writing an explicit value, even the
-builtin's current value) so resolution falls back to `global > builtin` and
-tracks any future change to the builtin default. This mirrors the general
-unset-vs-set distinction in `#260702-unset-means-reset-to-builtin`.
+`config.tune(key: "workflow.prefer_subagent", ...)` additionally accepts
+`reset: true` as an alternative to `value`; the two are mutually exclusive.
+`reset: true` removes the global override entirely (rather than writing an
+explicit value, even the builtin's current value) so resolution falls back to
+`global > builtin` and tracks any future change to the builtin default. This
+mirrors the general unset-vs-set distinction in
+`#260702-unset-means-reset-to-builtin`.
 {#260702-config-unset-reset-to-builtin}
 
-`config.bootstrap_alarm(session_key, value: "on"|"off")` sets the global
-`"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
+`config.tune(key: "bootstrap_alarm", value: "on"|"off", session_key)` sets the
+global `"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
 bootstrap staleness warning (`#260703-bootstrap-staleness-warning`). It
 requires a lead session key for authority, always writes the global config
-scope (global-only, mirroring `config.workflow_prefer_subagent`), and accepts
+scope (global-only, mirroring `workflow.prefer_subagent`), and accepts
 the same mutually-exclusive `reset: true` alternative to `value` with
 identical unset-to-builtin semantics.
 
-`config.doc_coverage_alarm(session_key, value: "on"|"off")` sets the global
-`"doc_coverage_alarm"` item, whose builtin default is `on`; it gates the doc
-coverage warning (`#260707-doc-coverage-warning`). It requires a lead session
-key for authority, always writes the global config scope (global-only,
-mirroring `config.bootstrap_alarm`), and accepts the same mutually-exclusive
+`config.tune(key: "doc_coverage_alarm", value: "on"|"off", session_key)` sets
+the global `"doc_coverage_alarm"` item, whose builtin default is `on`; it gates
+the doc coverage warning (`#260707-doc-coverage-warning`). It requires a lead
+session key for authority, always writes the global config scope (global-only,
+mirroring `bootstrap_alarm`), and accepts the same mutually-exclusive
 `reset: true` alternative to `value` with identical unset-to-builtin
 semantics.
 
 ## Tuning Catalog {#260625-tuning-catalog}
 
-`config.tuning` is a read-only discovery surface for workflow-tuning knobs used
-by `ws:lead-tune`. It returns a compact catalog whose entries describe
-user-facing knobs, their current resolved values when available, the selector
-fields a caller must choose, the value fields a caller may set, and the writer
-tool that performs the actual mutation.
+The tuning-knob catalog is part of `config.list`'s output (it subsumes the
+former standalone `config.tuning` read tool) and is the discovery surface for
+workflow-tuning knobs used by `ws:lead-tune`. It is a compact catalog whose
+entries describe user-facing knobs, their current resolved values when
+available, the selector fields a caller must choose, the value fields a caller
+may set, and the writer that performs the actual mutation — now uniformly
+`config.tune`, with the knob's id carried as the writer's fixed `key` argument.
 
 The catalog is a projection, not a second setter schema. Each entry names a
 small semantic knob id and derives field names, enum values, required fields, and
-descriptions from the existing MCP writer tool schema where possible. Prompt
-override entries derive their point ids from the same shipped override-marker
-scan used by `config.prompt`; model-tier entries derive their fields from
-`config.agents_tier`; workflow-preference entries derive their values from
-`config.workflow_prefer_subagent`, `config.workflow_prefer_mercenary`,
-`config.bootstrap_alarm`, and `config.doc_coverage_alarm`.
+descriptions from the per-key config registry. Prompt override entries derive
+their point ids from the shipped override-marker scan; model-tier entries derive
+their fields from the `agents.tier` registry entry (with `tier` in the value
+fields and `harness` the sole selector); workflow-preference entries derive their
+values from the `workflow.prefer_subagent`, `workflow.prefer_mercenary`,
+`bootstrap_alarm`, and `doc_coverage_alarm` registry entries.
 The shipped `DelegationSection` override marker is removed, so
-`prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
+`prompt.DelegationSection` is absent from the catalog and from prompt-override
 discovery; orphaned stored prompt keys remain ignored.
 
 Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
 structured shape for callers that need to build a proposal or compare runtime
-support: `knobs[]` entries carry `id`, `kind`, `description`, `writer`,
-optional `reset`, `selector_fields`, `value_fields`, and `current`.
-Compatibility-only writer arguments may be omitted from the catalog even when
-they remain accepted by the writer tool; the catalog exposes the canonical
-tuning syntax, not every legacy call shape. Product mode is honored:
-full-ws-only knobs are absent when the runtime is in wsflow/no-agent mode.
+support: each `knobs[]` entry carries `id`, `kind`, `description`, `writer`
+(always `config.tune` with a `key` fixed argument), optional `reset`,
+`selector_fields`, `value_fields`, and `current`. Compatibility-only writer
+arguments may be omitted from the catalog even when they remain accepted; the
+catalog exposes the canonical tuning syntax, not every legacy call shape.
+Product mode is honored: full-ws-only knobs are absent when the runtime is in
+wsflow/no-agent mode.
 
 > [!note] Constraints
-> - `config.tuning` does not mutate config and does not replace
->   `config.prompt.set`, `config.workflow_prefer_mercenary`, or
->   `config.agents_tier`.
-> - Adding a new lead-tune knob requires registering its semantic id and writer
->   tool, but must not copy enum/property schema by hand when that schema already
->   belongs to the writer tool.
+> - `config.list` does not mutate config; it exposes each knob's `config.tune`
+>   write contract rather than replacing it.
+> - Adding a new lead-tune knob requires registering its semantic id in the
+>   per-key config registry, but must not copy enum/property schema by hand when
+>   that schema already belongs to the registry entry.
 > - Prompt override discovery remains marker-driven; the tuning catalog must not
 >   invent or expose prompt `pointId` values absent from the shipped rsrc tree.
 
@@ -667,7 +972,7 @@ names) are accepted as read-compat synonyms on input, folded to the capability
 tiers `light↦small`, `core↦medium`, `deep↦large`; `xlarge` (fable-class) has no
 legacy alias and is independently configurable. Playbook frontmatter declares
 `role:` and `tier:` in the capability vocabulary; a tier resolves directly to a
-concrete backend/model through `config.agents_tier`
+concrete backend/model through `config.tune(key: "agents.tier")`
 (`#260513-harness-local-agent-tier-config`), which is keyed by the capability tier
 (the earlier "remains keyed by `light`/`core`/`deep`" framing is superseded by
 `#260620-tier-vocabulary-collapse-direct-model-map`).
@@ -676,9 +981,10 @@ concrete backend/model through `config.agents_tier`
 The two-vocabulary split is collapsed to a single tier vocabulary. The capability
 vocabulary `small`/`medium`/`large`/`xlarge` is the only tier vocabulary across
 every surface — playbook frontmatter, `playbook.render`, `mercenary.register`,
-and the model-config tool (the `config.agents_tier` surface, re-homed by this
-change rather than by the previously pending `config.model_alias` rename, which
-this supersedes). Config is keyed directly by the capability tier: a tier resolves
+and the model-config tool (the `config.tune(key: "agents.tier")` surface,
+re-homed by this change rather than by the previously pending
+`config.model_alias` rename, which this supersedes). Config is keyed directly by
+the capability tier: a tier resolves
 to its per-harness `(backend, model, effort)` with no intervening
 `light`/`core`/`deep` alias step, and the `firstClassTierToAlias` bridge is
 retired. `xlarge` has an independently configurable mapping instead of folding
@@ -716,8 +1022,8 @@ introduces migration.
 Each config item declares a natural **default write scope** in code; items that
 declare nothing fall back to `project`. A write without an explicit scope lands
 in the item's declared default scope. An explicit `scope:` argument on a set
-always wins over the declared default. `get`/`show` report *which scope* a value
-resolved from, so a caller can see whether a value is session-, project-,
+always wins over the declared default. `config.list` reports *which scope* a
+value resolved from, so a caller can see whether a value is session-, project-,
 global-, or builtin-sourced.
 
 Scope storage map:
@@ -739,14 +1045,15 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 
 > [!note] Constraints
 > - Scope-awareness is opt-in per config item; this contract does not retrofit
->   the existing `config.agents_tier` surface, which is re-homed under the same
+>   the existing `agents.tier` surface (`config.tune(key: "agents.tier")`), which
+>   is re-homed under the same
 >   model by the capability-tier collapse
 >   (`#260620-tier-vocabulary-collapse-direct-model-map`) rather than here.
 > - Item-level write gating still applies: a scope-aware setter honors an item's
 >   existing role/capability restrictions (not every item is freely settable at
 >   every scope).
 > - The substrate (resolver, default-scope registry, file-lock RMW, global store,
->   shared `scope` schema fragment) and scope-reporting on `config.show` are the
+>   shared `scope` schema fragment) and scope-reporting on `config.list` are the
 >   caller-visible surface today. Per-item scope-aware *set* surfaces arrive as
 >   individual items adopt the model (`"workflow.prefer_mercenary"`
 >   (`#260619-prefer-mercenary-session-scope-item`), prompt overrides); the set
@@ -755,48 +1062,51 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 ### Prompt Override Tuning Tools {#260620-config-prompt-override-tuning-tools}
 
 The prompt-override surface (`#260619-prompt-override-marker-engine`) is tunable
-from inside the MCP through a dedicated `config.prompt.*` namespace, distinct from
-`config.agents_tier`/`config.show`.
+from inside the MCP through the generic `config.tune`/`config.list` tools, keyed
+by `prompt.<point id>` config keys.
 
-`config.prompt.set(point id, harness, prompt, scope?)` stores a prompt override
-keyed by `(point id, harness)`, where `harness` is `claude`, `codex`, or `*`
-(the cross-harness `all` bucket; `*` is stored under the `all` key). The value is
-written through the layered config scope model (`#260619-layered-config-scope-model`)
-under the key `prompt.<point id>.<harness>`: with no `scope`, the write lands in
-the item's declared default scope (`project` for these unregistered `prompt.*`
-keys); an explicit `scope:` argument wins. A `session`-scope write requires the
-caller's `session_key`. The setter is lead-only — delegate and leaf keys are
-blocked by the `config.*` capability-gate prefix — and is visible in both full-ws
-and agentless wsflow modes, since prompt overrides are a mode-neutral rendering
-concern. Once stored, the override is honored at render time by the marker engine
-for the matching `(point id, harness)` and resolved scope.
+`config.tune(key: "prompt.<point id>", value: <text>, harness?, scope?,
+session_key)` stores a prompt override keyed by `(point id, harness)`, where
+`harness` is `claude`, `codex`, or `*` (the cross-harness `all` bucket; `*` is
+stored under the `all` key). The override text travels in the generic `value`
+argument. The value is written through the layered config scope model
+(`#260619-layered-config-scope-model`) under the key `prompt.<point id>.<harness>`:
+with no `scope`, the write lands in the item's declared default scope (`project`
+for these unregistered `prompt.*` keys); an explicit `scope:` argument wins. A
+`prompt.*` write requires the caller's `session_key` (any scope; not lead-scoped),
+which also serves as the target session for a `session`-scope write. The writer is
+lead-only — delegate and leaf keys are blocked by the `config.*` capability-gate
+prefix — and is visible in both full-ws and agentless wsflow modes, since prompt
+overrides are a mode-neutral rendering concern. Once stored, the override is
+honored at render time by the marker engine for the matching `(point id, harness)`
+and resolved scope.
 
-`config.prompt.unset(point id, harness, scope?)` resets a stored prompt
-override back to whatever the next-broader scope (or the inline seed default)
-resolves to; it never writes an empty-string value in place of the removed
-override — an explicit empty override is a distinct intent covered by
-`config.prompt.set` with an empty `prompt` value. `scope` accepts `session`,
-`project`, or `global` (the same enum as `config.prompt.set`); a `session`-scope
-unset requires the caller's `session_key`, matching the setter's session-scope
-write requirement. With no `scope`, the item's declared default scope is used
-(`project` for unregistered `prompt.*` keys). {#260702-unset-means-reset-to-builtin}
+`config.tune(key: "prompt.<point id>", reset: true, harness?, scope?, session_key)`
+resets a stored prompt override back to whatever the next-broader scope (or the
+inline seed default) resolves to; it never writes an empty-string value in place
+of the removed override — an explicit empty override is a distinct intent covered
+by a `config.tune` write with an empty `value`. `scope` accepts `session`,
+`project`, or `global`; a `session`-scope reset requires the caller's
+`session_key`, matching the setter's session-scope write requirement. With no
+`scope`, the item's declared default scope is used (`project` for unregistered
+`prompt.*` keys). {#260702-unset-means-reset-to-builtin}
 
-No-argument `config.prompt()` returns a **data listing**, not a manual: a scan of
-the shipped playbook resource tree for declared override markers (the marker
-grammar from `#260619-prompt-override-marker-engine`) reporting each
-override-point's id and short `desc` together with any current override values per
-harness bucket and the scope each resolved from, ending with a one-line pointer to
-the `ws:lead-tune` workflow-tuning skill (which owns the how-to manual and the
-proactive-proposal trigger). The tuning manual itself is deliberately not rendered
-there, so `config.prompt()` stays a lean data surface. Like `config.show`, it takes
-an optional `session_key` — session-scope overrides are listed and annotated only
-when it is supplied — and is lead-only via the same `config.*` prefix gate (a
-keyless caller passes; delegate and leaf keys are blocked). The listing is keyed on
-the declared markers (orphan `prompt.*` values without a marker are not surfaced),
-and each value's scope is resolved through the layered config scope model.
+`config.list` returns the declared override-points as `prompt_override` catalog
+knobs (`kind: "prompt_override"`), replacing the former standalone `config.prompt`
+listing: a scan of the shipped playbook resource tree for declared override
+markers (the marker grammar from `#260619-prompt-override-marker-engine`) reports
+each override-point's id and short `desc` together with any current override
+values per harness bucket and the scope each resolved from. The `ws:lead-tune`
+skill owns the how-to manual and the proactive-proposal trigger. Like the rest of
+`config.list`, it takes an optional `session_key` — session-scope overrides are
+listed and annotated only when it is supplied — and is lead-only via the same
+`config.*` prefix gate (a keyless caller passes; delegate and leaf keys are
+blocked). The listing is keyed on the declared markers (orphan `prompt.*` values
+without a marker are not surfaced), and each value's scope is resolved through the
+layered config scope model.
 
 > [!note] Constraints
-> - The setter does not introduce its own storage; it writes through the layered
+> - The writer does not introduce its own storage; it writes through the layered
 >   config primitive and inline into the single config file, so the override
 >   surface inherits that file's lock/atomicity story.
 
@@ -808,7 +1118,12 @@ ignored by the repository's Git ignore rules so generated or vendored
 directories do not dominate the readable project context. The spec inventory
 also flags any spec file that still carries a legacy planned marker with the
 same advisory the spec discovery tools emit; the flag is advisory and never
-fails the call.
+fails the call. The ticket inventory renders `ready/` and `todo/` tickets in
+full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
+folds remaining orphan `idea/` tickets — those without `parent:`, regardless
+of `related:` — into a single hidden-count line so the raw idea backlog does
+not dominate the tree, and their full bodies remain reachable via
+`tickets.list(status: "idea")` or `tickets.find`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
@@ -879,7 +1194,9 @@ requested. `ready/` identifies spec-addressed implementation work, while
 `tickets.find` locates tickets by text query, exact ticket stem, mentioned
 ticket stem, and optional status filters. `tickets.status` returns structured
 metadata for a single ticket stem and can optionally include archived done or
-dropped tickets.
+dropped tickets. All three enumerate from the git index as well as the working
+tree, so a worktree-local sparse-checkout narrows what is *marked*, never what is
+found (`#260806-worktree-sparse-checkout-ticket-scope`).
 
 `tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
 (status=dropped), writing the appropriate `completed:` or `dropped:` date into
@@ -890,7 +1207,17 @@ completeness: closing with an unresolved `### Phase N: <title>` heading (one
 with no `### Result` heading before the next Phase heading or EOF, and not
 marked `[dropped]`) returns a soft, non-blocking tip naming the unresolved
 phase(s) — never a hard block, mirroring `tickets.move`'s ready-gate spec-
-address tip. {#260620-ticket-close-tool}
+address tip. Closing while the current branch is an `impl/<root>/<stem>` branch
+that still carries unmerged commits ahead of its merge root additionally returns
+a second, independent soft `next_instruction` nudging the lead to review and
+merge that branch into `<root>` after the close-move commit lands; this reuses
+the `enter.implement` ahead-of-merge-root observation, is advisory only, and the
+tool itself performs no merge (consistent with never committing). The nudge is
+absent on a merged or clean impl branch and on any non-`impl/*` branch. Under an
+active worktree sparse-checkout the scope pre-flight runs
+before the frontmatter and `## Resolution` writes
+(`#260806-worktree-sparse-checkout-ticket-scope`).
+{#260620-ticket-close-tool}
 
 `tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
@@ -947,6 +1274,11 @@ fields are persisted in a single write. The response carries no
 non-`ready` upward move) can still run after that write, but the write is
 idempotent — the ticket is left in the migrated two-field form and a retry
 behaves identically — so a rejected move needs no special retry handling.
+
+A worktree sparse-checkout adds one further rejection, evaluated before that
+self-healing write and after the status preconditions: a source or destination
+outside the scope refuses the move as a true no-op
+(`#260806-worktree-sparse-checkout-ticket-scope`).
 {#260620-ticket-move-tool}
 
 `tickets.create_empty` (renamed from `tickets.create`, 260723 Phase 2) creates
@@ -977,8 +1309,11 @@ A fresh ticket has no prior posture, so `create_empty` never produces the
 `blocked` warning variant.
 
 Terminal states (`done`, `dropped`) and an empty stem are rejected with errors. The tool is not idempotent: a duplicate path returns an
-error. The `idea/` tip directs the caller to promote through `todo/` so the
-resolved posture can be stamped. {#260622-create-ticket-tool}
+error — including when the colliding ticket is in the index but hidden by this
+worktree's sparse-checkout, which is reported as such rather than as a plain
+duplicate (`#260806-worktree-sparse-checkout-ticket-scope`). The `idea/` tip
+directs the caller to promote through `todo/` so the resolved posture can be
+stamped. {#260622-create-ticket-tool}
 
 `tickets.template` returns the typed body skeleton for a given ticket type.
 `type` is required; accepted values are `feat`, `bug`, `refactor`, `chore`,
@@ -1187,7 +1522,7 @@ attached unconditionally rather than only on the writing branches.
 
 Ordinary gate results also carry an `advisory`: the non-waivable statement and
 the review-scope line. It says sage review is not waivable per ticket (pointing
-at `ws/config.show` for the `sage_review` config that governs it), that design
+at `ws/config.list` for the `sage_review` config that governs it), that design
 review checks coherence, right-problem framing, and executability, that
 completeness review checks structure, fields, and clarity, and that neither
 judges whether the underlying research itself is settled. It rides every `run`
@@ -1243,6 +1578,77 @@ reverting, which is landing-dependent and the caller's. Before this, a `block` a
 a `todo/` landing received "commit, then proceed to handoff" and was recorded and
 then dropped, since the caller's only block branch covers the `ready/` landing.
 {#260729-sage-stamp-resolution-routing}
+
+### Worktree Sparse-Checkout Ticket Scope
+
+A worktree may narrow which ticket files are checked out by a `--no-cone`
+sparse-checkout, so that a topic-focused worktree sees only its own tickets. The
+ticket tools treat that as a **display filter over a whole board**, never as a
+smaller board: a ticket the scope hides is still in the index, still enumerated,
+still resolvable by stem, and still blocks a colliding stem. The alternative —
+walking the filesystem — would let a session create a stem that collides with a
+hidden ticket, or edit a board listing while blind to entries it is about to
+drop. Enumeration is therefore driven by the union of the git index and the
+working tree, and hidden bodies are read out of the index in one
+`git cat-file --batch` rather than off disk.
+
+The scope is detected by a filesystem-first gate: `<GIT_DIR>/info/sparse-checkout`
+must exist, and `core.sparseCheckout` must resolve true. `git sparse-checkout
+disable` leaves the pattern file behind, so a stat alone is not conclusive; the
+gate reads the git config files directly and treats an explicit `false` as
+terminal **only** when no config file carries a competing `true`. Anything
+ambiguous defers to `git config`. Ranking the files by git's own precedence was
+rejected because that precedence is switched on by `extensions.worktreeConfig`,
+and honouring a stale worktree-local `false` while git itself filters the
+worktree inverts the gate — the exact partial-board blindness this whole entry
+exists to prevent. Requiring agreement instead needs no extension lookup.
+
+The consequence a caller can rely on: with `core.sparseCheckout` unset, every
+behavior below is unchanged and the ticket tools spawn **zero** additional git
+subprocesses. The scope path is additive, never a new cost on the ordinary path.
+
+Under an active scope:
+
+- `tickets.list`, `tickets.find`, and `tickets.status` enumerate hidden tickets
+  alongside checked-out ones. Each hidden entry carries `hidden` in its bracketed
+  flag list in text mode and `hidden: true` in JSON, so the caller reports
+  "filtered", not "absent".
+- `tickets.list` appends one trailing `scope:` line naming how many tickets this
+  worktree's scope hides and stating that they remain in the index and resolvable
+  by stem. It is text-mode only; a JSON listing gets the per-ticket `hidden` mark
+  but no aggregate count, because adding one would turn the response from an
+  array into an object. The line is suppressed when the caller's status filters
+  select nothing at all — an empty listing then has a cause unrelated to the
+  scope — and when the hidden count is zero.
+- `tickets.move` and `tickets.close` pre-flight both the resolved source and the
+  destination against the scope **before the first write to the source file**,
+  and refuse with a message naming the path, the governing config
+  (`core.sparseCheckout`), and a widen-or-disable remedy. Ordering matters
+  because a refusal after a frontmatter or `## Resolution` write is not a no-op:
+  following the message's own retry advice would then append a second
+  `## Resolution` section. Status preconditions are still evaluated first, so a
+  caller with a genuinely invalid transition gets the transition error rather
+  than a scope error. Destination inclusion is decided by `git sparse-checkout
+  check-rules`, which answers exactly for paths that do not exist yet; stderr is
+  never parsed, since git's sparse advice is gettext-localized.
+- A hidden source is distinguished from a stem that does not exist at all, so a
+  caller is never told to create a ticket that is already in the index.
+- `tickets.create_empty` refuses a stem whose ticket exists in the index but is
+  not checked out here, and says so explicitly rather than reporting a plain
+  duplicate-path error.
+- `tickets.verify` propagates a post-gate scope failure into its existing
+  silent branch and emits **no** ticket-graph advisories. Emitting `FIX:`
+  advisories computed over a board known to be partial would be worse than
+  emitting none.
+
+Two residual limits are stated rather than hidden. `check-rules` requires git
+≥ 2.42; on older git the destination pre-flight fails open and the refusal
+arrives from `git mv` after the source write, so that path returns a
+`partial-mutation:` notice naming exactly what was already written and what a
+retry would duplicate. The notice is gated on an active scope **and** on a byte
+comparison against a pre-write snapshot, so it can never fire on the
+sparse-off path or claim a write that a content-identical re-persist did not
+make. {#260806-worktree-sparse-checkout-ticket-scope}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
@@ -1310,6 +1716,23 @@ When an explicit commit path names an old root from a rename or a deleted root,
 than passing the missing root to `git add`; requested roots with live changes
 still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
+Under an active worktree sparse-checkout scope, `git.commit` stages its
+additions with `git add -A --sparse --` instead of the plain `git add -A --`
+form, so an explicitly requested path that sits outside the current
+sparse-checkout pattern (for example, a newly captured `idea/` ticket in a
+worktree scoped away from `idea/`) can still be staged and committed; the
+path returns to skip-worktree and disappears from the worktree only on the
+next `git sparse-checkout reapply`, while remaining resolvable from the index
+and other worktrees throughout. Scope activity is detected once per call via
+a cheap filesystem-first gate, so the unscoped path (`core.sparseCheckout`
+unset) is unaffected and stages exactly as before. `--sparse` is added to the
+`add` command only; the `rm --cached --ignore-unmatch` branch used for
+genuine deletions never gains it, since a merely-hidden (skip-worktree,
+on-disk-absent, unmodified) path never appears in the pre-staging `git
+status` this branch reads, so it can never be misrouted into a staged
+deletion. `tickets.create_empty` is unaffected by this change — it still only
+writes the ticket file and never stages or commits.
+{#260810-git-commit-sparse-staging}
 `git.commit` ticket-change summaries conservatively reconstruct an unambiguous
 same-stem ticket status move even when native Git reports the staged change as
 separate add/delete records instead of a rename. Ambiguous add/delete sets remain
@@ -1622,10 +2045,10 @@ Override values resolve through the layered config scope model under the key
 `prompt.<point id>.<harness>`, so a write at any scope through the config layer
 is honored by the resolver's precedence; the point id is the user-facing handle
 even though the body carries it as a marker rather than a template variable. The
-dedicated `config.prompt.set(point id, harness, prompt, scope?)` setter makes the
-override surface tunable from inside the MCP without external docs; a
-self-documenting `config.prompt()` listing makes that surface discoverable from
-inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
+generic `config.tune(key: "prompt.<point id>", value, harness?, scope?)` writer
+makes the override surface tunable from inside the MCP without external docs; the
+`config.list` catalog's `prompt_override` knobs make that surface discoverable
+from inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
 
 Shipped lead workflow-manual override-points include `UserPreferenceSection`, an
 empty extension slot for standing communication, terminology, and workflow
@@ -1646,8 +2069,9 @@ slot for it anymore. `builtinPromptOverrideDefaults()` returns an empty map.
 >   an external comment-processing standard and carries no meaning outside the
 >   playbook surface.
 > - Override-points do not use the `{{.Var}}` template-variable mechanism. The
->   point id lives only as the marker id and the `config.prompt.set` key; the seed
->   default is the inline block body, not a frontmatter default.
+>   point id lives only as the marker id and the `prompt.<point id>` config key
+>   (written via `config.tune`); the seed default is the inline block body, not a
+>   frontmatter default.
 > - Critical-path render mechanics are intentionally NOT exposed as
 >   override-points: the harness-aware continuation tip, the delegate child-key
 >   credential splice, and the `prefer_mercenary` guidance block
@@ -1723,9 +2147,9 @@ tool discovery, runtime capabilities, and explicit calls. `off` exposes the
 mercenary surface but keeps host-native subagents as the default guidance. `on`
 exposes the surface and makes implementer/reviewer renders prefer the
 mercenary-call path. The lead writes this item through
-`config.workflow_prefer_mercenary(session_key, value)`; the writer requires a
-lead session key for authority but writes the global config item because
-keyless tool visibility cannot read session or project state.
+`config.tune(key: "workflow.prefer_mercenary", value, session_key)`; the writer
+requires a lead session key for authority but writes the global config item
+because keyless tool visibility cannot read session or project state.
 
 `ws.lead.prefer_mercenary` is removed with no alias. The old unprefixed
 `"prefer_mercenary"` key remains orphaned local state and is not migrated.
@@ -1769,8 +2193,9 @@ mercenary) is therefore unable to login or spawn, so spawn depth is strictly 1
 reduction only — they are not the enforcement boundary.
 
 > [!note] Constraints
-> - `config.workflow_prefer_mercenary` controls both public mercenary surface
->   visibility and default render guidance. The on-request path is reachable
+> - `workflow.prefer_mercenary` (via `config.tune`) controls both public
+>   mercenary surface visibility and default render guidance. The on-request path
+>   is reachable
 >   only when the value is `off` or `on`; `hide` suppresses the public surface.
 > - Mercenary scope is implementer/reviewer only. Exploration and mental-model
 >   work are native-subagent only and never mint a mercenary.

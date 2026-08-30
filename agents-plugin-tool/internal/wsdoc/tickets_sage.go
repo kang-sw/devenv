@@ -97,7 +97,7 @@ type SageRecordResult struct {
 	// procedure never branched on it and the only prior reader was
 	// anyIssueResolutionMissing's pass->concern escalation. Surfacing the counts
 	// here lets the dispatch layer's next_instruction route them, which is where
-	// post-call branch handling belongs (ai-docs/ref/skill-authoring.md Layer 2)
+	// post-call branch handling belongs (ai-docs/manuals/skill-authoring.md Layer 2)
 	// rather than in restated playbook prose.
 	Autonomous int
 	Missing    int
@@ -117,7 +117,7 @@ type stageOutcome struct {
 
 // SageGate resolves the sage-review gate for a landing, porting the
 // lead-write-ticket gate + per-stage posture prose. resolvedSageReviewConfig is
-// the config.show sage_review value resolved by the caller (used only for the
+// the config.list sage_review value resolved by the caller (used only for the
 // missing/pending config-fallback branch).
 func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string) (SageGateResult, error) {
 	stem := strings.TrimSpace(opts.TicketStem)
@@ -144,7 +144,10 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 
 	designRequired, completenessRequired := sageReviewStageRequirement(stem)
 
-	ticketRel, _, err := findTicketPath(root, stem)
+	// nil scope: the sage tools write frontmatter to the ticket file, so a
+	// path they cannot open is no more actionable than a missing one. Leaving
+	// them index-unaware keeps their behavior identical to today.
+	ticketRel, _, _, err := findTicketPath(root, nil, stem)
 	if err != nil {
 		return SageGateResult{}, err
 	}
@@ -185,7 +188,7 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 }
 
 // resolveConcretePosture returns the effective posture for a stage, applying the
-// missing/pending config.show fallback and persisting the resolved value.
+// missing/pending config.list fallback and persisting the resolved value.
 func resolveConcretePosture(ticketAbs, field, posture, resolvedConfig string) (string, error) {
 	p := strings.TrimSpace(posture)
 	if p == "" || p == "pending" {
@@ -352,7 +355,10 @@ func SageRecord(root string, opts SageRecordOptions) (SageRecordResult, error) {
 		return SageRecordResult{}, fmt.Errorf("stage must be design, completeness, or combined")
 	}
 
-	ticketRel, _, err := findTicketPath(root, stem)
+	// nil scope: the sage tools write frontmatter to the ticket file, so a
+	// path they cannot open is no more actionable than a missing one. Leaving
+	// them index-unaware keeps their behavior identical to today.
+	ticketRel, _, _, err := findTicketPath(root, nil, stem)
 	if err != nil {
 		return SageRecordResult{}, err
 	}

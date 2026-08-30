@@ -102,7 +102,7 @@ func TestFormatSageGateRoundTrip(t *testing.T) {
 		Action:    "run",
 		Reviewers: []string{"design"},
 		Mode:      "standalone",
-		Advisory:  "sage review is not waivable per ticket (see ws/config.show for the sage_review config); design review checks coherence.",
+		Advisory:  "sage review is not waivable per ticket (see ws/config.list for the sage_review config); design review checks coherence.",
 	})
 	if !strings.Contains(runOut, "advisory: Sage review is not waivable") {
 		t.Fatalf("formatSageGate advisory must be capitalized:\n%s", runOut)

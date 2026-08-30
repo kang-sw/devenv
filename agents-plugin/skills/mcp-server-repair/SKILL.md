@@ -1,6 +1,6 @@
 ---
 name: mcp-server-repair
-description: Recover when the ws/* MCP tools are absent from the tool list, or a ws/* tool call fails to connect. Keep working through ws-cli and relay the reconnect steps to the user.
+description: The ws MCP server is not running, failed to start, is disconnected, or its ws/* tools are missing from the tool list. When you are about to report that ws MCP is unavailable, invoke this instead.
 ---
 
 # MCP Server Repair

@@ -23,8 +23,8 @@ func TestDocCoverageWarningFiresOnFerrule(t *testing.T) {
 	if !strings.Contains(text, "Doc coverage is missing") {
 		t.Fatalf("ferrule response must carry the doc-coverage warning: %s", text)
 	}
-	if !strings.Contains(text, "config.doc_coverage_alarm") {
-		t.Fatalf("warning must point to the config.doc_coverage_alarm setter: %s", text)
+	if !strings.Contains(text, "config.tune(key: \"doc_coverage_alarm\"") {
+		t.Fatalf("warning must point to the config.tune doc_coverage_alarm setter: %s", text)
 	}
 }
 
@@ -134,12 +134,13 @@ func TestDocCoverageWarningSuppressedWhenOff(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
-	offResp := callToolOnce(t, s, 2, "config.doc_coverage_alarm", map[string]any{
+	offResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "doc_coverage_alarm",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, offResp), "doc_coverage_alarm: off [scope:global]") {
-		t.Fatalf("config.doc_coverage_alarm off call must succeed: %s", offResp)
+		t.Fatalf("config.tune doc_coverage_alarm off call must succeed: %s", offResp)
 	}
 
 	suppressedResp := callLogin(t, s, 3, root, nil)
@@ -163,19 +164,20 @@ func TestDocCoverageAlarmTuningKnob(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
-	offResp := callToolOnce(t, s, 2, "config.doc_coverage_alarm", map[string]any{
+	offResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "doc_coverage_alarm",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, offResp), "doc_coverage_alarm: off [scope:global]") {
 		t.Fatalf("doc_coverage_alarm off call must succeed: %s", offResp)
 	}
 
-	tuningText := toolText(t, callToolOnce(t, s, 3, "config.tuning", map[string]any{
+	tuningText := toolText(t, callToolOnce(t, s, 3, "config.list", map[string]any{
 		"session_key": key,
 	}))
 	if !strings.Contains(tuningText, "doc_coverage_alarm") {
-		t.Fatalf("config.tuning must list the doc_coverage_alarm knob: %s", tuningText)
+		t.Fatalf("config.list must list the doc_coverage_alarm knob: %s", tuningText)
 	}
 	// Scope the "off" assertion to the doc_coverage_alarm knob's own block: the
 	// catalog also lists workflow.prefer_subagent, whose builtin default is
@@ -196,16 +198,18 @@ func TestDocCoverageAlarmTuningKnob(t *testing.T) {
 		t.Fatalf("config.tuning must report the resolved off value scoped to doc_coverage_alarm's own block: %s", docCoverageAlarmBlock)
 	}
 
-	resetResp := callToolOnce(t, s, 4, "config.doc_coverage_alarm", map[string]any{
+	resetResp := callToolOnce(t, s, 4, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "doc_coverage_alarm",
 		"reset":       true,
 	})
 	if !strings.Contains(toolText(t, resetResp), "doc_coverage_alarm: on [scope:builtin]") {
 		t.Fatalf("reset must report the builtin-sourced value: %s", resetResp)
 	}
 
-	conflictResp := callToolOnce(t, s, 5, "config.doc_coverage_alarm", map[string]any{
+	conflictResp := callToolOnce(t, s, 5, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "doc_coverage_alarm",
 		"value":       "on",
 		"reset":       true,
 	})

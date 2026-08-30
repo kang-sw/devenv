@@ -5,12 +5,11 @@ import (
 	"testing"
 )
 
-// keyPattern is the expected format: 4 lowercase-word segments + 2-digit suffix.
-var keyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){3}-[0-9]{2}$`)
+// keyPattern is the expected format: 3 lowercase-word segments.
+var keyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){2}$`)
 
 // TestGenerateFormat verifies that minted keys match the opaque word-chain format
-// contract: four hyphen-separated lowercase words followed by a 2-digit numeric
-// suffix, e.g. "amber-tide-fox-river-42".
+// contract: three hyphen-separated lowercase words, e.g. "amber-tide-fox".
 func TestGenerateFormat(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		key, err := Generate()
@@ -18,7 +17,7 @@ func TestGenerateFormat(t *testing.T) {
 			t.Fatalf("Generate() error: %v", err)
 		}
 		if !keyPattern.MatchString(key) {
-			t.Fatalf("Generate() key %q does not match expected pattern ^[a-z]+(-[a-z]+){3}-[0-9]{2}$", key)
+			t.Fatalf("Generate() key %q does not match expected pattern ^[a-z]+(-[a-z]+){2}$", key)
 		}
 	}
 }

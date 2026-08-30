@@ -1,0 +1,7 @@
+{
+  "key": "ticket.260807-dissolve-index.phase2",
+  "value": "Phase 2 DONE (2026-08-13, live 0.40.3-dev). Both dogfood runs completed, zero contradictions, nothing routed. Run (a) idempotency on devenv = clean no-op (v0046==latest, no items walkable, no _index re-add, health-check skipped). Run (b) real v0046 migration on a scratch acmewidgets fixture (tag v0045 + live _index.md): staleness alarm fired before / cleared after; project_tree+workflow_manual error-free with _index present; generated inventories coexisted additively; migration moved orientation-\u003eProject Orientation, notes-\u003erepo layer (stale note pruned), runbook-\u003emanuals/, dropped inventory tables, removed read-step + Ticket Focus bullet, deleted _index.md, tag v0045-\u003ev0046; # Manuals/# Notes ambient blocks injected the migrated content live; convergence invariant confirmed (upgrade == fresh shape). Result recorded on ticket (heading 1ec90d06); fixture commit 4ad96c41 (throwaway, under scratchpad/wsfix-b). Ticket is fully complete (Phase 1 + Phase 2 both landed) and ready to close to .done pending user confirmation.",
+  "priority": 1,
+  "written_at": "2026-08-13T03:05:43Z",
+  "visible": true
+}

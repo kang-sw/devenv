@@ -73,8 +73,9 @@ func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900002, root, nil))
 
-	enableResp := callToolOnce(t, s, 1, "config.workflow_prefer_mercenary", map[string]any{
+	enableResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_mercenary",
 		"value":       "on",
 	})
 	if !strings.Contains(toolText(t, enableResp), "workflow.prefer_mercenary: on [scope:global]") {
@@ -94,8 +95,9 @@ func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
 		t.Errorf("guidance block must be present after enable via production path:\n%s", string(renderedBody1))
 	}
 
-	disableResp := callToolOnce(t, s, 3, "config.workflow_prefer_mercenary", map[string]any{
+	disableResp := callToolOnce(t, s, 3, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_mercenary",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, disableResp), "workflow.prefer_mercenary: off [scope:global]") {
@@ -115,8 +117,9 @@ func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
 		t.Errorf("guidance block must be absent after disable via production path:\n%s", string(renderedBody2))
 	}
 
-	hideResp := callToolOnce(t, s, 5, "config.workflow_prefer_mercenary", map[string]any{
+	hideResp := callToolOnce(t, s, 5, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_mercenary",
 		"value":       "hide",
 	})
 	if !strings.Contains(toolText(t, hideResp), "workflow.prefer_mercenary: hide [scope:global]") {
@@ -138,8 +141,9 @@ func TestWorkflowPreferMercenaryRejectsLegacyEnabledShape(t *testing.T) {
 
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900003, root, nil))
-	resp := callToolOnce(t, s, 1, "config.workflow_prefer_mercenary", map[string]any{
+	resp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_mercenary",
 		"enabled":     false,
 	})
 	if !toolIsError(t, resp) {
@@ -161,7 +165,7 @@ func TestPreferMercenaryConfigShowReportsGlobalWorkflowKeys(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900004, root, nil))
 
-	showDefault := callToolOnce(t, s, 1, "config.show", map[string]any{})
+	showDefault := callToolOnce(t, s, 1, "config.list", map[string]any{})
 	defaultText := toolText(t, showDefault)
 	for _, want := range []string{
 		"workflow.prefer_subagent: off  [scope:builtin]",
@@ -172,15 +176,16 @@ func TestPreferMercenaryConfigShowReportsGlobalWorkflowKeys(t *testing.T) {
 		}
 	}
 
-	setResp := callToolOnce(t, s, 2, "config.workflow_prefer_mercenary", map[string]any{
+	setResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_mercenary",
 		"value":       "on",
 	})
 	if !strings.Contains(toolText(t, setResp), "workflow.prefer_mercenary: on [scope:global]") {
 		t.Fatalf("set call did not succeed: %s", setResp)
 	}
 
-	showGlobal := callToolOnce(t, s, 3, "config.show", map[string]any{})
+	showGlobal := callToolOnce(t, s, 3, "config.list", map[string]any{})
 	globalText := toolText(t, showGlobal)
 	if !strings.Contains(globalText, "workflow.prefer_mercenary: on  [scope:global]") {
 		t.Fatalf("config.show must report global workflow.prefer_mercenary: %s", globalText)
@@ -201,26 +206,28 @@ func TestWorkflowPreferSubagentWriterProductionPath(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900005, root, nil))
 
-	onResp := callToolOnce(t, s, 1, "config.workflow_prefer_subagent", map[string]any{
+	onResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "on",
 	})
 	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {
 		t.Fatalf("subagent on call must succeed: %s", onResp)
 	}
-	showOn := toolText(t, callToolOnce(t, s, 2, "config.show", map[string]any{}))
+	showOn := toolText(t, callToolOnce(t, s, 2, "config.list", map[string]any{}))
 	if !strings.Contains(showOn, "workflow.prefer_subagent: on  [scope:global]") {
 		t.Fatalf("config.show must report workflow.prefer_subagent on/global: %s", showOn)
 	}
 
-	offResp := callToolOnce(t, s, 3, "config.workflow_prefer_subagent", map[string]any{
+	offResp := callToolOnce(t, s, 3, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, offResp), "workflow.prefer_subagent: off [scope:global]") {
 		t.Fatalf("subagent off call must succeed: %s", offResp)
 	}
-	showOff := toolText(t, callToolOnce(t, s, 4, "config.show", map[string]any{}))
+	showOff := toolText(t, callToolOnce(t, s, 4, "config.list", map[string]any{}))
 	if !strings.Contains(showOff, "workflow.prefer_subagent: off  [scope:global]") {
 		t.Fatalf("config.show must report workflow.prefer_subagent off/global: %s", showOff)
 	}
@@ -242,16 +249,18 @@ func TestWorkflowPreferSubagentResetRestoresBuiltin(t *testing.T) {
 	s := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900007, root, nil))
 
-	onResp := callToolOnce(t, s, 1, "config.workflow_prefer_subagent", map[string]any{
+	onResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "on",
 	})
 	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {
 		t.Fatalf("subagent on call must succeed: %s", onResp)
 	}
 
-	resetResp := callToolOnce(t, s, 2, "config.workflow_prefer_subagent", map[string]any{
+	resetResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"reset":       true,
 	})
 	resetText := toolText(t, resetResp)
@@ -259,14 +268,15 @@ func TestWorkflowPreferSubagentResetRestoresBuiltin(t *testing.T) {
 		t.Fatalf("reset must report the builtin-sourced value, not a re-shadowed global write: %s", resetText)
 	}
 
-	showAfterReset := toolText(t, callToolOnce(t, s, 3, "config.show", map[string]any{}))
+	showAfterReset := toolText(t, callToolOnce(t, s, 3, "config.list", map[string]any{}))
 	if !strings.Contains(showAfterReset, "workflow.prefer_subagent: off  [scope:builtin]") {
 		t.Fatalf("config.show must report workflow.prefer_subagent as builtin-sourced after reset: %s", showAfterReset)
 	}
 
 	// reset and an explicit value are mutually exclusive.
-	conflictResp := callToolOnce(t, s, 4, "config.workflow_prefer_subagent", map[string]any{
+	conflictResp := callToolOnce(t, s, 4, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "on",
 		"reset":       true,
 	})
@@ -301,8 +311,9 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 		t.Fatalf("builtin/off workflow.prefer_subagent must not append lead-prefer-subagent:\n%s", offText)
 	}
 
-	onResp := callToolOnce(t, s, 2, "config.workflow_prefer_subagent", map[string]any{
+	onResp := callToolOnce(t, s, 2, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "on",
 	})
 	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {
@@ -325,8 +336,9 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 		t.Fatalf("prefer-subagent append must render through override marker stripping:\n%s", onText)
 	}
 
-	offResp := callToolOnce(t, s, 4, "config.workflow_prefer_subagent", map[string]any{
+	offResp := callToolOnce(t, s, 4, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "off",
 	})
 	if !strings.Contains(toolText(t, offResp), "workflow.prefer_subagent: off [scope:global]") {
@@ -364,8 +376,9 @@ func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testin
 	s.observeHarness("test", "claude")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900007, root, nil))
 
-	onResp := callToolOnce(t, s, 1, "config.workflow_prefer_subagent", map[string]any{
+	onResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
 		"session_key": key,
+		"key":         "workflow.prefer_subagent",
 		"value":       "on",
 	})
 	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {

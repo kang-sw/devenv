@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.38.0-dev"
+var version = "0.43.4-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -219,8 +219,8 @@ func runtimeCapabilityCommandNames() []string {
 		"mercenary.status",
 		"mercenary.tail",
 		"mercenary.wait",
-		"config.agents-tier",
-		"config.show",
+		"config.list",
+		"config.tune",
 		"git.commit",
 		"git.diff",
 		"git.log",
@@ -254,7 +254,7 @@ func runtimeCapabilityCommandNames() []string {
 func filterNoAgentCommands(commands []string) []string {
 	out := make([]string, 0, len(commands))
 	for _, command := range commands {
-		if strings.HasPrefix(command, "mercenary.") || command == "config.agents-tier" {
+		if strings.HasPrefix(command, "mercenary.") || command == "config.tune" {
 			continue
 		}
 		out = append(out, command)
@@ -275,11 +275,11 @@ func configCommand(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
-	case "show":
-		configShow(args[1:])
-	case "agents-tier":
-		fatalIfNoAgentCommand("config agents-tier")
-		configAgentsTier(args[1:])
+	case "list":
+		configList(args[1:])
+	case "tune":
+		fatalIfNoAgentCommand("config tune")
+		configTune(args[1:])
 	default:
 		configUsage()
 		os.Exit(2)
@@ -287,24 +287,24 @@ func configCommand(args []string) {
 }
 
 func configUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <show|agents-tier>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <list|tune>")
 }
 
-func configShow(args []string) {
-	fs := flag.NewFlagSet("config show", flag.ExitOnError)
+func configList(args []string) {
+	fs := flag.NewFlagSet("config list", flag.ExitOnError)
 	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	view, err := wsconfig.Show(wsconfig.Options{})
 	if outputJSON(*format) {
-		printJSONOrFatal("config show", view, err)
+		printJSONOrFatal("config list", view, err)
 		return
 	}
-	printTextOrFatal("config show", mcp.FormatConfigView(view), err)
+	printTextOrFatal("config list", mcp.FormatConfigView(view), err)
 }
 
-func configAgentsTier(args []string) {
-	fs := flag.NewFlagSet("config agents-tier", flag.ExitOnError)
+func configTune(args []string) {
+	fs := flag.NewFlagSet("config tune", flag.ExitOnError)
 	tier := fs.String("tier", "", "capability tier: small, medium, large, or xlarge")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
@@ -325,7 +325,7 @@ func configAgentsTier(args []string) {
 	} else {
 		cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness)
 	}
-	printJSONOrFatal("config agents-tier", cfg, err)
+	printJSONOrFatal("config tune", cfg, err)
 }
 
 func path(args []string) {
@@ -582,6 +582,9 @@ func ticketsFind(args []string) {
 		Query:              *query,
 		TicketStem:         *ticketStem,
 		MentionsTicketStem: *mentionsTicketStem,
+		// Mirrors the MCP surface: the explicit-stem form resolves through the
+		// index, the query form stays discovery.
+		Resolve: strings.TrimSpace(*ticketStem) != "",
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("tickets find", result, err)
@@ -606,6 +609,7 @@ func ticketsStatus(args []string) {
 		TicketStem:     *ticketStem,
 		IncludeDone:    *includeDone,
 		IncludeDropped: *includeDropped,
+		Resolve:        true,
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("tickets status", result, err)
@@ -635,7 +639,7 @@ func ticketsClose(args []string) {
 		Resolution: *resolution,
 		Today:      time.Now().Format("2006-01-02"),
 	})
-	printTextOrFatal("tickets close", mcp.FormatTicketMutate("closed", result), err)
+	printTextOrFatal("tickets close", mcp.FormatTicketMutate("closed", result), withPartialMutationNotice(err, result.PartialMutationNotice))
 }
 
 func ticketsMove(args []string) {
@@ -655,7 +659,7 @@ func ticketsMove(args []string) {
 		To:         *to,
 		SageReview: resolved.Value,
 	})
-	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), err)
+	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), withPartialMutationNotice(err, result.PartialMutationNotice))
 }
 
 func ticketsCreateEmpty(args []string) {
@@ -1074,6 +1078,18 @@ func printJSONOrFatal(prefix string, value any, err error) {
 		fatal(prefix, err)
 	}
 	fmt.Println(string(encoded))
+}
+
+// withPartialMutationNotice folds a ticket mutation's write-then-reject notice
+// into the error text. printTextOrFatal only ever sees the error, so without
+// this the notice — the one thing telling the caller its file already changed —
+// is discarded on exactly the path that needs it, and the error's own
+// widen-then-retry remedy corrupts the ticket on the retry.
+func withPartialMutationNotice(err error, notice string) error {
+	if err == nil || notice == "" {
+		return err
+	}
+	return fmt.Errorf("%w\npartial-mutation: %s A retry will not find an unchanged file.", err, notice)
 }
 
 func printTextOrFatal(prefix, text string, err error) {

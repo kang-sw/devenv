@@ -126,17 +126,17 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "config.tuning", "config.agents_tier", "tickets.list"} {
+	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.list"} {
 		if !slices.Contains(got.Tools, visible) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
 	}
-	for _, hidden := range []string{"mercenary.call", "mercenary.cancel", "mercenary.run-current", "subquery", "config.agents-tier"} {
+	for _, hidden := range []string{"mercenary.call", "mercenary.cancel", "mercenary.run-current", "subquery", "config.tune"} {
 		if slices.Contains(got.Commands, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
 		}
 	}
-	for _, visible := range []string{"config.show", "tickets.list", "runtime.capabilities"} {
+	for _, visible := range []string{"config.list", "tickets.list", "runtime.capabilities"} {
 		if !slices.Contains(got.Commands, visible) {
 			t.Fatalf("no-agent capabilities missing visible command %s in %v", visible, got.Commands)
 		}
@@ -198,7 +198,7 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		want string
 	}{
 		{name: "mercenary", args: []string{"mercenary", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: mercenary"},
-		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config agents-tier"},
+		{name: "config tune", args: []string{"config", "tune", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config tune"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(bin, tc.args...)
@@ -567,11 +567,11 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 			} `json:"agents"`
 		} `json:"config"`
 	}
-	beforeText := string(show("config", "show"))
+	beforeText := string(show("config", "list"))
 	if !strings.Contains(beforeText, "path: "+wantConfigPath()) || !strings.Contains(beforeText, "model_aliases:") || strings.HasPrefix(strings.TrimSpace(beforeText), "{") {
 		t.Fatalf("config show text = %q", beforeText)
 	}
-	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &before)
+	mustUnmarshalCLIJSON(t, show("config", "list", "--format", "json"), &before)
 	if before.Path != wantConfigPath() {
 		t.Fatalf("config show path = %q", before.Path)
 	}
@@ -591,7 +591,7 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 
-	show("config", "agents-tier", "--tier", "light", "--model", "claude-sonnet-4")
+	show("config", "tune", "--tier", "light", "--model", "claude-sonnet-4")
 
 	var after struct {
 		Path   string `json:"path"`
@@ -610,13 +610,13 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 			} `json:"agents"`
 		} `json:"config"`
 	}
-	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &after)
+	mustUnmarshalCLIJSON(t, show("config", "list", "--format", "json"), &after)
 	small := after.Config.Agents.Tiers["small"]
 	if after.Path != wantConfigPath() || small.Backend != "claude" || small.Model != "claude-sonnet-4" {
 		t.Fatalf("configured config show = path %q small %#v", after.Path, small)
 	}
 
-	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4", "--effort", "medium")
+	show("config", "tune", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4", "--effort", "medium")
 	var harnessAfter struct {
 		Config struct {
 			Agents struct {
@@ -628,14 +628,14 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 			} `json:"agents"`
 		} `json:"config"`
 	}
-	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
+	mustUnmarshalCLIJSON(t, show("config", "list", "--format", "json"), &harnessAfter)
 	claudeMedium := harnessAfter.Config.Agents.ModelAliases["medium"]["claude"]
 	if claudeMedium.Backend != "codex" || claudeMedium.Model != "gpt-5.4" || claudeMedium.Effort != "medium" {
 		t.Fatalf("claude medium alias = %#v", claudeMedium)
 	}
 
-	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.5")
-	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
+	show("config", "tune", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.5")
+	mustUnmarshalCLIJSON(t, show("config", "list", "--format", "json"), &harnessAfter)
 	claudeMedium = harnessAfter.Config.Agents.ModelAliases["medium"]["claude"]
 	if claudeMedium.Backend != "codex" || claudeMedium.Model != "gpt-5.5" || claudeMedium.Effort != "" {
 		t.Fatalf("claude medium alias after omitted effort update = %#v", claudeMedium)
@@ -830,8 +830,8 @@ func TestToolsCommandBareListMatchesToolsList(t *testing.T) {
 						t.Fatalf("agentless tools output exposed hidden tool %s in %v", hidden, gotNames)
 					}
 				}
-				if !slices.Contains(gotNames, "config.agents_tier") {
-					t.Fatalf("agentless tools output missing shared tool config.agents_tier in %v", gotNames)
+				if !slices.Contains(gotNames, "config.tune") {
+					t.Fatalf("agentless tools output missing shared tool config.tune in %v", gotNames)
 				}
 			}
 		})
@@ -887,6 +887,52 @@ func TestToolsCommandShowUnknownToolExitsNonZero(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "tool not found") {
 		t.Fatalf("unexpected message: %s", out)
+	}
+}
+
+// TestTicketsCloseCLIDeliversPartialMutationNotice is the CLI half of the
+// write-then-reject delivery path. printTextOrFatal only ever sees the error, so
+// the notice telling the caller its file already changed was dropped on exactly
+// the path that needs it: the caller acted on the error's widen-then-retry
+// remedy and the retry appended a second `## Resolution` section.
+//
+// The git move is made to fail by occupying the destination status directory
+// with a regular file, so this does not depend on the host's git version — the
+// real trigger is git < 2.42, where check-rules is absent and the destination
+// pre-flight fails open.
+func TestTicketsCloseCLIDeliversPartialMutationNotice(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs", "_index.md"), "# Index\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs", "tickets", "ready", "260101-feat-a.md"), "---\ntitle: A\n---\n# A\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs", "tickets", "todo", "260102-feat-shadow.md"), "---\ntitle: Shadow\n---\n# Shadow\n")
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "board")
+	runGit(t, root, "sparse-checkout", "set", "--no-cone", "/*", "!/ai-docs/tickets/todo/*")
+	if err := os.WriteFile(filepath.Join(root, "ai-docs", "tickets", ".done"), []byte("occupied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "tickets", "close",
+		"--root", root, "--stem", "260101-feat-a", "--status", "done",
+		"--resolution", "Closed for the fixture.")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a failed close, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "partial-mutation:") {
+		t.Fatalf("ws-mcp tickets close dropped the write-then-reject notice:\n%s", out)
+	}
+	if !strings.Contains(string(out), "## Resolution") {
+		t.Fatalf("the delivered notice does not name the non-idempotent write:\n%s", out)
 	}
 }
 
@@ -1030,7 +1076,7 @@ func TestCallCommandColdStartWorkflowManualMintsLeadKey(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 
 	cmd := exec.Command(bin, "call", "workflow_manual", fmt.Sprintf(`{"session_key":"obsidian-latch","root":%q}`, root))
-	cmd.Env = append(os.Environ(), "WS_CACHE_HOME="+cache)
+	cmd.Env = append(os.Environ(), "WS_CACHE_HOME="+cache, "WS_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("ws-mcp call workflow_manual (cold start) failed: %v\n%s", err, string(out))

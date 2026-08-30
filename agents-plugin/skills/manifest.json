@@ -4,9 +4,9 @@
     "lead-add-rule/SKILL.md": "87f06795eb6a642adf1cf13c790ee09bf605767dc4ede80b876ec325e73f2906",
     "lead-backfill-docs/SKILL.md": "26332923816f8ef6cfb7287335b748bd412221f58858238e75d881cc29195948",
     "lead-backfill-docs/agents/openai.yaml": "c7ade1247a41a2609587c6b96884efdc2d2db6cbbb79e0e5856dcacad3255da8",
-    "lead-bootstrap/AGENTS.template.md": "4eda25a237b61919f767f9a42af3e4a195be267a64db311f3ef973c6f6263b89",
+    "lead-bootstrap/AGENTS.template.md": "ed34c558758218ab4eecfc27f55462d84d029c1f3cac285711b3646d2cfe228b",
     "lead-bootstrap/SKILL.md": "c62e98b0f0bb9f482db02c8636a5f4972e9b962fdb05c70d14c202505638516c",
-    "lead-bootstrap/WORKFLOW.md": "87a03ab6f344687dafb4a41bcf10dc2f384a01f64097b85a093d579188a147ba",
+    "lead-bootstrap/WORKFLOW.md": "561446b4c3444c982bfb363b4adec0c09b436e534a5145cca01ee97e933aed58",
     "lead-discuss/SKILL.md": "76deb06a42abea90445935480d3c4d202f0ddb338224c289e9e0ac9ba0ac45db",
     "lead-discuss/agents/openai.yaml": "25bf5112c8b0d204f522e117248c26e683d6e4543bfd21a43a2d0e08eff15f69",
     "lead-drain-ready-queue/SKILL.md": "7c51237c08358f3354dbf102cadfaccad4d814ef046d5f3afeb7885b6c2377ac",
@@ -17,9 +17,11 @@
     "lead-proceed/SKILL.md": "28d585a4424d17fabb23721f7be24af5273a36a6f586961eefe0e76e3ff64846",
     "lead-review/SKILL.md": "763c723b127084d8660c98c52a5f3c8b338f45285728142293e9909f10249d77",
     "lead-revive/SKILL.md": "bbaf416690ffd5df3c3b04eebac0a4168fad2f35b584308f9242d34a33a09bf5",
+    "lead-scope-worktree/SKILL.md": "bb23722dccaeca50e7cdd575540be591c0496d40a4fadc38bcc286eaf5381539",
     "lead-ship/SKILL.md": "29f4fb2f9c7f858ae84d0587d44252b6e14076d8d3a911ebed4b140d776b5b52",
     "lead-tune/SKILL.md": "d8b5757d369922468108c22706b3494a0c5a33b584842f0f6de0399fae2d659f",
     "lead-verify-discussion/SKILL.md": "51b42c6e21bef144aabfbd0c1fcc9be75ce0d25ebc93cf493219272b5e8c4c9f",
-    "mcp-server-repair/SKILL.md": "cea2fa9583b347920de82a5eef4297a1ca987d2a21a68bc0f3a7754c0a7d4bf7"
+    "lead-write-ticket/SKILL.md": "bd1926bbe8eaeee42c671f074a11ae406629b83e8e60402785593f8103c1ed50",
+    "mcp-server-repair/SKILL.md": "7ec0b1c436d7ea2b5fad5386b52775c8d8bf44e2844501aab09dd7862a37495a"
   }
 }

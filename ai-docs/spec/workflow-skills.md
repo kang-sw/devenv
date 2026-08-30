@@ -33,6 +33,7 @@ lead-implement
 lead-check-blockers
 lead-proceed
 lead-review
+lead-scope-worktree
 lead-ship
 lead-tune
 lead-update-spec
@@ -48,12 +49,30 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 13 entry skills the user invokes as
+A second trigger class matches the session's own observation rather than a user
+request. `mcp-server-repair` is the case: no user types it, and the condition
+that should fire it is an environment state the agent has already noticed. Such
+a description is written in the vocabulary the agent emits when reporting that
+failure — the observable states it would name, phrased as a state declaration
+rather than an authoring-side condition clause — and names the moment of
+substitution, so the skill displaces the failure report the agent was about to
+write instead of competing with it. Descriptions in this class carry no
+restatement of body content: what the skill does on invocation is the body's
+job, and selection-surface budget buys trigger match only.
+{#260806-skill-description-self-invocation-trigger}
+
+The directly invocable surface is narrowed to 14 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-bootstrap`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
 `lead-verify-discussion`, `lead-tune`, `lead-drain-ready-queue`,
-`lead-goal-fan-out-step`, and `lead-backfill-docs`. The remaining
+`lead-goal-fan-out-step`, `lead-backfill-docs`, and `lead-scope-worktree`.
+`lead-scope-worktree` always discusses what this worktree's work line or
+topic is before writing any `git sparse-checkout` pattern — it never derives
+a pattern from inference. Its derived scope covers `ready/`, `todo/`, and
+`idea/` uniformly (no status directory is exempt); see
+`#260810-git-commit-sparse-staging` for the `.gitkeep` and `--sparse`
+capture-staging mechanism. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -73,15 +92,15 @@ routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel ro
 runtime trigger surface that fires when the user signals intent to tune how the
 workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
 so the skill can proactively propose a tune. Its playbook is the tuning manual —
-it loads the `config.tuning` catalog (`#260625-tuning-catalog`) and uses that
-catalog's knob ids, writer tools, field options, and current values to drive
-prompt overrides (`#260620-config-prompt-override-tuning-tools`, including
-`UserPreferenceSection` for standing preferences), workflow preference knobs,
-and `config.agents_tier` without reimplementing their set paths. The always-on
-`lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
-of general-task routing attention. In agentless wsflow the catalog omits the
-full-ws-only knob `workflow.prefer_mercenary`, while keeping shared knobs such
-as `workflow.prefer_subagent` and `config.agents_tier` (now a shared knob
+it loads the `config.list` catalog (`#260625-tuning-catalog`) and uses that
+catalog's knob ids, the `config.tune` write contract, field options, and current
+values to drive prompt overrides (`#260620-config-prompt-override-tuning-tools`,
+including `UserPreferenceSection` for standing preferences), workflow preference
+knobs, and the `agents.tier` knob without reimplementing their set paths. The
+always-on `lead-workflow-manual` carries only a one-line pointer, keeping tuning
+guidance out of general-task routing attention. In agentless wsflow the catalog
+omits the full-ws-only knob `workflow.prefer_mercenary`, while keeping shared
+knobs such as `workflow.prefer_subagent` and `agents.tier` (now a shared knob
 available in both product modes).
 {#260619-lead-tune-workflow-tuning-skill}
 
@@ -199,7 +218,7 @@ when a handler exceeds four steps and mixes responsibilities. Sub-block names
 describe the responsibility they perform; single-purpose checklists are not
 split only because they are long. Compact checkpoint skills may stay prose or
 short lists when output and end state are obvious.
-These authoring rules are maintained as `ai-docs/ref/skill-authoring.md`, an
+These authoring rules are maintained as `ai-docs/manuals/skill-authoring.md`, an
 upstream reference document read directly rather than a shipped invocable
 skill; the audit they describe covers `agents-plugin/skills/*/SKILL.md` and
 `agents-plugin/rsrc/lead-*/lead-*.md`.
@@ -231,11 +250,14 @@ wsflow exclusion rationale. The wsflow skill-bundle verification path checks
 inventory, forbidden full ws agent references, thin-shim shape, and shared
 playbook coverage; it does not require text identity with full ws skill shims.
 
-wsflow bootstrap uses package-local template version history. Its downstream
-`AGENTS.template.md` starts at `v0001` for the wsflow baseline and does not
-replay the full bootstrap migration backlog. Bootstrap behavior changes remain
-mirroring-sensitive: maintainers check both packages and bump each package's
-template version only when that package receives the behavior change.
+wsflow bootstrap emits a package-neutral downstream artifact converged with
+the full ws package: `AGENTS.template.md` and `WORKFLOW.md` produce identical
+emitted output across both packages modulo the shared
+`<!-- Template Version: vNNNN -->` tag, and both packages share one
+migration-ordinal lineage (wsflow no longer runs a separate `v0001..v0008`
+counter). Bootstrap behavior changes remain mirroring-sensitive: maintainers
+check both packages and bump the shared template version once for a change
+either package receives.
 
 ## wsflow Converged Implementation Spine {#260529-wsflow-converged-implement-spine}
 
@@ -537,9 +559,11 @@ dispatching the selected ticket, then hands off to `lead-proceed` with
 consumes this without any goal-specific change on that side, and no
 `merge_target` override is needed since the create-path already derives
 the merge target from the checked-out branch. Each ticket still gets its
-own `impl/<stem>` branch, merged into `goal/<parent>/<slug>` without an
-approval ask and auto-deleted per the Branch Cleanup naming-gate behavior
-(see the `impl/<stem>`-branch section above). When the selection subagent
+own `impl/<goal-branch>/<stem>` branch (the create-path resolver
+automatically encodes the checked-out `goal/<parent>/<slug>` branch as the
+merge root), merged into `goal/<parent>/<slug>` without an approval ask and
+auto-deleted per the Branch Cleanup naming-gate behavior (see the
+`impl/<merge-root>/<stem>`-branch section above). When the selection subagent
 reports `ready/` empty while the current branch is `goal/<parent>/<slug>`,
 the skill performs the run's one confirmed final merge itself in its own
 prose: derive PARENT and SLUG from the branch name by stripping the
@@ -582,7 +606,7 @@ of dispatching one advanceable ticket at a time, it selects a
 mutually-independent batch (disjoint edit surface, no `related:`/`parent:`
 ordering between candidates, excluding tickets already dispatched this run and
 not yet merged) and advances each in its own worktree-isolated mini-lead in
-parallel, one `impl/<stem>` branch and background native dispatch per ticket,
+parallel, one `impl/<goal-branch>/<stem>` branch and background native dispatch per ticket,
 merging each serially back into the parent as its mini-lead reaches its merge
 gate. It degrades to the plain serial path — one ticket, dispatched directly
 to `lead-proceed` — whenever fewer than two independent tickets are available
@@ -656,19 +680,30 @@ ticket makes about it, so it can spot-check the populator's citations without
 becoming a second surveyor.
 {#260729-ticket-reviewer-policy-resolution}
 
-Two authoring rules follow from the corpus checks having something to report.
-`judge: initial-status` refuses `ready/` when the earliest unfinished phase waits
-on a ticket that has not landed, however complete the spec addressing, and names
-the blocking stem — `ready/` means direct implementation target, so a ticket that
-cannot be started is not one. It is cut on the earliest unfinished phase rather
-than the ticket as a whole, because a ticket whose first phase is independent is
-startable regardless of what a later phase waits on. The judge fires before the
-Ground stage runs, so it decides from what the lead has already read; the
-populator's dependency-status decision gap is the backstop for what the lead
-missed, and reaches the user through the Open Decision Queue. This is a separate
-layer from `lead-drain-ready-queue`'s dispatch-time blocker skip: that filter reads the
-`## Blocked (` record a sage stamp writes, keeps a ticket out of a selection, and
-neither depends on nor repairs this rule.
+`judge: initial-status` and every `todo/` → `ready/` promotion defer to one
+gate, `## On: Dependency Closure Check`: a ticket lands in `ready/` only when the
+tickets its earliest unfinished phase block-depends on are already in `ready/`,
+`.done/`, or the same bulk-promotion action. `ready/` is a **closed work front**
+that drains in dependency order — a dependent may sit in `ready/` beside its
+prerequisite — not a set of tickets each startable in isolation; this relaxes an
+earlier bar that refused `ready/` until every dependency had landed in `.done/`.
+The gate is cut on the earliest unfinished phase, because a ticket whose first
+phase is independent is startable regardless of what a later phase waits on, and
+a blocking dependency counts only through a machine-readable
+`related: <stem>: prerequisite` or prerequisite `parent:` edge — never a
+prose-only mention or an epic-hierarchy `parent:`. `judge: initial-status` still
+fires before the Ground stage from what the lead has already read; the
+populator's dependency-status decision gap remains the backstop, reaching the
+user through the Open Decision Queue, and is a separate layer from
+`lead-drain-ready-queue`'s dispatch-time `## Blocked (` skip.
+
+Two or more tickets entering `ready/` in one action route to `## On: Bulk Ready
+Promotion` (`judge: bulk-ready-promotion`), which promotes them
+prerequisites-first — so each closure check passes against an already-promoted
+prerequisite — and commits the tickets that landed as one unit. It is
+deliberately separate from Cascade Edit, whose selection is
+decision-propagation-scoped; Cascade Edit itself now runs the Sage Review Gate,
+not only the Spec-address Check, per `ready/`-entering target.
 
 Epic detail belonging to a child that does not exist yet is recorded as the epic
 skeleton's `- Planned:` entry rather than deferred to a separate invocation.
@@ -922,10 +957,11 @@ branch is a strict ancestor of the merge target
 reason without deleting when the branch is currently checked out, linked to
 an active worktree, the merge target was ambiguous, or the branch has commits
 unreachable from the merge target. When none of those conditions hold, the
-branch's naming convention gates the remaining flow: a branch named
-`impl/<stem>` (the convention `lead-implement` uses for branches it creates,
-`<stem>` <=15 characters recommended, with any trailing `-` trimmed) is
-deleted without asking. A branch under any other name — including the legacy
+branch's naming convention gates the remaining flow: any `impl/`-prefixed
+branch — `impl/<merge-root>/<stem>` (the convention `lead-implement` uses for
+branches it creates, `<stem>` <=15 characters recommended, with any trailing
+`-` trimmed) or the rootless `impl/<stem>` form — is deleted without asking.
+A branch under any other name — including the legacy
 `implement/<scope-slug>` convention — keeps the ask-first flow: the user is
 asked before `git branch -d` runs, and the branch is retained if not
 approved. The naming convention is a trust boundary, not a security
@@ -1164,14 +1200,43 @@ lifecycle, spec stems, mental models, commit traceability, and manual fallback
 expectations without becoming a project-local override for runtime semantics.
 {#260506-bootstrap-workflow-guide}
 
-Bootstrap runs an advisory `_index.md` health check when the index exists. The
-first pass reads only `_index.md`; when candidates exist, it reports likely
-scope drift such as source-derived detail, behavior inventories, modification
-knowledge, static reference material, work history, duplicated maps, or stable
-reading maps, and asks whether to clean up `_index.md` now, defer cleanup, or
-route semantic follow-up work through the owning workflow. Bootstrap cleanup
-itself only compacts `_index.md`; it does not author or semantically update
-specs, mental models, tickets, or references.
+A versioned migration item retires `ai-docs/_index.md`. On upgrade,
+`lead-bootstrap` migrates the index's regions to their homes — resident
+orientation into the `AGENTS.md` body, tracked session notes into the `repo`
+note layer with qualitative staleness pruning, procedures into `manuals/`,
+derivable inventories to generation — removes the read-`_index.md` step, and
+deletes the file. On a fresh bootstrap the scaffold no longer creates
+`_index.md`; the always-resident orientation is carried in the `AGENTS.md`
+template body directly. A fresh-bootstrapped project and an upgrade-migrated
+project converge on the same `AGENTS.md` shape, neither carrying an `_index.md`.
+{#260812-bootstrap-index-dissolution}
+
+A companion versioned migration item retires `ai-docs/_index.local.md` the
+same way. On upgrade, `lead-bootstrap` splits the file's content by judgment
+into two regions — machine-local procedure content (credentials, IPs,
+hostnames, host-specific runbooks) into a new gitignored
+`ai-docs/manuals/*.local.md` sibling, and volatile local context into the
+`worktree` note layer by default, or the `clone` layer only when the content
+is judged clone-wide rather than worktree-specific — removes the
+read-`_index.local.md` step, removes the layout-tree entry describing it, and
+deletes the file. On a fresh bootstrap the scaffold no longer creates
+`_index.local.md`. A fresh-bootstrapped project and an upgrade-migrated
+project converge on the same shape, neither carrying an `_index.local.md`,
+mirroring the `_index.md` dissolution above.
+{#260822-bootstrap-index-local-dissolution}
+
+While a project still has an `ai-docs/_index.md` — an un-migrated but supported
+transitional state — bootstrap runs an advisory index health check gated on the
+file existing. The first pass reads only `_index.md`; when candidates exist, it
+reports likely scope drift such as source-derived detail, behavior inventories,
+modification knowledge, static reference material, work history, duplicated maps,
+or stable reading maps, and asks whether to clean up `_index.md` now, defer
+cleanup, or route semantic follow-up work through the owning workflow. Bootstrap
+cleanup itself only compacts `_index.md`; it does not author or semantically
+update specs, mental models, tickets, or references. The check skips cleanly once
+the file is gone, and every other workflow step that reads or maintains
+`_index.md` is likewise gated on its presence, degrading to the dissolved homes
+when it is absent.
 
 Bootstrap ensures downstream `.gitignore` covers local workflow state and
 runtime-managed API documentation cache data: `ai-docs/**/*.local.md` and
