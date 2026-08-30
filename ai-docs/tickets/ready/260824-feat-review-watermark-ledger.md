@@ -274,6 +274,61 @@ so the ledger never merge-conflicts, and after a race the re-absorbed branch's
 `marker..HEAD` excludes the racer's already-stamped work (set-subtraction) while
 still covering its own delta.
 
+### Result (b16e3b29) - 2026-08-30
+
+Both Phase-2 mechanisms landed, composing the Phase-1 primitives without
+touching them. **Cheap checkpoint recompute+nudge:** `wsreview.CheckpointNudge`
+(`checkpoint.go`, pure/root-in/string-out/fail-open, modeled on
+`doc_coverage_alarm.go`) calls `wsreview.Read` only — never `Bootstrap`/`Append`
+— and is wired at all four checkpoint call sites (`tickets.close`,
+`workflow_manual` FRESH-with-root + CONTINUE, `enter.implement` both the
+new-target and legacy `handleEnter` branches, `enter.proceed`); the
+FRESH-no-root branch stays unwired. Review-track resolution (`track.go`) falls
+back to `origin/HEAD` → local `main`/`master`, and staleness reads a
+`_review.local.md` knob (`config.go`). **Separately-invoked sweep:** two new
+MCP tools — `review.marker` (reads latest entry; `bootstrap:true` is the sole
+caller-opted-in seed trigger) and `review.stamp` (append-only, delegates
+`Append`'s SHA/block-requires-ref validation) — plus a range-scenario-only
+stamp step added to `lead-review.md` (mirrored to wsflow), registered in both
+`runtime.json` manifests, MCP-only (no CLI mirror).
+
+- **Lead adjudications (recorded on the plan):** checkpoint stays read-only
+  (ledger-honesty guard); *size* reuses the is-large-diff magnitude (20)
+  reinterpreted as a commit-count analog (`SizeThresholdCommits`, no diff stat);
+  *staleness* default pinned to **10 commits** (`DefaultStalenessCommits`),
+  deliberately below 20 so the two thresholds are non-degenerate; the two new
+  tools are ticket-scoped (sweep-stamps-ledger is sage-settled), spec entries
+  authored in this phase's doc step.
+- **Marker = latest entry's `Head`, not `Base`.** A review-cycle Important
+  caught the sweep's stamp step sourcing `base` from the marker entry's `Base`
+  field, which from the 2nd sweep on would pin `base` to the original bootstrap
+  commit and record false overlapping ranges. Fixed (b16e3b29): the stamp
+  records the range scenario's own invocation `<base>..<head>` — the exact span
+  reviewed — and `review.marker(bootstrap:true)` is retained only to seed an
+  empty ledger, its return no longer feeding the stamp.
+
+Verification: `go build ./...` + `go vet ./...` clean; `go test
+./internal/wsreview/...` (21 tests, 13 new) and `go test ./internal/mcp/...`
+(11 new watermark integration tests) pass; full-module `go test ./...` green
+including `cmd/ws-mcp` tool-surface and `wsrsrc` golden/mirror-drift guards. The
+ledger-honesty guard is asserted directly and non-vacuously: no-ledger →
+`os.Stat` confirms the file is never created; quiet range → byte-for-byte file
+equality across the call.
+
+Partitioned review: test clean; correctness clean + 3 carried minors
+(threshold-ordering matches adjudicated intent; `context.Background()` reuses
+the existing `aheadOfMergeRootCount` convention; `track.go` `TrimPrefix` edge
+unreachable in practice); fit surfaced 1 Important (the base-field bug above),
+fixed and confirmed `[resolved]` on re-review. No unresolved findings. Spec
+entries landed (900c8c5f): `#260830-review-watermark-ledger-tools`,
+`#260830-review-watermark-checkpoint-nudge` (mcp-tools.md),
+`#260830-review-range-scenario-ledger-stamp` (workflow-skills.md);
+`spec_index_verify` ok. No mental-model authored — both candidate invariants
+(marker=Head, ledger-honesty guard) are now captured in the authoritative spec.
+
+Ticket stays in `ready/`: Phase 3 (multi-maintainer canary + banner + no-squash)
+remains.
+
 ### Phase 3: Multi-maintainer canary + banner + no-squash constraint (2026-08-29)
 
 Dormant for the serial baseline; activates only under concurrent maintainers.
