@@ -1166,6 +1166,29 @@ contributor; local fix routes to `lead-discuss` with findings as context, leavin
 re-review to user discretion. OPEN enters discussion before re-routing to LGTM
 or NEEDS FIX.
 
+The range scenario additionally stamps the review-watermark ledger
+(`#260830-review-watermark-ledger-tools`) immediately after verdict emission,
+for every completed range-scenario verdict regardless of which verdict branch
+follows; the branch scenario never stamps. It first calls
+`review.marker(bootstrap: true)`, solely to seed a baseline entry when the
+ledger is empty — the call's returned entry does not feed the stamp itself.
+The verdict maps to a ledger token: LGTM -> `pass`; NEEDS FIX -> `concern` or
+`block` by severity; OPEN -> `concern`. The stamped `base`/`head` are the
+range invocation's own `<base>..<head>` arguments — the range identified at
+invoke time — never the marker entry's `Base` field, which drifts to the
+original bootstrap commit on every sweep after the first; stamping the
+marker's `Base` would falsely claim a later sweep reviewed the entire span
+back to the original bootstrap point instead of only the range just
+reviewed. `ref` (a routed ticket stem) accompanies a `block` verdict only.
+{#260830-review-range-scenario-ledger-stamp}
+
+Independent of `lead-review`, four MCP call sites elsewhere in the workflow
+surface (`tickets.close`, `workflow_manual`, `enter.implement`,
+`enter.proceed`) surface a cheap review-watermark checkpoint nudge computed
+from the same ledger (`#260830-review-watermark-checkpoint-nudge`). That
+nudge is advisory only: it never blocks the call it rides on, and it never
+appends to the ledger — only `review.marker` and `review.stamp` mutate it.
+
 `lead-review` scales review depth automatically. When commits lack `## AI
 Context` and conventional commit format (`judge: follows-ws-workflow` does not
 fire), subagent analysis infers intention before phases run. When diff size
