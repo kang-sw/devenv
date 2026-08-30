@@ -104,6 +104,61 @@ Verification: a repo with the field set exposes the review-track to the sweep;
 an unset repo gets exactly one scoped nudge, never a block; the three config
 homes have no overlapping ownership.
 
+### Result (ac3b7356) - 2026-08-30
+
+Config surface landed; the mechanism carries no devenv-specific shape.
+
+- **AGENTS.md `### Review Policy` reader** (`wsreview/agents_config.go`, new):
+  fail-open `ReadAgentsReviewPolicy` parses four `key: value` fields —
+  `review-track`, `release-boundary` (present|absent, default absent),
+  `rendezvous-backend` (platform|canary, default canary), `release-tag-glob`
+  (default `v*`). Missing file/section/field or malformed enum degrades to the
+  default, never an error (mirrors `config.go`'s `StalenessKnob` shape).
+- **`ResolveTrack` precedence** (`wsreview/track.go`): the AGENTS.md
+  `review-track` declaration now wins; the git heuristic
+  (`origin/HEAD`→`main`→`master`) is the fallback only when the field is unset.
+  Dropped the prior "does not exist yet / interim fallback" doc framing.
+- **Non-blocking session-scoped nudge** (`mcp/review_track_alarm.go` +
+  `sessionRecord.ReviewTrackNudgeShown` additive field + `setReviewTrackNudgeShown`
+  on `mutateRecord` + two `workflow_manual.go` wiring sites): when `review-track`
+  is unset, `workflow_manual` emits a "configure a review track" advisory at
+  most once per session, never blocking. This is the first once-per-session
+  `workflow_manual` nudge (all prior nudges recompute unconditionally) — captured
+  as a mental-model modification guideline (`mcp-runtime.md`).
+- **devenv's own config populated** (`AGENTS.md ### Review Policy`):
+  `review-track: develop`, `release-boundary: present`, `rendezvous-backend: canary`,
+  `release-tag-glob: v*` (lead-adjudicated; `canary` fits devenv's
+  single-maintainer-serial reality and needs no platform config; `present` is
+  inert until Phase 2 builds the gate). devenv is the dogfooded "set" case; the
+  "unset → one nudge" case is covered by `mcp` tests.
+
+Docs: spec `#260830-review-policy-config-surface` (workflow-skills.md, b5f3e38d);
+mental-model updates to `review-watermark-ledger.md` + `mcp-runtime.md` (6daf82f7).
+
+Verification: `go build ./... && go vet ./...` clean; `go test ./internal/wsreview/...`
+(30) and `./internal/mcp/...` green, including the two new nudge tests. Partitioned
+review (correctness=opus, fit, test) all **clean**, zero relays.
+
+Deviations from plan: none. Scope split honored — implementer did code+tests +
+devenv config; generic spec prose and mental-model went through the doc pipeline;
+`AGENTS.template.md` bootstrap templates left untouched.
+
+Incidental repair: this branch inherited a pre-existing **red** mcp test from ③
+Phase 3 — `TestServeStdioReviewMarkerBootstrapCreatesExactlyOneEntryAndIsIdempotent`
+asserted `len(raw lines) == 1` but ③'s 12-line banner made the file 13 lines
+(banner + 1 entry); idempotency itself was never broken. Fixed to count only
+non-`#` entry lines (test-only, 0fdbebc4); verified failing identically at goal
+tip 6b8d72f0 before any Phase 1 change. Root cause of the miss: ③ Phase 3's review
+ran only `./internal/wsreview/...` and never exercised the `./internal/mcp/`
+integration test that also reads the raw ledger.
+
+Deferred (Ask-first, downstream-affecting): adding the four fields to the two
+`AGENTS.template.md` bootstrap templates (both packages, lockstep versioned
+checklist) so downstream projects adopt the config via ordinary `lead-bootstrap`
+upgrade. No downstream project gets these fields until a follow-up addresses it —
+route as a follow-up child under epic `260824-epic-review-watermark-model` or fold
+into Phase 2 rollout.
+
 ### Phase 2: Mandatory release gate (devenv ship)
 
 - For a project that declares a release boundary, insert a **mandatory** range

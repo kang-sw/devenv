@@ -69,6 +69,24 @@ func TestResolveTrackFallsBackToLocalMaster(t *testing.T) {
 	}
 }
 
+func TestResolveTrackPrefersAgentsMdDeclarationOverGitDefault(t *testing.T) {
+	root := t.TempDir()
+	reviewTestInitRepoOnBranch(t, root, "main")
+
+	agentsMD := "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\nrelease-boundary: present\nrendezvous-backend: canary\nrelease-tag-glob: v*\n"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(agentsMD), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md fixture: %v", err)
+	}
+
+	got, err := ResolveTrack(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ResolveTrack failed: %v", err)
+	}
+	if got != "develop" {
+		t.Fatalf("ResolveTrack = %q, want %q (AGENTS.md declaration should win even though the git default branch is %q)", got, "develop", "main")
+	}
+}
+
 func TestResolveTrackFailsOpenWithNoOriginNoMainNoMaster(t *testing.T) {
 	root := t.TempDir()
 	reviewTestInitRepoOnBranch(t, root, "feature-only")

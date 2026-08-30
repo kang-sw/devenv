@@ -64,6 +64,12 @@ type sessionRecord struct {
 	// "clear the note" write is just writing an empty string, not a separate
 	// verb. See session_state.go's handleSessionNote.
 	Note string `json:"note,omitempty"`
+	// ReviewTrackNudgeShown marks that the review-track config nudge (see
+	// review_track_alarm.go) has already fired once for this session. Added as
+	// an additive field; older records parse with the zero value (false), so
+	// the nudge still fires on the first workflow_manual call after an
+	// upgrade — the correct "not shown yet" behavior.
+	ReviewTrackNudgeShown bool `json:"review_track_nudge_shown,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
@@ -313,6 +319,18 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 func (s *sessionStore) setNote(targetKey, text string) error {
 	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
 		r.Note = text
+		return nil
+	})
+}
+
+// setReviewTrackNudgeShown marks the review-track config nudge as already
+// fired for targetKey's own session record, via the same atomic
+// read-modify-write primitive as setNote. Called by the workflow_manual
+// wiring sites (review_track_alarm.go) immediately after a non-empty nudge is
+// injected, so a later same-session call does not repeat it.
+func (s *sessionStore) setReviewTrackNudgeShown(targetKey string) error {
+	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
+		r.ReviewTrackNudgeShown = true
 		return nil
 	})
 }

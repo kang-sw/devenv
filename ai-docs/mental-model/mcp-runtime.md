@@ -132,6 +132,18 @@ related:
   `computeManuals`/`scopeAnnouncement`; do not assume their injection call site
   is the precedent for a new block's placement — read `workflow_manual.go`
   directly. {#260810-note-tools} {#260702-workflow-state-tool}
+- Copying an existing `workflow_manual` ambient nudge (`docCoverageWarning`,
+  `bootstrapStalenessWarning`, `scopeAnnouncement`, `wsreview.CheckpointNudge`)
+  as the template for a new once-per-session nudge: every one of those
+  recomputes unconditionally on every call. `reviewTrackNudge`
+  (`review_track_alarm.go`) is the first nudge gated to fire at most once per
+  session, and the gate lives entirely outside the compute function itself —
+  at the two `workflow_manual.go` wiring sites (FRESH-with-root, CONTINUE),
+  each checking a new additive `sessionRecord.ReviewTrackNudgeShown` field
+  before computing/injecting the nudge and writing it true via
+  `setReviewTrackNudgeShown` (`mutateRecord`-based, like `setNote`)
+  immediately after a non-empty nudge fires. A copy-paste from an
+  always-recompute nudge silently drops the once-per-session behavior.
 - Resolving a project-scoped (worktree-agnostic) note layer under
   `Layout.ProjectDir` directly: `wsstate.layoutFor` sets `WorktreeKey ==
   ProjectKey` for a project's canonical (non-linked) worktree, so

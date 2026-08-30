@@ -325,9 +325,19 @@ func TestServeStdioReviewMarkerBootstrapCreatesExactlyOneEntryAndIsIdempotent(t 
 	if err != nil {
 		t.Fatalf("read ledger: %v", err)
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected exactly one ledger entry after repeated bootstrap, got %d: %v", len(lines), lines)
+	// Count only entry lines: the Phase-3 banner prepends `#`-prefixed
+	// comment lines at first creation, which the parser (and this idempotency
+	// assertion) must skip. The invariant is exactly one *entry*, not one raw
+	// file line.
+	var entries []string
+	for _, ln := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		entries = append(entries, ln)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly one ledger entry after repeated bootstrap, got %d: %v", len(entries), entries)
 	}
 }
 
