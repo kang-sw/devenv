@@ -80,7 +80,7 @@ func TestServeStdioWorkflowManualReviewTrackNudgeSilentWhenConfigured(t *testing
 	useLeadProfile(t)
 	root := t.TempDir()
 	reviewNudgeTestRepo(t, root)
-	mustWrite(t, root, "AGENTS.md", "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: main\nrelease-boundary: absent\nrendezvous-backend: canary\nrelease-tag-glob: v*\n")
+	mustWrite(t, root, "AGENTS.md", "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: main\nrelease-boundary: absent\nrendezvous-backend: canary\n")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))

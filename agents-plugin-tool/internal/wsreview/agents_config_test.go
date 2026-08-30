@@ -19,7 +19,6 @@ func TestReadAgentsReviewPolicyDefaultsWhenFileAbsent(t *testing.T) {
 	want := AgentsReviewPolicy{
 		ReleaseBoundary:   ReleaseBoundaryAbsent,
 		RendezvousBackend: RendezvousBackendCanary,
-		ReleaseTagGlob:    DefaultReleaseTagGlob,
 	}
 	if got != want {
 		t.Fatalf("ReadAgentsReviewPolicy = %+v, want %+v", got, want)
@@ -33,7 +32,6 @@ func TestReadAgentsReviewPolicyDefaultsWhenSectionAbsent(t *testing.T) {
 	want := AgentsReviewPolicy{
 		ReleaseBoundary:   ReleaseBoundaryAbsent,
 		RendezvousBackend: RendezvousBackendCanary,
-		ReleaseTagGlob:    DefaultReleaseTagGlob,
 	}
 	if got != want {
 		t.Fatalf("ReadAgentsReviewPolicy = %+v, want %+v", got, want)
@@ -47,7 +45,6 @@ func TestReadAgentsReviewPolicyDefaultsWhenFieldsAbsent(t *testing.T) {
 	want := AgentsReviewPolicy{
 		ReleaseBoundary:   ReleaseBoundaryAbsent,
 		RendezvousBackend: RendezvousBackendCanary,
-		ReleaseTagGlob:    DefaultReleaseTagGlob,
 	}
 	if got != want {
 		t.Fatalf("ReadAgentsReviewPolicy = %+v, want %+v", got, want)
@@ -56,13 +53,12 @@ func TestReadAgentsReviewPolicyDefaultsWhenFieldsAbsent(t *testing.T) {
 
 func TestReadAgentsReviewPolicyParsesAllFieldsPresent(t *testing.T) {
 	root := t.TempDir()
-	mustWriteAgentsMD(t, root, "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\nrelease-boundary: present\nrendezvous-backend: canary\nrelease-tag-glob: v*\n\n### Next Section\nother content\n")
+	mustWriteAgentsMD(t, root, "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\nrelease-boundary: present\nrendezvous-backend: canary\n\n### Next Section\nother content\n")
 	got := ReadAgentsReviewPolicy(root)
 	want := AgentsReviewPolicy{
 		ReviewTrack:       "develop",
 		ReleaseBoundary:   ReleaseBoundaryPresent,
 		RendezvousBackend: RendezvousBackendCanary,
-		ReleaseTagGlob:    "v*",
 	}
 	if got != want {
 		t.Fatalf("ReadAgentsReviewPolicy = %+v, want %+v", got, want)
@@ -71,13 +67,10 @@ func TestReadAgentsReviewPolicyParsesAllFieldsPresent(t *testing.T) {
 
 func TestReadAgentsReviewPolicyParsesPlatformBackend(t *testing.T) {
 	root := t.TempDir()
-	mustWriteAgentsMD(t, root, "## Workflow\n\n### Review Policy\nreview-track: main\nrelease-boundary: present\nrendezvous-backend: platform\nrelease-tag-glob: release-*\n")
+	mustWriteAgentsMD(t, root, "## Workflow\n\n### Review Policy\nreview-track: main\nrelease-boundary: present\nrendezvous-backend: platform\n")
 	got := ReadAgentsReviewPolicy(root)
 	if got.RendezvousBackend != RendezvousBackendPlatform {
 		t.Fatalf("RendezvousBackend = %q, want %q", got.RendezvousBackend, RendezvousBackendPlatform)
-	}
-	if got.ReleaseTagGlob != "release-*" {
-		t.Fatalf("ReleaseTagGlob = %q, want %q", got.ReleaseTagGlob, "release-*")
 	}
 }
 

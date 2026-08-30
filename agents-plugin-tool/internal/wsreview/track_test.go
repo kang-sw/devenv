@@ -73,7 +73,7 @@ func TestResolveTrackPrefersAgentsMdDeclarationOverGitDefault(t *testing.T) {
 	root := t.TempDir()
 	reviewTestInitRepoOnBranch(t, root, "main")
 
-	agentsMD := "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\nrelease-boundary: present\nrendezvous-backend: canary\nrelease-tag-glob: v*\n"
+	agentsMD := "# AGENTS.md\n\n## Workflow\n\n### Review Policy\nreview-track: develop\nrelease-boundary: present\nrendezvous-backend: canary\n"
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(agentsMD), 0o644); err != nil {
 		t.Fatalf("write AGENTS.md fixture: %v", err)
 	}
