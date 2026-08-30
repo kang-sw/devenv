@@ -283,11 +283,13 @@ research-only.
   nudges — including the loud raw case that matters (cry wolf). The nudge reads a
   slice-coverage signal and scales raw (louder) vs slice-covered (gentler).
 - **The slice-coverage signal is NOT a second marker file** (rejected: a second
-  shared-file append point = a second merge-conflict surface + complexity). Two
-  options with **no shared-file conflict surface**, both carried forward unchosen:
-  **(a)** infer from the ws phase-result commit footprint in the range; **(b)** an
-  altitude-labeled `Reviewed-slice:` commit trailer (squash-fragile, but only
-  needs to survive the pre-integration window, so bounded). Whichever, the label
+  shared-file append point = a second merge-conflict surface + complexity). It
+  lives in commit text instead (no shared-file conflict surface). **Chosen
+  (2026-08-30): (b) an altitude-labeled `Reviewed-slice:` commit trailer** — it
+  carries the actual ① verdict (no "ceremony ran" ≈ "① passed" approximation) and
+  is squash-fragile only in a window that does not matter (it need only survive
+  pre-integration). **(a)** ws phase-result footprint inference is retained as the
+  squash-robust fallback if the trailer proves impractical. Either way the label
   must name its *slice* altitude, never bare "reviewed."
 - **Taxonomy placement — a convention, not a mechanical requirement** (per the
   mechanical-vs-convention organizing rule above). The slice-coverage signal only
@@ -296,8 +298,9 @@ research-only.
   over/under-nag, **never under-review** — coverage stays airtight via
   skip-coverage (the marker still advances only on a real stamping review, so any
   mis-labeled range is still swept by the next stamping review or the gate). So a
-  convention is acceptable; the a/b choice and the ceremony≈pass question are
-  efficiency tuning, settleable at implementation.
+  convention is acceptable; the chosen (b) trailer already avoids the ceremony≈pass
+  looseness, and the remaining a/b fallback details are efficiency tuning,
+  settleable at implementation.
 - **Landing site:** ③ (`260824-feat-review-watermark-ledger`), Phase 2's nudge
   scaling, absorbs this **only if/when the relief-valve research is accepted**;
   ③'s just-vetted design is intentionally left untouched until then.

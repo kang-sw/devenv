@@ -141,20 +141,24 @@ the raw-vs-slice-covered split.
 
 **Mechanism — no second marker file.** A separate "slice-coverage marker" file
 (the first idea floated) was rejected: it adds a second shared-file append point
-and therefore a second merge-conflict surface, and extra complexity. Two
-lighter options that add **no shared-file conflict surface** (each commit's own
-message is private to that commit) are carried forward, both documented, neither
-chosen here:
+and therefore a second merge-conflict surface, and extra complexity. The signal
+instead lives in commit text (each commit's own message is private to that
+commit, so no shared-file conflict surface). **Chosen (2026-08-30): (b) the
+explicit trailer**, with (a) footprint inference documented as a fallback:
 
-- **(a) Footprint inference — zero new convention.** The recompute infers
+- **(b) Explicit altitude-labeled trailer — CHOSEN.** The guaranteed phase-result
+  commit (a ws-ceremony run always produces one) carries an explicit
+  `Reviewed-slice: <verdict>` trailer. It carries the **actual ① verdict**, so it
+  needs no "ceremony ran" ≈ "① passed" approximation — this directly closes the
+  sage design review's noted looseness in (a). Cost: one commit-message
+  convention, and it is **squash-fragile** (below), which is acceptable because the
+  signal only needs to survive the pre-integration window.
+- **(a) Footprint inference — FALLBACK.** The recompute instead infers
   slice-coverage from whether the range contains **ws-generated phase-result
-  commits** (the ws commit footprint, incl. `## AI Context`). A range full of ws
-  phase-result commits = slice-covered; a range of raw hand commits = raw.
-  Simplest, but approximates "ceremony ran" ≈ "① passed" (see open questions).
-- **(b) Explicit altitude-labeled trailer.** The guaranteed phase-result commit
-  (a ws-ceremony run always produces one) carries an explicit
-  `Reviewed-slice: <verdict>` trailer. More honest about the actual ① verdict;
-  costs one commit-message convention and is **squash-fragile** (below).
+  commits** (the ws commit footprint, incl. `## AI Context`): a range full of them
+  = slice-covered, a range of raw hand commits = raw. Zero new convention and
+  squash-robust, but approximates "ceremony ran" ≈ "① passed". Kept as the fallback
+  if the trailer convention proves impractical.
 
 **Discipline — the label must name its altitude.** Whichever option, the signal
 must read as *slice*-coverage, never bare "reviewed" — a bare "reviewed" that the
@@ -188,17 +192,14 @@ multi-maintainer sweep.
 ## Open questions
 
 Carried into implementation (the 2026-08-30 re-discussion settled purpose (A),
-severity calibration, and the no-second-file mechanism; these remain open):
+severity calibration, the no-second-file mechanism, and the signal choice —
+**(b) the explicit `Reviewed-slice:` trailer**; these remain open):
 
-- **Slice-coverage signal: footprint inference (a) vs explicit trailer (b)** —
-  both documented above, unchosen. Lean toward starting with (a) footprint
-  inference (zero new convention); (b) only if the calibration proves it needs the
-  actual ① verdict, not just "ceremony ran."
-- **Does a landed phase-result commit imply ① *passed*?** Option (a)'s
-  ceremony≈pass approximation holds only if a phase result does not land while an ①
-  concern is still open. Confirm against source at implementation time (① concerns
-  are expected to resolve in the implement relay before the phase result commits —
-  verify).
+- **Does a landed phase-result commit imply ① *passed*? — now fallback-only.**
+  With (b) chosen the trailer carries the real verdict, so this no longer gates the
+  primary design; it matters only if implementation falls back to (a) footprint
+  inference, where the ceremony≈pass approximation holds only if a phase result
+  does not land while an ① concern is still open (verify against source then).
 - The exact proposal phrasing and the threshold at which passive FYI becomes an
   active proposal (reuse ③'s size/staleness scale; where is the passive→propose
   cutoff, and how does the raw-vs-slice-covered split shift it?).
