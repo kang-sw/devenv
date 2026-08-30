@@ -11,6 +11,27 @@ sage-review-completeness: completed
 
 # Review policy config + release gate — AGENTS.md review-track, host-neutral gating, devenv ship gate
 
+## Blocked (2026-08-30)
+
+Phase 1 is done (`### Result (ac3b7356)`). **Phase 2 is paused pending user
+sign-off** on two mechanism decisions surfaced by the research plan
+`ai-docs/.plans/2026-08/30-1751-260824-review-release-gate-policy-p2.md` — both
+are AGENTS.md "Always ask" items a goal-run lead cannot self-authorize:
+
+- **R2 — new `review.gate` MCP tool** (new public MCP API surface). Lead
+  recommends APPROVE (Go/MCP split avoids forking the ledger grammar into
+  `lead-ship` bash; matches Phase 1 precedent).
+- **R5 — mandatory gate as a generic `lead-ship` playbook branch**, which amends
+  the "ship config is the single source of truth" Invariant (observable
+  canonical-flow change). Lead recommends APPROVE (a config-only bullet is
+  defeatable by omission, breaking the ticket's forcing-function ethos).
+
+R1/R3/R4 are lead-ratified in the plan; R5-sub (no-tag fallback) and R6-sub
+(wsflow condition-(a) parity) are lead-recommended, contingent on R5/R2. On
+sign-off (or a redirect), remove this note and re-enter Phase 2 implementation
+from the ratified plan. The independent ready ticket ⑤ `260828` is unaffected
+and continues to drain.
+
 ## Background
 
 The mechanism (range review + marker + sweep) is host-neutral; whether and where
