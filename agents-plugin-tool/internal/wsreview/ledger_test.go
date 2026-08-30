@@ -429,13 +429,15 @@ func TestAppendFirstCreationEmitsBannerOnce(t *testing.T) {
 // TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot reproduces
 // the Phase-3 canary in a real git repo: two branches that each Append
 // independently — without either absorbing the other's write first —
-// produce a real git conflict in the ledger's tail, with the banner text
-// landing inside the conflict markers themselves (this is the
-// concurrent-first-landing case named in the plan's Lead Adjudications,
-// where top-of-file and tail-anchor coincide because neither branch's
-// common ancestor has a ledger file yet — an add/add conflict). A serial
-// single-writer sequence, with no competing concurrent creation, must merge
-// cleanly.
+// produce a real git conflict in the ledger's tail, with the explanatory
+// banner surviving in the merged file (the concurrent-first-landing case
+// named in the plan's Lead Adjudications: neither branch's common ancestor
+// has a ledger file yet — an add/add conflict). Whether git places the
+// banner inside the conflict hunk or keeps it as common context above the
+// markers is git-version-dependent (Apple git 2.50 swept it into the hunk;
+// Linux git 2.55 in CI diffs it out), so the assertion checks the banner
+// against the whole file, not the hunk. A serial single-writer sequence,
+// with no competing concurrent creation, must merge cleanly.
 func TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot(t *testing.T) {
 	root := t.TempDir()
 	reviewTestInitGitWithCommit(t, root)
@@ -489,9 +491,15 @@ func TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot(t *testing.T)
 	if startMarker == -1 || endMarker == -1 || endMarker < startMarker {
 		t.Fatalf("expected git conflict markers in the ledger file, got:\n%s", content)
 	}
-	conflictRegion := content[startMarker : endMarker+len(">>>>>>>")]
-	if !strings.Contains(conflictRegion, ledgerBanner) {
-		t.Fatalf("expected the banner text inside the conflict markers, got conflict region:\n%s", conflictRegion)
+	// The banner is a top-of-file block; git keeps it as common context above
+	// the conflict region rather than inside the markers. Whether it lands
+	// inside the conflict hunk is git-version-dependent — Apple git 2.50 swept
+	// it in, Linux git 2.55 (CI) does not — so asserting against the hunk is
+	// non-portable. The canary's contract is that a conflict fires (markers
+	// present, asserted above) and the explanatory banner survives in the
+	// merged file; assert that against the whole file, not the hunk.
+	if !strings.Contains(content, ledgerBanner) {
+		t.Fatalf("expected the ledger banner to survive in the conflicted file, got:\n%s", content)
 	}
 
 	reviewTestRunGit(t, root, "merge", "--abort")
