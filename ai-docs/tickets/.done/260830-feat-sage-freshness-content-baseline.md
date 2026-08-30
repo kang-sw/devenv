@@ -6,6 +6,7 @@ related:
   260824-feat-review-release-gate-policy: unblocked by this — same stale-flag wedge at ready promotion
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Sage freshness content baseline — record reviewed-body digest so a re-stamp clears staleness
