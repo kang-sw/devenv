@@ -6,6 +6,7 @@ related:
   260824-feat-review-release-gate-policy: dependent — the release gate reviews a range through this scenario
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # lead-review range/watermark scenario — parameterize diff selection, add landing lens
@@ -133,6 +134,44 @@ range-scenario path.
 Verification: a range review over a diff that changed behavior without a
 matching spec/mental-model update surfaces a landing-lens finding; a
 convention-conformant, doc-complete diff passes it.
+
+### Result (cb777b56) - 2026-08-30
+
+Landed on `impl/goal/develop/copper-lantern-drizzle/issue-drew-spent` at
+`cb777b56`.
+
+- **Landing lens as a required review phase.** `lead-review` gains a `landing`
+  Review Phase (convention adherence + spec/mental-model update completeness —
+  were docs authored per each doc's function) folded into the existing phase
+  execution: no new posture, no new pipeline, no new verdict state. Placed last in
+  phase order (after any custom config phases).
+- **Range-scenario-scoped, enforced.** The lens runs ONLY in the range/watermark
+  scenario. The branch/PR scenario never runs it — regardless of the `Contributor
+  Workflow` config — and no config section can re-enable it there. This keeps an
+  external contributor's PR from being flagged for spec/mental-model updates they
+  were never expected to author. The scoping is expressed scenario-gated (not
+  contributor-type-gated) consistently across playbook, spec, and mental-model.
+- **Wording trap avoided.** The shared Invariant "a present config's Review
+  Phases / Checklist / Blocked Paths / Deep Review are honored by both scenarios"
+  does NOT absorb the landing lens; the lens's range-only scope is stated
+  separately.
+- **Artifacts.** Only canonical `agents-plugin/rsrc/lead-review/lead-review.md`
+  hand-edited; wsflow mirror + both `manifest.json` regenerated (byte-identical);
+  `ai-docs/spec/workflow-skills.md` (`#260513-review-workflow-skill`) and the
+  mental-model `workflow-skills.md` updated. Golden-pinned doctrine sentence
+  unchanged.
+
+Review (partitioned: correctness / fit / test) — all clean, no relays.
+
+Verification: `TestPlaybookPrintGoldenLeadReview` PASS (doctrine byte-identical);
+`go test ./internal/wsrsrc/...` drift guards (`TestShippedManifestUpToDate`,
+`TestWsflowRsrcMirrorUpToDate`) PASS; `python3 -m unittest discover
+agents-plugin-wsflow/tests` 10/10 PASS; `spec_index_verify` ok; `go build ./...`
+clean.
+
+Both phases are complete; this ticket is done. It unblocks ③
+(`260824-feat-review-watermark-ledger`) and ④
+(`260824-feat-review-release-gate-policy`), which consume this range scenario.
 
 ## Spec Impact
 

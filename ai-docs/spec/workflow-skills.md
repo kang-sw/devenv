@@ -1138,7 +1138,11 @@ Review threshold) and never enters the setup interview, since a range review
 touches no checkout, remote, or merge and the collaboration/remote config half
 is meaningless to it. When a config file is present, both scenarios honor its
 review-substance sections (Review Phases, Checklist, Deep Review); the config
-is machine-local and gitignored.
+is machine-local and gitignored. `## Landing Lens` is the one exception: it is
+honored by the range scenario only, present or absent config alike, and
+independent of the Contributor Workflow setting — the branch scenario never
+runs it. This keeps a branch/PR review from flagging an external contributor
+for spec/mental-model updates they were never expected to author.
 
 Branch discovery uses the configured remote access method (glab, API token, git
 fetch, or equivalent); if no branch argument is supplied, `lead-review` lists
@@ -1148,7 +1152,13 @@ caller-supplied `base..head` is already the identified target.
 
 Review phases run in order — intent, alignment, risk, and any configured custom
 phases — producing one of four verdicts: BLOCKED (a blocked path was found
-before phases ran), LGTM, NEEDS FIX, or OPEN.
+before phases ran), LGTM, NEEDS FIX, or OPEN. The range scenario additionally
+runs a required `landing` phase last: convention adherence plus spec/mental-
+model update completeness, checked against each doc's own function (spec
+describes caller-visible behavior; mental model captures modification-relevant
+operational knowledge), using config text if present else a built-in default.
+The branch scenario never runs the `landing` phase; its finding folds into the
+same aggregate-and-verdict path as any other phase, with no new verdict state.
 
 LGTM follows the configured merge approval sequence and optional post-merge
 notification. NEEDS FIX asks the user to fix locally or post findings to the
