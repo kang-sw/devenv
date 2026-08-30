@@ -7,6 +7,7 @@ related:
   260829-research-review-watermark-multi-maintainer-model: informed this ticket — contributed the rendezvous-backend config field (kept). Its tag-keyed gate-range re-key is SUPERSEDED (2026-08-30, `## Decisions`) by the ship/review decoupling: the gate range returns to the review marker (frontier), relying on the already-required no-squash/rebase convention rather than tag-robustness.
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-08-30
 ---
 
 # Review policy config + release gate — AGENTS.md review-track, host-neutral gating, devenv ship gate
