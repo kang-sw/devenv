@@ -1894,18 +1894,32 @@ skipped when resolving the latest entry, so they never shift the marker. Two
 tools are the sole caller-visible way to grow the ledger; neither has a CLI
 mirror (`#260505-cli-mirror-coverage`).
 
-`review.marker` reads the ledger's latest entry and returns it as
-`review ledger latest entry: <base>..<head>: <verdict>[ -> <ref>]`. An empty
-ledger (missing file, or a file with zero parseable entries) returns
+`review.marker` reads the ledger's **frontier** entry — the last *clearing*
+entry (verdict `pass`, `concern`, or the `bootstrap` floor), skipping any
+trailing `block` or `routed` entry rather than reporting the raw latest
+line — and returns it as `review ledger latest entry:
+<base>..<head>: <verdict>[ -> <ref>]`. A `block` or `routed` tail therefore
+never advances what `review.marker` reports; the frontier holds at whatever
+clearing entry preceded it until a later sweep stamps a `pass` or `concern`
+covering the range. An empty ledger (missing file, or a file with zero
+parseable entries, or one whose only entries are `block`/`routed`) returns
 `review ledger has no entry yet; call review.marker(bootstrap: true) to
 establish a baseline` instead. The optional `bootstrap` boolean is the
 **sole caller-opted-in trigger** that may grow the ledger from this tool: when
 `true` and the ledger has zero parseable entries, it resolves the working
 root's current `HEAD` and appends a `<HEAD>..<HEAD>: bootstrap` entry,
 returning `bootstrapped review ledger baseline: <base>..<head>: bootstrap`.
-When `bootstrap: true` is passed but the ledger already has an entry, the call
-is a no-op — it returns the existing latest entry exactly as a bare read
-would, never a second bootstrap line and never an error.
+When `bootstrap: true` is passed but the ledger already has a resolvable
+frontier entry, the call is a no-op — it returns the existing frontier entry
+exactly as a bare read would, never a second bootstrap line and never an
+error.
+
+An optional `format: "json"` argument switches the response to a structured
+`{base, head, verdict, ref, found}` object built from the same frontier
+entry, mirroring `tickets.status`'s `format=json` convention
+(`wantsJSON`/`toolJSONResponse`). This is the bare-SHA, no-string-scraping
+output a caller like the `lead-ship` release gate consumes to resolve
+`<frontier-head>..HEAD` without parsing the text-mode sentence.
 
 `review.stamp` appends one verdict entry, recording a completed sweep over an
 explicit `base`/`head` range. `base`, `head`, and `verdict` are required;
@@ -1938,11 +1952,14 @@ branches only), `enter.implement` (both direct and delegated branches), and
 the call it rides on, and a resolution failure (no review track, no
 readable ledger) silently produces no text rather than an error.
 
-The check reads the ledger's latest entry (`wsreview.Read`, never
+The check reads the ledger's frontier entry (`wsreview.Frontier`, never
 `wsreview.Bootstrap` or `wsreview.Append` — this is the read-only half of the
-ledger-honesty guard above) and, when found, counts commits between the
-entry's `head` (the marker — the ledger's own resumption point, not its
-`base`) and the review track's tip. Three states:
+ledger-honesty guard above) — the same last-clearing-entry resolution
+`review.marker` uses, so a tail `block` or `routed` entry shifts the nudge's
+origin back to the last `pass`/`concern`/`bootstrap` entry rather than the
+raw latest line — and, when found, counts commits between the entry's `head`
+(the marker — the ledger's own resumption point, not its `base`) and the
+review track's tip. Three states:
 
 - **No ledger entry at all**: `no review ledger yet for this project; run a
   sweep (lead-review range: <base>..<head>) to establish a baseline`.

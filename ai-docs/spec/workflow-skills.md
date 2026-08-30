@@ -1197,16 +1197,15 @@ field, or malformed value degrades to the field's default, never an error):
   absent.
 - `release-boundary: present | absent` — whether the project has a release
   promotion boundary. `absent` (the default) means advisory-only review with no
-  hard gate; a declared boundary is what a subsequent release-gate capability
-  keys its mandatory review off.
+  hard gate; `present` arms `lead-ship`'s Release gate (`#260513-review-workflow-skill`
+  below), which requires the range since the review-watermark frontier's head
+  to clear before promoting the release branch.
 - `rendezvous-backend: platform | canary` — how concurrent maintainers
   rendezvous on review state. `canary` (the default; needs no external config)
   relies on the append-only ledger's git-conflict canary; `platform` relies on
   host branch protection, for which the recommended set is require-branches-up-
   to-date, dismiss-stale-approvals, required-checks, and disabled squash/rebase
   (plus a merge queue at scale).
-- `release-tag-glob: <glob>` — the tag namespace identifying release tags,
-  resolved with `git describe --tags --match '<glob>'`. Defaults to `v*`.
 
 When the `review-track` field is unset, `workflow_manual` surfaces a
 non-blocking, session-scoped nudge advising the project to configure a review
@@ -1327,6 +1326,19 @@ versioned upgrades.
 `lead-ship` follows the repository ship configuration to prepare and execute a
 release. It confirms version, tag, and publish targets before any publishing
 step.
+
+When the loaded project's `AGENTS.md` `### Review Policy` declares
+`release-boundary: present`, `lead-ship` runs an un-omittable, user-overridable
+Release gate ahead of Execute's Pre-flight step — a playbook branch rather than
+a config-listed Pre-flight bullet, since a bullet-only gate is defeatable by a
+config that simply never lists it. The gate resolves the review-watermark
+frontier's head (`review.marker(format: json)`), counts commits since it, and
+either proceeds silently (empty range), triggers `lead-review` over the range
+(non-empty), or — when the triggered review still does not clear it — surfaces
+a strong recommendation and stops for an explicit user decision. An override
+proceeds without stamping the marker: `lead-ship` never calls `review.stamp`;
+only `lead-review`'s own sole-writer step ever advances the frontier
+(`#260513-review-workflow-skill` above).
 
 ## Delegate Prompt Boundaries {#260505-workflow-delegate-prompt-boundaries}
 
