@@ -118,6 +118,54 @@ func Read(root string) (Entry, bool, error) {
 	return entry, found, nil
 }
 
+// ParseFrontier scans content top to bottom and returns the last line whose
+// verdict is a clearing/floor verdict — pass, concern, or bootstrap — never
+// overwriting the running "latest clearing" entry with a block or routed
+// line. This is the frontier: the review-watermark's resolvable resumption
+// point, as distinct from ParseLatest's raw latest-entry-regardless-of-verdict
+// answer. A trailing block or routed entry therefore holds the frontier at
+// whatever clearing entry preceded it, rather than advancing past it.
+//
+// ParseLatest/Read/Bootstrap are unaffected by this function and stay on the
+// raw-latest semantics they already document (Bootstrap's own idempotency
+// check is "any entry exists", a different question from "what's the
+// frontier").
+func ParseFrontier(content string) (Entry, bool) {
+	var (
+		frontier Entry
+		found    bool
+	)
+	for _, line := range strings.Split(content, "\n") {
+		m := entryLineRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		verdict := m[3]
+		if verdict != VerdictPass && verdict != VerdictConcern && verdict != VerdictBootstrap {
+			// block or routed: skip — never overwrite the running frontier.
+			continue
+		}
+		frontier = Entry{Base: m[1], Head: m[2], Verdict: verdict, Ref: m[4]}
+		found = true
+	}
+	return frontier, found
+}
+
+// Frontier reads the ledger file at LedgerPath(root) and returns its
+// frontier entry via ParseFrontier, mirroring Read's file-handling and
+// missing-file contract.
+func Frontier(root string) (Entry, bool, error) {
+	raw, err := os.ReadFile(LedgerPath(root))
+	if os.IsNotExist(err) {
+		return Entry{}, false, nil
+	}
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("read review ledger %s: %w", LedgerPath(root), err)
+	}
+	entry, found := ParseFrontier(string(raw))
+	return entry, found, nil
+}
+
 // Append validates e and appends one formatted entry line to the ledger at
 // LedgerPath(root), creating the parent ai-docs/ directory and the ledger
 // file itself if absent. Append never mutates existing lines — this is

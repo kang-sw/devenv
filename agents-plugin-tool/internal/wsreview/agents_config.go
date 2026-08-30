@@ -18,10 +18,6 @@ const (
 	RendezvousBackendCanary   = "canary"
 )
 
-// DefaultReleaseTagGlob is the built-in release-tag-glob default, matching
-// this codebase's own `v<version>` tag scheme (ai-docs/ship/ws.md).
-const DefaultReleaseTagGlob = "v*"
-
 // reviewPolicySectionRE isolates the `### Review Policy` section's body out
 // of a project's root AGENTS.md, stopping at the next heading of level 1-3
 // (so nested content under an unrelated subsection never leaks in) or end of
@@ -39,9 +35,6 @@ var releaseBoundaryLineRE = regexp.MustCompile(`(?m)^release-boundary:\s*(\S+)\s
 // rendezvousBackendLineRE matches a `rendezvous-backend: platform|canary` line.
 var rendezvousBackendLineRE = regexp.MustCompile(`(?m)^rendezvous-backend:\s*(\S+)\s*$`)
 
-// releaseTagGlobLineRE matches a `release-tag-glob: <glob>` line.
-var releaseTagGlobLineRE = regexp.MustCompile(`(?m)^release-tag-glob:\s*(\S+)\s*$`)
-
 // AgentsReviewPolicy is the parsed `### Review Policy` config surface read
 // from a project's root AGENTS.md: the tracked, per-track structural facts
 // config home (as opposed to the `ai-docs/` ledger's marker+verdict state or
@@ -56,9 +49,6 @@ type AgentsReviewPolicy struct {
 	// RendezvousBackendCanary, defaulting to RendezvousBackendCanary (needs
 	// no GitHub branch-protection config).
 	RendezvousBackend string
-	// ReleaseTagGlob is the `git describe --tags --match <glob>` glob used to
-	// find the last release tag, defaulting to DefaultReleaseTagGlob.
-	ReleaseTagGlob string
 }
 
 // ReadAgentsReviewPolicy reads the review-policy fields from root's
@@ -68,7 +58,6 @@ type AgentsReviewPolicy struct {
 //	review-track: develop
 //	release-boundary: present
 //	rendezvous-backend: canary
-//	release-tag-glob: v*
 //
 // Never errors: a missing file, a missing section, or a missing/malformed
 // field all fail open to the zero-value/documented default for that field
@@ -81,7 +70,6 @@ func ReadAgentsReviewPolicy(root string) AgentsReviewPolicy {
 	policy := AgentsReviewPolicy{
 		ReleaseBoundary:   ReleaseBoundaryAbsent,
 		RendezvousBackend: RendezvousBackendCanary,
-		ReleaseTagGlob:    DefaultReleaseTagGlob,
 	}
 
 	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
@@ -113,9 +101,6 @@ func ReadAgentsReviewPolicy(root string) AgentsReviewPolicy {
 		}
 		// Any other value fails open to the built-in RendezvousBackendCanary
 		// default set above.
-	}
-	if m := releaseTagGlobLineRE.FindStringSubmatch(body); m != nil {
-		policy.ReleaseTagGlob = m[1]
 	}
 
 	return policy

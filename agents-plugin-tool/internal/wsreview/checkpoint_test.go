@@ -110,6 +110,41 @@ func TestCheckpointNudgeLargeRangeUsesSizeThreshold(t *testing.T) {
 	}
 }
 
+// TestCheckpointNudgeOriginatesFromFrontierNotRawTail pins the switch from
+// Read to Frontier: with a trailing block entry one commit ahead of an older
+// pass entry, and enough further commits to cross the staleness threshold
+// (10) measured from the pass entry but stay below it measured from the
+// block entry's own (more recent) head, the nudge must fire — proving it now
+// measures distance from the frontier (the pass entry), not the raw tail
+// (the block entry), which would otherwise stay quiet.
+func TestCheckpointNudgeOriginatesFromFrontierNotRawTail(t *testing.T) {
+	root := t.TempDir()
+	reviewTestInitRepoOnBranch(t, root, "main")
+	passHead := strings.TrimSpace(string(reviewTestRunGitOutput(t, root, "rev-parse", "HEAD")))
+	if err := Append(root, Entry{Base: passHead, Head: passHead, Verdict: VerdictPass}); err != nil {
+		t.Fatalf("seed pass entry: %v", err)
+	}
+
+	blockHead := checkpointTestCommit(t, root, "block-head")
+	if err := Append(root, Entry{Base: passHead, Head: blockHead, Verdict: VerdictBlock, Ref: "260901-bug-example"}); err != nil {
+		t.Fatalf("seed trailing block entry: %v", err)
+	}
+
+	// 9 more commits: from blockHead the count is 9 (< staleness 10, would be
+	// quiet on the raw tail); from passHead the count is 10 (>= staleness).
+	for i := 0; i < DefaultStalenessCommits-1; i++ {
+		checkpointTestCommit(t, root, fmt.Sprintf("c%d", i))
+	}
+
+	got := CheckpointNudge(context.Background(), root)
+	if !strings.Contains(got, "staleness threshold") {
+		t.Fatalf("CheckpointNudge with a trailing block entry = %q, want the staleness advisory measured from the prior pass entry (frontier), not the raw tail (which would be quiet)", got)
+	}
+	if !strings.Contains(got, passHead) {
+		t.Fatalf("CheckpointNudge = %q, want it to name the frontier (pass) entry's head %q, not the block entry's head", got, passHead)
+	}
+}
+
 // TestCheckpointNudgeSkipsBehindTrackArmWhenTrackUnresolvable: with a ledger
 // already seeded, an unresolvable review-track (branch that is not
 // main/master and has no origin/HEAD) skips only the "N commits behind

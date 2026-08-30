@@ -275,6 +275,114 @@ func TestRoutedCorrectiveEntryAppendsWithoutEditingEarlierBlock(t *testing.T) {
 	}
 }
 
+// TestParseFrontierTrailingBlockHoldsAtPriorClearingEntry pins the frontier
+// resolver's core behavior: a trailing block entry does not advance the
+// frontier past the last pass/concern/bootstrap entry that preceded it.
+func TestParseFrontierTrailingBlockHoldsAtPriorClearingEntry(t *testing.T) {
+	content := strings.Join([]string{
+		"aaaaaaa..bbbbbbb: pass",
+		"bbbbbbb..ccccccc: block -> 260901-bug-example",
+		"",
+	}, "\n")
+
+	entry, found := ParseFrontier(content)
+	if !found {
+		t.Fatalf("ParseFrontier did not find the prior clearing entry")
+	}
+	want := Entry{Base: "aaaaaaa", Head: "bbbbbbb", Verdict: VerdictPass}
+	if entry != want {
+		t.Fatalf("ParseFrontier = %+v, want %+v (frontier held at prior pass entry)", entry, want)
+	}
+}
+
+// TestParseFrontierTrailingRoutedHoldsAtPriorClearingEntry mirrors the
+// trailing-block case for a trailing routed corrective entry — routed is
+// likewise skipped, never overwriting the running frontier.
+func TestParseFrontierTrailingRoutedHoldsAtPriorClearingEntry(t *testing.T) {
+	content := strings.Join([]string{
+		"aaaaaaa..bbbbbbb: concern -> 260901-concern-example",
+		"bbbbbbb..ccccccc: block -> 260901-bug-example",
+		"bbbbbbb..ccccccc: routed -> 260901-bug-example",
+		"",
+	}, "\n")
+
+	entry, found := ParseFrontier(content)
+	if !found {
+		t.Fatalf("ParseFrontier did not find the prior clearing entry")
+	}
+	want := Entry{Base: "aaaaaaa", Head: "bbbbbbb", Verdict: VerdictConcern, Ref: "260901-concern-example"}
+	if entry != want {
+		t.Fatalf("ParseFrontier = %+v, want %+v (frontier held at prior concern entry)", entry, want)
+	}
+}
+
+// TestParseFrontierBootstrapAloneResolvesAsFloor proves bootstrap is itself a
+// resolvable frontier floor when it is the only entry.
+func TestParseFrontierBootstrapAloneResolvesAsFloor(t *testing.T) {
+	content := "aaaaaaa..aaaaaaa: bootstrap\n"
+
+	entry, found := ParseFrontier(content)
+	if !found {
+		t.Fatalf("ParseFrontier did not find the bootstrap floor entry")
+	}
+	want := Entry{Base: "aaaaaaa", Head: "aaaaaaa", Verdict: VerdictBootstrap}
+	if entry != want {
+		t.Fatalf("ParseFrontier = %+v, want %+v", entry, want)
+	}
+}
+
+// TestParseFrontierPassAndConcernAdvanceNormally proves the frontier
+// advances through consecutive clearing entries exactly like ParseLatest
+// does, mirroring TestParseLatestSkipsBannerLinesBeforeAndAfter's coverage
+// shape for the non-skipped case.
+func TestParseFrontierPassAndConcernAdvanceNormally(t *testing.T) {
+	content := strings.Join([]string{
+		"# banner line before any real entry",
+		"aaaaaaa..bbbbbbb: pass",
+		"ccccccc..ddddddd: concern -> 260901-concern-example",
+		"",
+	}, "\n")
+
+	entry, found := ParseFrontier(content)
+	if !found {
+		t.Fatalf("ParseFrontier did not find a real entry amid banner lines")
+	}
+	want := Entry{Base: "ccccccc", Head: "ddddddd", Verdict: VerdictConcern, Ref: "260901-concern-example"}
+	if entry != want {
+		t.Fatalf("ParseFrontier returned wrong entry: got %+v, want %+v", entry, want)
+	}
+}
+
+// TestFrontierRoundTripsThroughFile proves Frontier(root) reads the same
+// file-handling contract as Read(root) (missing file -> found=false, no
+// error) while resolving to the frontier rather than the raw latest entry.
+func TestFrontierRoundTripsThroughFile(t *testing.T) {
+	root := t.TempDir()
+
+	if _, found, err := Frontier(root); err != nil || found {
+		t.Fatalf("Frontier on a missing ledger file = (found=%v, err=%v), want (false, nil)", found, err)
+	}
+
+	if err := Append(root, Entry{Base: "aaaaaaa", Head: "bbbbbbb", Verdict: VerdictPass}); err != nil {
+		t.Fatalf("Append pass entry failed: %v", err)
+	}
+	if err := Append(root, Entry{Base: "bbbbbbb", Head: "ccccccc", Verdict: VerdictBlock, Ref: "260901-bug-example"}); err != nil {
+		t.Fatalf("Append block entry failed: %v", err)
+	}
+
+	entry, found, err := Frontier(root)
+	if err != nil {
+		t.Fatalf("Frontier failed: %v", err)
+	}
+	if !found {
+		t.Fatalf("Frontier did not find the prior clearing entry")
+	}
+	want := Entry{Base: "aaaaaaa", Head: "bbbbbbb", Verdict: VerdictPass}
+	if entry != want {
+		t.Fatalf("Frontier = %+v, want %+v (held at the pass entry, not the trailing block)", entry, want)
+	}
+}
+
 func TestAppendFirstCreationEmitsBannerOnce(t *testing.T) {
 	root := t.TempDir()
 

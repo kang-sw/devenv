@@ -1256,18 +1256,37 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		if boolArgument(params.Arguments["bootstrap"]) {
-			entry, created, err := wsreview.Bootstrap(context.Background(), root)
+			_, created, err := wsreview.Bootstrap(context.Background(), root)
 			if err != nil {
 				return toolTextResponse(req.ID, "", err)
+			}
+			// Re-resolve via the frontier — a just-created bootstrap entry is
+			// itself a clearing/floor verdict, so this is a no-behavior-change
+			// simplification for the reported entry, not a special case: both
+			// the created and no-op branches read the same frontier function.
+			// The created/no-op wording distinction is preserved, only the
+			// entry-lookup path is unified.
+			entry, found, err := wsreview.Frontier(root)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, reviewMarkerJSONValue(entry, found), nil)
+			}
+			if !found {
+				return toolTextResponse(req.ID, "review ledger has no entry yet; call review.marker(bootstrap: true) to establish a baseline\n", nil)
 			}
 			if created {
 				return toolTextResponse(req.ID, fmt.Sprintf("bootstrapped review ledger baseline: %s..%s: %s\n", entry.Base, entry.Head, entry.Verdict), nil)
 			}
 			return toolTextResponse(req.ID, fmt.Sprintf("review ledger latest entry: %s..%s: %s%s\n", entry.Base, entry.Head, entry.Verdict, reviewRefSuffix(entry.Ref)), nil)
 		}
-		entry, found, err := wsreview.Read(root)
+		entry, found, err := wsreview.Frontier(root)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, reviewMarkerJSONValue(entry, found), nil)
 		}
 		if !found {
 			return toolTextResponse(req.ID, "review ledger has no entry yet; call review.marker(bootstrap: true) to establish a baseline\n", nil)
@@ -4163,11 +4182,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "review.marker",
-			"description": "Read the review-watermark ledger's latest entry (base..head: verdict[ -> ref]). Optional bootstrap=true creates a baseline entry at current HEAD when no entry exists yet (idempotent on repeat) — the only caller-opted-in bootstrap trigger; a bare marker read never bootstraps.",
+			"description": "Read the review-watermark ledger's frontier entry — the last clearing (pass/concern/bootstrap) entry; a trailing block/routed tail does not advance it — as base..head: verdict[ -> ref]. Optional bootstrap=true creates a baseline entry at current HEAD when no entry exists yet (idempotent on repeat) — the only caller-opted-in bootstrap trigger; a bare marker read never bootstraps. Defaults to compact text; use format=json for structured base/head/verdict/ref/found output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"bootstrap": boolProperty("When true and no ledger entry exists, create a baseline bootstrap entry at current HEAD. No-op (returns the existing entry) when one already exists."),
+					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
@@ -4935,6 +4955,21 @@ func reviewRefSuffix(ref string) string {
 		return ""
 	}
 	return " -> " + ref
+}
+
+// reviewMarkerJSON is review.marker's format=json structured output: the
+// bare-SHA/structured frontier head a caller (the lead-ship gate, in
+// particular) consumes without string-scraping the text-mode response.
+type reviewMarkerJSON struct {
+	Base    string `json:"base"`
+	Head    string `json:"head"`
+	Verdict string `json:"verdict"`
+	Ref     string `json:"ref,omitempty"`
+	Found   bool   `json:"found"`
+}
+
+func reviewMarkerJSONValue(entry wsreview.Entry, found bool) reviewMarkerJSON {
+	return reviewMarkerJSON{Base: entry.Base, Head: entry.Head, Verdict: entry.Verdict, Ref: entry.Ref, Found: found}
 }
 
 func stringList(value any) []string {

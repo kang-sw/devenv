@@ -24,7 +24,7 @@ func reviewTrackNudge(root string) string {
 		return ""
 	}
 
-	return "> **Review-track branch is not configured.** This project's AGENTS.md has no `### Review Policy` `review-track` field, so the review sweep relies on the git-default branch heuristic (`origin/HEAD`, then local `main`/`master`) — which resolves nothing on a project without one of those branches. Declare `review-track: <branch>` (plus `release-boundary`, `rendezvous-backend`, `release-tag-glob`) under a `### Review Policy` subsection to make the declaration explicit."
+	return "> **Review-track branch is not configured.** This project's AGENTS.md has no `### Review Policy` `review-track` field, so the review sweep relies on the git-default branch heuristic (`origin/HEAD`, then local `main`/`master`) — which resolves nothing on a project without one of those branches. Declare `review-track: <branch>` (plus `release-boundary`, `rendezvous-backend`) under a `### Review Policy` subsection to make the declaration explicit."
 }
 
 // injectReviewTrackNudge prepends nudge to body, delegating to the existing

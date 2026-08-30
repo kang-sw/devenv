@@ -30,6 +30,27 @@ related:
 
 ## Module Contracts
 
+- **Frontier ≠ raw latest entry.** `ParseFrontier`/`Frontier` are a new,
+  separate read-side function pair from `ParseLatest`/`Read` (Phase 2,
+  `260824-feat-review-release-gate-policy`) — the frontier is the last
+  *clearing* entry (`pass`, `concern`, or the `bootstrap` floor), skipping any
+  trailing `block`/`routed` entry rather than reporting whatever line is
+  physically last. `ParseLatest`/`Read`/`Bootstrap` are unchanged and keep
+  their raw-latest-regardless-of-verdict semantics; `Bootstrap`'s own
+  "does an entry exist at all" idempotency check deliberately still uses
+  `Read`, not `Frontier` — that's a different question ("has this ledger ever
+  been seeded") from "what's the resumption point". `CheckpointNudge` and the
+  `review.marker` MCP tool both consume `Frontier`, so a stamped `block` (or
+  its `routed` corrective follow-up) holds both the checkpoint nudge and the
+  marker read at whatever clearing entry preceded it, until a later sweep
+  clears the range with `pass` or `concern`. This is also what decouples the
+  release gate from block-entry bookkeeping: the gate only ever sees a
+  resolvable clearing head, never has to special-case a `block` tail itself.
+- **Single-writer invariant.** `review.stamp`, called only from
+  `lead-review`'s range-scenario step 7, is the ledger's sole writer. No other
+  skill or gate — including `lead-ship`'s release gate — ever calls
+  `review.stamp`; a gate override proceeds without touching the marker, so
+  the frontier only ever advances through an actual completed review sweep.
 - A ledger tail conflict is a **designed STOP, not corruption**: the
   write-discipline convention (only the review-track branch stamps, and
   only via append) means two branches that each stamp independently,
@@ -75,13 +96,15 @@ related:
   causes **over-review** (the next sweep re-covers L's redundant range),
   never under-review, but it is still a wrong outcome to avoid.
 - Treating a squash-orphaned marker as data loss. The marker resolves
-  purely from ledger content (the last parseable entry), never by
-  graph-walking. If a squash/rebase landing on the review-track rewrites
-  the reviewed SHA (forbidden by convention, not mechanically blocked in
-  plain git), the marker does not corrupt — it simply stops advancing past
-  the orphaned span, and the next sweep's range naturally re-covers it.
-  The guarantee is fail-safe **over-review**, never fail-safe prevention;
-  don't assume the system needs enforcement to stay correct.
+  purely from ledger content (the frontier — the last *clearing* parseable
+  entry, not necessarily the last parseable entry outright; see Module
+  Contracts), never by graph-walking. If a squash/rebase landing on the
+  review-track rewrites the reviewed SHA (forbidden by convention, not
+  mechanically blocked in plain git), the marker does not corrupt — it simply
+  stops advancing past the orphaned span, and the next sweep's range
+  naturally re-covers it. The guarantee is fail-safe **over-review**, never
+  fail-safe prevention; don't assume the system needs enforcement to stay
+  correct.
 
 ## Technical Debt
 
