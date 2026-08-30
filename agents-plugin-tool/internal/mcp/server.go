@@ -1270,11 +1270,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			if err != nil {
 				return toolTextResponse(req.ID, "", err)
 			}
-			if !found {
-				return toolTextResponse(req.ID, "review ledger has no entry yet; call review.marker(bootstrap: true) to establish a baseline\n", nil)
-			}
 			if wantsJSON(params.Arguments) {
 				return toolJSONResponse(req.ID, reviewMarkerJSONValue(entry, found), nil)
+			}
+			if !found {
+				return toolTextResponse(req.ID, "review ledger has no entry yet; call review.marker(bootstrap: true) to establish a baseline\n", nil)
 			}
 			if created {
 				return toolTextResponse(req.ID, fmt.Sprintf("bootstrapped review ledger baseline: %s..%s: %s\n", entry.Base, entry.Head, entry.Verdict), nil)

@@ -435,6 +435,40 @@ func TestServeStdioReviewMarkerFormatJSONReturnsStructuredFrontier(t *testing.T)
 	}
 }
 
+// TestServeStdioReviewMarkerBootstrapFormatJSONReturnsJSONOnAllBlockNoFloor
+// covers the bootstrap branch's near-unreachable all-block-no-floor path: a
+// ledger whose only entry is a block (so wsreview.Read/Bootstrap's own
+// idempotency check finds an entry and no-ops) but which therefore has no
+// resolvable frontier (block never clears). A bootstrap:true, format:json
+// call in that state must still return a JSON object (found: false), not
+// fall through to the plain-text "no entry yet" message — pinning the same
+// wantsJSON-before-!found ordering the bare-read branch already had.
+func TestServeStdioReviewMarkerBootstrapFormatJSONReturnsJSONOnAllBlockNoFloor(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	reviewNudgeTestRepo(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	if err := wsreview.Append(root, wsreview.Entry{Base: head, Head: head, Verdict: wsreview.VerdictBlock, Ref: "260901-bug-example"}); err != nil {
+		t.Fatalf("seed all-block ledger: %v", err)
+	}
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	resp := callToolWithKey(t, server, 2, key, "review.marker", map[string]any{"bootstrap": true, "format": "json"})
+	var got struct {
+		Found bool `json:"found"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(resp)), &got); err != nil {
+		t.Fatalf("review.marker(bootstrap: true, format: json) on an all-block ledger did not return valid JSON: %v\nresponse: %s", err, resp)
+	}
+	if got.Found {
+		t.Fatalf("review.marker(bootstrap: true, format: json) on an all-block ledger = %+v, want found=false (no resolvable frontier)", got)
+	}
+}
+
 // TestServeStdioReviewStampRejectsBlockVerdictWithoutRef mirrors Phase 1's
 // Append test coverage shape (ledger_test.go's TestAppendBlockWithEmptyRefFails)
 // at the MCP tool boundary: review.stamp must surface Append's own validation
