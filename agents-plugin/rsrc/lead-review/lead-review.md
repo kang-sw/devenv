@@ -10,8 +10,12 @@ Target: user request
 
 Config Load
 - Branch scenario: load `ai-docs/_review.local.md` before any review step; run setup if absent.
-- Range scenario: load `ai-docs/_review.local.md` if present; if absent, proceed on built-in Review Phases / Deep Review defaults and never run setup.
-- A present config's Review Phases, Checklist, Blocked Paths, and Deep Review sections are honored by both scenarios.
+- Range scenario: load `ai-docs/_review.local.md` if present; if absent, proceed on built-in Review Phases / Landing Lens / Deep Review defaults and never run setup.
+- A present config's Review Phases, Checklist, Blocked Paths, and Deep Review sections are honored by both scenarios; `## Landing Lens` is honored by the range scenario only — branch scenario ignores it even if present.
+
+Landing Lens
+- Range scenario runs a required `landing` phase — convention adherence plus spec/mental-model update completeness — using config text if `## Landing Lens` is present, else the built-in default.
+- Branch scenario never runs the `landing` phase; no config section re-enables it there.
 
 - Never push, force-push, or modify remote branches without user confirmation.
 - Branch scenario: record the current branch before checkout; offer to restore it after review.
@@ -26,8 +30,8 @@ Determine scenario kind first: `range` argument supplied → range scenario; `br
 
 1. Check for `ai-docs/_review.local.md`.
 2. Branch scenario, absent → go to **On: setup**.
-3. Range scenario, absent → proceed on the built-in Review Phases / Deep Review defaults from **On: setup**'s Review Config Template; never go to **On: setup**.
-4. If present (either scenario): load all sections present: Remote, Branch Naming, Review Phases, Checklist, Blocked Paths, Comment Method, Merge Approval Method, Notification Method, Contributor Workflow, Deep Review. Range scenario ignores Remote, Branch Naming, Comment Method, Merge Approval Method, Notification Method, and Contributor Workflow — none apply to a checkout-free review.
+3. Range scenario, absent → proceed on the built-in Review Phases / Landing Lens / Deep Review defaults from **On: setup**'s Review Config Template; never go to **On: setup**.
+4. If present (either scenario): load all sections present: Remote, Branch Naming, Review Phases, Landing Lens, Checklist, Blocked Paths, Comment Method, Merge Approval Method, Notification Method, Contributor Workflow, Deep Review. Range scenario ignores Remote, Branch Naming, Comment Method, Merge Approval Method, Notification Method, and Contributor Workflow — none apply to a checkout-free review. Branch scenario ignores Landing Lens regardless of Contributor Workflow — it is a range-scenario-only check, not a contributor-type exception.
 
 ### 2. Identify branch (branch scenario only)
 
@@ -48,7 +52,7 @@ Determine scenario kind first: `range` argument supplied → range scenario; `br
    Range scenario: run `{{.McpNamespace}}/git.diff(range: "<base>..<head>", mode: "stat")` → present scope summary; use `{{.McpNamespace}}/git.log(range: "<base>..<head>")` for commit enumeration.
 2. Apply `judge: follows-ws-workflow` → determine intention analysis path.
 3. Apply `judge: is-large-diff` → determine phase execution depth.
-4. Run review phases in order: intent, alignment, risk, then any custom phases from config.
+4. Run review phases in order: intent, alignment, risk, then any custom phases from config. Range scenario also runs the required `landing` phase last (see Invariants: Landing Lens).
 5. Apply `judge: has-checklist` → present checklist items; collect user confirmation per item.
 6. Aggregate findings → emit verdict in **On: verdict**.
 
@@ -91,6 +95,14 @@ Commit messages and ## AI Context match the stated ticket or MR purpose.
 Diff is consistent with ai-docs/spec and mental-model docs.
 ### risk
 No breaking changes, security issues, or missing tests without justification.
+
+## Landing Lens                        ← optional to customize; range scenario always runs it (built-in default below if omitted); branch scenario never runs it
+Diff follows repo conventions (AGENTS.md, skill-authoring, wsflow-mirroring
+where applicable). Caller-visible behavior changes have a matching spec update
+(spec describes caller-visible behavior); workflow-system modification-relevant
+changes have a matching mental-model update (mental model captures
+modification-relevant operational knowledge) — each doc updated per its own
+function, not just "any doc touched."
 
 ## Checklist                           ← optional
 - [ ] <gate item>
