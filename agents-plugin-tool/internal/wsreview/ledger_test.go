@@ -244,9 +244,15 @@ func TestRoutedCorrectiveEntryAppendsWithoutEditingEarlierBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read raw ledger file: %v", err)
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	// The first Append physically creates the file, so it must carry the
+	// first-creation banner ahead of the two entry lines.
+	if !strings.HasPrefix(string(raw), ledgerBanner) {
+		t.Fatalf("first-creation Append did not emit the banner at the top of the file; got raw content:\n%s", raw)
+	}
+	afterBanner := strings.TrimPrefix(string(raw), ledgerBanner)
+	lines := strings.Split(strings.TrimRight(afterBanner, "\n"), "\n")
 	if len(lines) != 2 {
-		t.Fatalf("expected exactly 2 lines (original block untouched, plus append-only routed follow-up), got %d: %v", len(lines), lines)
+		t.Fatalf("expected exactly 2 entry lines below the banner (original block untouched, plus append-only routed follow-up), got %d: %v", len(lines), lines)
 	}
 	if lines[0] != "abc1234..def5678: block -> 260901-bug-example" {
 		t.Fatalf("original block entry was mutated: %q", lines[0])
@@ -266,6 +272,134 @@ func TestRoutedCorrectiveEntryAppendsWithoutEditingEarlierBlock(t *testing.T) {
 	}
 	if entry.Verdict != VerdictRouted {
 		t.Fatalf("expected latest entry verdict to be routed, got %q", entry.Verdict)
+	}
+}
+
+func TestAppendFirstCreationEmitsBannerOnce(t *testing.T) {
+	root := t.TempDir()
+
+	want := Entry{Base: "abc1234", Head: "def5678", Verdict: VerdictPass}
+	if err := Append(root, want); err != nil {
+		t.Fatalf("first Append failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(LedgerPath(root))
+	if err != nil {
+		t.Fatalf("read raw ledger file: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), ledgerBanner) {
+		t.Fatalf("fresh ledger did not start with the banner; got raw content:\n%s", raw)
+	}
+
+	// ParseLatest/Read must resolve to the real entry, never the banner —
+	// entryLineRE skips every banner line.
+	entry, found, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if !found {
+		t.Fatalf("Read did not find the appended entry")
+	}
+	if entry != want {
+		t.Fatalf("Read resolved to the wrong entry amid the banner: got %+v, want %+v", entry, want)
+	}
+
+	// A second Append on the now-existing file must not re-emit the banner.
+	second := Entry{Base: "aaa1111", Head: "bbb2222", Verdict: VerdictPass}
+	if err := Append(root, second); err != nil {
+		t.Fatalf("second Append failed: %v", err)
+	}
+	raw2, err := os.ReadFile(LedgerPath(root))
+	if err != nil {
+		t.Fatalf("read raw ledger file after second append: %v", err)
+	}
+	if strings.Count(string(raw2), ledgerBanner) != 1 {
+		t.Fatalf("banner must be emitted exactly once; got raw content:\n%s", raw2)
+	}
+}
+
+// TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot reproduces
+// the Phase-3 canary in a real git repo: two branches that each Append
+// independently — without either absorbing the other's write first —
+// produce a real git conflict in the ledger's tail, with the banner text
+// landing inside the conflict markers themselves (this is the
+// concurrent-first-landing case named in the plan's Lead Adjudications,
+// where top-of-file and tail-anchor coincide because neither branch's
+// common ancestor has a ledger file yet — an add/add conflict). A serial
+// single-writer sequence, with no competing concurrent creation, must merge
+// cleanly.
+func TestCanaryConcurrentFirstCreationConflictsSerialAppendDoesNot(t *testing.T) {
+	root := t.TempDir()
+	reviewTestInitGitWithCommit(t, root)
+	mainBranch := strings.TrimSpace(string(reviewTestRunGitOutput(t, root, "rev-parse", "--abbrev-ref", "HEAD")))
+
+	relLedger, err := filepath.Rel(root, LedgerPath(root))
+	if err != nil {
+		t.Fatalf("relativize ledger path: %v", err)
+	}
+
+	reviewTestRunGit(t, root, "branch", "branch-a")
+	reviewTestRunGit(t, root, "branch", "branch-b")
+
+	// Branch A: the first-ever Append on this branch. The ledger does not
+	// exist in the common ancestor, so this is the bare-Append-with-no-
+	// prior-Bootstrap first-creation path (the risk signal from the plan's
+	// Codebase Findings).
+	reviewTestRunGit(t, root, "checkout", "branch-a")
+	if err := Append(root, Entry{Base: "aaaaaaa", Head: "bbbbbbb", Verdict: VerdictPass}); err != nil {
+		t.Fatalf("branch-a Append failed: %v", err)
+	}
+	reviewTestRunGit(t, root, "add", relLedger)
+	reviewTestRunGit(t, root, "commit", "-m", "branch-a review")
+
+	// Branch B: independently, the first-ever Append on this branch too —
+	// two branches racing to create the ledger from nothing, neither seeing
+	// the other's write. This is the canary's precondition.
+	reviewTestRunGit(t, root, "checkout", "branch-b")
+	if err := Append(root, Entry{Base: "aaaaaaa", Head: "ccccccc", Verdict: VerdictConcern}); err != nil {
+		t.Fatalf("branch-b Append failed: %v", err)
+	}
+	reviewTestRunGit(t, root, "add", relLedger)
+	reviewTestRunGit(t, root, "commit", "-m", "branch-b review")
+
+	// Merge branch-a into branch-b: an add/add conflict, since the ledger
+	// exists on neither side's common ancestor — the canary firing.
+	mergeCmd := exec.Command("git", "merge", "branch-a", "--no-edit")
+	mergeCmd.Dir = root
+	mergeOut, mergeErr := mergeCmd.CombinedOutput()
+	if mergeErr == nil {
+		t.Fatalf("expected a git conflict between two branches independently creating the ledger, got a clean merge:\n%s", mergeOut)
+	}
+
+	conflicted, err := os.ReadFile(LedgerPath(root))
+	if err != nil {
+		t.Fatalf("read conflicted ledger file: %v", err)
+	}
+	content := string(conflicted)
+	startMarker := strings.Index(content, "<<<<<<<")
+	endMarker := strings.Index(content, ">>>>>>>")
+	if startMarker == -1 || endMarker == -1 || endMarker < startMarker {
+		t.Fatalf("expected git conflict markers in the ledger file, got:\n%s", content)
+	}
+	conflictRegion := content[startMarker : endMarker+len(">>>>>>>")]
+	if !strings.Contains(conflictRegion, ledgerBanner) {
+		t.Fatalf("expected the banner text inside the conflict markers, got conflict region:\n%s", conflictRegion)
+	}
+
+	reviewTestRunGit(t, root, "merge", "--abort")
+
+	// --- Serial path: a single writer appending once, with no competing
+	// concurrent creation on the other side, must merge cleanly (no
+	// false-positive conflict).
+	reviewTestRunGit(t, root, "checkout", mainBranch)
+	serialMergeCmd := exec.Command("git", "merge", "branch-b", "--no-edit")
+	serialMergeCmd.Dir = root
+	serialOut, serialErr := serialMergeCmd.CombinedOutput()
+	if serialErr != nil {
+		t.Fatalf("serial single-writer merge should not conflict: %v\n%s", serialErr, serialOut)
+	}
+	if strings.Contains(string(serialOut), "CONFLICT") {
+		t.Fatalf("serial single-writer merge reported a conflict:\n%s", serialOut)
 	}
 }
 
