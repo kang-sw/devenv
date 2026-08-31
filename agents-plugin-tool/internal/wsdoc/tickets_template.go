@@ -51,11 +51,12 @@ const ticketBodyActionable = `
 #### Edition (<short-hash>) - YYYY-MM-DD
 
 <later tweak or follow-up implementation pass for this completed phase>
-
-### Phase 2: <title>
-
-...
 ` + "```" + `
+
+Default to a single Phase 1. Add Phase 2, Phase 3, and so on only for units that
+are sequentially dependent — a later phase builds on an earlier phase's landed
+Result. Differing review, verification, or rollback boundaries alone do not
+justify a separate phase.
 
 Optional sections — add between ` + "`## Background`" + ` and ` + "`## Phases`" + ` when relevant:
 
