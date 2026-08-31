@@ -7,6 +7,8 @@ related-mental-model:
   - workflow-skills
 sage-review-design: completed
 sage-review-design-reviewed: 356941a69752e3ec
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 63ca190ef9f17e0b
 ---
 
 # plan-populator survey unilaterally reduces a fully-specified requirement to a subset (runtime-fallback misread as implementation-fallback)
@@ -135,15 +137,23 @@ Verification:
   obligation is present.
 - wsflow mirror byte-identity + manifest-hash tests green; full Go suite green.
 
+Deliverable (spec/doc pass, not optional drift-on-contact): update the
+`{#260505-implementation-workflow-skills}` anchor in
+`ai-docs/spec/workflow-skills.md` (the section covering the plan-populator
+survey/research contract) to record the new lead-directed scope-reduction
+escalation signal and the reviewer per-requirement coverage obligation; reconcile
+the `workflow-skills` mental-model on contact.
+
 ## Spec Impact
 
-Ready-promotion scouting (not required at `todo/`): the caller-visible workflow
-behavior added is (1) a new planner escalation signal for unilateral scope
-reduction, distinct from `[escalate-to-research]`, and (2) a reviewer obligation
-that every specified requirement is implemented or explicitly deferred. Target
-spec area: the plan-populator / implement-review contract anchors in
-`ai-docs/spec/workflow-skills.md`. A confirmed spec stem or `## Spec Impact`
-addressing these must be settled before this ticket moves to `ready/`.
+The caller-visible workflow behavior added is (1) a new planner escalation signal
+for a confident, unilateral scope reduction, distinct from `[escalate-to-research]`,
+and (2) a reviewer obligation that every specified authority requirement is
+implemented or explicitly, authorizedly deferred. This is addressed by the
+`{#260505-implementation-workflow-skills}` anchor in
+`ai-docs/spec/workflow-skills.md`, which already governs the plan-populator
+survey/research contract; the Phase 1 doc-pass deliverable above updates that
+anchor to cover both additions. No new spec stem is created and none is removed.
 
 ## Non-Goals
 
