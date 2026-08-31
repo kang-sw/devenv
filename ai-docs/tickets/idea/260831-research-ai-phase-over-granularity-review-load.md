@@ -1,65 +1,112 @@
 ---
-title: AI over-granular phase splitting amplifies per-phase review load
+title: Decomposition granularity — AI over-splits phases and tickets, amplifying review load
 related:
-  260831-refactor-severity-graded-per-slice-review-relay: sibling lever — that ticket lightens per-phase review *weight*; this one investigates reducing the *count* of phases that each draw review
+  260831-refactor-severity-graded-per-slice-review-relay: sibling lever — that ticket lightens per-phase review *weight*; this one investigates reducing the *count* of units (phases and tickets) that each draw review
   260824-epic-review-watermark-model: the review-altitude epic whose sweep/gate is the coarser-boundary alternative to per-phase review
 related-mental-model:
   - workflow-skills
 ---
 
-# AI over-granular phase splitting amplifies per-phase review load
+# Decomposition granularity — AI over-splits phases and tickets, amplifying review load
 
 ## Background
 
 The dogfood pain that motivated `260831-refactor-severity-graded-per-slice-review-relay`
-is a *product* of two factors: (1) each ticket phase draws per-phase review, and
-(2) the AI tends to split a ticket into more, finer phases than a human would.
-`260831` attacks factor (1) — the per-phase review *weight*. This ticket
-captures factor (2): the phase *count* amplifier. Even after per-phase weight is
-severity-graded, an over-split ticket multiplies whatever residual weight
-remains across many slices.
+is a *product*: felt review load = per-unit review *weight* × *count of units*.
+`260831` attacks the weight factor. This ticket holds the count factor, which
+turns out to live at **two altitudes**:
 
-This is a separate subsystem from the review loop: phase granularity is decided
-in ticket authoring / planning (`lead-write-ticket`'s `judge: ticket-shape`,
-and whatever planning heuristics drive phase decomposition), not in the
-`enter.implement` review path. Kept as a distinct follow-up rather than folded
-into `260831` to avoid perturbing two subsystems in one change.
+- **Phase granularity** — how many `### Phase N` sections one ticket carries.
+- **Ticket granularity** — how many tickets an epic/decomposition is split into.
 
-## Problem Statement
+Ticket granularity is the heavier amplifier: **each ticket carries its own sage
+review gate (design + completeness)**, so over-splitting tickets multiplies the
+authoring-side ceremony too, not just the implement-side review. Both altitudes
+are set in ticket authoring / planning and the review surfaces around it — a
+different subsystem from `enter.implement`'s review loop — so this is kept as a
+separate follow-up rather than folded into `260831`.
 
-- Observed tendency: AI decomposes a single reviewable unit into several
-  `### Phase N` sections where a coarser split (often one phase) would be a
-  cleaner reviewable slice.
-- `judge: ticket-shape` already states "Phase default: actionable tickets use
-  one `Phase 1`" and "Phase split: add phases only for sequentially dependent
-  units; differing review, verification, or rollback boundaries alone do not
-  justify a phase split." So the *convention* is already conservative — the open
-  question is why authoring drifts more granular than the convention, and
-  whether the lever is stronger authoring-time enforcement or a coarser review
-  boundary.
+## Survey Findings (2026-08-31 scan)
 
-## Candidate Levers (unsettled)
+- **Phase count is entirely author judgment; no tool derives or suggests it.**
+  `tickets.checklist`'s "phase" means the *authoring stage* (`content`/`intent`),
+  not implementation-phase count
+  (`agents-plugin-tool/internal/wsdoc/tickets_checklist.go`). The planning
+  surface (`plan-populator-survey`, `lead-implement` Plan contract) consumes a
+  single `selected_phase` and plans *within* it — it inherits whatever phases the
+  author already wrote and cannot drive phase count. So the lever is entirely
+  upstream in `lead-write-ticket`.
+- **The governing rule is already conservative — strong prose, zero
+  enforcement.** `judge: ticket-shape`
+  (`agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md`) states the phase
+  default is one `Phase 1` and explicitly rejects "differing review,
+  verification, or rollback boundaries alone" as a split justification. It also
+  owns the ticket-split rule ("unrelated increments belong in separate actionable
+  tickets"). But it is author-applied judgment with no tool check and no reviewer
+  that ever flags "too many phases/tickets."
+- **Reinforcing signals normalize multi-unit shape with no counter-pressure:**
+  the emitted ticket template models a *two-phase* skeleton
+  (`tickets_template.go`), and the completeness reviewer imposes per-phase
+  obligations ("each phase bounded / each phase has verification",
+  `agents-plugin/rsrc/ticket-reviewer-completeness/`) so review load scales with
+  phase count while nothing penalizes over-splitting.
+- **The ticketization proposal is not codified anywhere.** `lead-discuss`
+  surfaces "let's make these tickets" only informally in conversation and routes
+  creation to `lead-write-ticket`; its only ticket rules are "wait for the user's
+  explicit signal" and "route creation to lead-write-ticket." `lead-write-ticket`
+  owns the split *rule* (`judge: ticket-shape`) but sees one ticket at a time and
+  only ever suggests the *next single* child (epic/workset handoff). No surface
+  proposes the whole decomposition back to the user with merge candidates.
 
-- **Tighten phase-shape enforcement at authoring time.** Make
-  `judge: ticket-shape` (or a verify-phase check in `lead-write-ticket`)
-  actively push back on phases that are not sequentially dependent, collapsing
-  them toward one slice. Risk: over-collapsing genuinely separable work.
-- **Batch review at a coarser boundary instead of per-phase.** This is
-  effectively what epic `260824`'s sweep/gate already does at integration time —
-  so the question is whether per-phase review should shrink further (relying more
-  on the integration net) rather than trying to reduce phase count. Interacts
-  directly with `260824`'s "keep per-phase light" thesis and its under-review
-  risk framing.
-- **Do nothing structural; rely on `260831` alone.** If severity-graded weight
-  makes typical phases cheap enough, phase count may stop mattering in practice.
-  Test this first before investing in a phase-count lever.
+## Direction
+
+Treat the two altitudes differently. Full automation is a non-goal: granularity
+depends on intent the AI cannot fully infer, so the realistic aim is to reduce
+drift and keep a cheap human touch where judgment is irreducible.
+
+### Within-ticket phase splitting — automate, no user in the loop
+
+- **Rule-aware design-review signal.** Add a "phase over-split" check to the
+  *design* reviewer (its charter is coherence/right-problem/executability; the
+  completeness reviewer only checks that fields are present). It must apply
+  `judge: ticket-shape` faithfully — flag only phases that are **not**
+  sequentially dependent — so it does not fight legitimate splits. Design review
+  runs and corrects on nearly every ticket already, so the extra check adds no
+  meaningful round cost.
+- **Upstream prevention (cheaper and more fundamental than the signal):** change
+  the emitted template to model **one phase by default**, and resolve the
+  completeness reviewer's asymmetry where per-phase obligations scale load with
+  no over-split counter.
+
+### Epic-to-ticket splitting — human checkpoint, not automation
+
+- **A per-ticket reviewer is structurally blind to this** (it sees one ticket).
+  The over-decomposition critique can only bite where the whole child list is
+  visible: the **epic/workset design review** (plus the relation table). Route
+  the ticket-shape critique there.
+- **The decision stays the user's.** The gap is that today's ticket-creation
+  approval is low-salience and easy to rubber-stamp. Make it high-salience by
+  naming merge candidates at the moment of proposal — e.g. "N tickets proposed;
+  A and B look mergeable." The natural home is **`lead-discuss`'s
+  creation-handoff moment**: it is the only surface still holding the whole
+  intent before it is split, and it already routes creation. This fires **after**
+  the user signals they want to persist, so it does not violate the discuss rule
+  against proactively nagging to persist.
+
+## Non-Goals
+
+- Full automation of ticket-count decisions. Ticket-vs-ticket granularity is an
+  intent-dependent judgment that stays with the user; the goal is a cheaper,
+  more visible checkpoint, not removing the human.
 
 ## Open Questions
 
-- Is the drift a planning-model behavior (how implementation plans propose
-  phases) or a ticket-authoring behavior (how `lead-write-ticket` records them),
-  or both?
-- After `260831` lands, does phase count still produce felt load, or is the
-  amplifier neutralized by cheaper per-phase weight? (Measure before acting.)
-- If a lever is warranted, is it authoring-time collapse or deferring more to
-  the `260824` integration net — and are those mutually exclusive?
+- **Measure before investing.** After `260831` lands and per-phase weight is
+  severity-graded, re-check whether phase count still produces felt load — cheaper
+  phases may neutralize the amplifier without any phase-count lever.
+- Is the phase drift a planning-model behavior (how plans propose phases) or a
+  ticket-authoring behavior (how `lead-write-ticket` records them), or both?
+- For ticket granularity: is the high-salience checkpoint a new explicit prompt
+  in `lead-discuss`, or a strengthening of the existing creation approval? And
+  should the epic-level design review carry the over-decomposition critique, or
+  is the human checkpoint alone sufficient?
