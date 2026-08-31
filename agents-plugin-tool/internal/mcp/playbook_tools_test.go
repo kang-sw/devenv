@@ -1826,13 +1826,22 @@ func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
 	}
 
 	assertPlanner("plan-populator-survey", "medium", []string{
-		"[ok]` or `[escalate-to-research]`",
+		"[ok]`, `[escalate-to-research]`, or `[escalate-to-lead]`",
 		"Confidence: `<high|medium|low>`",
 		"Escalation rationale when returning `[escalate-to-research]`",
+		"Escalation rationale when returning `[escalate-to-lead]`",
+		"Carry a fully-specified, multi-part requirement into the plan whole; do not\n  silently implement a subset.",
+		"A \"first cut\" or phased subset is legitimate only when the ticket\n  or lead already authorized the phasing — never when the survey invents it.",
+		"an implementation\n  fallback (a scope shortcut or temporary path substituted for the real\n  target)",
+		"A ticket's required\n  runtime fallback — a specified execution branch such as graceful\n  degradation — is not a shortcut signal and must be planned in full.",
+		"Exit to research when confidence is low, strategy is unclear, contract facts\n  conflict, or reuse judgment needs a deeper planner.",
 	})
 	assertPlanner("plan-populator-research", "large", []string{
 		"[ok]` or `[escalate-to-lead]`",
 		"Include `None` when no blocker remains. Otherwise include the blocker,",
+		"Do not encode a temporary, implementation-fallback (scope shortcut), mock-data,\n  or duplicated-glue path as the implementation.",
+		"A ticket's required runtime\n  fallback — a specified execution branch such as graceful degradation — is not\n  a shortcut and must be planned in full.",
+		"or when a fully-specified, multi-part requirement\n  cannot be carried whole into the plan and only a confident subset can be\n  planned; a \"first cut\" is legitimate only when the ticket or lead already\n  authorized the phasing.",
 	})
 
 	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
@@ -2565,6 +2574,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Generated plan:",
 		"Authority: Ticket path <ticket-path>",
 		"Authority: Inline contract <accepted scope, constraints, non-goals, verification boundary>",
+		"Each specified authority requirement is implemented, or carries an explicit, authorized deferral.",
 		"Direct edit with no generated plan:",
 		"Reviewer prompt frame",
 		"Review the supplied authority, plan contract, and diff together.",
@@ -2607,6 +2617,11 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("lead-implement full ws render retained unreachable adjudicator routing prose, or the superseded capacity/root-cause trigger wording, %q:\n%s", forbidden, body)
 		}
+	}
+	// 260831: the reviewer-frame coverage line was operationalized against
+	// "authority" (not "ticket"); the old vague phrasing must not survive.
+	if strings.Contains(body, "Binding authority decisions were not omitted or violated.") {
+		t.Fatalf("lead-implement full ws render retained superseded reviewer-frame coverage line:\n%s", body)
 	}
 	for _, forbidden := range []string{
 		"Brief template",
