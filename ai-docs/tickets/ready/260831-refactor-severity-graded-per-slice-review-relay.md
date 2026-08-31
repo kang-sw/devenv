@@ -11,6 +11,8 @@ spec:
   - 260612-reviewer-allocation-tier-default
 sage-review-design: completed
 sage-review-design-reviewed: 3f98ca423ccd9194
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 3f98ca423ccd9194
 ---
 
 # Severity-graded per-slice review relay — restore Critical iteration + elevate, lighten the rest
