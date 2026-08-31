@@ -173,6 +173,42 @@ appears, `lead-only` stays relay-vocab-free, and the three relaying allocations
 share the graded clause set. `go build ./... && go vet ./... && go test ./...`
 green; `agents-plugin-wsflow` python tests pass; regenerated manifests verified.
 
+### Result (8f5ad563) - 2026-08-31
+
+Implemented as planned across `664faf49..8f5ad563` (3 commits) on
+`impl/develop/march-dodge-mug`; no substantive deviation from the survey plan.
+
+- **Runtime (`664faf49`).** Rewrote the three shared clause consts
+  (`implementReviewDispositionClause`, `implementReviewRelayClause`,
+  `implementReviewCriticalBranchClause`) in `session_state.go` into the
+  severity-graded budget: Critical = bounded 3 review rounds (relay #1 shared
+  with Important, Critical-scoped relay #2, review #3) then **unconditional
+  elevate** to `implementer-elevated`, no hard stop; Important = one relay then
+  self-reported `[not fixed: <reason>]`; Minor = 0 relays. Shared-clause
+  convergence across `single`/`partitioned:`/bare-`partitioned` kept;
+  `lead-only` untouched and relay-vocab-free.
+- **Rsrc prose + mirror (`52aaa720`).** Reconciled `lead-implement.md` Review
+  invariants, restored the `implementer-elevated` routing (Delegate dispatch
+  step 6 + Review relay dispatch template) rescoped to fire **only** at the
+  Critical ceiling; `review-adjudicator` left unreferenced. Added
+  `[not fixed: <reason>]` to `implementer-relay.md` only. Regenerated both
+  `manifest.json` hashes and the `agents-plugin-wsflow/rsrc` mirror byte-for-byte.
+- **Docs (`8f5ad563`).** Rewrote spec anchors
+  `{#260612-reviewer-allocation-tier-default}` and
+  `{#260619-stateless-implement-review-continuity}`, the matching mental-model
+  bullets, and the `prompt-bundle.md` pitfall bullet.
+- **Marker-locus decision (lead-resolved).** The Important-only
+  `[not fixed: <reason>]` marker lives in `implementer-relay.md` alone;
+  `implementer-elevated.md` stays Critical-ceiling-only and carries no
+  "not fixed" disposition. The resulting deliberate vocabulary asymmetry is
+  guarded by splitting the drift test into a core-four-token identity check
+  plus `TestImplementerRelayNotFixedMarkerPresentOnlyOnImportantPath`, and is
+  documented as intentional in `prompt-bundle.md`.
+- **Verification.** `go build ./... && go vet ./... && go test ./...` green
+  (all 13 packages); env-gated regen tests idempotent at HEAD; wsflow python
+  suite 10/10; partitioned review (correctness/fit/test) all **clean**, no
+  Critical/Important/Minor findings, no relay needed.
+
 ## Spec Impact
 
 Target: the implementation-review contract in
