@@ -1376,8 +1376,8 @@ func TestRenderPlaybookShippedImplementerElevatedDeclaredContext(t *testing.T) {
 	}
 }
 
-// fixCycleDispositionTokens is the disposition vocabulary the lead parses back from
-// every fix-cycle relay, whichever implementer delegate served it.
+// fixCycleDispositionTokens is the four-token disposition vocabulary shared
+// byte-identically by both fix-cycle delegates, whichever one served the relay.
 func fixCycleDispositionTokens() []string {
 	return []string{
 		"`[fixed]`",
@@ -1386,6 +1386,15 @@ func fixCycleDispositionTokens() []string {
 		"`[escalate: <reason>]`",
 	}
 }
+
+// notFixedDispositionToken is the Important-only self-reported non-resolution
+// marker added in 260831's severity-graded relay budget. Unlike the four core
+// tokens above, it deliberately does not join the shared vocabulary: it lives
+// in `implementer-relay`'s enumeration sites only. `implementer-elevated` is
+// reachable only at the Critical ceiling, and Critical never gets a "not
+// fixed" disposition — a still-non-clean Critical carries forward into the
+// next Critical-scoped round instead of settling as unresolved.
+const notFixedDispositionToken = "`[not fixed: <reason>]`"
 
 // extractDispositionEnumerations returns a fix-cycle delegate's two vocabulary
 // enumeration sites: the Process-step sentence that lists every token, and the Output
@@ -1425,16 +1434,11 @@ func extractDispositionEnumerations(t *testing.T, name, body string) (string, []
 	return processLine, bullets
 }
 
-// TestRenderedImplementerDelegatesShareOneDispositionVocabulary extends Phase 2's
-// two-site anti-drift count to all four sites the vocabulary now lives at:
-// `implementer-relay` Process 4 and Output, `implementer-elevated` Process 6 and Output.
-//
-// The two delegates are near-duplicates by construction and either can serve a relay,
-// so the lead parses one token set back from both. A token added, reworded, or dropped
-// at one site and not the others would hand the lead contradictory vocabularies on the
-// same relay path — the exact drift class that produced this ticket, and a class the
-// per-file count assertion cannot see because it never compares the files.
-func TestRenderedImplementerDelegatesShareOneDispositionVocabulary(t *testing.T) {
+// renderedImplementerDispositionEnumerations renders both fix-cycle delegates
+// with their shipped context and extracts each one's Process/Output disposition
+// enumeration sites, for the two drift guards below to check independently.
+func renderedImplementerDispositionEnumerations(t *testing.T) (relayProcess string, relayBullets []string, elevatedProcess string, elevatedBullets []string) {
+	t.Helper()
 	t.Setenv(envNoAgent, "")
 	t.Setenv(envNamespace, "")
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
@@ -1456,43 +1460,104 @@ func TestRenderedImplementerDelegatesShareOneDispositionVocabulary(t *testing.T)
 		return string(data)
 	}
 
-	relayProcess, relayBullets := extractDispositionEnumerations(t, "implementer-relay", render("implementer-relay", shippedImplementerRelayContext()))
-	elevatedProcess, elevatedBullets := extractDispositionEnumerations(t, "implementer-elevated", render("implementer-elevated", shippedImplementerElevatedContext()))
+	relayProcess, relayBullets = extractDispositionEnumerations(t, "implementer-relay", render("implementer-relay", shippedImplementerRelayContext()))
+	elevatedProcess, elevatedBullets = extractDispositionEnumerations(t, "implementer-elevated", render("implementer-elevated", shippedImplementerElevatedContext()))
+	return relayProcess, relayBullets, elevatedProcess, elevatedBullets
+}
 
-	// Both enumeration sites carry every token exactly once, in both delegates. Catches
+// TestRenderedImplementerDelegatesShareOneDispositionVocabulary extends Phase 2's
+// two-site anti-drift count to all four sites the four-token core vocabulary lives
+// at: `implementer-relay` Process 4 and Output, `implementer-elevated` Process 6 and
+// Output. It covers only the four tokens both delegates share
+// (`fixCycleDispositionTokens`); the fifth, Important-only `[not fixed: <reason>]`
+// token is a deliberate asymmetry between the two files (260831 severity-graded
+// relay) and is covered separately by
+// TestImplementerRelayNotFixedMarkerPresentOnlyOnImportantPath below — this test
+// must not re-flag that asymmetry as drift.
+//
+// The two delegates are near-duplicates by construction and either can serve a
+// relay for a Critical/Important finding's four settled dispositions, so the lead
+// parses one token set back from both for those. A token added, reworded, or
+// dropped at one site and not the others would hand the lead contradictory
+// vocabularies on the same relay path — the exact drift class that produced this
+// ticket, and a class the per-file count assertion cannot see because it never
+// compares the files.
+func TestRenderedImplementerDelegatesShareOneDispositionVocabulary(t *testing.T) {
+	relayProcess, relayBullets, elevatedProcess, elevatedBullets := renderedImplementerDispositionEnumerations(t)
+
+	// implementer-elevated carries no [not fixed: <reason>] site, so its full
+	// enumeration IS the four-core-token clause; implementer-relay's enumeration
+	// leads with that same clause before its own Important-only continuation, so
+	// elevatedProcess must be a byte-identical prefix of relayProcess.
+	if !strings.HasPrefix(relayProcess, elevatedProcess) {
+		t.Fatalf("implementer-relay Process enumeration does not lead with the four-core-token clause implementer-elevated defines:\n relay: %s\n elevated: %s", relayProcess, elevatedProcess)
+	}
+	if len(elevatedBullets) != len(fixCycleDispositionTokens()) {
+		t.Fatalf("implementer-elevated Output enumerates %d disposition bullets, want %d — a core token was added or removed without updating fixCycleDispositionTokens:\n%s",
+			len(elevatedBullets), len(fixCycleDispositionTokens()), strings.Join(elevatedBullets, "\n"))
+	}
+	if len(relayBullets) < len(fixCycleDispositionTokens()) {
+		t.Fatalf("implementer-relay Output enumerates %d disposition bullets, want at least %d core bullets:\n%s",
+			len(relayBullets), len(fixCycleDispositionTokens()), strings.Join(relayBullets, "\n"))
+	}
+	relayCoreBlock := strings.Join(relayBullets[:len(fixCycleDispositionTokens())], "\n")
+	elevatedBlock := strings.Join(elevatedBullets, "\n")
+	if relayCoreBlock != elevatedBlock {
+		t.Fatalf("implementer-relay's leading %d Output bullets disagree with implementer-elevated's:\n relay leading bullets:\n%s\n elevated bullets:\n%s", len(fixCycleDispositionTokens()), relayCoreBlock, elevatedBlock)
+	}
+
+	// Each core token appears exactly once at each site, in both delegates. Catches
 	// a token dropped from one site, or duplicated within one.
 	for _, delegate := range []struct {
 		name    string
 		process string
-		bullets []string
+		bullets string
 	}{
-		{name: "implementer-relay", process: relayProcess, bullets: relayBullets},
-		{name: "implementer-elevated", process: elevatedProcess, bullets: elevatedBullets},
+		{name: "implementer-relay", process: relayProcess, bullets: relayCoreBlock},
+		{name: "implementer-elevated", process: elevatedProcess, bullets: elevatedBlock},
 	} {
-		bulletBlock := strings.Join(delegate.bullets, "\n")
 		for _, token := range fixCycleDispositionTokens() {
 			if got := strings.Count(delegate.process, token); got != 1 {
 				t.Fatalf("%s Process enumeration names %s %d time(s), want 1:\n%s", delegate.name, token, got, delegate.process)
 			}
-			if got := strings.Count(bulletBlock, token); got != 1 {
-				t.Fatalf("%s Output enumeration defines %s %d time(s), want 1:\n%s", delegate.name, token, got, bulletBlock)
+			if got := strings.Count(delegate.bullets, token); got != 1 {
+				t.Fatalf("%s Output enumeration defines %s %d time(s), want 1:\n%s", delegate.name, token, got, delegate.bullets)
 			}
 		}
-		if len(delegate.bullets) != len(fixCycleDispositionTokens()) {
-			t.Fatalf("%s Output enumerates %d disposition bullets, want %d — a token was added or removed without updating fixCycleDispositionTokens:\n%s",
-				delegate.name, len(delegate.bullets), len(fixCycleDispositionTokens()), bulletBlock)
-		}
 	}
+}
 
-	// Cross-file identity: a one-file edit fails here even when both files stay
-	// internally consistent.
-	if relayProcess != elevatedProcess {
-		t.Fatalf("implementer-relay and implementer-elevated disagree on the Process disposition enumeration:\n relay: %s\n elevated: %s", relayProcess, elevatedProcess)
+// TestImplementerRelayNotFixedMarkerPresentOnlyOnImportantPath guards the
+// deliberate asymmetry TestRenderedImplementerDelegatesShareOneDispositionVocabulary
+// does not cover: `[not fixed: <reason>]` is Important-only self-reported
+// non-resolution, so it must appear exactly once at each `implementer-relay`
+// enumeration site and be wholly absent from `implementer-elevated` — that
+// delegate is reachable only at the Critical ceiling, and Critical never
+// settles as "not fixed" (see 260831's Risk Signal / `implementer-relay.md`
+// Process step 4 and Output). A future edit that "fixes" this back into
+// symmetry with implementer-elevated is the regression this test exists to
+// catch — see `ai-docs/mental-model/prompt-bundle.md`'s pitfall bullet.
+func TestImplementerRelayNotFixedMarkerPresentOnlyOnImportantPath(t *testing.T) {
+	relayProcess, relayBullets, elevatedProcess, elevatedBullets := renderedImplementerDispositionEnumerations(t)
+
+	if got := strings.Count(relayProcess, notFixedDispositionToken); got != 1 {
+		t.Fatalf("implementer-relay Process enumeration names %s %d time(s), want exactly 1:\n%s", notFixedDispositionToken, got, relayProcess)
 	}
 	relayBlock := strings.Join(relayBullets, "\n")
+	if got := strings.Count(relayBlock, notFixedDispositionToken); got != 1 {
+		t.Fatalf("implementer-relay Output enumeration defines %s %d time(s), want exactly 1:\n%s", notFixedDispositionToken, got, relayBlock)
+	}
+	if len(relayBullets) != len(fixCycleDispositionTokens())+1 {
+		t.Fatalf("implementer-relay Output enumerates %d disposition bullets, want %d (four core plus [not fixed: <reason>]):\n%s",
+			len(relayBullets), len(fixCycleDispositionTokens())+1, relayBlock)
+	}
+
+	if strings.Contains(elevatedProcess, notFixedDispositionToken) {
+		t.Fatalf("implementer-elevated Process enumeration must not name %s — Critical never gets a \"not fixed\" disposition:\n%s", notFixedDispositionToken, elevatedProcess)
+	}
 	elevatedBlock := strings.Join(elevatedBullets, "\n")
-	if relayBlock != elevatedBlock {
-		t.Fatalf("implementer-relay and implementer-elevated disagree on the Output disposition enumeration:\n relay:\n%s\n elevated:\n%s", relayBlock, elevatedBlock)
+	if strings.Contains(elevatedBlock, notFixedDispositionToken) {
+		t.Fatalf("implementer-elevated Output enumeration must not define %s — Critical never gets a \"not fixed\" disposition:\n%s", notFixedDispositionToken, elevatedBlock)
 	}
 }
 
@@ -2506,6 +2571,8 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"without a plan artifact",
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
+		"implementer-elevated` gets **Review relay dispatch** when the Critical ceiling fires (review #3 still reports the Critical finding non-clean)",
+		"When the Critical ceiling fires (review #3 still reports the Critical finding\nnon-clean), render `implementer-elevated` in place of `implementer-relay`",
 		"Rendered review relay prompt: <prompt-path>",
 		// The symmetric re-review ask. Without it a [fixed] item that did not land
 		// carries no token, so the capacity condition would have to be inferred from
@@ -2526,19 +2593,19 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
 		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
 	}
-	// Per-slice review relay (260828 Phase 1): the generated review Instruction now
-	// has exactly one relay slot, shared by the ordinary and Critical sub-paths, so
-	// neither adjudicator nor elevated-implementer routing has a reachable trigger
-	// anywhere in the generated text. The lead-implement playbook prose that named
-	// those triggers was removed in the same change; it must not resurface.
+	// Per-slice review relay (260831 severity-graded budget): `implementer-elevated`
+	// is reachable again, but only at the Critical ceiling (asserted in the wanted
+	// list above, reworded from the old capacity/root-cause trigger); the wanted
+	// assertions above pin that reworded routing text directly. `review-adjudicator`
+	// stays unreachable and unreferenced — nothing in the graded budget reproduces
+	// its contested-finding arbitration trigger.
 	for _, forbidden := range []string{
-		"implementer-elevated` gets **Review relay dispatch**",
 		"When the review Instruction's capacity or root-cause condition fired",
 		"review-adjudicator` gets the plan path, review paths, implementer disposition record",
 		"review-adjudicator` returns one verdict line per dispute",
 	} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("lead-implement full ws render retained unreachable adjudicator/elevated routing prose %q:\n%s", forbidden, body)
+			t.Fatalf("lead-implement full ws render retained unreachable adjudicator routing prose, or the superseded capacity/root-cause trigger wording, %q:\n%s", forbidden, body)
 		}
 	}
 	for _, forbidden := range []string{

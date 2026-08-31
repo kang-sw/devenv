@@ -564,27 +564,32 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 }
 
 // implementReviewDispositionClause states the disposition-marker requirement for
-// every non-clean Critical/Important finding review #1 returns. It is shared by
-// every allocation shape that dispatches a review, so the marker vocabulary and
-// the final-report carry-forward requirement never diverge between single,
+// every non-clean Critical/Important finding review #1 returns, plus the
+// Important-only self-reported non-resolution marker. It is shared by every
+// allocation shape that dispatches a review, so the marker vocabulary and the
+// final-report carry-forward requirement never diverge between single,
 // partitioned, and bare-partitioned generation.
-const implementReviewDispositionClause = "Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns: [fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]; carry each disposition into the final report."
+const implementReviewDispositionClause = "Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns: [fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]; carry each disposition into the final report. An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>] — a self-report, not a re-review verdict, since Important is never re-reviewed."
 
-// implementReviewRelayClause states the ordinary one-relay-then-closeout path.
-// There is exactly one relay slot in the new model, shared by the ordinary and
-// Critical sub-paths (see implementReviewCriticalBranchClause), so this clause
-// carries no cycle-budget or cycle-counting language: the relay fires once
-// after review #1 and the run continues past it regardless of what it
-// resolves. This replaces the former multi-cycle budget machinery.
-const implementReviewRelayClause = "Relay every non-clean Critical/Important finding from review #1 exactly once with the Review relay dispatch; after that relay returns, stop relaying and continue to the remaining todos with each finding's recorded disposition carried into the final report. No review #2 follows by default."
+// implementReviewRelayClause states relay #1's scope and the Important/Minor
+// budgets. Relay #1 dispositions every non-clean Critical/Important finding at
+// once; Important's entire relay budget is spent there, so a still-non-clean
+// Important afterward is never re-reviewed — it stands on the self-reported
+// [not fixed: <reason>] from implementReviewDispositionClause. Minor drives no
+// relay at any point. Critical's own further budget lives in
+// implementReviewCriticalBranchClause, not here.
+const implementReviewRelayClause = "Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the Review relay dispatch. Important is best-effort: its one-relay budget is spent in relay #1, is never re-reviewed, and a still-non-clean Important after relay #1 stands on that self-reported [not fixed: <reason>] rather than another relay. Minor drives no relay at any point; record Minor findings in the review summary only."
 
-// implementReviewCriticalBranchClause states the Critical exception: a Critical
-// finding in review #1 earns one Critical-scoped review #2 after the same relay
-// slot implementReviewRelayClause describes (not an additional one), and a
-// Critical finding still non-clean after that review #2 is a hard stop, never a
-// third relay. The hard-stop hand-off is file-first evidence (paths, not copied
-// finding bodies), matching the pattern the clauses this replaces already used.
-const implementReviewCriticalBranchClause = "Critical exception: if review #1 reports any Critical finding, follow the same relay with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings. Terminal: do not schedule a further relay after review #2 regardless of its result; a Critical finding still non-clean after review #2 stops the slice from merging. Hand-off: report the hard stop to the user with the review findings paths and disposition notes as durable evidence, and wait for direction rather than relaying again."
+// implementReviewCriticalBranchClause states the Critical exception: bounded 3
+// review rounds (review #1 plus up to 2 Critical-scoped re-reviews), affording
+// up to 2 Critical-scoped relays (relay #1 shared with Important, plus a second
+// Critical-only relay #2). A Critical still non-clean after review #3 is the
+// ceiling: it unconditionally elevates to `implementer-elevated` rather than
+// halting, and the run continues to the remaining todos — restoring the
+// elevation shape from before 260828 without reviving the mid-budget
+// capacity/root-cause trigger or review-adjudicator arbitration that shape also
+// carried.
+const implementReviewCriticalBranchClause = "Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings. If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt. Ceiling: if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated` — never a hard stop — and continue to the remaining todos with the elevation recorded in the final report; do not schedule a review #4 or a third relay."
 
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
