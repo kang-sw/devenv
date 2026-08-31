@@ -833,21 +833,29 @@ first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
 correctness `large`, fit and test `medium` — raised for unusually subtle risk.
 When a delegate playbook declares its own `tier:`, the `recommended-tier`
 returned by `playbook.render` is authoritative for that delegate and the table is
-the allocation default. The per-slice review loop is one repair relay, not a
-multi-cycle budget: review #1, then a single relay that dispositions its
-findings, then closeout — no default review #2. Every non-clean Critical or
-Important finding from review #1 carries exactly one disposition marker in that
-relay: `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or
-`[escalate: <reason>]`. The one exception is a Critical finding: when review #1
-surfaces any Critical, the single relay is followed by a Critical-scoped review
-#2, and a Critical still standing after that review is a hard stop — the slice
-does not merge and the finding is escalated with its durable evidence (the
-review findings paths and disposition notes), never a third relay. Because the
-model has exactly one relay slot across both the ordinary and Critical paths, the
-per-slice loop no longer routes to the `review-adjudicator` or
-`implementer-elevated` delegates: their multi-cycle triggers ("before the next
-review", "the next relay") have no reachable slot to fire into. The delegate
-playbooks remain in the tree but this loop does not invoke them.
+the allocation default. The per-slice review loop budgets by severity rather
+than uniformly. Critical is must-fix and bounded to 3 review rounds: review #1,
+then — only when review #1 reports a Critical finding — a Critical-scoped
+review #2 after relay #1, then, if still non-clean, a second Critical-scoped
+relay (relay #2) and a Critical-scoped review #3. A Critical still non-clean
+after review #3 is the ceiling, not a hard stop: it unconditionally elevates to
+`implementer-elevated` and the run continues to the remaining todos, carrying
+the elevation into the final report. Important is best-effort and gets at most
+one relay, spent in relay #1 alongside Critical and never re-reviewed; a still
+non-clean Important after relay #1 carries the implementer's own
+`[not fixed: <reason>]` self-report rather than a re-review verdict. Minor
+drives no relay at any point and is recorded in the review summary only. Every
+non-clean Critical or Important finding relay #1 dispositions carries exactly
+one marker: `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or
+`[escalate: <reason>]`; Important additionally has `[not fixed: <reason>]` for
+the still-non-clean case above — Critical never gets that marker, since a
+still-non-clean Critical instead carries forward into the next Critical-scoped
+round. Because `implementer-elevated` is reachable only at the Critical
+ceiling, and only for the Critical finding that reached it, the per-slice loop
+still does not route to `review-adjudicator`: nothing in this budget reproduces
+its contested-finding arbitration trigger ("before the next review", "the next
+relay" independent of severity). That playbook remains in the tree but this
+loop does not invoke it.
 {#260612-reviewer-allocation-tier-default}
 
 Delegates in the review fix-loop are stateless by contract: each implementer and
@@ -870,7 +878,8 @@ finding is not re-relayed, while genuinely new Critical/Important findings and
 findings reported fixed that a re-review returns unresolved are. Unresolved
 carryover is not a settled disposition: dedup bars re-litigating a decision the
 record already carries (won't-fix, deferred, out-of-scope, or an open
-escalation), while the single relay slot — rather than a multi-cycle budget —
+escalation), while the severity-graded budget — Important's single relay,
+Critical's bounded 3 review rounds — rather than an unbounded cycle count,
 naturally bounds reviewer-invented churn, so neither rule suppresses the relay of
 a fix that did not hold.
 Delegated review-fix relay is file-first: the lead renders the

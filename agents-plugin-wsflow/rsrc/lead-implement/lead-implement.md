@@ -29,7 +29,9 @@ Review
 - Reviewer count and partitions come from `review_alloc`.
 - Lead aggregates reviewer severity verdicts and records final review status.
 - Fix correctness, security, contract, and regression findings; reject style-only or scope-expanding findings with reasons.
-- Relay only unresolved Critical/Important findings; record minor findings in the review summary.
+- Critical is must-fix: bounded to 3 review rounds (review #1 plus up to 2 Critical-scoped re-reviews); a Critical still non-clean after review #3 unconditionally elevates to `implementer-elevated` — never a hard stop, and the run continues.
+- Important is best-effort: relayed once, in relay #1 alongside Critical; a still-non-clean Important after that relay is not re-reviewed — it stands on the implementer's own `[not fixed: <reason>]` record.
+- Minor drives no relay; record it in the review summary only.
 - Preserve settled or deferred dispositions.
 - Summarize review evidence before deleting temporary review files.
 
@@ -108,7 +110,7 @@ Run after a confirmed merge to reduce branch accumulation.
 <!-- ws:full-only:start -->
 5. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->
-6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
+6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; `implementer-elevated` gets **Review relay dispatch** when the Critical ceiling fires (review #3 still reports the Critical finding non-clean); reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
 ### Plan contract
 
@@ -184,6 +186,10 @@ Instructions:
 Render `implementer-relay` with declared inputs: PlanPath, ReviewCycle,
 CommitRange, ReviewPaths, DispositionNotes, VerificationHint, and
 ResultExpectations. Capture prompt path and recommended-tier.
+
+When the Critical ceiling fires (review #3 still reports the Critical finding
+non-clean), render `implementer-elevated` in place of `implementer-relay`, with
+those same declared inputs plus PriorFixCommits and PriorDispositions.
 
 Rendered review relay prompt: <prompt-path>
 

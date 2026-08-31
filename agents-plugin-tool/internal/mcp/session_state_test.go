@@ -262,46 +262,47 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	}
 }
 
-// implementOrdinaryRelayWants pins the one-relay + Critical-branch clause set
-// every review-dispatching allocation shape (single, partitioned, bare
-// partitioned) shares. Each entry is load-bearing:
+// implementOrdinaryRelayWants pins the severity-graded clause set every
+// review-dispatching allocation shape (single, partitioned, bare partitioned)
+// shares. Each entry is load-bearing:
 //   - the disposition-marker set is exhaustive and file-first (a marker per
-//     finding, not a copied finding body);
-//   - the relay clause fires exactly once, with no cycle-budget language, since
-//     there is exactly one relay slot in the model;
-//   - the Critical branch reuses that same relay slot rather than adding one,
-//     and terminates in a hard stop with durable evidence paths rather than a
-//     third relay.
+//     finding, not a copied finding body), including the Important-only
+//     self-reported [not fixed: <reason>];
+//   - relay #1 dispositions Critical and Important at once, and Important's
+//     entire relay budget is spent there with no re-review to follow;
+//   - Minor drives no relay at any point;
+//   - the Critical branch is bounded to 3 review rounds (up to 2 Critical-scoped
+//     relays) and ends in unconditional elevate at the ceiling, never a hard
+//     stop, with the run continuing to the remaining todos.
 func implementOrdinaryRelayWants() []string {
 	return []string{
 		"Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns",
 		"[fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]",
 		"carry each disposition into the final report",
-		"Relay every non-clean Critical/Important finding from review #1 exactly once with the Review relay dispatch",
-		"stop relaying and continue to the remaining todos",
-		"each finding's recorded disposition carried into the final report",
-		"No review #2 follows by default",
-		"Critical exception: if review #1 reports any Critical finding, follow the same relay with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
-		"do not schedule a further relay after review #2 regardless of its result",
-		"a Critical finding still non-clean after review #2 stops the slice from merging",
-		"report the hard stop to the user with the review findings paths and disposition notes as durable evidence",
-		"wait for direction rather than relaying again",
+		"An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>]",
+		"since Important is never re-reviewed",
+		"Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the Review relay dispatch",
+		"Important is best-effort: its one-relay budget is spent in relay #1",
+		"Minor drives no relay at any point; record Minor findings in the review summary only",
+		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
+		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt",
+		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
+		"never a hard stop",
+		"continue to the remaining todos with the elevation recorded in the final report",
+		"do not schedule a review #4 or a third relay",
 	}
 }
 
-// implementOrdinaryRelayForbidden pins the superseded multi-cycle-budget and
-// adjudication/elevated-relay vocabulary out of existence on the ordinary
-// review-dispatching path: the new model has exactly one relay slot, shared by
-// the ordinary and Critical sub-paths, so neither delegate has a reachable
-// trigger anywhere in generated review instructions.
+// implementOrdinaryRelayForbidden pins the superseded review-adjudicator
+// contested-finding arbitration vocabulary out of existence on the ordinary
+// review-dispatching path. Unlike the one-relay model this replaces, the
+// severity-graded budget legitimately reintroduces round/relay-count language
+// and the `implementer-elevated` token (bounded-3-round Critical, ceiling
+// elevate), so this list narrows to arbitration-only terms: nothing in the
+// budget reproduces review-adjudicator's contested-finding trigger.
 func implementOrdinaryRelayForbidden() []string {
 	return []string{
-		"review cycles for this implementation slice",
-		"budget",
-		"cycle 1",
-		"relay at most",
 		"review-adjudicator",
-		"implementer-elevated",
 		"[maintained]",
 		"Adjudicate at most once per relay slot",
 		"Capacity:",
@@ -1963,9 +1964,10 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	if strings.Contains(review, "reviewers") {
 		t.Fatalf("single-review todo instruction = %q", review)
 	}
-	// The new model has exactly one relay slot shared by the ordinary and Critical
-	// sub-paths, so the adjudicator/elevated delegates have no reachable trigger on
-	// any allocation shape, single included.
+	// The severity-graded budget still gives review-adjudicator no reachable
+	// trigger on any allocation shape, single included; implementer-elevated is
+	// reachable but only at the Critical ceiling, so it is not in this forbidden
+	// list (see implementOrdinaryRelayForbidden's own doc comment).
 	for _, forbidden := range implementOrdinaryRelayForbidden() {
 		if strings.Contains(review, forbidden) {
 			t.Fatalf("single-review todo instruction retained superseded relay/adjudication wording %q: %q", forbidden, review)
@@ -1975,9 +1977,11 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 
 // TestDeriveImplementTodoInstructionsCriticalReviewBranch pins the Critical-only
 // branch text at the generation source (independent of allocation shape, since
-// the clause is shared): one relay, then a Critical-scoped review #2, then a
-// hard stop with durable evidence paths on a still-Critical result — with no
-// further relay scheduled anywhere in that sequence.
+// the clause is shared): bounded-3-round iteration — review #1's relay #1,
+// then a Critical-scoped review #2, then (if still non-clean) a second
+// Critical-scoped relay #2 and a Critical-scoped review #3 — ending in
+// unconditional elevate to `implementer-elevated` at the ceiling, never a
+// hard stop, with the run continuing past it.
 func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
@@ -1990,19 +1994,24 @@ func TestDeriveImplementTodoInstructionsCriticalReviewBranch(t *testing.T) {
 	})
 	review := requireInstruction(t, todoByKey(t, got, "review"))
 	for _, want := range []string{
-		"Critical exception: if review #1 reports any Critical finding, follow the same relay with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
-		"do not schedule a further relay after review #2 regardless of its result",
-		"a Critical finding still non-clean after review #2 stops the slice from merging",
-		"report the hard stop to the user with the review findings paths and disposition notes as durable evidence",
-		"wait for direction rather than relaying again",
+		"Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings",
+		"If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt",
+		"if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated`",
+		"never a hard stop",
+		"continue to the remaining todos with the elevation recorded in the final report",
+		"do not schedule a review #4 or a third relay",
 	} {
 		if !strings.Contains(review, want) {
 			t.Fatalf("Critical-branch review instruction missing %q: %q", want, review)
 		}
 	}
-	for _, forbidden := range []string{"review #3", "third relay", "another relay after review #2"} {
+	// The ceiling replaces the old hard-stop terminal outright: the slice must
+	// never be described as blocked from merging or awaiting user direction —
+	// it elevates and the run continues past the ceiling with no further
+	// review or relay scheduled.
+	for _, forbidden := range []string{"stops the slice from merging", "does not merge", "wait for direction rather than relaying again"} {
 		if strings.Contains(review, forbidden) {
-			t.Fatalf("Critical-branch review instruction implies a second relay %q: %q", forbidden, review)
+			t.Fatalf("Critical-branch review instruction still implies a hard-stop outcome %q: %q", forbidden, review)
 		}
 	}
 }
