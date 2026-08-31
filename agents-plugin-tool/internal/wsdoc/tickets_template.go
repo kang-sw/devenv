@@ -53,10 +53,9 @@ const ticketBodyActionable = `
 <later tweak or follow-up implementation pass for this completed phase>
 ` + "```" + `
 
-Default to a single Phase 1. Add Phase 2, Phase 3, and so on only for units that
-are sequentially dependent — a later phase builds on an earlier phase's landed
-Result. Differing review, verification, or rollback boundaries alone do not
-justify a separate phase.
+Default to a single Phase 1. Add another phase when a later one is sequentially
+dependent — it builds on an earlier phase's landed Result; separate review or
+verification scope on its own is rarely reason enough.
 
 Optional sections — add between ` + "`## Background`" + ` and ` + "`## Phases`" + ` when relevant:
 
