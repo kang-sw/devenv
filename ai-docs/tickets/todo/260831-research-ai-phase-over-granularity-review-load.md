@@ -74,9 +74,11 @@ drift and keep a cheap human touch where judgment is irreducible.
   runs and corrects on nearly every ticket already, so the extra check adds no
   meaningful round cost.
 - **Upstream prevention (cheaper and more fundamental than the signal):** change
-  the emitted template to model **one phase by default**, and resolve the
+  the emitted template to model **one phase by default** (LANDED as a
+  consistency hotfix in `f5784dea` — the template contradicted the already-stated
+  one-phase default, so it did not need the measure-first gate), and resolve the
   completeness reviewer's asymmetry where per-phase obligations scale load with
-  no over-split counter.
+  no over-split counter (still open).
 
 ### Epic-to-ticket splitting — human checkpoint, not automation
 
