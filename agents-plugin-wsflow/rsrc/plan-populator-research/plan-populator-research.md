@@ -33,9 +33,15 @@ The plan path may contain survey output that requested research.
 - Plan must be self-contained: a fresh executor implements without re-researching.
 - Choose the clean existing mechanism when one fits the accepted target; do not
   plan a bypass.
-- Do not encode temporary, fallback, mock-data, or duplicated-glue behavior as
-  the implementation path.
-- Escalate when the accepted target cannot be satisfied without a questionable shortcut.
+- Do not encode a temporary, implementation-fallback (scope shortcut), mock-data,
+  or duplicated-glue path as the implementation. A ticket's required runtime
+  fallback — a specified execution branch such as graceful degradation — is not
+  a shortcut and must be planned in full.
+- Escalate to the lead when the accepted target cannot be satisfied without a
+  questionable shortcut, or when a fully-specified, multi-part requirement
+  cannot be carried whole into the plan and only a confident subset can be
+  planned; a "first cut" is legitimate only when the ticket or lead already
+  authorized the phasing.
 - Exclude code snippets, import-by-import instructions, routine-edit line citations,
   and exhaustive construction-site inventories.
 - Do not modify source files or create commits.
@@ -72,8 +78,9 @@ Identify:
 - What test infrastructure exists for this scope.
 - Which existing mechanisms the plan must reuse to avoid duplicated glue.
 - Whether the selected authority points toward a public contract mismatch, mock-data
-  wiring, fallback behavior, temporary implementation path, or test-passing
-  bypass.
+  wiring, an implementation fallback (scope shortcut), temporary implementation
+  path, or test-passing bypass — as distinct from a ticket's required runtime
+  fallback (a specified execution branch), which is not a shortcut signal.
 
 ### 3. Draft
 
@@ -84,8 +91,9 @@ Identify:
    wire formats, persistence schemas, public API types, config, env vars.
 4. If a clean plan exists, write it through the existing mechanism and call out
    rejected shortcut paths.
-5. If no clean plan exists, write `## Escalations` and report the blocker instead
-   of inventing a workaround.
+5. If no clean plan exists, or only a confident subset of a fully-specified,
+   multi-part requirement can be planned, write `## Escalations` and report the
+   blocker (or scope-reduction decision) instead of inventing a workaround.
 6. Replace any existing survey output at the plan path with the research plan,
    or refine it in place only when the six required sections remain intact.
 

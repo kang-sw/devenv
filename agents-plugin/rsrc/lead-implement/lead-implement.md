@@ -170,7 +170,7 @@ Required checks:
 - <required check from the Reviewer table>
 - Review the supplied authority, plan contract, and diff together.
 - Plan guardrails were not bypassed.
-- Binding authority decisions were not omitted or violated.
+- Each specified authority requirement is implemented, or carries an explicit, authorized deferral.
 
 Instructions:
 - For inline authority, do not read or require a ticket path.

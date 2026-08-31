@@ -898,19 +898,30 @@ accepted scope, constraints, non-goals, and verification boundary and never
 reads a placeholder ticket path. `plan-populator-survey` clips the selected
 authority, explores source, writes a light implementation plan with `Relevant
 Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
-`Verification Plan`, and `Escalations`, then returns `[ok]` or
-`[escalate-to-research]` with confidence and rationale. If survey cannot safely
-support implementation without strategy, contract, or reuse judgment,
-`lead-implement` routes to `plan-populator-research` on the same plan path
-before spawning the implementer.
+`Verification Plan`, and `Escalations`, then returns `[ok]`,
+`[escalate-to-research]`, or `[escalate-to-lead]` with confidence and
+rationale. `[escalate-to-lead]` is a lead-directed scope-reduction signal,
+distinct from `[escalate-to-research]`'s strategy/contract-uncertainty scope:
+a fully-specified, multi-part requirement must be carried whole into the plan,
+and a confident planner decision to implement only a subset is a scope
+decision for the lead, never a unilateral planner choice, unless the ticket or
+lead already authorized the phasing. If survey cannot safely support
+implementation without strategy, contract, or reuse judgment, `lead-implement`
+routes to `plan-populator-research` on the same plan path before spawning the
+implementer.
 
 `plan-populator-research` is reached from the survey escalation signal and makes
 planner judgments: it reads any existing survey output at the same plan path,
 chooses clean existing mechanisms when they fit the selected authority, preserves
 selected contract and verification guardrails in the plan, rejects temporary,
-fallback, mock-data, and duplicated-glue paths, and escalates when no clean plan
-can satisfy it. A survey-to-research route reuses the same authority inputs and
-replaces or refines the same plan artifact path with the research plan; it does not create a
+implementation-fallback (scope-shortcut), mock-data, and duplicated-glue paths
+— as distinct from a ticket's required runtime fallback (a specified execution
+branch such as graceful degradation), which is not a shortcut signal and must
+be planned in full — and escalates via the same `[escalate-to-lead]` channel
+when no clean plan can satisfy it or when only a confident subset of a
+fully-specified, multi-part requirement can be planned. A survey-to-research
+route reuses the same authority inputs and replaces or refines the same plan
+artifact path with the research plan; it does not create a
 research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
@@ -926,9 +937,9 @@ relevant ticket contract and records implementation strategy, codebase findings,
 verification expectations, escalations, and explicit out-of-scope boundaries.
 Ticket noise such as background discussion, unsettled options, and unrelated
 future phases is stripped. In ticket-driven runs, reviewers read the ticket and
-plan, then treat selected-scope binding decisions omitted from the plan or
-violated by the implementation as blocking findings within their assigned
-partitions.
+plan, then treat any specified authority requirement that is not implemented
+and does not carry an explicit, authorized deferral as a blocking finding
+within their assigned partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
 stages complete. For implementation-branch modes,
