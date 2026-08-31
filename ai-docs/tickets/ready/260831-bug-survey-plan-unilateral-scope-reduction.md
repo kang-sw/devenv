@@ -144,6 +144,37 @@ survey/research contract) to record the new lead-directed scope-reduction
 escalation signal and the reviewer per-requirement coverage obligation; reconcile
 the `workflow-skills` mental-model on contact.
 
+### Result (4e795761) - 2026-08-31
+
+All three changes landed as planned. The suggested approach held: rather than a
+new token, the survey delegate gained a lead-directed `[escalate-to-lead]`
+scope-reduction signal (distinct from the un-widened `[escalate-to-research]`),
+and the research delegate's existing `[escalate-to-lead]` was broadened to cover
+the same confident-subset case. Both planners now distinguish an implementation
+fallback (a forbidden unilateral shortcut) from a ticket's required runtime
+fallback (must be planned in full), closing the homonym trap. The reviewer-frame
+line reads "Each specified authority requirement is implemented, or carries an
+explicit, authorized deferral" — phrased against `authority` so it binds both
+`Authority: Ticket path` and `Authority: Inline contract` modes.
+
+`session_state.go` was left untouched (it holds only a name-pointer to the
+reviewer frame, not the coverage-line text), so the shared-clause convergence
+constraint was satisfied without any Go source change beyond test assertions.
+Golden/rendered tests now lock the down-scope rule and the new signal, assert
+`[escalate-to-research]` stays uncertainty-scoped, and forbid the removed vague
+line. Docs reconciled in-range: spec `{#260505-implementation-workflow-skills}`,
+mental-model `workflow-skills` (new local anchor
+`{#260831-forbid-unilateral-scope-reduction}`) and `prompt-bundle`.
+
+Verification: full Go suite (13 packages) green, plus wsflow mirror byte-identity
+and manifest-hash drift tests. Partitioned review: correctness / fit / test all
+clean. One Minor recorded, not fixed: the new mental-model anchor
+`{#260831-forbid-unilateral-scope-reduction}` resolves to no spec anchor, but
+this follows a tolerated local convention (five pre-existing unresolved
+mental-model anchors; `spec_index_verify` ok), so it was left as-is rather than
+break the pattern. Commit range `049e31af..5cad50c0` (feat `4e795761`, spec
+`3f8d7bc4`, mental-model `5cad50c0`).
+
 ## Spec Impact
 
 The caller-visible workflow behavior added is (1) a new planner escalation signal
