@@ -1,9 +1,14 @@
 ---
 title: Layer-aware note oversize nudge + clone-scoped path.generate kind
+spec:
+  - 260810-note-tools
+  - 260505-workflow-state-delegation-tools
 sage-review-design: completed
 related:
   260823-feat-note-write-oversize-relocate-nudge: origin — introduced the oversize relocate nudge this refines (dropped feature ticket)
 sage-review-design-reviewed: e1ae4730b05b8e27
+sage-review-completeness: completed
+sage-review-completeness-reviewed: e1ae4730b05b8e27
 ---
 
 # Layer-aware note oversize nudge + clone-scoped path.generate kind
