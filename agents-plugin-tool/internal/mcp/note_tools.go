@@ -291,11 +291,29 @@ func noteKeysArg(toolName string, args map[string]any) ([]string, error) {
 // constant (mirrors notesInjectionCap's style), not a contract fork.
 const noteOversizeThreshold = 300
 
-// noteOversizeChallenge is the confirmed discipline-nudge text appended to
-// note.write's text-mode response when any written note is oversize. The
-// write itself is always unconditional — this is a post-write nudge, never a
-// gate — and the remediation verbs are relocate/erase, never mute.
-const noteOversizeChallenge = "Large note (≥300 bytes; saved). Prefer: move the detail into a ticket/spec/mental-model and keep a <300-byte pointer here, or erase. Keep the full text only if it's volatile AND homeless AND must-always-stay-in-context. Not mute."
+// noteOversizeChallengeFor returns the confirmed discipline-nudge text
+// appended to note.write's text-mode response when any written note is
+// oversize, branched on the resolved layer. The write itself is always
+// unconditional — this is a post-write nudge, never a gate — and the
+// remediation verbs are relocate/erase, never mute. Each variant is trimmed
+// of the large-text-keep carve-out ("volatile AND homeless AND
+// must-always-stay-in-context"): notes are always-injected, so an
+// irreducible sub-300-byte pointer passes the threshold naturally instead of
+// needing a keep-the-full-text escape hatch.
+func noteOversizeChallengeFor(layer wsnote.Layer) string {
+	switch layer {
+	case wsnote.LayerRepo:
+		return "Large note (≥300 bytes; saved). Prefer: move the detail into a ticket/spec/mental-model and keep a <300-byte relative pointer here, or erase. Not mute."
+	case wsnote.LayerWorktree:
+		return "Large note (≥300 bytes; saved). Prefer: move the detail into a gitignored local doc (e.g. a sibling *.local.md) and keep a <300-byte relative pointer here, or erase. Not mute."
+	case wsnote.LayerClone:
+		return "Large note (≥300 bytes; saved). Prefer: allocate a doc via path.generate(kind: \"clone\", stem: ...), write the detail there, and keep the returned absolute path (never relative, never a gitignored in-worktree file) as a <300-byte pointer here, or erase. Not mute."
+	case wsnote.LayerMachine:
+		return "Large note (≥300 bytes; saved). Prefer: move the detail into an excluded doc referenced by an absolute path and keep a <300-byte pointer here, or erase. Not mute."
+	default:
+		return "Large note (≥300 bytes; saved). Prefer: move the detail out of this note and keep a <300-byte pointer here, or erase. Not mute."
+	}
+}
 
 // noteWriteExceedsOversizeThreshold reports whether any record's Value is at
 // or above noteOversizeThreshold bytes.
@@ -329,7 +347,16 @@ func (s *Server) handleNoteWrite(id json.RawMessage, args map[string]any, meta m
 	}
 	text := formatNoteWrite(records)
 	if noteWriteExceedsOversizeThreshold(records) {
-		text += "\n" + noteOversizeChallenge
+		// args are already validated by the resolveNoteStore call above, so
+		// this second parse cannot newly fail; resolveNoteStore returns only
+		// the noteStore interface, not the resolved wsnote.Layer, so the
+		// layer is re-derived here rather than widening resolveNoteStore's
+		// return signature (which would force unrelated edits at its other
+		// three call sites that don't need the layer value).
+		layer, layerErr := noteLayerArg(tool, args)
+		if layerErr == nil {
+			text += "\n" + noteOversizeChallengeFor(layer)
+		}
 	}
 	return toolTextResponse(id, text, nil)
 }

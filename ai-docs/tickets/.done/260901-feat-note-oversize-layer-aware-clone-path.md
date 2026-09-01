@@ -9,6 +9,7 @@ related:
 sage-review-design-reviewed: e1ae4730b05b8e27
 sage-review-completeness: completed
 sage-review-completeness-reviewed: e1ae4730b05b8e27
+completed: 2026-09-01
 ---
 
 # Layer-aware note oversize nudge + clone-scoped path.generate kind
@@ -122,6 +123,36 @@ Two coupled edits landing together:
 
 Verification: `go test ./...` in `agents-plugin-tool`; targeted `note_tools` and
 `generated_paths` tests.
+
+### Result (351628de) - 2026-09-01
+
+Landed on `impl/develop/shank-stank-quirk` (`58599fb8..351628de`).
+
+- `note.write` oversize nudge is layer-branched via
+  `noteOversizeChallengeFor(layer)`; `handleNoteWrite` re-derives the layer with
+  a second `noteLayerArg` parse (kept `resolveNoteStore`'s signature to avoid
+  unrelated call-site edits). The large-text-keep carve-out is removed from all
+  four variants and the default.
+- New `path.generate(kind: "clone")` allocates `<stem>-<6char [a-z0-9]>.md`
+  under `SharedDir/docs` via a dedicated `generateClonePaths` +
+  `reserveUniqueSuffixedGeneratedPath` + `randomBase36`; reserves with `O_EXCL`
+  and retries on collision, never truncating. MCP schema enum/description now
+  include `clone`. Confirmed no cache-cleanup path enumerates path kinds, so
+  clone docs persist with the referencing note (no cleanup change needed).
+- Spec: `{#260810-note-tools}` oversize paragraph rewritten to the layer-aware
+  contract; `{#260505-workflow-state-delegation-tools}` gained the
+  `kind: "clone"` sentence.
+
+Deviation: added a `cloneSuffixGenerator` package-level var as a deterministic
+test seam for the collision-retry path (production behavior unchanged).
+
+Verification: full `go test ./...` in `agents-plugin-tool` green (14 packages).
+
+Review: partitioned correctness/fit/test — all clean, no Critical/Important, no
+relay. Two minors recorded only: (1) `randomBase36` uses modulo (slight bias,
+negligible for a collision-avoidance suffix); (2) `cloneSuffixGenerator` is a
+package-global rather than instance-scoped DI and its "mirrors Options.Now"
+comment overstates the parallel — harmless (no parallel test relies on it).
 
 ## Spec Impact
 

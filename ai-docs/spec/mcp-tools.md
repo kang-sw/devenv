@@ -521,14 +521,35 @@ positional-array precedent anywhere in the tool surface.
   call has a `value` of at least a fixed oversize threshold (a named tunable
   constant, `300` bytes — mirroring the injection cap's named-constant
   style, `#260810-note-injection`), the **text-format** response additionally
-  carries a one-time discipline challenge appended after the write summary:
-  `Large note (≥300 bytes; saved). Prefer: move the detail into a
-  ticket/spec/mental-model and keep a <300-byte pointer here, or erase. Keep the
-  full text only if it's volatile AND homeless AND must-always-stay-in-context.
-  Not mute.` The challenge fires once per call regardless of how many
-  notes cross the threshold (a batch with several oversized notes still appends
-  it exactly once), and the write itself is unconditional — the note is stored
-  either way. The remediation it names is relocate or erase, never mute; a mute
+  carries a one-time discipline challenge appended after the write summary.
+  The challenge text is **layer-branched**, selected by the resolved
+  `layer` the write targeted, since the right place to move oversize detail
+  differs per layer:
+  - **repo**: `Large note (≥300 bytes; saved). Prefer: move the detail into
+    a ticket/spec/mental-model and keep a <300-byte relative pointer here,
+    or erase. Not mute.`
+  - **worktree**: `Large note (≥300 bytes; saved). Prefer: move the detail
+    into a gitignored local doc (e.g. a sibling *.local.md) and keep a
+    <300-byte relative pointer here, or erase. Not mute.`
+  - **clone**: `Large note (≥300 bytes; saved). Prefer: allocate a doc via
+    path.generate(kind: "clone", stem: ...), write the detail there, and
+    keep the returned absolute path (never relative, never a gitignored
+    in-worktree file) as a <300-byte pointer here, or erase. Not mute.`
+  - **machine**: `Large note (≥300 bytes; saved). Prefer: move the detail
+    into an excluded doc referenced by an absolute path and keep a
+    <300-byte pointer here, or erase. Not mute.` (machine has no dedicated
+    allocator — it stays prose-only.)
+
+  Every variant is intentionally trimmed of any "keep the full text if it's
+  volatile AND homeless AND must-always-stay-in-context" carve-out: notes are
+  always-injected, so an irreducible sub-300-byte pointer passes the
+  threshold naturally, and a keep-the-full-text escape hatch is unnecessary.
+  The challenge fires once per call regardless of how many notes cross the
+  threshold (a batch with several oversized notes still appends it exactly
+  once), and the write itself is unconditional — the note is stored either
+  way, and `note.write` never auto-relocates or repoints content itself; the
+  challenge is advice for the calling agent to allocate → write → repoint on
+  its own. The remediation it names is relocate or erase, never mute; a mute
   would only leave the content neither in context nor in its proper home. The
   JSON-format response is unaffected: it returns the written records only and
   never the challenge, matching the text-only-nudge convention `git.commit`
@@ -1996,7 +2017,17 @@ exchange file paths without inventing cache locations. `kind: "review"` and
 `kind: "prompt"` allocate worktree-scoped cache artifacts. `kind: "plan"`
 allocates repo-local implementation plan files under
 `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`; collisions append a numeric suffix
-while preserving the sanitized logical stem.
+while preserving the sanitized logical stem. `kind: "clone"` allocates a
+worktree-agnostic shared doc under the clone's `SharedDir` (a
+`docs/` subdirectory), targeted directly since `SharedDir` is already
+clone-shared and stable across every linked worktree of the same clone — no
+new cross-worktree resolution logic is needed. Unlike `review`/`prompt`'s
+opaque `<runID>-<NN>-<stem>.md` scheme, `clone` filenames are readable
+(`<sanitized-stem>-<6-char-suffix>.md`, where the suffix is a fresh random
+`[a-z0-9]` string); a suffix collision retries with a new random suffix
+rather than truncating a colliding sibling file. This is the allocator the
+`note.write` clone-layer oversize nudge (`#260810-note-tools`) points a
+calling agent at for relocating oversize note content.
 
 ## wsflow Agentless Runtime Mode {#260513-wsflow-agentless-runtime-mode}
 
