@@ -9,6 +9,7 @@ related:
 sage-review-design-reviewed: e1ae4730b05b8e27
 sage-review-completeness: completed
 sage-review-completeness-reviewed: e1ae4730b05b8e27
+completed: 2026-09-01
 ---
 
 # Layer-aware note oversize nudge + clone-scoped path.generate kind
