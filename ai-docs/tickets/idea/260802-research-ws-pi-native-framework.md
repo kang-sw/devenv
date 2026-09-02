@@ -184,12 +184,84 @@ mangled `ws_playbook_print` names) remains the MCP fallback.
   `@tintinweb/pi-subagents` is the recorded fallback.)
 - **MCP bridge:** unchanged (self-build minimal stdio, name-preserving).
 - **Skills / distribution (git package):** unchanged.
-- **Expansion (recursive explore, todo, goal-loop, compaction):** unchanged;
-  depth-2 recursive explore is where a custom agent profile — and its accepted
-  global-path write cost — would first be justified. Existing packages
+- **Expansion (todo, goal-loop, compaction, durable sub-worker recursion):**
+  unchanged; **durable** depth-2 recursion (a worker spawning a multi-turn
+  `spawn` child) is where a custom agent profile — and its accepted global-path
+  write cost — would first be justified. Recon-recursion is cheap via the
+  `explore` primitive (see below), *not* a custom profile. Existing packages
   (`@juicesharp/rpiv-todo`, `@tintinweb/pi-tasks`, `@narumitw/pi-goal`,
   `pi-goal-x`) stay reference/candidate prior art for the other expansion
   surfaces.
+
+### Recon as a first-class one-shot primitive (not spawner recursion)
+
+Refines "Recursive explore subagent" below. Recon delegation is modeled as a
+**dedicated `explore` primitive**, not the general spawner exposed at depth
+with curation restriction:
+
+- **Structural restriction, not prompt-enforced.** A worker's toolset contains
+  `explore` but NOT `spawn`, so it *cannot* escalate to arbitrary delegation —
+  the constraint is the tool's absence, not a `max-depth`/`allowed-playbooks`
+  rule the sub-agent must be taught.
+- **Deliberately less capable → cheaper.** `explore(query[, async])` is
+  **one-shot** (`--no-session`, no `continue`): recon leaves need no session
+  continuation, no continue-race guard, and self-reap — removing most of the
+  depth-2 cleanup-cascade cost flagged for full recursion. If a recon "needs
+  continue," it is a worker, not an explore → use `spawn`.
+- **One engine, thin preset.** `explore` reuses the self-built spawner internals
+  (subprocess + drain) with fixed `playbook=explore`, `--tools=recon`,
+  `--no-session`; ~30-50 lines over the engine, not a second implementation.
+- **Surface split by lifecycle, not depth.** `explore` = ephemeral one-shot
+  read-only recon (any level, always a leaf); `spawn/continue/wait` = durable
+  multi-turn worker orchestration. Two **first-class delegation kinds** (mirrors
+  Claude's Explore vs Task), consistent with the existing lead/worker asymmetry
+  — not "general + special case."
+
+Consequence: recon-recursion is nearly free (a worker calls the ordinary
+`explore` tool; leaves self-reap). **Durable** sub-worker recursion (a worker
+spawning a multi-turn `spawn` child) stays the rare, deferred true-recursion
+case — the only path that pulls the full continuation/cleanup surface down to
+depth-2. `explore` itself may land in MVP as a lead-level recon tool; exposing
+it to depth-1 workers is the cheap expansion.
+
+### Model catalog + tier mapping on Pi — user-configured, bootstrap-warned
+
+Unlike Claude/Codex (fixed frontier tiers ws pre-maps to
+haiku/sonnet/opus-class models), **Pi accepts any model string over an open,
+per-user catalog** (providers and routing vary widely). ws therefore **cannot
+ship a tier→model default**; the only safe built-in default is **inherit the
+parent/current model** — safe but *wrong for recon* (it runs cheap exploration
+on the expensive lead model).
+
+Design:
+
+- **Catalog = runtime-curated from Pi.** The adapter reads Pi's enabled/
+  configured model list at runtime (`enabled-models.ts`; exact extension-facing
+  read API to confirm) and presents it as the selectable pool — ws hardcodes no
+  model names.
+- **Tier map is user-configured, adapter-owned.** The user assigns catalog
+  entries to ws tiers (explore/recon, light/medium/large) once; the mapping
+  lives in the **Pi adapter's curation data file** (adapter-owned per the golden
+  rule — Pi model strings are harness-specific and must not enter ws-mcp core).
+- **Bootstrap warning (the "set this up once" pressure).** When the tier map (or
+  at least the explore tier) is unset, the adapter **appends a strong one-time
+  advisory to the `workflow_manual` bridge response** at session bootstrap: Pi
+  cannot infer tier models; recon/spawn will inherit the lead model (costly);
+  configure the catalog now. ws-mcp core stays neutral — the advisory is
+  injected adapter-side (the adapter already proxies `workflow_manual`). One
+  loud bootstrap nudge, not a per-spawn nag.
+- **Graceful fallback.** Unset never hard-fails: spawn/explore proceed with
+  inherit; work is never blocked on an unconfigured catalog. The pressure is the
+  bootstrap warning; the runtime silently inherits after.
+
+This is the Pi-specific instantiation of
+`260611-research-ws-per-role-delegation-tuning-config`.
+
+**Open sub-decision:** on an *unset* tier at spawn time, rely solely on the
+bootstrap warning + silent inherit, or also emit a single per-session
+escalation the first time a spawn actually runs unconfigured? Lean: bootstrap
+warning only, silent inherit after (avoid nag); revisit if users miss the
+bootstrap notice.
 
 ## Corrected Pi capability matrix
 
@@ -406,6 +478,13 @@ flush, but this must be verified at runtime. (Separate from the
 turn-accumulation spike above.)
 
 ### Recursive explore subagent — depth-bounded restricted recursion
+
+> **Reframed 2026-09-02** (see "Recon as a first-class one-shot primitive" in
+> the Revision section): recon delegation is a dedicated one-shot `explore`
+> primitive, not the general spawner exposed at depth. The depth-cap and
+> dual-defense gating below still apply, but for recon "recursion" reduces to
+> "a worker may call the ordinary `explore` tool" (leaves self-reap). Only
+> *durable* sub-worker recursion keeps the full-spawner design below.
 
 **260605 assumption correction.** The 260605 pivot assumed "subquery is
 absorbed into harness-native Explore subagents (Claude and Codex both
