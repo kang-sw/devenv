@@ -10,8 +10,8 @@ related-mental-model:
   - mcp-runtime
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: f1a77c7d77aad262
-sage-review-completeness-reviewed: f1a77c7d77aad262
+sage-review-design-reviewed: 8bef18715d5a6444
+sage-review-completeness-reviewed: 8bef18715d5a6444
 ---
 
 # Implement the ws Pi-native MVP: self-built MCP bridge + subagent spawner + model-catalog config
@@ -74,9 +74,11 @@ Settled in `260802` (see anchor for rejected alternatives and evidence):
   Pi extension source (TS/jiti `package.json`) and the adapter curation data
   file. This ticket is the authorizing ticket for that new root directory per
   AGENTS.md ("no new root module directories without a ticket").
-- **Every proxied `ws/*` call is keyed.** ws-mcp enforces a mandatory per-call
-  `session_key` (minted via `ws/lead.login`, `unknown_session` → re-login
-  guard); the bridge owns that key lifecycle (see Phase 1), never the Pi model.
+- **Every proxied `ws/*` call is keyed; the key stays caller-controllable.**
+  ws-mcp requires a per-call `session_key` (minted via `ws/lead.login` or
+  `ferrule`). The bridge default-fills its own key only when omitted and
+  forwards an explicit key verbatim, so both subagent child-key lineage and lead
+  multi-track orchestration retain explicit control (see Phase 1).
 
 ## Spec Impact
 
@@ -91,6 +93,9 @@ contracts stay unchanged per the golden rule). Expected caller-visible changes:
   `ws-agent-wait` (async, depth 0→1 leaf) and `explore` (one-shot recon leaf),
   with the per-spawn `--model`/`--tools`/`--append-system-prompt`/`--session`
   curation contract.
+- `session_key` stays an optional, caller-controllable parameter on keyed
+  `ws/*` tools (bridge default-fills when omitted, forwards when supplied);
+  `ferrule` remains exposed for lead multi-track and child-key minting.
 - New Pi model-catalog config: a user-curated catalog + tier map in the adapter
   data file; an unset config emits a `workflow_manual` advisory and falls back
   to inherit (never hard-fail).
@@ -114,18 +119,32 @@ with zero prose rewriting. Verify a minimal self-owned stdio client (or
 `package.json`; prefer the minimal self-owned client to keep the dependency
 surface empty.
 
-Session-key wiring: ws-mcp requires a per-call `session_key` on every keyed
-tool. The bridge **auto-logins via `ws/lead.login` at startup, holds the key,
-and injects it transparently into every proxied `tools/call`** — the
-`session_key` parameter is stripped from the registered Pi tool schema so the
-model never sees or manages it; on an `unknown_session` error the bridge
-re-logins and retries transparently. (Rejected: injecting the key into the
-system prompt for the model to pass, as on Claude/Codex — it burdens the model
-and exposes the key, and the bridge already owns the proxy layer.)
+Session-key wiring: ws-mcp requires a `session_key` on every keyed call, but on
+the registered Pi tools `session_key` stays an **optional, caller-controllable**
+parameter — it is not stripped. The bridge **default-fills** its own startup
+auto-login key only when a call omits `session_key`, and **forwards an explicit
+`session_key` verbatim**. This serves both scopes:
+
+- **Subagents** use the child key the lead minted for them (spliced into the
+  rendered playbook via `--append-system-prompt`, see Phase 2) and pass it
+  explicitly → the bridge forwards it, preserving ws-mcp's parent→child session
+  lineage. A blanket auto-login per subagent is wrong — it would mint an
+  unrelated key and break lineage.
+- **The lead** often orchestrates multiple implementation tracks under distinct
+  keys; it mints per-track/child keys with `ferrule` (binds a worktree `root`,
+  sets `capability` lead/delegate/leaf, records `parent_session_key` lineage)
+  and targets each track by passing its `session_key` explicitly. Hiding the key
+  at lead scope would break multi-track orchestration.
+
+`ferrule` and the other key-management tools stay exposed. `unknown_session`
+re-login applies only to the bridge's own default-fill key; an explicit
+caller-supplied key that is unknown surfaces to the caller. (Rejected: stripping
+`session_key` and transparently injecting one bridge-held key — it breaks both
+subagent lineage and lead multi-track orchestration.)
 
 Gate: a keyed ws-mcp tool (e.g. `ws/workflow_manual`) round-trips end-to-end
-through the bridge against a live model, with the bridge supplying the session
-key (the model never sees `session_key`).
+through the bridge against a live model — with `session_key` default-filled when
+omitted and forwarded verbatim when supplied.
 
 ### Phase 2: Self-built subagent spawner + explore primitive
 
