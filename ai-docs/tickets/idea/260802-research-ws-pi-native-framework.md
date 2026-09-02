@@ -235,21 +235,27 @@ on the expensive lead model).
 
 Design:
 
-- **Catalog = runtime-curated from Pi.** The adapter reads Pi's enabled/
-  configured model list at runtime (`enabled-models.ts`; exact extension-facing
-  read API to confirm) and presents it as the selectable pool — ws hardcodes no
-  model names.
+- **Catalog = curated subset of Pi's raw model pool.** The adapter reads Pi's
+  enabled/configured models at runtime (`enabled-models.ts`; exact
+  extension-facing read API to confirm), but that raw pool can be **hundreds to
+  thousands** of entries once an aggregator (e.g. openrouter) is connected —
+  too large to present or tier-map directly. So setup is itself a **curation
+  step**: the user narrows the raw pool to a small workable catalog, and *that
+  curated subset* is what gets stored and tier-mapped. ws hardcodes no model
+  names; the raw pool is the input to curation, not the stored catalog.
 - **Tier map is user-configured, adapter-owned.** The user assigns catalog
   entries to ws tiers (explore/recon, light/medium/large) once; the mapping
   lives in the **Pi adapter's curation data file** (adapter-owned per the golden
   rule — Pi model strings are harness-specific and must not enter ws-mcp core).
-- **Bootstrap warning (the "set this up once" pressure).** When the tier map (or
-  at least the explore tier) is unset, the adapter **appends a strong one-time
-  advisory to the `workflow_manual` bridge response** at session bootstrap: Pi
-  cannot infer tier models; recon/spawn will inherit the lead model (costly);
-  configure the catalog now. ws-mcp core stays neutral — the advisory is
-  injected adapter-side (the adapter already proxies `workflow_manual`). One
-  loud bootstrap nudge, not a per-spawn nag.
+- **Bootstrap warning — every `workflow_manual` while unset.** When the tier map
+  (or at least the explore tier) is unset, the adapter **appends a strong
+  advisory to every `workflow_manual` bridge response** (not once-per-session):
+  Pi cannot infer tier models; recon/spawn will inherit the lead model (costly);
+  curate the catalog now. This mirrors the **existing bootstrap-version-behind
+  advisory**, which already re-warns on every `workflow_manual` while its
+  condition holds — an established, appropriately-frequent cadence. ws-mcp core
+  stays neutral: the advisory is injected adapter-side (the adapter already
+  proxies `workflow_manual`), keyed on the adapter's own unset-config state.
 - **Graceful fallback.** Unset never hard-fails: spawn/explore proceed with
   inherit; work is never blocked on an unconfigured catalog. The pressure is the
   bootstrap warning; the runtime silently inherits after.
@@ -257,11 +263,11 @@ Design:
 This is the Pi-specific instantiation of
 `260611-research-ws-per-role-delegation-tuning-config`.
 
-**Open sub-decision:** on an *unset* tier at spawn time, rely solely on the
-bootstrap warning + silent inherit, or also emit a single per-session
-escalation the first time a spawn actually runs unconfigured? Lean: bootstrap
-warning only, silent inherit after (avoid nag); revisit if users miss the
-bootstrap notice.
+**Resolved (warning cadence):** the advisory rides the `workflow_manual`
+cadence — re-warns on each manual read while the config is unset, exactly like
+the existing bootstrap-version-behind advisory — rather than a once-per-session
+notice or a per-spawn escalation. Spawn/explore stay silent inherit; the
+repeated `workflow_manual` nudge is the pressure.
 
 ## Corrected Pi capability matrix
 
