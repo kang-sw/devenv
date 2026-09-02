@@ -57,6 +57,128 @@ phases. Code work is deferred until the discussion in "Open questions" converges
    hooks, recursive explore, agentId persistence). Code work does not start
    until the discussion in "Open questions" converges.
 
+## Revision (2026-09-02): ecosystem survey — reuse over self-build
+
+**Trigger.** The subagent design below ("Subagent surface — continuation,
+spawn API, curation") was written against Pi *core* + the shipped
+`examples/extensions/subagent/` reference, **without surveying the Pi package
+registry** (pi.dev/packages, ~5,600 packages). A web survey plus two
+source-verified spikes (2026-09-02, pi 0.84.4) corrected this. Net result: the
+subagent layer is largely **reuse, not build**; the MCP bridge stays
+**self-build** but for sharpened reasons. All findings below are
+source-verified against the named package versions (external packages — not
+checkable against this repo's tree; verified by two subagent source reads this
+session).
+
+### Subagent layer — REUSE `@tintinweb/pi-subagents` (supersedes the "Subagent surface" self-build)
+
+Source-verified against `@tintinweb/pi-subagents@0.19.0` (requires pi ≥0.84.0;
+validated on 0.84.4):
+
+- Async fan-out (background default, `maxConcurrent` 10), resume
+  (`resume:<id>`; `@handle` reopens even tombstoned sessions), context fork
+  (`inherit_context`).
+- **Framing correction:** children run as **in-process pi `AgentSession`s**
+  (`createAgentSession`, agent-runner.ts:1007), NOT `pi --model` subprocesses.
+  This supersedes the entire self-built continuation mechanism below
+  (subprocess + `--session <path>` + `--append-system-prompt` path reuse) and
+  makes the Q8/Q9 subprocess-continuation spikes moot **under reuse** (they
+  survive only as validation for the self-build fallback).
+- **Dynamic per-spawn system prompt:** no inline systemPrompt param on any
+  spawn path, but custom agent `.md` files are re-read on every Agent call
+  (`reloadCustomAgents`, index.ts:1771). ws injects a rendered playbook by
+  writing `<cwd>/.pi/agents/<agentId>.md` at spawn time, then spawning
+  `subagent_type: <agentId>`. No fork of the package.
+- **Per-spawn tuning + precedence** (all via `resolveAgentInvocationConfig`,
+  invocation-config.ts): model (free string; frontmatter `model:` or param;
+  **frontmatter wins**), effort (`thinking:` enum
+  `off/minimal/low/medium/high/xhigh/max`; **frontmatter wins**), built-in
+  tools (`tools:`/`disallowed_tools:` frontmatter-ONLY allow/deny — no tool
+  param), extension/MCP tool gating coarse via `isolated:true` (strips all
+  extension+MCP, keeps built-ins), depth recursion via `allowed_subagents:`
+  (nested delegation off by default) + global `maxSubagentDepth` (default 2).
+
+**ws curation → tintinweb frontmatter mapping (the ws bridge's remaining job):**
+
+| ws curation field | tintinweb surface |
+|---|---|
+| tier → model | frontmatter `model:` |
+| tier → effort | frontmatter `thinking:` |
+| built-in tool-group (read-only / recon / full-worker) | frontmatter `tools:` allowlist |
+| "no ws-mcp/extension tools" | `isolated: true` |
+| depth policy (which children, max depth) | frontmatter `allowed_subagents:` (+ built-in `maxSubagentDepth=2`) |
+| `playbook.render` body | generated `.md` body |
+| task | Agent tool `prompt` param (caller-retained) |
+
+Frontmatter-wins precedence is a **feature** for ws: curation authored into the
+generated `.md` is authoritative, and the delegated task cannot override
+model/effort/tools — matching the lead-authority / golden-rule model. The
+caller retains only `prompt`, `description`, `name` (@handle), `resume`,
+`schedule`.
+
+**Reuse caveats to carry into implementation:**
+
+- Unknown `model:` in frontmatter → **silent fallback to the parent model**
+  (model-resolver.ts); ws must validate model strings against pi's catalog at
+  render time to avoid a silent wrong-model spawn. (A caller-*param* unknown
+  model hard-fails; only the frontmatter path we rely on is silent.)
+- Extension/MCP tool gating is coarse (`isolated` = all-or-nothing).
+  Acceptable because ws workers are speced to receive no ws-mcp/extension
+  tools: `isolated:true` + `tools:` allowlist covers the curation. A future
+  worker needing *selective* extension tools is unsupported by tintinweb and
+  would force a bridge-owned registration path.
+- Per-spawn `.md` files are on-disk side effects (`.pi/agents/<id>.md`); unique
+  per agentId (concurrency-safe), need lifecycle cleanup.
+- External v0.x dependency: version-pin and track breaking changes. tintinweb's
+  own tool names (`Agent` / `get_subagent_result`) and FleetView widget are
+  surfaced opinions; ws prose uses its own notation, so a thin wrapper or prose
+  adaptation is needed.
+
+ws's genuine remaining delta shrinks to: the **curation data file**, the
+**render→`.md` writer**, **model-string validation**, and **`.md` lifecycle
+cleanup**. The self-built registry / stdout-draining / spawn-continue-wait /
+`--session` juggling in "Subagent surface" is superseded.
+
+### MCP bridge — self-build RETAINED, re-justified (supersedes the "avoid heavy SDK" rationale)
+
+The survey found mature MCP adapters (`pi-mcp-adapter@2.32.1`: stdio+HTTP+OAuth,
+three registration modes; plus alternates). But source-verified: **no adapter
+preserves tool names verbatim** — `formatToolName` always converts `.`→`_` and
+(default) prefixes `<server>_`, in every mode including eager per-tool
+(`directTools:true`), types.ts:756-766. So `ws/playbook.print` cannot survive
+as a literal Pi tool name via any published adapter.
+
+The ticket's own tool-name spike already proved a self-registered
+`ws/playbook.print` dispatches verbatim end-to-end. Decision unchanged
+(self-build the minimal stdio bridge), re-justified:
+
+1. **Name preservation** — only self-registration keeps `ws/...` verbatim, so
+   SKILL.md prose stays load-and-go (the harness-neutral "skills load
+   unmodified" doctrine). No published adapter offers this.
+2. **Dependency minimization** — reusing tintinweb already puts one
+   fast-moving external dep on the critical path; adding an MCP adapter is a
+   second. A small self-owned stdio client (ws-mcp's tool schema is small)
+   avoids it.
+
+`pi-mcp-adapter` (directTools eager mode) is recorded as the **fallback** if
+the self-built client proves painful. Accepting it means mangled names
+(`ws_playbook_print`) plus confirming the model bridges prose→mangled — plausible
+(on Claude ws already runs as `mcp__plugin_ws_ws__*` and the model bridges the
+notation), but unverified on Pi.
+
+### MVP scope revision
+
+- **Subagent layer:** reuse `@tintinweb/pi-subagents`; build only the
+  curation data file + render→`.md` writer + model validation + `.md`
+  cleanup. (Was: self-built spawn/continue/wait + registry + file-based
+  continuation.)
+- **MCP bridge:** unchanged (self-build minimal stdio, name-preserving).
+- **Skills / distribution (git package):** unchanged.
+- **Expansion (todo, goal-loop, compaction):** existing packages
+  (`@juicesharp/rpiv-todo`, `@tintinweb/pi-tasks`, `@narumitw/pi-goal`,
+  `pi-goal-x`) are reference/candidate-dependency prior art, not must-build —
+  evaluate reuse-vs-thin-reimpl at expansion time.
+
 ## Corrected Pi capability matrix
 
 The opencode tradeoff note's Pi column contained two factual errors. Direct
@@ -89,6 +211,11 @@ reading of the shipped Pi docs corrects them:
   Subagent continuation, however, is *not* trivial — see below.
 
 ## The central work item: MCP bridge
+
+> **Re-justified 2026-09-02** (see the Revision section above). The self-build
+> decision stands, but on name-preservation + dependency-minimization grounds
+> rather than the "avoid a heavy SDK" rationale below; `pi-mcp-adapter` is now
+> the recorded fallback.
 
 Pi has no built-in MCP client. The ws-mcp server (the harness-neutral MCP
 tool surface: context, workflow state, git, docs, tickets, playbook, agents)
@@ -132,6 +259,12 @@ design and needs runtime confirmation (does `pi.registerTool` accept `/` in
 different surface — verify against `examples/extensions/dynamic-tools.ts`).
 
 ## Subagent surface — continuation, spawn API, curation
+
+> **Superseded 2026-09-02** by the "Subagent layer — REUSE `@tintinweb/pi-subagents`"
+> decision in the Revision section above. This entire self-built design (custom
+> `ws-agent-spawn/continue/wait`, module-state registry, background stdout
+> draining, file-based `--session` continuation) is retained for design
+> rationale and as the self-build fallback only; the reuse path replaces it.
 
 The `examples/extensions/subagent/` reference (1015 lines, shipped with Pi)
 implements frontmatter-driven subagents: `name`/`description`/`tools`/`model`
@@ -561,6 +694,12 @@ openrouter). Session spikes ran two sequential `--session <path>` turns.
 Research / discussion. No code work. The opencode implementation ticket
 (`260801-feat-ws-opencode-adapter`, dropped); this research is the active
 direction but has not yet promoted to `ready/`.
-MVP scope is agreed; the runtime spikes (Q8, Q9) and the tool-name spike
-(Q2) are the next concrete investigations, all read-only / no ws-mcp
-source change.
+
+Direction sharpened by the 2026-09-02 ecosystem survey (see Revision section):
+subagent layer reuses `@tintinweb/pi-subagents`; MCP bridge stays self-build.
+Both the runtime-spike questions (Q8, Q9) and the tool-name spike (Q2) are
+resolved. The one prior Open question below (`--append-system-prompt` vs
+`--system-prompt`) applies only to the self-build subagent fallback and is
+moot under the tintinweb reuse path. Next concrete step when code work opens:
+an install-and-drive validation of the tintinweb reuse path (render→`.md`→spawn
+round-trip with curation frontmatter) and the self-built MCP stdio bridge.
