@@ -804,3 +804,7 @@ for the self-build path. Next concrete step when code work opens: implement and
 drive the self-built MCP stdio bridge + the minimal spawn/continue/wait spawner
 (render→`--append-system-prompt`→`--session` round-trip with `--tools`/`--model`
 curation).
+
+Implementation spun out to `260902-feat-ws-pi-native-mvp` (todo/), which carries
+the phase plan (bridge → spawner+explore → model-catalog config → PoC command).
+This research ticket remains the design anchor.
