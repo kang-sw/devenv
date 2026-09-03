@@ -21,8 +21,11 @@ import {
   AgentEventLineBuffer,
   TOOL_GROUPS,
   handleAgentEvent,
+  resolveModelForTier,
+  asModelTier,
   type AgentRecord,
 } from "../src/spawner.ts";
+import type { ModelCatalogConfig } from "../src/model-catalog.ts";
 
 function freshRunningRecord(): AgentRecord {
   return {
@@ -278,6 +281,56 @@ describe("AgentEventLineBuffer", () => {
     assert.equal(events.length, 1);
     buf.end();
     assert.equal(events.length, 1, "end() must not re-emit or duplicate the already-flushed event");
+  });
+});
+
+describe("resolveModelForTier", () => {
+  const catalog: ModelCatalogConfig = {
+    tiers: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
+  };
+
+  test("tier set + mapped in catalog -> resolved model", () => {
+    assert.equal(resolveModelForTier(catalog, "small", "inherited/model"), "openrouter/cheap-model");
+    assert.equal(resolveModelForTier(catalog, "large", "inherited/model"), "openrouter/big-model");
+  });
+
+  test("tier set + catalog present but that tier unmapped -> inherit", () => {
+    assert.equal(resolveModelForTier(catalog, "medium", "inherited/model"), "inherited/model");
+    assert.equal(resolveModelForTier(catalog, "xlarge", undefined), undefined);
+  });
+
+  test("no tier (spawn regression) -> inherit unchanged", () => {
+    assert.equal(resolveModelForTier(catalog, undefined, "inherited/model"), "inherited/model");
+    assert.equal(resolveModelForTier(catalog, undefined, undefined), undefined);
+  });
+
+  test("tier set but catalog unset -> inherit", () => {
+    assert.equal(resolveModelForTier(undefined, "small", "inherited/model"), "inherited/model");
+  });
+
+  test("explore's implicit small tier -> resolved when catalog has tiers.small, inherit otherwise", () => {
+    assert.equal(resolveModelForTier(catalog, "small", "inherited/model"), "openrouter/cheap-model");
+    const unmappedSmall: ModelCatalogConfig = { tiers: { large: "openrouter/big-model" } };
+    assert.equal(resolveModelForTier(unmappedSmall, "small", "inherited/model"), "inherited/model");
+    assert.equal(resolveModelForTier(undefined, "small", "inherited/model"), "inherited/model");
+  });
+});
+
+describe("asModelTier", () => {
+  test("passes through each of the four valid tier values", () => {
+    assert.equal(asModelTier("small"), "small");
+    assert.equal(asModelTier("medium"), "medium");
+    assert.equal(asModelTier("large"), "large");
+    assert.equal(asModelTier("xlarge"), "xlarge");
+  });
+
+  test("an unrecognized tier value resolves to undefined (unset/inherit), not a validation error", () => {
+    assert.equal(asModelTier("huge"), undefined);
+    assert.equal(asModelTier(""), undefined);
+  });
+
+  test("undefined stays undefined", () => {
+    assert.equal(asModelTier(undefined), undefined);
   });
 });
 

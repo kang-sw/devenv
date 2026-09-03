@@ -18,12 +18,16 @@
  * ticket's Decisions section (no `.pi/agents/` writes, no global profile
  * files).
  *
- * `--model` resolves as **inherit** this phase: the active model
- * (`ctx.model`) of the *calling* tool-execute context is forwarded verbatim
- * as `provider/id`, or omitted entirely when unset, mirroring the shipped
+ * `--model` resolves tier-first, inherit-fallback (Phase 3): a caller-
+ * supplied `tier` (ws-agent-spawn) or the implicit `"small"` tier
+ * (explore/exploreLeaf) is looked up in the adapter-owned model-catalog
+ * data file (model-catalog.ts); when mapped, that `provider/id` is used.
+ * Otherwise (catalog unset, tier unmapped, or no tier at all) this falls
+ * back to the Phase 2 inherit behavior: the active model (`ctx.model`) of
+ * the *calling* tool-execute context is forwarded verbatim as
+ * `provider/id`, or omitted entirely when unset, mirroring the shipped
  * `examples/extensions/subagent/index.ts`'s `dispatchDefaults.model`
- * pattern. A tier -> model catalog is explicit Phase 3 scope, not built
- * here; `tier` is accepted and stored as record metadata only.
+ * pattern.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -35,6 +39,19 @@ import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
+import { readModelCatalog, resolveTierModel, type ModelCatalogConfig, type ModelTier } from "./model-catalog.ts";
+
+const VALID_MODEL_TIERS: ReadonlySet<string> = new Set(["small", "medium", "large", "xlarge"]);
+
+/**
+ * Casts an arbitrary caller-supplied tier string to a `ModelTier`, or
+ * `undefined` when it does not match one of the four valid values —
+ * treated as unset/inherit, never a validation error, per "never
+ * hard-fail."
+ */
+export function asModelTier(tier: string | undefined): ModelTier | undefined {
+  return tier !== undefined && VALID_MODEL_TIERS.has(tier) ? (tier as ModelTier) : undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -660,6 +677,29 @@ export interface AgentToolsHandle {
 }
 
 /**
+ * Pure tier-first, inherit-fallback model resolution: when `tier` is given
+ * and mapped in `config`, that `provider/id` wins; otherwise (no `tier`,
+ * catalog unset, or that specific tier unmapped) falls back to
+ * `inheritModel` unchanged. Split out from `registerAgentTools`'s
+ * `resolveModel` closure (which owns the IO — re-reading the catalog file
+ * fresh per call) so the resolution rule itself is directly unit-testable
+ * with no file I/O or toolCtx shape involved, matching this module's
+ * existing pure-helper/IO-wrapper split (e.g. `buildSpawnArgs` vs
+ * `spawnPiProcess`).
+ */
+export function resolveModelForTier(
+  config: ModelCatalogConfig | undefined,
+  tier: ModelTier | undefined,
+  inheritModel: string | undefined,
+): string | undefined {
+  if (tier) {
+    const tierModel = resolveTierModel(config, tier);
+    if (tierModel) return tierModel;
+  }
+  return inheritModel;
+}
+
+/**
  * Registers the four delegation-spawner tools (`ws-agent-spawn`,
  * `ws-agent-continue`, `ws-agent-wait`, `explore`) against the extension's
  * own module-state registry, reusing the bridge's already-connected
@@ -671,12 +711,27 @@ export interface AgentToolsHandle {
  * never receives a nested-spawn tool in its own `--tools` allowlist even
  * though its own `pi` process loads this same extension.
  */
-export function registerAgentTools(pi: ExtensionAPI, bridge: BridgeHandle, sessionCtx: { cwd: string }): AgentToolsHandle {
+export function registerAgentTools(
+  pi: ExtensionAPI,
+  bridge: BridgeHandle,
+  sessionCtx: { cwd: string; modelCatalogPath: string },
+): AgentToolsHandle {
   const registry: AgentRegistry = new Map();
 
-  function resolveModel(toolCtx: unknown): string | undefined {
+  function inheritModel(toolCtx: unknown): string | undefined {
     const model = (toolCtx as { model?: { provider?: string; id?: string } } | undefined)?.model;
     return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
+  }
+
+  /**
+   * IO wrapper around `resolveModelForTier`: re-reads the model-catalog file
+   * fresh on every call (no caching) so a hand-edit applies without
+   * restarting Pi, matching bridge.ts's workflow_manual advisory's
+   * no-caching choice.
+   */
+  function resolveModel(toolCtx: unknown, tier: ModelTier | undefined): string | undefined {
+    const config = tier ? readModelCatalog(sessionCtx.modelCatalogPath) : undefined;
+    return resolveModelForTier(config, tier, inheritModel(toolCtx));
   }
 
   pi.registerTool({
@@ -689,7 +744,11 @@ export function registerAgentTools(pi: ExtensionAPI, bridge: BridgeHandle, sessi
       properties: {
         playbook: { type: "string", description: 'Playbook stem to render, e.g. "implementer".' },
         task: { type: "string", description: "Task text passed as the spawned process's initial prompt." },
-        tier: { type: "string", description: "Advisory tier hint; not yet resolved to a model (Phase 3 scope)." },
+        tier: {
+          type: "string",
+          description:
+            'Model tier hint ("small"|"medium"|"large"|"xlarge"), resolved against model-catalog.json; falls back to inherit (the calling session\'s model) when unset, unmapped, or unrecognized.',
+        },
       },
       required: ["playbook", "task"],
     } as never,
@@ -701,7 +760,7 @@ export function registerAgentTools(pi: ExtensionAPI, bridge: BridgeHandle, sessi
         {
           sessionKey: bridge.defaultSessionKeyRef.current ?? "",
           cwd: sessionCtx.cwd,
-          model: resolveModel(toolCtx),
+          model: resolveModel(toolCtx, asModelTier(p.tier)),
           wsToolNames: bridge.wsToolNames,
         },
         p,
@@ -726,7 +785,7 @@ export function registerAgentTools(pi: ExtensionAPI, bridge: BridgeHandle, sessi
       const p = params as { agentId: string; task: string };
       const result = await continueAgent(
         registry,
-        { cwd: sessionCtx.cwd, model: resolveModel(toolCtx), wsToolNames: bridge.wsToolNames },
+        { cwd: sessionCtx.cwd, model: resolveModel(toolCtx, undefined), wsToolNames: bridge.wsToolNames },
         p.agentId,
         p.task,
       );
@@ -776,7 +835,10 @@ export function registerAgentTools(pi: ExtensionAPI, bridge: BridgeHandle, sessi
       const result = await exploreLeaf(
         bridge.client,
         registry,
-        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolveModel(toolCtx) },
+        // explore resolves implicitly through the "small" tier — no
+        // caller-facing tier param on ExploreParams (ticket: explore is a
+        // role, not a caller-supplied tier).
+        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolveModel(toolCtx, "small") },
         p,
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };

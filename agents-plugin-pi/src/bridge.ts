@@ -26,13 +26,16 @@
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { spawnWsMcpClient, type McpStdioClient, type McpToolCallResult } from "./mcp-stdio-client.ts";
+import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
+import { isModelCatalogUnset, readModelCatalog, type ModelCatalogConfig } from "./model-catalog.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
   pluginDir: string;
   runtimeJsonPath: string;
+  /** Path to the adapter-owned model-catalog data file (see model-catalog.ts). Read fresh on every workflow_manual call — no caching. */
+  modelCatalogPath: string;
   /** Working directory of the Pi session — used as the ferrule bootstrap root. */
   cwd: string;
   ui?: ExtensionUIContext;
@@ -68,6 +71,42 @@ function notify(ui: ExtensionUIContext | undefined, message: string, level: "inf
 
 function firstText(result: McpToolCallResult): string | undefined {
   return result.content.find((item) => item.type === "text")?.text;
+}
+
+/**
+ * Advisory appended to every `workflow_manual` response while the model
+ * catalog's `small` tier is unset. Mirrors the Go core's blockquote
+ * bootstrap-staleness-advisory convention (`bootstrap_alarm.go`) — a `>
+ * [!note]`-style block, re-warning on every read while the condition holds
+ * rather than once per session (no ticket-mandated exact copy).
+ */
+export const MODEL_CATALOG_ADVISORY =
+  "> [!note]\n" +
+  "> **Pi model tier map is unset.** ws-agent-spawn and explore currently " +
+  "silently inherit the parent session's model for every delegated agent — " +
+  "costly for cheap recon/explore work. Configure at least the `small` tier " +
+  "in `agents-plugin-pi/model-catalog.json` (sibling to `runtime.json`) to " +
+  "route explore/recon to a cheaper model; other tiers (`medium`, `large`, " +
+  "`xlarge`) are optional. Changes apply immediately — no restart needed.";
+
+/**
+ * Appends `MODEL_CATALOG_ADVISORY` as a new `{type:"text"}` item onto a
+ * COPY of `content` (never mutated in place) when `rawName ===
+ * "workflow_manual"` and the catalog's `small`/explore tier is unset;
+ * otherwise returns `content` unchanged (same reference). Extracted as a
+ * pure function — independent of the live MCP round-trip — so the
+ * append-not-prepend/copy-not-mutate/unset-gated contract is directly
+ * unit-testable, same as resolveSessionKey/withOptionalSessionKey above.
+ */
+export function maybeAppendModelCatalogAdvisory(
+  rawName: string,
+  content: McpContentItem[],
+  config: ModelCatalogConfig | undefined,
+): McpContentItem[] {
+  if (rawName !== "workflow_manual" || !isModelCatalogUnset(config)) {
+    return content;
+  }
+  return [...content, { type: "text", text: MODEL_CATALOG_ADVISORY }];
 }
 
 /**
@@ -192,7 +231,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
             // returning a value never sets it (docs/extensions.md#L1953-2011).
             throw new Error(firstText(result) ?? `${registeredName} failed with no error text`);
           }
-          return { content: result.content, details: result };
+          // Read the catalog fresh on every call (no caching) so a hand-edit
+          // to model-catalog.json applies without restarting Pi.
+          const content = maybeAppendModelCatalogAdvisory(rawName, result.content, readModelCatalog(opts.modelCatalogPath));
+          return { content, details: result };
         },
       });
     }

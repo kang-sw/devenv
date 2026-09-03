@@ -15,7 +15,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeToolName, withOptionalSessionKey, resolveSessionKey } from "../src/bridge.ts";
+import { sanitizeToolName, withOptionalSessionKey, resolveSessionKey, maybeAppendModelCatalogAdvisory, MODEL_CATALOG_ADVISORY } from "../src/bridge.ts";
+import type { ModelCatalogConfig } from "../src/model-catalog.ts";
 
 // Live snapshot of ws-mcp's tools/list response (60 tools), captured via a
 // direct spawnWsMcpClient() probe against this repo's ws-mcp launcher. Not
@@ -157,5 +158,54 @@ describe("resolveSessionKey", () => {
     const inputSnapshot = { ...input };
     resolveSessionKey(input, { current: "default-key-123" });
     assert.deepEqual(input, inputSnapshot, "input params object must not be mutated");
+  });
+});
+
+describe("maybeAppendModelCatalogAdvisory", () => {
+  const unsetConfig: ModelCatalogConfig | undefined = undefined;
+  const setConfig: ModelCatalogConfig = { tiers: { small: "openrouter/cheap-model" } };
+
+  test("appends the advisory for workflow_manual when the catalog is unset", () => {
+    const content = [{ type: "text", text: "manual body" }];
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, unsetConfig);
+    assert.equal(result.length, 2);
+    assert.deepEqual(result[0], { type: "text", text: "manual body" });
+    assert.equal(result[1].type, "text");
+    assert.equal(result[1].text, MODEL_CATALOG_ADVISORY);
+  });
+
+  test("appends (not prepends) — the advisory is the last item", () => {
+    const content = [{ type: "text", text: "first" }, { type: "text", text: "second" }];
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, unsetConfig);
+    assert.equal(result[result.length - 1].text, MODEL_CATALOG_ADVISORY);
+  });
+
+  test("returns a copy — does not mutate the input content array", () => {
+    const content = [{ type: "text", text: "manual body" }];
+    const contentRef = content;
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, unsetConfig);
+    assert.equal(content, contentRef, "input array identity must be preserved (not spliced in place)");
+    assert.equal(content.length, 1, "input array must not be mutated");
+    assert.notEqual(result, content, "must return a fresh array, not the same reference");
+  });
+
+  test("does not append when the small tier is configured", () => {
+    const content = [{ type: "text", text: "manual body" }];
+    const result = maybeAppendModelCatalogAdvisory("workflow_manual", content, setConfig);
+    assert.equal(result, content, "content must be returned unchanged (same reference) when the catalog is set");
+    assert.equal(result.length, 1);
+  });
+
+  test("does not append for a different tool name, even when the catalog is unset", () => {
+    const content = [{ type: "text", text: "some other tool's body" }];
+    const result = maybeAppendModelCatalogAdvisory("playbook.render", content, unsetConfig);
+    assert.equal(result, content);
+    assert.equal(result.length, 1);
+  });
+
+  test("does not append for the sanitized ws__workflow_manual name — only the raw dotted-less name matches", () => {
+    const content = [{ type: "text", text: "manual body" }];
+    const result = maybeAppendModelCatalogAdvisory("ws__workflow_manual", content, unsetConfig);
+    assert.equal(result, content);
   });
 });

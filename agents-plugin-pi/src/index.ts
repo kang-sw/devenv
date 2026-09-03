@@ -18,8 +18,13 @@
  *
  * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
  * `ws-agent-continue` / `ws-agent-wait` / `explore`, see src/spawner.ts) on
- * top of the Phase 1 bridge. Model catalog (Phase 3) and /ws-discuss
- * (Phase 4) remain out of scope here.
+ * top of the Phase 1 bridge. Phase 3 adds the adapter-owned model-catalog
+ * curation data file (`model-catalog.json`, see src/model-catalog.ts):
+ * tier-aware `--model` resolution in the spawner, an unset-tier advisory
+ * appended to every `workflow_manual` bridge response (bridge.ts), and a
+ * read-only `ws-model-catalog-list` command exercising Pi's
+ * `ctx.scopedModels` read API to help the user hand-curate the catalog.
+ * /ws-discuss (Phase 4) remains out of scope here.
  *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
@@ -47,6 +52,7 @@ const repoRoot = dirname(pluginDir);
 const skillsDir = join(repoRoot, "agents-plugin", "skills");
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
+const modelCatalogPath = join(pluginDir, "model-catalog.json");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
@@ -56,15 +62,30 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     skillPaths: [skillsDir],
   }));
 
+  // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
+  // models as `provider/id` candidates for the user to hand-copy into
+  // model-catalog.json's `tiers`/`catalog` fields. No writes — curation
+  // stays a hand-edited data file (see model-catalog.ts's doc comment).
+  pi.registerCommand("ws-model-catalog-list", {
+    description: "List provider/id model candidates for curating model-catalog.json's tiers.",
+    handler: async (_args, ctx) => {
+      const models = ctx.scopedModels.length > 0 ? ctx.scopedModels.map((sm) => sm.model) : ctx.modelRegistry.getAvailable();
+      const lines = models.map((m) => `${m.provider}/${m.id}`);
+      const header = ctx.scopedModels.length > 0 ? `Scoped models (${lines.length}):` : `All available models (${lines.length}):`;
+      ctx.ui.notify([header, ...lines].join("\n"));
+    },
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     handle = await startBridge(pi, {
       launcherPath,
       pluginDir,
       runtimeJsonPath,
+      modelCatalogPath,
       cwd: ctx.cwd,
       ui: ctx.ui,
     });
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd });
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath });
   });
 
   pi.on("session_shutdown", () => {
