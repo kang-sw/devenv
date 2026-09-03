@@ -1,118 +1,191 @@
 ---
-title: "Epic: MCP tool-surface affordance reduction — shrink count and attractiveness of the ws tool surface"
+title: "Epic: MCP tool-surface affordance reduction & surface sanitize"
 sage-review-design: completed
 related:
   260901-research-enter-tool-direct-call-affordance-rename: child ① — the settled affordance/rename work (enter.* → mechanical-op + opaque params); this epic owns its scheduling and the shared execution model
   260630-epic-skill-playbook-diet: coordinate, not owned here — that epic moves contracts INTO tools (Lever B MCP-ification) and can grow the very tools this epic reshapes; sequence so a tool is not expanded immediately before it is renamed/collapsed
   260901-bug-enter-proceed-misplaced-facts-silent-unknown-status: explicitly OUT of scope — diagnosability hardening, not surface reduction
   260901-bug-ticket-scanner-silently-skips-noncanonical-status-dir: explicitly OUT of scope — scanner robustness, not surface reduction
-sage-review-design-reviewed: 59ffc7858a162560
+sage-review-design-reviewed: e632ab15bc085a1a
 ---
 
-# Epic: MCP tool-surface affordance reduction
+# Epic: MCP tool-surface affordance reduction & surface sanitize
 
 ## Summary
 
-The ws MCP surface exposes ~62 tools (plus gated `mercenary.*`/`exec.*`
-families), organized as a flat CRUD-style palette. Two coupled problems:
+The ws MCP surface exposes ~62 tools (68 dotted tools defined counting the
+gated `exec.*`/`mercenary.*` families), organized as a flat CRUD-style palette.
+Three coupled problems:
 
 1. **Attractiveness (affordance).** Intent-named, richly-documented tools
    (`enter.proceed`, `enter.implement`, and other workflow-entry-shaped tools)
    invite agents to call them **directly, skipping the lead-* skill** that was
-   supposed to build their inputs. This has recurred across independent
-   downstream Codex sessions — a systematic affordance mismatch, not one-off
-   error. The tool surface is competing with the skills as the model's mental
-   API.
+   supposed to build their inputs. Recurred across independent downstream Codex
+   sessions — a systematic affordance mismatch. The tool surface is competing
+   with the skills as the model's mental API.
 2. **Weight.** The raw count carries mechanical over-splitting (e.g. `todo.*` is
-   a 9-tool ordered-list CRUD) and query redundancy smell
-   (`tickets.list`/`find`/`status`, three-way `specs.*`) that add grazing noise.
+   a 9-tool ordered-list CRUD) and proven read-surface redundancy
+   (`tickets.list`/`find`/`status` return the same `TicketInfo`; likewise
+   `specs.*`).
+3. **Inconsistent vocabulary (sanitize).** A single "read/query" intent is
+   spread across **`list` (×6), `status` (×5), `read` (×3), `find` (×2),
+   `search`, `info`, `print`** — 6-7 synonyms. Worse, `status` conflates two
+   different meanings: **corpus lookup** (`tickets.status`) and **live state**
+   (`git.status`). This trains the wrong mental model and adds grazing noise.
 
-This epic owns shrinking both the **count** and the **attractiveness** of the
-surface. It does not own moving contracts into tools (that is
+This epic owns shrinking the **count**, the **attractiveness**, and the
+**naming/shape consistency** of the surface — a general sanitize, not only a
+diet. It does not own moving contracts into tools (that is
 `260630-epic-skill-playbook-diet`) nor router diagnosability (the two bug
 tickets above).
 
-## Scope — three layers, ordered by pain/readiness (not by effort)
+## Layers
 
-Ordering key is **most-settled + most-painful first → speculative cleanup
-later**, NOT lowest-effort-first (see cross-child invariant on effort below).
+Numeric labels are identities, **not** the execution order (see the organizing
+model for the cost-ordered sequence ④ → ③ → ②).
 
-- **① Semantic / affordance** — the workflow-entry-shaped tools that read as
-  user intent. Settled direction (L1 mechanical rename + L3 opaque published
-  `params`, L2 collapse rejected) lives in child
-  `260901-research-enter-tool-direct-call-affordance-rename`. Highest value:
-  the only layer actively blocking downstream; and the only layer whose design
-  is already frozen.
-- **② Mechanical inelegance** — over-split tool families (`todo.*` 9 leaves,
-  candidate `note.*`) consolidated to the operations callers actually compose.
-  Contained; low value (noise reduction); needs a consolidation-shape decision.
-- **③ Query redundancy** — `tickets.list`/`find`/`status`, three-way `specs.*`.
-  Needs an **audit first** to confirm genuine redundancy vs distinct semantics
-  (`find` vs `status` may differ) before any dedup. Lowest confidence.
+- **① Semantic / affordance (judgment: settled).** The workflow-entry-shaped
+  tools that read as user intent. Settled direction (L1 mechanical rename + L3
+  opaque published `params`, L2 collapse rejected) lives in child
+  `260901-research-enter-tool-direct-call-affordance-rename`. Highest value —
+  the only layer actively blocking downstream — and design already frozen.
+- **② Mechanical over-split → signature merge (JUDGMENT-heavy).** Fold
+  over-split families to the operation callers actually compose. Concrete win:
+  `todo.append`/`insert_before`/`insert_after` differ only by position anchor →
+  one `todo.add(position: end|before|after, ref_key?)` (3→1). Candidate:
+  `note.mute`/`unmute` → `note.set_visible(bool)`. This is the one workstream
+  that **designs a novel merged signature and reconciles output/anchor
+  semantics** — the genuine judgment cost of the epic.
+- **③ Read-surface collapse (CLEAN collapse).** `tickets.{list,find,status}`
+  and `specs.{list,find,status}` are proven redundant: all three return the
+  same `TicketInfo`/spec-metadata struct via the same formatter, and
+  `find(ticket_stem=X)` already equals `status(X)` (same `Resolve:true`,
+  identical output — verified in `server.go` tickets.find/status handlers). So
+  collapse each triple to the survivor: `find()` = list, `find(ticket_stem=X)` =
+  status. **6 → 2.** No semantic reconciliation — the survivor already is the
+  superset; `status(stem)→find(ticket_stem=stem)` is a fixed param remap. The
+  survivor is renamed to `query` as part of ④.
+- **④ Verb-vocabulary unification (DETERMINISTIC rename).** Rename the read/query
+  surface to a small canonical verb set (below). Once the old→new name map is
+  fixed, application is a **scripted substitution + diff/test verification**
+  across Go registration/switch, `runtime.json`, specs, playbook tokens, and
+  tests — no per-site judgment, only a thin prose-cleanup tail. This is the
+  cheapest layer despite touching the most tools (~15-20 names).
 
-## Organizing model — decision vs execution (not layer-serial)
+## Canonical read-surface verbs (sanitize target)
 
-The dominant cost of all three layers is the same: **ws-side playbook
-re-authoring** (a skill-authoring ceremony per touched skill, not a
-find-replace). Doing the three layers as three serial passes would re-author the
-same playbooks (`lead-proceed`/`lead-implement`) up to 3× with 3× the ceremony,
-deprecation windows, and drift risk. So the epic is organized on the
-**decision → execution** axis instead of layer-serial:
+The key line: **separate corpus-read from live-state**, and give each one verb.
 
-- **Decision phase (freeze the end-state surface).** Freeze the full target
-  names/shapes across the cheap-to-decide layers (① is already frozen; ②'s
-  obvious consolidations) and run the ③ **audit** to decide its end-state. This
-  is the genuinely hard part — the difficulty is deciding, not editing.
-- **Execution phase (batch by playbook).** Re-author each affected ws skill
-  **once** against the frozen surface. A skill touched by multiple layers gets a
-  single coordinated rewrite; a skill touched only by ③ waits for the audit.
-  **Owner of a shared-skill rewrite:** the child that already owns the widest
-  reshape of that skill holds the pen; the others contribute only their frozen
-  deltas into that one pass, never a second authoring pass. Concretely, the
-  overlap-heavy `lead-proceed`/`lead-implement` are exactly ①'s targets, so ①
-  owns their coordinated rewrite and ②/③ fold any of their deltas to those two
-  skills into ①'s pass. Confirm/adjust ownership when ②/③ are created.
+| verb | meaning | targets |
+|---|---|---|
+| **`query`** | search / resolve / enumerate a **searchable corpus** | tickets, specs (absorb list+status via ③), `note.search→`, `mental_models.find→` |
+| **`read`** | fetch **one item's body** by id/key | convention, infra, `todo.read`, candidate `playbook.print→read` |
+| **`list`** | enumerate a **short bounded set** (not a searchable corpus) | agenda, api, config — kept, NOT renamed to query |
+| **`status`** | **live** runtime / vcs / process state only | git, exec, mercenary, candidate `runtime.info→status` |
+
+Not every `list` becomes `query`: the line is corpus-vs-bounded-set. `status`
+stops being used for corpus point-lookup (that becomes `query`).
+
+**Corpus triples move together.** `mental_models` is a searchable-corpus family
+that exposes the same `list`/`find`/`status` triple as tickets/specs, so ④ does
+NOT rename `mental_models.find→query` in isolation and leave `mental_models.list`
+/`status` behind (that would reproduce the very inconsistency this removes).
+Instead, `mental_models` is added to ③'s audit-then-collapse: verify the triple
+is a clean superset (as tickets/specs were), then collapse all three into
+`mental_models.query`. If the audit finds it is NOT a clean superset, ④ still
+aligns the verb (`find→query`) and the residual `list`/`status` are left as an
+explicit, noted exception rather than a silent half-rename. Any other family with
+a `list`/`find`/`status` corpus triple is treated the same way.
+
+Illustrative rename map (finalize when ④ is scoped): `tickets.find→tickets.query`,
+`specs.find→specs.query`, `note.search→note.query`,
+`mental_models.find→mental_models.query`, `runtime.info→runtime.status`,
+candidate `playbook.print→playbook.read`.
+
+## Organizing model — decision vs execution, deterministic vs judgment
+
+The execution cost floor is ws-side playbook re-authoring (a skill-authoring
+ceremony per touched skill), so layer-serial passes would re-author the same
+playbooks (`lead-proceed`/`lead-implement`) up to 3× — organize on
+**decision → execution** instead of layer-serial:
+
+- **Decision phase (freeze the end-state surface).** Freeze the canonical verb
+  map (④, nearly done via the table above), the ③ collapse survivors (proven),
+  and the ② merged signatures (the genuinely hard design). Difficulty is
+  deciding, not editing.
+- **Execution phase.** The landing order below is deterministic → judgment; it
+  is **not** three re-authoring passes over the same skill. Each ws skill gets at
+  most **one** authoring ceremony (per the pen-holder rule); ④ is a scripted
+  token substitution, not an authoring pass. Landing order:
+  1. **④ rename** — a scripted name-map substitution across the whole tree
+     (Go registration/switch, `runtime.json`, specs, playbook **tokens**, tests)
+     + diff/test. It touches tokens inside pen-held skills too, but mechanically,
+     never as authoring — so it does not count as a rewrite of those skills. Run
+     it first to lock the vocabulary so every later layer acts on canonical names.
+  2. **③ collapse** — clean removal of the redundant read siblings, folding into
+     the now-`query` survivor (for tickets/specs, rename and collapse coincide
+     on the same survivor).
+  3. **② merge** — the judgment-heavy signature merges last.
+  **Owner of a shared-skill rewrite:** the child owning the widest *authoring*
+  reshape of a skill holds the pen; others contribute frozen deltas into that one
+  pass. The overlap-heavy `lead-proceed`/`lead-implement` are ①'s targets, so ①
+  owns their coordinated rewrite; ②/③ fold their deltas to those two skills into
+  ①'s pass.
+  **① vs ④ ordering (the one real collision):** ④'s scripted substitution edits
+  the *tokens* in `lead-proceed`/`lead-implement`; ①'s authoring pass edits their
+  *prose/structure*. To avoid re-authoring those two skills twice, run ④'s script
+  first (or last) as a mechanical sweep and let ① do its single authoring pass
+  against canonical names — ① never re-runs ④'s rename by hand. Default: ④ script
+  → ① authoring. Confirm at child creation.
 
 ## Cross-child invariants
 
+- **Rename is scripted, not hand-edited.** ④ applies a fixed old→new name map by
+  script across Go registration/switch, `runtime.json`, specs, playbook tokens,
+  and tests, verified by diff + tests, with only a thin prose-cleanup tail.
+  Hand-editing name-by-name is a smell.
+- **Collapse only where redundancy is proven a clean superset.** ③ removes tools
+  only where the survivor already returns the removed tool's output (tickets,
+  specs — verified). A merely "looks similar" pair is NOT collapsed here; it is
+  left, or routed to a fresh audit. Semantic reconciliation (novel merged
+  signatures) belongs to ②, not ③.
+- **Naming/shape hygiene only; semantics unchanged** except ②'s scoped signature
+  merges. No tool changes what it *does*.
+- **Exposed surface is the gate.** Gated `exec.*`/`mercenary.*` adopt the same
+  canonical vocabulary but are not this epic's landing gate.
 - **Authoring is ws-only, ×1.** `agents-plugin-wsflow` assets are mechanically
-  mirrored from ws by script, so only ws-side playbooks are authored; the
-  wsflow multiplier is ~1. Any child that hand-edits wsflow separately is a
-  smell — fix the mirror instead.
-- **Effort delta between layers is small; value delta is not.** Because the
-  common cost floor is playbook re-authoring, the layers do not differ much in
-  effort. Prioritize by value/readiness (① first), and do NOT under-scope ① as
-  "the easy one" — it has the widest blast radius (ws+wsflow playbooks,
-  `runtime.json`, `mcp-tools.md`/`workflow-skills.md`, resolver next-instruction
-  text at `proceed_resolver.go:355`, Go tool registration).
+  mirrored from ws by script; only ws-side playbooks are authored. Hand-editing
+  wsflow separately is a smell — fix the mirror.
 - **Non-playbook reference surfaces are part of every freeze.** `runtime.json`,
-  the MCP/workflow specs, resolver next-instruction text, and Go tool
-  registration are mechanical (not ceremony) but must be captured in the frozen
-  end-state so a rename/consolidation lands atomically.
-- **Coordinate with skill-playbook-diet.** That epic's Lever B pushes more
-  decision logic INTO `enter.*`; this epic makes those tools less visible. A
-  tool must not be expanded by diet immediately before this epic renames or
-  reshapes it — sequence the two.
-- **Deprecation posture is per-child.** Whether a rename ships as a hard cut or
-  an alias/transition window is decided per child (downstream callers exist);
-  the epic requires each child to state its posture, not a single epic-wide rule.
+  the MCP/workflow specs, resolver next-instruction text
+  (`proceed_resolver.go:355`), and Go tool registration land atomically with the
+  rename/collapse.
+- **Coordinate with skill-playbook-diet.** Its Lever B pushes more decision logic
+  INTO `enter.*`; this epic makes those tools less visible. A tool must not be
+  expanded by diet immediately before this epic renames or reshapes it.
+- **Deprecation posture is per-child** (hard cut vs alias window); each child
+  states its own, given downstream callers exist.
 
 ## Child tickets
 
 - **①** `260901-research-enter-tool-direct-call-affordance-rename` — exists at
-  `idea/`; promote under this epic. Owns the affordance rename + opaque-params
-  execution.
-- **②** mechanical tool-family consolidation (`todo.*`, candidate `note.*`) —
-  to be created.
-- **③** query-tool redundancy audit → dedup (`tickets.*` read tools, `specs.*`)
-  — to be created; audit gates any removal.
+  `idea/`; promote under this epic. Owns the affordance rename + opaque-params.
+- **④** verb-vocabulary unification (scripted rename to canonical verbs) — to be
+  created; carries the frozen name map.
+- **③** read-surface collapse (`tickets`/`specs` list+status → query; plus
+  `mental_models` and any other corpus triple, audit-gated per the table note) —
+  to be created; depends on ④'s survivor naming.
+- **②** mechanical signature merge (`todo` insert-trio → `add`; candidate
+  `note.mute/unmute`) — to be created; the judgment-heavy one.
 
 ## Closure conditions
 
-- The workflow-entry-shaped tools no longer read as user intent and no longer
-  publish a self-inviting input schema (① landed).
-- Over-split families are consolidated to composed operations, or explicitly
-  decided to keep (② resolved either way).
-- Query redundancy is audited and either deduped or documented as intentionally
-  distinct (③ resolved either way).
+- Workflow-entry-shaped tools no longer read as user intent nor publish a
+  self-inviting input schema (① landed).
+- The read/query surface uses the canonical verb set; `status` no longer names a
+  corpus lookup; `list` survives only for bounded sets (④ landed).
+- Proven-redundant read triples are collapsed to their `query` survivor (③
+  landed).
+- Over-split families are merged to composed operations, or explicitly kept (②
+  resolved either way).
 - The mirror keeps wsflow in sync with no hand-authored wsflow drift introduced.
