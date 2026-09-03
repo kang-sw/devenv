@@ -160,18 +160,67 @@ settled the two forks and gap #6. Evidence is `pi --help`, `docs/packages.md`,
 
 ### Remaining publish work (mechanical, no open design)
 
-1. **Skills bundling (the one blocker).** Add package-local `skills/` (pack-time
-   copy from `agents-plugin/skills`) + a `"pi": { "skills": [...] }` manifest or a
-   `pluginDir`-relative `skillPaths`.
-2. **Publish metadata.** `files` whitelist (bin/, runtime.json, rsrc/, skills/,
-   model-catalog.json, src/), move any runtime deps to `dependencies`, Pi core to
-   `peerDependencies: "*"`, drop `private: true`, add `license`/`repository`/
-   `engines`.
-3. **Hand-sync drift guard.** The copy set now grows to include `skills/`; add a
-   pack-time copy script (or `bundledDependencies`) so a stale copy cannot ship.
+1. **Skills bundling (the one blocker). — DONE (impl/track/pi-agent, commit
+   279f501a; spec d327de64).** Shipped as a `pluginDir`-relative package-local-first
+   resolver (`src/skills-dir.ts::resolveSkillsDir`) + a pack-time `prepack`/`prepare`
+   copy script (`scripts/copy-skills.mjs`) that generates a gitignored
+   `agents-plugin-pi/skills/`, plus a `files` whitelist that ships it. The
+   `"pi": { "skills": [...] }` manifest alternative was not used; the resolver path
+   keeps dev `-e` working via the canonical-tree fallback.
+2. **Publish metadata (partly landed).** The `files` whitelist landed with item 1
+   (bin/, runtime.json, rsrc/, skills/, model-catalog.json, src/). Still to do for
+   an actual publish: move any runtime deps to `dependencies`, Pi core to
+   `peerDependencies: "*"`, drop `private: true` (deliberately kept for now — no
+   publish until features 2/3 are discussed), add `license`/`repository`/`engines`.
+3. **Hand-sync drift guard — DONE for skills.** The pack-time copy script
+   regenerates `skills/` on every pack, so it cannot drift; the three original
+   hand-synced copies (`bin/`/`runtime.json`/`rsrc/`) remain prose-note-guarded as
+   before.
 
 Nothing in gaps/forks now forces a feature-code rewrite: the entry contract is
 install-identical and the CLI-resolution pattern is already correct, so
 `260903-feat-ws-pi-subagent-rpc-ux` and `260903-feat-ws-pi-goal-loop-compaction-hook`
 can be built under `-e` and will run unchanged once installed, provided the
 package-local-paths discipline holds.
+
+## Consumption model + publish path — decided npm-first (2026-09-03)
+
+A follow-up read of Pi `docs/packages.md` (git-source section) surfaced a
+repo-layout constraint the gap #6 spike did not cover:
+
+- **`pi install git:<host>/<user>/<repo>` targets the repo ROOT.** Pi clones the
+  whole repo to `~/.pi/agent/git/<host>/<path>` and runs `npm install` only if a
+  **root `package.json`** exists; the git spec supports refs (`@tag`/`@commit`)
+  and `git@`/`ssh://` shorthand but **no subdirectory / subpath / `#fragment`**
+  syntax. This package's `package.json` lives at `agents-plugin-pi/`, a monorepo
+  **subdirectory**, so a bare `pi install git:github.com/<user>/<devenv-repo>`
+  cannot discover it.
+
+Three consumption paths follow, with the decision:
+
+- **npm publish → `pi install npm:<name>` — CHOSEN target.** Cleanest canonical
+  path; independent of monorepo layout. Deferred until after features 2/3 land
+  (no rush to publish).
+- **Dedicated repo whose root IS the package → `pi install git:...` — rejected
+  for now.** Would need a repo split / subtree / mirror; heavier than npm publish
+  and buys nothing npm publish doesn't.
+- **Local path → `pi install ./agents-plugin-pi` (or abs path) — works today**
+  (in-place reference; the package-local-first resolver's canonical-tree fallback
+  finds the sibling `agents-plugin/skills` from the checkout). This is the
+  dogfooding install path until publish.
+
+### npm publish prerequisites (for the eventual publish slice)
+
+- Drop `private: true` (npm refuses to publish a private-marked package).
+- Auth: an npm account + `npm login` (web flow) **or** a publish token in
+  `.npmrc` (`//registry.npmjs.org/:_authToken=`); publish typically needs
+  2FA/OTP, or an **automation token** to bypass it in CI.
+- Name policy: unscoped `ws-pi-bridge` must be globally unique (verify
+  availability); a scoped name (`@<scope>/ws-pi-bridge`) avoids collision but is
+  private-by-default, so publishing it publicly needs `--access public` /
+  `publishConfig.access: "public"`. Scoped is the safer default.
+- Optional: `npm publish --provenance` via GitHub Actions OIDC for supply-chain
+  attestation.
+- These join the still-pending publish-metadata items (deps→`dependencies`, Pi
+  core→`peerDependencies: "*"`, `license`/`repository`/`engines`) under
+  remaining-work item 2 above.

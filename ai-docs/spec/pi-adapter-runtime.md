@@ -82,9 +82,15 @@ already returned by the handshake, so it costs no extra round-trip.
 
 ## Skill exposure {#260903-pi-bridge-skill-exposure}
 
-The adapter answers Pi's `resources_discover` event with the path to the ws
-`agents-plugin/skills/` tree, so ws skills load as native Pi skills with no prose
-rewriting. ws skill directory names are already hyphen-form
+The adapter answers Pi's `resources_discover` event with the path to a ws skills
+tree, so ws skills load as native Pi skills with no prose rewriting. The path is
+resolved **package-local-first**: the adapter prefers a `skills/` directory inside
+its own package root (present in a published/installed tarball, generated at pack
+time — see Package topology) and falls back to the canonical monorepo
+`agents-plugin/skills/` tree for dev `-e` runs from the source checkout. Either
+way a single existing directory is handed to Pi; the fallback returns the
+canonical path unconditionally, so a checkout missing both simply exposes no
+skills rather than failing. ws skill directory names are already hyphen-form
 (`lead-add-rule`, `lead-proceed`, …), which matches Pi's skill-name charset, so
 no renaming is required.
 
@@ -265,9 +271,21 @@ self-contained: it carries its own byte-identical copies of the ws-mcp launcher
 (`bin/ws-mcp-launcher.py`), the runtime compatibility contract (`runtime.json`),
 and the prompt/playbook tree (`rsrc/`) — the same copy-not-reference precedent the
 `agents-plugin-wsflow` package already uses, and required because the launcher
-resolves those trees relative to its own package directory at runtime. These
+resolves those trees relative to its own package directory at runtime. These three
 copies are kept in sync by hand; there is no automated sync tooling, so a change
 to the canonical `agents-plugin/` copies must be mirrored here.
+
+The ws skills tree is a fourth carried copy, but with a distinct, **automated**
+sync model rather than a hand-synced commit: a pack-time script (wired to npm
+`prepack` and `prepare`) copies `agents-plugin/skills/` into a package-local
+`skills/` directory that is shipped in the published tarball (via the `files`
+whitelist) yet gitignored and never committed. This keeps the large skills tree
+out of the repository while still making an installed package self-contained; the
+package-local-first resolver (see Skill exposure) prefers this generated copy and
+uses the canonical tree only for dev `-e` runs. The copy script is Node-builtins
+only, so it runs under a consumer's `npm install --omit=dev`, and no-ops when the
+canonical source is absent (packing from an already-vendored tarball). `npm pack`
+fires both hooks, so the copy runs redundantly but idempotently.
 
 > [!note] Constraints
 > - This contract covers the Phase 1 bridge, the Phase 2 delegation spawner, the
