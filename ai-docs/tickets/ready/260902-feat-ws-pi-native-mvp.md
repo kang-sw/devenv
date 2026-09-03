@@ -75,8 +75,8 @@ Settled in `260802` (see anchor for rejected alternatives and evidence):
   file. This ticket is the authorizing ticket for that new root directory per
   AGENTS.md ("no new root module directories without a ticket").
 - **Every proxied `ws/*` call is keyed; the key stays caller-controllable.**
-  ws-mcp requires a per-call `session_key` (minted via `ws/lead.login` or
-  `ferrule`). The bridge default-fills its own key only when omitted and
+  ws-mcp requires a per-call `session_key` (minted via `ferrule`). The bridge
+  default-fills its own key only when omitted and
   forwards an explicit key verbatim, so both subagent child-key lineage and lead
   multi-track orchestration retain explicit control (see Phase 1).
 
