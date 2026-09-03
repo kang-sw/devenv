@@ -160,15 +160,22 @@ settled the two forks and gap #6. Evidence is `pi --help`, `docs/packages.md`,
 
 ### Remaining publish work (mechanical, no open design)
 
-1. **Skills bundling (the one blocker).** Add package-local `skills/` (pack-time
-   copy from `agents-plugin/skills`) + a `"pi": { "skills": [...] }` manifest or a
-   `pluginDir`-relative `skillPaths`.
-2. **Publish metadata.** `files` whitelist (bin/, runtime.json, rsrc/, skills/,
-   model-catalog.json, src/), move any runtime deps to `dependencies`, Pi core to
-   `peerDependencies: "*"`, drop `private: true`, add `license`/`repository`/
-   `engines`.
-3. **Hand-sync drift guard.** The copy set now grows to include `skills/`; add a
-   pack-time copy script (or `bundledDependencies`) so a stale copy cannot ship.
+1. **Skills bundling (the one blocker). — DONE (impl/track/pi-agent, commit
+   279f501a; spec d327de64).** Shipped as a `pluginDir`-relative package-local-first
+   resolver (`src/skills-dir.ts::resolveSkillsDir`) + a pack-time `prepack`/`prepare`
+   copy script (`scripts/copy-skills.mjs`) that generates a gitignored
+   `agents-plugin-pi/skills/`, plus a `files` whitelist that ships it. The
+   `"pi": { "skills": [...] }` manifest alternative was not used; the resolver path
+   keeps dev `-e` working via the canonical-tree fallback.
+2. **Publish metadata (partly landed).** The `files` whitelist landed with item 1
+   (bin/, runtime.json, rsrc/, skills/, model-catalog.json, src/). Still to do for
+   an actual publish: move any runtime deps to `dependencies`, Pi core to
+   `peerDependencies: "*"`, drop `private: true` (deliberately kept for now — no
+   publish until features 2/3 are discussed), add `license`/`repository`/`engines`.
+3. **Hand-sync drift guard — DONE for skills.** The pack-time copy script
+   regenerates `skills/` on every pack, so it cannot drift; the three original
+   hand-synced copies (`bin/`/`runtime.json`/`rsrc/`) remain prose-note-guarded as
+   before.
 
 Nothing in gaps/forks now forces a feature-code rewrite: the entry contract is
 install-identical and the CLI-resolution pattern is already correct, so
