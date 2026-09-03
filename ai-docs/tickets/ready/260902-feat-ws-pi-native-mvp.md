@@ -355,10 +355,19 @@ relay needed, no elevation. Golden rule verified: zero changes to `agents-plugin
 `-tool/`, `-wsflow/`, or the hand-synced `agents-plugin-pi/{rsrc,runtime.json,bin}`
 copies.
 
-**The live end-to-end gate (unset map → `workflow_manual` shows the advisory and a
-spawn inherits; then configure a tier → a spawn launches with the mapped
-`--model`) has NOT yet been run.** This is the sole outstanding acceptance step
-for Phase 3.
+Live end-to-end gate: **PASSED** (driven via `pi -e agents-plugin-pi/src/index.ts
+--mode json -p`, luna default `openai/gpt-5.6-luna-pro`). Part A (catalog `{}`):
+the unset advisory ("Pi model tier map is unset.") appeared on the
+`ws__workflow_manual` result and NOT on the `explore` result (confirming the
+`rawName==="workflow_manual"` gate), and the `explore` child inherited
+`--model openrouter/openai/gpt-5.6-luna-pro`. Part B (`{"tiers":{"small":
+"anthropic/claude-haiku-4.5"}}`, deliberately distinct from the parent so
+mapped ≠ inherit): the advisory was absent from `ws__workflow_manual`, and the
+small-tier `explore` child launched with the mapped `--model
+anthropic/claude-haiku-4.5` — captured live from `/proc/<pid>/cmdline` (explore is
+`--no-session`, so argv capture, not a session-file stamp, is the proof). No
+defects; `model-catalog.json` was temporarily edited for Part B and restored to
+`{}` (tree clean, no commits from the gate).
 
 Deferred: `AGENTS.md` `## Project Orientation` still omits the `agents-plugin-pi/`
 root (kept out until the ticket integrates off this tracking branch, consistent
