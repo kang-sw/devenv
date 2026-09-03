@@ -447,9 +447,18 @@ ruled out. In a real interactive Pi session the handler fires → injects the
 kickoff → idle →
 the turn runs (documented Pi `sendUserMessage` behavior), i.e. exactly the
 composition already proven from the identical string. The gate therefore stands
-on the kickoff-string proof plus the separate command-dispatch proof; a
-fully-literal interactive `/ws-discuss` capture is deferred to a manual/human
-Pi run.
+on the kickoff-string proof plus the separate command-dispatch proof.
+
+Fully-literal capture — CONFIRMED (2026-09-03, human interactive run). The user
+ran the real `/ws-discuss` in an interactive Pi TUI against the luna default
+model; the model's final output reported the full composition driven from the
+single command — the `lead-discuss` skill expanded, the bridged
+`ws__playbook_print` / `ws__workflow_manual` / `ws__git_status` /
+`ws__project_tree` tools were called, the ws-mcp launcher was running, and one
+real child `pi` `explore` process returned `state:"done"` with recon findings.
+This is the interactive path the non-interactive drivers could not exercise; the
+caveat above is therefore scoped to non-interactive driving only, and the
+fully-literal `/ws-discuss` end-to-end is now witnessed rather than deferred.
 
 Startup operational notes for anyone re-running Phase-4-style gates
 (non-defects): print mode blocks on open stdin — close it (`</dev/null`); and
@@ -459,7 +468,10 @@ also propagates to spawned children).
 Deferred: `AGENTS.md` `## Project Orientation` still omits the
 `agents-plugin-pi/` root (kept out until the ticket integrates off this tracking
 branch, consistent with Phases 1-3); a dedicated Pi-adapter mental-model domain
-(now authorable since the MVP surface is complete); the fully-literal interactive
-`/ws-discuss` capture above. All four MVP phases are complete; merge into
+(now authorable since the MVP surface is complete); npm distribution of the
+adapter, now tracked under `260903-research-ws-pi-adapter-npm-distribution`. (The
+fully-literal interactive `/ws-discuss` capture that was deferred here is now
+confirmed — see the Fully-literal capture note above.) All four MVP phases are
+complete; merge into
 `track/pi-agent` and ticket close await explicit user choice (default: no-merge,
 retain branch).
