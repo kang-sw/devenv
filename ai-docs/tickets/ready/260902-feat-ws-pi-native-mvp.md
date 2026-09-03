@@ -10,8 +10,8 @@ related-mental-model:
   - mcp-runtime
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 8bef18715d5a6444
-sage-review-completeness-reviewed: 8bef18715d5a6444
+sage-review-design-reviewed: 3f588c6fa9466ec7
+sage-review-completeness-reviewed: 3f588c6fa9466ec7
 ---
 
 # Implement the ws Pi-native MVP: self-built MCP bridge + subagent spawner + model-catalog config
