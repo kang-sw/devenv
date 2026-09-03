@@ -229,6 +229,58 @@ the async spawner as a Pi extension surface:
 Gate: lead spawns a worker and an `explore` leaf, `wait` harvests both, and a
 `continue` on the worker resumes its session.
 
+### Result (7fcce4e3) - 2026-09-03
+
+Phase 2 landed the self-built delegation spawner in `agents-plugin-pi/`. Commits
+`13b4e67f` (spawner + four tools + unit tests) and `7fcce4e3` (review-relay
+fixes). New caller-visible surface documented in spec `pi-adapter-runtime`
+(`{#260903-pi-delegation-spawner-tools}`, `{#260903-pi-spawner-completion-gating}`,
+`{#260903-pi-explore-recon-leaf}`, `{#260903-pi-spawner-tool-groups}`,
+`{#260903-pi-spawner-model-tier-inherit}`; landed separately in `fc99fea2`).
+
+New: `src/spawner.ts` — module-state `AgentRegistry`, async `spawnAgent` /
+`continueAgent` / `waitAgents` / `exploreLeaf`, `registerAgentTools`, and the pure
+helpers `TOOL_GROUPS` / `resolveTools` / `isTerminalStopReason` / `buildSpawnArgs`
+/ `AgentEventLineBuffer` / `handleAgentEvent`. Tool registration + a
+still-running-worker kill-pass wired into `src/index.ts`; `src/bridge.ts`
+`BridgeHandle` extended with `client` / `defaultSessionKeyRef` / `wsToolNames` so
+the spawner reuses the single ws-mcp connection instead of opening a second one.
+
+Deviations from the plan text:
+- **Completion gates on the child `close` event, stronger than the planned
+  `exit`.** `close` fires after stdio is fully drained (`lineBuffer.end()` runs
+  first), so the flush guarantee the Q9 risk demands holds a fortiori; the
+  last-seen terminal `stopReason` (`stop`/`length`/`error`/`aborted`) is kept only
+  as metadata and never flips state. This is the load-bearing correctness point.
+- **Spec section is a lead-owned doc step, not part of the implementer commit** —
+  fit review flagged its absence from `13b4e67f`; it landed in `fc99fea2`.
+- **Bun-virtual-script branch of the shipped `examples/extensions/subagent`
+  reference was dropped** — this package runs only under Node, so it would be dead
+  code.
+
+Verification (partial — live gate pending): 59 unit tests pass (`node --test`):
+tool-group resolution, all five `stopReason` classifications, spawn/continue/
+explore arg-building (incl. `--session`/`--no-session` mutual exclusion and
+`--model`-omitted-when-unset), the multibyte-safe NDJSON line buffer, and the
+`handleAgentEvent` state-gating regression added in relay (terminal `stopReason`
+must not flip `state`). Partitioned review: correctness clean (all load-bearing
+gating verified) + 3 robustness minors `[fixed]`; fit one Important (spec gap,
+closed in `fc99fea2`) + one minor `[fixed]`; test one Important
+(`handleAgentEvent` regression coverage, `[fixed]` in `7fcce4e3`). No Critical, no
+elevation. Golden rule verified: zero changes to `agents-plugin/`, `-tool/`,
+`-wsflow/`, or the hand-synced `agents-plugin-pi/{rsrc,runtime.json,bin}` copies.
+
+**The live end-to-end gate (spawn a worker + `explore` leaf → `wait` harvests
+both → `continue` resumes the worker's session, against a live provider) has NOT
+yet been run** — the async engine and Pi tool wiring are exercised only by that
+gate, matching Phase 1's convention of unit-testing IO-free seams only. This is
+the sole outstanding acceptance step for Phase 2.
+
+Deferred: `AGENTS.md` `## Project Orientation` still omits the `agents-plugin-pi/`
+root (kept out until the ticket integrates off this tracking branch, consistent
+with Phase 1); `tier` resolves as inherit until Phase 3 lands the model catalog.
+Phases 3-4 remain; ticket stays in `ready/`.
+
 ### Phase 3: Model catalog curation + tier map + bootstrap warning
 
 Depends on Phase 2 (spawner consumes the tier map). Implement the Pi model
