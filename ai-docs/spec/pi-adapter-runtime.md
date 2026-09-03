@@ -13,8 +13,8 @@ ws-mcp); no ws-mcp source is modified for Pi. All Pi-specific policy lives in th
 adapter.
 
 This document describes the caller-observable behavior of the adapter. It covers
-the Phase 1 bridge surface and the Phase 2 delegation spawner; the user-curated
-model catalog is a later surface that adds its own section.
+the Phase 1 bridge surface, the Phase 2 delegation spawner, and the Phase 3
+user-curated model catalog + tier map.
 
 ## Tool exposure and name sanitization {#260903-pi-bridge-tool-registration}
 
@@ -166,18 +166,49 @@ bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. No
 agent-profile files are written to disk (no `.pi/agents/`); all curation is
 in-memory plus `pi` CLI flags.
 
-### Model tier is inherit-only at this stage {#260903-pi-spawner-model-tier-inherit}
+### Model tier resolution {#260903-pi-spawner-model-tier-inherit}
 
-`ws-agent-spawn` accepts a `tier`, but the adapter does not yet map a tier to a
-concrete model. A spawn resolves its model by inheriting the parent session's
-active model (equivalently, omitting `--model` for Pi's own default). The `tier`
-value is carried as inert metadata pending the model-catalog surface.
+`ws-agent-spawn` accepts a `tier`; the adapter resolves it to a concrete model
+through the user-curated tier map (see below). The map is keyed on ws's canonical
+first-class tiers `small` / `medium` / `large` / `xlarge`, so a
+`playbook.render` `recommended-tier` passes through unchanged. When the requested
+tier has a mapped model, the spawn launches with `--model <that model>`; when the
+tier is unmapped, the map is unset, or the caller passed an unrecognized tier
+string, the spawn falls back to inheriting the parent session's active model
+(equivalently, omitting `--model`). An unrecognized tier is never a validation
+error — resolution never hard-fails, it only degrades to inherit.
 
-> [!note] Implementation Gap · 2026-09-03
-> Unexposed capability: `ws-agent-spawn`'s `tier` argument is accepted but not yet
-> resolved to a model. The user-curated model catalog and tier→model map are a
-> separate, not-yet-built surface; until it lands every spawn inherits the parent
-> model regardless of `tier`.
+`explore` is a **role**, not a caller-facing tier: it always resolves through the
+`small` tier (no `tier` parameter is exposed on `explore`). `ws-agent-continue`
+stays inherit-only (it carries no tier).
+
+### Model catalog data file {#260903-pi-model-catalog-config-file}
+
+The curated catalog and tier map live in an adapter-owned data file,
+`agents-plugin-pi/model-catalog.json` (sibling to `runtime.json`) — no Pi model
+strings are placed in the harness-neutral ws-mcp core. Its shape is a `tiers`
+object mapping each canonical tier to a `provider/id` model string, plus an
+optional `catalog` list of curated candidate models. The file ships as `{}`
+(fully unset) so a fresh checkout starts with every spawn inheriting until the
+user curates it. It is read **fresh on every spawn** (no caching), so a hand-edit
+applies without restarting Pi; a missing or malformed file is treated as unset
+rather than an error.
+
+The read-only `ws-model-catalog-list` command enumerates the session's usable
+models (`ctx.scopedModels`, falling back to the full available pool when no
+scoping is configured) as `provider/id` candidates for the user to hand-copy into
+`model-catalog.json`. It never writes the file.
+
+### Unset-tier advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
+
+While the tier map's `small` tier is unset, the adapter appends a strong advisory
+to every `workflow_manual` response (and only that tool's response), mirroring the
+cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed and
+re-appended on every call while the condition holds, not once per session. The
+advisory is appended after the tool's own content (never prepended, never mutating
+the original in place) and is added only on a successful `workflow_manual` result,
+never on an error response. Spawns and explores still degrade silently to inherit
+while unset; the advisory is the only pressure and never blocks work.
 
 ## Package topology {#260903-pi-adapter-package-topology}
 
@@ -192,8 +223,6 @@ copies are kept in sync by hand; there is no automated sync tooling, so a change
 to the canonical `agents-plugin/` copies must be mirrored here.
 
 > [!note] Constraints
-> - This contract covers the Phase 1 bridge and the Phase 2 delegation spawner.
->   The user-curated model catalog + tier→model map (which would resolve
->   `ws-agent-spawn`'s `tier` to a concrete model) and the `/ws-discuss` PoC
->   command are separate, not-yet-implemented surfaces and are not part of this
->   contract yet.
+> - This contract covers the Phase 1 bridge, the Phase 2 delegation spawner, and
+>   the Phase 3 model catalog + tier map. The `/ws-discuss` PoC command is a
+>   separate, not-yet-implemented surface and is not part of this contract yet.
