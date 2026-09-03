@@ -735,6 +735,18 @@ openrouter). Session spikes ran two sequential `--session <path>` turns.
   ws `SKILL.md` prose with `ws/playbook.print`-style tool calls is
   load-and-go.** This also resolves "skill prose references to MCP tool
   calls" (was Q4) — prose works unmodified.
+  **Caveat (2026-09-03, found during Phase 1 impl `260902`): the verbatim
+  round-trip was provider-dependent.** The live model here emitted a `tool_use`
+  block (Anthropic-format, slash-tolerant). OpenAI-compatible providers (e.g.
+  openrouter) reject a `/` in the tool name (`^[a-zA-Z0-9_.-]+$`), which breaks
+  the entire tool-bearing turn — reproduced against every backend on the only
+  live provider available. Pi's open model space means the bridge cannot assume
+  slash tolerance, so the MVP registers tools under **provider-legal sanitized
+  names** (`ws__<tool>`; `/`→`__`, `.`→`_`) and relies on the model's prose→tool
+  mapping (the same mechanism Claude Code's `mcp__…__…` names already use). The
+  "prose works unmodified" consequence holds; the "register the name verbatim"
+  mechanism does not. See spec `pi-adapter-runtime`
+  `{#260903-pi-bridge-tool-registration}`.
 - **`--session` + `-p` resume appends turns (was Q8).** Two sequential
   `pi --mode json -p --session <path>` calls against the same file
   accumulated turns: after turn 1 the file had 5 lines (session header +

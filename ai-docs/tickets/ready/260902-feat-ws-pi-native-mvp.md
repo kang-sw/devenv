@@ -8,6 +8,7 @@ related-mental-model:
   - plugin-runtime
   - named-agent-runtime
   - mcp-runtime
+spec: pi-adapter-runtime
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3f588c6fa9466ec7
@@ -87,8 +88,12 @@ adapter-runtime surface. Target spec area: **Pi adapter runtime contract** (a
 new area sibling to `plugin-runtime` / `mcp-tools`; the harness-neutral ws-mcp
 contracts stay unchanged per the golden rule). Expected caller-visible changes:
 
-- ws-mcp tools are reachable on Pi under their verbatim `ws/...` names via the
-  bridge — no name mangling, so skill/playbook prose is unchanged.
+- ws-mcp tools are reachable on Pi under provider-legal sanitized names
+  (`ws__<tool>`; `/`→`__`, `.`→`_`) via the bridge; dispatch to ws-mcp uses the
+  raw dotted name, and skill/playbook prose stays unchanged because the model
+  maps `ws/<tool>` prose onto the sanitized tool (spec `pi-adapter-runtime`,
+  `{#260903-pi-bridge-tool-registration}`). The literal-`ws/...` form the plan
+  assumed is rejected by OpenAI-compatible providers — see Phase 1 Result.
 - New Pi-side delegation tools: `ws-agent-spawn` / `ws-agent-continue` /
   `ws-agent-wait` (async, depth 0→1 leaf) and `explore` (one-shot recon leaf),
   with the per-spawn `--model`/`--tools`/`--append-system-prompt`/`--session`
@@ -145,6 +150,54 @@ subagent lineage and lead multi-track orchestration.)
 Gate: a keyed ws-mcp tool (e.g. `ws/workflow_manual`) round-trips end-to-end
 through the bridge against a live model — with `session_key` default-filled when
 omitted and forwarded verbatim when supplied.
+
+### Result (0d47b71f) - 2026-09-03
+
+Phase 1 bridge landed in the new `agents-plugin-pi/` root. Commits
+`5930d48f..0d47b71f` (scaffold `3772819f`, naming fix `9aea2744`, review-round-1
+fixes `0d47b71f`). Caller-visible behavior is documented in spec
+`pi-adapter-runtime` (`ai-docs/spec/pi-adapter-runtime.md`). Gate met with
+evidence.
+
+Deviations from the plan text:
+- **Tool naming reversed from "verbatim `ws/...`".** A literal `/` in the tool
+  name is rejected by OpenAI-compatible providers (`^[a-zA-Z0-9_.-]+$`), which
+  breaks the whole tool-bearing turn. The Q2 spike's success was
+  provider-dependent (a slash-tolerant Anthropic-format backend). Pi's open
+  model space forbids assuming one provider's leniency, so tools register under
+  provider-legal sanitized names (`/`→`__`, `.`→`_`, e.g. `ws__playbook_print`);
+  dispatch still uses the raw dotted name, skill prose is untouched, and the
+  model maps prose→tool as the reference harnesses already do. User-approved;
+  anchor `260802` Q2 annotated with the caveat.
+- **Subprocess spawns in `session_start`, not at module load** — Pi forbids
+  starting background processes from the top-level extension factory.
+- **`session_key` required-list strip (discovered live).** Pi validates
+  tool-call arguments against the registered schema *before* execute runs;
+  ws-mcp marks `session_key` required on root-aware tools, so omitted-key calls
+  failed Pi-side before fill-or-forward. Fixed by stripping `session_key` from
+  each registered schema's `required[]` only (kept in `properties`), making the
+  optional-key constraint true at the Pi tool layer.
+- **`rsrc/` added to the copied assets** (plan step-1 named only launcher +
+  runtime.json). The copied launcher resolves `WS_RSRC_ROOT` relative to its own
+  package, so `agents-plugin-pi/rsrc/` must exist (byte-identical, wsflow
+  precedent) or `playbook.render`/`workflow_manual` fail with "rsrc manifest
+  missing". Now three hand-synced byte-identical copies (launcher, runtime.json,
+  rsrc/) with no sync tooling — the same debt wsflow carries.
+
+Verification: 31 unit tests pass (`node --test`; sanitize/strip/resolve,
+JSON-RPC line-buffer incl. multibyte-split + out-of-order id correlation,
+version pin). Live gate against openrouter (only ready provider): default-fill
+round trip, prose-mapping (`ws/playbook.print` prose → `ws__playbook_print`
+call), explicit `session_key` forwarding, pin-and-fail, and `resources_discover`
+— all confirmed. The UTF-8 multi-chunk fix was validated via a documented
+byte-fed proxy (real responses stayed under the 64KB pipe buffer). Golden rule
+verified: zero changes to `agents-plugin/`, `agents-plugin-tool/`,
+`agents-plugin-wsflow/`.
+
+Deferred: automated multi-provider tool-name-legality check; a dedicated
+Pi-adapter mental-model domain (better authored once Phases 2-3 fill the
+surface); the `--append-system-prompt` vs `--system-prompt` tuning (anchor
+`260802` Open item). Phases 2-4 remain; ticket stays in `ready/`.
 
 ### Phase 2: Self-built subagent spawner + explore primitive
 
