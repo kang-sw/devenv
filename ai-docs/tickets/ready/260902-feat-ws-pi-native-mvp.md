@@ -258,7 +258,7 @@ Deviations from the plan text:
   reference was dropped** — this package runs only under Node, so it would be dead
   code.
 
-Verification (partial — live gate pending): 59 unit tests pass (`node --test`):
+Verification: 59 unit tests pass (`node --test`):
 tool-group resolution, all five `stopReason` classifications, spawn/continue/
 explore arg-building (incl. `--session`/`--no-session` mutual exclusion and
 `--model`-omitted-when-unset), the multibyte-safe NDJSON line buffer, and the
@@ -270,11 +270,23 @@ closed in `fc99fea2`) + one minor `[fixed]`; test one Important
 elevation. Golden rule verified: zero changes to `agents-plugin/`, `-tool/`,
 `-wsflow/`, or the hand-synced `agents-plugin-pi/{rsrc,runtime.json,bin}` copies.
 
-**The live end-to-end gate (spawn a worker + `explore` leaf → `wait` harvests
-both → `continue` resumes the worker's session, against a live provider) has NOT
-yet been run** — the async engine and Pi tool wiring are exercised only by that
-gate, matching Phase 1's convention of unit-testing IO-free seams only. This is
-the sole outstanding acceptance step for Phase 2.
+Live end-to-end gate: **PASSED**. Driven non-interactively via `pi -e
+agents-plugin-pi/src/index.ts --mode json -p "<orchestration>"` (project-local
+extensions load through the CLI `-e` flag) against the user's configured luna
+default (`openai/gpt-5.6-luna-pro`, openrouter), the model issued all four tools
+in order: `ws-agent-spawn` (worker on the variable-free `delegate-sample`
+playbook) and `explore` both returned `state:"running"`; `ws-agent-wait
+{policy:"all"}` harvested BOTH (`done:[worker→"READY" exit 0, explore→"AGENTS.md"
+exit 0]`, `timedOut:false`); `ws-agent-continue` resumed the worker (→"AGAIN")
+on the **same** on-disk session (verified by the `parentId` chain
+READY→AGAIN in `session.jsonl`, not a fresh session). Inner children ran under
+`--model` inherit (each assistant message stamped `model:"openai/gpt-5.6-luna-pro"`)
+and the `full-worker` group's `ws__*` names passed into the child `--tools` with
+no unknown-tool errors. No defects.
+
+Process note (not a defect): the `implementer` playbook requires template
+variables (`PlanPath` …) so it is not a clean bare-`ws-agent-spawn` render pick;
+a variable-free playbook (`delegate-sample`) renders and spawns cleanly.
 
 Deferred: `AGENTS.md` `## Project Orientation` still omits the `agents-plugin-pi/`
 root (kept out until the ticket integrates off this tracking branch, consistent
