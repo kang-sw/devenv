@@ -1,10 +1,28 @@
 /**
  * Tool re-registration bridge: spawns the ws-mcp launcher, version-checks
- * it, lists its tools, and re-registers each one on Pi under "ws/" + rawName
- * (load-bearing prefix — see plan Codebase Findings on
- * ai-docs/spec/mcp-tools.md's McpNamespace template and the literal
- * `ws/playbook.print(...)` / `ws/workflow_manual(...)` call syntax already
- * hard-coded into each skill's SKILL.md prose under agents-plugin/skills/).
+ * it, lists its tools, and re-registers each one on Pi under a sanitized
+ * name derived from "ws/" + rawName.
+ *
+ * SKILL.md prose is written as the literal `ws/playbook.print(...)` /
+ * `ws/workflow_manual(...)` call syntax (see
+ * ai-docs/spec/mcp-tools.md's McpNamespace template and
+ * agents-plugin/skills/*), but that prose form is not itself a legal
+ * provider tool name: OpenAI-compatible tool-calling APIs (confirmed live
+ * against this repo's only reachable provider, openrouter) reject any
+ * character outside `[a-zA-Z0-9_-]` in a tool name, so a literal `/` (or a
+ * raw `.` from ws-mcp's own dotted names) breaks the entire tool-bearing
+ * turn, not just one call.
+ *
+ * The REGISTERED name is therefore sanitized (`/` -> `__` namespace
+ * separator, `.` -> `_` within-tool separator: `registeredName = "ws__" +
+ * rawName.replaceAll(".", "_")`, e.g. `playbook.print` -> `ws__playbook_print`),
+ * matching the shape the reference harnesses already use for these same
+ * tools (Claude Code registers them as `mcp__plugin_ws_ws__playbook_print`).
+ * The model maps the unmodified `ws/playbook.print(...)` SKILL.md prose to
+ * the sanitized registered name itself (prose is not rewritten here — it is
+ * not this bridge's to rewrite). Dispatch to ws-mcp always uses the RAW
+ * dotted `rawName` (`client.callTool(rawName, ...)`) — sanitization is
+ * registration-only and never touches the wire call to ws-mcp.
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
@@ -35,6 +53,47 @@ function notify(ui: ExtensionUIContext | undefined, message: string, level: "inf
 
 function firstText(result: McpToolCallResult): string | undefined {
   return result.content.find((item) => item.type === "text")?.text;
+}
+
+/**
+ * Provider-legal registered name for a ws-mcp raw tool name: `ws__` prefix
+ * (namespace separator, stands in for the `/` in the `ws/<rawName>` prose
+ * form) plus the raw name's `.` separators flattened to `_`. Registration
+ * only — never used for the wire call to ws-mcp, which always dispatches on
+ * the untouched `rawName`.
+ */
+function sanitizeToolName(rawName: string): string {
+  return `ws__${rawName.replaceAll(".", "_")}`;
+}
+
+/**
+ * Drops `session_key` from a JSON-Schema's `required` array (keeping it in
+ * `properties`, unchanged, so a caller can still supply it explicitly).
+ *
+ * Discovered live: Pi validates tool-call arguments against the registered
+ * `parameters` schema *before* `execute()` ever runs (a typebox/JSON-Schema
+ * checker walks the raw schema's `required` array structurally — no typebox
+ * `Kind` wrapping needed for this either, consistent with the step-7 spike).
+ * ws-mcp's own inputSchema marks `session_key` required on every root-aware
+ * tool, so passing it through unmodified silences the session_key
+ * fill-or-forward path entirely: Pi rejects an omitted-session_key call
+ * with "must have required properties session_key" before the bridge's
+ * `resolveSessionKey()` default-fill ever gets a chance to run. This is the
+ * one schema edit the bridge makes — it does not add a synthetic
+ * session_key property (ws-mcp's own inputSchema already declares it), it
+ * only lifts the artificial requirement so "session_key stays optional and
+ * caller-controllable" (ticket constraint) is actually true at the Pi
+ * tool-call layer, not just inside execute().
+ */
+function withOptionalSessionKey(inputSchema: Record<string, unknown>): Record<string, unknown> {
+  const required = inputSchema.required;
+  if (!Array.isArray(required) || !required.includes("session_key")) {
+    return inputSchema;
+  }
+  return {
+    ...inputSchema,
+    required: required.filter((name) => name !== "session_key"),
+  };
 }
 
 /**
@@ -88,8 +147,9 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
 
     for (const tool of tools) {
       const rawName = tool.name;
+      const registeredName = sanitizeToolName(rawName);
       pi.registerTool({
-        name: `ws/${rawName}`,
+        name: registeredName,
         label: rawName,
         description: tool.description ?? rawName,
         // Raw JSON-Schema pass-through — confirmed empirically (see the
@@ -100,14 +160,16 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         // verbatim to the provider API; it does not require typebox's Kind
         // symbols at runtime. ws-mcp's inputSchema is already a plain
         // {type, properties, required} object, so no typebox shim is needed.
-        parameters: tool.inputSchema as never,
+        parameters: withOptionalSessionKey(tool.inputSchema) as never,
         async execute(_toolCallId, params) {
+          // Dispatch always uses the RAW dotted name — sanitization is
+          // registration-only, never part of the ws-mcp wire call.
           const args = resolveSessionKey(params as Record<string, unknown> | undefined, defaultKeyRef);
           const result = await client.callTool(rawName, args);
           if (result.isError) {
             // Throwing is how Pi's tool contract signals isError: true —
             // returning a value never sets it (docs/extensions.md#L1953-2011).
-            throw new Error(firstText(result) ?? `ws/${rawName} failed with no error text`);
+            throw new Error(firstText(result) ?? `${registeredName} failed with no error text`);
           }
           return { content: result.content, details: result };
         },
@@ -138,7 +200,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
       notify(opts.ui, `ws-pi-bridge: ferrule bootstrap threw: ${(err as Error).message}`, "warning");
     }
 
-    notify(opts.ui, `ws-pi-bridge: registered ${tools.length} ws/* tools from ws-mcp ${initResult.serverInfo.version}`);
+    notify(opts.ui, `ws-pi-bridge: registered ${tools.length} ws__* tools from ws-mcp ${initResult.serverInfo.version}`);
   } catch (err) {
     shutdown();
     throw err;

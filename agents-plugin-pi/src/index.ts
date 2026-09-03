@@ -6,9 +6,11 @@
  *   - Spawns the ws-mcp launcher as a subprocess on session_start, closes it
  *     on session_shutdown (docs/extensions.md#L220-224, #L516-526 — no
  *     background processes from the top-level factory).
- *   - Re-registers every ws-mcp tool as `ws/<tool>` via pi.registerTool
- *     (bridge.ts) so existing SKILL.md prose (already written as literal
- *     `ws/playbook.print(...)` calls) dispatches with zero rewriting.
+ *   - Re-registers every ws-mcp tool via pi.registerTool (bridge.ts) under a
+ *     provider-legal sanitized name derived from the `ws/<tool>` prose form
+ *     (`/` -> `__`, `.` -> `_`, e.g. `ws__playbook_print`) — SKILL.md prose
+ *     stays untouched as literal `ws/playbook.print(...)` calls; the model
+ *     maps that prose to the sanitized registered name itself.
  *   - Exposes agents-plugin/skills/ through resources_discover, pointing at
  *     the existing directory directly rather than copying it (sibling root,
  *     same repo — unlike bin/ws-mcp-launcher.py + runtime.json, which have

@@ -1,0 +1,54 @@
+# Executor Wrapup
+
+Shared wrapup procedure for executor-series skills. Load and follow after a
+completed implementation phase has a reviewable result commit.
+
+## Invariants
+
+- Wait for the Doc Pipeline step and any ticket updates to complete before running the doc-commit gate.
+- Doc-commit gate always runs; prior steps may have dirtied `ai-docs/`.
+- Commit message for doc updates follows AGENTS.md commit rules; type is `docs`.
+- Ancestor loading: any agent that reads `ai-docs/mental-model/<domain>/<sub>.md` must read `ai-docs/mental-model/<domain>/index.md` first.
+
+## Ancestor Loading
+
+1. Callers using `{{.McpNamespace}}/mental_models.find` should read returned parent docs before child docs.
+2. Callers using manual paths must read the parent before the child.
+3. Delegation prompts must include the ancestor-loading rule when subagents read mental models.
+
+## Doc Pipeline
+
+1. If `ai-docs/_index.md` exists, refresh it to reflect current inventory, descriptions, and focus state (pre-dissolution coexistence only - inventory and focus are otherwise generated/derivable and need no refresh). Otherwise, update `AGENTS.md`'s `## Project Orientation` section only when repo identity, topology, or canonical flows actually changed, and record session-scoped updates via `{{.McpNamespace}}/note.write(layer: "repo", ...)`.
+
+## Doc Commit Gate
+
+Run after Doc Pipeline and any ticket update complete:
+
+```bash
+git status --porcelain ai-docs/
+```
+
+- If output is non-empty: create a commit covering all `ai-docs/` changes.
+- If output is empty: no-op and proceed.
+
+## Ticket Update
+
+Ticket-driven only:
+
+`Result` records the completed phase's behavioral delta; `Edition` records only
+its follow-up pass's delta. For either, include deviations, verification evidence,
+unresolved findings, and deferred follow-ups; do not restate unchanged plan or spec content.
+
+1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each newly completed phase.
+   Use the result commit supplied by the caller.
+2. For follow-up implementation on an already completed phase, append
+   `#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.
+   Use the result commit supplied by the caller.
+3. Move completed tickets to the next status directory when all phases complete.
+
+## Doctrine
+
+This playbook optimizes for complete doc-state capture: every executor skill
+exits with a clean git working tree for `ai-docs/`. When a rule is ambiguous,
+apply whichever interpretation ensures no doc-pipeline output is left
+uncommitted.
