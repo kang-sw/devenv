@@ -1,0 +1,10 @@
+{
+  "name": "ws-pi-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension that bridges ws-mcp (harness-neutral, Go source untouched) onto Pi via a self-owned stdio MCP client, re-registering every ws-mcp tool as ws/<tool> so existing SKILL.md prose dispatches unmodified.",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  }
+}
