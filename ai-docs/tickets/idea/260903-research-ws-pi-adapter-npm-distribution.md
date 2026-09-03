@@ -105,5 +105,73 @@ not introduce a reverse dependency.
 Make ongoing Pi-adapter changes distribution-aware: prefer package-local paths
 over repo-relative sibling references for anything the runtime reads; when adding
 a new bundled asset, treat it the way `bin/`/`runtime.json`/`rsrc/` are treated
-(package-local, hand-sync-noted) rather than reaching across roots. Do not
-publish anything until Forks A/B and gap 6 are settled.
+(package-local, hand-sync-noted) rather than reaching across roots. The spike
+below settles Forks A/B and gap 6; the one remaining publish blocker is the
+skills-path fix.
+
+## Spike resolution (gap #6 + Forks A/B) — 2026-09-03
+
+An empirical spike against the installed Pi build (`@earendil-works/pi-coding-agent@0.84.4`)
+settled the two forks and gap #6. Evidence is `pi --help`, `docs/packages.md`,
+`docs/extensions.md`, `dist/core/extensions/loader.js`,
+`dist/core/package-manager.js`, and live `session_start` probes.
+
+- **gap #6 — installed-extension consumption: RESOLVED.** Pi has a first-class
+  package manager: `pi install npm:<name>` / `git:` / URL / local path, writing a
+  `packages` array into user settings `~/.pi/agent/settings.json` (or project
+  `.pi/settings.json` with `-l`, auto-installed on trust). A published package
+  declares resources via a `package.json` `"pi": { extensions, skills, prompts,
+  themes }` key (glob + `!exclude`), or via auto-scanned convention dirs
+  (`extensions/`, `skills/`, `prompts/`, `themes/`). Installs run
+  `npm install --omit=dev`. `-e` stays the "try without installing" path.
+- **Entry-contract parity `-e` vs installed: IDENTICAL.** Both routes converge on
+  the same jiti loader and the same default-exported `function(pi)` factory;
+  `registerCommand`/`registerTool`/`on`/`resources_discover` behave identically,
+  and every `pluginDir`-relative asset (`bin/`, `runtime.json`,
+  `model-catalog.json`, `rsrc/`) resolves the same when installed
+  (`import.meta.url` points at the real on-disk file either way). **The single
+  divergence is the skills path** (`src/index.ts:57-58`
+  `repoRoot/agents-plugin/skills`), which walks *out of* the package to a sibling
+  repo dir that does not exist in an installed tarball → the #1 blocker, as
+  gap-list item 1 predicted.
+- **Fork B — TS vs build: SETTLED = ship raw `.ts`.** Pi loads every extension
+  through jiti with type-stripping (`docs/extensions.md:185`; `loader.js` uses
+  `createJiti`), same path for `-e`/manifest/convention. No build step. Caveat:
+  runtime third-party deps must be in `dependencies` (installs are `--omit=dev`),
+  and Pi core stays a `peerDependencies: "*"`, not bundled.
+- **Fork A — skills copy vs depend: SETTLED = copy (package-local).** Bundle a
+  package-local `skills/` populated at pack time from `agents-plugin/skills`
+  (joining the existing hand-synced `bin/`/`runtime.json`/`rsrc/` copies), and
+  expose it either by declaring `"pi": { "skills": [...] }` in `package.json`
+  (auto-discovered, zero code) or by pointing `resources_discover`'s `skillPaths`
+  at the `pluginDir` copy instead of `repoRoot`. Depend-on-a-separate-package is
+  unnecessary complexity and is dropped.
+- **pi CLI resolution for spawned children: current pattern already correct.** The
+  spawner re-invokes the CLI via `process.argv[1]` (the running pi launcher) with
+  `process.execPath` (`src/spawner.ts:270-279`) — install-safe for both `-e` and
+  installed. `require.resolve("@earendil-works/pi-coding-agent")` FAILS from an
+  installed extension (probe-confirmed), so never resolve the CLI that way. If a
+  later slice switches to `RpcClient`, its default `cliPath` is the literal
+  `"dist/cli.js"` (won't resolve when installed) — pass an explicit `cliPath`
+  derived from `argv[1]`, or use the package's `./client` / `/rpc-entry` exports.
+  Minor: the reference example's Bun-virtual-script (`/$bunfs/root/`) guard was
+  dropped from the current spawner as dead code; restore it only if a
+  compiled-binary pi distribution is ever targeted.
+
+### Remaining publish work (mechanical, no open design)
+
+1. **Skills bundling (the one blocker).** Add package-local `skills/` (pack-time
+   copy from `agents-plugin/skills`) + a `"pi": { "skills": [...] }` manifest or a
+   `pluginDir`-relative `skillPaths`.
+2. **Publish metadata.** `files` whitelist (bin/, runtime.json, rsrc/, skills/,
+   model-catalog.json, src/), move any runtime deps to `dependencies`, Pi core to
+   `peerDependencies: "*"`, drop `private: true`, add `license`/`repository`/
+   `engines`.
+3. **Hand-sync drift guard.** The copy set now grows to include `skills/`; add a
+   pack-time copy script (or `bundledDependencies`) so a stale copy cannot ship.
+
+Nothing in gaps/forks now forces a feature-code rewrite: the entry contract is
+install-identical and the CLI-resolution pattern is already correct, so
+`260903-feat-ws-pi-subagent-rpc-ux` and `260903-feat-ws-pi-goal-loop-compaction-hook`
+can be built under `-e` and will run unchanged once installed, provided the
+package-local-paths discipline holds.
