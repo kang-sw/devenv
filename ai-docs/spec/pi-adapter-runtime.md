@@ -13,8 +13,9 @@ ws-mcp); no ws-mcp source is modified for Pi. All Pi-specific policy lives in th
 adapter.
 
 This document describes the caller-observable behavior of the adapter. It covers
-the Phase 1 bridge surface, the Phase 2 delegation spawner, and the Phase 3
-user-curated model catalog + tier map.
+the Phase 1 bridge surface, the Phase 2 delegation spawner, the Phase 3
+user-curated model catalog + tier map, and the Phase 4 `/ws-discuss`
+proof-of-concept command.
 
 ## Tool exposure and name sanitization {#260903-pi-bridge-tool-registration}
 
@@ -210,6 +211,52 @@ the original in place) and is added only on a successful `workflow_manual` resul
 never on an error response. Spawns and explores still degrade silently to inherit
 while unset; the advisory is the only pressure and never blocks work.
 
+## Proof-of-concept command {#260903-pi-poc-discuss-command}
+
+The adapter registers one proof-of-concept command, `/ws-discuss`, via
+`pi.registerCommand` — the MVP gate that demonstrates the three adapter surfaces
+(skill exposure, the ws-mcp bridge, the delegation spawner) composing in a single
+end-to-end run. It is registered at the extension-factory top level alongside
+`ws-model-catalog-list` (command/tool registration is declarative and not gated
+behind `session_start`; only subprocess spawning is).
+
+The command is a thin kickoff, not an imperative workflow driver:
+
+- When the agent is not idle (`ctx.isIdle()` is false), it declines with a
+  `ctx.ui.notify` warning and does nothing else — mirroring Pi's own
+  `send-user-message` example, so the plain (no `deliverAs`) send below is always
+  safe.
+- When idle, it calls `pi.sendUserMessage(kickoff, { expandPromptTemplates: true })`
+  with a single kickoff string, then returns. The command triggers model work; it
+  does not run the bridge or spawner itself.
+
+The kickoff string is produced by a pure, unit-tested builder
+(`buildDiscussKickoff(args)`), so its exact shape is a fixed contract rather than
+incidental prose. It has two parts:
+
+- It **leads** with `/skill:lead-discuss <topic>`. Under
+  `expandPromptTemplates: true`, Pi expands that leading token into the
+  `lead-discuss` skill body (skills-load), and everything after the token on that
+  line becomes the skill's `User:` args. When the caller passes no argument, a
+  fixed default PoC topic is substituted so a bare `/ws-discuss` is still a valid
+  gate invocation. The `lead-discuss` skill body itself calls the bridged
+  `ws__playbook_print` / `ws__workflow_manual` tools, so skills-load transitively
+  drives the bridge with no imperative tool call in the handler.
+- It **appends**, after a blank-line separator, an explicit instruction to
+  dispatch one `explore` recon leaf and report its result. The blank line keeps
+  this instruction off the skill-command line (so it does not corrupt the
+  `User:` args split). This append is load-bearing: the discuss skill does not
+  itself spawn, so the spawn round-trip that the gate requires is not inherent to
+  skills-load + bridge — the kickoff must name it explicitly to make the
+  spawn deterministic.
+
+Because the gate proof is a live model-driven run (the model reads the kickoff
+and issues the bridged and spawner tool calls itself), it is verified the same
+way the Phase 2–3 gates were — a `pi -e … --mode json -p` transcript — not a unit
+assertion. The unit tests pin only the kickoff wording that steers that run; the
+command handler's `ctx`/`pi` glue is left untested, matching the
+`ws-model-catalog-list` precedent.
+
 ## Package topology {#260903-pi-adapter-package-topology}
 
 The adapter lives in `agents-plugin-pi/`, a sibling package root parallel to
@@ -223,6 +270,9 @@ copies are kept in sync by hand; there is no automated sync tooling, so a change
 to the canonical `agents-plugin/` copies must be mirrored here.
 
 > [!note] Constraints
-> - This contract covers the Phase 1 bridge, the Phase 2 delegation spawner, and
->   the Phase 3 model catalog + tier map. The `/ws-discuss` PoC command is a
->   separate, not-yet-implemented surface and is not part of this contract yet.
+> - This contract covers the Phase 1 bridge, the Phase 2 delegation spawner, the
+>   Phase 3 model catalog + tier map, and the Phase 4 `/ws-discuss` PoC command —
+>   the full ws-pi-native MVP surface. Post-MVP surfaces (durable depth-2
+>   recursion, an always-visible TODO, the goal-loop, and compaction hooks) are
+>   deferred to follow-up tickets under the epic and are not part of this contract
+>   yet.
