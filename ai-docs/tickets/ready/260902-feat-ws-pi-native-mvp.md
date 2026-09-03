@@ -435,8 +435,16 @@ command handler but exits before running the turn the handler injects via
 `pi.sendUserMessage`; interactive `--mode json`/`rpc` would run that injected
 turn but cannot be driven from a pipe/redirect here (a plain pipe blocks before
 `session_start`; a `script` PTY without a controlling terminal exits right after
-the session header; rpc needs a JSON-RPC handshake a dumb pipe can't supply). In
-a real interactive Pi session the handler fires → injects the kickoff → idle →
+the session header; rpc needs a JSON-RPC handshake a dumb pipe can't supply);
+and a session-resume bridge (dispatch under `-p --session <path>`, then resume
+the session to drain the pending turn) fails because the injected message is
+never persisted — under `-p` the input is consumed as an extension command, no
+agent turn runs, and no session file is written at all (isolated by a control
+run where an ordinary `-p` prompt with the same `--session` flag persists
+normally, confirming the flag works and it is specifically the handler-injected
+message that never reaches disk). Three non-interactive driver paths are thus
+ruled out. In a real interactive Pi session the handler fires → injects the
+kickoff → idle →
 the turn runs (documented Pi `sendUserMessage` behavior), i.e. exactly the
 composition already proven from the identical string. The gate therefore stands
 on the kickoff-string proof plus the separate command-dispatch proof; a
