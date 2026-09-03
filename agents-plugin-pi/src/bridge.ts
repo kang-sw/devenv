@@ -26,7 +26,7 @@
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { spawnWsMcpClient, type McpToolCallResult } from "./mcp-stdio-client.ts";
+import { spawnWsMcpClient, type McpStdioClient, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 
 export interface BridgeOptions {
@@ -41,6 +41,21 @@ export interface BridgeOptions {
 export interface BridgeHandle {
   /** Idempotent — safe to call more than once (e.g. a duplicate session_shutdown). */
   shutdown(): void;
+  /**
+   * The bridge's already-connected ws-mcp client, threaded out so Phase 2's
+   * spawner can issue its own `playbook.render` / `ferrule` calls without
+   * opening a second connection to the launcher.
+   */
+  client: McpStdioClient;
+  /**
+   * The same default-filled session_key ref used by every bridged tool's
+   * fill-or-forward path (`resolveSessionKey`). A live object reference, not
+   * a snapshot — reads the current value even if the bootstrap ferrule call
+   * resolves after a caller has already captured this handle.
+   */
+  defaultSessionKeyRef: { current: string | undefined };
+  /** Sanitized `ws__*` registered tool names (see `sanitizeToolName`), for the spawner's `full-worker` tool group. */
+  wsToolNames: string[];
 }
 
 function notify(ui: ExtensionUIContext | undefined, message: string, level: "info" | "warning" | "error" = "info"): void {
@@ -135,6 +150,13 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     client.close();
   };
 
+  // Declared outside the try block (not just `const` inside it) so the
+  // Phase 2 spawner's return-value fields below can still see them after a
+  // successful try — `try { const x = ... }` block-scopes `x` to the try
+  // block itself.
+  let tools: Awaited<ReturnType<typeof client.listTools>> = [];
+  const defaultKeyRef: { current: string | undefined } = { current: undefined };
+
   try {
     const initResult = await client.initialize({
       name: "ws-pi-bridge",
@@ -142,8 +164,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     });
     assertVersionPin(runtime, initResult.serverInfo.version);
 
-    const tools = await client.listTools();
-    const defaultKeyRef: { current: string | undefined } = { current: undefined };
+    tools = await client.listTools();
 
     for (const tool of tools) {
       const rawName = tool.name;
@@ -206,5 +227,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     throw err;
   }
 
-  return { shutdown };
+  return {
+    shutdown,
+    client,
+    defaultSessionKeyRef: defaultKeyRef,
+    wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),
+  };
 }

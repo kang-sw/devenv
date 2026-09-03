@@ -16,8 +16,10 @@
  *     same repo — unlike bin/ws-mcp-launcher.py + runtime.json, which have
  *     repo precedent for copying instead, see agents-plugin-wsflow).
  *
- * Phase 1 scope only: the bridge itself. Spawner/explore (Phase 2), model
- * catalog (Phase 3), and /ws-discuss (Phase 4) are out of scope here.
+ * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
+ * `ws-agent-continue` / `ws-agent-wait` / `explore`, see src/spawner.ts) on
+ * top of the Phase 1 bridge. Model catalog (Phase 3) and /ws-discuss
+ * (Phase 4) remain out of scope here.
  *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
@@ -37,6 +39,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
+import { registerAgentTools, type AgentToolsHandle } from "./spawner.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -47,6 +50,7 @@ const runtimeJsonPath = join(pluginDir, "runtime.json");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
+  let agentTools: AgentToolsHandle | undefined;
 
   pi.on("resources_discover", () => ({
     skillPaths: [skillsDir],
@@ -60,9 +64,14 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       cwd: ctx.cwd,
       ui: ctx.ui,
     });
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd });
   });
 
   pi.on("session_shutdown", () => {
+    // Kill any still-running spawned `pi` children before tearing down the
+    // bridge connection they were dispatching ws__* tool calls through.
+    agentTools?.killRunning();
+    agentTools = undefined;
     handle?.shutdown();
     handle = undefined;
   });
