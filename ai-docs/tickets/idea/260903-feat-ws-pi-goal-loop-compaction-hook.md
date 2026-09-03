@@ -63,40 +63,70 @@ real API:
   extension API — a caveat for any design that wants to disable Pi's built-in
   auto-compaction while the ws loop owns compaction timing.
 
-## Proposed direction (idea — detailed UX/protocol TBD)
+## Resolved design (2026-09-03 discussion)
 
-Register an `agent_settled` handler that, **gated by `getContextUsage().percent`**
-(so a judgment turn is not injected on every settle — a refinement over the raw
-opencode design), injects a ws judgment turn carrying the current ws goal + the
-compression-safety heuristic, and on a compact-safe verdict calls
-`ctx.compact()` then re-enters the next goal turn. `session_before_compact` is
-the companion surface for injecting ws state / custom summary into the
-compaction, and for the "is this a phase boundary?" safety check.
+**Signal shape — explicit skill calls, zero prose parsing.** State transitions
+happen ONLY through model-invoked skills; the absence of any call means the loop
+continues. No response-text marker parsing — a deliberate departure from the
+opencode four-token design and a sharper contract than the Claude prose-judged
+loop (which relied on the harness Stop-hook plus the agent simply stopping). The
+three levers:
 
-**Detailed UX and the marker/judgment protocol are deliberately TBD** at idea
-stage: the exact judgment signal (a registered judgment tool call vs a parsed
-marker token vs a structured response), the percent threshold, how the ws goal
-is sourced (todo/agenda state?), and the loop-guard against runaway re-entry are
-designed when this is promoted — the research anchor already mandates the marker
-protocol be redesigned from scratch on Pi.
+- `/goal-achieved <summary>` — terminal; goal met, end the run.
+- `/goal-blocked <reason>` — terminal; end the run with a blocker report.
+  (Whether the blocker is also written to durable ticket state — the Claude-native
+  `260723` mechanism that survives compaction — is deferred to promotion.)
+- `/goal-compact-and-continue <carry-forward-prose>` — non-terminal; the prose is
+  passed as `ctx.compact({ customInstructions })`, then the loop re-enters the
+  next goal turn.
+- (no call) — default; `agent_settled` re-injects a continue turn and the agent
+  keeps working.
 
-## Open questions
+**Arming (Claude-parity, minimal).** Entering goal mode injects an announcement
+turn ("Goal settled: <goal>"), matching Claude's own `/goal` surface — no branch
+or state substrate beyond an active-goal marker. The `agent_settled` handler is
+armed ONLY while a goal is active; a settle outside goal mode is an ordinary stop
+(this is what stops every normal Pi session from looping forever). Each loop
+re-fire re-injects a reminder carrying the goal and the levers, e.g. "Goal yet
+running … <goal> … call /goal-achieved | /goal-blocked |
+/goal-compact-and-continue for a state transition."
 
-- **Judgment signal shape.** Registered judgment tool call (extension-owned) vs
-  parsed marker token vs structured message — the anchor leaves this to the
-  expansion phase.
-- **Percent threshold + heuristic source.** What `percent` gates the judgment
-  turn, and where the "phase boundary / merge gate = safe" signal comes from
-  (ws todo/agenda/workflow_state vs the model's own read).
-- **Loop guard.** Preventing runaway re-entry (goal turn -> keep-working -> goal
-  turn -> ...) and interaction with Pi's own auto-compaction (which is RPC-only
-  to disable).
+**Runaway backstop.** Well-behaved agents self-terminate via achieved/blocked;
+as a backstop, N consecutive re-fires with no tool call force-stop the goal.
+Claude's own goal loop force-stops around ~10 consecutive no-tool-call re-fires —
+mirror that threshold, config-tunable.
+
+**Compaction ownership — model-driven.** The extension surfaces the current
+`getContextUsage().percent` in the continue turn as information; the model decides
+whether to call `/goal-compact-and-continue`. The extension does NOT autonomously
+compact. Pi's own overflow auto-compaction stays as the last-resort backstop.
+Config knobs: (a) the compaction advisory point (the `percent` at which the
+reminder nudges the model to compact), and (b) a context-window / max-token
+override. `session_before_compact` remains the companion surface for injecting ws
+state into a compaction and detecting Pi's own `reason: "threshold"` signal.
+
+## Remaining open questions (post-2026-09-03)
+
+Resolved above: judgment signal shape (explicit skills, no prose parsing),
+arming (active-goal announcement + armed-only-in-goal-mode), loop guard (N
+consecutive no-tool-call re-fires force-stop), and compaction ownership
+(model-driven with `percent` surfaced + config knobs + Pi overflow backstop).
+Still open:
+
+- **Durable goal state across compaction.** The Claude-native ancestor
+  (`260723`) leaned on durable on-disk ticket state to survive compaction; how
+  much of that carries over to the Pi loop, and whether `/goal-blocked` writes a
+  durable blocker record.
+- **Compression-safety heuristic placement.** In the model-driven design the
+  "phase boundary / merge gate = safe to compact" heuristic becomes advisory
+  prose the model weighs (not an extension gate) — confirm this is sufficient, or
+  whether `session_before_compact` should still veto an unsafe compaction.
 - **Interaction with subagent RPC children** (`260903-feat-ws-pi-subagent-rpc-ux`):
   does the goal-loop run only on the lead session, or also drive settle/compact
   on children?
-- **Durable goal state across compaction.** The Claude-native ancestor
-  (`260723`) leaned on durable on-disk ticket state to survive compaction; how
-  much of that carries over to the Pi loop.
+- **Config surface.** Where the tunable knobs live (runaway threshold, compaction
+  advisory point, context-window override) — ws config vs Pi settings vs
+  extension constants.
 
 ## Non-goals
 

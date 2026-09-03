@@ -60,38 +60,55 @@ From `@earendil-works/pi-coding-agent` type defs (`dist/modes/rpc/`):
   run inside the extension process with no subprocess — trades OS-process
   isolation for direct in-process message injection / transcript access.
 
-## Proposed direction (idea — detailed UX TBD)
+## Resolved design (2026-09-03 discussion)
 
-Replace (or augment) the one-shot `-p` spawner with a **persistent RPC child**
-model so `ws-agent-spawn` yields a driveable handle, and add lead-facing
-affordances to send a follow-up message into a running child and to open its
-transcript. Whether the durable answer is out-of-process `RpcClient` (keeps the
-MVP's context-isolation guarantee) or in-process `AgentSession` (simpler, no
-subprocess, but shares the process) is an open fork below.
+Replace the one-shot `-p` spawner with **persistent `RpcClient` children** (mode
+rpc, keeping the MVP's out-of-process context isolation) and expose this tool
+surface:
 
-**Detailed UX is deliberately TBD** at idea stage: the exact ws tool/command
-surface (how a follow-up is addressed to a specific child, how a transcript is
-surfaced to the lead, how this maps onto the ws spawner tool names
-`ws-agent-spawn`/`ws-agent-continue`/`ws-agent-wait`) is designed when this is
-promoted, not fixed here.
+| tool | backend | behavior |
+| --- | --- | --- |
+| `ws-agent-spawn(prompt, model_name?, model_effort?)` -> `{agent_id}` | `RpcClient.start()` | spawn a persistent, driveable child |
+| `ws-agent-send(agent_id, message, interrupt?)` | `followUp()` (default, queue) / `steer()` (`interrupt: true`) | send into a live child; if `agent_id` is dormant, auto-resume via `--session` then deliver — **subsumes a separate resume tool** |
+| `ws-agent-wait(agent_ids[], timeout?)` | select over the set | return the FIRST child to reach idle OR emit a report; carries `reason: idle\|report` and the child's last message auto-attached |
+| `ws-agent-list()` | extension registry | live children, status, pending-report count |
+| `ws-agent-stop(agent_id)` | `abort()` + `stop()` | teardown |
+| `ws-agent-transcript(agent_id)` -> `{transcript_path}` | Pi session JSONL path | advanced/rare; lead greps/reads needed parts with fs tools — no content marshalling |
+| `ws-report-to-lead(message)` (child-side) | RpcClient event stream | intermediate child->lead report before verdict; relayed to the parent, buffered per-agent, wakes a `ws-agent-wait` with `reason: report` |
 
-## Open forks / questions
+Resolved forks:
 
-- **Fork — out-of-process `RpcClient` vs in-process `AgentSession`.** Isolation
-  and parity with the current one-shot model (RpcClient) vs simplicity and
-  direct transcript access (AgentSession). May be per-use-case rather than a
-  single global choice.
-- **cliPath resolution (shared with distribution gap #6).** `RpcClient` needs to
-  locate the pi CLI entry (`cliPath`, defaults to searching `dist/cli.js`) to
-  spawn children. From an *installed* extension this must resolve reliably; this
-  is the same unknown as `260903-research-ws-pi-adapter-npm-distribution` gap #6
-  and should be settled by that spike first.
-- **`ws-agent-continue` mapping.** The MVP already exposes a continue tool; does
-  it become a thin `RpcClient.followUp()`/`prompt()` call, and does that change
-  its session-lineage/`session_key` semantics?
-- **Lifecycle ownership.** A persistent child must be torn down on
-  `session_shutdown` (the MVP already kills one-shot children there); RPC
-  children add idle/abort lifecycle the extension must manage.
+- **send / resume unified** — one `ws-agent-send`; a dormant `agent_id`
+  auto-resumes. No separate resume tool.
+- **child->lead channel is asymmetric** — a dedicated no-arg `ws-report-to-lead`
+  (a child has exactly one parent, so no addressing), NOT a symmetric `send`.
+- **transcript is path-only** — return the session file path, not marshalled
+  content; raw-transcript reads are rare and better served by the lead's own
+  grep/fs tools.
+- **wait is a select with report-wake** — an array of ids, first-finisher
+  returns, and an in-flight `ws-report-to-lead` also wakes it (flagged via
+  `reason`), so intermediate reports are not buried until the next poll.
+
+## Remaining open questions (post-2026-09-03)
+
+Resolved above: the full tool surface, send/resume unification, the asymmetric
+`ws-report-to-lead` channel, path-only transcript, and wait-as-select with
+report-wake. `ws-agent-continue` from the MVP folds into `ws-agent-send`. gap #6
+(cliPath resolution) is settled by the distribution spike — `process.argv[1]`
+already yields the correct installed CLI entry. Still open:
+
+- **`RpcClient` vs in-process `AgentSession`.** Default is out-of-process
+  `RpcClient` (isolation parity with the MVP); whether a lightweight in-process
+  `AgentSession` variant is worth offering per-use-case is deferred.
+- **session_key lineage.** How the extension maps a ws `session_key` <-> Pi
+  session id in its registry so an auto-resume (`ws-agent-send` to a dormant id)
+  restores the same ws lineage; and whether a resumed child keeps or re-mints its
+  `session_key`.
+- **Lifecycle / reaping.** Teardown on `session_shutdown` (the MVP already kills
+  one-shot children); persistent children add idle-timeout auto-reap to prevent
+  leaked processes, plus the abort/idle lifecycle the extension must own.
+- **Report buffering semantics.** Per-agent report buffer bounds, ordering, and
+  whether `ws-agent-wait` returns one report or drains all pending on wake.
 
 ## Non-goals
 
