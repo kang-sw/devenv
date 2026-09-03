@@ -13,8 +13,8 @@ ws-mcp); no ws-mcp source is modified for Pi. All Pi-specific policy lives in th
 adapter.
 
 This document describes the caller-observable behavior of the adapter. It covers
-the Phase 1 bridge surface; later phases (delegation spawner, model catalog) add
-their own sections.
+the Phase 1 bridge surface and the Phase 2 delegation spawner; the user-curated
+model catalog is a later surface that adds its own section.
 
 ## Tool exposure and name sanitization {#260903-pi-bridge-tool-registration}
 
@@ -106,6 +106,79 @@ UTF-8 characters split across read-buffer boundaries are reconstructed intact.
 Concurrent in-flight requests are correlated back to their callers by JSON-RPC
 id, independent of the order responses arrive.
 
+## Delegation spawner {#260903-pi-delegation-spawner-tools}
+
+The adapter exposes a Pi-side delegation layer built on the same self-owned
+subprocess machinery as the bridge, but spawning the **`pi` CLI itself** (not the
+ws-mcp launcher) as a child process per delegated worker. Four tools are
+registered:
+
+- `ws-agent-spawn({ playbook, task, tier? })` — start an asynchronous worker. The
+  adapter renders the named ws playbook to a system-prompt file (via the bridged
+  `ws__playbook_render`), launches `pi --mode json -p` with that file as
+  `--append-system-prompt`, a per-spawn `--tools` allowlist, and a ws-owned
+  `--session` file, then returns an `agentId` immediately without waiting for the
+  worker to finish. The worker runs in the background.
+- `ws-agent-continue({ agentId, task })` — resume a completed worker with a new
+  task on its existing session. Allowed only when the worker has reached the done
+  state; the same session file and system-prompt file are reused (the prompt is
+  not re-rendered, so it is not duplicated across turns).
+- `ws-agent-wait({ agentIds, policy, timeout? })` — harvest workers. `policy:
+  "any"` returns once at least one named worker is done; `policy: "all"` returns
+  once all are. The result partitions the ids into done / still-running /
+  timed-out. A timeout never kills a running worker — it stays registered for a
+  later wait or continue. An empty `agentIds` list is a caller error and fails
+  fast rather than blocking.
+
+Depth is bounded 0→1: none of the four delegation tools appears in any spawnable
+worker's own `--tools` allowlist, so a depth-1 worker cannot spawn a further
+generation. Still-running workers are terminated when the session is torn down
+(`session_shutdown`), before the bridge connection they dispatch through is
+closed.
+
+### Worker completion is gated on process exit {#260903-pi-spawner-completion-gating}
+
+A worker flips to the done state only when its `pi` child process closes its
+stdio, **not** when a terminal `stopReason` is first observed in the streamed JSON
+event log. The terminal `stopReason` set is exactly `stop` / `length` / `error` /
+`aborted` (`toolUse` and `pending` are non-terminal). The `--session` file is only
+guaranteed fully flushed after the child exits, so gating completion on process
+close is what makes an immediate `ws-agent-continue` right after `ws-agent-wait`
+safe — the resumed turn always reads a complete session file. The last-seen
+`stopReason` is retained only as completion metadata. A spawn that fails to launch
+(bad interpreter, missing binary) settles its waiters rather than hanging.
+
+### explore — one-shot recon leaf {#260903-pi-explore-recon-leaf}
+
+`explore({ query, async? })` is a thin one-shot preset over the same engine for
+ephemeral read-only reconnaissance: a fixed `explore` playbook, the `recon` tool
+group, `--no-session` (no continuation state), and self-reaping (the registry
+entry is dropped once the leaf completes). An `explore` leaf has no `continue`
+path.
+
+### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
+
+The `--tools` allowlist for each spawn resolves from an adapter-owned tool-group
+table — `read-only`, `recon`, and `full-worker` — mapping each group to a Pi
+tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` group
+additionally includes the bridge's live `ws__*` tool names, taken from the running
+bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. No
+agent-profile files are written to disk (no `.pi/agents/`); all curation is
+in-memory plus `pi` CLI flags.
+
+### Model tier is inherit-only at this stage {#260903-pi-spawner-model-tier-inherit}
+
+`ws-agent-spawn` accepts a `tier`, but the adapter does not yet map a tier to a
+concrete model. A spawn resolves its model by inheriting the parent session's
+active model (equivalently, omitting `--model` for Pi's own default). The `tier`
+value is carried as inert metadata pending the model-catalog surface.
+
+> [!note] Implementation Gap · 2026-09-03
+> Unexposed capability: `ws-agent-spawn`'s `tier` argument is accepted but not yet
+> resolved to a model. The user-curated model catalog and tier→model map are a
+> separate, not-yet-built surface; until it lands every spawn inherits the parent
+> model regardless of `tier`.
+
 ## Package topology {#260903-pi-adapter-package-topology}
 
 The adapter lives in `agents-plugin-pi/`, a sibling package root parallel to
@@ -119,7 +192,8 @@ copies are kept in sync by hand; there is no automated sync tooling, so a change
 to the canonical `agents-plugin/` copies must be mirrored here.
 
 > [!note] Constraints
-> - This section documents the Phase 1 bridge only. The Pi-side delegation
->   spawner (`ws-agent-spawn`/`continue`/`wait`, `explore`) and the user-curated
->   model catalog + tier map are separate, not-yet-implemented surfaces and are
->   not part of this contract yet.
+> - This contract covers the Phase 1 bridge and the Phase 2 delegation spawner.
+>   The user-curated model catalog + tier→model map (which would resolve
+>   `ws-agent-spawn`'s `tier` to a concrete model) and the `/ws-discuss` PoC
+>   command are separate, not-yet-implemented surfaces and are not part of this
+>   contract yet.
