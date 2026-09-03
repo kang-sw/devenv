@@ -1,5 +1,6 @@
 ---
 title: enter.* tools are called directly without their lead-* skill — affordance correction via mechanical rename and opaque published params
+parent: 260903-epic-mcp-tool-surface-affordance-reduction
 related:
   260901-bug-enter-proceed-misplaced-facts-silent-unknown-status: the recurring failure this addresses structurally; that ticket owns the immediate diagnosability hardening (reason enrichment + misplaced-key warnings), this owns the tool-surface/naming strategy
   260726-feat-enter-verdict-scenario-output: adjacent enter.* verdict-output reshape; any name/schema change here must stay consistent with that output work
