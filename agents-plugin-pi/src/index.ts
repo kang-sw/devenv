@@ -11,10 +11,12 @@
  *     (`/` -> `__`, `.` -> `_`, e.g. `ws__playbook_print`) — SKILL.md prose
  *     stays untouched as literal `ws/playbook.print(...)` calls; the model
  *     maps that prose to the sanitized registered name itself.
- *   - Exposes agents-plugin/skills/ through resources_discover, pointing at
- *     the existing directory directly rather than copying it (sibling root,
- *     same repo — unlike bin/ws-mcp-launcher.py + runtime.json, which have
- *     repo precedent for copying instead, see agents-plugin-wsflow).
+ *   - Exposes ws skills through resources_discover via a package-local-first
+ *     resolver (src/skills-dir.ts): prefers a pack-time-copied
+ *     `agents-plugin-pi/skills/` (baked into the published/installed tarball,
+ *     gitignored, never committed — see scripts/copy-skills.mjs) and falls
+ *     back to the monorepo canonical `agents-plugin/skills/` for dev `-e`
+ *     runs from the source tree.
  *
  * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
  * `ws-agent-continue` / `ws-agent-wait` / `explore`, see src/spawner.ts) on
@@ -43,6 +45,11 @@
  * changed file(s) here verbatim — all three copies must stay in lockstep.
  * A stale/missing rsrc/ copy surfaces at call time, e.g. workflow_manual:
  * "render playbook: rsrc manifest missing".
+ *
+ * `skills/` is a separate, fourth carried copy with a different sync model:
+ * it is generated at pack time by scripts/copy-skills.mjs (prepack/prepare),
+ * gitignored, and never hand-synced — see src/skills-dir.ts's
+ * package-local-first resolver above.
  */
 
 import { dirname, join } from "node:path";
@@ -51,11 +58,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import { registerAgentTools, type AgentToolsHandle } from "./spawner.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
+import { resolveSkillsDir } from "./skills-dir.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
 const repoRoot = dirname(pluginDir);
-const skillsDir = join(repoRoot, "agents-plugin", "skills");
+const skillsDir = resolveSkillsDir(pluginDir, repoRoot);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
 const modelCatalogPath = join(pluginDir, "model-catalog.json");

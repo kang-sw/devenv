@@ -7,7 +7,18 @@
   "pi": {
     "extensions": ["./src/index.ts"]
   },
+  "files": [
+    "src/",
+    "bin/",
+    "rsrc/",
+    "skills/",
+    "runtime.json",
+    "model-catalog.json"
+  ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "copy-skills": "node scripts/copy-skills.mjs",
+    "prepack": "npm run copy-skills",
+    "prepare": "npm run copy-skills"
   }
 }
