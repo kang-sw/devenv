@@ -1,7 +1,8 @@
 /**
  * Unit tests for spawner.ts's pure-logic seams: resolveTools,
- * isTerminalStopReason, buildSpawnArgs, and AgentEventLineBuffer's
- * multibyte-split safety.
+ * isTerminalStopReason, buildSpawnArgs, AgentEventLineBuffer's
+ * multibyte-split safety, and handleAgentEvent's state-non-mutation
+ * invariant.
  *
  * The async spawn/continue/wait engine (spawnAgent/continueAgent/waitAgents/
  * exploreLeaf) is exercised only by the live gate (a lead-scoped Pi session
@@ -13,7 +14,29 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { resolveTools, isTerminalStopReason, buildSpawnArgs, AgentEventLineBuffer, TOOL_GROUPS } from "../src/spawner.ts";
+import {
+  resolveTools,
+  isTerminalStopReason,
+  buildSpawnArgs,
+  AgentEventLineBuffer,
+  TOOL_GROUPS,
+  handleAgentEvent,
+  type AgentRecord,
+} from "../src/spawner.ts";
+
+function freshRunningRecord(): AgentRecord {
+  return {
+    agentId: "test-agent",
+    playbook: "implementer",
+    noSession: false,
+    state: "running",
+    outputText: "",
+    exitCode: null,
+    exitSignal: null,
+    selfReap: false,
+    waiters: [],
+  };
+}
 
 describe("TOOL_GROUPS / resolveTools", () => {
   test("read-only carries no bash and no ws__* tools", () => {
@@ -255,5 +278,40 @@ describe("AgentEventLineBuffer", () => {
     assert.equal(events.length, 1);
     buf.end();
     assert.equal(events.length, 1, "end() must not re-emit or duplicate the already-flushed event");
+  });
+});
+
+describe("handleAgentEvent", () => {
+  test("a terminal stopReason updates record.stopReason but NEVER flips record.state (load-bearing: only proc.on('close') may do that)", () => {
+    const record = freshRunningRecord();
+    handleAgentEvent(record, { type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+    assert.equal(record.stopReason, "stop");
+    assert.equal(record.state, "running", "state must stay unchanged by an in-stream terminal stopReason");
+  });
+
+  test("a non-terminal stopReason (toolUse) also updates stopReason without touching state", () => {
+    const record = freshRunningRecord();
+    handleAgentEvent(record, { type: "message_end", message: { role: "assistant", stopReason: "toolUse" } });
+    assert.equal(record.stopReason, "toolUse");
+    assert.equal(record.state, "running");
+  });
+
+  test("captures final assistant text and errorMessage without touching state", () => {
+    const record = freshRunningRecord();
+    handleAgentEvent(record, {
+      type: "message_end",
+      message: { role: "assistant", stopReason: "error", errorMessage: "boom", content: [{ type: "text", text: "partial answer" }] },
+    });
+    assert.equal(record.outputText, "partial answer");
+    assert.equal(record.errorMessage, "boom");
+    assert.equal(record.state, "running");
+  });
+
+  test("ignores non-message_end events and non-assistant roles", () => {
+    const record = freshRunningRecord();
+    handleAgentEvent(record, { type: "agent_start" });
+    handleAgentEvent(record, { type: "message_end", message: { role: "toolResult", stopReason: "stop" } });
+    assert.equal(record.stopReason, undefined);
+    assert.equal(record.state, "running");
   });
 });

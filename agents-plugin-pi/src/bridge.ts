@@ -55,7 +55,7 @@ export interface BridgeHandle {
    */
   defaultSessionKeyRef: { current: string | undefined };
   /** Sanitized `ws__*` registered tool names (see `sanitizeToolName`), for the spawner's `full-worker` tool group. */
-  wsToolNames: string[];
+  wsToolNames: readonly string[];
 }
 
 function notify(ui: ExtensionUIContext | undefined, message: string, level: "info" | "warning" | "error" = "info"): void {

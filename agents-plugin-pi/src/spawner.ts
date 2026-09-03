@@ -272,7 +272,16 @@ function waitForDone(record: AgentRecord): Promise<void> {
   return new Promise((resolve) => record.waiters.push(resolve));
 }
 
-function handleAgentEvent(record: AgentRecord, evt: unknown): void {
+/**
+ * Extracts `stopReason`/`errorMessage`/final text from a `message_end`
+ * event onto `record`. Deliberately NEVER touches `record.state` — the
+ * load-bearing invariant (module doc comment / `spawnPiProcess` doc comment)
+ * is that `state:"done"` is flipped only by the child's `close` event, never
+ * by observing a terminal `stopReason` in the stream. Exported so that
+ * invariant has direct unit coverage (test/spawner.test.ts) instead of only
+ * being reachable through a live subprocess.
+ */
+export function handleAgentEvent(record: AgentRecord, evt: unknown): void {
   if (!evt || typeof evt !== "object") return;
   const e = evt as Record<string, unknown>;
   if (e.type !== "message_end") return;
@@ -329,8 +338,16 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
   // Spawn-level failure (bad command, missing binary, permissions). Without
   // a listener this becomes an unhandled exception instead of settling the
   // record — mirrors mcp-stdio-client.ts's McpStdioClient 'error' handling.
+  // Explicitly flips state:"done" and settles waiters here rather than
+  // relying on Node also emitting 'close' after 'error' (a dual-emit
+  // assumption) — 'close' still fires afterward in the common case and
+  // re-applies the same done/settled state, which is idempotent (settleWaiters
+  // drains an already-empty waiters array; state/exitCode get overwritten
+  // with equivalent values).
   proc.on("error", (err) => {
     record.errorMessage = `pi process failed to start: ${err.message}`;
+    record.state = "done";
+    settleWaiters(record);
   });
 
   proc.on("close", (code, signal) => {
@@ -518,6 +535,13 @@ export async function waitAgents(
   policy: WaitPolicy,
   timeoutMs?: number,
 ): Promise<WaitAgentsResult> {
+  if (agentIds.length === 0) {
+    // Promise.race([]) never settles — an empty agentIds with policy:"any"
+    // and no timeout would otherwise hang ws-agent-wait forever. Fail fast
+    // instead (there is nothing to wait for by construction).
+    throw new Error('ws-pi-agent: waitAgents requires at least one agentId in "agent-ids"');
+  }
+
   const records = agentIds.map((id) => {
     const record = registry.get(id);
     if (!record) {
@@ -588,6 +612,9 @@ export async function exploreLeaf(
     throw new Error(`ws-pi-agent: playbook.render("explore") failed: ${text ?? "no content returned"}`);
   }
   const systemPromptPath = text.split("\n")[0]?.trim();
+  if (!systemPromptPath) {
+    throw new Error('ws-pi-agent: playbook.render("explore") returned no prompt path');
+  }
 
   const agentId = randomUUID();
   const record: AgentRecord = {
