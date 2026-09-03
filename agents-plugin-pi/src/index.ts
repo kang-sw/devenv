@@ -18,6 +18,19 @@
  *
  * Phase 1 scope only: the bridge itself. Spawner/explore (Phase 2), model
  * catalog (Phase 3), and /ws-discuss (Phase 4) are out of scope here.
+ *
+ * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
+ * package are byte-identical copies of the same-named files under
+ * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
+ * cross-root relative reference, no shared sync tooling exists yet). This
+ * note lives here rather than as a header comment inside
+ * bin/ws-mcp-launcher.py so the copy stays byte-identical with
+ * agents-plugin/bin/ws-mcp-launcher.py (verifiable via `diff`) instead of
+ * silently drifting from it. When agents-plugin/bin/ws-mcp-launcher.py,
+ * agents-plugin/runtime.json, or agents-plugin/rsrc/ change, re-copy the
+ * changed file(s) here verbatim — all three copies must stay in lockstep.
+ * A stale/missing rsrc/ copy surfaces at call time, e.g. workflow_manual:
+ * "render playbook: rsrc manifest missing".
  */
 
 import { dirname, join } from "node:path";

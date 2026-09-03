@@ -2,13 +2,12 @@
  * Pin-and-fail version check between the bundled runtime.json and the
  * spawned ws-mcp server's reported version.
  *
- * agents-plugin-pi/runtime.json is a hand-synced copy of
- * agents-plugin/runtime.json (see the header comment in
- * agents-plugin-pi/bin/ws-mcp-launcher.py, itself a hand-synced copy of
- * agents-plugin/bin/ws-mcp-launcher.py — this mirrors the existing
- * agents-plugin-wsflow precedent, which carries its own copies rather than a
- * cross-root relative reference). No sync tooling exists yet to keep these
- * in lockstep automatically.
+ * agents-plugin-pi/runtime.json is a hand-synced, byte-identical copy of
+ * agents-plugin/runtime.json (see the HAND-SYNC NOTE in index.ts for the
+ * full 3-way copy surface — this mirrors the existing agents-plugin-wsflow
+ * precedent, which carries its own copies rather than a cross-root relative
+ * reference). No sync tooling exists yet to keep these in lockstep
+ * automatically.
  */
 
 import { readFileSync } from "node:fs";

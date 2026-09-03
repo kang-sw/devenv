@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-# NOTE(agents-plugin-pi): this file is a hand-synced copy of
-# agents-plugin/bin/ws-mcp-launcher.py (same precedent as
-# agents-plugin-wsflow/bin/ws-mcp-launcher.py). There is no automated sync
-# tooling yet — when agents-plugin/bin/ws-mcp-launcher.py changes, re-copy it
-# here, and keep it in lockstep with the other two hand-synced siblings:
-# agents-plugin/runtime.json -> agents-plugin-pi/runtime.json and
-# agents-plugin/rsrc/ -> agents-plugin-pi/rsrc/ (the launcher resolves
-# playbook rsrc manifests relative to its own directory, so a missing/stale
-# rsrc/ copy surfaces at call time, e.g. workflow_manual: "render playbook:
-# rsrc manifest missing"). Do not let these copies diverge.
 import hashlib
 import json
 import os

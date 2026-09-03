@@ -62,7 +62,7 @@ function firstText(result: McpToolCallResult): string | undefined {
  * only — never used for the wire call to ws-mcp, which always dispatches on
  * the untouched `rawName`.
  */
-function sanitizeToolName(rawName: string): string {
+export function sanitizeToolName(rawName: string): string {
   return `ws__${rawName.replaceAll(".", "_")}`;
 }
 
@@ -85,7 +85,7 @@ function sanitizeToolName(rawName: string): string {
  * caller-controllable" (ticket constraint) is actually true at the Pi
  * tool-call layer, not just inside execute().
  */
-function withOptionalSessionKey(inputSchema: Record<string, unknown>): Record<string, unknown> {
+export function withOptionalSessionKey(inputSchema: Record<string, unknown>): Record<string, unknown> {
   const required = inputSchema.required;
   if (!Array.isArray(required) || !required.includes("session_key")) {
     return inputSchema;
@@ -106,7 +106,7 @@ function withOptionalSessionKey(inputSchema: Record<string, unknown>): Record<st
  * Never mutates the tool's registered `parameters` schema — only the
  * per-call arguments object.
  */
-function resolveSessionKey(
+export function resolveSessionKey(
   params: Record<string, unknown> | undefined,
   defaultKeyRef: { current: string | undefined },
 ): Record<string, unknown> {
