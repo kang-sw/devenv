@@ -183,7 +183,7 @@ install-identical and the CLI-resolution pattern is already correct, so
 can be built under `-e` and will run unchanged once installed, provided the
 package-local-paths discipline holds.
 
-## Consumption model + publish path — decided npm-first (2026-09-03)
+## Consumption model + publish path — decided git-root-first (2026-09-03)
 
 A follow-up read of Pi `docs/packages.md` (git-source section) surfaced a
 repo-layout constraint the gap #6 spike did not cover:
@@ -192,22 +192,48 @@ repo-layout constraint the gap #6 spike did not cover:
   whole repo to `~/.pi/agent/git/<host>/<path>` and runs `npm install` only if a
   **root `package.json`** exists; the git spec supports refs (`@tag`/`@commit`)
   and `git@`/`ssh://` shorthand but **no subdirectory / subpath / `#fragment`**
-  syntax. This package's `package.json` lives at `agents-plugin-pi/`, a monorepo
-  **subdirectory**, so a bare `pi install git:github.com/<user>/<devenv-repo>`
-  cannot discover it.
+  syntax. This package's own `package.json` lives at `agents-plugin-pi/`, a
+  monorepo **subdirectory** — so a bare `pi install git:` could not discover it,
+  UNTIL a repo-root manifest points Pi at the subdir extension (below).
 
-Three consumption paths follow, with the decision:
+Four consumption paths, with the decision:
 
-- **npm publish → `pi install npm:<name>` — CHOSEN target.** Cleanest canonical
-  path; independent of monorepo layout. Deferred until after features 2/3 land
-  (no rush to publish).
-- **Dedicated repo whose root IS the package → `pi install git:...` — rejected
-  for now.** Would need a repo split / subtree / mirror; heavier than npm publish
-  and buys nothing npm publish doesn't.
-- **Local path → `pi install ./agents-plugin-pi` (or abs path) — works today**
-  (in-place reference; the package-local-first resolver's canonical-tree fallback
-  finds the sibling `agents-plugin/skills` from the checkout). This is the
-  dogfooding install path until publish.
+- **Repo-root manifest → `pi install git:<repo>` — CHOSEN (primary).** A minimal
+  inert `package.json` at the monorepo root declaring
+  `"pi": { "extensions": ["agents-plugin-pi/src/index.ts"] }` makes Pi's
+  git-install load the subdir extension directly from the existing monorepo — no
+  repo split, and crucially **no npm auth**. "Publish" is a git tag + push.
+  Landed 2026-09-03 (see verification below).
+- **npm publish → `pi install npm:<name>` — retained as secondary.** Cleanest
+  registry path but needs npm auth + publish metadata; deferred, kept as an option
+  for gallery/registry reach. Prereqs unchanged (below).
+- **Dedicated repo whose root IS the package — no longer needed.** The in-repo
+  root manifest gives the git-address install without a split.
+- **Local path → `pi install ./` or `pi install /abs/repo` — works today** for
+  dogfooding (in-place reference; the resolver's canonical-tree fallback finds
+  `agents-plugin/skills` from the checkout).
+
+### git-root path — verification (2026-09-03)
+
+Two empirical spikes confirmed the root-manifest path:
+
+- **Discovery works.** A minimal root manifest (`"pi": { extensions:["sub/…"],
+  skills:[…] }`) loaded a subdir extension, a manifest-`skills` subdir glob, and
+  the extension's `resources_discover` skills — verified via
+  `pi --mode rpc --no-session get_commands`. The real extension resolves its own
+  `bin/`/`runtime.json`/`rsrc/` and the `resolveSkillsDir` resolver from
+  `import.meta.url`, so discovery-by-root-manifest needs no code change.
+- **Claude/Codex unaffected.** `claude plugin validate agents-plugin` passes with
+  the root `package.json` present; Claude/Codex marketplace discovery keys on the
+  subdir `.claude-plugin`/`.agents` manifests and does not read `package.json`.
+
+Design of the landed root manifest: **`extensions` only, no `skills` field** — the
+extension's `resources_discover` (`resolveSkillsDir`) is the single skills
+mechanism (a git-clone carries the committed `agents-plugin/skills`, so the
+resolver fallback exposes it); a manifest `skills` entry would double-expose and
+trigger Pi's by-name dedup warning. The manifest is inert (no deps, no lifecycle
+scripts), so the git-install root `npm install` is a no-op. slice 1's pack-time
+skills copy stays as npm-subdir-path insurance.
 
 ### npm publish prerequisites (for the eventual publish slice)
 
