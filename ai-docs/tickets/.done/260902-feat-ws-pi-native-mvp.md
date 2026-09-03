@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 39d5c8df0da96321
 sage-review-completeness-reviewed: 39d5c8df0da96321
+completed: 2026-09-03
 ---
 
 # Implement the ws Pi-native MVP: self-built MCP bridge + subagent spawner + model-catalog config
@@ -475,3 +476,8 @@ confirmed — see the Fully-literal capture note above.) All four MVP phases are
 complete; merge into
 `track/pi-agent` and ticket close await explicit user choice (default: no-merge,
 retain branch).
+
+
+## Resolution (2026-09-03)
+
+All four MVP phases complete (bridge, delegation spawner, model catalog + tier map, /ws-discuss PoC command). Composition proven end-to-end on Pi; the fully-literal interactive /ws-discuss gate was confirmed by a human interactive run (2026-09-03). 90 unit tests pass; golden rule held throughout (zero ws-mcp Go source changes). Follow-ups spun out as idea tickets: 260903-research-ws-pi-adapter-npm-distribution (standalone distribution) and 260903-feat-human-relay-interactive-gate (TTY-only gate relay). Merged into track/pi-agent.
