@@ -385,3 +385,73 @@ end-to-end on Pi — proving skills-load + bridge + spawner compose. This
 validates the MVP before feature expansion (durable depth-2 recursion,
 always-visible TODO, goal-loop, compaction hooks — all deferred to follow-up
 tickets under the epic).
+
+### Result (d0318a4d) - 2026-09-03
+
+Phase 4 landed the `/ws-discuss` proof-of-concept command in `agents-plugin-pi/`,
+closing the ws-pi-native MVP surface. Implementation commit `d0318a4d`; spec +
+survey plan `763e5b24`. Caller-visible surface documented in spec
+`pi-adapter-runtime` (`{#260903-pi-poc-discuss-command}`; intro and closing
+Constraints note flipped from "/ws-discuss not-yet-implemented" to the full MVP
+surface).
+
+New: `src/discuss.ts` exports the pure `buildDiscussKickoff(args)` — the kickoff
+string leads with `/skill:lead-discuss <topic>` (skills-load; the discuss body
+transitively drives the bridged `ws__playbook_print` / `ws__workflow_manual`)
+and, after a blank-line separator, appends an explicit one-`explore`-leaf
+instruction (the spawn round-trip, which is NOT inherent to the discuss skill so
+it must be named to be deterministic). `src/index.ts` registers a single
+top-level `pi.registerCommand("ws-discuss", …)` beside `ws-model-catalog-list`:
+idle-guard (`ctx.isIdle()` → `ctx.ui.notify` + return), else
+`pi.sendUserMessage(buildDiscussKickoff(args), { expandPromptTemplates: true })`.
+`test/discuss.test.ts` adds 5 unit tests pinning the kickoff contract.
+
+Verification: 90 unit tests pass (`node --test`; 85 pre-Phase-4 + 5 new).
+Partitioned review: correctness clean, test clean, fit one Important (spec
+staleness — the by-design lead-owned doc step, closed in `763e5b24`, matching the
+Phase 2 `fc99fea2` / Phase 3 `066e9bb4` precedent) + one Minor (long description
+string, no fix). No Critical, no relay, no elevation. Golden rule verified: the
+diff touches only `agents-plugin-pi/{src,test}`; zero changes to `agents-plugin/`,
+`-tool/`, `-wsflow/`, or the hand-synced `agents-plugin-pi/{rsrc,runtime.json,bin}`
+copies.
+
+Live end-to-end gate: **PASSED** on substance, with a documented driver caveat.
+The gate's claim — skills-load + bridge + spawner compose end-to-end on Pi — was
+proven live by feeding the **exact** `buildDiscussKickoff(...)` output through
+`pi -e agents-plugin-pi/src/index.ts --offline --mode json -p` (transcript
+`gate2.ndjson`, exit 0): (a) the `lead-discuss` skill body expanded in the turn;
+(b) four bridged `ws__*` tools were called and returned `isError=false`
+(`ws__playbook_print`, `ws__workflow_manual`, `ws__git_status`,
+`ws__project_tree`) with real content, and the ws-mcp launcher subprocess was
+confirmed in the process tree; (c) one `explore` recon leaf was dispatched as a
+real child `pi` process and harvested (`state:"done"`, `## Findings` output). The
+command handler itself was independently proven to dispatch under `-p` via a
+minimal probe extension (marker file written on `/probecmd`).
+
+Caveat (faithfully recorded, not a product defect): the **literal** single
+`/ws-discuss` invocation could not be exercised fully end-to-end by a
+**non-interactive driver** in this environment. `-p` print mode dispatches the
+command handler but exits before running the turn the handler injects via
+`pi.sendUserMessage`; interactive `--mode json`/`rpc` would run that injected
+turn but cannot be driven from a pipe/redirect here (a plain pipe blocks before
+`session_start`; a `script` PTY without a controlling terminal exits right after
+the session header; rpc needs a JSON-RPC handshake a dumb pipe can't supply). In
+a real interactive Pi session the handler fires → injects the kickoff → idle →
+the turn runs (documented Pi `sendUserMessage` behavior), i.e. exactly the
+composition already proven from the identical string. The gate therefore stands
+on the kickoff-string proof plus the separate command-dispatch proof; a
+fully-literal interactive `/ws-discuss` capture is deferred to a manual/human
+Pi run.
+
+Startup operational notes for anyone re-running Phase-4-style gates
+(non-defects): print mode blocks on open stdin — close it (`</dev/null`); and
+startup network ops stall cold starts — use `--offline` / `PI_OFFLINE=1` (which
+also propagates to spawned children).
+
+Deferred: `AGENTS.md` `## Project Orientation` still omits the
+`agents-plugin-pi/` root (kept out until the ticket integrates off this tracking
+branch, consistent with Phases 1-3); a dedicated Pi-adapter mental-model domain
+(now authorable since the MVP surface is complete); the fully-literal interactive
+`/ws-discuss` capture above. All four MVP phases are complete; merge into
+`track/pi-agent` and ticket close await explicit user choice (default: no-merge,
+retain branch).
