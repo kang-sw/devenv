@@ -24,7 +24,12 @@
  * appended to every `workflow_manual` bridge response (bridge.ts), and a
  * read-only `ws-model-catalog-list` command exercising Pi's
  * `ctx.scopedModels` read API to help the user hand-curate the catalog.
- * /ws-discuss (Phase 4) remains out of scope here.
+ *
+ * Phase 4 ships the `/ws-discuss` proof-of-concept command (kickoff built by
+ * src/discuss.ts): a single `pi.sendUserMessage` that loads the lead-discuss
+ * skill (skills-load), whose body drives the bridged `ws__*` tools (bridge),
+ * and instructs the model to dispatch one `explore` recon leaf (spawner) —
+ * proving skills-load + bridge + spawner compose end-to-end on Pi.
  *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
@@ -45,6 +50,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import { registerAgentTools, type AgentToolsHandle } from "./spawner.ts";
+import { buildDiscussKickoff } from "./discuss.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -73,6 +79,24 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const lines = models.map((m) => `${m.provider}/${m.id}`);
       const header = ctx.scopedModels.length > 0 ? `Scoped models (${lines.length}):` : `All available models (${lines.length}):`;
       ctx.ui.notify([header, ...lines].join("\n"));
+    },
+  });
+
+  // Phase 4 proof-of-concept command: one message that loads the lead-discuss
+  // skill (skills-load), whose body calls the bridged ws__* tools (bridge), and
+  // instructs the model to dispatch one `explore` recon leaf (spawner) — proving
+  // all three MVP surfaces compose. expandPromptTemplates:true expands the
+  // leading `/skill:lead-discuss <topic>` (docs/extensions.md#L1439-1467); the
+  // idle guard mirrors examples/extensions/send-user-message.ts so the plain
+  // (no deliverAs) send is always safe.
+  pi.registerCommand("ws-discuss", {
+    description: "PoC gate: load the ws discuss skill and dispatch one explore leaf, proving skills-load + bridge + spawner compose.",
+    handler: async (args, ctx) => {
+      if (!ctx.isIdle()) {
+        ctx.ui.notify("Agent is busy — try again when idle.", "warning");
+        return;
+      }
+      pi.sendUserMessage(buildDiscussKickoff(args), { expandPromptTemplates: true });
     },
   });
 
