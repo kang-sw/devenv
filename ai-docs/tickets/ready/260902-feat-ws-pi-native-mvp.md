@@ -317,6 +317,55 @@ config:
 Gate: with an unset map, `workflow_manual` shows the advisory and a spawn
 inherits; after configuring a tier, a spawn uses the mapped model.
 
+### Result (2daacf6d) - 2026-09-03
+
+Phase 3 landed the model-catalog surface in `agents-plugin-pi/`. Implementation
+commit `2daacf6d`; spec `066e9bb4`. Caller-visible surface documented in spec
+`pi-adapter-runtime` (`{#260903-pi-spawner-model-tier-inherit}` rewritten from
+inherit-only to tier resolution; new `{#260903-pi-model-catalog-config-file}` and
+`{#260903-pi-model-catalog-unset-advisory}`).
+
+New: `src/model-catalog.ts` (`readModelCatalog` — never throws, missing/malformed
+→ unset; `resolveTierModel`; `isModelCatalogUnset`) and `model-catalog.json`
+(ships `{}` = unset). `src/spawner.ts` tier-aware resolution (exported pure
+`resolveModelForTier` + `asModelTier` unrecognized→inherit; `explore` resolves via
+an implicit `small` role, no caller-facing tier; `ws-agent-continue` stays
+inherit). `src/bridge.ts` exported pure `maybeAppendModelCatalogAdvisory`
+(append-not-prepend, copy-not-mutate, only `workflow_manual` + unset `small`),
+read fresh per call. `src/index.ts` wires the catalog path and registers the
+read-only `ws-model-catalog-list` command (`ctx.scopedModels` with
+`ctx.modelRegistry.getAvailable()` fallback).
+
+Key facts confirmed during survey (recorded to correct the ticket text): the
+extension-facing model-pool read API is `ctx.scopedModels` /
+`ctx.getScopedModels()` (`docs/extensions.md` L1013-1017), **not** a file named
+`enabled-models.ts` (no such file exists in the installed 0.84.4 build). The
+mirrored "bootstrap-version-behind advisory" is a ws-mcp Go-core mechanism
+recomputed per call — the adapter reimplements the per-call cadence in TS, never
+calling into or modifying the Go core.
+
+Verification: 85 unit tests pass (`node --test`; 59 pre-existing + 26 new — the
+implementer's report of "71 + 14" was an inaccurate breakdown, reconciled by the
+test reviewer running the suite at `eb4d23f8` = 59; no regression or duplication).
+Partitioned review: correctness clean + 1 minor (a non-string tier value
+hand-edited into the JSON would forward unchanged — out of realistic scope, no fix
+required); fit one Important (spec staleness, closed in `066e9bb4`) + 0 minor; test
+clean + 1 minor (the count-report inaccuracy above, not a defect). No Critical, no
+relay needed, no elevation. Golden rule verified: zero changes to `agents-plugin/`,
+`-tool/`, `-wsflow/`, or the hand-synced `agents-plugin-pi/{rsrc,runtime.json,bin}`
+copies.
+
+**The live end-to-end gate (unset map → `workflow_manual` shows the advisory and a
+spawn inherits; then configure a tier → a spawn launches with the mapped
+`--model`) has NOT yet been run.** This is the sole outstanding acceptance step
+for Phase 3.
+
+Deferred: `AGENTS.md` `## Project Orientation` still omits the `agents-plugin-pi/`
+root (kept out until the ticket integrates off this tracking branch, consistent
+with Phases 1-2); a dedicated Pi-adapter mental-model domain (better authored once
+Phase 4 closes the MVP). Phase 4 (`/ws-discuss` PoC) remains; ticket stays in
+`ready/`.
+
 ### Phase 4: Proof-of-concept command
 
 Depends on Phases 1–3. Register one PoC command (e.g. `/ws-discuss`) via
