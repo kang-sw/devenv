@@ -3003,9 +3003,39 @@ func TestServeStdioTodoAddErrorBranches(t *testing.T) {
 		t.Fatalf("ref_key-for-end(implicit) error expected, got: %s", got)
 	}
 
+	// ref_key supplied but EMPTY for position: end -> still rejected (both
+	// explicit "end" and implicit/omitted position). This is the load-bearing
+	// case for the comma-ok `args["ref_key"]` presence check in handleTodoAdd:
+	// a regression back to rawStringArg's empty-string-means-missing collapse
+	// would silently accept this and must be caught here.
+	if got := callToolWithKey(t, server, 601, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "end", "ref_key": "",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("empty ref_key-for-end(explicit) error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 602, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "ref_key": "",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("empty ref_key-for-end(implicit) error expected, got: %s", got)
+	}
+
 	// None of the error paths above should have mutated the list.
 	if rec, ok := server.sessions.readState(key); !ok || len(rec.Todos) != 0 {
 		t.Fatalf("error paths must not mutate the todo list: %v", keysOf(rec.Todos))
+	}
+
+	// Pin the other side of the comma-ok distinction: an ABSENT ref_key for
+	// position: end must still be accepted, both with an explicit "end" and
+	// with position omitted entirely (implicit default).
+	if got := callToolWithKey(t, server, 603, key, "todo.add", map[string]any{
+		"key": "end-explicit-no-ref", "title": "T", "position": "end",
+	}); !strings.Contains(got, "todo added: end-explicit-no-ref") {
+		t.Fatalf("absent ref_key with explicit position=end should be accepted, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 604, key, "todo.add", map[string]any{
+		"key": "end-implicit-no-ref", "title": "T",
+	}); !strings.Contains(got, "todo added: end-implicit-no-ref") {
+		t.Fatalf("absent ref_key with implicit (omitted) position should be accepted, got: %s", got)
 	}
 
 	// Reused verbatim error messages (from todoAppend/todoInsert/normalizeTodoKey)
