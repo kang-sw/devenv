@@ -14,6 +14,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ce6262334bd651be
 sage-review-completeness-reviewed: ce6262334bd651be
+completed: 2026-09-04
 ---
 
 # Pi goal-loop + turn-end compaction judgment hook
@@ -237,6 +238,56 @@ Verification: a live transcript showing the model call
 `/goal-compact-and-continue` compacts with the carry-forward prose and re-enters
 the loop; the percent surfaces in the continue turn; a config-knob override takes
 effect on a fresh read. Depends on Phase 1.
+
+### Result (151809e6) - 2026-09-04
+
+Extended `agents-plugin-pi/src/goal-loop.ts` with the model-driven compaction
+surface; no new module.
+
+- `goal-compact-and-continue(carry_forward)` — a **non-terminal**
+  `pi.registerTool` lever that calls `ctx.compact({ customInstructions:
+  carry_forward })` once and returns **without** `disarmGoal()`. Because a manual
+  `ctx.compact` aborts the invoking turn, the goal reaches a fresh settle and the
+  existing Phase-1 `agent_settled` reminder re-enters the next goal turn — no
+  separate continuation path.
+- **Advisory surfacing (not a gate).** The reminder now carries
+  `getContextUsage().percent` (via pure `computeContextPercent`, which derives
+  from `tokens`/context-window/override when `percent` is null right after a
+  compaction) plus a static compression-safety heuristic (phase/merge boundary =
+  safe; non-phase stop = unsafe). Past the advisory point the percent line reads
+  as a nudge. The extension never autonomously compacts.
+- **`session_before_compact` observe-only companion** (`buildCompactionObservation`
+  pure builder) — never `cancel`s or overrides. Verified against the installed
+  build: the manual path forwards `customInstructions` verbatim while
+  `_runAutoCompaction` hardcodes them empty and offers no partial-inject hook, so
+  observe-only for `reason:"threshold"` is the faithful scoping (Pi's overflow
+  auto-compaction remains the last-resort backstop).
+- **Config knobs** — `compaction_advisory_percent` (`(0,100]`) and
+  `context_window_override` (finite-positive) join the Phase-1 runaway threshold in
+  `goal-loop-config.json`, with `resolveCompactionAdvisoryPercent` /
+  `resolveContextWindowOverride` mirroring Phase 1's never-throw, read-fresh-per-
+  settle pattern.
+- **Phase-1 reducer churn (planned):** `decideOnSettle` now returns
+  `{ action:"reinject", goal }` and `buildGoalReminder` construction moved into the
+  IO glue where `ctx.getContextUsage()` + config are in scope. Armed-only gating,
+  terminal disarm, and the runaway backstop are unchanged and still asserted.
+
+Spec: `{#260904-pi-goal-loop-model-driven-compaction}` (commit c1229949);
+Constraints updated to mark compaction landed — only the always-visible TODO
+remains deferred under the epic.
+
+Verification: `cd agents-plugin-pi && npm test` → 189/189 pass (161 prior + 28
+new Phase-2). Review: fit clean, correctness clean (1 Minor: theoretical
+`contextWindow===0` → `Infinity`, doc-comment overclaim, record-only), test clean
+(3 Minor: one untested `computeContextPercent` branch combo, no fractional-percent
+rounding test, un-extracted lever result-text template consistent with Phase 1 —
+all record-only). No relay required (no Critical/Important). GOLDEN RULE held.
+
+Deferred: the live `pi --mode json` compaction transcript gate (lever compacts
+with carry-forward + re-enters; percent surfaces; config override applies on fresh
+read) is **outstanding** — no provider credentials in this sandbox; honestly
+unverified, not faked. Code-level claims verified by direct dist source inspection
+(`types.d.ts`, `agent-session.js` compact vs auto-compaction paths).
 
 ## Non-goals
 
