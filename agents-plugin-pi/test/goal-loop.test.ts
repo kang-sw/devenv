@@ -46,7 +46,7 @@ import {
   DEFAULT_COMPACTION_ADVISORY_PERCENT,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
-import { WS_PI_AGENT_CHILD_ENV } from "../src/spawner.ts";
+import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -374,8 +374,20 @@ describe("decideOnSettle", () => {
 });
 
 describe("isChildProcess", () => {
-  test("true when the spawned-child marker is set (matches spawner.ts's WS_PI_AGENT_CHILD_ENV key)", () => {
-    assert.equal(isChildProcess({ [WS_PI_AGENT_CHILD_ENV]: "1" }), true);
+  test("true when the spawned-child role marker is set to worker (matches process-role.ts's WS_PI_SPAWN_ROLE_ENV key)", () => {
+    assert.equal(isChildProcess({ [WS_PI_SPAWN_ROLE_ENV]: "worker" }), true);
+  });
+
+  test("true when the spawned-child role marker is set to explore", () => {
+    assert.equal(isChildProcess({ [WS_PI_SPAWN_ROLE_ENV]: "explore" }), true);
+  });
+
+  test("true when the spawned-child role marker is set to fork (reserved, conservatively still treated as child)", () => {
+    assert.equal(isChildProcess({ [WS_PI_SPAWN_ROLE_ENV]: "fork" }), true);
+  });
+
+  test("false when an invalid/unrecognized role value is set (readSpawnRole rejects it, so no marker is seen)", () => {
+    assert.equal(isChildProcess({ [WS_PI_SPAWN_ROLE_ENV]: "bogus" }), false);
   });
 
   test("false when the marker is absent (lead session)", () => {

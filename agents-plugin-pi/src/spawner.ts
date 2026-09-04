@@ -58,6 +58,7 @@ import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agen
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { readModelCatalog, resolveAlias, type ModelCatalogConfig } from "./model-catalog.ts";
+import { WS_PI_SPAWN_ROLE_ENV } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -72,27 +73,22 @@ export type ToolGroup = "read-only" | "recon" | "full-worker";
 export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
 
 /**
- * Env var marker set on every spawned child's process environment
- * (`buildRpcClientOptions`'s RPC path and `spawnPiProcess`'s one-shot
- * `explore` path both carry it) so the goal-loop's `agent_settled` handler
- * (goal-loop.ts) can no-op when the running process is itself a spawned
- * child, never the lead session — defense-in-depth against a message that
- * happens to start with `/goal …` reaching a child's input pipeline (e.g. a
- * lead-authored `ws-agent-send` message), per the 260903 Phase 1 ticket's
- * "lead session only" settled cross-ticket fact.
- */
-export const WS_PI_AGENT_CHILD_ENV = "WS_PI_AGENT_CHILD";
-
-/**
  * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
- * (`spawnPiProcess` below): merges `WS_PI_AGENT_CHILD_ENV=1` over `baseEnv`
- * without dropping any inherited variable. Extracted (review fix, cycle 1)
- * so the marker-placement logic is unit-testable without invoking a real
- * child process — mirrors `buildRpcClientOptions`'s export for the same
- * reason on the RPC path.
+ * (`spawnPiProcess` below): merges the `explore` process-role marker
+ * (`WS_PI_SPAWN_ROLE_ENV`, see `process-role.ts`) over `baseEnv` without
+ * dropping any inherited variable. Extracted (review fix, cycle 1) so the
+ * marker-placement logic is unit-testable without invoking a real child
+ * process — mirrors `buildRpcClientOptions`'s export for the same reason on
+ * the RPC path.
+ *
+ * 260904 Phase 1: `WS_PI_SPAWN_ROLE_ENV` subsumes the old boolean
+ * `WS_PI_AGENT_CHILD_ENV` marker (a role value instead of a single "is a
+ * child" flag) — goal-loop.ts's `isChildProcess` now reads presence of ANY
+ * role via `readSpawnRole`/`process-role.ts` instead of equality to `"1"`,
+ * so this rename does not change that consuming contract.
  */
 export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return { ...baseEnv, [WS_PI_AGENT_CHILD_ENV]: "1" };
+  return { ...baseEnv, [WS_PI_SPAWN_ROLE_ENV]: "explore" };
 }
 
 /**
@@ -628,10 +624,14 @@ export interface RpcResumeCtx {
 
 /**
  * Exported (review fix, cycle 1) so `test/spawner.test.ts` can assert the
- * `WS_PI_AGENT_CHILD_ENV` marker directly against the built options object
+ * `WS_PI_SPAWN_ROLE_ENV` marker directly against the built options object
  * instead of leaving it covered only by a manual spot-check — `RpcClient`'s
  * own `env: {...process.env, ...this.options.env}` merge means this function
  * only needs to carry the marker itself (no `process.env` spread here).
+ *
+ * 260904 Phase 1: carries `WS_PI_SPAWN_ROLE_ENV: "worker"` (see
+ * `process-role.ts`), replacing the old boolean `WS_PI_AGENT_CHILD_ENV: "1"`
+ * marker this function used to set.
  */
 export function buildRpcClientOptions(
   cwd: string,
@@ -643,7 +643,7 @@ export function buildRpcClientOptions(
   return {
     cliPath: RPC_CLI_PATH,
     cwd,
-    env: { [WS_PI_AGENT_CHILD_ENV]: "1" },
+    env: { [WS_PI_SPAWN_ROLE_ENV]: "worker" },
     model,
     args: ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools],
   };

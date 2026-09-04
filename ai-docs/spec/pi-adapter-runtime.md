@@ -59,6 +59,25 @@ the caller's view:
   parent→child key lineage and lead multi-track orchestration, where distinct
   keys must reach ws-mcp unchanged.
 
+In front of that fill-or-forward rule the bridge runs a **narrow, mechanical
+key normalization** that rewrites exactly two explicit-key values — both
+recognized by string equality against values the adapter knows out-of-band —
+to the bridge's own default key:
+
+| explicit `session_key` value | rewritten to | why |
+| --- | --- | --- |
+| the fresh-bootstrap sentinel `obsidian-latch` | own key | a lead that follows the canonical skill text literally passes the FRESH sentinel; forwarding it would make ws-mcp mint a **second** lead key while the bridge already holds one, splitting the session's ws state across two keys |
+| the **parent lead's key** (present only in a process spawned as a side-thread fork, delivered through the spawn environment) | own key | the fork inherits a transcript that names the lead's key, and ws-mcp keys agenda/todos per key, so forwarding it would clobber the lead's state |
+
+Every other explicit key — including a lead driving a child by that child's
+key — passes through untouched; widening the rewrite beyond these two cases is
+rejected. The rewrite is a pure function
+(`normalizeSessionKey(params, { ownKey, sentinel, parentLeadKey? })`) applied
+strictly before fill-or-forward, and is a bridge-layer mechanism, never a prompt
+instruction. When the startup `ferrule` bootstrap fails and the own key is unset
+(see below), the sentinel rewrite is **disabled** so the model's own FRESH call
+self-heals; the parent-key case is likewise a no-op when no parent key is present.
+
 Because Pi validates tool-call arguments against the registered parameter schema
 *before* the tool executes, and ws-mcp advertises `session_key` as a required
 property, the bridge relaxes each registered schema so `session_key` is listed in
@@ -70,6 +89,93 @@ through unchanged.
 If the startup `ferrule` bootstrap fails, the default key is left unset rather
 than faked; a later omitted-`session_key` call then surfaces ws-mcp's own
 `mandatory_session_key` guidance instead of a swallowed error.
+
+## Lead bootstrap: workflow manual + Pi lead guide in the system prompt {#260905-pi-lead-bootstrap-system-prompt}
+
+On the reference harnesses (Claude, Codex) the ws workflow manual reaches the
+lead only through a model-invoked `workflow_manual` tool call carrying a
+session-key handshake, because those hosts give the plugin no hook on the lead's
+system prompt. On Pi the adapter owns the extension, so the manual is injected
+directly into the lead's system prompt and the handshake becomes unnecessary.
+
+- Hook: the adapter appends a **ws block** to the lead's system prompt on every
+  agent run (Pi's `before_agent_start`, whose result may return a `systemPrompt`
+  chained across extensions). The extension **appends, never replaces**: it
+  returns the incoming `systemPrompt` followed by the ws block. Because Pi
+  re-assembles the system prompt from its base on every turn, the handler
+  re-applies the block each turn from an in-memory snapshot rather than
+  capturing it once.
+- The ws block content, in order:
+  1. the **full `workflow_manual` CONTINUE response as of session start** — the
+     static manual body plus ws-mcp's session-start dynamic material (`## Session
+     Key`, `## Session State`, repo notes, and the per-call advisory blocks) —
+     obtained by the bridge itself right after the `ferrule` bootstrap by calling
+     `workflow_manual` under its own key, and prefixed by one fixed line marking
+     the dynamic part as a **session-start snapshot** whose current values come
+     from a later `workflow_manual` call. The manual text has a single source
+     (ws-mcp's render); the adapter never carries a copy of it.
+  2. the **Pi lead guide** — an adapter-owned prose file
+     (`agents-plugin-pi/pi-lead-guide.md`, shipped in the package `files`
+     whitelist so an installed tarball carries it) describing the Pi-specific
+     lead surface: that `session_key` never needs to be supplied, that the manual
+     is already present so a `workflow_manual` call returns only its dynamic part,
+     and a **verb routing table** with one row per Pi lead verb. The guide is
+     structured so later tickets extend the verb table with their own rows rather
+     than rewriting shared text.
+- Fetch cadence: the block is assembled **once per session start** and held in
+  extension memory; it is not re-fetched per turn. The dynamic material is
+  refreshed only when an entry-point skill calls `workflow_manual` (the same
+  cadence as on the reference harnesses). Injecting the manual into the system
+  prompt — rather than as a transcript message — is deliberate: the system prompt
+  survives Pi compaction natively, so post-compaction recovery reduces to a
+  `workflow_state`/`workflow_manual` call.
+- Role gating: the ws block is appended only for the **lead** (no spawn role in
+  the environment) and for a **`fork`** (a lead-caliber peer that needs the same
+  manual and guide). It is appended for neither `worker` nor `explore` children —
+  they receive their own rendered playbook via `--append-system-prompt`, and the
+  lead manual would reintroduce the lead's delegation posture into a worker. The
+  session-start snapshot fetch is likewise gated to lead/fork, so worker/explore
+  processes never pay for it. A user-launched headless lead (`--mode rpc`) has no
+  spawn role and receives the block exactly like the TUI lead; nothing here
+  depends on `ctx.ui`.
+- Degraded path: if the `session_start` `ferrule` bootstrap or the manual fetch
+  fails, the own key or the snapshot is left unset and the ws block is simply not
+  injected for that session; the model still reaches ws-mcp through the ordinary
+  tool path.
+
+## `workflow_manual` calls are mapped onto `workflow_state` {#260905-pi-workflow-manual-state-mapping}
+
+Because the manual body already lives in the lead's system prompt (see above), a
+model-invoked `ws__workflow_manual` call in a lead or fork process must return
+only the **state-and-advisories view** — everything ws-mcp recomputes per call —
+and never the manual body a second time:
+
+- Primary: the bridge forwards the call to ws-mcp `workflow_manual` with the
+  (normalized) key and **cuts the static manual body out of the response** by
+  exact substring match against a static-body snapshot taken at session start
+  (the `playbook.print("lead-workflow-manual")` render, which `workflow_manual`
+  produces internally). What remains is the per-call material — `## Session Key`,
+  `## Session State`, repo notes, and the advisory blocks — so ws-mcp's contract
+  that those are recomputed on every call is preserved.
+- Fallback: if the snapshot body is not found in the response (the renderer
+  changed mid-session), the bridge dispatches ws-mcp `workflow_state` instead —
+  a state-only view with no FRESH mode that never mints — and drops the
+  `workflow_manual`-only arguments (`root`) from that call, forwarding only the
+  session key. `workflow_state`'s own fail-loud error path for an unresolvable
+  key is surfaced unchanged.
+- The bridge prepends one fixed line to the mapped response — that the workflow
+  manual is in the system prompt and this is the current session state — so a
+  model expecting the manual is not confused by its absence.
+- The unset-catalog advisory (the model-catalog unset advisory below) keeps
+  riding the mapped response with its per-call cadence; it is keyed on the
+  registered name the model called, not on the wire tool the bridge dispatched.
+- Role- and bootstrap-gated: the cut/mapping and the prepended line apply only in
+  a lead or fork process **and** only when the session-start static-body snapshot
+  exists. A `worker` or `explore` that calls `ws__workflow_manual`, or any process
+  whose bootstrap was degraded (no snapshot), has the call forwarded verbatim,
+  since its system prompt carries no manual — the model's own call self-heals
+  exactly as on the reference harnesses. This gating decision is a pure predicate
+  (`shouldMapWorkflowManual(rawName, hasSnapshot, role)`).
 
 ## Startup version pin-and-fail {#260903-pi-bridge-version-pin}
 
@@ -156,6 +262,17 @@ abstraction. Five tools are registered:
   mapping and on-disk session, leaving it **dormant/resumable** (a later
   `ws-agent-send` revives it). This is distinct from `session_shutdown`, the
   terminal teardown of every child.
+
+Each spawned child inherits a **process-role marker** in its environment so the
+extension running inside it can tell what kind of process it is: `WS_PI_SPAWN_ROLE`
+carries `worker` (a `ws-agent-spawn` child), `explore` (a recon leaf), or `fork`
+(a lead-caliber side-thread peer); its absence marks the host **lead** process.
+A `fork` additionally carries `WS_PI_PARENT_SESSION_KEY` (the lead's key), which
+feeds the fork's key-normalization parent-key case and lets the bridge mint the
+fork's key with lead lineage. This single marker is the source for both the
+system-prompt role gate (only lead and fork receive the ws block) and the goal
+loop's lead-only gating (any role present marks a child, whose settle handler
+no-ops).
 
 Still-running workers are terminated when the session is torn down
 (`session_shutdown`), before the bridge connection they dispatch through is

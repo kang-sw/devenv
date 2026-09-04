@@ -29,6 +29,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { isModelCatalogUnset, readModelCatalog, type ModelCatalogConfig } from "./model-catalog.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
@@ -59,6 +60,24 @@ export interface BridgeHandle {
   defaultSessionKeyRef: { current: string | undefined };
   /** Sanitized `ws__*` registered tool names (see `sanitizeToolName`), for the spawner's `full-worker` tool group. */
   wsToolNames: readonly string[];
+  /**
+   * The full `workflow_manual` CONTINUE-response text, fetched once
+   * (lead/fork roles only) right after the ferrule bootstrap succeeds. A
+   * live ref, same convention as `defaultSessionKeyRef` — `undefined` for a
+   * worker/explore role, or when the fetch fails/returns no text (degraded
+   * bootstrap). Consumed by `lead-bootstrap.ts` (system-prompt injection)
+   * and, indirectly, by the workflow_manual->workflow_state mapping below
+   * (via `staticBodySnapshotRef`, not this ref).
+   */
+  manualSnapshotRef: { current: string | undefined };
+  /**
+   * The static manual-body snapshot (`playbook.print("lead-workflow-manual")`),
+   * fetched in lockstep with `manualSnapshotRef` (same gate, same
+   * all-or-nothing degraded fallback). Used by the workflow_manual->
+   * workflow_state mapping's `cutStaticBody` call — `undefined` disables the
+   * mapping entirely (forward every workflow_manual call verbatim).
+   */
+  staticBodySnapshotRef: { current: string | undefined };
 }
 
 function notify(ui: ExtensionUIContext | undefined, message: string, level: "info" | "warning" | "error" = "info"): void {
@@ -111,6 +130,131 @@ export function maybeAppendModelCatalogAdvisory(
 }
 
 /**
+ * Fixed line prepended to every mapped `workflow_manual` response — both the
+ * cut-success branch and the workflow_state-fallback branch (§3). Wording is
+ * pinned by the ticket contract.
+ */
+const WORKFLOW_STATE_MAPPING_LINE = "Workflow manual is in your system prompt; this is your current session state.";
+
+export function prependWorkflowStateLine(text: string): string {
+  return `${WORKFLOW_STATE_MAPPING_LINE}\n\n${text}`;
+}
+
+/**
+ * Removes the first exact-substring occurrence of `staticBodySnapshot` from
+ * `response`. `found: false` (the static manual body no longer appears
+ * byte-identical inside a live `workflow_manual` response — e.g. renderer
+ * drift between the session-start snapshot and a later call) is the
+ * ticket's own trigger for the `workflow_state` fallback dispatch. Pure,
+ * synchronous, no IO — the mapping's IO wrapper below calls this on an
+ * already-fetched response body.
+ */
+export function cutStaticBody(response: string, staticBodySnapshot: string): { text: string; found: boolean } {
+  const index = response.indexOf(staticBodySnapshot);
+  if (index === -1) {
+    return { text: response, found: false };
+  }
+  return { text: response.slice(0, index) + response.slice(index + staticBodySnapshot.length), found: true };
+}
+
+/**
+ * Replaces the first `{type:"text"}` item's text with `mappedText` on a COPY
+ * of `content` (never mutated in place); if `content` carries no text item at
+ * all, `mappedText` is unshifted as a new leading item instead. Mirrors
+ * `maybeAppendModelCatalogAdvisory`'s copy-not-mutate contract so the two
+ * compose safely (this function's output is always fed into that one next).
+ */
+function replaceFirstTextItem(content: McpContentItem[], mappedText: string): McpContentItem[] {
+  let replaced = false;
+  const next = content.map((item) => {
+    if (!replaced && item.type === "text") {
+      replaced = true;
+      return { ...item, text: mappedText };
+    }
+    return item;
+  });
+  if (!replaced) {
+    next.unshift({ type: "text", text: mappedText });
+  }
+  return next;
+}
+
+/**
+ * Pure role-gate predicate for the §3 workflow_manual -> workflow_state
+ * mapping: `true` only when `rawName` is the literal `"workflow_manual"`
+ * dispatch name, a static-body snapshot actually exists, AND the caller's
+ * role is lead-or-fork. Extracted (review relay #1, cycle 1) from
+ * `execute()`'s previously-inlined closure condition specifically so this
+ * gate is unit-testable without a live `pi -e` session — mirrors
+ * `lead-bootstrap.ts`'s `computeBeforeAgentStartResult` extraction for the
+ * exact same reason (an inlined boolean-logic gate with no test seam is a
+ * silent-regression risk: swapping `&&` for `||`, or dropping the role
+ * check, would leak the mapping into a worker/explore `workflow_manual`
+ * call with zero coverage to catch it).
+ */
+export function shouldMapWorkflowManual(rawName: string, hasSnapshot: boolean, role: SpawnRole | undefined): boolean {
+  return rawName === "workflow_manual" && hasSnapshot && isLeadOrFork(role);
+}
+
+export interface WorkflowManualMappingDeps {
+  /** Duck-typed subset of `McpStdioClient` — lets tests supply a stub with no real subprocess. */
+  callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
+  /** The `playbook.print("lead-workflow-manual")` snapshot fetched once at session_start. */
+  staticBodySnapshot: string;
+  modelCatalogPath: string;
+  /** Invoked on a cut-miss fallback (renderer drift) — the caller is responsible for the "notify once per session" dedupe (a closure flag in `startBridge`), not this function. */
+  notifyMappingDegraded: () => void;
+}
+
+/**
+ * IO wrapper for the `workflow_manual` -> `workflow_state` mapping (§3).
+ * Dispatches `workflow_manual` with `args` (already normalized/resolved by
+ * the caller) and cuts `deps.staticBodySnapshot` out of the response:
+ *
+ * - Cut found: returns `prependWorkflowStateLine(cut text)`, re-wrapped
+ *   through `maybeAppendModelCatalogAdvisory` keyed on the literal
+ *   `"workflow_manual"` name (§3: the advisory still rides the mapped
+ *   response, keyed on the tool's *registered* — i.e. ws-mcp's own raw
+ *   dotted — name, not on which tool was actually dispatched to).
+ * - Cut miss (renderer drift): calls `deps.notifyMappingDegraded()`, then
+ *   dispatches `workflow_state` instead — dropping `root` and any other
+ *   `workflow_manual`-only arg by only forwarding `session_key` — prepends
+ *   the same fixed line, and applies the same advisory keying.
+ *
+ * An `isError` result on either dispatch is thrown, matching the bridge's
+ * existing non-mapped dispatch contract (`execute()`'s own `if
+ * (result.isError) throw ...`).
+ */
+export async function dispatchMappedWorkflowManual(
+  args: Record<string, unknown>,
+  deps: WorkflowManualMappingDeps,
+): Promise<{ content: McpContentItem[]; details: McpToolCallResult }> {
+  const manualResult = await deps.callTool("workflow_manual", args);
+  if (manualResult.isError) {
+    throw new Error(firstText(manualResult) ?? "workflow_manual failed with no error text");
+  }
+  const manualText = firstText(manualResult) ?? "";
+  const cut = cutStaticBody(manualText, deps.staticBodySnapshot);
+
+  const config = readModelCatalog(deps.modelCatalogPath);
+
+  if (cut.found) {
+    const content = replaceFirstTextItem(manualResult.content, prependWorkflowStateLine(cut.text));
+    return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, config), details: manualResult };
+  }
+
+  deps.notifyMappingDegraded();
+  const stateArgs: Record<string, unknown> = args.session_key === undefined ? {} : { session_key: args.session_key };
+  const stateResult = await deps.callTool("workflow_state", stateArgs);
+  if (stateResult.isError) {
+    throw new Error(firstText(stateResult) ?? "workflow_state failed with no error text");
+  }
+  const stateText = firstText(stateResult) ?? "";
+  const content = replaceFirstTextItem(stateResult.content, prependWorkflowStateLine(stateText));
+  return { content: maybeAppendModelCatalogAdvisory("workflow_manual", content, config), details: stateResult };
+}
+
+/**
  * Provider-legal registered name for a ws-mcp raw tool name: `ws__` prefix
  * (namespace separator, stands in for the `/` in the `ws/<rawName>` prose
  * form) plus the raw name's `.` separators flattened to `_`. Registration
@@ -149,6 +293,55 @@ export function withOptionalSessionKey(inputSchema: Record<string, unknown>): Re
     ...inputSchema,
     required: required.filter((name) => name !== "session_key"),
   };
+}
+
+/**
+ * The fresh-bootstrap sentinel a caller sends in `session_key` when it has no
+ * lead session key yet (mirrors ws-mcp's own `freshBootstrapKey` constant,
+ * `agents-plugin-tool/internal/mcp/workflow_manual.go`, and the identical
+ * literal already shipped verbatim in `agents-plugin/rsrc/lead-proceed/
+ * lead-proceed.md` and sibling skill text — this is the live, already-shipped
+ * value, not an invented one).
+ */
+const FRESH_BOOTSTRAP_SENTINEL = "obsidian-latch";
+
+export interface NormalizeSessionKeyOptions {
+  /** The bridge's own default-filled session key (`defaultSessionKeyRef.current`), or undefined pre-bootstrap. */
+  ownKey: string | undefined;
+  /** The fresh-bootstrap sentinel value that rewrites to `ownKey`. */
+  sentinel: string;
+  /** The env-delivered parent lead key (fork-only, `WS_PI_PARENT_SESSION_KEY`), when set. */
+  parentLeadKey?: string;
+}
+
+/**
+ * Rewrites exactly two explicit `session_key` values to the bridge's own key,
+ * ahead of `resolveSessionKey`'s fill-or-forward: the fresh-bootstrap sentinel
+ * (`opts.sentinel`), and — fork-only — the env-delivered parent lead key
+ * (`opts.parentLeadKey`). Every other explicit key (including an explicit
+ * child key) passes through completely untouched — widening this to any other
+ * rewrite case is explicitly rejected by the ticket contract.
+ *
+ * When `opts.ownKey` is unset (degraded bootstrap: the bridge's own ferrule
+ * mint hasn't resolved, or failed), both rewrites are disabled and `params` is
+ * returned unchanged — the sentinel self-heals exactly as today (ws-mcp's own
+ * fresh-bootstrap path still recognizes it directly).
+ *
+ * Never mutates `params` — copy-on-write, same contract as
+ * `resolveSessionKey`.
+ */
+export function normalizeSessionKey(
+  params: Record<string, unknown> | undefined,
+  opts: NormalizeSessionKeyOptions,
+): Record<string, unknown> | undefined {
+  if (!opts.ownKey) {
+    return params;
+  }
+  const provided = params?.session_key;
+  if (provided === opts.sentinel || (opts.parentLeadKey !== undefined && provided === opts.parentLeadKey)) {
+    return { ...(params ?? {}), session_key: opts.ownKey };
+  }
+  return params;
 }
 
 /**
@@ -196,6 +389,12 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // block itself.
   let tools: Awaited<ReturnType<typeof client.listTools>> = [];
   const defaultKeyRef: { current: string | undefined } = { current: undefined };
+  const manualSnapshotRef: { current: string | undefined } = { current: undefined };
+  const staticBodySnapshotRef: { current: string | undefined } = { current: undefined };
+  // Per-session "notify once" dedupe (§3) for the workflow_manual mapping's
+  // cut-miss fallback — a closure flag scoped to this startBridge call
+  // (one bridge per Pi session), not a module-level global.
+  let notifiedMappingDegraded = false;
 
   try {
     const initResult = await client.initialize({
@@ -225,7 +424,46 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         async execute(_toolCallId, params) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
-          const args = resolveSessionKey(params as Record<string, unknown> | undefined, defaultKeyRef);
+          // normalizeSessionKey runs in front of resolveSessionKey's own
+          // fill-or-forward: it rewrites the two ticket-mandated sentinel/
+          // parent-key explicit cases to the bridge's own key, then
+          // resolveSessionKey handles the (separate) omitted-key fill.
+          const normalized = normalizeSessionKey(params as Record<string, unknown> | undefined, {
+            ownKey: defaultKeyRef.current,
+            sentinel: FRESH_BOOTSTRAP_SENTINEL,
+            // WS_PI_PARENT_SESSION_KEY_ENV is unset until a future
+            // fork-spawning ticket sets it (out of scope here — this phase
+            // only reserves the env var name via process-role.ts).
+            parentLeadKey: process.env[WS_PI_PARENT_SESSION_KEY_ENV],
+          });
+          const args = resolveSessionKey(normalized, defaultKeyRef);
+
+          // §3 workflow_manual -> workflow_state mapping: only for lead/fork
+          // roles, and only once a static-body snapshot actually exists
+          // (both are the "degraded bootstrap" escape hatch — worker/explore
+          // roles and a failed/skipped snapshot fetch both forward
+          // workflow_manual verbatim, exactly as today).
+          if (shouldMapWorkflowManual(rawName, Boolean(staticBodySnapshotRef.current), readSpawnRole(process.env))) {
+            return await dispatchMappedWorkflowManual(args, {
+              callTool: (name, callArgs) => client.callTool(name, callArgs),
+              // shouldMapWorkflowManual already asserted this is truthy — TS
+              // can't see through the predicate call, so this cast is safe
+              // and load-bearing only for the type checker, not runtime.
+              staticBodySnapshot: staticBodySnapshotRef.current as string,
+              modelCatalogPath: opts.modelCatalogPath,
+              notifyMappingDegraded: () => {
+                if (!notifiedMappingDegraded) {
+                  notifiedMappingDegraded = true;
+                  notify(
+                    opts.ui,
+                    "ws-pi-bridge: workflow_manual's static manual body no longer matches the session-start snapshot (renderer drift) — falling back to workflow_state; per-call advisories are unavailable for the rest of this session",
+                    "warning",
+                  );
+                }
+              },
+            });
+          }
+
           const result = await client.callTool(rawName, args);
           if (result.isError) {
             // Throwing is how Pi's tool contract signals isError: true —
@@ -264,6 +502,48 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
       notify(opts.ui, `ws-pi-bridge: ferrule bootstrap threw: ${(err as Error).message}`, "warning");
     }
 
+    // §1/§3 session-start snapshot fetch: the full workflow_manual response
+    // (for lead-bootstrap.ts's system-prompt block) and the static
+    // manual-body snapshot (for this bridge's own workflow_manual mapping),
+    // fetched once here, right after the ferrule bootstrap. Gated on
+    // isLeadOrFork so a worker/explore child — which loads this same
+    // extension but never uses either — skips the extra round-trip
+    // entirely. Also gated on defaultKeyRef.current actually being set: a
+    // failed ferrule bootstrap is already the degraded-bootstrap case, and
+    // both refs staying unset is exactly what that case needs (§3).
+    //
+    // All-or-nothing: per the plan, a failure or empty-text response on
+    // EITHER call leaves BOTH refs unset (never a manual snapshot with no
+    // static-body snapshot, or vice versa) — the ws system-prompt block and
+    // the workflow_manual mapping degrade together, not independently.
+    if (defaultKeyRef.current && isLeadOrFork(readSpawnRole(process.env))) {
+      try {
+        const manualResult = await client.callTool("workflow_manual", { session_key: defaultKeyRef.current });
+        const staticBodyResult = await client.callTool("playbook.print", {
+          name: "lead-workflow-manual",
+          session_key: defaultKeyRef.current,
+        });
+        const manualText = !manualResult.isError ? firstText(manualResult) : undefined;
+        const staticBodyText = !staticBodyResult.isError ? firstText(staticBodyResult) : undefined;
+        if (manualText && staticBodyText) {
+          manualSnapshotRef.current = manualText;
+          staticBodySnapshotRef.current = staticBodyText;
+        } else {
+          notify(
+            opts.ui,
+            "ws-pi-bridge: session-start manual/static-body snapshot fetch returned no text — ws system-prompt block and workflow_manual mapping disabled for this session",
+            "warning",
+          );
+        }
+      } catch (err) {
+        notify(
+          opts.ui,
+          `ws-pi-bridge: session-start manual/static-body snapshot fetch threw: ${(err as Error).message} — ws system-prompt block and workflow_manual mapping disabled for this session`,
+          "warning",
+        );
+      }
+    }
+
     notify(opts.ui, `ws-pi-bridge: registered ${tools.length} ws__* tools from ws-mcp ${initResult.serverInfo.version}`);
   } catch (err) {
     shutdown();
@@ -275,5 +555,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     client,
     defaultSessionKeyRef: defaultKeyRef,
     wsToolNames: tools.map((tool) => sanitizeToolName(tool.name)),
+    manualSnapshotRef,
+    staticBodySnapshotRef,
   };
 }

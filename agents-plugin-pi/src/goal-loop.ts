@@ -38,12 +38,18 @@
  *
  * Settled cross-ticket fact: the goal-loop runs on the lead session only.
  * The `agent_settled` handler no-ops when the running process is itself a
- * spawned child (`WS_PI_AGENT_CHILD_ENV` set — see spawner.ts's
- * `buildRpcClientOptions`/`spawnPiProcess`, both of which now carry this env
+ * spawned child (any `WS_PI_SPAWN_ROLE_ENV` role set — see
+ * `process-role.ts`'s `readSpawnRole`, and spawner.ts's
+ * `buildRpcClientOptions`/`buildChildProcessEnv`, both of which carry that
  * marker on every spawned child) — defense-in-depth against a message that
  * happens to start with `/goal …` reaching a child's input pipeline (e.g. a
  * lead-authored `ws-agent-send` message), even though each spawned child
  * loads this same extension fresh with its own inert module-level state.
+ * 260904 Phase 1: this marker is now a role value (`worker`/`explore`/
+ * `fork`), not the old boolean `WS_PI_AGENT_CHILD_ENV`; `isChildProcess`
+ * treats presence of ANY role as "child" — conservatively including a future
+ * `fork`, until the not-yet-landed side-thread-fork ticket decides
+ * otherwise.
  *
  * Following the bridge.ts/spawner.ts convention (not discuss.ts's
  * single-call-site convention): this one file mixes pure, unit-tested
@@ -69,7 +75,7 @@
 
 import { readFileSync } from "node:fs";
 import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { WS_PI_AGENT_CHILD_ENV } from "./spawner.ts";
+import { readSpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
 // Config: adapter-owned runaway-threshold data file, sibling to
@@ -240,15 +246,21 @@ export function disarmGoal(): GoalLoopState {
 }
 
 /**
- * Pure predicate: `true` when `env` carries the spawned-child marker
- * (`WS_PI_AGENT_CHILD_ENV`, set by spawner.ts on every spawned child's
- * process environment). Extracted from the `agent_settled` handler (review
- * fix, cycle 1) — mirroring `decideOnSettle`'s own pure-reducer extraction —
- * so the "no-op in a spawned child" guard is unit-testable without spawning
- * a real process.
+ * Pure predicate: `true` when `env` carries ANY spawned-child process-role
+ * marker (`WS_PI_SPAWN_ROLE_ENV`, set by spawner.ts on every spawned
+ * child's process environment — see `process-role.ts`). Extracted from the
+ * `agent_settled` handler (review fix, cycle 1) — mirroring
+ * `decideOnSettle`'s own pure-reducer extraction — so the "no-op in a
+ * spawned child" guard is unit-testable without spawning a real process.
+ *
+ * 260904 Phase 1: reads presence of any role via `readSpawnRole` (subsumes
+ * the old boolean `WS_PI_AGENT_CHILD_ENV` equality check) — a `worker`,
+ * `explore`, or (reserved, not yet spawned) `fork` child are all still
+ * treated as "child" here, keeping this contract intact even though `fork`
+ * is treated as lead-or-fork by bridge.ts's separate `isLeadOrFork` gate.
  */
 export function isChildProcess(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(env[WS_PI_AGENT_CHILD_ENV]);
+  return Boolean(readSpawnRole(env));
 }
 
 /**
