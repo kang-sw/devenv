@@ -35,6 +35,66 @@ Review
 - Preserve settled or deferred dispositions.
 - Summarize review evidence before deleting temporary review files.
 
+## Fact Contract
+
+`{{.McpNamespace}}/route.resolve_implement`'s published schema is opaque
+(`params: object`); this table is the authoritative field contract the
+resolver reads. Send `session_key`, `target`, `facts`, `policy`, and
+`format` as top-level call arguments.
+
+`target`
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | `ticket\|inline\|unknown` | |
+| `label` | string\|null | |
+| `ticket_stem` | string\|null | |
+| `ticket_path` | string\|null | |
+| `scope_label` | string\|null | Selected implementation scope label. |
+| `scope_slug` | string\|null | Kebab-case branch suffix; ignored with a warning for ticket targets (deterministic word-key is authoritative). |
+
+`facts.scope`
+| Field | Enum |
+|-------|------|
+| `span` | `single-file\|multi-file\|unknown` |
+| `surface` | `internal\|public-interface\|cross-module\|unknown` |
+| `new_public_symbol` | `yes\|no\|unknown` |
+| `new_type_contract` | `yes\|no\|unknown` |
+| `test_surface` | `none\|existing\|new-files\|unknown` |
+| `explicit_delegation_request` | `yes\|no\|unknown` |
+| `explicit_direct_edit_request` | `yes\|no\|unknown` (overrides all other scope facts to direct-edit when `yes`) |
+
+`facts.complexity`
+| Field | Enum |
+|-------|------|
+| `change_points` | `clear\|partially-known\|unknown` |
+| `reuse_points` | `confirmed\|unconfirmed\|not-applicable\|unknown` |
+| `strategy_shape` | `single-obvious\|multiple-viable\|unknown` |
+| `side_effect_risk` | `low\|moderate\|high\|unknown` |
+| `cold_context` | `yes\|no\|unknown` |
+
+`facts.risk`
+| Field | Enum |
+|-------|------|
+| `correctness` | `low\|moderate\|high\|unknown` |
+| `fit` | `low\|moderate\|high\|unknown` |
+| `test` | `low\|moderate\|high\|unknown` |
+| `security_or_contract` | `low\|moderate\|high\|unknown` |
+
+`policy`
+| Field | Enum/Type |
+|-------|-----------|
+| `low_ceremony_if_safe` | `yes\|no\|unknown` |
+| `branch.merge_target` | string; required only while already on an implementation branch |
+| `branch.allow_rename` | `yes\|no\|unknown` (defaults to allowed) |
+| `branch.merge_confirm` | `skip\|ask\|unknown` (defaults to ask) |
+| `review.override` | `auto\|lead-only\|single\|partitioned` |
+| `docs.mode` | `standard\|skip-with-reason\|unknown` |
+| `docs.reason` | string; required when `docs.mode=skip-with-reason` |
+
+`format`: `text` (default) \| `json`. Groups and fields are optional;
+unknown/null values are normalized by the resolver. MCP observes Git branch
+state itself — do not pass observed branch facts as caller policy.
+
 ## On: invoke
 
 ### 1. Route
