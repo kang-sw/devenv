@@ -57,13 +57,13 @@ rejects L2:
 
 - **L1 — Name: intent-verb → mechanical-op.** Rename each tool **in place**
   after what it mechanically does (resolve a routing verdict from supplied
-  facts), so a model wanting to "proceed" does not reach for it. Base naming
-  (user-preferred): `enter.proceed → route.resolve_proceed`,
-  `enter.implement → route.resolve_implement`. The neutral `route.*` namespace
-  keeps the intent noun out of the leaf entirely; alternative
-  `proceed.resolve_verdict`/`implement.resolve_verdict` keeps per-tool identity.
-  Final leaf/namespace naming is the one open bikeshed to settle at
-  implementation.
+  facts), so a model wanting to "proceed" does not reach for it. **Settled naming
+  (user-confirmed 2026-09-04): `enter.proceed → route.resolve_proceed`,
+  `enter.implement → route.resolve_implement`.** The neutral `route.*` namespace
+  keeps the intent noun out of the leaf entirely; the alternative
+  `proceed.resolve_verdict`/`implement.resolve_verdict` (per-tool identity) was
+  rejected because it keeps the intent noun (`proceed`/`implement`) as the
+  namespace, which re-invites the direct call this rename exists to remove.
 
 - **L2 — Cardinality: KEEP TWO TOOLS (collapse rejected).** Do **not** collapse
   into a single `ws/enter(mode, params)` / `route.resolve_verdict(mode, …)`.
@@ -86,7 +86,15 @@ rejects L2:
   The real input contract moves into the **skill body** (`lead-proceed` /
   `lead-implement`), consistent with the repo's "contracts in playbooks, tools
   thin" doctrine. With two tools (L2), each simply publishes its own
-  `params: object` — no union pain.
+  `params: object` — no union pain. **Settled (user-confirmed 2026-09-04): full
+  opaque** — the published schema is the opaque `params` plus the skill pointer
+  only, with no residual documented hint fields; the real input contract lives
+  solely in the skill body. Rationale beyond debloat: a model follows an input
+  contract best when it reads it closest to the call, and skill prose is read
+  immediately before the tool call whereas the MCP schema surface sits at a large
+  context distance from the call site — recent schema-clutter drift is partly
+  that distance. Moving the contract into the skill body puts it at minimum
+  context distance, where compliance is highest.
 
 The runtime redirect guard (a ticket-path target with `status=unknown` should
 point the caller at `ws:lead-proceed` rather than dead-ending) is owned by the
@@ -94,8 +102,6 @@ companion bug ticket as the runtime surface of L3's internal validation.
 
 ## Open Questions
 
-- Final naming: `route.resolve_proceed`/`route.resolve_implement` (preferred) vs
-  `proceed.resolve_verdict`/`implement.resolve_verdict`.
 - Deprecation path: **settled — one-shot hard cut, inherited from the epic** (no
   alias window). Old tool names appear in both `agents-plugin` and
   `agents-plugin-wsflow` lead-proceed/lead-implement playbooks, `runtime.json`,
@@ -105,9 +111,10 @@ companion bug ticket as the runtime surface of L3's internal validation.
   downstream sessions' learned direct-call habit — is softened by the redirect
   guard (companion bug ticket `260901-bug-enter-proceed-misplaced-facts-silent-unknown-status`),
   not by an alias.
-- How much of the input contract genuinely moves to the skill body vs. stays as
-  a minimal published hint, and whether `enter.implement`'s self-read git state
-  changes the opaque-params story for that tool.
+- `enter.implement` self-read git state: with full opaque params settled (L3),
+  confirm its opaque-params story matches proceed's — implement derives some facts
+  (git) itself, so its skill-body contract covers fewer caller-supplied fields,
+  but the published surface is still the same opaque `params`.
 - Whether the family should extend beyond proceed/implement (any other enter.*
   survivors after the enter.sprint/enter.salvage retirement).
 

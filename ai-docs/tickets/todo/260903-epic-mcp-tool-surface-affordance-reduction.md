@@ -52,10 +52,12 @@ model for the cost-ordered sequence ④ → ③ → ②).
 - **② Mechanical over-split → signature merge (JUDGMENT-heavy).** Fold
   over-split families to the operation callers actually compose. Concrete win:
   `todo.append`/`insert_before`/`insert_after` differ only by position anchor →
-  one `todo.add(position: end|before|after, ref_key?)` (3→1). Candidate:
-  `note.mute`/`unmute` → `note.set_visible(bool)`. This is the one workstream
-  that **designs a novel merged signature and reconciles output/anchor
-  semantics** — the genuine judgment cost of the epic.
+  one `todo.add(position: end|before|after, ref_key?)` (3→1). The `note.mute`/
+  `unmute` → `note.set_visible(bool)` candidate was considered and **dropped**
+  (small win; the `mute`/`unmute` pair reads more clearly than a boolean setter),
+  so this layer is `todo`-only. This is the one workstream that **designs a novel
+  merged signature and reconciles output/anchor semantics** — the genuine
+  judgment cost of the epic.
 - **③ Read-surface collapse (CLEAN collapse).** `tickets.{list,find,status}`
   and `specs.{list,find,status}` are proven redundant: all three return the
   same `TicketInfo`/spec-metadata struct via the same formatter, and

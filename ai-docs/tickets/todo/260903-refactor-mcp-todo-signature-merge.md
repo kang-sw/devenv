@@ -1,12 +1,12 @@
 ---
-title: "MCP mechanical over-split → signature merge (todo insert-trio → add; note visibility)"
+title: "MCP mechanical over-split → signature merge (todo insert-trio → add)"
 parent: 260903-epic-mcp-tool-surface-affordance-reduction
 sage-review-design: completed
 sage-review-design-reviewed: 9d10d44f552ffc22
 sage-review-completeness: required
 ---
 
-# MCP mechanical over-split → signature merge (todo insert-trio → add; note visibility)
+# MCP mechanical over-split → signature merge (todo insert-trio → add)
 
 Layer ② of `260903-epic-mcp-tool-surface-affordance-reduction`, and the one
 **judgment-heavy** workstream: it designs a novel merged signature and reconciles
@@ -26,9 +26,10 @@ Primary win — `todo.*` (9 tools):
   `list`, `read`. Net family `9 → 7` (`read`↔`list` fold is possible but the two
   differ in granularity — leave for now).
 
-Candidate — `note.*` (5 tools): `note.mute`/`unmute` are a visibility toggle
-pair → `note.set_visible(visible: bool)`. **5 → 4.** Lower value; confirm at
-design.
+Note candidate — **dropped (user-confirmed 2026-09-04).** `note.mute`/`unmute`
+(→ `note.set_visible(bool)`, 5 → 4) was considered but dropped: the win is small
+and the `mute`/`unmute` pair reads more clearly than a boolean setter, so the
+churn is not worth it. This ticket's scope is the `todo` merge only.
 
 ## Why this is the judgment layer
 
@@ -46,8 +47,7 @@ not derived.
 - Boundary: naming/shape hygiene stays elsewhere; this ticket owns the one
   place the epic changes a call *shape* (not just a name).
 - Deprecation posture: one-shot hard cut inherited from the epic — no alias for
-  the removed leaf tools (`insert_before`/`insert_after`, and `note.mute`/`unmute`
-  if the note candidate lands).
+  the removed leaf tools (`todo.insert_before`/`todo.insert_after`).
 
 ## Open questions
 
@@ -55,9 +55,8 @@ not derived.
   contract when `ref_key` is missing/invalid; whether `end` needs `ref_key` at
   all.
 - Whether `todo.read` folds into `todo.list` (granularity difference argues no).
-- `note.set_visible` inclusion — worth the churn, or drop the note candidate?
 
 ## Spec Impact
 
-Not applicable at `idea/`. Adoption will touch the todo (and possibly note) tool
-contract in the MCP tools spec; scope at promotion.
+Not applicable at `idea/`. Adoption will touch the todo tool contract in the MCP
+tools spec; scope at promotion.
