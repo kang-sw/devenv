@@ -156,6 +156,11 @@ the surface small.
   session_key equal to the parent lead's key to the fork's own key — a
   mechanical bridge-layer substitution, not a prompt instruction. The parent
   key reaches the fork process out-of-band (spawn env/flag), never via prose.
+  The rewrite itself is one case of the bridge normalization layer owned by
+  `260904-feat-ws-pi-lead-bootstrap-system-prompt` (§2 there; role marker
+  `WS_PI_SPAWN_ROLE=fork` + `WS_PI_PARENT_SESSION_KEY`); this ticket sets the
+  marker at fork spawn and adds its `ws.fork` / `ws.ask` / `ws.resolve` rows
+  to that ticket's Pi lead guide.
 - Rejected paths: in-process `createAgentSession` from a tool `execute()` (no
   shipped Pi example does this; reentrancy with the host `ExtensionRunner`
   unverified) and Pi's `ctx.fork()` (it *replaces the host's own session* —

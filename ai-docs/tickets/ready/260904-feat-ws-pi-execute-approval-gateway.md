@@ -182,7 +182,10 @@ tool (a native shell could not be interposed). Reads stay native (safe).
 
 - **Remove** native bash from the lead (hard) — no direct exec/mutation path.
 - **Add** `ws.execute` + `ws.approve` (≈ +1 net after bash removal; each is
-  load-bearing). Keeping approval an explicit tool (not prose-parsed) is
+  load-bearing). Their "when to use" rows go into the Pi lead guide that
+  `260904-feat-ws-pi-lead-bootstrap-system-prompt` injects into the lead's
+  system prompt (that ticket lands first in the drain order); this ticket
+  does not author standalone lead guidance elsewhere. Keeping approval an explicit tool (not prose-parsed) is
   consistent with the goal-loop's zero-prose-parsing decision
   (`260903-feat-ws-pi-goal-loop-compaction-hook`).
 - **Keep read as a soft-discouraged escape hatch** — an "ugly-named" direct read
