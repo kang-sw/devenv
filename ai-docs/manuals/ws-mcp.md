@@ -19,7 +19,7 @@ models:
 - named-agent mental model: `ai-docs/mental-model/named-agent-runtime.md`
 
 For live tool schemas and current inventory, ask the runtime: use MCP
-`tools/list`, `ws/runtime.info`, `ws-mcp runtime capabilities`, or the source
+`tools/list`, `ws/runtime.read`, `ws-mcp runtime capabilities`, or the source
 registry in `agents-plugin-tool/internal/mcp/server.go`.
 
 ## Process Model

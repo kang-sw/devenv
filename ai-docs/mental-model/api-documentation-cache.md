@@ -38,7 +38,7 @@ related:
 - `api.list` depends only on filesystem reads under the caller's resolved
   worktree root; it must not import or depend on `wsagent`.
 - The rsrc manifest and wsflow mirror must stay free of retired API-doc prompt
-  stems; leaving stale prompt files makes `playbook.print` able to load a dead
+  stems; leaving stale prompt files makes `playbook.read` able to load a dead
   agent-backed path.
 
 ## Extension Points & Change Recipes
