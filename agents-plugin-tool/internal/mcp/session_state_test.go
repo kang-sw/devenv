@@ -1299,109 +1299,85 @@ func TestProceedInputRejectsNonStringFactTypes(t *testing.T) {
 	}
 }
 
-func TestEnterProceedSchemaAdvertisesNullableFacts(t *testing.T) {
-	useLeadProfile(t)
-	server := NewServer(t.TempDir(), "test")
-	properties := toolPropertiesByName(t, callToolsList(t, server), "route.resolve_proceed")
-	target := objectProperties(t, properties["target"])
-	assertNullableSchema(t, target["ticket_path"])
-	assertNullableSchema(t, target["kind"])
-
-	facts := objectProperties(t, properties["facts"])
-	ticketFacts := objectProperties(t, facts["ticket"])
-	gateFacts := objectProperties(t, facts["gates"])
-	workFacts := objectProperties(t, facts["work"])
-	for name, schema := range map[string]any{
-		"ticket.status":          ticketFacts["status"],
-		"ticket.phase":           ticketFacts["phase"],
-		"gates.scope_blocked":    gateFacts["scope_blocked"],
-		"gates.migration_anchor": gateFacts["migration_anchor"],
-		"work.slice":             workFacts["slice"],
-	} {
-		t.Run(name, func(t *testing.T) {
-			assertNullableSchema(t, schema)
-		})
-	}
-}
-
-func TestEnterImplementSchemaRequiresTargetAndAdvertisesNullableFacts(t *testing.T) {
-	useLeadProfile(t)
-	server := NewServer(t.TempDir(), "test")
+// assertRouteResolveSchemaIsOpaque asserts the published tools/list schema for
+// toolName is fully opaque: properties are exactly session_key + params,
+// params is a bare object with no nested properties, required is exactly
+// [session_key], and both the tool description and params description point
+// at the owning skill by name (pointer-text/naming-consistency proof for the
+// companion redirect-guard ticket).
+func assertRouteResolveSchemaIsOpaque(t *testing.T, listLine, toolName, skillPointer string) {
+	t.Helper()
 	var listResp map[string]any
-	if err := json.Unmarshal([]byte(callToolsList(t, server)), &listResp); err != nil {
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
 		t.Fatal(err)
 	}
 	result, _ := listResp["result"].(map[string]any)
 	listedTools, _ := result["tools"].([]any)
-	var schema map[string]any
+	var tool map[string]any
 	for _, rawTool := range listedTools {
-		tool, _ := rawTool.(map[string]any)
-		if tool["name"] == "route.resolve_implement" {
-			schema, _ = tool["inputSchema"].(map[string]any)
+		candidate, _ := rawTool.(map[string]any)
+		if candidate["name"] == toolName {
+			tool = candidate
 			break
 		}
 	}
-	if schema == nil {
-		t.Fatal("ws.route.resolve_implement schema not found")
+	if tool == nil {
+		t.Fatalf("tools/list missing %s", toolName)
 	}
-	required, _ := schema["required"].([]any)
-	if !containsAnyString(required, "target") {
-		t.Fatalf("required = %#v, want target", required)
+	description, _ := tool["description"].(string)
+	if !strings.Contains(description, skillPointer) {
+		t.Fatalf("%s description = %q, want it to contain %q", toolName, description, skillPointer)
+	}
+
+	schema, _ := tool["inputSchema"].(map[string]any)
+	if schema == nil {
+		t.Fatalf("%s missing inputSchema", toolName)
 	}
 
 	properties, _ := schema["properties"].(map[string]any)
-	target := objectProperties(t, properties["target"])
-	assertNullableSchema(t, target["ticket_path"])
-	assertNullableSchema(t, target["kind"])
+	if len(properties) != 2 {
+		t.Fatalf("%s properties = %#v, want exactly session_key and params", toolName, properties)
+	}
+	for _, forbidden := range []string{"target", "facts", "policy"} {
+		if _, present := properties[forbidden]; present {
+			t.Fatalf("%s properties still advertise %q; want opaque params only", toolName, forbidden)
+		}
+	}
+	if _, ok := properties["session_key"]; !ok {
+		t.Fatalf("%s properties missing session_key: %#v", toolName, properties)
+	}
 
-	facts := objectProperties(t, properties["facts"])
-	scope := objectProperties(t, facts["scope"])
-	assertNullableSchema(t, scope["span"])
-	assertNullableSchema(t, scope["surface"])
-	policy := objectProperties(t, properties["policy"])
-	assertNullableSchema(t, policy["low_ceremony_if_safe"])
-	docs := objectProperties(t, policy["docs"])
-	assertNullableSchema(t, docs["mode"])
+	params, _ := properties["params"].(map[string]any)
+	if params == nil {
+		t.Fatalf("%s properties missing params object: %#v", toolName, properties)
+	}
+	if params["type"] != "object" {
+		t.Fatalf("%s params type = %#v, want \"object\"", toolName, params["type"])
+	}
+	if _, hasNestedProperties := params["properties"]; hasNestedProperties {
+		t.Fatalf("%s params has residual nested properties: %#v", toolName, params)
+	}
+	paramsDescription, _ := params["description"].(string)
+	if !strings.Contains(paramsDescription, skillPointer) {
+		t.Fatalf("%s params description = %q, want it to contain %q", toolName, paramsDescription, skillPointer)
+	}
+
+	required, _ := schema["required"].([]any)
+	if len(required) != 1 || required[0] != "session_key" {
+		t.Fatalf("%s required = %#v, want exactly [\"session_key\"]", toolName, required)
+	}
 }
 
-func objectProperties(t *testing.T, raw any) map[string]any {
-	t.Helper()
-	obj, _ := raw.(map[string]any)
-	props, _ := obj["properties"].(map[string]any)
-	if props == nil {
-		t.Fatalf("schema missing object properties: %#v", raw)
-	}
-	return props
+func TestRouteResolveProceedSchemaIsOpaque(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_proceed", "ws:lead-proceed")
 }
 
-func assertNullableSchema(t *testing.T, raw any) {
-	t.Helper()
-	schema, _ := raw.(map[string]any)
-	types, _ := schema["type"].([]any)
-	hasString, hasNull := false, false
-	for _, typ := range types {
-		switch typ {
-		case "string":
-			hasString = true
-		case "null":
-			hasNull = true
-		}
-	}
-	if !hasString || !hasNull {
-		t.Fatalf("schema type = %#v, want string+null in %#v", schema["type"], schema)
-	}
-	if enumValues, ok := schema["enum"].([]any); ok {
-		hasNullEnum := false
-		for _, value := range enumValues {
-			if value == nil {
-				hasNullEnum = true
-				break
-			}
-		}
-		if !hasNullEnum {
-			t.Fatalf("nullable enum missing null value: %#v", enumValues)
-		}
-	}
+func TestRouteResolveImplementSchemaIsOpaque(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_implement", "ws:lead-implement")
 }
 
 func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
