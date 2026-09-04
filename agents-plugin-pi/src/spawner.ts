@@ -69,17 +69,24 @@ export type ToolGroup = "read-only" | "recon" | "full-worker";
  *   never gets a scoped child session key spliced in, so any `ws__*` call
  *   from a recon worker would silently fall back to the bridge's own
  *   default-filled key instead of a scoped one.
- * - `full-worker`: everything, plus the live `ws__*` bridge tool names
- *   (passed in by the caller, not hardcoded, so this group tracks ws-mcp's
- *   actual registered tool set instead of drifting from it). Deliberately
- *   excludes every `ws-agent-*` driving/spawn tool (D-B): a worker can
- *   spawn `explore` but never another worker, so nested spawn depth never
- *   exceeds lead -> worker -> explore-leaf.
+ * - `full-worker`: everything, plus the literal `"explore"` custom tool name
+ *   and the live `ws__*` bridge tool names (the latter passed in by the
+ *   caller, not hardcoded, so this group tracks ws-mcp's actual registered
+ *   tool set instead of drifting from it). `explore` is included as a fixed
+ *   built-in here (not sourced from `wsToolNames`) because it is a
+ *   pi-native `pi.registerTool()` custom tool, not a `ws__*` bridge tool —
+ *   Pi's `--tools` allowlist filters "built-in, extension, and custom"
+ *   tools alike, so omitting the literal name would silently strip it even
+ *   though it is registered. Deliberately excludes every `ws-agent-*`
+ *   driving/spawn tool (D-B): a worker can spawn `explore` but never
+ *   another worker, so nested spawn depth never exceeds lead -> worker ->
+ *   explore-leaf — depth-safe because `explore`'s own `recon` group
+ *   excludes both `explore` and every `ws-agent-*` name.
  */
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "read-only": ["read", "grep", "find", "ls"],
   recon: ["read", "grep", "find", "ls", "bash"],
-  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", "explore"],
 };
 
 /**
@@ -690,20 +697,27 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
  * that is never delivered. So:
  *
  * - Dormant (`!record.client`): rebuild a fresh `RpcClient` against the
- *   SAME cached session/prompt/model (auto-resume, D-C), then deliver via
- *   `prompt()` regardless of `interrupt` — nothing is running yet to
- *   interrupt or queue behind. This is also where D-C's "auto-resumed child
- *   on the SAME ws session_key" lineage falls out for free: the reused
- *   `systemPromptPath` already has any session key spliced in by the lead's
- *   own prior `playbook.render` call, and passing it unchanged via
+ *   SAME cached session/prompt/model (auto-resume, D-C), clear any latched
+ *   `idlePending` from a prior run, then deliver via `prompt()` regardless
+ *   of `interrupt` — nothing is running yet to interrupt or queue behind.
+ *   This is also where D-C's "auto-resumed child on the SAME ws
+ *   session_key" lineage falls out for free: the reused `systemPromptPath`
+ *   already has any session key spliced in by the lead's own prior
+ *   `playbook.render` call, and passing it unchanged via
  *   `--append-system-prompt` on every relaunch never re-derives or
  *   duplicates it.
  * - Live and idle (including the instant after this function's own
  *   auto-resume branch, or right after `spawnAgent`'s initial `prompt()`
- *   settles): also `prompt()`, regardless of `interrupt`.
+ *   settles): also `prompt()`, regardless of `interrupt` — and likewise
+ *   clears `idlePending` first (D-D): the PREVIOUS run's completion left it
+ *   latched, and leaving it set would let a `ws-agent-wait` racing this new
+ *   run busy-return the stale prior finish/last-message instead of waiting
+ *   for the run this send just started.
  * - Live and streaming: `interrupt ? steer() : followUp()`, per the
  *   ticket's literal flag semantics — this is the one case where an active
- *   run actually exists for the queue to drain into.
+ *   run actually exists for the queue to drain into. `idlePending` is
+ *   already `false` here (the agent never settled since it started
+ *   streaming), so there is nothing to clear.
  */
 export async function sendToAgent(
   registry: RpcAgentRegistry,
@@ -737,6 +751,12 @@ export async function sendToAgent(
       await record.client.followUp(message);
     }
   } else {
+    // Live-idle: starting a fresh run here must clear any latched
+    // idlePending from the PREVIOUS run before prompt() fires — otherwise a
+    // ws-agent-wait racing this new run would busy-return with the stale
+    // finished/last_message from before this send (D-D violation). Mirrors
+    // the dormant-resume branch above, which clears it for the same reason.
+    record.idlePending = false;
     await record.client.prompt(message);
   }
   return { agent_id: agentId };
@@ -803,6 +823,18 @@ export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string
     const record = registry.get(alreadyIdle) as RpcAgentRecord;
     record.idlePending = false;
     return { agent_id: alreadyIdle, last_message: await harvestLastMessage(record), timed_out: false };
+  }
+
+  // Guard: every listed record is dormant (no live client, per `stopAgent`)
+  // and none has `idlePending` latched (the fast path above already would
+  // have returned if so) — with no `timeoutMs`, nothing will EVER fire an
+  // `agent_settled` event to resolve the race below, so this would hang
+  // forever. Fail fast instead, mirroring the empty-`agentIds` guard above.
+  const allDormant = records.every(({ record }) => !record.client);
+  if (allDormant && !(timeoutMs && timeoutMs > 0)) {
+    throw new Error(
+      'ws-pi-agent: waitForAgents: every listed agentId is dormant (stopped) with no timeout given — nothing can ever settle this wait; pass a timeout or ws-agent-send one of them first to resume it',
+    );
   }
 
   const winner = new Promise<string>((resolve) => {
