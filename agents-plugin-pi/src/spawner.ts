@@ -1,6 +1,7 @@
 /**
  * Self-built delegation spawner: `ws-agent-spawn` / `ws-agent-send` /
- * `ws-agent-wait` / `ws-agent-list` / `ws-agent-stop` / `explore`.
+ * `ws-agent-wait` / `ws-agent-list` / `ws-agent-stop` /
+ * `ws-agent-transcript` / `ws-report-to-lead` / `explore`.
  *
  * Phase 1 replaces the one-shot `pi --mode json -p` worker spawner with
  * persistent `RpcClient` (`--mode rpc`) children: `ws-agent-spawn` starts a
@@ -25,14 +26,25 @@
  * `pi --mode json -p --no-session --tools=recon` recon leaf from Phases 2-3
  * (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/`waitForDone`
  * below), self-reaping, non-recursive (depth <= 2: lead -> worker ->
- * explore-leaf; explore cannot spawn explore, since none of the five
- * `ws-agent-*` tools are in `TOOL_GROUPS`). Only its implicit model
- * resolution switches from the old tier lookup to the reframed alias lookup
- * (still keyed on the fixed name `"small"`).
+ * explore-leaf; explore cannot spawn explore, since none of the `ws-agent-*`
+ * tools are in `TOOL_GROUPS`). Only its implicit model resolution switches
+ * from the old tier lookup to the reframed alias lookup (still keyed on the
+ * fixed name `"small"`).
  *
  * `--tools` per-spawn group curation (`read-only`/`recon`/`full-worker`) is
  * retained unchanged — zero on-disk agent-profile files, curation lives in
  * the in-memory `TOOL_GROUPS` table below plus `pi` CLI flags.
+ *
+ * Phase 2 adds a bounded per-agent child->lead report channel:
+ * `ws-report-to-lead` (child-side, `full-worker`-only) is relayed into a
+ * `RpcAgentRecord.pendingReports` FIFO (cap `REPORT_BUFFER_CAP`,
+ * drop-oldest-with-marker on overflow) purely by observing the existing
+ * `RpcClient.onEvent()` stream's `tool_execution_start` events — no new
+ * transport (see `applyRpcEvent`'s doc comment for the full trace).
+ * `ws-agent-wait` now also wakes on a report and drains the full buffer FIFO
+ * on any wake (`reason: "idle" | "report"`, D-D — see `harvestWinner`).
+ * `ws-agent-transcript` (lead-side, not in any `TOOL_GROUPS`) returns the
+ * already-tracked `sessionPath` with no RPC round-trip.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -56,6 +68,9 @@ import { readModelCatalog, resolveAlias, type ModelCatalogConfig } from "./model
 
 export type ToolGroup = "read-only" | "recon" | "full-worker";
 
+/** Sole source of truth for the child-side report tool's name, shared by `TOOL_GROUPS`, its registration, and the event-matching branch in `applyRpcEvent`. */
+export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
+
 /**
  * Built-in Pi tool names per curated group (docs/usage.md's `### Tool
  * Options`: `read, bash, edit, write, grep, find, ls`).
@@ -69,24 +84,28 @@ export type ToolGroup = "read-only" | "recon" | "full-worker";
  *   never gets a scoped child session key spliced in, so any `ws__*` call
  *   from a recon worker would silently fall back to the bridge's own
  *   default-filled key instead of a scoped one.
- * - `full-worker`: everything, plus the literal `"explore"` custom tool name
- *   and the live `ws__*` bridge tool names (the latter passed in by the
- *   caller, not hardcoded, so this group tracks ws-mcp's actual registered
- *   tool set instead of drifting from it). `explore` is included as a fixed
- *   built-in here (not sourced from `wsToolNames`) because it is a
- *   pi-native `pi.registerTool()` custom tool, not a `ws__*` bridge tool —
- *   Pi's `--tools` allowlist filters "built-in, extension, and custom"
- *   tools alike, so omitting the literal name would silently strip it even
+ * - `full-worker`: everything, plus the literal `"explore"` and
+ *   `"ws-report-to-lead"` custom tool names and the live `ws__*` bridge tool
+ *   names (the latter passed in by the caller, not hardcoded, so this group
+ *   tracks ws-mcp's actual registered tool set instead of drifting from it).
+ *   `explore` and `ws-report-to-lead` are included as fixed built-ins here
+ *   (not sourced from `wsToolNames`) because both are pi-native
+ *   `pi.registerTool()` custom tools, not `ws__*` bridge tools — Pi's
+ *   `--tools` allowlist filters "built-in, extension, and custom" tools
+ *   alike, so omitting either literal name would silently strip it even
  *   though it is registered. Deliberately excludes every `ws-agent-*`
  *   driving/spawn tool (D-B): a worker can spawn `explore` but never
  *   another worker, so nested spawn depth never exceeds lead -> worker ->
  *   explore-leaf — depth-safe because `explore`'s own `recon` group
- *   excludes both `explore` and every `ws-agent-*` name.
+ *   excludes `explore`, `ws-report-to-lead`, and every `ws-agent-*` name.
+ *   `ws-report-to-lead` is added only here, per the ticket's "the only
+ *   child-side tool ADDED by this ticket" — `recon`/`read-only` are
+ *   untouched.
  */
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "read-only": ["read", "grep", "find", "ls"],
   recon: ["read", "grep", "find", "ls", "bash"],
-  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", "explore"],
+  "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", "explore", REPORT_TO_LEAD_TOOL_NAME],
 };
 
 /**
@@ -551,6 +570,10 @@ export interface RpcAgentRecord {
   lastText?: string;
   /** Detaches the current `client.onEvent(...)` listener; re-armed on every (re)start. */
   unsubscribe?: () => void;
+  /** FIFO buffer of undrained `ws-report-to-lead` messages, capped at `REPORT_BUFFER_CAP` (drop-oldest). */
+  pendingReports: string[];
+  /** Count of reports dropped from `pendingReports` due to overflow since the last drain. */
+  reportsDropped: number;
 }
 
 export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
@@ -593,28 +616,73 @@ function buildRpcClientOptions(
   };
 }
 
+/** Per-agent bounded FIFO cap on undrained `ws-report-to-lead` messages (drop-oldest-with-marker on overflow). */
+export const REPORT_BUFFER_CAP = 32;
+
 /**
- * Applies an `agent_start`/`agent_settled` RPC event onto `record`'s
- * locally-tracked streaming state. Exported so the idle-edge-consume waiter
- * logic (`ws-agent-send`'s prompt-vs-followUp/steer branch, `ws-agent-wait`'s
- * `idlePending` fast path) has direct unit coverage without a real
- * `RpcClient` subprocess — mirrors `handleAgentEvent`'s test-injection
- * pattern for the one-shot `explore` path above. All other event types are
- * ignored here; they only matter to a live streaming UI, not to this
- * module's idle/running bookkeeping.
+ * Pushes `message` onto `record.pendingReports`, drop-oldest once the buffer
+ * exceeds `REPORT_BUFFER_CAP` (incrementing `reportsDropped` as a truncation
+ * marker), then settles any pending waiters — a report is a wake condition
+ * exactly like `agent_settled` (reused `settleWaiters`; draining an empty
+ * `waiters` array when nobody is currently waiting is already a no-op).
  */
-export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string }): void {
+export function enqueueReport(record: RpcAgentRecord, message: string): void {
+  record.pendingReports.push(message);
+  if (record.pendingReports.length > REPORT_BUFFER_CAP) {
+    record.pendingReports.shift();
+    record.reportsDropped += 1;
+  }
+  settleWaiters(record);
+}
+
+/**
+ * Edge-consume drain: swaps `record.pendingReports`/`reportsDropped` for
+ * empty/zero and returns the previous values. Pure, mirrors the edge/consume
+ * shape of the existing `idlePending` clear in `waitForAgents`.
+ */
+export function drainReports(record: RpcAgentRecord): { reports: string[]; reports_dropped: number } {
+  const reports = record.pendingReports;
+  const reports_dropped = record.reportsDropped;
+  record.pendingReports = [];
+  record.reportsDropped = 0;
+  return { reports, reports_dropped };
+}
+
+/**
+ * Applies an `agent_start`/`agent_settled`/`ws-report-to-lead`-tool RPC event
+ * onto `record`'s locally-tracked streaming/report state. Exported so the
+ * idle-edge-consume waiter logic (`ws-agent-send`'s prompt-vs-followUp/steer
+ * branch, `ws-agent-wait`'s `idlePending` fast path) and the report-relay
+ * branch have direct unit coverage without a real `RpcClient` subprocess —
+ * mirrors `handleAgentEvent`'s test-injection pattern for the one-shot
+ * `explore` path above.
+ *
+ * The report branch matches a raw `tool_execution_start` event (the same
+ * event Pi's own extension-hook fan-out emits the instant the LLM dispatches
+ * a tool call, forwarded verbatim to the parent's `RpcClient.onEvent()` — see
+ * the plan's Codebase Findings for the full trace) whose `toolName` is
+ * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, is enqueued.
+ * All other event types (including a `tool_execution_start` for any other
+ * tool name) are ignored here — they only matter to a live streaming UI or
+ * to the tool's own execution, not to this module's bookkeeping.
+ */
+export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown }): void {
   if (evt.type === "agent_start") {
     record.streaming = true;
   } else if (evt.type === "agent_settled") {
     record.streaming = false;
     record.idlePending = true;
     settleWaiters(record);
+  } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
+    const message = (evt.args as { message?: unknown } | undefined)?.message;
+    if (typeof message === "string") {
+      enqueueReport(record, message);
+    }
   }
 }
 
 function attachEventListener(record: RpcAgentRecord, client: RpcClient): void {
-  record.unsubscribe = client.onEvent((evt) => applyRpcEvent(record, evt as { type?: string }));
+  record.unsubscribe = client.onEvent((evt) => applyRpcEvent(record, evt as { type?: string; toolName?: string; args?: unknown }));
 }
 
 /**
@@ -670,6 +738,8 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     streaming: false,
     idlePending: false,
     waiters: [],
+    pendingReports: [],
+    reportsDropped: 0,
   };
   registry.set(agentId, record);
 
@@ -773,9 +843,26 @@ export function firstIdlePendingAgentId(records: ReadonlyArray<{ id: string; rec
   return records.find(({ record }) => record.idlePending)?.id;
 }
 
+/**
+ * Pure selection helper mirroring `firstIdlePendingAgentId`'s shape: the
+ * first entry (in caller-given order) with at least one undrained buffered
+ * report, or `undefined` when none has any. A dormant record can still carry
+ * an undrained report from before it stopped, so this must be checked
+ * independently of `client`/`idlePending` state.
+ */
+export function firstReportPendingAgentId(records: ReadonlyArray<{ id: string; record: RpcAgentRecord }>): string | undefined {
+  return records.find(({ record }) => record.pendingReports.length > 0)?.id;
+}
+
 export interface WaitForAgentsResult {
   agent_id?: string;
   last_message?: string;
+  /** Present only on a non-timeout harvest: "idle" when the agent settled, "report" when only a buffered report woke the wait. */
+  reason?: "idle" | "report";
+  /** Buffered `ws-report-to-lead` messages drained for the woken agent, FIFO order. Always present ([] when nothing was harvested, e.g. on timeout). */
+  reports: string[];
+  /** Count of reports dropped from the buffer due to overflow since the last drain. Always present (0 when nothing was harvested). */
+  reports_dropped: number;
   timed_out: boolean;
 }
 
@@ -793,15 +880,37 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
 }
 
 /**
- * Races `agentIds` for the first to settle (`agent_settled`), NEVER killing
- * a still-running agent on timeout — a timed-out wait simply leaves every
- * agent registered exactly as it was for a later wait/send. Drops the old
- * `policy: "any"|"all"` axis entirely (Phase 1's `ws-agent-wait(agent_ids[],
- * timeout?)` signature always behaves as first-finisher).
+ * Harvests a woken/already-pending winner: idle takes priority over a
+ * same-agent buffered report when both are true at harvest time (an
+ * implementation-level tie-break, not a ticket ambiguity — see the plan) —
+ * `reason: "idle"` is reported, but any buffered reports are still drained
+ * and returned either way (D-D: a waking lead sees the full report queue
+ * regardless of what triggered the wake).
+ */
+async function harvestWinner(record: RpcAgentRecord, agentId: string): Promise<WaitForAgentsResult> {
+  if (record.idlePending) {
+    record.idlePending = false;
+    const drained = drainReports(record);
+    return { agent_id: agentId, reason: "idle", last_message: await harvestLastMessage(record), ...drained, timed_out: false };
+  }
+  const drained = drainReports(record);
+  return { agent_id: agentId, reason: "report", ...drained, timed_out: false };
+}
+
+/**
+ * Races `agentIds` for the first to settle (`agent_settled`) or report
+ * (`ws-report-to-lead`), NEVER killing a still-running agent on timeout — a
+ * timed-out wait simply leaves every agent registered exactly as it was for
+ * a later wait/send. Drops the old `policy: "any"|"all"` axis entirely
+ * (Phase 1's `ws-agent-wait(agent_ids[], timeout?)` signature always behaves
+ * as first-finisher).
  *
  * An agent whose `idlePending` flag is already latched at call time (it
  * settled since the last wait/send) is harvested immediately with no race
- * at all — see `firstIdlePendingAgentId`.
+ * at all — see `firstIdlePendingAgentId`. Likewise, an agent already holding
+ * an undrained buffered report (even a dormant one — see
+ * `firstReportPendingAgentId`) is harvested immediately with `reason:
+ * "report"`.
  */
 export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string[], timeoutMs?: number): Promise<WaitForAgentsResult> {
   if (agentIds.length === 0) {
@@ -820,9 +929,15 @@ export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string
 
   const alreadyIdle = firstIdlePendingAgentId(records);
   if (alreadyIdle) {
-    const record = registry.get(alreadyIdle) as RpcAgentRecord;
-    record.idlePending = false;
-    return { agent_id: alreadyIdle, last_message: await harvestLastMessage(record), timed_out: false };
+    return harvestWinner(registry.get(alreadyIdle) as RpcAgentRecord, alreadyIdle);
+  }
+
+  // A dormant record can still carry an undrained report from before it
+  // stopped; this must resolve before the `allDormant` hang-guard below
+  // would otherwise (incorrectly) refuse the wait.
+  const alreadyReported = firstReportPendingAgentId(records);
+  if (alreadyReported) {
+    return harvestWinner(registry.get(alreadyReported) as RpcAgentRecord, alreadyReported);
   }
 
   // Guard: every listed record is dormant (no live client, per `stopAgent`)
@@ -857,12 +972,10 @@ export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string
   }
 
   if (!winnerId) {
-    return { timed_out: true };
+    return { timed_out: true, reports: [], reports_dropped: 0 };
   }
 
-  const winnerRecord = registry.get(winnerId) as RpcAgentRecord;
-  winnerRecord.idlePending = false;
-  return { agent_id: winnerId, last_message: await harvestLastMessage(winnerRecord), timed_out: false };
+  return harvestWinner(registry.get(winnerId) as RpcAgentRecord, winnerId);
 }
 
 /**
@@ -912,6 +1025,22 @@ export async function stopAgent(registry: RpcAgentRegistry, agentId: string): Pr
   return { agent_id: agentId };
 }
 
+/**
+ * Lead-side introspection accessor (same family as `ws-agent-list`/
+ * `ws-agent-stop`, not a driving/spawn tool): returns the absolute path to
+ * `agentId`'s Pi session JSONL, unchanged since `spawnAgent` first computed
+ * it. No RPC round-trip, no content marshalling — the lead greps the file
+ * directly. Throws when `agentId` is unknown, same message convention as
+ * `sendToAgent`/`stopAgent`.
+ */
+export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: string): { transcript_path: string } {
+  const record = registry.get(agentId);
+  if (!record) {
+    throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
+  }
+  return { transcript_path: record.sessionPath };
+}
+
 // ---------------------------------------------------------------------------
 // Pi tool registration.
 // ---------------------------------------------------------------------------
@@ -929,20 +1058,33 @@ export interface AgentToolsHandle {
 }
 
 /**
- * Registers the five RPC-backed delegation tools (`ws-agent-spawn`,
- * `ws-agent-send`, `ws-agent-wait`, `ws-agent-list`, `ws-agent-stop`) plus
- * the unchanged one-shot `explore` tool, against two separate in-extension
- * registries: `rpcRegistry` (RPC-backed, persistent children) and
- * `exploreRegistry` (one-shot, self-reaping recon leaves). They are kept
- * separate rather than unified because their completion signals are
- * fundamentally different (an `agent_settled` RPC event vs. a child
- * process's `close` event) — see `waitForAgents` vs `waitForDone`.
+ * Registers the seven RPC-backed delegation tools (`ws-agent-spawn`,
+ * `ws-agent-send`, `ws-agent-wait`, `ws-agent-list`, `ws-agent-stop`,
+ * `ws-agent-transcript`, `ws-report-to-lead`) plus the unchanged one-shot
+ * `explore` tool, against two separate in-extension registries: `rpcRegistry`
+ * (RPC-backed, persistent children) and `exploreRegistry` (one-shot,
+ * self-reaping recon leaves). They are kept separate rather than unified
+ * because their completion signals are fundamentally different (an
+ * `agent_settled` RPC event vs. a child process's `close` event) — see
+ * `waitForAgents` vs `waitForDone`.
  *
- * MVP depth is 0->1 leaf (D-B): none of the five `ws-agent-*` tools are
+ * Phase 2 adds a child->lead report channel: `ws-report-to-lead` is the only
+ * child-side tool this ticket adds (registered here but reachable only from
+ * a worker's `full-worker` `--tools` allowlist, per `TOOL_GROUPS`); its
+ * `execute()` is a no-op ack — the relay to the parent's per-agent
+ * `pendingReports` buffer rides the existing `RpcClient.onEvent()` wire via
+ * `applyRpcEvent`'s new `tool_execution_start` branch, not the tool's return
+ * value (see that function's doc comment). `ws-agent-transcript` is a
+ * lead-side introspection tool (same family as `ws-agent-list`/
+ * `ws-agent-stop`), never added to any `TOOL_GROUPS` entry, so it is not
+ * reachable from a worker's own `--tools`.
+ *
+ * MVP depth is 0->1 leaf (D-B): none of the `ws-agent-*` tools are
  * themselves part of any `TOOL_GROUPS` entry, so a worker spawned through
  * `ws-agent-spawn` never receives a nested-spawn tool in its own `--tools`
  * allowlist even though its own `pi` process loads this same extension —
- * only the non-recursive `explore` leaf is reachable from a worker.
+ * only the non-recursive `explore` leaf (and now `ws-report-to-lead`, a
+ * non-spawning report call) is reachable from a worker.
  */
 export function registerAgentTools(
   pi: ExtensionAPI,
@@ -1043,7 +1185,7 @@ export function registerAgentTools(
     name: "ws-agent-wait",
     label: "ws-agent-wait",
     description:
-      "Wait for the first of the given agent_ids to settle (agent_settled), returning its agent_id and last assistant message. Never kills a running agent on timeout.",
+      "Wait for the first of the given agent_ids to settle (agent_settled) OR report (a child calling ws-report-to-lead), returning agent_id, reason (idle|report), and all buffered reports for that agent drained in FIFO order (plus reports_dropped if the buffer overflowed). On reason:idle, last_message is also included. Never kills a running agent on timeout.",
     parameters: {
       type: "object",
       properties: {
@@ -1084,6 +1226,46 @@ export function registerAgentTools(
       const p = params as { agent_id: string };
       const result = await stopAgent(rpcRegistry, p.agent_id);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "ws-agent-transcript",
+    label: "ws-agent-transcript",
+    description:
+      "Lead-side introspection: returns {transcript_path}, the absolute path to a spawned agent's Pi session JSONL. No content marshalling — grep/read the file directly.",
+    parameters: {
+      type: "object",
+      properties: { agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." } },
+      required: ["agent_id"],
+    } as never,
+    async execute(_toolCallId, params) {
+      const p = params as { agent_id: string };
+      const result = getAgentTranscriptPath(rpcRegistry, p.agent_id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  });
+
+  pi.registerTool({
+    name: REPORT_TO_LEAD_TOOL_NAME,
+    label: REPORT_TO_LEAD_TOOL_NAME,
+    description:
+      "Surface a buffered async status update or intermediate finding to the lead immediately, distinct from your final answer (which the lead harvests separately once you settle). The lead receives this the next time it calls ws-agent-wait on you (reason: report), draining every buffered report in FIFO order.",
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately." },
+      },
+      required: ["message"],
+    } as never,
+    async execute() {
+      // No-op ack: the relay to the parent's per-agent report buffer already
+      // happens via the existing RpcClient.onEvent() stream (Pi emits
+      // tool_execution_start the instant the LLM dispatches this call,
+      // forwarded verbatim to the parent's applyRpcEvent) — see that
+      // function's doc comment for the full trace. This execute() body does
+      // not touch the registry.
+      return { content: [{ type: "text", text: "reported" }] };
     },
   });
 
