@@ -163,14 +163,14 @@ func TestSubstitutionGuardRejectsDisqualifyingContent(t *testing.T) {
 func TestSubstitutionMirrorRespectsWordBoundaries(t *testing.T) {
 	source := "---\nname: fixture\n---\n\n" +
 		"This shows: the result and draws/ conclusions alongside " +
-		"ws:playbook.read and ws/enter_implement plus `ws:tickets_create`.\n"
+		"ws:playbook.read and ws/sample_tool plus `ws:tickets_create`.\n"
 	out, err := GenerateWsflowSkillBody(source)
 	if err != nil {
 		t.Fatalf("expected guard to accept fixture, got error: %v", err)
 	}
 	want := "---\nname: fixture\n---\n\n" +
 		"This shows: the result and draws/ conclusions alongside " +
-		"wsflow:playbook.read and wsflow/enter_implement plus `wsflow:tickets_create`.\n"
+		"wsflow:playbook.read and wsflow/sample_tool plus `wsflow:tickets_create`.\n"
 	if out != want {
 		t.Fatalf("word-boundary substitution mismatch:\ngot:  %q\nwant: %q", out, want)
 	}

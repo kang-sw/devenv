@@ -14,8 +14,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn('ws/playbook.read(name: "lead-proceed")', shim)
         self.assertIn("Route only; do not implement or plan here.", text)
         self.assertIn("Always route code-editing work through `lead-implement`", text)
-        self.assertIn("{{.McpNamespace}}/enter.proceed(session_key:", text)
-        self.assertIn("Follow `Next:` from `enter.proceed` exactly", text)
+        self.assertIn("{{.McpNamespace}}/route.resolve_proceed(session_key:", text)
+        self.assertIn("Follow `Next:` from `route.resolve_proceed` exactly", text)
         self.assertIn("scope_blocked=no-unfinished-phase", text)
         self.assertIn("scope_blocked=container-ticket", text)
         self.assertIn("scope_blocked=multiple-explicit-phases", text)
@@ -28,11 +28,11 @@ class SkillDispatchContractsTest(unittest.TestCase):
     def test_implement_keeps_execution_owner(self):
         text = (RSRC_DIR / "lead-implement" / "lead-implement.md").read_text(encoding="utf-8")
 
-        self.assertIn("{{.McpNamespace}}/enter.implement", text)
+        self.assertIn("{{.McpNamespace}}/route.resolve_implement", text)
         self.assertIn("Gather `target`, `facts`, and explicit caller `policy`", text)
         self.assertIn("Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.", text)
         self.assertIn(
-            "No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict.",
+            "No Edit or Write tool call is permitted until `route.resolve_implement` returns a `direct-edit` verdict.",
             text,
         )
         self.assertIn(
