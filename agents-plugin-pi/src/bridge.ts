@@ -29,7 +29,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { isModelCatalogUnset, readModelCatalog, type ModelCatalogConfig } from "./model-catalog.ts";
-import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole } from "./process-role.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
@@ -177,6 +177,23 @@ function replaceFirstTextItem(content: McpContentItem[], mappedText: string): Mc
     next.unshift({ type: "text", text: mappedText });
   }
   return next;
+}
+
+/**
+ * Pure role-gate predicate for the §3 workflow_manual -> workflow_state
+ * mapping: `true` only when `rawName` is the literal `"workflow_manual"`
+ * dispatch name, a static-body snapshot actually exists, AND the caller's
+ * role is lead-or-fork. Extracted (review relay #1, cycle 1) from
+ * `execute()`'s previously-inlined closure condition specifically so this
+ * gate is unit-testable without a live `pi -e` session — mirrors
+ * `lead-bootstrap.ts`'s `computeBeforeAgentStartResult` extraction for the
+ * exact same reason (an inlined boolean-logic gate with no test seam is a
+ * silent-regression risk: swapping `&&` for `||`, or dropping the role
+ * check, would leak the mapping into a worker/explore `workflow_manual`
+ * call with zero coverage to catch it).
+ */
+export function shouldMapWorkflowManual(rawName: string, hasSnapshot: boolean, role: SpawnRole | undefined): boolean {
+  return rawName === "workflow_manual" && hasSnapshot && isLeadOrFork(role);
 }
 
 export interface WorkflowManualMappingDeps {
@@ -426,10 +443,13 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           // (both are the "degraded bootstrap" escape hatch — worker/explore
           // roles and a failed/skipped snapshot fetch both forward
           // workflow_manual verbatim, exactly as today).
-          if (rawName === "workflow_manual" && staticBodySnapshotRef.current && isLeadOrFork(readSpawnRole(process.env))) {
+          if (shouldMapWorkflowManual(rawName, Boolean(staticBodySnapshotRef.current), readSpawnRole(process.env))) {
             return await dispatchMappedWorkflowManual(args, {
               callTool: (name, callArgs) => client.callTool(name, callArgs),
-              staticBodySnapshot: staticBodySnapshotRef.current,
+              // shouldMapWorkflowManual already asserted this is truthy — TS
+              // can't see through the predicate call, so this cast is safe
+              // and load-bearing only for the type checker, not runtime.
+              staticBodySnapshot: staticBodySnapshotRef.current as string,
               modelCatalogPath: opts.modelCatalogPath,
               notifyMappingDegraded: () => {
                 if (!notifiedMappingDegraded) {

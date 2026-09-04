@@ -24,6 +24,7 @@ import {
   MODEL_CATALOG_ADVISORY,
   cutStaticBody,
   prependWorkflowStateLine,
+  shouldMapWorkflowManual,
   dispatchMappedWorkflowManual,
 } from "../src/bridge.ts";
 import type { ModelCatalogConfig } from "../src/model-catalog.ts";
@@ -256,6 +257,40 @@ describe("prependWorkflowStateLine", () => {
     const result = prependWorkflowStateLine("## Session Key\n...");
     assert.match(result, /^Workflow manual is in your system prompt; this is your current session state\./);
     assert.ok(result.endsWith("## Session Key\n..."));
+  });
+});
+
+describe("shouldMapWorkflowManual", () => {
+  test("worker role: false even with a snapshot present (must forward workflow_manual verbatim)", () => {
+    assert.equal(shouldMapWorkflowManual("workflow_manual", true, "worker"), false);
+  });
+
+  test("explore role: false even with a snapshot present (must forward workflow_manual verbatim)", () => {
+    assert.equal(shouldMapWorkflowManual("workflow_manual", true, "explore"), false);
+  });
+
+  test("host lead (role undefined) with a snapshot present: true", () => {
+    assert.equal(shouldMapWorkflowManual("workflow_manual", true, undefined), true);
+  });
+
+  test("fork role with a snapshot present: true", () => {
+    assert.equal(shouldMapWorkflowManual("workflow_manual", true, "fork"), true);
+  });
+
+  test("host lead with no snapshot present: false (degraded bootstrap)", () => {
+    assert.equal(shouldMapWorkflowManual("workflow_manual", false, undefined), false);
+  });
+
+  test("fork role with no snapshot present: false (degraded bootstrap)", () => {
+    assert.equal(shouldMapWorkflowManual("workflow_manual", false, "fork"), false);
+  });
+
+  test("a different rawName never maps, even for a lead role with a snapshot present", () => {
+    assert.equal(shouldMapWorkflowManual("playbook.render", true, undefined), false);
+  });
+
+  test("the sanitized ws__workflow_manual name never matches — only the raw dotted-less name does", () => {
+    assert.equal(shouldMapWorkflowManual("ws__workflow_manual", true, undefined), false);
   });
 });
 
