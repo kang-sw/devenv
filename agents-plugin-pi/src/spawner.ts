@@ -50,7 +50,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -67,10 +67,34 @@ import { WS_PI_SPAWN_ROLE_ENV } from "./process-role.ts";
 // RPC-backed path below.
 // ---------------------------------------------------------------------------
 
-export type ToolGroup = "read-only" | "recon" | "full-worker";
+export type ToolGroup = "read-only" | "recon" | "full-worker" | "execute-worker";
 
 /** Sole source of truth for the child-side report tool's name, shared by `TOOL_GROUPS`, its registration, and the event-matching branch in `applyRpcEvent`. */
 export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
+
+/**
+ * Sole source of truth for the gated-exec worker tool's name (260904 Phase 1:
+ * end-to-end approval gateway). Defined here rather than in
+ * `execute-gateway.ts` to avoid a circular import: `TOOL_GROUPS` below and
+ * `applyRpcEvent`'s new pendingApproval-observation branch both need this
+ * name, and `execute-gateway.ts` (which registers the tool itself) already
+ * imports plumbing FROM `spawner.ts` (`spawnAgent`, `RpcAgentRecord`, etc) —
+ * the reverse import would be circular. Mirrors `REPORT_TO_LEAD_TOOL_NAME`'s
+ * placement for the same reason.
+ */
+export const GATED_EXEC_TOOL_NAME = "ws-worker-exec";
+
+/**
+ * Spawn-time env var carrying the child's own approvals directory
+ * (`<sessionDir>/approvals`, see `buildRpcClientOptions` below) — the only
+ * channel `ws-worker-exec`'s `execute()` has to learn where to poll for its
+ * decision file, since neither `sessionDir` nor `sessionPath` is otherwise
+ * passed to the child process. Parallel to `WS_PI_SPAWN_ROLE_ENV`
+ * (`process-role.ts`), but kept here (not there) because it is spawner-owned
+ * plumbing specific to the RPC-backed path, not a role marker every spawn
+ * kind needs.
+ */
+export const WS_PI_APPROVAL_DIR_ENV = "WS_PI_APPROVAL_DIR";
 
 /**
  * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
@@ -121,18 +145,33 @@ export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.Process
  *   `ws-report-to-lead` is added only here, per the ticket's "the only
  *   child-side tool ADDED by this ticket" — `recon`/`read-only` are
  *   untouched.
+ * - `execute-worker` (260904 Phase 1): the ticket's §5 "mutation-incapable
+ *   read family" worker spawned by `ws-execute` — reuses the exact
+ *   `read-only` builtins array (`READ_ONLY_BUILTINS` below), never
+ *   re-derived, plus the gated-exec tool (`GATED_EXEC_TOOL_NAME` — every
+ *   free-form shell command, including a "read" that mutates via
+ *   redirection/`-exec`, must go through it and pause for lead approval),
+ *   `ws-report-to-lead` (progress updates), and `explore` (scoped read-only
+ *   sub-questions). Deliberately excludes `bash`/`edit`/`write` — those would
+ *   let the worker bypass the approval gate entirely.
  */
+const READ_ONLY_BUILTINS: readonly string[] = ["read", "grep", "find", "ls"];
+
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
-  "read-only": ["read", "grep", "find", "ls"],
+  "read-only": READ_ONLY_BUILTINS,
   recon: ["read", "grep", "find", "ls", "bash"],
   "full-worker": ["read", "bash", "edit", "write", "grep", "find", "ls", "explore", REPORT_TO_LEAD_TOOL_NAME],
+  "execute-worker": [...READ_ONLY_BUILTINS, GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore"],
 };
 
 /**
  * Comma-joined `--tools` value for a curated group. `wsToolNames` (the
  * bridge's sanitized `ws__*` registered names) is only appended for
- * `full-worker` — `read-only` and `recon` are built-in-only by design (see
- * `TOOL_GROUPS` doc comment above).
+ * `full-worker` — `read-only`, `recon`, and `execute-worker` are
+ * built-in/custom-only by design (see `TOOL_GROUPS` doc comment above); an
+ * execute-worker never gets a scoped child session key spliced into its
+ * prompt (same reasoning as `recon`), so it never calls a `ws__*` bridge tool
+ * either.
  */
 export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = []): string {
   const builtins = TOOL_GROUPS[group];
@@ -295,6 +334,32 @@ export function resolveModelForAlias(
     if (aliasModel) return aliasModel;
   }
   return inheritModel;
+}
+
+/**
+ * Pure extraction of the calling tool-execute `toolCtx`'s current model as a
+ * `provider/id` string, or `undefined` when absent/malformed. Exported
+ * (260904 Phase 1) so `execute-gateway.ts`'s `ws-execute` tool can resolve
+ * its own inherit-fallback model the same way `ws-agent-spawn`/`explore`
+ * already do here, without duplicating this shape-tolerant extraction.
+ */
+export function inheritModelFromToolCtx(toolCtx: unknown): string | undefined {
+  const model = (toolCtx as { model?: { provider?: string; id?: string } } | undefined)?.model;
+  return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
+}
+
+/**
+ * Review fix (relay #1, TEST finding #3): pure extraction of `spawnAgent`'s
+ * `ctx.toolGroup ?? "full-worker"` default — previously inlined directly in
+ * `spawnAgent`, leaving no seam a unit test could exercise independent of a
+ * real `RpcClient` spawn. `RpcSpawnCtx.toolGroup`'s own doc comment already
+ * states the contract this codifies: "Omitted (or explicit `"full-worker"`)
+ * preserves every existing `ws-agent-spawn` caller's behavior unchanged."
+ * Mirrors `inheritModelFromToolCtx`'s own extraction-for-testability shape
+ * immediately above.
+ */
+export function resolveSpawnToolGroup(explicit: ToolGroup | undefined): ToolGroup {
+  return explicit ?? "full-worker";
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +647,8 @@ export interface RpcAgentRecord {
   modelEffort?: string;
   /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
   wsToolNames: readonly string[];
+  /** Curated `--tools` group this record was spawned with; reused unchanged on a dormant resume so `resolveTools` never silently widens/narrows a resumed child's tool surface. Set at spawn (`ctx.toolGroup ?? "full-worker"`), never mutated afterward. */
+  toolGroup: ToolGroup;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
   streaming: boolean;
   /** Edge-consume flag: set by the `agent_settled` listener, cleared by whichever `ws-agent-wait` call harvests it first. */
@@ -595,6 +662,24 @@ export interface RpcAgentRecord {
   pendingReports: string[];
   /** Count of reports dropped from `pendingReports` due to overflow since the last drain. */
   reportsDropped: number;
+  /**
+   * 260904 Phase 1: set by `applyRpcEvent` the instant a `tool_execution_start`
+   * for `GATED_EXEC_TOOL_NAME` is observed on this record's child; cleared by
+   * `ws-approve` once a decision is written. `undefined` means "no gated
+   * command is currently awaiting lead approval on this agent" — the
+   * condition `validatePendingApproval` (execute-gateway.ts) rejects against.
+   *
+   * Review fix (relay #1): also carries `cwd`, captured from the gated-exec
+   * tool call's own `args.cwd` override when the worker supplied one (the
+   * same `ws-worker-exec` `cwd?` param `execute-gateway.ts`'s `execute()`
+   * itself falls back on via `p.cwd ?? sessionCtx.cwd`) — the approval-relay
+   * callback (`createApprovalRelay`) must scrape the SAME directory the
+   * command will actually run in, not unconditionally the worker's base
+   * `sessionCtx.cwd`, or a `cwd`-overridden command's ground-truth git
+   * context (branch/dirty/ahead_behind) would silently describe the wrong
+   * directory to the lead.
+   */
+  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
 }
 
 export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
@@ -616,10 +701,25 @@ export interface RpcSpawnCtx {
   wsToolNames: readonly string[];
   /** Path to the adapter-owned model-catalog data file, read fresh per spawn. */
   modelCatalogPath: string;
+  /** Curated `--tools` group for this spawn. Omitted (or explicit `"full-worker"`) preserves every existing `ws-agent-spawn` caller's behavior unchanged — only `ws-execute` (execute-gateway.ts) passes `"execute-worker"`. */
+  toolGroup?: ToolGroup;
+  /**
+   * 260904 Phase 1: fired right after `attachEventListener` observes a
+   * freshly-set `record.pendingApproval` on this spawn's record — the
+   * approval-request-relay injection hook. `spawner.ts` stays generic (no
+   * `pi.sendUserMessage` import) by taking this as a plain callback;
+   * `execute-gateway.ts`'s `createApprovalRelay` is the only real
+   * implementation. Never fires for a non-`"execute-worker"` spawn in
+   * practice, since `GATED_EXEC_TOOL_NAME` is reachable only from that
+   * group's `--tools` list.
+   */
+  onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
 export interface RpcResumeCtx {
   cwd: string;
+  /** See `RpcSpawnCtx.onApprovalPending` — threaded through `sendToAgent`'s dormant-auto-resume branch so a resumed `execute-worker`'s approval relay keeps working. */
+  onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
 /**
@@ -631,7 +731,14 @@ export interface RpcResumeCtx {
  *
  * 260904 Phase 1: carries `WS_PI_SPAWN_ROLE_ENV: "worker"` (see
  * `process-role.ts`), replacing the old boolean `WS_PI_AGENT_CHILD_ENV: "1"`
- * marker this function used to set.
+ * marker this function used to set. Also now carries `WS_PI_APPROVAL_DIR`,
+ * derived from `sessionPath`'s own directory (`dirname(sessionPath)`, the
+ * same `sessionDir` `spawnAgent`/`sendToAgent` already `mkdtempSync`'d or
+ * cached — no new parameter needed since the two paths are always siblings:
+ * `sessionPath` is unconditionally `join(sessionDir, "session.jsonl")`).
+ * Inert for a non-`"execute-worker"` spawn (nothing in its `--tools` list can
+ * ever dispatch `ws-worker-exec` to read this var), so it is folded into the
+ * env unconditionally rather than threaded as an extra opt-in parameter.
  */
 export function buildRpcClientOptions(
   cwd: string,
@@ -643,7 +750,7 @@ export function buildRpcClientOptions(
   return {
     cliPath: RPC_CLI_PATH,
     cwd,
-    env: { [WS_PI_SPAWN_ROLE_ENV]: "worker" },
+    env: { [WS_PI_SPAWN_ROLE_ENV]: "worker", [WS_PI_APPROVAL_DIR_ENV]: join(dirname(sessionPath), "approvals") },
     model,
     args: ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools],
   };
@@ -698,8 +805,22 @@ export function drainReports(record: RpcAgentRecord): { reports: string[]; repor
  * All other event types (including a `tool_execution_start` for any other
  * tool name) are ignored here — they only matter to a live streaming UI or
  * to the tool's own execution, not to this module's bookkeeping.
+ *
+ * 260904 Phase 1 adds a 2nd `tool_execution_start` branch, matched on
+ * `GATED_EXEC_TOOL_NAME`: sets `record.pendingApproval` from the event's
+ * `toolCallId` (this IS the `cmd_id` — no new id needs minting) plus the
+ * gated-exec tool's own `{command, rationale}` args. Requires both a string
+ * `toolCallId` and a string `args.command`; a missing/malformed event is
+ * silently ignored (never throws) — matches the report branch's own
+ * best-effort shape-tolerance above.
+ *
+ * Review fix (relay #1): also captures `args.cwd` (the same optional
+ * per-call working-directory override `ws-worker-exec`'s own `execute()`
+ * accepts) onto `record.pendingApproval.cwd` when it is a string — omitted
+ * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
+ * exactly as `execute-gateway.ts`'s `execute()` itself does.
  */
-export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown }): void {
+export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string }): void {
   if (evt.type === "agent_start") {
     record.streaming = true;
   } else if (evt.type === "agent_settled") {
@@ -711,11 +832,39 @@ export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; tool
     if (typeof message === "string") {
       enqueueReport(record, message);
     }
+  } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
+    const args = evt.args as { command?: unknown; rationale?: unknown; cwd?: unknown } | undefined;
+    const command = args?.command;
+    if (typeof command === "string" && typeof evt.toolCallId === "string") {
+      record.pendingApproval = {
+        cmdId: evt.toolCallId,
+        command,
+        rationale: typeof args?.rationale === "string" ? args.rationale : undefined,
+        cwd: typeof args?.cwd === "string" ? args.cwd : undefined,
+      };
+    }
   }
 }
 
-function attachEventListener(record: RpcAgentRecord, client: RpcClient): void {
-  record.unsubscribe = client.onEvent((evt) => applyRpcEvent(record, evt as { type?: string; toolName?: string; args?: unknown }));
+/**
+ * Wires `client.onEvent()` into `applyRpcEvent` for `record`, then — 260904
+ * Phase 1 — additionally invokes `onApprovalPending(record)` right after any
+ * `tool_execution_start` for `GATED_EXEC_TOOL_NAME` (the same event
+ * `applyRpcEvent` just used to set `record.pendingApproval`). Kept as a
+ * second, independent check on the raw event (not a "did pendingApproval
+ * change" diff) so this function stays a thin, generic wire-up: `spawner.ts`
+ * never imports `pi.sendUserMessage` itself (golden-rule-adjacent — keeps the
+ * approval-relay's actual injection behavior owned entirely by
+ * `execute-gateway.ts`, which supplies the real callback).
+ */
+function attachEventListener(record: RpcAgentRecord, client: RpcClient, onApprovalPending?: (record: RpcAgentRecord) => void): void {
+  record.unsubscribe = client.onEvent((evt) => {
+    const e = evt as { type?: string; toolName?: string; args?: unknown; toolCallId?: string };
+    applyRpcEvent(record, e);
+    if (onApprovalPending && e.type === "tool_execution_start" && e.toolName === GATED_EXEC_TOOL_NAME) {
+      onApprovalPending(record);
+    }
+  });
 }
 
 /**
@@ -761,6 +910,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   const catalogConfig = params.modelName ? readModelCatalog(ctx.modelCatalogPath) : undefined;
   const modelBase = resolveModelForAlias(catalogConfig, params.modelName, ctx.inheritModel);
 
+  const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const record: RpcAgentRecord = {
     agentId,
     sessionPath,
@@ -768,6 +918,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     modelBase,
     modelEffort: params.modelEffort,
     wsToolNames: ctx.wsToolNames,
+    toolGroup,
     streaming: false,
     idlePending: false,
     waiters: [],
@@ -777,13 +928,13 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   registry.set(agentId, record);
 
   const client = new RpcClient(
-    buildRpcClientOptions(ctx.cwd, modelBase, sessionPath, params.systemPromptPath, resolveTools("full-worker", ctx.wsToolNames)),
+    buildRpcClientOptions(ctx.cwd, modelBase, sessionPath, params.systemPromptPath, resolveTools(toolGroup, ctx.wsToolNames)),
   );
   record.client = client;
 
   await client.start();
   await applyModelEffort(client, params.modelEffort);
-  attachEventListener(record, client);
+  attachEventListener(record, client, ctx.onApprovalPending);
   await client.prompt(params.prompt);
 
   return { agent_id: agentId };
@@ -836,13 +987,13 @@ export async function sendToAgent(
 
   if (!record.client) {
     const client = new RpcClient(
-      buildRpcClientOptions(ctx.cwd, record.modelBase, record.sessionPath, record.systemPromptPath, resolveTools("full-worker", record.wsToolNames)),
+      buildRpcClientOptions(ctx.cwd, record.modelBase, record.sessionPath, record.systemPromptPath, resolveTools(record.toolGroup, record.wsToolNames)),
     );
     record.client = client;
     record.idlePending = false;
     await client.start();
     await applyModelEffort(client, record.modelEffort);
-    attachEventListener(record, client);
+    attachEventListener(record, client, ctx.onApprovalPending);
     await client.prompt(message);
     return { agent_id: agentId };
   }
@@ -1088,6 +1239,14 @@ export interface AgentToolsHandle {
    * untouched, so it keeps the old kill style).
    */
   stopAll(): Promise<void>;
+  /**
+   * 260904 Phase 1: the same RPC-backed registry `ws-agent-*` already reads
+   * and writes, exposed so `execute-gateway.ts`'s `ws-execute`/`ws-approve`
+   * tools can spawn/inspect agents on ONE shared map — §4's "agent_id
+   * disambiguates among all live and dormant/retained agents" requires this,
+   * not a second parallel registry.
+   */
+  rpcRegistry: RpcAgentRegistry;
 }
 
 /**
@@ -1123,14 +1282,20 @@ export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: { cwd: string; modelCatalogPath: string },
+  /**
+   * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
+   * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
+   * `ws-agent-send`'s `sendToAgent` call (dormant-resume branch) so a
+   * `ws-execute`-spawned `execute-worker` keeps its approval relay wired even
+   * if it is later driven through the generic `ws-agent-*` tools (shared
+   * registry, §4). A no-op for every other `toolGroup` — `GATED_EXEC_TOOL_NAME`
+   * is unreachable from `full-worker`/`recon`/`read-only`'s `--tools` lists,
+   * so this callback simply never fires for them.
+   */
+  onApprovalPending?: (record: RpcAgentRecord) => void,
 ): AgentToolsHandle {
   const rpcRegistry: RpcAgentRegistry = new Map();
   const exploreRegistry: AgentRegistry = new Map();
-
-  function inheritModel(toolCtx: unknown): string | undefined {
-    const model = (toolCtx as { model?: { provider?: string; id?: string } } | undefined)?.model;
-    return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
-  }
 
   /**
    * IO wrapper around `resolveModelForAlias` for `explore`'s implicit
@@ -1140,7 +1305,7 @@ export function registerAgentTools(
    */
   function resolveExploreModel(toolCtx: unknown): string | undefined {
     const config = readModelCatalog(sessionCtx.modelCatalogPath);
-    return resolveModelForAlias(config, "small", inheritModel(toolCtx));
+    return resolveModelForAlias(config, "small", inheritModelFromToolCtx(toolCtx));
   }
 
   pi.registerTool({
@@ -1175,9 +1340,10 @@ export function registerAgentTools(
         rpcRegistry,
         {
           cwd: sessionCtx.cwd,
-          inheritModel: inheritModel(toolCtx),
+          inheritModel: inheritModelFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
           modelCatalogPath: sessionCtx.modelCatalogPath,
+          onApprovalPending,
         },
         {
           systemPromptPath: p.system_prompt_path,
@@ -1209,7 +1375,7 @@ export function registerAgentTools(
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { agent_id: string; message: string; interrupt?: boolean };
-      const result = await sendToAgent(rpcRegistry, { cwd: sessionCtx.cwd }, p.agent_id, p.message, p.interrupt);
+      const result = await sendToAgent(rpcRegistry, { cwd: sessionCtx.cwd, onApprovalPending }, p.agent_id, p.message, p.interrupt);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -1334,6 +1500,7 @@ export function registerAgentTools(
   });
 
   return {
+    rpcRegistry,
     async stopAll(): Promise<void> {
       const rpcStops = [...rpcRegistry.values()]
         .filter((record): record is RpcAgentRecord & { client: RpcClient } => !!record.client)

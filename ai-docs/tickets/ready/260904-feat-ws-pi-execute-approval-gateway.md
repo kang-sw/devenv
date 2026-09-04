@@ -345,6 +345,52 @@ hard removal of the lead's native bash (structural) or the soft-convention
 fallback (§8)**. Race/registry/select logic unit-tested where seam-extractable.
 Depends on 260903 Phase 1.
 
+### Result (69672092) - 2026-09-05
+
+Phase 1 landed the whole gateway through the prompt-injection fallback relay on
+`impl/goal/track/pi-agent/amber-otter-canyon/plus-wife-purse` (`b073586e` plan →
+`d35b1b4f` tool-group threading → `4455ec78` gateway → `69672092` review relay
+#1). The contract is captured in `spec/pi-adapter-runtime.md`
+`{#260905-pi-execute-approval-gateway}`, `{#260905-pi-worker-gated-exec}`, and
+`{#260905-pi-lead-tool-surface-execute-gateway}` (spec commit `81297c33`).
+
+Landed behavior: `ws-execute`/`ws-approve` lead verbs; the `execute-worker` tool
+group (read-only native family + `ws-worker-exec` gated exec + report + explore,
+no native bash); the prompt-injection approval relay over a per-agent filesystem
+decision channel using Pi's own `toolCallId` as `cmd_id`; the §7 adapter-scraped
+context header (now honoring a worker `cwd` override); `approve`/`deny(reason)`/
+`run-instead(command)` with per-decision field validation and `cmd_id`
+race-binding; abort via `ws-agent-stop` (unblock "aborted", dormant+retain); and
+the lead tool-surface reshaping (native bash/read removed, ugly-read retained,
+`ws-worker-exec` excluded from the lead's active set via `computeLeadActiveTools`).
+
+§8 linchpin resolved: `pi.setActiveTools`/`getActiveTools` on `ExtensionAPI`
+reshape the one registry holding built-ins and extension tools alike, so **hard
+removal** of native bash from the host lead session is achieved (not the
+soft-convention fallback) — verified against the installed pi package source.
+
+Deviations: (1) a from-scratch minimal mutation-incapable file-read tool was
+registered for the ugly-read name (no Pi API exposes invoking a built-in tool's
+impl from extension code) — fit-reviewed as justified; (2) `WS_PI_APPROVAL_DIR`
+derived from `dirname(sessionPath)` rather than a threaded param (inert for
+non-execute-worker spawns) — fit-reviewed as justified.
+
+Verification: `cd agents-plugin-pi && npm test` → **292/292 pass** (235 baseline
++ 57). Reviews (partitioned correctness/fit/test): gate-integrity core clean;
+5 Important findings fixed in relay #1 (`69672092`) — approval header cwd-override
+(correctness), `run-instead`/`deny` field validation (correctness), and three
+test-coverage gaps (tautological toolGroup default, ugly-read slicing,
+`waitForDecisionFile` abort/cleanup); the fit "missing spec anchors" Important was
+lead-dispositioned as deferred-to-doc-pre-pass (spec is lead-owned) and authored
+in `81297c33`. One correctness Minor recorded: the tool-surface exclusion's
+`/reload` durability relies on the session-start handler re-firing — captured as
+an Implementation Gap in the spec and folded into the outstanding manual gate.
+
+Outstanding: the live `pi --mode rpc` end-to-end gate (all eight Phase 1
+verification items, incl. the post-`/reload` tool-surface check) is deferred —
+no provider credentials in the build sandbox — and stands as the manual
+verification step before release.
+
 ### Phase 2: Harness-native pause/resume + escalation refinements
 
 If Pi exposes pausing an in-flight worker and injecting the decision via
@@ -357,6 +403,20 @@ Verification: a live run showing an in-flight worker paused at a mutation and
 resumed by a lead `ws.approve` without a separate injected lead turn; a light
 worker escalating a task that exceeded its tier; an approval request expanded on
 demand. Depends on Phase 1.
+
+## Blocked (2026-09-05)
+
+Phase 2 is not autonomously advanceable in the current build sandbox. Its
+headline deliverable — replacing the prompt-injection relay with a
+harness-native pause/resume path — is *conditional* on Pi exposing in-flight
+worker pause/resume, and both that capability probe and every Phase 2
+verification item require a live `pi --mode rpc` session with provider
+credentials, which this environment does not have. The secondary items
+(mid-task `complex` escalation, on-demand approval-context expand) are
+lower-value on their own and share the same live-verification wall. Unblock when
+a live Pi environment with credentials is available; a human may also choose to
+accept Phase 1's relay as sufficient and drop Phase 2. Phase 1 is complete and
+merged; nothing in Phase 2 blocks the rest of the Pi drain.
 
 ## Non-goals
 

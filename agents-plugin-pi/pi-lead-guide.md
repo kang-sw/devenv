@@ -42,7 +42,9 @@ Route a task to the right primitive by what you actually need done:
 | Declare the active goal achieved (terminal) | `goal-achieved <summary>` |
 | Declare the active goal blocked (terminal) | `goal-blocked <reason>` |
 | Compact context mid-goal and keep going (non-terminal) | `goal-compact-and-continue <carry-forward>` |
+| Delegate a lead-consensus-caliber shell task, gated command-by-command | `ws-execute` (spawns an execute-worker; optional `command` runs verbatim first, then `prompt` drives the worker; `complex:true` for a stronger model). This gate exists because `ws-execute` proxies actions at your own trust level — a general `ws-agent-spawn` worker carries no such gate. |
+| Respond to a pending execute-worker command approval request | `ws-approve` (`decision`: `approve` \| `deny` with `reason` \| `run-instead` with `command`; rejected if `cmd_id` is stale or mismatched) |
 
-This table grows as later tickets land more primitives (an execute/approve
-gateway, a fork/ask/resolve side-thread surface) — treat any verb not listed
-here as not yet available, not as a naming mismatch to guess around.
+This table grows as later tickets land more primitives (a fork/ask/resolve
+side-thread surface) — treat any verb not listed here as not yet available,
+not as a naming mismatch to guess around.

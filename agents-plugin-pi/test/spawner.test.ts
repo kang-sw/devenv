@@ -32,6 +32,17 @@
  * `WS_PI_SPAWN_ROLE_ENV` (`process-role.ts`) — these tests now assert the
  * role values (`"worker"`/`"explore"`) instead of `"1"`.
  *
+ * 260904 Phase 1 (execute-approve gateway) additionally covers: the new
+ * `"execute-worker"` `TOOL_GROUPS` entry and its `resolveTools` threading
+ * through a fake record's `toolGroup`; `applyRpcEvent`'s new
+ * `pendingApproval`-capturing branch for `GATED_EXEC_TOOL_NAME`;
+ * `buildRpcClientOptions`'s new `WS_PI_APPROVAL_DIR_ENV` placement; and
+ * `inheritModelFromToolCtx` (exported out of `registerAgentTools`'s former
+ * private closure for reuse by `execute-gateway.ts`). The gated-exec tool's
+ * own `execute()` body, `ws-execute`/`ws-approve`'s tool registrations, and
+ * the approval-request/decision file relay end-to-end are NOT covered here
+ * — see test/execute-gateway.test.ts's header comment for that split.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
@@ -51,6 +62,8 @@ import {
   enqueueReport,
   drainReports,
   REPORT_TO_LEAD_TOOL_NAME,
+  GATED_EXEC_TOOL_NAME,
+  WS_PI_APPROVAL_DIR_ENV,
   REPORT_BUFFER_CAP,
   getAgentTranscriptPath,
   listAgents,
@@ -58,9 +71,12 @@ import {
   sendToAgent,
   buildRpcClientOptions,
   buildChildProcessEnv,
+  inheritModelFromToolCtx,
+  resolveSpawnToolGroup,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
+  type ToolGroup,
 } from "../src/spawner.ts";
 import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import type { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -109,6 +125,50 @@ describe("TOOL_GROUPS / resolveTools", () => {
   test("full-worker never includes any ws-agent-* driving/spawn tool name (D-B: depth stays lead -> worker -> explore-leaf)", () => {
     const resolved = resolveTools("full-worker", ["ws__playbook_render"]);
     assert.ok(!resolved.includes("ws-agent-"), `full-worker tools must never include a ws-agent-* name: ${resolved}`);
+  });
+
+  test("execute-worker equals read-only plus the gated-exec, report, and explore tools, in order (260904 Phase 1)", () => {
+    assert.deepEqual([...TOOL_GROUPS["execute-worker"]], ["read", "grep", "find", "ls", GATED_EXEC_TOOL_NAME, REPORT_TO_LEAD_TOOL_NAME, "explore"]);
+    assert.equal(resolveTools("execute-worker"), `read,grep,find,ls,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME},explore`);
+  });
+
+  test("execute-worker never appends ws__* bridge tool names (unlike full-worker) — a caller-passed wsToolNames is ignored", () => {
+    assert.equal(resolveTools("execute-worker", ["ws__playbook_render"]), `read,grep,find,ls,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME},explore`);
+  });
+
+  test("execute-worker never includes bash/edit/write — those would let the worker bypass the approval gate", () => {
+    const resolved = resolveTools("execute-worker");
+    for (const forbidden of ["bash", "edit", "write"]) {
+      assert.ok(!resolved.split(",").includes(forbidden), `execute-worker tools must never include "${forbidden}": ${resolved}`);
+    }
+  });
+
+  test("resolveTools(record.toolGroup, ...) threading: a fake record with toolGroup:\"execute-worker\" resolves the execute-worker tool list, not full-worker's", () => {
+    const record = freshRpcRecord({ toolGroup: "execute-worker" as ToolGroup, wsToolNames: ["ws__playbook_render"] });
+    const resolved = resolveTools(record.toolGroup, record.wsToolNames);
+    assert.equal(resolved, `read,grep,find,ls,${GATED_EXEC_TOOL_NAME},${REPORT_TO_LEAD_TOOL_NAME},explore`);
+    assert.notEqual(resolved, resolveTools("full-worker", record.wsToolNames), "must not fall back to the old hardcoded full-worker group");
+  });
+
+  test("resolveTools(record.toolGroup, ...) threading: a record whose toolGroup field is \"full-worker\" resolves full-worker's tool list", () => {
+    const record = freshRpcRecord({ toolGroup: "full-worker", wsToolNames: ["ws__ferrule"] });
+    assert.equal(resolveTools(record.toolGroup, record.wsToolNames), resolveTools("full-worker", ["ws__ferrule"]));
+  });
+});
+
+describe("resolveSpawnToolGroup (review fix, relay #1, TEST finding #3)", () => {
+  test("an omitted (undefined) explicit toolGroup defaults to full-worker — spawnAgent's actual ctx.toolGroup ?? \"full-worker\" seam", () => {
+    assert.equal(resolveSpawnToolGroup(undefined), "full-worker");
+  });
+
+  test("an explicit toolGroup is passed through unchanged, never overridden by the default", () => {
+    assert.equal(resolveSpawnToolGroup("execute-worker"), "execute-worker");
+    assert.equal(resolveSpawnToolGroup("read-only"), "read-only");
+    assert.equal(resolveSpawnToolGroup("recon"), "recon");
+  });
+
+  test("an explicit \"full-worker\" is indistinguishable from omission (both resolve to full-worker) — the intended no-op case", () => {
+    assert.equal(resolveSpawnToolGroup("full-worker"), resolveSpawnToolGroup(undefined));
   });
 });
 
@@ -365,12 +425,27 @@ describe("resolveModelForAlias", () => {
   });
 });
 
+describe("inheritModelFromToolCtx", () => {
+  test("extracts provider/id from a well-formed toolCtx.model", () => {
+    assert.equal(inheritModelFromToolCtx({ model: { provider: "openrouter", id: "some-model" } }), "openrouter/some-model");
+  });
+
+  test("returns undefined when toolCtx is undefined, has no model, or model is missing provider/id", () => {
+    assert.equal(inheritModelFromToolCtx(undefined), undefined);
+    assert.equal(inheritModelFromToolCtx({}), undefined);
+    assert.equal(inheritModelFromToolCtx({ model: {} }), undefined);
+    assert.equal(inheritModelFromToolCtx({ model: { provider: "openrouter" } }), undefined);
+    assert.equal(inheritModelFromToolCtx({ model: { id: "some-model" } }), undefined);
+  });
+});
+
 function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return {
     agentId: "rpc-agent-1",
     sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
     systemPromptPath: "/tmp/ws-pi-agent-x/prompt.md",
     wsToolNames: [],
+    toolGroup: "full-worker",
     streaming: false,
     idlePending: false,
     waiters: [],
@@ -452,6 +527,75 @@ describe("applyRpcEvent: ws-report-to-lead", () => {
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: 42 } });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME });
     assert.deepEqual(record.pendingReports, []);
+  });
+});
+
+describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture)", () => {
+  test("a tool_execution_start for the gated-exec tool with a string toolCallId + command sets pendingApproval from the event's own toolCallId (the cmd_id)", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-123",
+      args: { command: "rm -rf build", rationale: "clean stale build output" },
+    });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-123", command: "rm -rf build", rationale: "clean stale build output", cwd: undefined });
+  });
+
+  test("rationale is omitted (undefined) when args.rationale is not a string", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-456",
+      args: { command: "echo hi" },
+    });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-456", command: "echo hi", rationale: undefined, cwd: undefined });
+  });
+
+  test("a missing toolCallId is ignored — pendingApproval is never set without a usable cmd_id", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, args: { command: "echo hi" } });
+    assert.equal(record.pendingApproval, undefined);
+  });
+
+  test("a missing or non-string args.command is ignored", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: {} });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-2", args: { command: 42 } });
+    assert.equal(record.pendingApproval, undefined);
+  });
+
+  test("a tool_execution_start for a different toolName (e.g. ws-report-to-lead) never sets pendingApproval", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, toolCallId: "call-1", args: { message: "hi", command: "echo hi" } });
+    assert.equal(record.pendingApproval, undefined);
+  });
+
+  test("a later gated-exec event overwrites a still-pending approval from an earlier one (the newest command is the one awaiting a decision)", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo one" } });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-2", args: { command: "echo two" } });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-2", command: "echo two", rationale: undefined, cwd: undefined });
+  });
+
+  test("review fix (relay #1, CORRECTNESS finding #1): a string args.cwd override is captured onto pendingApproval.cwd", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-1",
+      args: { command: "echo hi", cwd: "/repo/subdir" },
+    });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "echo hi", rationale: undefined, cwd: "/repo/subdir" });
+  });
+
+  test("cwd is omitted (undefined) when args.cwd is missing or not a string", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo hi" } });
+    assert.equal(record.pendingApproval?.cwd, undefined);
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-2", args: { command: "echo hi", cwd: 42 } });
+    assert.equal(record.pendingApproval?.cwd, undefined);
   });
 });
 
@@ -801,15 +945,23 @@ describe("getAgentTranscriptPath", () => {
 // the consuming-side coverage.
 // ---------------------------------------------------------------------------
 
-describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
-  test("built options carry the worker role marker", () => {
-    const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/session.jsonl", "/tmp/system.md", "read,bash");
-    assert.deepEqual(options.env, { [WS_PI_SPAWN_ROLE_ENV]: "worker" });
+describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV placement)", () => {
+  test("built options carry the worker role marker and the approvals dir derived from sessionPath's own directory", () => {
+    const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/ws-pi-agent-x/session.jsonl", "/tmp/system.md", "read,bash");
+    assert.deepEqual(options.env, {
+      [WS_PI_SPAWN_ROLE_ENV]: "worker",
+      [WS_PI_APPROVAL_DIR_ENV]: "/tmp/ws-pi-agent-x/approvals",
+    });
   });
 
-  test("the marker is the sole env entry (RpcClient.start() merges it over process.env itself, so this function must not pre-spread it)", () => {
-    const options = buildRpcClientOptions("/repo", undefined, "/tmp/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(Object.keys(options.env ?? {}), [WS_PI_SPAWN_ROLE_ENV]);
+  test("env carries exactly the role marker and the approvals dir — nothing else (RpcClient.start() merges it over process.env itself, so this function must not pre-spread it)", () => {
+    const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-y/session.jsonl", "/tmp/system.md", "read");
+    assert.deepEqual(new Set(Object.keys(options.env ?? {})), new Set([WS_PI_SPAWN_ROLE_ENV, WS_PI_APPROVAL_DIR_ENV]));
+  });
+
+  test("260904 Phase 1: the approvals dir is inert-but-present even for a non-execute-worker (full-worker) spawn — WS_PI_APPROVAL_DIR is always derived from sessionPath, not gated on tools", () => {
+    const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-z/session.jsonl", "/tmp/system.md", resolveTools("full-worker"));
+    assert.equal(options.env?.[WS_PI_APPROVAL_DIR_ENV], "/tmp/ws-pi-agent-z/approvals");
   });
 });
 
