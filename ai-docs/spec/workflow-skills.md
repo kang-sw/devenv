@@ -647,7 +647,7 @@ Queue rather than resolving them from the delegate's evidence.
 
 The same delegate carries the corpus checks, because it is the cheapest point in
 the procedure that can make them without loading tickets into the lead's context:
-one `tickets.list` call shortlists tickets whose title or unresolved phase titles
+one `tickets.query` call shortlists tickets whose title or unresolved phase titles
 cover work this ticket also claims, and supplies the current status of every
 ticket this one names as a blocker, predecessor, or landing-order constraint. A
 real overlap and a dependency sitting behind this ticket's landing status are both

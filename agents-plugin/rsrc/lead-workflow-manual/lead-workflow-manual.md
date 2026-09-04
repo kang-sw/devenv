@@ -138,13 +138,13 @@ path/status/reference lookup before shell search. Use native file reads after a
 discovery tool returns the path to inspect or edit.
 
 Prefer:
-- `{{.McpNamespace}}/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
+- `{{.McpNamespace}}/tickets.query(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
 - `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `{{.McpNamespace}}/tickets.query(mentions_ticket_stem: "<stem>")` for parent/related scans.
-- `{{.McpNamespace}}/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
+- `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", include_done: true)` for status checks.
 - `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for anchor lookup.
 - `{{.McpNamespace}}/specs.query(ticket_stem: "<stem>")` for ticket-linked specs.
-- `{{.McpNamespace}}/specs.status(spec_stem: "<stem>")` for duplicate-safe anchor location.
+- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for duplicate-safe anchor location.
 - `{{.McpNamespace}}/mental_models.query(query: "<topic>")` for domain discovery.
 - `{{.McpNamespace}}/mental_models.status(domain: "<domain>")` for known-domain docs.
 - `{{.McpNamespace}}/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.

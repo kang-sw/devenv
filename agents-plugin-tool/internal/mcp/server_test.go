@@ -735,23 +735,89 @@ func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 	}
 }
 
-func TestServeStdioSpecToolsRejectTicketOnlyArgument(t *testing.T) {
+// TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape pins the
+// 260903 collapse's byte-identical requirement for the point-resolve call
+// shape (ticket_stem alone, no query/mentions_ticket_stem/statuses): it must
+// error on a not-found stem exactly like the removed tickets.status did,
+// rather than silently succeeding with TicketsFind's empty-array discovery
+// shape, and a found stem's JSON must be a bare object, not an array.
+func TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/todo/260504-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	notFoundInput := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.query","arguments":{"ticket_stem":"260504-missing"}}}` + "\n"
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, notFoundInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "ticket not found: 260504-missing") {
+		t.Fatalf("tickets.query(ticket_stem:) not-found case did not error like the removed tickets.status: %s", out.String())
+	}
+
+	jsonInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.query","arguments":{"ticket_stem":"260504-demo","format":"json"}}}` + "\n"
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"])
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(text), &obj); err != nil {
+		t.Fatalf("tickets.query(ticket_stem:) json mode is not a bare object like the removed tickets.status: %v\n%s", err, text)
+	}
+	if obj["stem"] != "260504-demo" {
+		t.Fatalf("tickets.query(ticket_stem:) json object missing expected stem: %s", text)
+	}
+}
+
+// TestServeStdioSpecsQueryPointResolveMatchesRemovedStatusShape is the specs
+// counterpart of TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape:
+// specs.query(spec_stem: X) alone (no query, no ticket_stem) must error on a
+// not-found anchor exactly like the removed specs.status did, and a found
+// anchor's text/JSON must use SpecAnchorStatus's spec_stem/locations/files
+// shape (formatSpecStatus), not SpecsFind's per-file formatSpecs listing.
+func TestServeStdioSpecsQueryPointResolveMatchesRemovedStatusShape(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"specs.status","arguments":{"ticket_stem":"260504-ticket-demo"}}}` + "\n"
-
+	notFoundInput := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-missing"}}}` + "\n"
 	var out bytes.Buffer
 	server := NewServer(root, "test")
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, notFoundInput, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
-	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
-	if !strings.Contains(text, "spec_stem") || !strings.Contains(out.String(), `"isError":true`) {
-		t.Fatalf("specs.status accepted ticket_stem argument: %s", out.String())
+	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "spec anchor not found: 260504-missing") {
+		t.Fatalf("specs.query(spec_stem:) not-found case did not error like the removed specs.status: %s", out.String())
+	}
+
+	textInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-spec-demo"}}}` + "\n"
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"])
+	if !strings.Contains(text, "spec_stem:") || !strings.Contains(text, "locations:") || !strings.Contains(text, "files:") {
+		t.Fatalf("specs.query(spec_stem:) text did not use the removed specs.status's spec_stem/locations/files shape: %s", text)
+	}
+
+	jsonInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260504-spec-demo","format":"json"}}}` + "\n"
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	jsonText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(jsonText), &obj); err != nil {
+		t.Fatalf("specs.query(spec_stem:) json mode is not a bare object like the removed specs.status: %v\n%s", err, jsonText)
+	}
+	if obj["spec_stem"] != "260504-spec-demo" {
+		t.Fatalf("specs.query(spec_stem:) json object missing expected spec_stem: %s", jsonText)
 	}
 }
 
@@ -1063,9 +1129,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	rootAwareTools := []string{
 		"api.list",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.query", "specs.status",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
 		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.query", "tickets.status", "path.generate", "playbook.render",
+		"tickets.query", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
@@ -1110,7 +1176,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"system_prompt_text\"") {
 		t.Fatalf("tools/list ws.mercenary.register schema missing system_prompt_text: %s", byID["2"])
 	}
-	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.query", "tickets.status", "specs.list", "specs.query", "specs.status", "mental_models.query", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.query", "specs.query", "mental_models.query", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -1398,7 +1464,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.list", "playbook.read", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.query", "playbook.read", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
