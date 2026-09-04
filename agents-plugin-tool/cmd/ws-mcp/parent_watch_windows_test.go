@@ -43,12 +43,14 @@ func TestWatchProcessExit_FiresOnRealExit(t *testing.T) {
 	}
 }
 
-// TestWatchProcessExit_NeverOpenablePID asserts that calling watchProcessExit
-// on a PID that has already exited (and been reaped) returns without invoking
-// onExit. There is a small, accepted PID-reuse race in principle (the OS could
-// theoretically reassign the PID before OpenProcess runs), but in practice a
-// freshly-reaped PID is not immediately reused within a test's lifetime.
-func TestWatchProcessExit_NeverOpenablePID(t *testing.T) {
+// TestWatchProcessExit_DeadPIDNeverFires asserts that arming watchProcessExit on
+// a PID that has already exited (and been reaped) returns without invoking
+// onExit. This is deterministic: watchProcessExit polls the handle with a zero
+// timeout at open and disarms when it is already signaled, so whether
+// OpenProcess fails outright (object gone) or succeeds against a lingering /
+// reaped-then-reused object (already signaled), onExit never fires. The former
+// "accepted PID-reuse race" is closed by that at-open guard.
+func TestWatchProcessExit_DeadPIDNeverFires(t *testing.T) {
 	helper := exec.Command("ping", "127.0.0.1", "-n", "20")
 	if err := helper.Start(); err != nil {
 		t.Fatalf("start helper: %v", err)
