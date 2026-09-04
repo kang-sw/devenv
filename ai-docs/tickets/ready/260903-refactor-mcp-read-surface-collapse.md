@@ -99,6 +99,41 @@ tools for every prior call shape; the removed names are gone in-package (a
 (`go test ./...` in `agents-plugin-tool/`); and playbook paths that called
 `status` now call `query(ticket_stem)`/`query(spec_stem)` with unchanged results.
 
+### Result
+
+Collapsed tickets + specs read triples into the `query` survivor in commit
+`bd335c7f` (fix `d3b2248b`): removed `tickets.list`/`tickets.status`/`specs.list`/
+`specs.status` from Go registration + dispatch, both `runtime.json` `tools`
+sections, `mcp-tools.md`/`workflow-skills.md`/`documentation-system.md`, nine
+`agents-plugin/rsrc/**` playbook token remaps + regenerated wsflow mirror, and the
+two test files. `mental_models` left un-collapsed with the noted-exception spec
+text pointing at `260904-research-mental-models-query-reconciliation`. CLI
+subcommand surface, `runtime.json` `"commands"`, and the shared `wsdoc`
+functions (still used by `references.trace` + the legacy-marker resolver) left
+intact.
+
+**Design correction (recorded):** the ticket's Decision claim that
+`query(ticket_stem=X)` was *already* a byte-identical superset of `status(X)` did
+NOT hold as layer ④ left it — the ④-renamed `query` point-resolve shape produced
+find-style output (array / empty-on-missing), not status-style (single object /
+error-on-missing). The collapse therefore routes the point-resolve shape to reuse
+the existing `TicketsStatus`/`SpecsStatus` + their formatters, giving genuine
+byte-identical output (object JSON + exact `ticket not found: %s` /
+`spec anchor not found: %s` errors). No new tool signature; the only in-package
+callers of `query(ticket_stem/spec_stem)` were tests, so no live caller relied on
+the old find-semantics. Two pinning tests were added to lock the byte-identical
+shape.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool/` green across 13
+packages (cache-disabled — an earlier cached run masked a Critical); wsflow
+Python suite 10/10; grep sweep clean. Review: partitioned correctness + fit —
+fit clean; correctness caught one **Critical** (stale
+`agents-plugin/skills/manifest.json` after the in-diff `AGENTS.template.md` edit,
+failing `TestSkillsManifestDriftIsVisible`) which was fixed by the
+`WSRSRC_REGEN_SKILLS` regen (`d3b2248b`) and re-review confirmed **[resolved]**;
+one Minor (optional text-mode assertion for the tickets pinning test) recorded,
+not fixed.
+
 ## Spec Impact
 
 Edits to existing anchors only — no new spec stem, no heading `{#slug}` change:
