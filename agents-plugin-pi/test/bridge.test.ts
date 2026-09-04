@@ -22,8 +22,12 @@ import {
   normalizeSessionKey,
   maybeAppendModelCatalogAdvisory,
   MODEL_CATALOG_ADVISORY,
+  cutStaticBody,
+  prependWorkflowStateLine,
+  dispatchMappedWorkflowManual,
 } from "../src/bridge.ts";
 import type { ModelCatalogConfig } from "../src/model-catalog.ts";
+import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
 // Live snapshot of ws-mcp's tools/list response (60 tools), captured via a
 // direct spawnWsMcpClient() probe against this repo's ws-mcp launcher. Not
@@ -224,6 +228,119 @@ describe("normalizeSessionKey", () => {
     const inputSnapshot = { ...input };
     normalizeSessionKey(input, { ownKey: "own-key-1", sentinel: SENTINEL });
     assert.deepEqual(input, inputSnapshot, "input params object must not be mutated");
+  });
+});
+
+describe("cutStaticBody", () => {
+  test("removes the first occurrence of the static body substring", () => {
+    const result = cutStaticBody("HEADER\nSTATIC BODY\nFOOTER", "STATIC BODY\n");
+    assert.equal(result.found, true);
+    assert.equal(result.text, "HEADER\nFOOTER");
+  });
+
+  test("found:false when the static body does not appear (renderer drift)", () => {
+    const result = cutStaticBody("HEADER\nsomething else\nFOOTER", "STATIC BODY\n");
+    assert.equal(result.found, false);
+    assert.equal(result.text, "HEADER\nsomething else\nFOOTER");
+  });
+
+  test("only removes the first occurrence when the substring repeats", () => {
+    const result = cutStaticBody("Xabc Xabc", "Xabc");
+    assert.equal(result.found, true);
+    assert.equal(result.text, " Xabc");
+  });
+});
+
+describe("prependWorkflowStateLine", () => {
+  test("prepends the fixed line ahead of the given text", () => {
+    const result = prependWorkflowStateLine("## Session Key\n...");
+    assert.match(result, /^Workflow manual is in your system prompt; this is your current session state\./);
+    assert.ok(result.endsWith("## Session Key\n..."));
+  });
+});
+
+describe("dispatchMappedWorkflowManual", () => {
+  function textResult(text: string): McpToolCallResult {
+    return { content: [{ type: "text", text }] };
+  }
+
+  test("cut found: returns the cut text with the fixed line prepended, no workflow_state dispatch", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const result = await dispatchMappedWorkflowManual(
+      { session_key: "lead-1", root: "/repo" },
+      {
+        callTool: async (name, args) => {
+          calls.push({ name, args });
+          return textResult("HEADER\nSTATIC-BODY\n## Session Key\nlead-1");
+        },
+        staticBodySnapshot: "STATIC-BODY\n",
+        modelCatalogPath: "/nonexistent/model-catalog.json",
+        notifyMappingDegraded: () => assert.fail("notifyMappingDegraded must not be called on a cut hit"),
+      },
+    );
+    assert.deepEqual(calls, [{ name: "workflow_manual", args: { session_key: "lead-1", root: "/repo" } }]);
+    const text = result.content.find((item) => item.type === "text")?.text;
+    assert.match(text ?? "", /^Workflow manual is in your system prompt/);
+    assert.ok(text?.includes("## Session Key\nlead-1"));
+    assert.ok(!text?.includes("STATIC-BODY"));
+  });
+
+  test("cut miss: falls back to workflow_state, dropping root, and notifies once", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let notified = 0;
+    const result = await dispatchMappedWorkflowManual(
+      { session_key: "lead-1", root: "/repo" },
+      {
+        callTool: async (name, args) => {
+          calls.push({ name, args });
+          if (name === "workflow_manual") return textResult("HEADER\nsomething drifted\n## Session Key\nlead-1");
+          return textResult("## Session State\ntodos: none");
+        },
+        staticBodySnapshot: "STATIC-BODY\n",
+        modelCatalogPath: "/nonexistent/model-catalog.json",
+        notifyMappingDegraded: () => {
+          notified += 1;
+        },
+      },
+    );
+    assert.deepEqual(calls, [
+      { name: "workflow_manual", args: { session_key: "lead-1", root: "/repo" } },
+      { name: "workflow_state", args: { session_key: "lead-1" } },
+    ]);
+    assert.equal(notified, 1);
+    const text = result.content.find((item) => item.type === "text")?.text;
+    assert.match(text ?? "", /^Workflow manual is in your system prompt/);
+    assert.ok(text?.includes("## Session State"));
+  });
+
+  test("advisory still appends on the mapped response when the model catalog is unset", async () => {
+    const result = await dispatchMappedWorkflowManual(
+      { session_key: "lead-1" },
+      {
+        callTool: async () => textResult("HEADER\nSTATIC-BODY\nBODY"),
+        staticBodySnapshot: "STATIC-BODY\n",
+        modelCatalogPath: "/nonexistent/model-catalog.json",
+        notifyMappingDegraded: () => {},
+      },
+    );
+    assert.equal(result.content.length, 2, "advisory must be appended as an additional content item");
+    assert.equal(result.content[1].text, MODEL_CATALOG_ADVISORY);
+  });
+
+  test("throws when the workflow_manual dispatch itself errors", async () => {
+    await assert.rejects(
+      () =>
+        dispatchMappedWorkflowManual(
+          { session_key: "lead-1" },
+          {
+            callTool: async () => ({ content: [{ type: "text", text: "boom" }], isError: true }),
+            staticBodySnapshot: "STATIC-BODY\n",
+            modelCatalogPath: "/nonexistent/model-catalog.json",
+            notifyMappingDegraded: () => {},
+          },
+        ),
+      /boom/,
+    );
   });
 });
 
