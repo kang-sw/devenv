@@ -266,7 +266,7 @@ func renderTickets(b *strings.Builder, ticketsRoot string) {
 		}
 	}
 	if orphanIdea > 0 {
-		fmt.Fprintf(b, "  idea: %d orphan hidden — tickets.list status=idea to view\n", orphanIdea)
+		fmt.Fprintf(b, "  idea: %d orphan hidden — tickets.query statuses=idea to view\n", orphanIdea)
 	}
 	if !anyTicket {
 		b.WriteString("  (none)\n")

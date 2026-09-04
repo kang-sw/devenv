@@ -1177,7 +1177,7 @@ full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
 folds remaining orphan `idea/` tickets — those without `parent:`, regardless
 of `related:` — into a single hidden-count line so the raw idea backlog does
 not dominate the tree, and their full bodies remain reachable via
-`tickets.query(status: "idea")`.
+`tickets.query(statuses: ["idea"])`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc

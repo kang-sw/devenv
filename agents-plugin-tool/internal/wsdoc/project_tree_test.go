@@ -59,7 +59,7 @@ func TestProjectTreeFoldsOrphanIdeaTickets(t *testing.T) {
 		"  [idea] 260503-child-demo",
 		"      parent: 260503-epic-demo  # Epic demo",
 		"      related: 260503-feat-demo  # source · Demo ticket",
-		"  idea: 2 orphan hidden — tickets.list status=idea to view",
+		"  idea: 2 orphan hidden — tickets.query statuses=idea to view",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
@@ -86,7 +86,7 @@ func TestProjectTreeOrphanOnlyIdeaSuppressesNone(t *testing.T) {
 		t.Fatalf("ProjectTree returned error: %v", err)
 	}
 
-	if !strings.Contains(got, "  idea: 2 orphan hidden — tickets.list status=idea to view") {
+	if !strings.Contains(got, "  idea: 2 orphan hidden — tickets.query statuses=idea to view") {
 		t.Fatalf("ProjectTree output missing orphan count line\n%s", got)
 	}
 	if strings.Contains(got, "(none)") {
