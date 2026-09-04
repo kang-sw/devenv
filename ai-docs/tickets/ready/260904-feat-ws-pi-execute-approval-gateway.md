@@ -251,7 +251,11 @@ primitive" framing.
   cannot forcibly prevent the lead reaching for native bash. This is the weaker
   "convention, not construction" mode §1 rejects for fork-splice, so hard removal
   is preferred; but the ticket does not assume it, and Phase 1 must report which
-  mode was achieved.
+  mode was achieved. Grounding lead (2026-09-04): Pi 0.84.4's extension API
+  declares `pi.getActiveTools(): string[]` and `pi.setActiveTools(toolNames)`
+  (`dist/core/extensions/types.d.ts`), i.e. an extension *can* reshape its
+  host session's active tool set — the likely mechanism for hard removal;
+  whether it covers built-in bash and survives `/reload` is the Phase 1 check.
 
 ### 9. Relationship to the ws-mcp exec.* surface (260524) — orthogonal, policy deferred
 

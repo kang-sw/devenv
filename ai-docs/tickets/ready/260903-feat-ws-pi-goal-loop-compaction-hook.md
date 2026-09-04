@@ -131,8 +131,11 @@ is single-session, and Phase 2 already fixes the heuristic as advisory-only:
   prose the model weighs (not an extension gate) — confirm this is sufficient, or
   whether `session_before_compact` should still veto an unsafe compaction.
 - **Interaction with subagent RPC children** (`260903-feat-ws-pi-subagent-rpc-ux`):
-  does the goal-loop run only on the lead session, or also drive settle/compact
-  on children?
+  settled 2026-09-04 — the goal-loop runs on the **lead session only**. RPC
+  children are one-shot prompt runs driven by the lead (`ws-agent-send` /
+  `ws-agent-wait`), so no settle re-injection or compaction lever is armed in a
+  child; the extension's `agent_settled` handler is a no-op when the process
+  is a spawned child.
 
 ## Spec Impact
 

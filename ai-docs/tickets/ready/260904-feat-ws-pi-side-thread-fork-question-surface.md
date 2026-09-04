@@ -144,6 +144,18 @@ the surface small.
   `model_name` override resolves through the `260903` catalog alias table.
 - System prompt: **append only**. Replacement is rejected by the user; prefix
   cache is explicitly irrelevant to this design.
+- **ws session_key: the fork gets its own lead-scope key, never the lead's.**
+  Every Pi process's bridge already mints its own key at start (`ferrule`,
+  `bridge.ts` default-fill) and forwards a key the model passes explicitly. A
+  fork inherits a transcript that may name the lead's key, and ws-mcp keys
+  agenda/todos per session_key (file-backed), so a fork calling with the
+  lead's key would clobber the lead's todo list (e.g. `lead-write-ticket`'s
+  checklist appends). Decision (2026-09-04): the fork's bridge mints via
+  `ferrule(root, capability: lead, parent_session_key: <lead key>)` so
+  lineage is kept, and the bridge **rewrites** an explicitly passed
+  session_key equal to the parent lead's key to the fork's own key — a
+  mechanical bridge-layer substitution, not a prompt instruction. The parent
+  key reaches the fork process out-of-band (spawn env/flag), never via prose.
 - Rejected paths: in-process `createAgentSession` from a tool `execute()` (no
   shipped Pi example does this; reentrancy with the host `ExtensionRunner`
   unverified) and Pi's `ctx.fork()` (it *replaces the host's own session* —
@@ -413,6 +425,11 @@ Verification (report which mode was achieved, as `260904` Phase 1 does):
    final report says `Commit: none` is surfaced as incomplete; a fork that
    goes idle without `kind: "final"` is surfaced as incomplete with the
    transcript tail, never as a result.
+5. Session-key isolation: a fork that explicitly passes the lead's key has it
+   rewritten to its own key at the bridge (assert the lead's todo/agenda are
+   untouched after a fork ran `lead-write-ticket`), and ws-mcp accepts the
+   `capability: lead` + `parent_session_key` mint so `session.children` on
+   the lead lists the fork.
 
 ### Phase 2: Owner question surface (`ws.ask`, registry, overlay chat, lazy discussion fork, injection)
 
@@ -443,7 +460,11 @@ Verification:
    the package; `@xterm/headless` + `node-pty` is the fallback only if
    cell/style-level assertions become necessary. Human judgment remains
    needed for visual polish, IME/CJK candidate placement, and cross-emulator
-   quirks. Using that loop: open `/answer` on a pending `ws.ask`, observe a
+   quirks. If a scenario cannot be driven agent-side (TTY-only behavior,
+   flaky capture), the implementer does **not** stop the loop: package that
+   scenario for one-shot human execution (the
+   `260903-feat-human-relay-interactive-gate` shape — exact commands, expected
+   screen, pass/fail criteria) and hand it over at closeout. Using that loop: open `/answer` on a pending `ws.ask`, observe a
    lazy fork spawn at the current tip, exchange two turns, `/done`, and assert
    the injected custom message appears in the lead session with
    `context + question + summary` and is delivered only after the lead is idle.
