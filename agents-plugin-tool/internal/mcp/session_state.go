@@ -809,7 +809,7 @@ func (s *sessionStore) clearAllAgenda(sessionKey string) error {
 
 // enterMode atomically stores the typed payload as an agenda blob under
 // agendaKey and replaces the entire todo list with todos. This is the single
-// write behind every ws.enter.* tool: agenda update and todo replacement land
+// write behind every ws.route.resolve_* tool: agenda update and todo replacement land
 // together so a reader never observes a half-applied mode switch.
 func (s *sessionStore) enterMode(sessionKey, agendaKey string, payload json.RawMessage, todos []todoItem) error {
 	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
@@ -853,7 +853,7 @@ func (s *sessionStore) mutateTodosResult(sessionKey string, fn func([]todoItem) 
 // --- MCP handlers ------------------------------------------------------------
 //
 // These parse arguments, drive the store, and format the compact text response.
-// They are the dispatch targets for the ws.agenda.*, ws.enter.*, and ws.todo.*
+// They are the dispatch targets for the ws.agenda.*, ws.route.resolve_*, and ws.todo.*
 // cases in callTool. All session-state tools require a session_key and are
 // reachable by any role that holds one (roleAllowsTool does not gate these
 // prefixes), per the ticket's D3 scoping decision.
