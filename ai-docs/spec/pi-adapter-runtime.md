@@ -286,6 +286,45 @@ lead greps or reads the file with its own filesystem tools. This is an
 advanced/rare accessor; it is registered as a tool but is not in any worker
 `--tools` group, so a worker cannot call it.
 
+## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
+
+The adapter drives a **lead-session goal loop**: while a goal is active, each time
+the agent run settles the loop re-injects a continue turn so the agent keeps
+working toward the goal, and the model ends the run only by an explicit terminal
+call. State lives in memory for the session; there is no on-disk goal substrate in
+this surface.
+
+- **Arming.** `/goal <goal>` (a `pi.registerCommand`) enters goal mode: it injects
+  a `Goal settled: <goal>` announcement turn and sets an active-goal marker. A
+  settle outside goal mode is an ordinary stop — the `agent_settled` handler is
+  armed **only** while a goal is active, which is what keeps an ordinary Pi session
+  from looping.
+- **Re-fire reminder.** While armed, an `agent_settled` re-injects a reminder turn
+  carrying the goal and the levers (naming the terminal tools and the force-stop
+  caveat), then the agent continues.
+- **Terminal levers.** Two model-invoked tools registered via `pi.registerTool`
+  (zero prose parsing) end the run: `goal-achieved(summary)` and
+  `goal-blocked(reason)`. Either disarms the loop, so the next settle is an
+  ordinary stop. The absence of any call is the default: the loop simply
+  continues.
+- **Runaway backstop.** N **consecutive** re-fires with no intervening tool call
+  force-stop the goal and fully reset the loop; a re-fire in which a tool call did
+  occur resets the streak to zero. The threshold defaults to 10 and is tunable
+  through an adapter-owned data file, `agents-plugin-pi/goal-loop-config.json`
+  (sibling to `model-catalog.json`), read **fresh** per settle; a missing or
+  malformed file, or a non-positive / non-finite `runaway_threshold`, falls back
+  to the default rather than erroring.
+- **Lead-session-only.** The goal loop runs on the lead session only. Every
+  spawned child (persistent RPC worker or one-shot explore leaf) is launched with
+  a `WS_PI_AGENT_CHILD=1` environment marker, and the `agent_settled` handler
+  no-ops when that marker is present — so a child's own settles never arm a loop or
+  a reminder, matching the delegation model where children are driven by the lead
+  through `ws-agent-send` / `ws-agent-wait`.
+
+Compaction — the model-driven `/goal-compact-and-continue` lever,
+`getContextUsage().percent` surfacing, and the `session_before_compact` companion —
+is not part of this surface yet; it is a separate follow-up phase.
+
 ## Proof-of-concept command {#260903-pi-poc-discuss-command}
 
 The adapter registers one proof-of-concept command, `/ws-discuss`, via
@@ -359,7 +398,10 @@ fires both hooks, so the copy runs redundantly but idempotently.
 > [!note] Constraints
 > - This contract covers the bridge, the delegation spawner (upgraded to
 >   persistent RPC children with bounded depth ≤ 2, a child→lead report channel,
->   and a path-only transcript accessor), the model catalog alias table, and the
->   `/ws-discuss` PoC command. Post-MVP surfaces still deferred to follow-up
->   tickets under the epic — an always-visible TODO, the goal-loop, and compaction
->   hooks — are not part of this contract yet.
+>   and a path-only transcript accessor), the model catalog alias table, the
+>   `/ws-discuss` PoC command, and the lead-session goal loop (arming, the
+>   `agent_settled` re-fire, the terminal levers, and the runaway backstop).
+>   Post-MVP surfaces still deferred to follow-up phases/tickets under the epic —
+>   an always-visible TODO, and the goal-loop's model-driven compaction hooks
+>   (`/goal-compact-and-continue`, context-usage surfacing, `session_before_compact`)
+>   — are not part of this contract yet.
