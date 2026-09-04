@@ -549,9 +549,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleAgendaClear(req.ID, params.Arguments)
 	case "agenda.list":
 		return s.handleAgendaList(req.ID, params.Arguments)
-	case "enter.implement":
+	case "route.resolve_implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
-	case "enter.proceed":
+	case "route.resolve_proceed":
 		return s.handleEnterProceed(req.ID, params.Arguments)
 	case "todo.add":
 		return s.handleTodoAdd(req.ID, params.Arguments)
@@ -3469,7 +3469,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "enter.implement",
+			"name":        "route.resolve_implement",
 			"description": "Enter implement mode: resolve normalized implementation facts and observed Git branch state into one deterministic implementation verdict, store the 'implement' agenda blob, and replace the todo list with the derived implement checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3558,7 +3558,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "enter.proceed",
+			"name":        "route.resolve_proceed",
 			"description": "Enter routing mode: resolve deterministic proceed facts into one route verdict, store the 'proceed' agenda blob, and replace the todo list with the lead-proceed checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",

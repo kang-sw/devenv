@@ -1242,7 +1242,7 @@ func TestProceedNextInstructions(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantNext: "lead-write-ticket",
-			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/enter.proceed`,
+			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/route.resolve_proceed`,
 		},
 		{
 			name: "discussion instruction names skill namespace",
@@ -1302,7 +1302,7 @@ func TestProceedInputRejectsNonStringFactTypes(t *testing.T) {
 func TestEnterProceedSchemaAdvertisesNullableFacts(t *testing.T) {
 	useLeadProfile(t)
 	server := NewServer(t.TempDir(), "test")
-	properties := toolPropertiesByName(t, callToolsList(t, server), "enter.proceed")
+	properties := toolPropertiesByName(t, callToolsList(t, server), "route.resolve_proceed")
 	target := objectProperties(t, properties["target"])
 	assertNullableSchema(t, target["ticket_path"])
 	assertNullableSchema(t, target["kind"])
@@ -1336,13 +1336,13 @@ func TestEnterImplementSchemaRequiresTargetAndAdvertisesNullableFacts(t *testing
 	var schema map[string]any
 	for _, rawTool := range listedTools {
 		tool, _ := rawTool.(map[string]any)
-		if tool["name"] == "enter.implement" {
+		if tool["name"] == "route.resolve_implement" {
 			schema, _ = tool["inputSchema"].(map[string]any)
 			break
 		}
 	}
 	if schema == nil {
-		t.Fatal("ws.enter.implement schema not found")
+		t.Fatal("ws.route.resolve_implement schema not found")
 	}
 	required, _ := schema["required"].([]any)
 	if !containsAnyString(required, "target") {
@@ -1413,7 +1413,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903500, root, nil))
 
 	_ = callToolWithKey(t, server, 1, key, "todo.add", map[string]any{"key": "stale", "title": "stale"})
-	text := callToolWithKey(t, server, 2, key, "enter.proceed", proceedReadyArgs("text"))
+	text := callToolWithKey(t, server, 2, key, "route.resolve_proceed", proceedReadyArgs("text"))
 	nonEmpty := nonEmptyLines(text)
 	if len(nonEmpty) < 3 {
 		t.Fatalf("raw verdict too short:\n%s", text)
@@ -1430,7 +1430,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 		t.Fatal("session record not found")
 	}
 	if !eqKeys(keysOf(record.Todos), "route-context", "resolve-verdict") {
-		t.Fatalf("enter.proceed did not replace todo list: %v", keysOf(record.Todos))
+		t.Fatalf("route.resolve_proceed did not replace todo list: %v", keysOf(record.Todos))
 	}
 	var agenda proceedAgenda
 	if err := json.Unmarshal(record.Agenda["proceed"], &agenda); err != nil {
@@ -1449,8 +1449,8 @@ func TestEnterProceedJSONIncludesRawVerdict(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903600, root, nil))
 
-	raw := callToolWithKey(t, server, 1, key, "enter.proceed", proceedReadyArgs("text"))
-	jsonText := callToolWithKey(t, server, 2, key, "enter.proceed", proceedReadyArgs("json"))
+	raw := callToolWithKey(t, server, 1, key, "route.resolve_proceed", proceedReadyArgs("text"))
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_proceed", proceedReadyArgs("json"))
 	var result proceedResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -1491,7 +1491,7 @@ func TestEnterProceedWarningsAndErrors(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903700, root, nil))
-	respLine := callToolLineWithKey(t, server, 1, key, "enter.proceed", proceedArgs("ticket-path", "bad enum", nil, map[string]any{
+	respLine := callToolLineWithKey(t, server, 1, key, "route.resolve_proceed", proceedArgs("ticket-path", "bad enum", nil, map[string]any{
 		"ticket": map[string]any{"status": "blocked"},
 	}))
 	if !toolIsError(t, respLine) || !strings.Contains(toolText(t, respLine), "invalid status") {
@@ -1736,11 +1736,11 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 900100, root, nil))
 
-	enter := callToolWithKey(t, server, 1, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(enter, "entered implement mode") {
-		t.Fatalf("enter.implement response unexpected: %s", enter)
+		t.Fatalf("route.resolve_implement response unexpected: %s", enter)
 	}
 
 	full := callToolWithKey(t, server, 2, key, "todo.list", map[string]any{"mode": "full"})
@@ -1774,7 +1774,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902500, root, nil))
 
-	enter := callToolWithKey(t, server, 1, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", map[string]any{
 		"delegation":   "direct-edit",
 		"plan_depth":   "none",
 		"review_alloc": "single",
@@ -1786,11 +1786,11 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		"- [ ] {review} Review (single)",
 	} {
 		if !strings.Contains(enter, want) {
-			t.Fatalf("enter.implement output missing %q:\n%s", want, enter)
+			t.Fatalf("route.resolve_implement output missing %q:\n%s", want, enter)
 		}
 	}
 
-	if got := callToolWithKey(t, server, 2, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 2, key, "route.resolve_implement", map[string]any{
 		"plan_depth":   "brief",
 		"review_alloc": "single",
 		"need_review":  true,
@@ -1798,7 +1798,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("invalid plan_depth error expected, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 3, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 3, key, "route.resolve_implement", map[string]any{
 		"delegation":   "direct-edit",
 		"review_alloc": "single",
 		"need_review":  true,
@@ -1808,7 +1808,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("direct-edit omitted plan_depth exposed planner path: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 4, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 4, key, "route.resolve_implement", map[string]any{
 		"delegation":   "delegated",
 		"plan_depth":   "research",
 		"review_alloc": "single",
@@ -1817,7 +1817,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("legacy research plan_depth should be rejected with survey escalation guidance, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 5, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 5, key, "route.resolve_implement", map[string]any{
 		"delegation":   "direct-edit",
 		"plan_depth":   "research",
 		"review_alloc": "single",
@@ -1826,14 +1826,14 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("direct-edit research plan_depth should be rejected, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 6, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 6, key, "route.resolve_implement", map[string]any{
 		"review_alloc": "single",
 		"need_review":  true,
 	}); !strings.Contains(got, "- [ ] {prep} Prep (survey plan)") || !strings.Contains(got, "- [ ] {edit} Edit (delegated)") {
 		t.Fatalf("legacy omitted delegation/plan_depth should default to delegated survey, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 7, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 7, key, "route.resolve_implement", map[string]any{
 		"review_alloc": "singel",
 		"need_review":  true,
 	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
@@ -1851,7 +1851,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
-	text := callToolWithKey(t, server, 2, key, "enter.implement", implementReadyArgs("text"))
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 	for _, want := range []string{
 		"Implementation Verdict",
 		"Mode: delegated",
@@ -1864,11 +1864,11 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		"standard documentation gates",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("enter.implement verdict missing %q:\n%s", want, text)
+			t.Fatalf("route.resolve_implement verdict missing %q:\n%s", want, text)
 		}
 	}
 
-	jsonText := callToolWithKey(t, server, 3, key, "enter.implement", implementReadyArgs("json"))
+	jsonText := callToolWithKey(t, server, 3, key, "route.resolve_implement", implementReadyArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -1892,7 +1892,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		t.Fatalf("unexpected agenda: %+v", agenda)
 	}
 	if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge") {
-		t.Fatalf("enter.implement did not replace todo list: %v", keysOf(record.Todos))
+		t.Fatalf("route.resolve_implement did not replace todo list: %v", keysOf(record.Todos))
 	}
 	readPrep := callToolWithKey(t, server, 4, key, "todo.read", map[string]any{"key": "prep"})
 	var prepPayload todoReadPayload
@@ -1940,7 +1940,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	risk["test"] = "low"
 	risk["security_or_contract"] = "low"
 
-	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2028,7 +2028,7 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
-	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", implementDirectSkipDocsArgs("json"))
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementDirectSkipDocsArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2093,7 +2093,7 @@ func TestEnterImplementUnbornRepositoryFallsBackFromCurrentBranchCompletion(t *t
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
-	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", implementDirectSkipDocsArgs("json"))
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementDirectSkipDocsArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2210,7 +2210,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			if tc.mutateArgs != nil {
 				tc.mutateArgs(args)
 			}
-			jsonText := callToolWithKey(t, server, 2, key, "enter.implement", args)
+			jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 			var result implementResult
 			if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 				t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2253,7 +2253,7 @@ func TestEnterImplementStopsOnImplementBranchWithoutMergeTarget(t *testing.T) {
 
 	args := implementReadyArgs("json")
 	delete(args["policy"].(map[string]any)["branch"].(map[string]any), "merge_target")
-	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
@@ -2307,7 +2307,7 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 
 	args := implementReadyArgs("json")
 	args["policy"].(map[string]any)["branch"].(map[string]any)["allow_rename"] = "yes"
-	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
@@ -2331,7 +2331,7 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 // only proves deriveImplementBranchPlan's response to a conflict, not that
 // the ancestor-path scan actually finds one against a real repo. Here a
 // legacy single-segment ref "impl/ws-dashboard-dev" is pre-created as a real
-// branch, then enter.implement is driven for a fresh create on current
+// branch, then route.resolve_implement is driven for a fresh create on current
 // branch "ws-dashboard-dev" — whose derived target is
 // "impl/ws-dashboard-dev/<stem>" — so the scan's second ancestor probe
 // (segments[:2] == "impl/ws-dashboard-dev") must rev-parse-verify a ref that
@@ -2357,7 +2357,7 @@ func TestEnterImplementCreatePathMergeRootRefConflictDetectedByRealGit(t *testin
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
 	args := implementReadyArgs("json")
-	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
@@ -3775,11 +3775,11 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5100, root, nil))
 
 	// Enter implement mode to populate agenda+todos.
-	enter := callToolWithKey(t, server, 5101, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 5101, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(enter, "entered implement mode") {
-		t.Fatalf("enter.implement unexpected: %s", enter)
+		t.Fatalf("route.resolve_implement unexpected: %s", enter)
 	}
 
 	// Continue mode: key present and resolves.
@@ -3893,7 +3893,7 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5300, root, nil))
 
 	// Enter implement mode to populate todos.
-	callToolWithKey(t, server, 5301, key, "enter.implement", map[string]any{
+	callToolWithKey(t, server, 5301, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 
@@ -4021,11 +4021,11 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5500, root, nil))
 
 	// Enter implement mode to populate agenda+todos.
-	enter := callToolWithKey(t, server, 5501, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 5501, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(enter, "entered implement mode") {
-		t.Fatalf("enter.implement unexpected: %s", enter)
+		t.Fatalf("route.resolve_implement unexpected: %s", enter)
 	}
 
 	manualResp := callToolWithKey(t, server, 5502, key, "workflow_manual", nil)

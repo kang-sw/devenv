@@ -571,7 +571,7 @@ prose: derive PARENT and SLUG from the branch name by stripping the
 `goal/<slug>` falls back to `main` as the merge target), ask the user for
 explicit approval, then `git merge --no-ff goal/<parent>/<slug>` into
 `<parent>` (or the `main`-fallback equivalent) — rather than routing
-through `lead-proceed`/`lead-implement`, because `enter.implement`
+through `lead-proceed`/`lead-implement`, because `route.resolve_implement`
 requires a ticket target this ticket-less step has none of. This override
 never extends to push or remote actions for either the per-ticket or the
 final merge. Outside an active `/goal` context, or once off a `goal/*`
@@ -745,7 +745,7 @@ workflow routing does not create new skeleton artifacts. {#260512-skeleton-draft
 Implementation skills execute code changes and close the documentation loop.
 
 `lead-implement` is the implementation harness. It gathers normalized target,
-scope, complexity, risk, and policy facts, calls `ws.enter.implement`, follows
+scope, complexity, risk, and policy facts, calls `ws.route.resolve_implement`, follows
 the MCP-authored Implementation Verdict, then runs the shared
 post-implementation documentation pipeline before reporting completion. The MCP
 verdict owns deterministic implementation labels and branch preflight: it chooses
@@ -769,7 +769,7 @@ dispatches a planner to write or refine that single implementation plan, spawns
 an implementer agent with the plan, and captures the resulting commit range.
 Ticket scope facts freeze from the ticket before source reading; inline scope
 facts may use the accepted request, loaded context, focused source inspection,
-and command output before `enter.implement`. The MCP verdict normally keeps
+and command output before `route.resolve_implement`. The MCP verdict normally keeps
 branch isolation independent of edit mode. One exact low-ceremony exception retains the current named
 non-implementation branch for an inline target only when
 `policy.low_ceremony_if_safe=yes` and unoverridden facts independently satisfy
@@ -802,7 +802,7 @@ metadata for the lead or transport, not worker-facing task input.
 
 After fact gathering and before preparation or source inspection,
 `lead-implement` reads the raw Implementation Verdict returned by
-`ws.enter.implement`. The verdict summarizes target, selected scope, branch
+`ws.route.resolve_implement`. The verdict summarizes target, selected scope, branch
 action, edit mode, plan depth, review allocation, documentation mode, normalized
 conditions, warnings, agenda values, and a concrete `Next:` instruction. The
 playbook follows that instruction instead of recomputing deterministic labels,
@@ -1011,7 +1011,7 @@ nobody wrote in the first place.
 whose local scope and verification are clear, and for which neither planning nor
 independent review materially improves the outcome, may take a direct-execution
 early return. It states the reason, performs and verifies the bounded request,
-and returns without calling `enter.proceed`, leaving the session agenda and todos
+and returns without calling `route.resolve_proceed`, leaving the session agenda and todos
 unchanged. The judgment may inspect only explicitly requested paths; unknown or
 expanded scope uses normal routing. {#260828-proceed-direct-execution-early-return}
 
@@ -1102,7 +1102,7 @@ plan as task input, may read additional documents listed in the plan, and must
 not read the ticket directly unless the plan's `Escalations` section explicitly
 authorizes ticket-file reading.
 
-For every normal route, `lead-proceed` calls `ws.enter.proceed` after lead-owned
+For every normal route, `lead-proceed` calls `ws.route.resolve_proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one
 `NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
 deterministic route-row precedence, normalization warnings, raw verdict text,
@@ -1114,7 +1114,7 @@ chain as the active execution instruction. It follows MCP's `Next:` instruction,
 which includes the route announcement, downstream invocation, verification,
 failure, stop, and post-write reroute rails. After `lead-write-ticket` refresh or
 promotion returns, the `Next:` instruction requires `lead-proceed` to rebuild
-route context and enter `ws.enter.proceed` again instead of continuing from an
+route context and enter `ws.route.resolve_proceed` again instead of continuing from an
 old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
 `lead-proceed` to call `ws/playbook.read(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
@@ -1122,7 +1122,7 @@ implementation-tool use. Outside the direct-execution judgment, `lead-proceed`
 does not apply sibling `lead-implement` judges, compute direct/delegated
 execution mode, compute branch mode, or inspect source.
 `lead-implement` owns those decisions when the handoff executes by calling
-`ws.enter.implement` after fact gathering. wsflow mirrors the same route-only
+`ws.route.resolve_implement` after fact gathering. wsflow mirrors the same route-only
 proceed boundary without pre-applying `wsflow:lead-implement` branch or
 execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
@@ -1191,8 +1191,8 @@ reviewed. `ref` (a routed ticket stem) accompanies a `block` verdict only.
 {#260830-review-range-scenario-ledger-stamp}
 
 Independent of `lead-review`, four MCP call sites elsewhere in the workflow
-surface (`tickets.close`, `workflow_manual`, `enter.implement`,
-`enter.proceed`) surface a cheap review-watermark checkpoint nudge computed
+surface (`tickets.close`, `workflow_manual`, `route.resolve_implement`,
+`route.resolve_proceed`) surface a cheap review-watermark checkpoint nudge computed
 from the same ledger (`#260830-review-watermark-checkpoint-nudge`). That
 nudge is advisory only: it never blocks the call it rides on, and it never
 appends to the ledger — only `review.marker` and `review.stamp` mutate it.

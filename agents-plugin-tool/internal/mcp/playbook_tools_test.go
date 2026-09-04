@@ -2556,7 +2556,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		t.Errorf("body %q: expected doctrine text 'execution attention'", body)
 	}
 	for _, want := range []string{
-		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
+		"Gather `target`, `facts`, and explicit caller `policy` for `ws/route.resolve_implement`",
 		"For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output.",
 		"Treat the installed todo list as the ordered runbook",
 		"Stop for unresolved binding decisions before source edits.",
@@ -2744,12 +2744,12 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		t.Errorf("body %q: expected doctrine text 'workflow attention'", body)
 	}
 	for _, want := range []string{
-		`enter.proceed`,
+		`route.resolve_proceed`,
 		"Follow `Next:` exactly",
-		"Treat an `enter.proceed` verdict as authoritative",
+		"Treat an `route.resolve_proceed` verdict as authoritative",
 		"judge: direct-execution",
 		"- On `Yes`",
-		"return without calling `enter.proceed`",
+		"return without calling `route.resolve_proceed`",
 		"scope_blocked=no-unfinished-phase",
 		"scope_blocked=container-ticket",
 		"scope_blocked=multiple-explicit-phases",
@@ -2943,11 +2943,11 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	}{
 		{
 			skill:   "lead-implement",
-			wantAll: []string{"enter.implement", "`target`", "`facts`", "`policy`"},
+			wantAll: []string{"route.resolve_implement", "`target`", "`facts`", "`policy`"},
 		},
 		{
 			skill:    "lead-proceed",
-			wantAll:  []string{"enter.proceed", "Treat an `enter.proceed` verdict as authoritative", "Follow `Next:` exactly"},
+			wantAll:  []string{"route.resolve_proceed", "Treat an `route.resolve_proceed` verdict as authoritative", "Follow `Next:` exactly"},
 			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 	}
