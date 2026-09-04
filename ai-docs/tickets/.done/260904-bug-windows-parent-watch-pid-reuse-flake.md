@@ -47,3 +47,17 @@ package passed; only this `cmd/ws-mcp` test failed.
   affect published release assets and does not reproduce on Linux.
 - If the re-run passes, this stays `idea/`; if it fails deterministically,
   promote to a real fix ticket and prefer the creation-time identity check.
+
+## Resolution (2026-09-04)
+
+Fixed in `22c51b15` (PR #9, ff-merged to `develop`). Rather than the
+creation-time comparison floated above, `watchProcessExit` now does a
+zero-timeout wait at open and disarms when the handle is already signaled: a
+reaped-then-recycled PID's object is already-signaled at open, so `onExit` never
+fires for a dead PID. Production `startParentDeathWatch` opens the parent handle
+once while alive and waits on that same handle, so it was already immune to PID
+reuse — the at-open guard closes the only spurious-fire path (opening an
+already-dead PID, the test's call pattern) with no signature change or reference
+timestamp. Negative test renamed `NeverOpenablePID` -> `DeadPIDNeverFires` and
+its "accepted race" caveat dropped. Verified green by the `windows-smoke` job on
+PR #9 (run 33854960982).
