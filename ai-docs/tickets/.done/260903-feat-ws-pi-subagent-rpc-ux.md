@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a65324df6bf96a7c
 sage-review-completeness-reviewed: a65324df6bf96a7c
+completed: 2026-09-04
 ---
 
 # Pi subagent interaction: persistent RPC children (send-message, transcript, resume)
@@ -269,6 +270,46 @@ Verification: a live run showing a child `ws-report-to-lead` mid-run waking a le
 `ws-agent-wait` with `reason: report`, multiple queued reports draining FIFO in one
 wake, a report buffering when no wait is pending, and `ws-agent-transcript`
 returning a greppable session path. Depends on Phase 1.
+
+### Result (3ea0bd32) - 2026-09-04
+
+Extended the Phase 1 RPC engine (no rewrite) with the child→lead report channel
+and the transcript accessor. Added child-side `ws-report-to-lead(message)` (in the
+`full-worker` `--tools` allowlist) whose call rides the child's existing RPC
+tool-invocation event (`tool_execution_start` for the tool name) into a per-agent
+bounded FIFO buffer — default cap 32, drop-oldest with a `reports_dropped` marker
+on overflow, reports retained across `ws-agent-stop` (dormancy). `ws-agent-wait`
+now wakes on idle **or** a report, carries `reason: idle|report`, and drains ALL
+pending reports for the woken agent in FIFO order (D-D); a new report fast path is
+ordered before the all-dormant guard so a dormant-but-reported agent is still
+harvestable. Added `ws-agent-transcript(agent_id) -> {transcript_path}` (Pi
+session JSONL path, no content marshalling; not in any worker `--tools` group).
+The relay needs no new transport — confirmed against installed
+`@earendil-works/pi-coding-agent@0.84.4` that a child custom-tool invocation
+surfaces to the parent `RpcClient.onEvent` stream.
+
+Verification: `agents-plugin-pi` `npm test` → 129/129 pass. The live `pi --mode
+rpc` gate (a real child `ws-report-to-lead` mid-run waking a concurrent
+`ws-agent-wait` with `reason: report`, multi-report FIFO drain in one real wake, a
+report buffering with no wait pending, `ws-agent-transcript` returning an on-disk
+greppable path) was NOT run — no live provider credentials in this environment;
+deferred to a manual live-gate pass (same caveat as Phase 1). All seam-extractable
+logic (report buffer FIFO/overflow, drain-all, reason tie-break,
+dormant-but-reported harvest, transcript accessor) is duck-typed unit-tested
+without a real `RpcClient`.
+
+Review: partitioned (correctness/fit/test) — fit clean, test clean, correctness
+clean with one non-actionable Minor (a concurrent double-`ws-agent-wait` on the
+same agent could return `reason: report` with an empty drain to the second waiter;
+outside the single-loop lead operating envelope, pre-existing in shape from Phase
+1's double-harvest tail). No relay needed.
+
+Spec: new anchors `{#260904-pi-report-to-lead-channel}` and
+`{#260904-pi-agent-transcript-path}`; `ws-agent-wait` bullet updated for the report
+dimension (commit `540953df`). Deviation: one mechanical TDZ hoist of
+`REPORT_TO_LEAD_TOOL_NAME` above `TOOL_GROUPS` (no design change).
+
+Both phases complete; ticket closed to `.done`.
 
 ## Non-goals
 
