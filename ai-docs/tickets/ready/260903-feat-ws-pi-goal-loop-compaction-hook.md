@@ -174,6 +174,52 @@ the loop, (b) a settle re-injects the reminder, (c) `/goal-achieved` and
 re-fire, (e) the runaway backstop force-stops after the configured count.
 Loop-guard / threshold logic unit-tested where seam-extractable.
 
+### Result (91a19eaf) - 2026-09-04
+
+Landed the lead-session goal loop arming + settled re-fire + terminal levers in a
+new adapter-local module `agents-plugin-pi/src/goal-loop.ts`, registered at the
+extension-factory top level from `index.ts`.
+
+- `/goal <goal>` (`pi.registerCommand`) injects a `Goal settled: <goal>`
+  announcement and arms an in-memory state machine; the `agent_settled` handler
+  is armed **only** while a goal is active, so a non-goal settle is an ordinary
+  stop.
+- An armed settle re-injects a reminder carrying the goal + both lever tool names
+  + the force-stop caveat.
+- Terminal levers are model-invoked `pi.registerTool` tools (zero prose parsing,
+  matching the `ws-report-to-lead` precedent): `goal-achieved(summary)` and
+  `goal-blocked(reason)` each disarm the loop. Design-ambiguity resolution: the
+  ticket's "skill" wording was implemented as `registerTool`, since neither Pi
+  commands nor skills apply to the model's own generated output.
+- Runaway backstop: N **consecutive** no-tool-call re-fires force-stop and reset;
+  a re-fire with an intervening tool call resets the streak. Threshold defaults to
+  10, tunable via adapter-owned `agents-plugin-pi/goal-loop-config.json` (sibling
+  to `model-catalog.json`), read fresh per settle; missing/malformed/non-positive
+  falls back to the default.
+- Lead-session-only: both spawn call sites in `spawner.ts` now stamp a
+  `WS_PI_AGENT_CHILD=1` env marker (via extracted `buildChildProcessEnv`), and the
+  settle handler no-ops when the marker is present (via extracted pure predicate
+  `isChildProcess(env)`), settling the cross-ticket fact with
+  `260903-feat-ws-pi-subagent-rpc-ux`.
+
+Spec: `{#260904-pi-goal-loop-arming-settled-levers}` (commit 9e230835); Constraints
+updated to mark arming/levers landed with compaction still deferred to Phase 2.
+
+Verification: `cd agents-plugin-pi && npm test` → 161/161 pass (129 baseline + 24
+Phase-1 + 8 review-fix tests). Review: fit clean, correctness clean (1 Minor:
+fractional `runaway_threshold` accepted, record-only), test 1 Important **[fixed]**
+in relay #1 (extracted `isChildProcess` + `buildChildProcessEnv`, added positive/
+negative/marker-placement unit coverage) + 1 Minor [fixed] + 1 Minor
+[won't fix: explicitly optional]. GOLDEN RULE held (no `agents-plugin-tool/`
+change).
+
+Deferred: the live `pi --mode json` five-point transcript gate (goal arms /
+settle re-injects / both levers stop / non-goal settle doesn't re-fire / backstop
+force-stops) is **outstanding** — this sandbox has no provider credentials, so it
+is honestly unverified, not faked. Also unexercised live: that a spawned worker's
+runtime env actually carries `WS_PI_AGENT_CHILD=1` (verified by reading compiled
+`rpc-client.js` env-merge behavior + unit tests, not observed live).
+
 ### Phase 2: Model-driven compaction lever + config knobs
 
 Add `/goal-compact-and-continue <carry-forward-prose>` (prose →
