@@ -7,6 +7,8 @@ related:
   260903-refactor-mcp-verb-vocabulary-unification: sibling layer ④ — ④'s scripted token substitution over lead-proceed/lead-implement runs before this ticket's authoring pass so those two skills are authored once
 sage-review-design: completed
 sage-review-design-reviewed: 587db921af0b881a
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 2ce5ab8ad8931cc2
 ---
 
 # enter.* affordance rename — route.resolve_* + full-opaque published params
@@ -89,10 +91,28 @@ caller-supplied fields than proceed, but the published surface is the same opaqu
 `params`. Coordinate the opaque-schema pointer text with the companion bug
 ticket's redirect guard so a mis-shaped direct call is pointed at the skill.
 
+Acceptance (not "schema now shows `params: object`" alone): the Go decoder still
+parses + validates the typed struct with the existing resolver/verdict tests
+green (routing output byte-unchanged); the relocated skill-body contract covers
+every field the resolver reads, cross-checked field-by-field against the typed
+struct so none is dropped; and a mis-shaped direct call surfaces the opaque
+pointer / redirect-guard message rather than a silent `status=unknown`.
+
 ## Spec Impact
 
-Adoption touches the MCP tools spec (`mcp-tools.md`) tool-name + input-schema
-contract for the two renamed tools, and the workflow-skills spec
-(`workflow-skills.md`) where `lead-proceed`/`lead-implement` reference them and
-now carry the input contract. Scope the exact spec-stem addressing when this
-ticket is promoted to `ready/`.
+Edits to existing anchors only — no new spec stem, and no heading `{#slug}`
+changes (so no `renamed-spec`):
+
+- `mcp-tools.md` `{#260625-session-state-tools}` — the "Enter (typed mode
+  switches)" paragraph and the per-mode `implement`/`proceed` subsections
+  (currently describing `enter.implement`/`enter.proceed` and their accepted
+  fields): rename the two tools to `route.resolve_implement`/
+  `route.resolve_proceed` and rewrite the published input-schema prose to the
+  opaque `params` + skill-pointer contract (typed validation stays internal).
+- `workflow-skills.md` `{#260505-proceed-routing-pipeline}` (proceed) and
+  `{#260505-implementation-workflow-skills}` (implement) — where
+  `lead-proceed`/`lead-implement` name the tool and now carry the real input
+  contract in the skill body.
+
+The `references.trace` sweep at implementation confirms no other spec anchor
+names the old tools.
