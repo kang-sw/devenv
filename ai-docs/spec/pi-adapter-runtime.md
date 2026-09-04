@@ -574,17 +574,31 @@ not consume delegation depth.
   task-focused natural language: no identity or persona framing and no XML or
   all-caps override language, which were found to backfire.
 
-> [!note] Implementation Gap · 2026-09-05
-> Missing behavior (Phase 1 verification outstanding): the exact `pi --fork`
-> command composition with `--mode rpc`/`--tools`/`--append-system-prompt` and
-> its at-leaf clone semantics, and the bleed proof-of-concept that gates the
-> side-thread surface's next phase (measuring the acknowledge-and-return rate
-> with the loop on versus off on a real lead session), both require a live
-> `pi --mode rpc` run with provider credentials, absent from the build sandbox.
-> The offline surface — tool-surface arithmetic, the anti-bleed predicates, the
-> report-shape and `expects_commit` checks, and the session-key rewrite — is
-> unit-covered; the live end-to-end confirmation of depth, completion
-> enforcement, and session-key isolation is deferred to that gate.
+> [!note] Live verification · 2026-09-05
+> The Phase 1 live gate was run against the installed adapter on a real Pi
+> session (`pi 0.84.4`, `openai-codex` subscription provider). Confirmed
+> end-to-end: `pi --fork <lead-session>` copy-on-fork composition produces a new
+> forked session that inherits the lead's full transcript; the fork's tool
+> surface carries `ws-report-to-lead` and excludes `ws-fork`; the fork emits a
+> `kind:"final"` report in the required shape (Outcome/Files changed/
+> Verification/Blockers/Commit), which the lead harvests via `ws-agent-wait`; the
+> anti-bleed nudge is delivered to the fork's own session (not the lead's), so a
+> no-report turn is re-prompted in place with no lead-context pollution. The
+> bleed PoC's go/no-go for the next phase therefore clears: the structural loop
+> is sufficient to drive the fork to a report.
+>
+> Operational precondition surfaced by the same run: a spawned child (worker or
+> fork alike) loads the adapter extension **only when the package is user-scope
+> installed** (`pi install <path>`). RPC children re-run the Pi CLI through
+> `process.argv[1]` without an explicit `-e`, and Pi does not auto-discover a
+> project's `package.json` `pi.extensions`; an ad-hoc `-e` lead run therefore
+> leaves children without `ws-report-to-lead` and the report round-trip silently
+> fails. The report/relay channel is available to spawned agents only under an
+> installed adapter.
+>
+> Not yet exercised live: Phase 2's owner-question TUI overlay (interactive
+> component + `/answer`/`/thread` shortcuts), which needs a live interactive TUI
+> rather than the `--print` non-interactive path used here.
 
 ## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
 

@@ -571,3 +571,29 @@ Unblock when a live `pi` environment with provider credentials is available:
 run the Phase 1 live gate (`--fork` composition + bleed PoC), and if the PoC
 clears its go/no-go, proceed to Phase 2. Until then the selector should skip
 this ticket.
+
+### Live gate cleared (2026-09-05) — bleed PoC go/no-go = GO
+
+The Phase 1 live gate was run on `pi 0.84.4` with the `openai-codex`
+subscription provider (user-scope installed adapter). Confirmed end-to-end:
+`--fork` copy-on-fork inherits the lead's full context; the fork's surface
+carries `ws-report-to-lead` and excludes `ws-fork`; the fork emits a
+`kind:"final"` report in the required shape, harvested by the lead via
+`ws-agent-wait`; the anti-bleed nudge lands in the fork's own session (not the
+lead's) with no lead-context pollution. **The bleed PoC clears its go/no-go
+(GO):** the structural loop is sufficient to drive the fork to a report, so
+Phase 2 may build the owner-question surface on top of forks.
+
+Operational precondition surfaced by the run: spawned children (workers and
+forks alike) load the adapter extension **only when it is user-scope installed**
+(`pi install <path>`) — RPC children re-run the Pi CLI via `process.argv[1]`
+without `-e`, and Pi does not auto-discover a project `package.json`'s
+`pi.extensions`, so an ad-hoc `-e` lead run leaves children without the report
+channel. Documented in `pi-adapter-runtime.md`
+(`260905-pi-side-thread-fork-task-thread` Live-verification note).
+
+**Remaining Phase 2 blocker is now narrowed to the TUI overlay only:** the
+owner-question overlay `Component`, `/answer`/`/thread` shortcuts, and
+`aboveEditor` widget need a live *interactive* TUI (tmux probe on an isolated
+socket) — not exercised by the `--print` non-interactive path used for the gate.
+The fork-mechanism prerequisite is no longer blocking.
