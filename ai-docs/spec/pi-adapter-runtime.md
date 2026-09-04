@@ -13,9 +13,9 @@ ws-mcp); no ws-mcp source is modified for Pi. All Pi-specific policy lives in th
 adapter.
 
 This document describes the caller-observable behavior of the adapter. It covers
-the Phase 1 bridge surface, the Phase 2 delegation spawner, the Phase 3
-user-curated model catalog + tier map, and the Phase 4 `/ws-discuss`
-proof-of-concept command.
+the bridge surface, the delegation spawner (persistent RPC worker children with
+bounded depth ≤ 2), the user-curated model catalog alias table, and the
+`/ws-discuss` proof-of-concept command.
 
 ## Tool exposure and name sanitization {#260903-pi-bridge-tool-registration}
 
@@ -117,43 +117,59 @@ id, independent of the order responses arrive.
 
 The adapter exposes a Pi-side delegation layer built on the same self-owned
 subprocess machinery as the bridge, but spawning the **`pi` CLI itself** (not the
-ws-mcp launcher) as a child process per delegated worker. Four tools are
-registered:
+ws-mcp launcher) as a child process per delegated worker. Each worker is a
+**persistent, driveable child**: it is launched in Pi's RPC mode (a long-lived
+`RpcClient`, `pi --mode rpc`), so the lead can send follow-up messages into a
+running or dormant child rather than the one-shot `-p`-per-task model. Each worker
+still runs as its own child process, preserving out-of-process isolation. The
+spawn tool is a **thin launcher**: the lead renders the playbook itself (surfacing
+the tier/model recommendation at render time), so the spawn tool carries no tier
+abstraction. Five tools are registered:
 
-- `ws-agent-spawn({ playbook, task, tier? })` — start an asynchronous worker. The
-  adapter renders the named ws playbook to a system-prompt file (via the bridged
-  `ws__playbook_render`), launches `pi --mode json -p` with that file as
-  `--append-system-prompt`, a per-spawn `--tools` allowlist, and a ws-owned
-  `--session` file, then returns an `agentId` immediately without waiting for the
-  worker to finish. The worker runs in the background.
-- `ws-agent-continue({ agentId, task })` — resume a completed worker with a new
-  task on its existing session. Allowed only when the worker has reached the done
-  state; the same session file and system-prompt file are reused (the prompt is
-  not re-rendered, so it is not duplicated across turns).
-- `ws-agent-wait({ agentIds, policy, timeout? })` — harvest workers. `policy:
-  "any"` returns once at least one named worker is done; `policy: "all"` returns
-  once all are. The result partitions the ids into done / still-running /
-  timed-out. A timeout never kills a running worker — it stays registered for a
-  later wait or continue. An empty `agentIds` list is a caller error and fails
-  fast rather than blocking.
+- `ws-agent-spawn({ system_prompt_path, prompt, model_name?, model_effort? })
+  -> { agent_id }` — start a persistent worker. `system_prompt_path` is the
+  lead-rendered playbook file, passed as `--append-system-prompt`; `prompt` is the
+  raw task text, delivered as the child's first turn. `model_name` is an optional
+  alias resolved through the catalog (see below) to `--model`, omitted → inherit
+  the parent's model; `model_effort` is an optional reasoning-effort override
+  applied after launch. The call returns an `agent_id` immediately; the worker runs
+  in the background. Every child is launched with an explicit CLI path, so it
+  resolves the installed `pi` entry with no bare-`pi` fallback.
+- `ws-agent-send(agent_id, message, interrupt?)` — send a message into a child.
+  The delivery mechanism is chosen from the child's state: a message starts a new
+  turn on an idle child, `interrupt: true` steers an actively streaming child
+  mid-run, and a non-interrupt message during an active run queues after the
+  current turn. A message to a **dormant** child auto-resumes it from its on-disk
+  session (keeping the same ws `session_key`) and then delivers — so resume is
+  subsumed by send, and there is no separate continue tool.
+- `ws-agent-wait(agent_ids[], timeout?)` — block until the FIRST child in the set
+  reaches idle, then return that child with its last message. Idle harvest is
+  edge/consume: a child returned as idle is consumed, so a later wait on an array
+  still listing it does not busy-return it and later finishers are not starved. On
+  `timeout` expiry with no finisher, the call returns a timed-out marker and leaves
+  every child registered; an empty `agent_ids` list is a caller error and fails
+  fast.
+- `ws-agent-list()` — enumerate live children with their status.
+- `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
+  mapping and on-disk session, leaving it **dormant/resumable** (a later
+  `ws-agent-send` revives it). This is distinct from `session_shutdown`, the
+  terminal teardown of every child.
 
-Depth is bounded 0→1: none of the four delegation tools appears in any spawnable
-worker's own `--tools` allowlist, so a depth-1 worker cannot spawn a further
-generation. Still-running workers are terminated when the session is torn down
+Still-running workers are terminated when the session is torn down
 (`session_shutdown`), before the bridge connection they dispatch through is
 closed.
 
-### Worker completion is gated on process exit {#260903-pi-spawner-completion-gating}
+### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
-A worker flips to the done state only when its `pi` child process closes its
-stdio, **not** when a terminal `stopReason` is first observed in the streamed JSON
-event log. The terminal `stopReason` set is exactly `stop` / `length` / `error` /
-`aborted` (`toolUse` and `pending` are non-terminal). The `--session` file is only
-guaranteed fully flushed after the child exits, so gating completion on process
-close is what makes an immediate `ws-agent-continue` right after `ws-agent-wait`
-safe — the resumed turn always reads a complete session file. The last-seen
-`stopReason` is retained only as completion metadata. A spawn that fails to launch
-(bad interpreter, missing binary) settles its waiters rather than hanging.
+Because a worker is now a persistent RPC child rather than a one-shot process, a
+turn's completion is signalled by the child reaching **idle** (its RPC
+`agent_settled` event), not by the child process closing its stdio. `ws-agent-wait`
+races that idle signal across the waited set; the child stays alive after settling,
+ready for the next `ws-agent-send`. Streaming-vs-idle state is tracked per child so
+a send is routed correctly (start a new turn / steer / queue). A spawn that fails
+to launch (bad interpreter, missing binary) settles its waiters rather than
+hanging, and a set of children with no live process and no pending idle in an
+untimed wait fails fast rather than blocking forever.
 
 ### explore — one-shot recon leaf {#260903-pi-explore-recon-leaf}
 
@@ -161,7 +177,13 @@ safe — the resumed turn always reads a complete session file. The last-seen
 ephemeral read-only reconnaissance: a fixed `explore` playbook, the `recon` tool
 group, `--no-session` (no continuation state), and self-reaping (the registry
 entry is dropped once the leaf completes). An `explore` leaf has no `continue`
-path.
+path, and its own `recon` allowlist excludes `explore` and every `ws-agent-*`
+tool, so an explore leaf spawns neither another explore nor a worker — it is the
+non-recursive terminal of the delegation tree (see bounded depth below).
+`explore` is the one delegation tool a worker itself may reach. Because the
+persistent-child `ws-agent-wait` tracks only RPC children, a one-shot
+`explore({ async: true })` leaf is not harvestable through it; the common
+synchronous `explore` is unaffected.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
 
@@ -169,53 +191,70 @@ The `--tools` allowlist for each spawn resolves from an adapter-owned tool-group
 table — `read-only`, `recon`, and `full-worker` — mapping each group to a Pi
 tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` group
 additionally includes the bridge's live `ws__*` tool names, taken from the running
-bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. No
-agent-profile files are written to disk (no `.pi/agents/`); all curation is
-in-memory plus `pi` CLI flags.
+bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. A
+worker's `full-worker` allowlist **excludes every delegation-driving tool**
+(`ws-agent-spawn` / `-send` / `-wait` / `-list` / `-stop`), so a worker cannot
+spawn or drive a further generation of persistent workers, but it **includes the
+literal `explore` tool** — a pi-native custom tool, not a `ws__*` bridge name, so
+it must be named explicitly to survive Pi's `--tools` allowlist — so a worker may
+spawn a read-only recon leaf. No agent-profile files are written to disk (no
+`.pi/agents/`); all curation is in-memory plus `pi` CLI flags.
 
-### Model tier resolution {#260903-pi-spawner-model-tier-inherit}
+### Bounded delegation depth {#260904-pi-spawner-bounded-depth-explore-leaf}
 
-`ws-agent-spawn` accepts a `tier`; the adapter resolves it to a concrete model
-through the user-curated tier map (see below). The map is keyed on ws's canonical
-first-class tiers `small` / `medium` / `large` / `xlarge`, so a
-`playbook.render` `recommended-tier` passes through unchanged. When the requested
-tier has a mapped model, the spawn launches with `--model <that model>`; when the
-tier is unmapped, the map is unset, or the caller passed an unrecognized tier
-string, the spawn falls back to inheriting the parent session's active model
-(equivalently, omitting `--model`). An unrecognized tier is never a validation
-error — resolution never hard-fails, it only degrades to inherit.
+The delegation tree terminates at depth 2 (lead → worker → explore leaf). A
+worker's `--tools` allowlist admits `explore` but no delegation-driving tool, and
+the `explore` leaf's own `recon` allowlist admits neither `explore` nor any
+`ws-agent-*` tool, so no branch of the tree extends past an explore leaf. This is
+enforced entirely by the adapter's per-spawn `--tools` allowlists; the ws-mcp
+core's own keyed-handler role check is untouched.
 
-`explore` is a **role**, not a caller-facing tier: it always resolves through the
-`small` tier (no `tier` parameter is exposed on `explore`). `ws-agent-continue`
-stays inherit-only (it carries no tier).
+### Model resolution: name alias, not tier {#260903-pi-spawner-model-tier-inherit}
+
+`ws-agent-spawn` carries **no `tier`** parameter. Model selection is the lead's
+call at render time: `ws__playbook_render` already returns a config-resolved
+`recommended-tier` / `recommended-model` / `recommended-reasoning-effort`, and the
+lead either passes `model_name` (and optionally `model_effort`) to the spawn or
+omits them to inherit the parent's model. When `model_name` is given it is resolved
+through the catalog's alias table (see below) to a concrete `provider/id` and
+launched as `--model <that model>`; an unknown alias, an empty table, or an omitted
+`model_name` all degrade to inheriting the parent's active model. Resolution never
+hard-fails. `model_effort`, when given, is applied to the launched child through a
+post-launch reasoning-effort call rather than a launch flag; an unsupported value
+is a no-op, never an error.
+
+`explore` is a **role**, not a caller-facing model choice: it resolves its own
+model through the catalog and exposes no `model_name` parameter.
 
 ### Model catalog data file {#260903-pi-model-catalog-config-file}
 
-The curated catalog and tier map live in an adapter-owned data file,
+The curated model aliases live in an adapter-owned data file,
 `agents-plugin-pi/model-catalog.json` (sibling to `runtime.json`) — no Pi model
-strings are placed in the harness-neutral ws-mcp core. Its shape is a `tiers`
-object mapping each canonical tier to a `provider/id` model string, plus an
-optional `catalog` list of curated candidate models. The file ships as `{}`
-(fully unset) so a fresh checkout starts with every spawn inheriting until the
-user curates it. It is read **fresh on every spawn** (no caching), so a hand-edit
-applies without restarting Pi; a missing or malformed file is treated as unset
-rather than an error.
+strings are placed in the harness-neutral ws-mcp core. Its shape is an `aliases`
+object mapping a **generic model name** (e.g. `opus`, `sonnet`) to a concrete
+`provider/id` model string, plus an optional `catalog` list of curated candidate
+models. A `model_name` passed to `ws-agent-spawn` is resolved name → `provider/id`
+through this table; this replaces the earlier tier→model map, since the spawn tool
+no longer takes a tier. The file ships as `{}` (empty alias table) so a fresh
+checkout starts with every spawn inheriting until the user curates it. It is read
+**fresh on every spawn** (no caching), so a hand-edit applies without restarting
+Pi; a missing or malformed file is treated as an empty table rather than an error.
 
 The read-only `ws-model-catalog-list` command enumerates the session's usable
 models (`ctx.scopedModels`, falling back to the full available pool when no
 scoping is configured) as `provider/id` candidates for the user to hand-copy into
 `model-catalog.json`. It never writes the file.
 
-### Unset-tier advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
+### Unset-catalog advisory on workflow_manual {#260903-pi-model-catalog-unset-advisory}
 
-While the tier map's `small` tier is unset, the adapter appends a strong advisory
+While the catalog's alias table is empty, the adapter appends a strong advisory
 to every `workflow_manual` response (and only that tool's response), mirroring the
 cadence of the ws-mcp core's bootstrap-version-behind advisory — recomputed and
 re-appended on every call while the condition holds, not once per session. The
 advisory is appended after the tool's own content (never prepended, never mutating
 the original in place) and is added only on a successful `workflow_manual` result,
 never on an error response. Spawns and explores still degrade silently to inherit
-while unset; the advisory is the only pressure and never blocks work.
+while the table is empty; the advisory is the only pressure and never blocks work.
 
 ## Proof-of-concept command {#260903-pi-poc-discuss-command}
 
@@ -288,9 +327,10 @@ canonical source is absent (packing from an already-vendored tarball). `npm pack
 fires both hooks, so the copy runs redundantly but idempotently.
 
 > [!note] Constraints
-> - This contract covers the Phase 1 bridge, the Phase 2 delegation spawner, the
->   Phase 3 model catalog + tier map, and the Phase 4 `/ws-discuss` PoC command —
->   the full ws-pi-native MVP surface. Post-MVP surfaces (durable depth-2
->   recursion, an always-visible TODO, the goal-loop, and compaction hooks) are
->   deferred to follow-up tickets under the epic and are not part of this contract
->   yet.
+> - This contract covers the bridge, the delegation spawner (upgraded to
+>   persistent RPC children with bounded depth ≤ 2), the model catalog alias table,
+>   and the `/ws-discuss` PoC command. Post-MVP surfaces still deferred to
+>   follow-up tickets under the epic — the child→lead report channel and path-only
+>   transcript (`ws-report-to-lead` / `ws-agent-transcript`, this ticket's Phase 2),
+>   an always-visible TODO, the goal-loop, and compaction hooks — are not part of
+>   this contract yet.
