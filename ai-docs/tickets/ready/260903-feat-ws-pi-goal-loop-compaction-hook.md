@@ -10,6 +10,10 @@ related-mental-model:
   - plugin-runtime
 spec:
   - pi-adapter-runtime
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: ce6262334bd651be
+sage-review-completeness-reviewed: ce6262334bd651be
 ---
 
 # Pi goal-loop + turn-end compaction judgment hook
@@ -102,8 +106,12 @@ whether to call `/goal-compact-and-continue`. The extension does NOT autonomousl
 compact. Pi's own overflow auto-compaction stays as the last-resort backstop.
 Config knobs: (a) the compaction advisory point (the `percent` at which the
 reminder nudges the model to compact), and (b) a context-window / max-token
-override. `session_before_compact` remains the companion surface for injecting ws
-state into a compaction and detecting Pi's own `reason: "threshold"` signal.
+override. These knobs plus the Phase 1 runaway threshold live as **adapter-owned
+config** — built-in extension-constant defaults overridden by an adapter-owned
+data file read fresh per use (the `model-catalog.json` sibling precedent), never
+in ws-mcp config (golden rule). `session_before_compact` remains the companion
+surface for injecting ws state into a compaction and detecting Pi's own
+`reason: "threshold"` signal.
 
 ## Remaining open questions (post-2026-09-03)
 
@@ -111,7 +119,8 @@ Resolved above: judgment signal shape (explicit skills, no prose parsing),
 arming (active-goal announcement + armed-only-in-goal-mode), loop guard (N
 consecutive no-tool-call re-fires force-stop), and compaction ownership
 (model-driven with `percent` surfaced + config knobs + Pi overflow backstop).
-Still open:
+The items below are deferred and **none blocks the phases** — Phase 1 verification
+is single-session, and Phase 2 already fixes the heuristic as advisory-only:
 
 - **Durable goal state across compaction.** The Claude-native ancestor
   (`260723`) leaned on durable on-disk ticket state to survive compaction; how
@@ -124,12 +133,63 @@ Still open:
 - **Interaction with subagent RPC children** (`260903-feat-ws-pi-subagent-rpc-ux`):
   does the goal-loop run only on the lead session, or also drive settle/compact
   on children?
-- **Config surface.** Where the tunable knobs live (runaway threshold, compaction
-  advisory point, context-window override) — ws config vs Pi settings vs
-  extension constants.
+
+## Spec Impact
+
+- Target spec: `ai-docs/spec/pi-adapter-runtime.md`. Add new `260904`-dated
+  anchors for the goal-loop surface — a levers/arming anchor (the three `/goal-*`
+  skills, the "Goal settled" announcement, the `agent_settled`
+  armed-only-in-goal-mode handler + per-re-fire reminder, and the
+  N-consecutive-no-tool-call runaway backstop) and a compaction anchor
+  (model-driven `/goal-compact-and-continue`, `getContextUsage().percent`
+  surfacing, the config knobs, and the `session_before_compact` companion with Pi
+  overflow as backstop).
+- Update the spec's closing Constraints note, which currently lists the goal-loop
+  and compaction hooks as "deferred to follow-up tickets … not part of this
+  contract yet," to reflect that this ticket lands them.
+- Expected caller-visible change: while a goal is active, an agent settle
+  re-injects a continue turn and three `/goal-*` skills drive state transitions;
+  the model owns compaction timing via `/goal-compact-and-continue`.
+- Contract-first: yes. Write the `🚧` planned spec entries at proceed via
+  `lead-write-spec`, removing the markers as each phase lands.
+
+## Phases
+
+### Phase 1: Goal-mode arming + agent_settled loop + terminal levers
+
+Register the goal-entry command `/goal <goal>` (inject the "Goal settled: <goal>"
+announcement and set the active-goal marker), the `agent_settled` handler armed only while a
+goal is active (a settle outside goal mode is an ordinary stop), the per-re-fire
+reminder injection carrying the goal + levers, and the two terminal skills
+`/goal-achieved <summary>` and `/goal-blocked <reason>` that end the run. Add the
+runaway backstop: N consecutive re-fires with no tool call force-stop the goal
+(default 10 consecutive, config-tunable). No compaction in this phase.
+
+Verification: a live `pi … --mode json` transcript showing (a) goal entry arms
+the loop, (b) a settle re-injects the reminder, (c) `/goal-achieved` and
+`/goal-blocked` each terminate the loop, (d) a non-goal session settle does NOT
+re-fire, (e) the runaway backstop force-stops after the configured count.
+Loop-guard / threshold logic unit-tested where seam-extractable.
+
+### Phase 2: Model-driven compaction lever + config knobs
+
+Add `/goal-compact-and-continue <carry-forward-prose>` (prose →
+`ctx.compact({ customInstructions })` → re-enter the next goal turn), surface in
+the continue turn both `getContextUsage().percent` AND the compression-safety
+heuristic advisory (phase-boundary / merge-gate = safe to compact; a non-phase
+stop = unsafe) as information, wire the config knobs (runaway threshold,
+compaction advisory point, context-window override — stored as extension-constant
+defaults plus an adapter-owned data-file override, per the `model-catalog.json`
+precedent), and add the `session_before_compact` companion (inject ws state;
+observe Pi's `reason: "threshold"`), leaving Pi's overflow auto-compaction as the
+last-resort backstop.
+
+Verification: a live transcript showing the model call
+`/goal-compact-and-continue` compacts with the carry-forward prose and re-enters
+the loop; the percent surfaces in the continue turn; a config-knob override takes
+effect on a fresh read. Depends on Phase 1.
 
 ## Non-goals
 
-- Building it in this ticket — capture + feasibility + protocol framing only.
 - Changing ws-mcp; the loop is adapter-local.
 - Reproducing the opencode four-token marker verbatim (explicitly discarded).
