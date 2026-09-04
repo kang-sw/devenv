@@ -925,7 +925,8 @@ func TestNoteWriteOversizeAppendsChallengeExactlyOnce(t *testing.T) {
 	if !strings.Contains(resp, "big.note") {
 		t.Fatalf("note.write(oversize) confirmation missing key: %s", resp)
 	}
-	if got := strings.Count(resp, noteOversizeChallenge); got != 1 {
+	wantChallenge := noteOversizeChallengeFor(wsnote.LayerWorktree)
+	if got := strings.Count(resp, wantChallenge); got != 1 {
 		t.Fatalf("note.write(oversize) appended the challenge %d times, want exactly 1: %s", got, resp)
 	}
 	if !strings.Contains(resp, "Not mute.") {
@@ -957,7 +958,8 @@ func TestNoteWriteBatchWithOneOversizeAppendsChallengeOncePerCall(t *testing.T) 
 			map[string]any{"key": "batch.small2", "value": "also short", "priority": 3},
 		},
 	})
-	if got := strings.Count(resp, noteOversizeChallenge); got != 1 {
+	wantChallenge := noteOversizeChallengeFor(wsnote.LayerWorktree)
+	if got := strings.Count(resp, wantChallenge); got != 1 {
 		t.Fatalf("note.write(batch, one oversize) appended the challenge %d times, want exactly 1: %s", got, resp)
 	}
 }
@@ -984,5 +986,126 @@ func TestNoteWriteJSONModeOmitsOversizeChallenge(t *testing.T) {
 	var records []wsnote.Record
 	if err := json.Unmarshal([]byte(resp), &records); err != nil {
 		t.Fatalf("note.write(oversize, format:json) response is not valid JSON: %v\n%s", err, resp)
+	}
+}
+
+// TestNoteOversizeChallengeForIsLayerBranchedAndDropsLargeTextKeepCarveOut
+// verifies each of the four wsnote.Layer variants produces its own distinct
+// nudge text matching the layer-specific remediation contract, and that none
+// of them carry the removed large-text-keep carve-out phrase — notes are
+// always-injected, so an irreducible sub-300-byte pointer passes the
+// threshold naturally instead of needing a keep-the-full-text escape hatch.
+func TestNoteOversizeChallengeForIsLayerBranchedAndDropsLargeTextKeepCarveOut(t *testing.T) {
+	const carveOutPhrase = "volatile AND homeless AND must-always-stay-in-context"
+
+	cases := []struct {
+		layer    wsnote.Layer
+		mustHave []string
+	}{
+		{
+			layer:    wsnote.LayerRepo,
+			mustHave: []string{"ticket/spec/mental-model", "relative pointer"},
+		},
+		{
+			layer:    wsnote.LayerWorktree,
+			mustHave: []string{"gitignored local doc", "*.local.md", "relative pointer"},
+		},
+		{
+			layer:    wsnote.LayerClone,
+			mustHave: []string{`path.generate(kind: "clone"`, "absolute path"},
+		},
+		{
+			layer:    wsnote.LayerMachine,
+			mustHave: []string{"excluded doc", "absolute path"},
+		},
+	}
+
+	seen := map[string]bool{}
+	for _, tc := range cases {
+		text := noteOversizeChallengeFor(tc.layer)
+		if !strings.HasPrefix(text, "Large note (≥300 bytes; saved).") {
+			t.Fatalf("layer %q challenge missing the shared oversize preamble: %s", tc.layer, text)
+		}
+		if !strings.HasSuffix(text, "Not mute.") {
+			t.Fatalf("layer %q challenge missing the not-mute remediation phrasing: %s", tc.layer, text)
+		}
+		for _, want := range tc.mustHave {
+			if !strings.Contains(text, want) {
+				t.Fatalf("layer %q challenge missing %q: %s", tc.layer, want, text)
+			}
+		}
+		if strings.Contains(text, carveOutPhrase) {
+			t.Fatalf("layer %q challenge still contains the removed large-text-keep carve-out: %s", tc.layer, text)
+		}
+		if seen[text] {
+			t.Fatalf("layer %q challenge text is not distinct from another layer's: %s", tc.layer, text)
+		}
+		seen[text] = true
+	}
+}
+
+// TestNoteWriteRepoLayerOversizeUsesRepoChallengeText verifies note.write on
+// the repo layer appends the repo-specific (relative-pointer,
+// ticket/spec/mental-model) nudge text, not the worktree variant.
+func TestNoteWriteRepoLayerOversizeUsesRepoChallengeText(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "repo",
+		"notes": []any{
+			map[string]any{"key": "repo.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
+		},
+	})
+	wantChallenge := noteOversizeChallengeFor(wsnote.LayerRepo)
+	if !strings.Contains(resp, wantChallenge) {
+		t.Fatalf("note.write(oversize, layer:repo) = %s, want repo-layer challenge text %q", resp, wantChallenge)
+	}
+	if strings.Contains(resp, noteOversizeChallengeFor(wsnote.LayerWorktree)) {
+		t.Fatalf("note.write(oversize, layer:repo) unexpectedly used the worktree-layer challenge text: %s", resp)
+	}
+}
+
+// TestNoteWriteCloneLayerOversizeUsesCloneChallengeText verifies note.write
+// on the clone layer appends the clone-specific (path.generate allocator,
+// absolute-path pointer) nudge text.
+func TestNoteWriteCloneLayerOversizeUsesCloneChallengeText(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "clone",
+		"notes": []any{
+			map[string]any{"key": "clone.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
+		},
+	})
+	wantChallenge := noteOversizeChallengeFor(wsnote.LayerClone)
+	if !strings.Contains(resp, wantChallenge) {
+		t.Fatalf("note.write(oversize, layer:clone) = %s, want clone-layer challenge text %q", resp, wantChallenge)
+	}
+}
+
+// TestNoteWriteMachineLayerOversizeUsesMachineChallengeText verifies
+// note.write on the machine layer appends the machine-specific
+// (prose-only, no allocator mention) nudge text.
+func TestNoteWriteMachineLayerOversizeUsesMachineChallengeText(t *testing.T) {
+	setupNoteTestEnv(t)
+	s := NewServer(t.TempDir(), "test")
+	_, key := mintRootKey(t, s, 1)
+
+	resp := callToolWithKey(t, s, 2, key, "note.write", map[string]any{
+		"layer": "machine",
+		"notes": []any{
+			map[string]any{"key": "machine.big", "value": strings.Repeat("a", noteOversizeThreshold), "priority": 1},
+		},
+	})
+	wantChallenge := noteOversizeChallengeFor(wsnote.LayerMachine)
+	if !strings.Contains(resp, wantChallenge) {
+		t.Fatalf("note.write(oversize, layer:machine) = %s, want machine-layer challenge text %q", resp, wantChallenge)
+	}
+	if strings.Contains(resp, "path.generate") {
+		t.Fatalf("note.write(oversize, layer:machine) unexpectedly mentions an allocator: %s", resp)
 	}
 }

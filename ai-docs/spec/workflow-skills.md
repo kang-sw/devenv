@@ -833,32 +833,29 @@ first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
 correctness `large`, fit and test `medium` — raised for unusually subtle risk.
 When a delegate playbook declares its own `tier:`, the `recommended-tier`
 returned by `playbook.render` is authoritative for that delegate and the table is
-the allocation default. The review budget counts review cycles, not relays, and
-is per implementation slice: 2 cycles for single-reviewer, 3 cycles for
-partitioned, where the lead may arbitrate a contested finding through the
-`review-adjudicator` delegate. Adjudication runs inside a relay slot, consumes no
-review cycle, is bounded to one per slot, and returns one verdict per dispute:
-uphold the refusal, override it, or record it as a scope deferral carried into
-the final report. Overriding a maintained refusal ships the fix as the next relay
-and spends that cycle; overriding a mid-relay escalation returns the verdict
-inside the current slot and spends nothing. The single-reviewer budget has no
-adjudication slot. A relay routes to the `implementer-elevated` delegate —
-declared `tier: large`, and rendered with the relay inputs plus the prior cycles'
-fix commits and dispositions — instead of `implementer-relay` when a finding the
-implementer reported fixed is returned unresolved or still non-clean by the next
-review, or when a newly surfaced finding shares a root cause with an
-already-relayed one. The first condition fires after one such failed relay rather
-than two, because the budget's last relay is the only slot the elevated delegate
-can still act in, and a finding carrying a settled disposition (won't-fix,
-deferred, out-of-scope, or an open escalation) is a decision rather than a failed
-fix attempt and never triggers it. When an adjudicator override and either
-elevated-routing condition apply to the same relay, the lead dispatches
-`implementer-elevated` once carrying the override list, never two relays for one
-cycle. The initial review is cycle 1, so
-the budget permits one fewer relay than its cycle count. The last budgeted cycle
-completes the run rather than halting it: the lead stops relaying, proceeds to
-closeout, and carries unresolved findings with their dispositions into the
-final report.
+the allocation default. The per-slice review loop budgets by severity rather
+than uniformly. Critical is must-fix and bounded to 3 review rounds: review #1,
+then — only when review #1 reports a Critical finding — a Critical-scoped
+review #2 after relay #1, then, if still non-clean, a second Critical-scoped
+relay (relay #2) and a Critical-scoped review #3. A Critical still non-clean
+after review #3 is the ceiling, not a hard stop: it unconditionally elevates to
+`implementer-elevated` and the run continues to the remaining todos, carrying
+the elevation into the final report. Important is best-effort and gets at most
+one relay, spent in relay #1 alongside Critical and never re-reviewed; a still
+non-clean Important after relay #1 carries the implementer's own
+`[not fixed: <reason>]` self-report rather than a re-review verdict. Minor
+drives no relay at any point and is recorded in the review summary only. Every
+non-clean Critical or Important finding relay #1 dispositions carries exactly
+one marker: `[fixed]`, `[won't fix: <reason>]`, `[deferred: <reason>]`, or
+`[escalate: <reason>]`; Important additionally has `[not fixed: <reason>]` for
+the still-non-clean case above — Critical never gets that marker, since a
+still-non-clean Critical instead carries forward into the next Critical-scoped
+round. Because `implementer-elevated` is reachable only at the Critical
+ceiling, and only for the Critical finding that reached it, the per-slice loop
+still does not route to `review-adjudicator`: nothing in this budget reproduces
+its contested-finding arbitration trigger ("before the next review", "the next
+relay" independent of severity). That playbook remains in the tree but this
+loop does not invoke it.
 {#260612-reviewer-allocation-tier-default}
 
 Delegates in the review fix-loop are stateless by contract: each implementer and
@@ -878,13 +875,13 @@ full findings, reports the severity verdict, reviews the current diff per its
 charter, and is not asked to classify regression-vs-preexisting. The lead
 enforces convergence by dedup against the durable disposition record — a settled
 finding is not re-relayed, while genuinely new Critical/Important findings and
-findings reported fixed that a re-review returns unresolved are — layered over
-the review-cycle budget as the backstop for the pathological case of a reviewer
-inventing new findings each cycle. Unresolved carryover is not a settled
-disposition: dedup bars re-litigating a decision the record already carries
-(won't-fix, deferred, out-of-scope, or an open escalation), and the budget
-separately bounds reviewer-invented churn, so neither rule suppresses the relay
-of a fix that did not hold.
+findings reported fixed that a re-review returns unresolved are. Unresolved
+carryover is not a settled disposition: dedup bars re-litigating a decision the
+record already carries (won't-fix, deferred, out-of-scope, or an open
+escalation), while the severity-graded budget — Important's single relay,
+Critical's bounded 3 review rounds — rather than an unbounded cycle count,
+naturally bounds reviewer-invented churn, so neither rule suppresses the relay of
+a fix that did not hold.
 Delegated review-fix relay is file-first: the lead renders the
 `implementer-relay` playbook with declared inputs for plan path, review cycle,
 current commit range, non-clean review paths, disposition notes, verification
@@ -901,19 +898,30 @@ accepted scope, constraints, non-goals, and verification boundary and never
 reads a placeholder ticket path. `plan-populator-survey` clips the selected
 authority, explores source, writes a light implementation plan with `Relevant
 Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
-`Verification Plan`, and `Escalations`, then returns `[ok]` or
-`[escalate-to-research]` with confidence and rationale. If survey cannot safely
-support implementation without strategy, contract, or reuse judgment,
-`lead-implement` routes to `plan-populator-research` on the same plan path
-before spawning the implementer.
+`Verification Plan`, and `Escalations`, then returns `[ok]`,
+`[escalate-to-research]`, or `[escalate-to-lead]` with confidence and
+rationale. `[escalate-to-lead]` is a lead-directed scope-reduction signal,
+distinct from `[escalate-to-research]`'s strategy/contract-uncertainty scope:
+a fully-specified, multi-part requirement must be carried whole into the plan,
+and a confident planner decision to implement only a subset is a scope
+decision for the lead, never a unilateral planner choice, unless the ticket or
+lead already authorized the phasing. If survey cannot safely support
+implementation without strategy, contract, or reuse judgment, `lead-implement`
+routes to `plan-populator-research` on the same plan path before spawning the
+implementer.
 
 `plan-populator-research` is reached from the survey escalation signal and makes
 planner judgments: it reads any existing survey output at the same plan path,
 chooses clean existing mechanisms when they fit the selected authority, preserves
 selected contract and verification guardrails in the plan, rejects temporary,
-fallback, mock-data, and duplicated-glue paths, and escalates when no clean plan
-can satisfy it. A survey-to-research route reuses the same authority inputs and
-replaces or refines the same plan artifact path with the research plan; it does not create a
+implementation-fallback (scope-shortcut), mock-data, and duplicated-glue paths
+— as distinct from a ticket's required runtime fallback (a specified execution
+branch such as graceful degradation), which is not a shortcut signal and must
+be planned in full — and escalates via the same `[escalate-to-lead]` channel
+when no clean plan can satisfy it or when only a confident subset of a
+fully-specified, multi-part requirement can be planned. A survey-to-research
+route reuses the same authority inputs and replaces or refines the same plan
+artifact path with the research plan; it does not create a
 research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
@@ -929,9 +937,9 @@ relevant ticket contract and records implementation strategy, codebase findings,
 verification expectations, escalations, and explicit out-of-scope boundaries.
 Ticket noise such as background discussion, unsettled options, and unrelated
 future phases is stripped. In ticket-driven runs, reviewers read the ticket and
-plan, then treat selected-scope binding decisions omitted from the plan or
-violated by the implementation as blocking findings within their assigned
-partitions.
+plan, then treat any specified authority requirement that is not implemented
+and does not carry an explicit, authorized deferral as a blocking finding
+within their assigned partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
 stages complete. For implementation-branch modes,
@@ -999,11 +1007,18 @@ nobody wrote in the first place.
 
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
-`lead-proceed` is the first step for implementation tasks. It is route-only: it
-reads conversation state and existing workflow artifacts, then continues through
-the needed pipeline stages without reading source code or performing
-implementation work. When workflow primitive context is not already active, it
-loads `lead-workflow-manual` before routing.
+`lead-proceed` is the first step for implementation tasks. An inline request
+whose local scope and verification are clear, and for which neither planning nor
+independent review materially improves the outcome, may take a direct-execution
+early return. It states the reason, performs and verifies the bounded request,
+and returns without calling `enter.proceed`, leaving the session agenda and todos
+unchanged. The judgment may inspect only explicitly requested paths; unknown or
+expanded scope uses normal routing. {#260828-proceed-direct-execution-early-return}
+
+All other targets are route-only: `lead-proceed` reads conversation state and
+existing workflow artifacts, then continues through the needed pipeline stages
+without source inspection or implementation work. When workflow primitive context
+is not already active, it loads `lead-workflow-manual` before routing.
 
 When handoff stages are needed, their order is fixed:
 
@@ -1069,13 +1084,13 @@ Verdict, stops when the anchor is missing, and treats absent binding anchor
 decisions as missing settled decisions.
 {#260513-proceed-ticket-freshness-gate}
 
-Implementation always routes through `lead-implement` with the selected scope as
-a hard scope boundary. `lead-proceed` does not rejudge general ticket quality,
-mutate ticket structure, decide delegated plan depth, or invoke implementation
-primitives before `lead-implement`; it requests phase or ticket slicing only
-when scope resolution blocks safe implementation. Public or cross-module
-contract checkpoints are expressed through the delegated `lead-implement`
-implementation plan.
+Except for a direct-execution early return, implementation routes through
+`lead-implement` with the selected scope as a hard scope boundary.
+`lead-proceed` does not rejudge general ticket quality, mutate ticket structure,
+decide delegated plan depth, or invoke implementation primitives before
+`lead-implement`; it requests phase or ticket slicing only when scope resolution
+blocks safe implementation. Public or cross-module contract checkpoints are
+expressed through the delegated `lead-implement` implementation plan.
 
 `lead-implement` also loads the native-subagent pivot anchor before editing when
 the target touches plugin architecture, host-neutral migration, spawn-removal,
@@ -1087,7 +1102,7 @@ plan as task input, may read additional documents listed in the plan, and must
 not read the ticket directly unless the plan's `Escalations` section explicitly
 authorizes ticket-file reading.
 
-Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
+For every normal route, `lead-proceed` calls `ws.enter.proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one
 `NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
 deterministic route-row precedence, normalization warnings, raw verdict text,
@@ -1103,9 +1118,9 @@ route context and enter `ws.enter.proceed` again instead of continuing from an
 old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
 `lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
-implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
-judges, compute direct/delegated execution mode, compute branch mode, or inspect
-source.
+implementation-tool use. Outside the direct-execution judgment, `lead-proceed`
+does not apply sibling `lead-implement` judges, compute direct/delegated
+execution mode, compute branch mode, or inspect source.
 `lead-implement` owns those decisions when the handoff executes by calling
 `ws.enter.implement` after fact gathering. wsflow mirrors the same route-only
 proceed boundary without pre-applying `wsflow:lead-implement` branch or
@@ -1114,26 +1129,108 @@ execution judgments.
 
 ## Review Workflow Skills {#260513-review-workflow-skills}
 
-`lead-review` reviews a pull request or merge request branch. It loads
-`ai-docs/_review.local.md` for environment configuration (remote access method,
-branch naming, review phases, blocked paths, comment and merge methods, and
-contributor workflow); when no config exists, it interviews the user and writes
-the config before proceeding. The config is machine-local and gitignored.
+`lead-review` reviews either a pull/merge request branch (branch scenario,
+default or via a `branch` argument) or a caller-supplied `base..head` range
+(range scenario, via a `range` argument) instead of a checked-out branch — the
+caller owns minting the range marker; `lead-review` only consumes it. Both
+scenarios run the same downstream phase, judge, and verdict machinery; only
+target diff selection differs.
+
+It loads `ai-docs/_review.local.md` for environment configuration (remote
+access method, branch naming, review phases, blocked paths, comment and merge
+methods, and contributor workflow). Config-load is scenario-scoped: the branch
+scenario, absent config, interviews the user and writes the config before
+proceeding (unchanged today); the range scenario, absent config, proceeds on
+built-in review-substance defaults (intent/alignment/risk phase text, the Deep
+Review threshold) and never enters the setup interview, since a range review
+touches no checkout, remote, or merge and the collaboration/remote config half
+is meaningless to it. When a config file is present, both scenarios honor its
+review-substance sections (Review Phases, Checklist, Deep Review); the config
+is machine-local and gitignored. `## Landing Lens` is the one exception: it is
+honored by the range scenario only, present or absent config alike, and
+independent of the Contributor Workflow setting — the branch scenario never
+runs it. This keeps a branch/PR review from flagging an external contributor
+for spec/mental-model updates they were never expected to author.
 
 Branch discovery uses the configured remote access method (glab, API token, git
 fetch, or equivalent); if no branch argument is supplied, `lead-review` lists
 available branches filtered by any configured naming pattern and asks the user to
-select one.
+select one. Branch discovery does not apply to the range scenario — the
+caller-supplied `base..head` is already the identified target.
 
 Review phases run in order — intent, alignment, risk, and any configured custom
 phases — producing one of four verdicts: BLOCKED (a blocked path was found
-before phases ran), LGTM, NEEDS FIX, or OPEN.
+before phases ran), LGTM, NEEDS FIX, or OPEN. The range scenario additionally
+runs a required `landing` phase last: convention adherence plus spec/mental-
+model update completeness, checked against each doc's own function (spec
+describes caller-visible behavior; mental model captures modification-relevant
+operational knowledge), using config text if present else a built-in default.
+The branch scenario never runs the `landing` phase; its finding folds into the
+same aggregate-and-verdict path as any other phase, with no new verdict state.
 
 LGTM follows the configured merge approval sequence and optional post-merge
 notification. NEEDS FIX asks the user to fix locally or post findings to the
 contributor; local fix routes to `lead-discuss` with findings as context, leaving
 re-review to user discretion. OPEN enters discussion before re-routing to LGTM
 or NEEDS FIX.
+
+The range scenario additionally stamps the review-watermark ledger
+(`#260830-review-watermark-ledger-tools`) immediately after verdict emission,
+for every completed range-scenario verdict regardless of which verdict branch
+follows; the branch scenario never stamps. It first calls
+`review.marker(bootstrap: true)`, solely to seed a baseline entry when the
+ledger is empty — the call's returned entry does not feed the stamp itself.
+The verdict maps to a ledger token: LGTM -> `pass`; NEEDS FIX -> `concern` or
+`block` by severity; OPEN -> `concern`. The stamped `base`/`head` are the
+range invocation's own `<base>..<head>` arguments — the range identified at
+invoke time — never the marker entry's `Base` field, which drifts to the
+original bootstrap commit on every sweep after the first; stamping the
+marker's `Base` would falsely claim a later sweep reviewed the entire span
+back to the original bootstrap point instead of only the range just
+reviewed. `ref` (a routed ticket stem) accompanies a `block` verdict only.
+{#260830-review-range-scenario-ledger-stamp}
+
+Independent of `lead-review`, four MCP call sites elsewhere in the workflow
+surface (`tickets.close`, `workflow_manual`, `enter.implement`,
+`enter.proceed`) surface a cheap review-watermark checkpoint nudge computed
+from the same ledger (`#260830-review-watermark-checkpoint-nudge`). That
+nudge is advisory only: it never blocks the call it rides on, and it never
+appends to the ledger — only `review.marker` and `review.stamp` mutate it.
+
+### Review Policy Config Surface {#260830-review-policy-config-surface}
+
+Whether and where review *blocks* is per-project policy declared across three
+non-overlapping config homes: tracked, per-track structural facts live in
+`AGENTS.md`; marker and verdict state lives in the `ai-docs/` review-watermark
+ledger; machine-local review mechanics (remote access, blocked paths, review
+phases) live in the gitignored `_review.local.md`. The homes do not double-own:
+the review-track branch is a shared structural fact and never lives in
+`_review.local.md`, and the volatile marker never lives in `AGENTS.md`.
+
+`AGENTS.md` declares the review policy under a `### Review Policy` section as
+`key: value` lines, parsed fail-open (a missing file, missing section, missing
+field, or malformed value degrades to the field's default, never an error):
+
+- `review-track: <branch>` — the branch whose reviews stamp the ledger. When
+  set, it takes precedence over the git-heuristic default (`origin/HEAD`, then
+  local `main`, then `master`) that resolves the review track when the field is
+  absent.
+- `release-boundary: present | absent` — whether the project has a release
+  promotion boundary. `absent` (the default) means advisory-only review with no
+  hard gate; `present` arms `lead-ship`'s Release gate (`#260513-review-workflow-skill`
+  below), which requires the range since the review-watermark frontier's head
+  to clear before promoting the release branch.
+- `rendezvous-backend: platform | canary` — how concurrent maintainers
+  rendezvous on review state. `canary` (the default; needs no external config)
+  relies on the append-only ledger's git-conflict canary; `platform` relies on
+  host branch protection, for which the recommended set is require-branches-up-
+  to-date, dismiss-stale-approvals, required-checks, and disabled squash/rebase
+  (plus a merge queue at scale).
+
+When the `review-track` field is unset, `workflow_manual` surfaces a
+non-blocking, session-scoped nudge advising the project to configure a review
+track; the nudge fires at most once per session (not once per checkpoint) and
+never blocks the call it rides on.
 
 `lead-review` scales review depth automatically. When commits lack `## AI
 Context` and conventional commit format (`judge: follows-ws-workflow` does not
@@ -1249,6 +1346,19 @@ versioned upgrades.
 `lead-ship` follows the repository ship configuration to prepare and execute a
 release. It confirms version, tag, and publish targets before any publishing
 step.
+
+When the loaded project's `AGENTS.md` `### Review Policy` declares
+`release-boundary: present`, `lead-ship` runs an un-omittable, user-overridable
+Release gate ahead of Execute's Pre-flight step — a playbook branch rather than
+a config-listed Pre-flight bullet, since a bullet-only gate is defeatable by a
+config that simply never lists it. The gate resolves the review-watermark
+frontier's head (`review.marker(format: json)`), counts commits since it, and
+either proceeds silently (empty range), triggers `lead-review` over the range
+(non-empty), or — when the triggered review still does not clear it — surfaces
+a strong recommendation and stops for an explicit user decision. An override
+proceeds without stamping the marker: `lead-ship` never calls `review.stamp`;
+only `lead-review`'s own sole-writer step ever advances the frontier
+(`#260513-review-workflow-skill` above).
 
 ## Delegate Prompt Boundaries {#260505-workflow-delegate-prompt-boundaries}
 

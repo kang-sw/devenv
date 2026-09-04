@@ -7,17 +7,61 @@ workflow (`.github/workflows/ws-mcp-release.yml`) to build cross-platform
 
 ## Version Strategy
 
-The release version is whatever `develop` currently holds — it is NOT re-derived
-or bumped at ship time. Per-merge patch bumps on `develop`
-(`agents-plugin-tool/scripts/bump-ws-version.sh`) accumulate into the next
-release; `develop -> main` owns no bump. Read the version from
-`agents-plugin/runtime.json` `.plugin_version`; the tag is `.release_tag`
+Each ship owns exactly one patch-version bump. After confirming that local
+`develop` contains `origin/develop`, read the current version from
+`agents-plugin/runtime.json` `.plugin_version`, increment its patch component,
+and run `agents-plugin-tool/scripts/bump-ws-version.sh <next-version>`. Commit
+the script-generated version edits on `develop` before testing or tagging.
+Ordinary merges into `develop` do not bump the version. The tag is `.release_tag`
 (`v<plugin_version>`). Ship refuses if `.release_tag != "v" + .plugin_version`
 for either `agents-plugin/runtime.json` or `agents-plugin-wsflow/runtime.json`
 (the workflow enforces the same contract).
 
 ## Pre-flight
 
+**Sync develop against origin FIRST — never ship from stale local refs.** This
+is the recurring failure mode: a parallel session ships a patch, `origin/develop`
+and the `v<version>` tag advance, and a local ship that skipped `fetch` promotes
+stale `develop` (colliding on the version/tag). Every check below runs against
+freshly fetched state.
+
+- **Release gate** (this project declares `release-boundary: present` in
+  `AGENTS.md` `### Review Policy` — see `lead-ship`'s Release gate section):
+  call `review.marker(format: json)` to resolve the review-watermark
+  frontier. Check `found` **first, before any rev-list call** — an empty
+  `head` substituted into `git rev-list --count <frontier-head>..develop`
+  resolves the empty side to `develop`'s own tip and silently reports `0`,
+  which would wrongly read as clear.
+  - `found: false` (no ledger entry yet — this project's first ship): treat
+    all prior history as review-skipped, **not clear**, and **stop for an
+    explicit decision** between (i) `review.marker(bootstrap: true)` to
+    accept prior history as unreviewed (seeds `<HEAD>..<HEAD>`, equivalent to
+    an override, nothing reviewed — this is itself the explicit accept, so it
+    proceeds directly) or (ii) an explicit `lead-review` over
+    `range: <chosen-base>..develop` for a human-supplied base, which stamps
+    and advances the marker. These do not compose. Option (ii) is a real
+    review, not an accept-as-is: apply the same clears/not-clear handling as
+    the `found: true` branch below to its outcome — a `block`/non-clearing
+    result must stop for another explicit decision, not auto-proceed.
+  - `found: true`: run `git rev-list --count <frontier-head>..develop`.
+    Empty — proceed. Non-empty — trigger `lead-review` over
+    `range: <frontier-head>..develop`; if it still doesn't clear, surface a
+    strong recommendation and stop for an explicit decision.
+  - An override at any of these stops proceeds without stamping the marker
+    (only `lead-review`'s own `review.stamp` step ever advances it).
+- `git fetch origin --tags` — refresh remote-tracking refs and tags before any
+  other check.
+- Develop is up to date: `git merge-base --is-ancestor origin/develop develop` —
+  local `develop` must contain all of `origin/develop`. If it fails,
+  `origin/develop` advanced (a parallel ship or merge): **stop and reconcile
+  first** — `git merge origin/develop` into `develop`, then restart Pre-flight.
+  Never promote a `develop` that is behind `origin/develop`.
+- Bump the next patch version through `bump-ws-version.sh` and commit the
+  generated version edits on `develop`.
+- Version tag unclaimed: `git ls-remote --tags origin v<version>` is empty for the
+  bumped version. A non-empty result means a concurrent release claimed the
+  version; increment the patch again, commit the regenerated version edits,
+  re-run tests, and restart the tag check.
 - `git merge-base --is-ancestor main develop` — develop must be a linear
   descendant of main (fast-forwardable); abort otherwise.
 - `cd agents-plugin-tool && go test ./...` — all packages green.
@@ -26,6 +70,12 @@ for either `agents-plugin/runtime.json` or `agents-plugin-wsflow/runtime.json`
 - Marketplace sanity: `.plugins[].name` in both
   `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json` is
   exactly `ws wsflow`.
+- **R4 pin**: once every check above passes (including the version-bump
+  commit), record `git rev-parse develop` as `<reviewed-through-sha>` — the
+  tip this ship run has actually vetted, version bump included. The
+  pin-and-re-assert in Publish (below) re-checks against this value
+  immediately before the ff-merge, not against the pre-bump gate-time tip, so
+  the ship's own version-bump commit never trips it.
 
 ## Build
 
@@ -42,12 +92,24 @@ Push: yes (final gate).
 
 ## Publish
 
+Order is deliberate: publish the synced `develop` before promoting `main`, so
+`origin/main` never advances ahead of `origin/develop`. The gate precedes every
+push — all pushes below are reversible-only-before-they-run.
+
+- **R4 re-assert**: re-run `git rev-parse develop` and compare it to the
+  `<reviewed-through-sha>` recorded by Pre-flight's R4 pin. A match means no
+  new commit landed on `develop` since Pre-flight finished — proceed. A
+  mismatch means the tip moved (a parallel merge landed during the Confirm
+  wait-for-approval gap or later): **abort this Publish step** and re-run
+  Pre-flight's Release gate over just the delta
+  (`<reviewed-through-sha>..develop`) before retrying.
 - `git checkout main && git merge --ff-only develop` — promote develop to main
   (matches the historical release shape: main's tip is develop's tip, no extra
-  merge commit).
+  merge commit). Local only.
 - Final gate: show version, tag, and publish targets; wait for explicit
-  approval.
-- `git push origin main`
+  approval before any push.
+- `git push origin develop` — publish the synced develop first.
+- `git push origin main` — promote the release branch.
 - `git push origin v<version>` — triggers the GitHub release workflow.
 
 ## Post-ship
@@ -55,4 +117,5 @@ Push: yes (final gate).
 - Watch the `ws-mcp release` workflow run for `v<version>` to green (build +
   publish GitHub release assets, windows-smoke).
 - Return to `develop` (`git checkout develop`). The next develop merge resumes
-  patch bumping from `v<version>`.
+  normal development without a version bump; the next ship owns the next patch
+  bump.

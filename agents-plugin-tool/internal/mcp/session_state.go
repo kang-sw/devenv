@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kang-sw/devenv/internal/wsreview"
 )
 
 // session_state.go implements the session state machine layered onto the
@@ -560,37 +563,33 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	}
 }
 
-// implementReviewFinalCycleClause states what the last budgeted review cycle does.
-// The budget ends relaying only; the run continues through the remaining todos so an
-// autonomous goal run is never stranded at the cap.
-const implementReviewFinalCycleClause = "After the last budgeted cycle returns, stop relaying and continue to the remaining todos, carrying each unresolved finding with its disposition into the final report; the budget ends relaying, not the run."
+// implementReviewDispositionClause states the disposition-marker requirement for
+// every non-clean Critical/Important finding review #1 returns, plus the
+// Important-only self-reported non-resolution marker. It is shared by every
+// allocation shape that dispatches a review, so the marker vocabulary and the
+// final-report carry-forward requirement never diverge between single,
+// partitioned, and bare-partitioned generation.
+const implementReviewDispositionClause = "Record exactly one disposition marker for every non-clean Critical/Important finding review #1 returns: [fixed], [won't fix: <reason>], [deferred: <reason>], or [escalate: <reason>]; carry each disposition into the final report. An Important finding still non-clean after its own relay instead carries the implementer's self-reported [not fixed: <reason>] — a self-report, not a re-review verdict, since Important is never re-reviewed."
 
-// implementReviewAdjudicationClause states the contested-finding arbitration step for
-// the review-cycle budgets that still have a relay left to ship an override into. It
-// is appended to the partitioned and fallback branches only: the 2-cycle single branch
-// has no remaining relay, and lead-only never relays at all.
-//
-// One rule per sentence behind a leading token label. The unbroken-paragraph form this
-// replaced was skipped under attention pressure (the `ai-docs/manuals/skill-authoring.md` reader model),
-// and the clause now carries enough rules that the labels are the only index into them.
-const implementReviewAdjudicationClause = "Trigger: When a re-review answers [maintained] on a contested won't-fix, or the implementer answers [escalate: <reason>] mid-relay, adjudicate before the next review; skip this step when neither answer appeared. Dispatch: Render `review-adjudicator` with declared inputs: PlanPath, ReviewPaths, DispositionNotes, CommitRange (the implemented range under review), ReviewCycle, target_kind, ticket_path, selected_phase, and inline_contract; supply every one, passing an empty string for the authority inputs the target kind does not use, then dispatch the rendered prompt and parse its one verdict line per dispute. Cost: Adjudication runs inside the current relay slot and consumes no review cycle. Override: On a [maintained] dispute an [override: <reason>] ships as the next relay and spends that cycle rather than adding one; on an [escalate: <reason>] dispute the verdict returns to the implementer inside the current relay slot and spends nothing, because no review has run. Accept: An [accept] leaves the refusal standing: the finding leaves the relay list, is not relayed again, and carries its recorded disposition into the final report. Out-of-scope: An [out-of-scope: <reason>] leaves the relay list, costs no relay, and is carried into the final report as unresolved by decision with its stated reason. Bound: Adjudicate at most once per relay slot: a second escalation in the same slot is not re-adjudicated and reaches the next review as-is."
+// implementReviewRelayClause states relay #1's scope and the Important/Minor
+// budgets. Relay #1 dispositions every non-clean Critical/Important finding at
+// once; Important's entire relay budget is spent there, so a still-non-clean
+// Important afterward is never re-reviewed — it stands on the self-reported
+// [not fixed: <reason>] from implementReviewDispositionClause. Minor drives no
+// relay at any point. Critical's own further budget lives in
+// implementReviewCriticalBranchClause, not here.
+const implementReviewRelayClause = "Relay #1 dispositions every non-clean Critical/Important finding from review #1 at once with the Review relay dispatch. Important is best-effort: its one-relay budget is spent in relay #1, is never re-reviewed, and a still-non-clean Important after relay #1 stands on that self-reported [not fixed: <reason>] rather than another relay. Minor drives no relay at any point; record Minor findings in the review summary only."
 
-// implementReviewElevatedRelayClause states which relays go to the elevated implementer
-// instead of the standard relay. Split from the adjudication clause by concern: that one
-// settles whether a contested finding is real, this one settles who receives a finding
-// whose reality is not in dispute but whose fix did not hold.
-//
-// Capacity fires after exactly one failed relay, not two. A 3-cycle budget affords 2
-// relays, so a relayed-twice-and-still-failing state is first observable at the cycle-3
-// review, after which no relay follows — firing there would make the delegate
-// unreachable. The condition is stated positively (a [fixed] finding a re-review returns
-// [unresolved]) so settled dispositions, which are decisions rather than failures of
-// capacity, do not trip it.
-//
-// Root-cause is worded on newly surfaced findings, not recurrences: recurrence of the
-// same finding is already the capacity condition, and the motivating run surfaced three
-// distinct findings sharing one root cause.
-const implementReviewElevatedRelayClause = "Capacity: A finding the implementer reported [fixed] that the next review returns [unresolved] or still reports non-clean routes the next relay to `implementer-elevated` instead of `implementer-relay`, after one such failed relay rather than two, because the last relay is the only slot left to act in. Excluded: A finding carrying [won't fix], [deferred], [out-of-scope], or an open [escalate: <reason>] is a settled decision, not a failed fix attempt, and never triggers the capacity condition. Root-cause: A newly surfaced finding whose root cause matches an already-relayed finding routes the next relay to `implementer-elevated` too, independent of the cycle count and without waiting for the same finding to recur. Elevated inputs: Render `implementer-elevated` with the relay's declared inputs plus PriorFixCommits and PriorDispositions, so it can read what the prior attempts changed. Precedence: When an adjudicator override and a capacity or root-cause signal apply to the same relay, dispatch `implementer-elevated` once carrying the override list; never dispatch two relays for one cycle."
+// implementReviewCriticalBranchClause states the Critical exception: bounded 3
+// review rounds (review #1 plus up to 2 Critical-scoped re-reviews), affording
+// up to 2 Critical-scoped relays (relay #1 shared with Important, plus a second
+// Critical-only relay #2). A Critical still non-clean after review #3 is the
+// ceiling: it unconditionally elevates to `implementer-elevated` rather than
+// halting, and the run continues to the remaining todos — restoring the
+// elevation shape from before 260828 without reviving the mid-budget
+// capacity/root-cause trigger or review-adjudicator arbitration that shape also
+// carried.
+const implementReviewCriticalBranchClause = "Critical exception: if review #1 reports any Critical finding, follow relay #1 with one Critical-scoped review #2 using the Re-review prompt, limited to the Critical findings. If review #2 still reports that Critical non-clean, follow it with a second Critical-scoped relay (relay #2) via the Review relay dispatch, then a Critical-scoped review #3 using the Re-review prompt. Ceiling: if review #3 still reports the Critical finding non-clean, unconditionally elevate that finding to `implementer-elevated` — never a hard stop — and continue to the remaining todos with the elevation recorded in the final report; do not schedule a review #4 or a third relay."
 
 func implementReviewInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
@@ -600,12 +599,12 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]; the exclusion targets reviewer-invented churn, not unresolved carryover. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewFinalCycleClause, implementReviewAdjudicationClause, implementReviewElevatedRelayClause)
+		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. %s %s %s", formatReviewPartitions(verdict.ReviewAlloc), implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
-		return "Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. Relay only new non-clean Critical/Important findings. Budget 2 review cycles for this implementation slice: the initial review is cycle 1, so relay at most once. " + implementReviewFinalCycleClause + " With no adjudication slot at this budget, an implementer [escalate: <reason>] here is your own accept-or-defer call rather than a delegate dispatch."
+		return fmt.Sprintf("Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 	}
-	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts for new non-clean Critical/Important findings and for any [fixed] finding a re-review returns [unresolved: <short reason>]; the exclusion targets reviewer-invented churn, not unresolved carryover. Budget 3 review cycles for this implementation slice as a whole, not per partition: the initial review is cycle 1, so relay at most twice. " + implementReviewFinalCycleClause + " " + implementReviewAdjudicationClause + " " + implementReviewElevatedRelayClause
+	return fmt.Sprintf("Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. %s %s %s", implementReviewDispositionClause, implementReviewRelayClause, implementReviewCriticalBranchClause)
 }
 
 func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
@@ -769,7 +768,12 @@ func (s *sessionStore) readState(sessionKey string) (sessionRecord, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.readRecord(dir, sessionKey)
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return sessionRecord{}, false
+	}
+	s.touch(dir, sessionKey)
+	return record, true
 }
 
 // setAgenda upserts an agenda blob under key.
@@ -1013,6 +1017,11 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	text := fmt.Sprintf("entered %s mode; todo list replaced (%d items)\n%s\n", mode, len(todos), renderTodos(todos, false))
+	if record, ok := s.sessions.readState(sessionKey); ok {
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			text += "review-watermark: " + reviewNudge + "\n"
+		}
+	}
 	return toolTextResponse(id, text, nil)
 }
 
@@ -1064,7 +1073,11 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			text, err := implementResultJSON(result)
 			return toolTextResponse(id, text, err)
 		}
-		return toolTextResponse(id, result.Raw, nil)
+		raw := result.Raw
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			raw += "review-watermark: " + reviewNudge + "\n"
+		}
+		return toolTextResponse(id, raw, nil)
 	}
 
 	needReview, _ := args["need_review"].(bool)
@@ -1145,6 +1158,17 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 	todos := deriveProceedTodos()
 	if err := s.sessions.enterMode(sessionKey, "proceed", rawAgenda, todos); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	// Append the review-watermark nudge to result.Raw before branching on
+	// format, so the JSON result's Raw field mirrors the text output exactly
+	// (TestEnterProceedJSONIncludesRawVerdict). Appending only in the text
+	// branch left the two formats out of parity whenever the nudge is
+	// non-empty — latent until 260830 made the baseline arm reachable on
+	// trackless repos.
+	if record, ok := s.sessions.readState(sessionKey); ok {
+		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+			result.Raw += "review-watermark: " + reviewNudge + "\n"
+		}
 	}
 	if input.Format == "json" {
 		text, err := proceedResultJSON(result)

@@ -3,6 +3,8 @@ package mcp
 import (
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wskey"
 )
 
 func TestResolveImplementStrategyRules(t *testing.T) {
@@ -1016,4 +1018,125 @@ func TestResolveImplementDocSkipAndWarnings(t *testing.T) {
 	if result.Verdict.DocMode != "standard" || !result.Agenda.NeedDoc {
 		t.Fatalf("doc fallback = %q need_doc=%v, want standard true", result.Verdict.DocMode, result.Agenda.NeedDoc)
 	}
+}
+
+// ticketPhaseInput builds an implementInput for a ticket target with the
+// given ticket stem and scope label, holding the facts/policy shape fixed so
+// only the ticket_stem/scope_label vary between calls in the word-key stem
+// tests below.
+func ticketPhaseInput(ticketStem, scopeLabel string) implementInput {
+	return implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: scopeLabel, TicketStem: ticketStem},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{AllowRename: factString{Value: "yes", Present: true}},
+		},
+	}
+}
+
+// TestResolveImplementSameTicketStemAcrossPhasesContinues verifies the core
+// ticket contract: entering enter.implement for the same ticket across
+// successive phases (same ticket_stem, differing scope_label) derives the
+// same impl-branch stem, so the second phase's observation of the first
+// phase's branch resolves to "continue" rather than "stop" or "rename".
+func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
+	const stem = "260900-feat-x"
+
+	phase1 := ticketPhaseInput(stem, "Phase 1")
+	result1 := resolveImplement(phase1, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	if result1.Verdict.BranchPlan.Action != "create" {
+		t.Fatalf("phase 1 action = %q, want create; plan=%+v", result1.Verdict.BranchPlan.Action, result1.Verdict.BranchPlan)
+	}
+	targetBranch := result1.Verdict.BranchPlan.TargetBranch
+	if targetBranch == "" {
+		t.Fatalf("phase 1 produced empty target branch; plan=%+v", result1.Verdict.BranchPlan)
+	}
+
+	phase2 := ticketPhaseInput(stem, "Phase 2")
+	obs2 := implementBranchObservation{CurrentBranch: targetBranch, StartCommit: "abc123", AheadOfMergeRoot: 3}
+	result2 := resolveImplement(phase2, obs2)
+	if result2.Verdict.BranchPlan.Action != "continue" {
+		t.Fatalf("phase 2 action = %q, want continue (same ticket_stem must resolve the same target branch %q); plan=%+v",
+			result2.Verdict.BranchPlan.Action, targetBranch, result2.Verdict.BranchPlan)
+	}
+}
+
+// TestResolveImplementDifferentTicketStemStillStops verifies the L1 safety
+// stop still fires when a different ticket's target lands on a branch that
+// already carries another ticket's unmerged work, even though both branches
+// share the derivation mechanism.
+func TestResolveImplementDifferentTicketStemStillStops(t *testing.T) {
+	phase1 := ticketPhaseInput("260900-feat-x", "Phase 1")
+	result1 := resolveImplement(phase1, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	if result1.Verdict.BranchPlan.Action != "create" {
+		t.Fatalf("setup action = %q, want create; plan=%+v", result1.Verdict.BranchPlan.Action, result1.Verdict.BranchPlan)
+	}
+	occupiedBranch := result1.Verdict.BranchPlan.TargetBranch
+
+	other := ticketPhaseInput("260900-feat-y", "Phase 1")
+	obs := implementBranchObservation{CurrentBranch: occupiedBranch, StartCommit: "abc123", AheadOfMergeRoot: 2}
+	result := resolveImplement(other, obs)
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("different ticket_stem action = %q, want stop even with allow_rename=yes; plan=%+v",
+			result.Verdict.BranchPlan.Action, result.Verdict.BranchPlan)
+	}
+}
+
+// TestNormalizeImplementFactsTicketStemOverridesCallerScopeSlug verifies that
+// a non-empty target.ticket_stem is authoritative over a caller-supplied
+// target.scope_slug, not just the empty-scope_slug fallback: the derived
+// word-key wins and a warning explains the override.
+func TestNormalizeImplementFactsTicketStemOverridesCallerScopeSlug(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", TicketStem: "x", ScopeSlug: "caller-supplied"},
+	}
+	n, warnings := normalizeImplementFacts(input)
+	want := wskey.Derive("x", 3)
+	if n.ScopeSlug != want {
+		t.Fatalf("ScopeSlug = %q, want derived word-key %q", n.ScopeSlug, want)
+	}
+	if n.ScopeSlug == "caller-supplied" {
+		t.Fatalf("ScopeSlug retained caller-supplied value %q, want it overridden", n.ScopeSlug)
+	}
+	if !containsString(warnings, "target.scope_slug ignored for ticket target; branch stem derived deterministically from ticket_stem") {
+		t.Fatalf("warnings missing scope_slug-override notice: %v", warnings)
+	}
+}
+
+// TestNormalizeImplementFactsInlineUnaffected verifies inline targets (no
+// ticket_stem) keep the existing slugifyImplementScope label-derived path,
+// both when scope_slug is caller-supplied and when it is missing.
+func TestNormalizeImplementFactsInlineUnaffected(t *testing.T) {
+	t.Run("caller-supplied scope_slug is preserved", func(t *testing.T) {
+		input := implementInput{
+			Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
+		}
+		n, warnings := normalizeImplementFacts(input)
+		if n.ScopeSlug != "tiny-edit" {
+			t.Fatalf("ScopeSlug = %q, want unchanged caller-supplied %q", n.ScopeSlug, "tiny-edit")
+		}
+		if containsString(warnings, "target.scope_slug missing; derived from target label") {
+			t.Fatalf("unexpected missing-scope_slug warning: %v", warnings)
+		}
+	})
+
+	t.Run("missing scope_slug falls back to label slug", func(t *testing.T) {
+		input := implementInput{
+			Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit"},
+		}
+		n, warnings := normalizeImplementFacts(input)
+		want := slugifyImplementScope("tiny edit")
+		if n.ScopeSlug != want {
+			t.Fatalf("ScopeSlug = %q, want label-derived %q", n.ScopeSlug, want)
+		}
+		if !containsString(warnings, "target.scope_slug missing; derived from target label") {
+			t.Fatalf("warnings missing label-fallback notice: %v", warnings)
+		}
+	})
 }

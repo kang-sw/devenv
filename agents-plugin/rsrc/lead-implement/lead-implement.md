@@ -29,7 +29,9 @@ Review
 - Reviewer count and partitions come from `review_alloc`.
 - Lead aggregates reviewer severity verdicts and records final review status.
 - Fix correctness, security, contract, and regression findings; reject style-only or scope-expanding findings with reasons.
-- Relay only unresolved Critical/Important findings; record minor findings in the review summary.
+- Critical is must-fix: bounded to 3 review rounds (review #1 plus up to 2 Critical-scoped re-reviews); a Critical still non-clean after review #3 unconditionally elevates to `implementer-elevated` — never a hard stop, and the run continues.
+- Important is best-effort: relayed once, in relay #1 alongside Critical; a still-non-clean Important after that relay is not re-reviewed — it stands on the implementer's own `[not fixed: <reason>]` record.
+- Minor drives no relay; record it in the review summary only.
 - Preserve settled or deferred dispositions.
 - Summarize review evidence before deleting temporary review files.
 
@@ -80,8 +82,8 @@ Policy rules:
 ### 6. Closeout
 
 - After doc-closeout compaction, verify final tree equivalence, or report skipped.
-- `{final-action-gate}` report: changes, branch, merge target, docs, ticket Result hash, review, tests, deviations, disputes, skipped closeout.
-- Stop for the user's choice: merge, new slice, or stop.
+- `{final-action-gate}` report: changes, branch, merge target, docs, ticket Result hash, remaining phases or ticket-complete, review, tests, deviations, disputes, skipped closeout.
+- Stop for the user's choice: merge or stop; offer a next-slice continuation only when this ticket still has an unfinished phase.
 
 ### 7. Merge
 
@@ -104,11 +106,11 @@ Run after a confirmed merge to reduce branch accumulation.
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier` as dispatch metadata.
 2. For `implementer`, pass only file-first render inputs: `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`; `RoleModel` is declared in the prompt and tool-injected from tier metadata.
 3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text.
-4. Collect the normal completion report. If `ResultExpectations` names an output file, additionally require the output-file path plus a short summary. `review-adjudicator` returns one verdict line per dispute instead of a completion report; collect those lines and act on each verdict.
+4. Collect the normal completion report. If `ResultExpectations` names an output file, additionally require the output-file path plus a short summary.
 <!-- ws:full-only:start -->
 5. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->
-6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; `implementer-elevated` gets **Review relay dispatch** when the review Instruction's capacity or root-cause condition fires for that relay; `review-adjudicator` gets the plan path, review paths, implementer disposition record, commit range under review, review cycle, and the authority inputs for the target kind; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
+6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; `implementer-elevated` gets **Review relay dispatch** when the Critical ceiling fires (review #3 still reports the Critical finding non-clean); reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
 ### Plan contract
 
@@ -168,7 +170,7 @@ Required checks:
 - <required check from the Reviewer table>
 - Review the supplied authority, plan contract, and diff together.
 - Plan guardrails were not bypassed.
-- Binding authority decisions were not omitted or violated.
+- Each specified authority requirement is implemented, or carries an explicit, authorized deferral.
 
 Instructions:
 - For inline authority, do not read or require a ticket path.
@@ -185,9 +187,9 @@ Render `implementer-relay` with declared inputs: PlanPath, ReviewCycle,
 CommitRange, ReviewPaths, DispositionNotes, VerificationHint, and
 ResultExpectations. Capture prompt path and recommended-tier.
 
-When the review Instruction's capacity or root-cause condition fired for this
-relay, render `implementer-elevated` in place of `implementer-relay`, with those
-same declared inputs plus PriorFixCommits and PriorDispositions.
+When the Critical ceiling fires (review #3 still reports the Critical finding
+non-clean), render `implementer-elevated` in place of `implementer-relay`, with
+those same declared inputs plus PriorFixCommits and PriorDispositions.
 
 Rendered review relay prompt: <prompt-path>
 

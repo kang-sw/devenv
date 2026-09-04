@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wskey"
 )
 
 type implementInput struct {
@@ -594,7 +595,12 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		ScopeSlug:                 strings.TrimSpace(input.Target.ScopeSlug),
 		TicketStem:                strings.TrimSpace(input.Target.TicketStem),
 	}
-	if n.ScopeSlug == "" {
+	if n.TicketStem != "" {
+		if n.ScopeSlug != "" {
+			warnings = append(warnings, "target.scope_slug ignored for ticket target; branch stem derived deterministically from ticket_stem")
+		}
+		n.ScopeSlug = wskey.Derive(n.TicketStem, 3)
+	} else if n.ScopeSlug == "" {
 		n.ScopeSlug = slugifyImplementScope(firstNonEmpty(input.Target.ScopeLabel, input.Target.TicketStem, input.Target.Label, "implementation"))
 		warnings = append(warnings, "target.scope_slug missing; derived from target label")
 	}

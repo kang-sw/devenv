@@ -67,8 +67,12 @@ again for a root you already hold a key for does not reuse or restore the
 existing identity: it mints a brand-new session key with empty state,
 stranding any agenda, todo, or session-tree state bound to the earlier key. If
 you are recovering after compaction, restore the preserved key instead of
-re-minting; only call `ferrule` again when you have genuinely never held a key
-for this root.
+re-minting — re-minting when you meant to restore is the footgun above. Holding
+several keys on one root is deliberate and supported when they carry distinct
+workflow contexts: to run parallel development tracks in one session, mint one
+key per track and keep each verbatim, since agenda, todo, and session-tree state
+are per-key, not shared across the root. Session keys are lightweight and stale
+ones prune automatically, so create one per track without hesitation.
 
 ### User preferences
 

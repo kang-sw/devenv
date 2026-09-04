@@ -104,6 +104,25 @@ branch and push there, reserving `main` for release-worthy merges. Local commits
 on `main` are fine when a flow calls for them, but only push `main` when the
 merge is a release (or the user explicitly asks).
 
+### Review Policy
+
+```text
+review-track: develop
+release-boundary: present
+rendezvous-backend: canary
+```
+
+`review-track` is the branch the review sweep tracks (work lands and is
+reviewed on `develop`; shipping is `develop` -> `main`). `release-boundary:
+present` declares that this project has a real `develop` -> `main` release
+step, gated by the `lead-ship` release gate (`ai-docs/spec/workflow-skills.md`
+`{#260830-review-policy-config-surface}`): before promoting `develop` to
+`main`, ship reads the review-watermark frontier head and requires the range
+since it to be clear. `rendezvous-backend: canary` uses the append-only
+review-ledger canary (no GitHub branch-protection config needed) rather than
+the `platform` backend, matching this project's current
+single-maintainer-serial posture.
+
 ### Commit Rules
 
 Auto-create one commit per logical unit unless the user asks not to commit.
@@ -130,19 +149,6 @@ When a spec heading `{#slug}` changes, include
 
 Keep unrelated untracked files out of commits. `.codex` may exist locally; do
 not stage it unless explicitly requested.
-
-**Version bump on merge into `develop`.** `develop` is the default integration
-branch; routine work merges there, not into `main`. Every merge into `develop`
-(from any feature, topic, `impl/*`, or `goal/*` branch) bumps the plugin patch
-version through `agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>`. Never
-hand-edit the version edition points (both `plugin.json` pairs, both
-`runtime.json`, `main.go`, release assets, this file's `## Project Orientation`
-version strings); the script is the single bump surface. Claude Code keys
-plugin-cache invalidation on the `version` string, so an unchanged version
-serves stale builds even across branch-pin reinstalls — bump per merge so each
-dogfood build is distinct. `develop -> main` happens only at shipping, which
-owns the release version through the ship procedure, so no bump rides that
-merge.
 
 ### Context Window Discipline
 
@@ -224,8 +230,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Specs, tickets, and mental models here describe the workflow
   system itself; downstream application material belongs in downstream
-  projects. Active plugin package: `agents-plugin/` (`ws@0.43.4`). Agentless
-  derivative package: `agents-plugin-wsflow/` (`wsflow@0.43.4`). Native
+  projects. Active plugin package: `agents-plugin/` (`ws@0.44.4`). Agentless
+  derivative package: `agents-plugin-wsflow/` (`wsflow@0.44.4`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**
