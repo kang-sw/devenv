@@ -10,55 +10,98 @@ sage-review-completeness: required
 
 # MCP read-surface collapse — fold proven-redundant list/find/status triples into query
 
-Layer ③ of `260903-epic-mcp-tool-surface-affordance-reduction`. See the epic for
-the canonical verb table and cost model; this ticket carries ③'s specifics.
+## Background
 
-## Scope
+Layer ③ of `260903-epic-mcp-tool-surface-affordance-reduction`. Collapse
+read-surface triples to a single `query` tool **where redundancy is proven a
+clean superset** — not merely "looks similar". See the epic for the canonical
+verb table and cost model; this ticket carries ③'s audited specifics.
 
-Collapse read-surface triples to a single `query` tool **where redundancy is
-proven a clean superset** — not merely "looks similar".
+## Decisions — audit outcomes
 
-Proven (verified in `server.go` tickets.find/status handlers): `tickets.{list,
-find,status}` and `specs.{list,find,status}` all return the same
-`TicketInfo`/spec-metadata struct via the same formatter, and
-`find(ticket_stem=X)` already equals `status(X)` (same `Resolve:true`, identical
-output). So:
+### tickets + specs: collapse (proven clean superset)
+
+Verified in `agents-plugin-tool/internal/mcp/server.go` +
+`internal/wsdoc/tickets.go`: `tickets.{list,find,status}` and
+`specs.{list,find,status}` all return the same `TicketInfo`/spec-metadata struct
+via the same formatter, and `find(ticket_stem=X)` already equals `status(X)`
+(same `Resolve:true`, identical output). So the `query`-named survivor (from ④)
+absorbs all three call shapes:
 
 - `query()` = old `list` (enumerate, no query).
 - `query(ticket_stem=X)` = old `status` (point resolve; fixed param remap).
 - `query(query=…)` = old `find`.
 
 Result: **6 → 2** for tickets + specs. No semantic reconciliation — the survivor
-already is the superset. The survivor is the `query`-named tool from layer ④.
+already is the superset.
 
-## Audit-gated extension
+**Cost check resolved — removing `status` is cost-neutral.** `tickets.status` is
+NOT a cheaper targeted lookup: `TicketsStatus`→`scanTickets` and
+`TicketsFind`→`scanTicketsWithBodies` both walk the full board and `readTicket`
+every `.md` file; the exact stem is never used to skip the walk. No hot
+point-lookup path is regressed by removing `status`. (Incidental finding, not
+required by this ticket: `find(ticket_stem=X)` currently reads on-disk bodies
+twice — the stem-filter `continue` sits after the body read; moving it ahead is a
+trivial optional cleanup the collapse can fold in.)
 
-`mental_models` exposes the same `list`/`find`/`status` triple. It is a
-searchable-corpus family, so it must not be left as a half-rename (only
-`find→query`). Add it to this ticket's audit: verify the triple is a clean
-superset as tickets/specs were, then collapse to `mental_models.query`; if the
-audit finds it is NOT a clean superset, layer ④ still aligns the verb and the
-residual `list`/`status` are a noted explicit exception. Any other family with a
-`list`/`find`/`status` corpus triple is treated the same way.
+### mental_models: NOT a clean superset → verb-align only (noted exception)
+
+Audit result: `mental_models.{list,find,status}` do **not** collapse cleanly,
+for two independent reasons:
+
+- `mental_models.list` is a divergent legacy implementation — its own private
+  struct and pre-formatted output via `MentalModelsList` (own `WalkDir`, header +
+  `sources:` layout, **no JSON path**), not `scanMentalModels`/
+  `formatMentalModels`. So `find()` is a data superset but is **not
+  output-identical** to today's `list`.
+- `mental_models.find` has no `path` argument, while `status` resolves one doc by
+  `path`; they overlap only on `domain`. `status(path=X)` has no `find`
+  equivalent.
+
+So ③ does **not** collapse mental_models. Per the epic's corpus-triple rule, ④
+still aligns the verb (`find→query`) and `mental_models.list`/`status` are left as
+an explicit, noted exception. A genuine `mental_models.query` merge would require
+re-pointing `list` at `scanMentalModels`/`formatMentalModels` (an output-format +
+JSON-support change) and adding the `path` key to the merged tool — that is
+semantic reconciliation (novel signature), out of ③'s clean-collapse scope;
+captured as a separate follow-up rather than forced here.
 
 ## Ordering / dependencies
 
 - Runs **after** ④ (acts on the canonical `query` name).
-- Boundary: collapse only proven-superset triples; unproven similarity is left
-  or routed to a fresh audit, never merged here. Novel merged signatures belong
-  to layer ② (`260903-refactor-mcp-todo-signature-merge`), not here.
+- Boundary: collapse only proven-superset triples; unproven similarity is left or
+  routed to a fresh audit, never merged here. Novel merged signatures belong to
+  layer ② (`260903-refactor-mcp-todo-signature-merge`) or a dedicated follow-up,
+  not here.
 - Deprecation posture: one-shot hard cut inherited from the epic — no alias for
-  the removed `list`/`status` names; ④'s script removes them in-package.
+  the removed `list`/`status` names; the rename/collapse removes them in-package.
 
-## Open questions
+## Phases
 
-- Cost check: is `TicketsStatus` a cheaper targeted lookup than
-  `TicketsFind(ticket_stem)`? If a hot playbook path relies on the cheap
-  point-lookup, confirm find-exact short-circuits (does not full-scan) before
-  removing `status`.
-- mental_models audit outcome (clean superset or noted exception).
+### Phase 1: Collapse tickets and specs read triples into query
+
+Remove `tickets.list`, `tickets.status`, `specs.list`, `specs.status`; the
+④-renamed `tickets.query`/`specs.query` survivor serves all three prior call
+shapes (enumerate / point-resolve by stem / search). Apply the fixed param remap
+for old `status` call sites (`status(X)` → `query(ticket_stem=X)`), and update Go
+registration + dispatch, `runtime.json`, the MCP/workflow specs, playbook token
+call sites (and the wsflow mirror via the mirror script), and tests. `mental_models`
+is **not** in this phase (audit: not a clean superset — verb-aligned by ④ only).
+
+Acceptance: the two survivor tools return byte-identical output to the removed
+tools for every prior call shape; the removed names are gone in-package (a
+`references.trace` / grep sweep is clean); the full test suite is green; and
+playbook paths that called `status` now call `query(ticket_stem)` with unchanged
+results.
 
 ## Spec Impact
 
-Not applicable at `idea/`. Adoption will touch the tickets/specs listing +
-resolution behavior contract in the MCP tools spec; scope at promotion.
+Edits to existing anchors only — no new spec stem, no heading `{#slug}` change:
+
+- `mcp-tools.md` `{#260505-ticket-discovery-tools}` and
+  `{#260505-spec-discovery-tools}` — remove the `list`/`status` tool entries and
+  fold their documented behavior into the `query` survivor's contract
+  (enumerate / point-resolve / search call shapes).
+- `mcp-tools.md` `{#260505-mental-model-discovery-tools}` — record the noted
+  exception: `mental_models.query` (verb-aligned) coexists with the un-collapsed
+  `list`/`status`, with a pointer to the reconciliation follow-up.

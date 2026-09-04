@@ -84,9 +84,9 @@ The key line: **separate corpus-read from live-state**, and give each one verb.
 | verb | meaning | targets |
 |---|---|---|
 | **`query`** | search / resolve / enumerate a **searchable corpus** | tickets, specs (absorb list+status via ③), `note.search→`, `mental_models.find→` |
-| **`read`** | fetch **one item's body** by id/key | convention, infra, `todo.read`, candidate `playbook.print→read` |
+| **`read`** | fetch **one item's body** by id/key | convention, infra, `todo.read`, `playbook.print→read`, `runtime.info→read` |
 | **`list`** | enumerate a **short bounded set** (not a searchable corpus) | agenda, api, config — kept, NOT renamed to query |
-| **`status`** | **live** runtime / vcs / process state only | git, exec, mercenary, candidate `runtime.info→status` |
+| **`status`** | **live** runtime / vcs / process state only | git, `runtime.debug_events`; gated exec/mercenary |
 
 Not every `list` becomes `query`: the line is corpus-vs-bounded-set. `status`
 stops being used for corpus point-lookup (that becomes `query`).
@@ -102,10 +102,14 @@ aligns the verb (`find→query`) and the residual `list`/`status` are left as an
 explicit, noted exception rather than a silent half-rename. Any other family with
 a `list`/`find`/`status` corpus triple is treated the same way.
 
-Illustrative rename map (finalize when ④ is scoped): `tickets.find→tickets.query`,
+Finalized rename map (evidence in child ④): `tickets.find→tickets.query`,
 `specs.find→specs.query`, `note.search→note.query`,
-`mental_models.find→mental_models.query`, `runtime.info→runtime.status`,
-candidate `playbook.print→playbook.read`.
+`mental_models.find→mental_models.query`, `playbook.print→playbook.read`,
+`runtime.info→runtime.read` (static build metadata, **not** live state — corrects
+the earlier `→status` guess; the real live-state member is `runtime.debug_events`,
+left as-is). ③'s audit found `mental_models` is **not** a clean superset, so its
+`list`/`status` are left as a noted exception (④ verb-aligns `find→query` only),
+not collapsed; a genuine `mental_models.query` merge is a deferred follow-up.
 
 ## Organizing model — decision vs execution, deterministic vs judgment
 
