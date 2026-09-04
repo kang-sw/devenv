@@ -29,6 +29,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { isModelCatalogUnset, readModelCatalog, type ModelCatalogConfig } from "./model-catalog.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV } from "./process-role.ts";
 
 export interface BridgeOptions {
   launcherPath: string;
@@ -281,11 +282,10 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           const normalized = normalizeSessionKey(params as Record<string, unknown> | undefined, {
             ownKey: defaultKeyRef.current,
             sentinel: FRESH_BOOTSTRAP_SENTINEL,
-            // WS_PI_PARENT_SESSION_KEY is unset until a future fork-spawning
-            // ticket sets it (out of scope here — this phase only reserves
-            // the env var name); reading it directly by string keeps this
-            // call site independent of process-role.ts's module boundary.
-            parentLeadKey: process.env.WS_PI_PARENT_SESSION_KEY,
+            // WS_PI_PARENT_SESSION_KEY_ENV is unset until a future
+            // fork-spawning ticket sets it (out of scope here — this phase
+            // only reserves the env var name via process-role.ts).
+            parentLeadKey: process.env[WS_PI_PARENT_SESSION_KEY_ENV],
           });
           const args = resolveSessionKey(normalized, defaultKeyRef);
           const result = await client.callTool(rawName, args);

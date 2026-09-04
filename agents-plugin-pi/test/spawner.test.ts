@@ -25,9 +25,12 @@
  * and live coverage.
  *
  * Review fix (cycle 1, 260903 Phase 1 goal-loop): also covers
- * `buildRpcClientOptions`/`buildChildProcessEnv`'s `WS_PI_AGENT_CHILD_ENV`
- * marker placement at both spawn call sites — previously left to a manual
- * spot-check with zero automated coverage.
+ * `buildRpcClientOptions`/`buildChildProcessEnv`'s process-role env marker
+ * placement at both spawn call sites — previously left to a manual
+ * spot-check with zero automated coverage. 260904 Phase 1 renamed the
+ * marker from the boolean `WS_PI_AGENT_CHILD_ENV` to the role-valued
+ * `WS_PI_SPAWN_ROLE_ENV` (`process-role.ts`) — these tests now assert the
+ * role values (`"worker"`/`"explore"`) instead of `"1"`.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -55,11 +58,11 @@ import {
   sendToAgent,
   buildRpcClientOptions,
   buildChildProcessEnv,
-  WS_PI_AGENT_CHILD_ENV,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
 } from "../src/spawner.ts";
+import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import type { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ModelCatalogConfig } from "../src/model-catalog.ts";
 
@@ -787,42 +790,44 @@ describe("getAgentTranscriptPath", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Spawned-child env marker (review fix, cycle 1): `WS_PI_AGENT_CHILD_ENV`
-// placement, previously covered only by a manual spot-check. Each spawn
-// call site's env-building is a pure function (buildRpcClientOptions for
-// the RPC path, buildChildProcessEnv for the one-shot `explore` path via
-// spawnPiProcess), so both are asserted directly without spawning a real
-// process. See goal-loop.test.ts's `isChildProcess` suite for the
-// consuming-side (agent_settled no-op) coverage.
+// Spawned-child process-role env marker (review fix, cycle 1; renamed
+// 260904 Phase 1 from the boolean `WS_PI_AGENT_CHILD_ENV` to the
+// role-valued `WS_PI_SPAWN_ROLE_ENV`, see process-role.ts): placement,
+// previously covered only by a manual spot-check. Each spawn call site's
+// env-building is a pure function (buildRpcClientOptions for the RPC path,
+// buildChildProcessEnv for the one-shot `explore` path via spawnPiProcess),
+// so both are asserted directly without spawning a real process. See
+// goal-loop.test.ts's `isChildProcess` suite and process-role.test.ts for
+// the consuming-side coverage.
 // ---------------------------------------------------------------------------
 
-describe("buildRpcClientOptions (WS_PI_AGENT_CHILD_ENV placement)", () => {
-  test("built options carry the spawned-child marker", () => {
+describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV placement)", () => {
+  test("built options carry the worker role marker", () => {
     const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/session.jsonl", "/tmp/system.md", "read,bash");
-    assert.deepEqual(options.env, { [WS_PI_AGENT_CHILD_ENV]: "1" });
+    assert.deepEqual(options.env, { [WS_PI_SPAWN_ROLE_ENV]: "worker" });
   });
 
   test("the marker is the sole env entry (RpcClient.start() merges it over process.env itself, so this function must not pre-spread it)", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/session.jsonl", "/tmp/system.md", "read");
-    assert.deepEqual(Object.keys(options.env ?? {}), [WS_PI_AGENT_CHILD_ENV]);
+    assert.deepEqual(Object.keys(options.env ?? {}), [WS_PI_SPAWN_ROLE_ENV]);
   });
 });
 
-describe("buildChildProcessEnv (WS_PI_AGENT_CHILD_ENV placement for spawnPiProcess)", () => {
-  test("sets the spawned-child marker to \"1\"", () => {
+describe("buildChildProcessEnv (WS_PI_SPAWN_ROLE_ENV placement for spawnPiProcess)", () => {
+  test("sets the spawned-child marker to \"explore\"", () => {
     const env = buildChildProcessEnv({});
-    assert.equal(env[WS_PI_AGENT_CHILD_ENV], "1");
+    assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
   });
 
   test("preserves every inherited variable from the base env (no dropped vars)", () => {
     const env = buildChildProcessEnv({ PATH: "/usr/bin", HOME: "/home/user" });
     assert.equal(env.PATH, "/usr/bin");
     assert.equal(env.HOME, "/home/user");
-    assert.equal(env[WS_PI_AGENT_CHILD_ENV], "1");
+    assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
   });
 
-  test("an existing WS_PI_AGENT_CHILD value in the base env is overwritten to \"1\"", () => {
-    const env = buildChildProcessEnv({ [WS_PI_AGENT_CHILD_ENV]: "stale" });
-    assert.equal(env[WS_PI_AGENT_CHILD_ENV], "1");
+  test("an existing WS_PI_SPAWN_ROLE value in the base env is overwritten to \"explore\"", () => {
+    const env = buildChildProcessEnv({ [WS_PI_SPAWN_ROLE_ENV]: "stale" });
+    assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
   });
 });
