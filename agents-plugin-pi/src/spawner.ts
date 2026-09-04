@@ -58,7 +58,7 @@ import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agen
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
 import { readModelCatalog, resolveAlias, type ModelCatalogConfig } from "./model-catalog.ts";
-import { WS_PI_SPAWN_ROLE_ENV } from "./process-role.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
@@ -649,6 +649,18 @@ export interface RpcAgentRecord {
   wsToolNames: readonly string[];
   /** Curated `--tools` group this record was spawned with; reused unchanged on a dormant resume so `resolveTools` never silently widens/narrows a resumed child's tool surface. Set at spawn (`ctx.toolGroup ?? "full-worker"`), never mutated afterward. */
   toolGroup: ToolGroup;
+  /**
+   * 260904 Phase 1 (side-thread fork): a pre-computed `--tools` value that
+   * bypasses `resolveTools(toolGroup, wsToolNames)` entirely when set —
+   * a fork's tool surface is dynamic (`computeForkToolSurface` over the
+   * lead's own `pi.getActiveTools()` at spawn time, `fork.ts`), not one of
+   * the static `TOOL_GROUPS` entries `toolGroup` indexes. Cached verbatim at
+   * spawn and reused unchanged on every dormant resume (mirrors
+   * `systemPromptPath`/`modelBase`'s existing cache-and-reuse contract).
+   * `undefined` for every non-fork spawn — those keep resolving tools from
+   * `toolGroup`/`wsToolNames` exactly as before.
+   */
+  explicitTools?: string;
   /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
   streaming: boolean;
   /** Edge-consume flag: set by the `agent_settled` listener, cleared by whichever `ws-agent-wait` call harvests it first. */
@@ -659,7 +671,7 @@ export interface RpcAgentRecord {
   /** Detaches the current `client.onEvent(...)` listener; re-armed on every (re)start. */
   unsubscribe?: () => void;
   /** FIFO buffer of undrained `ws-report-to-lead` messages, capped at `REPORT_BUFFER_CAP` (drop-oldest). */
-  pendingReports: string[];
+  pendingReports: AgentReport[];
   /** Count of reports dropped from `pendingReports` due to overflow since the last drain. */
   reportsDropped: number;
   /**
@@ -680,6 +692,21 @@ export interface RpcAgentRecord {
    * directory to the lead.
    */
   pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
+}
+
+/**
+ * A single buffered `ws-report-to-lead` message. `kind` is optional
+ * (260904 Phase 1, side-thread fork ticket): `"question"`/`"final"`
+ * disambiguate a fork's task-thread turn (see `fork.ts`'s anti-bleed
+ * predicates); existing `full-worker`/`execute-worker` callers omit it
+ * entirely and are unaffected (additive, not a breaking rename of
+ * `pendingReports`/`WaitForAgentsResult.reports`'s element shape from a bare
+ * `string` — every existing consumer reads `.message` instead of the string
+ * directly).
+ */
+export interface AgentReport {
+  message: string;
+  kind?: "question" | "final";
 }
 
 export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
@@ -703,6 +730,34 @@ export interface RpcSpawnCtx {
   modelCatalogPath: string;
   /** Curated `--tools` group for this spawn. Omitted (or explicit `"full-worker"`) preserves every existing `ws-agent-spawn` caller's behavior unchanged — only `ws-execute` (execute-gateway.ts) passes `"execute-worker"`. */
   toolGroup?: ToolGroup;
+  /**
+   * 260904 Phase 1 (side-thread fork): the lead's own session file to fork
+   * from (`toolCtx.sessionManager.getSessionFile()`, `fork.ts`'s
+   * `registerFork`). When set, `buildRpcClientOptions` emits `--fork
+   * <forkFrom>` instead of `--session <sessionPath>` for THIS initial spawn
+   * only — never threaded through `RpcResumeCtx`/`sendToAgent`'s
+   * dormant-resume branch, which always resumes via the fork's own
+   * already-discovered `sessionPath` (see `spawnAgent`'s `client.getState()`
+   * overwrite below). `undefined` for every non-fork spawn (unchanged
+   * `--session` behavior).
+   */
+  forkFrom?: string;
+  /**
+   * 260904 Phase 1 (side-thread fork): pre-computed `--tools` value that
+   * bypasses `resolveTools(toolGroup, wsToolNames)` when set — see
+   * `RpcAgentRecord.explicitTools`'s doc comment for the full rationale.
+   * `undefined` for every non-fork spawn.
+   */
+  explicitTools?: string;
+  /**
+   * 260904 Phase 1 (side-thread fork): the lead's own default-filled
+   * session key (`BridgeHandle.defaultSessionKeyRef.current`), forwarded to
+   * `buildRpcClientOptions` so it can set `WS_PI_PARENT_SESSION_KEY_ENV` on
+   * the fork child's env — the marker `normalizeSessionKey` (bridge.ts)
+   * already rewrites an explicit sentinel `session_key` from. Only
+   * meaningful alongside `forkFrom`; ignored otherwise.
+   */
+  parentSessionKey?: string;
   /**
    * 260904 Phase 1: fired right after `attachEventListener` observes a
    * freshly-set `record.pendingApproval` on this spawn's record — the
@@ -739,6 +794,21 @@ export interface RpcResumeCtx {
  * Inert for a non-`"execute-worker"` spawn (nothing in its `--tools` list can
  * ever dispatch `ws-worker-exec` to read this var), so it is folded into the
  * env unconditionally rather than threaded as an extra opt-in parameter.
+ *
+ * 260904 Phase 1 (side-thread fork) adds the `forkFrom`/`parentSessionKey`
+ * params: when `forkFrom` is given, the emitted args swap `["--session",
+ * sessionPath, ...]` for `["--fork", forkFrom, ...]` (initial spawn only —
+ * `sendToAgent`'s dormant-resume call site never passes `forkFrom`) and the
+ * role marker becomes `"fork"` instead of `"worker"`; `parentSessionKey`
+ * (only meaningful alongside `forkFrom`) additionally sets
+ * `WS_PI_PARENT_SESSION_KEY_ENV` on the child's env, the marker
+ * `normalizeSessionKey` (bridge.ts) already rewrites an explicit sentinel
+ * `session_key` from — the fork's own bridge instance uses it to mint its
+ * own lead-scope key instead of a fresh one. `--fork`'s exact composition
+ * with `--mode rpc`/`--tools`/`--append-system-prompt` and its at-leaf vs.
+ * before-a-message clone semantics is the ticket's own named live-
+ * verification item (not resolvable offline) — this function only builds
+ * the argv, it does not confirm Pi's own `--fork` behavior.
  */
 export function buildRpcClientOptions(
   cwd: string,
@@ -746,13 +816,25 @@ export function buildRpcClientOptions(
   sessionPath: string,
   systemPromptPath: string,
   tools: string,
+  forkFrom?: string,
+  parentSessionKey?: string,
 ): RpcClientOptions {
+  const env: Record<string, string> = {
+    [WS_PI_SPAWN_ROLE_ENV]: forkFrom ? "fork" : "worker",
+    [WS_PI_APPROVAL_DIR_ENV]: join(dirname(sessionPath), "approvals"),
+  };
+  if (forkFrom && parentSessionKey) {
+    env[WS_PI_PARENT_SESSION_KEY_ENV] = parentSessionKey;
+  }
+  const args = forkFrom
+    ? ["--fork", forkFrom, "--append-system-prompt", systemPromptPath, "--tools", tools]
+    : ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools];
   return {
     cliPath: RPC_CLI_PATH,
     cwd,
-    env: { [WS_PI_SPAWN_ROLE_ENV]: "worker", [WS_PI_APPROVAL_DIR_ENV]: join(dirname(sessionPath), "approvals") },
+    env,
     model,
-    args: ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools],
+    args,
   };
 }
 
@@ -760,14 +842,22 @@ export function buildRpcClientOptions(
 export const REPORT_BUFFER_CAP = 32;
 
 /**
- * Pushes `message` onto `record.pendingReports`, drop-oldest once the buffer
+ * Pushes `message` (optionally tagged with `kind` — 260904 Phase 1's
+ * `"question"`/`"final"` disambiguation for a fork's task-thread turn, see
+ * `fork.ts`) onto `record.pendingReports`, drop-oldest once the buffer
  * exceeds `REPORT_BUFFER_CAP` (incrementing `reportsDropped` as a truncation
  * marker), then settles any pending waiters — a report is a wake condition
  * exactly like `agent_settled` (reused `settleWaiters`; draining an empty
  * `waiters` array when nobody is currently waiting is already a no-op).
+ *
+ * `kind` is omitted from the pushed entry entirely (not stored as an
+ * explicit `undefined` property) when the caller omits it, so an existing
+ * `full-worker`/`execute-worker` report round-trips as `{message}` — no
+ * `kind` key at all — unchanged in shape from before this field existed.
  */
-export function enqueueReport(record: RpcAgentRecord, message: string): void {
-  record.pendingReports.push(message);
+export function enqueueReport(record: RpcAgentRecord, message: string, kind?: "question" | "final"): void {
+  const entry: AgentReport = kind === undefined ? { message } : { message, kind };
+  record.pendingReports.push(entry);
   if (record.pendingReports.length > REPORT_BUFFER_CAP) {
     record.pendingReports.shift();
     record.reportsDropped += 1;
@@ -780,7 +870,7 @@ export function enqueueReport(record: RpcAgentRecord, message: string): void {
  * empty/zero and returns the previous values. Pure, mirrors the edge/consume
  * shape of the existing `idlePending` clear in `waitForAgents`.
  */
-export function drainReports(record: RpcAgentRecord): { reports: string[]; reports_dropped: number } {
+export function drainReports(record: RpcAgentRecord): { reports: AgentReport[]; reports_dropped: number } {
   const reports = record.pendingReports;
   const reports_dropped = record.reportsDropped;
   record.pendingReports = [];
@@ -801,12 +891,15 @@ export function drainReports(record: RpcAgentRecord): { reports: string[]; repor
  * event Pi's own extension-hook fan-out emits the instant the LLM dispatches
  * a tool call, forwarded verbatim to the parent's `RpcClient.onEvent()` — see
  * the plan's Codebase Findings for the full trace) whose `toolName` is
- * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, is enqueued.
+ * `REPORT_TO_LEAD_TOOL_NAME`; `evt.args.message`, if a string, is enqueued
+ * (260904 Phase 1, side-thread fork ticket: along with `evt.args.kind` when
+ * it is exactly `"question"` or `"final"` — any other value, including a
+ * malformed one, is dropped, same as an absent `kind`).
  * All other event types (including a `tool_execution_start` for any other
  * tool name) are ignored here — they only matter to a live streaming UI or
  * to the tool's own execution, not to this module's bookkeeping.
  *
- * 260904 Phase 1 adds a 2nd `tool_execution_start` branch, matched on
+ * 260904 Phase 1 (execute-approve gateway) adds a 2nd `tool_execution_start` branch, matched on
  * `GATED_EXEC_TOOL_NAME`: sets `record.pendingApproval` from the event's
  * `toolCallId` (this IS the `cmd_id` — no new id needs minting) plus the
  * gated-exec tool's own `{command, rationale}` args. Requires both a string
@@ -828,9 +921,11 @@ export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; tool
     record.idlePending = true;
     settleWaiters(record);
   } else if (evt.type === "tool_execution_start" && evt.toolName === REPORT_TO_LEAD_TOOL_NAME) {
-    const message = (evt.args as { message?: unknown } | undefined)?.message;
+    const args = evt.args as { message?: unknown; kind?: unknown } | undefined;
+    const message = args?.message;
     if (typeof message === "string") {
-      enqueueReport(record, message);
+      const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
+      enqueueReport(record, message, kind);
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
     const args = evt.args as { command?: unknown; rationale?: unknown; cwd?: unknown } | undefined;
@@ -901,6 +996,20 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
  * this satisfies the ticket's "returns immediately" contract while still
  * surfacing a synchronous spawn-time failure (bad `cliPath`, provider auth)
  * to the caller instead of swallowing it.
+ *
+ * 260904 Phase 1 (side-thread fork): when `ctx.forkFrom` is set, the
+ * mkdtemp'd `sessionPath` computed below is only a PLACEHOLDER (it still
+ * backs the approvals-dir derivation `buildRpcClientOptions` folds into the
+ * child's env) — `pi --fork <forkFrom>` has Pi itself create/name the real
+ * forked session file, discoverable only after `client.start()` via
+ * `client.getState().sessionFile`. `record.sessionPath` is overwritten with
+ * that real path immediately after `start()` resolves (before any event
+ * listener/model-effort/prompt call), so every downstream consumer
+ * (`getAgentTranscriptPath`, a dormant resume's own `--session
+ * record.sessionPath`) sees the actual forked file, never the placeholder.
+ * Throws — never silently degrades — when `getState()` returns no
+ * `sessionFile`, mirroring the codebase's existing never-silently-degrade
+ * convention (e.g. `bridge.ts`'s ferrule-mint failure handling).
  */
 export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, params: SpawnAgentParams): Promise<{ agent_id: string }> {
   const agentId = randomUUID();
@@ -911,6 +1020,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   const modelBase = resolveModelForAlias(catalogConfig, params.modelName, ctx.inheritModel);
 
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
+  const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
   const record: RpcAgentRecord = {
     agentId,
     sessionPath,
@@ -919,6 +1029,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     modelEffort: params.modelEffort,
     wsToolNames: ctx.wsToolNames,
     toolGroup,
+    explicitTools: ctx.explicitTools,
     streaming: false,
     idlePending: false,
     waiters: [],
@@ -928,11 +1039,23 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   registry.set(agentId, record);
 
   const client = new RpcClient(
-    buildRpcClientOptions(ctx.cwd, modelBase, sessionPath, params.systemPromptPath, resolveTools(toolGroup, ctx.wsToolNames)),
+    buildRpcClientOptions(ctx.cwd, modelBase, sessionPath, params.systemPromptPath, tools, ctx.forkFrom, ctx.parentSessionKey),
   );
   record.client = client;
 
   await client.start();
+
+  if (ctx.forkFrom) {
+    const state = await client.getState();
+    const forkedSessionFile = state?.sessionFile;
+    if (!forkedSessionFile) {
+      throw new Error(
+        "ws-pi-agent: fork spawn: RpcClient.getState() returned no sessionFile — cannot determine the forked session's actual path",
+      );
+    }
+    record.sessionPath = forkedSessionFile;
+  }
+
   await applyModelEffort(client, params.modelEffort);
   attachEventListener(record, client, ctx.onApprovalPending);
   await client.prompt(params.prompt);
@@ -986,8 +1109,21 @@ export async function sendToAgent(
   }
 
   if (!record.client) {
+    // 260904 Phase 1 (side-thread fork): `forkFrom` is deliberately never
+    // passed here — a dormant resume (including a stopped fork) always
+    // resumes via `--session record.sessionPath` (the fork's own
+    // already-discovered real session file, see `spawnAgent`'s
+    // `getState()` overwrite), exactly like a normal worker resume.
+    // `record.explicitTools` (when set) is reused verbatim, same
+    // cache-and-reuse contract as `systemPromptPath`/`modelBase`.
     const client = new RpcClient(
-      buildRpcClientOptions(ctx.cwd, record.modelBase, record.sessionPath, record.systemPromptPath, resolveTools(record.toolGroup, record.wsToolNames)),
+      buildRpcClientOptions(
+        ctx.cwd,
+        record.modelBase,
+        record.sessionPath,
+        record.systemPromptPath,
+        record.explicitTools ?? resolveTools(record.toolGroup, record.wsToolNames),
+      ),
     );
     record.client = client;
     record.idlePending = false;
@@ -1044,7 +1180,7 @@ export interface WaitForAgentsResult {
   /** Present only on a non-timeout harvest: "idle" when the agent settled, "report" when only a buffered report woke the wait. */
   reason?: "idle" | "report";
   /** Buffered `ws-report-to-lead` messages drained for the woken agent, FIFO order. Always present ([] when nothing was harvested, e.g. on timeout). */
-  reports: string[];
+  reports: AgentReport[];
   /** Count of reports dropped from the buffer due to overflow since the last drain. Always present (0 when nothing was harvested). */
   reports_dropped: number;
   timed_out: boolean;
@@ -1454,6 +1590,12 @@ export function registerAgentTools(
       type: "object",
       properties: {
         message: { type: "string", description: "Status update or intermediate finding to surface to the lead immediately." },
+        kind: {
+          type: "string",
+          enum: ["question", "final"],
+          description:
+            "Optional disambiguation for a task-thread fork's turn-end (ws-fork): \"question\" ends your turn awaiting the lead's input; \"final\" marks the task fully complete, using the required Outcome/Files changed/Verification/Blockers/Commit/Decisions report shape. Omit for a normal full-worker/execute-worker progress update.",
+        },
       },
       required: ["message"],
     } as never,

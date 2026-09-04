@@ -43,6 +43,17 @@
  * the approval-request/decision file relay end-to-end are NOT covered here
  * — see test/execute-gateway.test.ts's header comment for that split.
  *
+ * 260904 Phase 1 (side-thread fork) additionally covers: `buildRpcClientOptions`'s
+ * new `forkFrom`/`parentSessionKey` params (the `--fork` vs `--session` arg
+ * branch and the `"fork"` vs `"worker"` role marker); `applyRpcEvent`'s/
+ * `enqueueReport`'s new optional `kind` carry-through onto
+ * `pendingReports`'/`WaitForAgentsResult.reports`'s new `{message, kind?}`
+ * element shape (every PRE-existing assertion in this file that used to
+ * compare a bare report string is updated to the new object shape here, not
+ * rewritten). `fork.ts`'s own pure predicates/IO glue are covered by
+ * test/fork.test.ts instead — see that file's header comment for its own
+ * pure/live-gate split.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
@@ -78,7 +89,7 @@ import {
   type RpcAgentRegistry,
   type ToolGroup,
 } from "../src/spawner.ts";
-import { WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
+import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import type { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ModelCatalogConfig } from "../src/model-catalog.ts";
 
@@ -511,7 +522,7 @@ describe("applyRpcEvent: ws-report-to-lead", () => {
       settled = true;
     });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "halfway done" } });
-    assert.deepEqual(record.pendingReports, ["halfway done"]);
+    assert.deepEqual(record.pendingReports, [{ message: "halfway done" }]);
     assert.equal(settled, true, "a report must settle any pending waiter, same as agent_settled");
   });
 
@@ -527,6 +538,23 @@ describe("applyRpcEvent: ws-report-to-lead", () => {
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: 42 } });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME });
     assert.deepEqual(record.pendingReports, []);
+  });
+
+  test('260904 Phase 1 (side-thread fork): a valid kind ("question"/"final") is carried through onto the enqueued entry', () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "need input", kind: "question" } });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
+    assert.deepEqual(record.pendingReports, [
+      { message: "need input", kind: "question" },
+      { message: "all done", kind: "final" },
+    ]);
+  });
+
+  test("an unrecognized or non-string kind is dropped (entry carries no kind key at all, same as omitted)", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "progress", kind: "bogus" } });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "more progress", kind: 42 } });
+    assert.deepEqual(record.pendingReports, [{ message: "progress" }, { message: "more progress" }]);
   });
 });
 
@@ -606,8 +634,8 @@ describe("enqueueReport / drainReports", () => {
       enqueueReport(record, `report-${i}`);
     }
     assert.equal(record.pendingReports.length, REPORT_BUFFER_CAP);
-    assert.equal(record.pendingReports[0], "report-1", "the oldest (report-0) must be dropped, not the newest");
-    assert.equal(record.pendingReports[record.pendingReports.length - 1], `report-${REPORT_BUFFER_CAP}`);
+    assert.equal(record.pendingReports[0].message, "report-1", "the oldest (report-0) must be dropped, not the newest");
+    assert.equal(record.pendingReports[record.pendingReports.length - 1].message, `report-${REPORT_BUFFER_CAP}`);
     assert.equal(record.reportsDropped, 1);
   });
 
@@ -616,9 +644,17 @@ describe("enqueueReport / drainReports", () => {
     enqueueReport(record, "first");
     enqueueReport(record, "second");
     const drained = drainReports(record);
-    assert.deepEqual(drained, { reports: ["first", "second"], reports_dropped: 0 });
+    assert.deepEqual(drained, { reports: [{ message: "first" }, { message: "second" }], reports_dropped: 0 });
     assert.deepEqual(record.pendingReports, []);
     assert.equal(record.reportsDropped, 0);
+  });
+
+  test("260904 Phase 1 (side-thread fork): enqueueReport's optional kind param is carried onto the pushed entry", () => {
+    const record = freshRpcRecord();
+    enqueueReport(record, "need input", "question");
+    enqueueReport(record, "plain progress");
+    enqueueReport(record, "all done", "final");
+    assert.deepEqual(record.pendingReports, [{ message: "need input", kind: "question" }, { message: "plain progress" }, { message: "all done", kind: "final" }]);
   });
 
   test("drainReports surfaces a non-zero reports_dropped after overflow, then resets it", () => {
@@ -645,8 +681,8 @@ describe("firstReportPendingAgentId", () => {
   test("returns the first (in given order) record with a pending report", () => {
     const records = [
       { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b", pendingReports: ["x"] }) },
-      { id: "c", record: freshRpcRecord({ agentId: "c", pendingReports: ["y"] }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b", pendingReports: [{ message: "x" }] }) },
+      { id: "c", record: freshRpcRecord({ agentId: "c", pendingReports: [{ message: "y" }] }) },
     ];
     assert.equal(firstReportPendingAgentId(records), "b");
   });
@@ -740,7 +776,7 @@ describe("waitForAgents", () => {
     const registry: RpcAgentRegistry = new Map([["a", record]]);
 
     const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: ["buffered while dormant"], reports_dropped: 0, timed_out: false });
+    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: [{ message: "buffered while dormant" }], reports_dropped: 0, timed_out: false });
   });
 
   test("a report arriving while a waitForAgents call is already pending resolves the wait with reason:report and the message", async () => {
@@ -752,7 +788,7 @@ describe("waitForAgents", () => {
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "mid-run update" } });
 
     const result = await resultPromise;
-    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: ["mid-run update"], reports_dropped: 0, timed_out: false });
+    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: [{ message: "mid-run update" }], reports_dropped: 0, timed_out: false });
   });
 
   test("multiple reports enqueued before any wait call are all drained in one response, FIFO order", async () => {
@@ -763,7 +799,13 @@ describe("waitForAgents", () => {
     const registry: RpcAgentRegistry = new Map([["a", record]]);
 
     const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: ["first", "second", "third"], reports_dropped: 0, timed_out: false });
+    assert.deepEqual(result, {
+      agent_id: "a",
+      reason: "report",
+      reports: [{ message: "first" }, { message: "second" }, { message: "third" }],
+      reports_dropped: 0,
+      timed_out: false,
+    });
   });
 
   test("tie-break: an idle-settled agent with a pending report on the SAME agent reports reason:idle but still returns the buffered report(s)", async () => {
@@ -776,7 +818,7 @@ describe("waitForAgents", () => {
       agent_id: "a",
       reason: "idle",
       last_message: "final answer",
-      reports: ["report before settle"],
+      reports: [{ message: "report before settle" }],
       reports_dropped: 0,
       timed_out: false,
     });
@@ -962,6 +1004,44 @@ describe("buildRpcClientOptions (WS_PI_SPAWN_ROLE_ENV / WS_PI_APPROVAL_DIR_ENV p
   test("260904 Phase 1: the approvals dir is inert-but-present even for a non-execute-worker (full-worker) spawn — WS_PI_APPROVAL_DIR is always derived from sessionPath, not gated on tools", () => {
     const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-z/session.jsonl", "/tmp/system.md", resolveTools("full-worker"));
     assert.equal(options.env?.[WS_PI_APPROVAL_DIR_ENV], "/tmp/ws-pi-agent-z/approvals");
+  });
+
+  test('260904 Phase 1 (side-thread fork): forkFrom set emits ["--fork", forkFrom, ...] instead of ["--session", sessionPath, ...], and sets the role marker to "fork"', () => {
+    const options = buildRpcClientOptions(
+      "/repo",
+      undefined,
+      "/tmp/ws-pi-agent-w/session.jsonl",
+      "/tmp/system.md",
+      "read,bash",
+      "/lead/session.jsonl",
+    );
+    assert.deepEqual(options.args, ["--fork", "/lead/session.jsonl", "--append-system-prompt", "/tmp/system.md", "--tools", "read,bash"]);
+    assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "fork");
+  });
+
+  test("forkFrom + parentSessionKey sets WS_PI_PARENT_SESSION_KEY_ENV on the child's env", () => {
+    const options = buildRpcClientOptions(
+      "/repo",
+      undefined,
+      "/tmp/ws-pi-agent-w2/session.jsonl",
+      "/tmp/system.md",
+      "read",
+      "/lead/session.jsonl",
+      "lead-key-123",
+    );
+    assert.equal(options.env?.[WS_PI_PARENT_SESSION_KEY_ENV], "lead-key-123");
+  });
+
+  test("forkFrom without a parentSessionKey omits WS_PI_PARENT_SESSION_KEY_ENV entirely", () => {
+    const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w3/session.jsonl", "/tmp/system.md", "read", "/lead/session.jsonl");
+    assert.equal(WS_PI_PARENT_SESSION_KEY_ENV in (options.env ?? {}), false);
+  });
+
+  test("no forkFrom (the existing worker/execute-worker path): --session branch and role=worker are unchanged", () => {
+    const options = buildRpcClientOptions("/repo", undefined, "/tmp/ws-pi-agent-w4/session.jsonl", "/tmp/system.md", "read");
+    assert.deepEqual(options.args, ["--session", "/tmp/ws-pi-agent-w4/session.jsonl", "--append-system-prompt", "/tmp/system.md", "--tools", "read"]);
+    assert.equal(options.env?.[WS_PI_SPAWN_ROLE_ENV], "worker");
+    assert.equal(WS_PI_PARENT_SESSION_KEY_ENV in (options.env ?? {}), false);
   });
 });
 
