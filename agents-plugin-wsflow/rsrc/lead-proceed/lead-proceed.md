@@ -11,7 +11,7 @@ Target: user request
 - Keep a direct execution within the requested scope; stop before it expands.
 - Reload `{{.McpNamespace}}/workflow_manual` after session compaction; recover key via `{{.SkillNamespace}}:lead-revive` if lost. Fresh start: call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")`.
 - Limit pre-route source reads to explicitly requested paths and direct-execution judgment.
-- Treat an `enter.proceed` verdict as authoritative; follow its `Next:` exactly.
+- Treat an `route.resolve_proceed` verdict as authoritative; follow its `Next:` exactly.
 
 ## On: invoke
 
@@ -21,7 +21,7 @@ Target: user request
    `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
 2. For an inline target, apply `judge: direct-execution`.
    - On `Yes`, state the reason, perform and verify the bounded request
-     directly, then return without calling `enter.proceed`.
+     directly, then return without calling `route.resolve_proceed`.
 3. If the target references a ticket, read it. Apply remaining judgments and
    resolve facts.
 4. Scope resolution before calling:
@@ -29,7 +29,7 @@ Target: user request
    - Every phase has `### Result` → `scope_blocked=no-unfinished-phase`; do not route to promotion.
    - Container ticket (epic/workset) → `scope_blocked=container-ticket`.
    - Two or more explicit phases in one request → `scope_blocked=multiple-explicit-phases`.
-5. Call `{{.McpNamespace}}/enter.proceed(session_key: <key>, target: ..., facts: ...)`.
+5. Call `{{.McpNamespace}}/route.resolve_proceed(session_key: <key>, target: ..., facts: ...)`.
 6. Follow `Next:` exactly.
 
 ## Judgments

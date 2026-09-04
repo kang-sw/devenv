@@ -510,13 +510,13 @@ func implementRouteInstruction(verdict implementTodoVerdict) string {
 	case "stop":
 		return fmt.Sprintf("Stop before source edits: %s. Resolve the branch policy or branch state before continuing.", firstNonEmpty(plan.Reason, "branch action is blocked"))
 	case "create":
-		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target. Mark route complete only after the branch action succeeds; do not call route.resolve_implement again.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "rename":
-		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call route.resolve_implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "continue":
-		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
+		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call route.resolve_implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
 	case "current":
-		return fmt.Sprintf("Keep the current branch %s for this explicit low-ceremony path. Omit implementation-branch creation and merge work, and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, "the observed branch"))
+		return fmt.Sprintf("Keep the current branch %s for this explicit low-ceremony path. Omit implementation-branch creation and merge work, and do not call route.resolve_implement again.", firstNonEmpty(plan.CurrentBranch, "the observed branch"))
 	default:
 		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
 	}
@@ -1027,7 +1027,7 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
 	if _, hasNewTarget := args["target"]; hasNewTarget {
-		const tool = "enter.implement"
+		const tool = "route.resolve_implement"
 		sessionKey, err := sessionStateKey(tool, args)
 		if err != nil {
 			return toolTextResponse(id, "", err)
@@ -1084,15 +1084,15 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	needDoc, _ := args["need_doc"].(bool)
 	delegation, err := parseImplementDelegation(stringValue(args["delegation"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	planDepth, err := parseLegacyImplementPlanDepth(delegation, stringValue(args["plan_depth"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	reviewAlloc, err := parseImplementReviewAlloc(stringValue(args["review_alloc"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	args["delegation"] = delegation
 	args["plan_depth"] = planDepth
@@ -1104,7 +1104,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		NeedReview:  needReview,
 		NeedDoc:     needDoc,
 	})
-	return s.handleEnter(id, "enter.implement", "implement", args, todos)
+	return s.handleEnter(id, "route.resolve_implement", "implement", args, todos)
 }
 
 func parseLegacyImplementPlanDepth(delegation string, raw string) (string, error) {
@@ -1141,7 +1141,7 @@ func stringValue(v any) string {
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	const tool = "enter.proceed"
+	const tool = "route.resolve_proceed"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)

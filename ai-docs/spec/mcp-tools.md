@@ -268,14 +268,14 @@ blobs` rather than an empty list. These are the fallback primitives for modes
 not covered by a typed enter tool, and let a caller discover or clear
 orphaned blobs without guessing key names from tool descriptions.
 
-**Enter (typed mode switches).** `enter.implement` and `enter.proceed` each
+**Enter (typed mode switches).** `route.resolve_implement` and `route.resolve_proceed` each
 perform one atomic write that both stores the typed payload as an agenda blob (keyed by the mode name) and
 **replaces** the entire todo list with items derived from the mode. Because the
 list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
 `todo.add` loop is needed for a covered mode:
 
-- `implement`: `enter.implement` is the public mode-switch call for the
+- `implement`: `route.resolve_implement` is the public mode-switch call for the
   implementation-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.scope` / `facts.complexity` /
   `facts.risk` objects, a small `policy` object, and optional `format:
@@ -390,7 +390,7 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   focused verification, one logical explicit-path commit with `## AI Context`,
   retained branch and commit-range reporting, and no push; final-action and
   merge todos are absent only for this result.
-- `proceed`: `enter.proceed` is the public mode-switch call for the
+- `proceed`: `route.resolve_proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
   `facts.work` objects, and optional `format: text|json`. It normalizes the
@@ -1271,7 +1271,7 @@ address tip. Closing while the current branch is an `impl/<root>/<stem>` branch
 that still carries unmerged commits ahead of its merge root additionally returns
 a second, independent soft `next_instruction` nudging the lead to review and
 merge that branch into `<root>` after the close-move commit lands; this reuses
-the `enter.implement` ahead-of-merge-root observation, is advisory only, and the
+the `route.resolve_implement` ahead-of-merge-root observation, is advisory only, and the
 tool itself performs no merge (consistent with never committing). The nudge is
 absent on a merged or clean impl branch and on any non-`impl/*` branch. Under an
 active worktree sparse-checkout the scope pre-flight runs
@@ -2002,8 +2002,8 @@ Four tools each surface a cheap, read-only advisory when the review-watermark
 ledger looks stale relative to the project's review track (the resolved
 default branch — `origin/HEAD`'s target, else local `main`, else local
 `master`): `tickets.close`, `workflow_manual` (FRESH-with-root and CONTINUE
-branches only), `enter.implement` (both direct and delegated branches), and
-`enter.proceed`. The nudge is fail-open and purely advisory: it never blocks
+branches only), `route.resolve_implement` (both direct and delegated branches), and
+`route.resolve_proceed`. The nudge is fail-open and purely advisory: it never blocks
 the call it rides on, and a resolution failure (no review track, no
 readable ledger) silently produces no text rather than an error.
 
@@ -2035,7 +2035,7 @@ review track's tip. Three states:
 - **Fresh** (below the staleness threshold): no text.
 
 Each of the four call sites injects the same advisory text, differing only in
-presentation. `tickets.close`, `enter.implement`, and `enter.proceed` prefix
+presentation. `tickets.close`, `route.resolve_implement`, and `route.resolve_proceed` prefix
 it `review-watermark: ` and append it to their own response text (the
 text-mode raw verdict, for the latter two). The two `workflow_manual`
 branches instead prepend it unprefixed as a top-of-body banner block, using

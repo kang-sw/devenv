@@ -17,8 +17,8 @@ Branch
 - Merge commits follow repository commit rules and include `## AI Context`.
 
 Execution
-- Call `{{.McpNamespace}}/enter.implement` once after facts are complete.
-- No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict. On `delegated`, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
+- Call `{{.McpNamespace}}/route.resolve_implement` once after facts are complete.
+- No Edit or Write tool call is permitted until `route.resolve_implement` returns a `direct-edit` verdict. On `delegated`, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
 - Name workflow skill handoffs with `{{.SkillNamespace}}:<skill>` notation.
 - Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.
 - Treat the installed todo list as the ordered runbook; do not create a parallel task list.
@@ -41,10 +41,10 @@ Review
 
 1. Parse target: ticket path or inline description.
 2. If ticket-driven, read the ticket and extract stem, selected scope, artifacts, and caller slice.
-3. Gather `target`, `facts`, and explicit caller `policy` for `{{.McpNamespace}}/enter.implement`; use `unknown` unless a value is directly supported by the caller, ticket, loaded docs, file contents, command output, or MCP verdict.
+3. Gather `target`, `facts`, and explicit caller `policy` for `{{.McpNamespace}}/route.resolve_implement`; use `unknown` unless a value is directly supported by the caller, ticket, loaded docs, file contents, command output, or MCP verdict.
 4. Do not set decision fields for delegation, branch mode, plan depth, review allocation, review need, or documentation need.
 5. Use the current lead `session_key` from `{{.McpNamespace}}/workflow_manual`; stop if no lead key is available.
-6. Call `{{.McpNamespace}}/enter.implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
+6. Call `{{.McpNamespace}}/route.resolve_implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
 
 Policy rules:
 - Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.
@@ -55,7 +55,7 @@ Policy rules:
 
 `explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
 
-**Fact-source rule**: Freeze `facts.scope` before the `enter.implement` call. For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output. Unsupported facts stay `unknown`; do not revise frozen facts after the call. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
+**Fact-source rule**: Freeze `facts.scope` before the `route.resolve_implement` call. For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output. Unsupported facts stay `unknown`; do not revise frozen facts after the call. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
 
 ### 2. Execute Verdict
 
