@@ -321,9 +321,39 @@ this surface.
   a reminder, matching the delegation model where children are driven by the lead
   through `ws-agent-send` / `ws-agent-wait`.
 
-Compaction — the model-driven `/goal-compact-and-continue` lever,
-`getContextUsage().percent` surfacing, and the `session_before_compact` companion —
-is not part of this surface yet; it is a separate follow-up phase.
+### Model-driven compaction {#260904-pi-goal-loop-model-driven-compaction}
+
+Compaction inside the goal loop is **model-driven**: the extension surfaces
+information and offers a lever, but never compacts on its own. Pi's own overflow
+auto-compaction remains the last-resort backstop.
+
+- **The lever.** `goal-compact-and-continue(carry_forward)` is a model-invoked
+  `pi.registerTool` tool (alongside the Phase-1 terminal levers) that is
+  **non-terminal**: it calls `ctx.compact({ customInstructions: carry_forward })`
+  once and returns without disarming the goal. Because a manual `ctx.compact`
+  aborts the invoking turn, the goal then reaches a fresh settle and the existing
+  armed `agent_settled` reminder re-enters the next goal turn — so compaction folds
+  into the normal loop rather than needing its own continuation path.
+- **Advisory surfacing, not a gate.** While armed, the reminder turn carries two
+  pieces of information for the model to weigh: the current context usage as a
+  percent (from `getContextUsage().percent`, or derived from `tokens` against the
+  context window / a configured override when `percent` is null right after a
+  compaction), and a static compression-safety heuristic (a phase boundary or
+  merge gate is normally safe to compact; a non-phase stop is not). Past a
+  configurable advisory point the percent line reads as a nudge. None of this
+  auto-triggers compaction — the model decides.
+- **`session_before_compact` companion (observe-only).** The adapter subscribes to
+  `session_before_compact` purely to observe — it never returns `cancel` or a
+  compaction override. Pi forwards a manual compaction's `customInstructions`
+  verbatim into this event but hardcodes them empty for its own
+  threshold/overflow auto-compaction, and offers no partial "inject state" hook on
+  the auto path, so the companion observes Pi's `reason: "threshold"` signal while
+  the manual lever alone carries ws carry-forward state.
+- **Config knobs.** Two knobs join the Phase-1 runaway threshold in
+  `agents-plugin-pi/goal-loop-config.json`, read fresh per settle with the same
+  never-throw fallback: a compaction advisory point (percent, `(0,100]`) and a
+  context-window / max-token override (finite-positive). Out-of-range, malformed,
+  or missing values fall back to the built-in defaults.
 
 ## Proof-of-concept command {#260903-pi-poc-discuss-command}
 
@@ -400,8 +430,8 @@ fires both hooks, so the copy runs redundantly but idempotently.
 >   persistent RPC children with bounded depth ≤ 2, a child→lead report channel,
 >   and a path-only transcript accessor), the model catalog alias table, the
 >   `/ws-discuss` PoC command, and the lead-session goal loop (arming, the
->   `agent_settled` re-fire, the terminal levers, and the runaway backstop).
->   Post-MVP surfaces still deferred to follow-up phases/tickets under the epic —
->   an always-visible TODO, and the goal-loop's model-driven compaction hooks
->   (`/goal-compact-and-continue`, context-usage surfacing, `session_before_compact`)
->   — are not part of this contract yet.
+>   `agent_settled` re-fire, the terminal levers, the runaway backstop, and the
+>   model-driven compaction lever with its advisory surfacing, config knobs, and
+>   observe-only `session_before_compact` companion). The one post-MVP surface
+>   still deferred to a follow-up ticket under the epic — an always-visible TODO —
+>   is not part of this contract yet.
