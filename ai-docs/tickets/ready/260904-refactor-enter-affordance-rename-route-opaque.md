@@ -78,6 +78,43 @@ playbook token references, and the wsflow mirror (via the mirror script, not
 hand-edited). Verify by diff + tests; no alias left behind. Routing behavior
 unchanged.
 
+### Result (7e35db10) - 2026-09-04
+
+One-shot hard-cut rename landed: `enter.implement → route.resolve_implement` and
+`enter.proceed → route.resolve_proceed` as literal-string swaps across every
+in-package surface — Go dispatch switch + tool registration `"name"` fields,
+behavior-visible error-prefix and branch-action/next-instruction strings
+(`session_state.go`, `proceed_resolver.go`, `implement_resolver.go`), the four
+sibling `_test.go` files, both `runtime.json` `"tools"` keys, the
+`mcp-tools.md` / `workflow-skills.md` spec cross-references (token-only, no
+`{#slug}` change), the two canonical `rsrc/lead-proceed` + `lead-implement`
+playbooks, and `test_skill_dispatch_contracts.py`. The wsflow rsrc mirror and
+both `manifest.json` files were regenerated via the mirror generator
+(`WSRSRC_REGEN` + `WS_REGEN_WSFLOW_RSRC`, both `-count=1`), never hand-edited.
+Routing logic, the published `inputSchema`, and internal Go handler identifiers
+(`handleEnterImplement` etc.) were left untouched — Phase 2 owns the schema
+hollowing.
+
+Verification: `go test ./... -count=1` green across all 14 packages (including
+the `TestShippedManifestUpToDate` / `TestWsflowRsrcMirrorUpToDate` drift
+guards), re-confirmed on the goal branch post-merge; the
+`enter\.(proceed|implement)|enter_proceed|enter_implement` grep sweep returns
+zero hits across code, `runtime.json`, specs, and playbooks.
+
+Review (partitioned, correctness opus / test sonnet): correctness clean; test
+clean with 1 Minor recorded and no action — the renamed branch-action/error
+literal strings in `session_state.go` and `implement_resolver.go:926` have no
+exact-rendered-text assertion, a coverage gap that pre-dates the rename (the old
+tokens were equally untested) with no typo found on manual inspection.
+
+Deviations / deferred: mental-model prose still names the old tools
+(`mcp-runtime.md`, `workflow-skills.md`) — deferred out of this surgical rename
+per the plan's Out of Scope (same precedent as sibling ④); this accumulated
+epic-rename doc drift (④'s verb unification + ①'s `route.resolve_*`) is captured
+in a follow-up idea ticket rather than silently deferred. A pre-existing,
+unrelated Python failure (`test_proceed_keeps_implementation_route_only`, stale
+`"Route only…"` assertion) is likewise captured separately, not touched here.
+
 ### Phase 2: Hollow published schema to opaque params + move contract to skills
 
 Reduce each tool's client-visible input schema to `params: object` plus the
