@@ -11,7 +11,7 @@ Target: user request
 - Keep a direct execution within the requested scope; stop before it expands.
 - Reload `{{.McpNamespace}}/workflow_manual` after session compaction; recover key via `{{.SkillNamespace}}:lead-revive` if lost. Fresh start: call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")`.
 - Limit pre-route source reads to explicitly requested paths and direct-execution judgment.
-- Treat an `enter.proceed` verdict as authoritative; follow its `Next:` exactly.
+- Treat an `route.resolve_proceed` verdict as authoritative; follow its `Next:` exactly.
 
 ## On: invoke
 
@@ -21,7 +21,7 @@ Target: user request
    `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
 2. For an inline target, apply `judge: direct-execution`.
    - On `Yes`, state the reason, perform and verify the bounded request
-     directly, then return without calling `enter.proceed`.
+     directly, then return without calling `route.resolve_proceed`.
 3. If the target references a ticket, read it. Apply remaining judgments and
    resolve facts.
 4. Scope resolution before calling:
@@ -29,7 +29,7 @@ Target: user request
    - Every phase has `### Result` → `scope_blocked=no-unfinished-phase`; do not route to promotion.
    - Container ticket (epic/workset) → `scope_blocked=container-ticket`.
    - Two or more explicit phases in one request → `scope_blocked=multiple-explicit-phases`.
-5. Call `{{.McpNamespace}}/enter.proceed(session_key: <key>, target: ..., facts: ...)`.
+5. Call `{{.McpNamespace}}/route.resolve_proceed(session_key: <key>, target: ..., facts: ...)`.
 6. Follow `Next:` exactly.
 
 ## Judgments
@@ -64,6 +64,49 @@ Target: user request
 |----------|------|
 | Yes | Accepted work spans multiple independently reviewable phases or needs pre-implementation contract/verification traceability beyond its eventual implementation commit and any relevant existing spec |
 | No | Accepted work is one bounded reviewable slice recoverable from its eventual implementation commit plus any relevant existing spec, regardless of file count or public surface |
+
+## Fact Contract
+
+`{{.McpNamespace}}/route.resolve_proceed`'s published schema is opaque
+(`params: object`); this table is the authoritative field contract the
+resolver reads. Send `session_key`, `target`, `facts`, and optional `format`
+as top-level call arguments.
+
+`target`
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | `ticket-path\|inline\|unknown` | |
+| `label` | string\|null | Short target label; defaults from path/stem/kind when omitted. |
+| `ticket_stem` | string\|null | |
+| `ticket_path` | string\|null | |
+
+`facts.ticket`
+| Field | Enum |
+|-------|------|
+| `ticket_missing` | `yes\|no\|unknown` |
+| `has_ticket` | `yes\|no\|unknown` |
+| `status` | `idea\|todo\|ready\|done\|dropped\|unknown\|n/a` |
+| `category` | `epic\|workset\|other\|n/a\|unknown` |
+| `actionable` | `yes\|no\|unknown` |
+| `freshness` | `current\|missing-settled-decisions\|uncertain\|n/a\|unknown` |
+| `phase` | string (free text) |
+
+`facts.gates`
+| Field | Enum |
+|-------|------|
+| `discussion_needed` | `yes\|no\|unknown` |
+| `needs_ticket` | `yes\|no\|n/a\|unknown` |
+| `scope_blocked` | `none\|container-ticket\|multiple-explicit-phases\|too-broad\|no-unfinished-phase\|phase-already-complete\|unknown` |
+| `migration_anchor` | `loaded\|n/a\|missing\|conflict\|unknown` |
+
+`facts.work`
+| Field | Enum |
+|-------|------|
+| `category` | `implementation\|ticket_write\|discussion\|status_report\|unknown` |
+| `slice` | string (free text) |
+
+`format`: `text` (default) \| `json`. All fields are optional; unknown/null
+values are normalized by the resolver.
 
 ## Doctrine
 

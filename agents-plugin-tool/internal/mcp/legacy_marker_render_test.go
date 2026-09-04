@@ -173,7 +173,7 @@ func TestFormatSpecSurfacesOmitRetiredMarkerRender(t *testing.T) {
 			t.Fatalf("formatSpecs re-emitted the retired marker line: %q", line)
 		}
 	}
-	// specs.list and specs.find at format=json hand this value straight to
+	// specs.list and specs.query at format=json hand this value straight to
 	// toolJSONResponse, so the struct tags are the wire contract. They are the
 	// whole contract for every JSON path, not only the specs.* handlers:
 	// references.trace embeds []SpecInfo as well, and SpecAnchorStatus nests both

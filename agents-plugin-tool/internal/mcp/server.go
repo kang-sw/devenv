@@ -502,7 +502,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
 	// are not rejected here; root-aware tools surface the unknown_session error
 	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g.
-	// runtime.info) silently ignore an unrecognised session_key.
+	// runtime.read) silently ignore an unrecognised session_key.
 	//
 	// Lead-only tools (see isLeadOnlyTool) are additionally blocked for any
 	// non-lead scoped key to prevent self-bootstrap escalation: a delegate or
@@ -523,7 +523,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	}
 
 	switch params.Name {
-	case "runtime.info":
+	case "runtime.read":
 		info, err := runtimeInfo(s.version, s.sourceCommit)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -549,16 +549,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleAgendaClear(req.ID, params.Arguments)
 	case "agenda.list":
 		return s.handleAgendaList(req.ID, params.Arguments)
-	case "enter.implement":
+	case "route.resolve_implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
-	case "enter.proceed":
+	case "route.resolve_proceed":
 		return s.handleEnterProceed(req.ID, params.Arguments)
-	case "todo.append":
-		return s.handleTodoAppend(req.ID, params.Arguments)
-	case "todo.insert_before":
-		return s.handleTodoInsert(req.ID, params.Arguments, false)
-	case "todo.insert_after":
-		return s.handleTodoInsert(req.ID, params.Arguments, true)
+	case "todo.add":
+		return s.handleTodoAdd(req.ID, params.Arguments)
 	case "todo.check":
 		return s.handleTodoCheck(req.ID, params.Arguments)
 	case "todo.erase":
@@ -1029,22 +1025,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.VerifySpecIndex(root)
 		return toolTextResponse(req.ID, text, err)
-	case "specs.list":
-		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.list does not accept ticket_stem parameters"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		result, err := wsdoc.SpecsList(root)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatSpecs(result), err)
-	case "specs.find":
+	case "specs.query":
 		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.find uses ticket_stem, not mentions_ticket_stem"))
+			return toolTextResponse(req.ID, "", fmt.Errorf("specs.query uses ticket_stem, not mentions_ticket_stem"))
 		}
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1053,6 +1036,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		query, _ := params.Arguments["query"].(string)
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
+		// A pure point-resolve call - spec_stem set, no query text and no
+		// ticket_stem filter - is exactly the old specs.status shape: reuse its
+		// logic (SpecsStatus + formatSpecStatus) so the object-shaped JSON and
+		// not-found error survive the collapse byte-identically instead of
+		// falling through to SpecsFind's array/empty-on-miss discovery shape.
+		if strings.TrimSpace(specStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(ticketStem) == "" {
+			result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, result, err)
+			}
+			return toolTextResponse(req.ID, formatSpecStatus(result), err)
+		}
 		result, err := wsdoc.SpecsFind(root, wsdoc.SpecFindOptions{Query: query, SpecStem: specStem, TicketStem: ticketStem})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1061,20 +1056,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, formatSpecFind(query, result), err)
 		}
 		return toolTextResponse(req.ID, formatSpecs(result), err)
-	case "specs.status":
-		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.status uses spec_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatSpecStatus(result), err)
 	case "mental_models.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1082,9 +1063,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
-	case "mental_models.find":
+	case "mental_models.query":
 		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.find uses spec_stem, not ticket_stem"))
+			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.query uses spec_stem, not ticket_stem"))
 		}
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1124,7 +1105,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleNoteMute(req.ID, params.Arguments, params.Meta)
 	case "note.unmute":
 		return s.handleNoteUnmute(req.ID, params.Arguments, params.Meta)
-	case "note.search":
+	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "references.trace":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1138,24 +1119,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatReferenceTrace(result), err)
-	case "tickets.list":
-		if hasSpecStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		result, err := wsdoc.TicketsList(root, wsdoc.TicketListOptions{
-			Statuses:       stringList(params.Arguments["statuses"]),
-			IncludeDone:    boolArgument(params.Arguments["include_done"]),
-			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
-		})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatTickets(result)+ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments)), err)
-	case "tickets.find":
+	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
@@ -1166,12 +1130,39 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		query, _ := params.Arguments["query"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		mentionsTicketStem, _ := params.Arguments["mentions_ticket_stem"].(string)
+		statuses := stringList(params.Arguments["statuses"])
+		// A pure point-resolve call - ticket_stem set, no query text, no
+		// mentions_ticket_stem filter, and no statuses override - is exactly
+		// the old tickets.status shape: reuse its logic (TicketsStatus +
+		// formatTickets over a single-element slice) so the object-shaped
+		// JSON and not-found error survive the collapse byte-identically
+		// instead of falling through to TicketsFind's array/empty-on-miss
+		// discovery shape.
+		if strings.TrimSpace(ticketStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(mentionsTicketStem) == "" && len(statuses) == 0 {
+			result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
+				TicketStem:     ticketStem,
+				IncludeDone:    boolArgument(params.Arguments["include_done"]),
+				IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
+				// This point-resolve branch is a resolution surface by
+				// definition: it answers "where is this stem", so a hidden
+				// ticket must be reported as hidden-but-found rather than
+				// absent.
+				Resolve: true,
+			})
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, result, err)
+			}
+			if result == nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
+		}
 		// The explicit-stem form is a resolution query and must report a
 		// hidden-but-found ticket; the free-text query form stays a discovery
 		// surface, filesystem-only plus the aggregate hidden count below.
 		resolve := strings.TrimSpace(ticketStem) != ""
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
-			Statuses:           stringList(params.Arguments["statuses"]),
+			Statuses:           statuses,
 			IncludeDone:        boolArgument(params.Arguments["include_done"]),
 			IncludeDropped:     boolArgument(params.Arguments["include_dropped"]),
 			Query:              query,
@@ -1187,31 +1178,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments))
 		}
 		return toolTextResponse(req.ID, text, err)
-	case "tickets.status":
-		if hasSpecStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		ticketStem, _ := params.Arguments["ticket_stem"].(string)
-		result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
-			TicketStem:     ticketStem,
-			IncludeDone:    boolArgument(params.Arguments["include_done"]),
-			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
-			// tickets.status is a resolution surface by definition: it answers
-			// "where is this stem", so a hidden ticket must be reported as
-			// hidden-but-found rather than absent.
-			Resolve: true,
-		})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		if result == nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
 	case "tickets.close":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1451,7 +1417,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
-	case "playbook.print":
+	case "playbook.read":
 		// Phase 2: name + context; rsrc root is call-site-overridable seam for M3.
 		// Argument parsing is named/extensible (not positional) for forward-compat
 		// with M3's session_key prepend.
@@ -1503,7 +1469,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		var parentKey string
 		var preferMercenary bool
 		// Override lookup is built for any present session_key (shared helper with
-		// the playbook.print path); it is independent of the lead-gate.
+		// the playbook.read path); it is independent of the lead-gate.
 		renderSessionKey, _ := params.Arguments["session_key"].(string)
 		renderOverrideLookup := buildOverrideLookup(s, renderSessionKey)
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
@@ -2487,7 +2453,7 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 
 // formatSpecFind inherits nothing from formatSpecs: it delegates wholly to
 // formatDocumentFind, which knows nothing of SpecInfo. The legacy-marker
-// advisory therefore has to be appended here explicitly, or the specs.find
+// advisory therefore has to be appended here explicitly, or the specs.query
 // query path silently loses it while the no-query fallback keeps it. Each line
 // is prefixed with the spec path so the note stays attributable.
 //
@@ -2976,7 +2942,7 @@ func ticketScopeAnnotation(root string, statuses []string) string {
 // wsdoc.EffectiveTicketStatuses so the hidden count covers exactly the statuses
 // the accompanying listing covered — including its archive gating, which drops
 // an explicitly requested .done/.dropped unless the matching include flag is
-// set. Without that half, tickets.list(statuses: ["done"]) with include_done
+// set. Without that half, tickets.query(statuses: ["done"]) with include_done
 // unset would render an empty listing and then blame the scope for it. The rule
 // itself lives in wsdoc rather than being mirrored here: mcp already imports
 // wsdoc freely, so there is no import-boundary reason to keep a second copy that
@@ -3405,7 +3371,7 @@ func errorResponse(id json.RawMessage, code int, message string) response {
 func tools() []map[string]any {
 	toolList := []map[string]any{
 		{
-			"name":        "runtime.info",
+			"name":        "runtime.read",
 			"description": "Return ws-mcp runtime metadata for compatibility checks.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3503,153 +3469,38 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "enter.implement",
-			"description": "Enter implement mode: resolve normalized implementation facts and observed Git branch state into one deterministic implementation verdict, store the 'implement' agenda blob, and replace the todo list with the derived implement checklist.",
+			"name":        "route.resolve_implement",
+			"description": "Inner step of ws:lead-implement; not a direct entry point — params are constructed by that skill. Resolves normalized implementation facts and observed Git branch state into one deterministic implementation verdict, stores the 'implement' agenda blob, and replaces the todo list with the derived implement checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"target": map[string]any{
+					"params": map[string]any{
 						"type":        "object",
-						"description": "Implementation target after lead-owned route fact gathering.",
-						"properties": map[string]any{
-							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket", "inline", "unknown"}),
-							"label":       nullableStringProperty("Short target label or summary."),
-							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
-							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
-							"scope_label": nullableStringProperty("Selected implementation scope label."),
-							"scope_slug":  nullableStringProperty("Kebab-case implementation branch suffix."),
-						},
+						"description": "Opaque implementation-routing input, constructed by ws:lead-implement. Inner step of that skill; not a direct entry point — see ws:lead-implement's Fact Contract for the full field set.",
 					},
-					"facts": map[string]any{
-						"type":        "object",
-						"description": "Grouped normalized implementation facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
-						"properties": map[string]any{
-							"scope": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"span":                         nullableEnumStringProperty("Implementation span.", []string{"single-file", "multi-file", "unknown"}),
-									"surface":                      nullableEnumStringProperty("Touched surface.", []string{"internal", "public-interface", "cross-module", "unknown"}),
-									"new_public_symbol":            nullableEnumStringProperty("Whether work introduces a public symbol.", []string{"yes", "no", "unknown"}),
-									"new_type_contract":            nullableEnumStringProperty("Whether work introduces or changes a type/schema contract.", []string{"yes", "no", "unknown"}),
-									"test_surface":                 nullableEnumStringProperty("Test surface affected by the work.", []string{"none", "existing", "new-files", "unknown"}),
-									"explicit_delegation_request":  nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
-									"explicit_direct_edit_request": nullableEnumStringProperty("When yes, overrides all other predicates and forces direct-edit verdict regardless of span/scope/surface facts. Encodes an explicit human instruction to skip delegation. Accepted: yes, no, unknown.", []string{"yes", "no", "unknown"}),
-								},
-							},
-							"complexity": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"change_points":    nullableEnumStringProperty("Known change-point clarity.", []string{"clear", "partially-known", "unknown"}),
-									"reuse_points":     nullableEnumStringProperty("Known reuse point status.", []string{"confirmed", "unconfirmed", "not-applicable", "unknown"}),
-									"strategy_shape":   nullableEnumStringProperty("Implementation strategy shape.", []string{"single-obvious", "multiple-viable", "unknown"}),
-									"side_effect_risk": nullableEnumStringProperty("Side-effect risk.", []string{"low", "moderate", "high", "unknown"}),
-									"cold_context":     nullableEnumStringProperty("Whether the code area is cold for the lead.", []string{"yes", "no", "unknown"}),
-								},
-							},
-							"risk": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"correctness":          nullableEnumStringProperty("Correctness risk.", []string{"low", "moderate", "high", "unknown"}),
-									"fit":                  nullableEnumStringProperty("Fit/contract-preservation risk.", []string{"low", "moderate", "high", "unknown"}),
-									"test":                 nullableEnumStringProperty("Test risk.", []string{"low", "moderate", "high", "unknown"}),
-									"security_or_contract": nullableEnumStringProperty("Security or external contract risk.", []string{"low", "moderate", "high", "unknown"}),
-								},
-							},
-						},
-					},
-					"policy": map[string]any{
-						"type":        "object",
-						"description": "Small explicit caller policy set. Observable Git state is read by MCP.",
-						"properties": map[string]any{
-							"low_ceremony_if_safe": nullableEnumStringProperty("Whether the caller prefers reduced ceremony when all independent safety predicates allow it.", []string{"yes", "no", "unknown"}),
-							"branch": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"merge_target":  nullableStringProperty("Required when already on an implementation branch."),
-									"allow_rename":  nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict (defaults to yes).", []string{"yes", "no", "unknown"}),
-									"merge_confirm": nullableEnumStringProperty("Whether lead-implement may skip the ask-before-merge confirmation for this merge (defaults to ask).", []string{"skip", "ask", "unknown"}),
-								},
-							},
-							"review": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"override": nullableEnumStringProperty("Review override. auto or null lets MCP derive allocation.", []string{"auto", "lead-only", "single", "partitioned"}),
-								},
-							},
-							"docs": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"mode":   nullableEnumStringProperty("Documentation mode.", []string{"standard", "skip-with-reason", "unknown"}),
-									"reason": nullableStringProperty("Required reason when mode=skip-with-reason."),
-								},
-							},
-						},
-					},
-					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
 				},
-				"required": []string{"session_key", "target"},
+				"required": []string{"session_key"},
 			},
 		},
 		{
-			"name":        "enter.proceed",
-			"description": "Enter routing mode: resolve deterministic proceed facts into one route verdict, store the 'proceed' agenda blob, and replace the todo list with the lead-proceed checklist.",
+			"name":        "route.resolve_proceed",
+			"description": "Inner step of ws:lead-proceed; not a direct entry point — params are constructed by that skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the lead-proceed checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"target": map[string]any{
+					"params": map[string]any{
 						"type":        "object",
-						"description": "Proceed target after lead-owned artifact reading.",
-						"properties": map[string]any{
-							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket-path", "inline", "unknown"}),
-							"label":       nullableStringProperty("Short target label or summary."),
-							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
-							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
-						},
+						"description": "Opaque routing input, constructed by ws:lead-proceed. Inner step of that skill; not a direct entry point — see ws:lead-proceed's Fact Contract for the full field set.",
 					},
-					"facts": map[string]any{
-						"type":        "object",
-						"description": "Grouped normalized route facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
-						"properties": map[string]any{
-							"ticket": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"ticket_missing": nullableEnumStringProperty("Whether a ticket-path target is missing.", []string{"yes", "no", "unknown"}),
-									"has_ticket":     nullableEnumStringProperty("Whether the target has a ticket artifact.", []string{"yes", "no", "unknown"}),
-									"status":         nullableEnumStringProperty("Ticket status.", []string{"idea", "todo", "ready", "done", "dropped", "unknown", "n/a"}),
-									"category":       nullableEnumStringProperty("Ticket category.", []string{"epic", "workset", "other", "n/a", "unknown"}),
-									"actionable":     nullableEnumStringProperty("Actionability judgment.", []string{"yes", "no", "unknown"}),
-									"freshness":      nullableEnumStringProperty("Ticket freshness against active conversation decisions.", []string{"current", "missing-settled-decisions", "uncertain", "n/a", "unknown"}),
-									"phase":          nullableStringProperty("Selected phase label when one is named."),
-								},
-							},
-							"gates": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"discussion_needed": nullableEnumStringProperty("Whether user-blocking discussion is needed.", []string{"yes", "no", "unknown"}),
-									"needs_ticket":      nullableEnumStringProperty("Whether an inline target needs a ticket first.", []string{"yes", "no", "n/a", "unknown"}),
-									"scope_blocked":     nullableEnumStringProperty("Scope blocker.", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}),
-									"migration_anchor":  nullableEnumStringProperty("Migration-anchor check result.", []string{"loaded", "n/a", "missing", "conflict", "unknown"}),
-								},
-							},
-							"work": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"category": nullableEnumStringProperty("Current work category hint.", []string{"implementation", "ticket_write", "discussion", "status_report", "unknown"}),
-									"slice":    nullableStringProperty("Resolved implementation slice, whole target, blocked, n/a, or unknown."),
-								},
-							},
-						},
-					},
-					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
 				},
-				"required": []string{"session_key", "target"},
+				"required": []string{"session_key"},
 			},
 		},
 		{
-			"name":        "todo.append",
-			"description": "Append a new pending todo item with a caller-provided key (unique within the active list) and title. Erased keys are reusable.",
+			"name":        "todo.add",
+			"description": "Add a new pending todo item with a caller-provided key (unique within the active list) and title. position defaults to \"end\" (append); \"before\"/\"after\" insert relative to ref_key, which is required for those positions and rejected for \"end\". Erased keys are reusable.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3657,38 +3508,10 @@ func tools() []map[string]any {
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
 					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
+					"position":    enumStringProperty(`Where to add the item. Defaults to "end" (append). "before"/"after" require ref_key; "end" must not carry one.`, []string{"end", "before", "after"}),
+					"ref_key":     stringProperty("Existing item key to insert before/after. Required when position is before or after; must be omitted when position is end."),
 				},
 				"required": []string{"session_key", "key", "title"},
-			},
-		},
-		{
-			"name":        "todo.insert_before",
-			"description": "Insert a new pending todo item immediately before ref_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"ref_key":     stringProperty("Existing item key to insert before."),
-					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
-					"title":       stringProperty("Human-facing item title."),
-					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
-				},
-				"required": []string{"session_key", "ref_key", "key", "title"},
-			},
-		},
-		{
-			"name":        "todo.insert_after",
-			"description": "Insert a new pending todo item immediately after ref_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"ref_key":     stringProperty("Existing item key to insert after."),
-					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
-					"title":       stringProperty("Human-facing item title."),
-					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
-				},
-				"required": []string{"session_key", "ref_key", "key", "title"},
 			},
 		},
 		{
@@ -3985,38 +3808,16 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "specs.list",
-			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, and ticket refs.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
-			"name":        "specs.find",
-			"description": "Find spec files by query, spec anchor stem, or ticket stem reference. Defaults to compact text; use format=json for structured metadata.",
+			"name":        "specs.query",
+			"description": "Query spec files by text query, spec anchor stem, or ticket stem reference. A spec_stem given alone (no query, no ticket_stem) point-resolves that anchor and returns its locations and file metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query":       stringProperty("Optional case-insensitive text query."),
-					"spec_stem":   stringProperty("Optional exact spec anchor stem."),
+					"spec_stem":   stringProperty("Optional exact spec anchor stem. Given alone, point-resolves that anchor."),
 					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-			},
-		},
-		{
-			"name":        "specs.status",
-			"description": "Return locations and file metadata for one spec anchor stem. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"spec_stem": stringProperty("Spec anchor stem to inspect."),
-					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-				"required": []string{"spec_stem"},
 			},
 		},
 		{
@@ -4028,8 +3829,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "mental_models.find",
-			"description": "Find mental-model paths by query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
+			"name":        "mental_models.query",
+			"description": "Query mental-model paths by text query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4080,7 +3881,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.mute",
-			"description": "Mute notes by key on the machine, worktree, clone, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.search still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
+			"description": "Mute notes by key on the machine, worktree, clone, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.query still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4105,8 +3906,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "note.search",
-			"description": "Search notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") searches just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, searches multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"name":        "note.query",
+			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4133,13 +3934,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "tickets.list",
-			"description": "List ticket paths and status metadata without reading full document bodies. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": ticketDiscoverySchema(false),
-		},
-		{
-			"name":        "tickets.find",
-			"description": "Find ticket paths by query, ticket stem, or mentions of another ticket stem. Defaults to compact text; use format=json for structured metadata.",
+			"name":        "tickets.query",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4147,24 +3943,10 @@ func tools() []map[string]any {
 					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
 					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
 					"query":                stringProperty("Optional case-insensitive text query."),
-					"ticket_stem":          stringProperty("Optional exact ticket stem."),
+					"ticket_stem":          stringProperty("Optional exact ticket stem. Given alone, point-resolves that ticket."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
 					"format":               stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-			},
-		},
-		{
-			"name":        "tickets.status",
-			"description": "Return status metadata for a single ticket stem. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"ticket_stem":     stringProperty("Ticket stem to inspect."),
-					"include_done":    boolProperty("Allow lookup under ai-docs/tickets/.done when true."),
-					"include_dropped": boolProperty("Allow lookup under ai-docs/tickets/.dropped when true."),
-					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-				"required": []string{"ticket_stem"},
 			},
 		},
 		{
@@ -4242,7 +4024,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.checklist",
-			"description": "Return a ticket-authoring phase's checklist item list as data, for installing into a single todo.append instruction. Use instead of following the phase's static prose section directly.",
+			"description": "Return a ticket-authoring phase's checklist item list as data, for installing into a single todo.add instruction. Use instead of following the phase's static prose section directly.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4326,7 +4108,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "playbook.print",
+			"name":        "playbook.read",
 			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -4528,9 +4310,9 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
-		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
+		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
+		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
@@ -4903,22 +4685,6 @@ func execRawGrepSchema() map[string]any {
 	return s
 }
 
-func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"statuses":        stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
-			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
-			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
-			"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-		},
-	}
-	if requireTicketStem {
-		schema["required"] = []string{"ticket_stem"}
-	}
-	return schema
-}
-
 func stringMapArgument(value any) map[string]string {
 	items, ok := value.(map[string]any)
 	if !ok {
@@ -5064,7 +4830,7 @@ func enumStringProperty(description string, values []string) map[string]any {
 
 // enumStringOrArrayProperty returns an inputSchema property accepting either
 // a single enum string or an array of that same enum, via "anyOf" — the
-// shape note.search's "layer" argument needs (optional, single-or-array)
+// shape note.query's "layer" argument needs (optional, single-or-array)
 // and no existing helper here covers, since every other enum property in
 // this file is single-shape only.
 func enumStringOrArrayProperty(description string, values []string) map[string]any {

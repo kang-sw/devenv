@@ -5,6 +5,6 @@ description: Reconstruct mental-model documents from scratch by surveying operat
 
 # Forge Mental Model
 
-Call `ws/playbook.print(name: "lead-forge-mental-model")` and execute the returned procedure
+Call `ws/playbook.read(name: "lead-forge-mental-model")` and execute the returned procedure
 inline against the user request.
 If this call fails to connect, run `/ws:mcp-server-repair`.

@@ -109,10 +109,10 @@ func Compute(root string, opts wsconfig.Options, limit int) string {
 		fmt.Fprintf(&sb, "- [%s] %s (priority %d, %s): %s\n", note.Layer, note.Key, note.Priority, note.WrittenAt, note.Value)
 	}
 	if elided > 0 {
-		fmt.Fprintf(&sb, "(%d lower-priority notes elided — use note.search to retrieve.)\n", elided)
+		fmt.Fprintf(&sb, "(%d lower-priority notes elided — use note.query to retrieve.)\n", elided)
 	}
 	if muted > 0 {
-		fmt.Fprintf(&sb, "(%d muted — use note.search to view.)\n", muted)
+		fmt.Fprintf(&sb, "(%d muted — use note.query to view.)\n", muted)
 	}
 	sb.WriteString("_Post-it reminders: `note.write` to pin, `note.erase` when done._\n")
 	return strings.TrimRight(sb.String(), "\n")

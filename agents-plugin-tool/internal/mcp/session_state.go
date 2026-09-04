@@ -510,13 +510,13 @@ func implementRouteInstruction(verdict implementTodoVerdict) string {
 	case "stop":
 		return fmt.Sprintf("Stop before source edits: %s. Resolve the branch policy or branch state before continuing.", firstNonEmpty(plan.Reason, "branch action is blocked"))
 	case "create":
-		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target. Mark route complete only after the branch action succeeds; do not call route.resolve_implement again.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "rename":
-		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call route.resolve_implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "continue":
-		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
+		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call route.resolve_implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
 	case "current":
-		return fmt.Sprintf("Keep the current branch %s for this explicit low-ceremony path. Omit implementation-branch creation and merge work, and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, "the observed branch"))
+		return fmt.Sprintf("Keep the current branch %s for this explicit low-ceremony path. Omit implementation-branch creation and merge work, and do not call route.resolve_implement again.", firstNonEmpty(plan.CurrentBranch, "the observed branch"))
 	default:
 		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
 	}
@@ -809,7 +809,7 @@ func (s *sessionStore) clearAllAgenda(sessionKey string) error {
 
 // enterMode atomically stores the typed payload as an agenda blob under
 // agendaKey and replaces the entire todo list with todos. This is the single
-// write behind every ws.enter.* tool: agenda update and todo replacement land
+// write behind every ws.route.resolve_* tool: agenda update and todo replacement land
 // together so a reader never observes a half-applied mode switch.
 func (s *sessionStore) enterMode(sessionKey, agendaKey string, payload json.RawMessage, todos []todoItem) error {
 	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
@@ -853,7 +853,7 @@ func (s *sessionStore) mutateTodosResult(sessionKey string, fn func([]todoItem) 
 // --- MCP handlers ------------------------------------------------------------
 //
 // These parse arguments, drive the store, and format the compact text response.
-// They are the dispatch targets for the ws.agenda.*, ws.enter.*, and ws.todo.*
+// They are the dispatch targets for the ws.agenda.*, ws.route.resolve_*, and ws.todo.*
 // cases in callTool. All session-state tools require a session_key and are
 // reachable by any role that holds one (roleAllowsTool does not gate these
 // prefixes), per the ticket's D3 scoping decision.
@@ -1027,7 +1027,7 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
 	if _, hasNewTarget := args["target"]; hasNewTarget {
-		const tool = "enter.implement"
+		const tool = "route.resolve_implement"
 		sessionKey, err := sessionStateKey(tool, args)
 		if err != nil {
 			return toolTextResponse(id, "", err)
@@ -1084,15 +1084,15 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	needDoc, _ := args["need_doc"].(bool)
 	delegation, err := parseImplementDelegation(stringValue(args["delegation"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	planDepth, err := parseLegacyImplementPlanDepth(delegation, stringValue(args["plan_depth"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	reviewAlloc, err := parseImplementReviewAlloc(stringValue(args["review_alloc"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("route.resolve_implement: %w", err))
 	}
 	args["delegation"] = delegation
 	args["plan_depth"] = planDepth
@@ -1104,7 +1104,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		NeedReview:  needReview,
 		NeedDoc:     needDoc,
 	})
-	return s.handleEnter(id, "enter.implement", "implement", args, todos)
+	return s.handleEnter(id, "route.resolve_implement", "implement", args, todos)
 }
 
 func parseLegacyImplementPlanDepth(delegation string, raw string) (string, error) {
@@ -1141,7 +1141,7 @@ func stringValue(v any) string {
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	const tool = "enter.proceed"
+	const tool = "route.resolve_proceed"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1177,8 +1177,8 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 	return toolTextResponse(id, result.Raw, nil)
 }
 
-func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) response {
-	const tool = "todo.append"
+func (s *Server) handleTodoAdd(id json.RawMessage, args map[string]any) response {
+	const tool = "todo.add"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1196,46 +1196,37 @@ func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) respo
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	position := "end"
+	if raw, ok := args["position"]; ok && raw != nil {
+		if str, ok := raw.(string); ok {
+			position = str
+		}
+	}
+	if position != "end" && position != "before" && position != "after" {
+		return toolTextResponse(id, "", fmt.Errorf("%s: position must be one of end, before, after", tool))
+	}
+	refKeyRaw, refKeyPresent := args["ref_key"]
+	refKey, _ := refKeyRaw.(string)
+	if position == "end" {
+		if refKeyPresent {
+			return toolTextResponse(id, "", fmt.Errorf("%s: ref_key must be omitted when position is end", tool))
+		}
+		if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
+			return todoAppend(list, normalizedKey, title, todoPending, instruction)
+		}); err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		}
+		return toolTextResponse(id, fmt.Sprintf("todo added: %s\n", normalizedKey), nil)
+	}
+	if refKey == "" {
+		return toolTextResponse(id, "", fmt.Errorf("%s: ref_key is required when position is %s", tool, position))
+	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoAppend(list, normalizedKey, title, todoPending, instruction)
+		return todoInsert(list, refKey, normalizedKey, title, todoPending, instruction, position == "after")
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("todo appended: %s\n", normalizedKey), nil)
-}
-
-func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after bool) response {
-	tool := "todo.insert_before"
-	if after {
-		tool = "todo.insert_after"
-	}
-	sessionKey, err := sessionStateKey(tool, args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	refKey, err := rawStringArg(tool, "ref_key", args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	key, err := rawStringArg(tool, "key", args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	normalizedKey, err := normalizeTodoKey(key)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	title, _ := args["title"].(string)
-	instruction, err := todoInstructionArg(tool, args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoInsert(list, refKey, normalizedKey, title, todoPending, instruction, after)
-	}); err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	return toolTextResponse(id, fmt.Sprintf("todo inserted: %s\n", normalizedKey), nil)
+	return toolTextResponse(id, fmt.Sprintf("todo added: %s\n", normalizedKey), nil)
 }
 
 func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) response {

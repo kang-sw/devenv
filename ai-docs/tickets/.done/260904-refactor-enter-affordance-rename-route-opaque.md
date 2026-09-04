@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-design-reviewed: 587db921af0b881a
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 2ce5ab8ad8931cc2
+completed: 2026-09-04
 ---
 
 # enter.* affordance rename — route.resolve_* + full-opaque published params
@@ -97,8 +98,9 @@ hollowing.
 
 Verification: `go test ./... -count=1` green across all 14 packages (including
 the `TestShippedManifestUpToDate` / `TestWsflowRsrcMirrorUpToDate` drift
-guards); the `enter\.(proceed|implement)|enter_proceed|enter_implement` grep
-sweep returns zero hits across code, `runtime.json`, specs, and playbooks.
+guards), re-confirmed on the goal branch post-merge; the
+`enter\.(proceed|implement)|enter_proceed|enter_implement` grep sweep returns
+zero hits across code, `runtime.json`, specs, and playbooks.
 
 Review (partitioned, correctness opus / test sonnet): correctness clean; test
 clean with 1 Minor recorded and no action — the renamed branch-action/error
@@ -133,6 +135,53 @@ green (routing output byte-unchanged); the relocated skill-body contract covers
 every field the resolver reads, cross-checked field-by-field against the typed
 struct so none is dropped; and a mis-shaped direct call surfaces the opaque
 pointer / redirect-guard message rather than a silent `status=unknown`.
+
+### Result (a46d03cf) - 2026-09-04
+
+Hollowed the client-visible `inputSchema` of `route.resolve_proceed` and
+`route.resolve_implement` (`server.go`) to `session_key` + an opaque
+`params: object` + a `ws:lead-proceed` / `ws:lead-implement` skill pointer (in
+both the tool `description` and the `params` description), `required` reduced to
+`["session_key"]`. The real field contract (`target` / `facts.*` / `policy.*` /
+`format`) was relocated into new `## Fact Contract` tables in
+`agents-plugin/rsrc/lead-proceed/lead-proceed.md` and `lead-implement.md`,
+mirrored to wsflow with both manifests regenerated. Spec prose
+(`mcp-tools.md` `{#260625-session-state-tools}`, `workflow-skills.md`
+`{#260505-proceed-routing-pipeline}` / `{#260505-implementation-workflow-skills}`)
+reframed to describe the opaque published schema + skill-pointer without deleting
+semantic content or changing any `{#slug}`.
+
+Key resolved design point: "opaque `params: object`" is **advertised-schema
+only**. There is no JSON-schema validator in the package and callers send
+top-level `target`/`facts`/`policy`, so the Go decoder is untouched and routing
+is byte-unchanged — `git diff` on `proceed_resolver.go` / `implement_resolver.go`
+is empty, and every existing `TestResolveProceed*` / `TestEnterProceed*` /
+`TestEnterImplement*` / `TestDeriveImplementTodo*` fixture stays green unchanged.
+The two old nested-schema tests were replaced with
+`TestRouteResolveProceedSchemaIsOpaque` / `TestRouteResolveImplementSchemaIsOpaque`
+(assert `target`/`facts`/`policy` absent, `params` a bare object, `required`, and
+the pointer substring). Field-by-field cross-check of the Fact Contract tables
+against the resolver structs is clean (no invented or dropped field/enum).
+
+Verification: `go test ./... -count=1` green across all 14 packages (incl.
+`TestShippedManifestUpToDate` / `TestWsflowRsrcMirrorUpToDate`).
+
+Review (partitioned, correctness opus / fit sonnet / test sonnet): correctness
+clean, test clean; fit clean with 1 Minor recorded and no action —
+`containsAnyString` (`session_state_test.go:1645`) became dead when the old
+schema test was deleted but was not swept alongside
+`objectProperties`/`assertNullableSchema`; harmless unused test helper, left for
+a next-touch cleanup.
+
+Deferred / cross-refs: the `status=unknown` mis-shaped-facts **redirect guard**
+itself remains owned by `260901-bug-enter-proceed-misplaced-facts-silent-unknown-status`
+— this phase only established pointer-text/skill-name consistency for it to
+reference. The skill-authoring **Layer 1 exception** (the relocated `Fact
+Contract` sections are authorized restatement, since the schema is no longer
+ToolSearch-discoverable once opaque) is recorded here and in the implementation
+commit's `## AI Context` so a future skill audit does not strip them as drift.
+Mental-model prose for these tools stays deferred to
+`260904-refactor-mental-model-doc-drift-epic-renames`.
 
 ## Spec Impact
 

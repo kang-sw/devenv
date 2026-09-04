@@ -152,7 +152,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0019: Replace per-file `ai-docs/*.local.md` ignores with `ai-docs/**/*.local.md`.
 - v0020: Convert ticket `related:` list format to map format across all ticket statuses.
 - v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then run mental-model-updater to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
-- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `ws/playbook.print(name: "lead-write-spec")` to rebuild `features:` frontmatter.
+- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `ws/playbook.read(name: "lead-write-spec")` to rebuild `features:` frontmatter.
 - v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
 - v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`.
 - v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.
@@ -189,7 +189,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   focus cleanup is needed.
 - v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
-- v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.list`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
+- v0044: Remove the `Check '## Ticket Focus' in 'ai-docs/_index.md'` reader-instruction bullet from `## Project Knowledge` on upgrade; do not re-add it or any replacement section. Active-attention discovery is filesystem-backed (`tickets.query`/`project_tree` over the status directories) and each ticket's own body, not a cached index section.
 - v0045: Retire spec planned markers. Remove every `🚧` from `ai-docs/spec/` in
   all three forms: `🚧 <Feature Name>` headings at any level (`#` through
   `######`), `> [!<keyword>] Planned 🚧` body callouts under any alphabetic

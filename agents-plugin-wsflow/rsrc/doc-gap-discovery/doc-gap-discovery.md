@@ -32,7 +32,7 @@ with evidence; you never decide whether a change deserves a spec entry.
 2. Read the window: `{{.McpNamespace}}/git.log(range: "<window>", include_body: true)`.
 3. Partition the window into contiguous groups using the boundary table below.
 4. Per group, read `{{.McpNamespace}}/git.diff(mode: "stat")`, then the scoped diff of its non-`ai-docs/` paths.
-5. Per group, locate the documentation that would cover it: `{{.McpNamespace}}/specs.find(query: "<changed surface>")` and `{{.McpNamespace}}/mental_models.find(query: "<changed surface>")`; read what they return.
+5. Per group, locate the documentation that would cover it: `{{.McpNamespace}}/specs.query(query: "<changed surface>")` and `{{.McpNamespace}}/mental_models.query(query: "<changed surface>")`; read what they return.
 6. Per group, record what changed in caller-observable terms, which stems or docs already mention it, and what those omit.
 7. Assign candidacy per group from the evidence in step 6.
 

@@ -247,7 +247,7 @@ Static content only.
 )
 
 // ---------------------------------------------------------------------------
-// playbook.print — golden harness rendering
+// playbook.read — golden harness rendering
 // ---------------------------------------------------------------------------
 
 func TestPlaybookPrintUnknownHarness(t *testing.T) {
@@ -321,7 +321,7 @@ func TestPlaybookPrintCodexHarness(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// playbook.print — delegation tip injection
+// playbook.read — delegation tip injection
 // ---------------------------------------------------------------------------
 
 func TestPlaybookPrintDelegatesTipPresent(t *testing.T) {
@@ -360,7 +360,7 @@ func TestPlaybookPrintDelegatesTipAbsent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// playbook.print — caller context substitution
+// playbook.read — caller context substitution
 // ---------------------------------------------------------------------------
 
 func TestPlaybookPrintCallerContextSubstituted(t *testing.T) {
@@ -382,7 +382,7 @@ func TestPlaybookPrintCallerContextSubstituted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// playbook.print — no-vars fast path
+// playbook.read — no-vars fast path
 // ---------------------------------------------------------------------------
 
 func TestPlaybookPrintNoVarsPlaybook(t *testing.T) {
@@ -763,8 +763,8 @@ func TestPlaybookToolsInLeadToolNames(t *testing.T) {
 		}
 		return false
 	}
-	if !has("playbook.print") {
-		t.Error("playbook.print missing from LeadToolNames")
+	if !has("playbook.read") {
+		t.Error("playbook.read missing from LeadToolNames")
 	}
 	if !has("playbook.render") {
 		t.Error("playbook.render missing from LeadToolNames")
@@ -772,8 +772,8 @@ func TestPlaybookToolsInLeadToolNames(t *testing.T) {
 }
 
 func TestPlaybookToolsNotNoAgentHidden(t *testing.T) {
-	if noAgentHiddenTool("playbook.print") {
-		t.Error("playbook.print is incorrectly hidden in no-agent mode")
+	if noAgentHiddenTool("playbook.read") {
+		t.Error("playbook.read is incorrectly hidden in no-agent mode")
 	}
 	if noAgentHiddenTool("playbook.render") {
 		t.Error("playbook.render is incorrectly hidden in no-agent mode")
@@ -786,7 +786,7 @@ func TestPlaybookToolsVisibleInToolsList(t *testing.T) {
 		name, _ := tool["name"].(string)
 		listed[name] = true
 	}
-	for _, want := range []string{"playbook.print", "playbook.render"} {
+	for _, want := range []string{"playbook.read", "playbook.render"} {
 		if !listed[want] {
 			t.Errorf("tool %q missing from tools() list", want)
 		}
@@ -1095,7 +1095,7 @@ func TestReservedNamespaceVarsDoNotRequireFrontmatter(t *testing.T) {
 kind: print
 delegates: false
 ---
-Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+Call {{.McpNamespace}}/tickets.query and {{.SkillNamespace}}:lead-discuss.
 Actual tool: ws.ferrule.
 `,
 	})
@@ -1108,7 +1108,7 @@ Actual tool: ws.ferrule.
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ferrule"} {
+	for _, want := range []string{"wsflow/tickets.query", "wsflow:lead-discuss", "ferrule"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered body missing %q:\n%s", want, body)
 		}
@@ -1125,7 +1125,7 @@ func TestPlaybookReservedNamespaceVarsFullWs(t *testing.T) {
 kind: print
 delegates: false
 ---
-Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+Call {{.McpNamespace}}/tickets.query and {{.SkillNamespace}}:lead-discuss.
 `,
 	})
 	s := newTestServerWithHarness(t, "codex")
@@ -1134,7 +1134,7 @@ Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, want := range []string{"ws/tickets.find", "ws:lead-discuss"} {
+	for _, want := range []string{"ws/tickets.query", "ws:lead-discuss"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered body missing %q:\n%s", want, body)
 		}
@@ -1683,7 +1683,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	s := newTestServerWithHarness(t, "codex")
 
 	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
-		"note": "see ws/specs.find for details",
+		"note": "see ws/specs.query for details",
 	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
@@ -1693,7 +1693,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 		t.Fatalf("read code-reviewer render: %v", err)
 	}
 	codeReviewerBody := string(codeReviewerData)
-	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details"} {
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.query for details"} {
 		if !strings.Contains(codeReviewerBody, want) {
 			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
 		}
@@ -2009,7 +2009,7 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 func TestPlaybookToolsSchemaNameRequired(t *testing.T) {
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
-		if name != "playbook.print" && name != "playbook.render" {
+		if name != "playbook.read" && name != "playbook.render" {
 			continue
 		}
 		schema, _ := tool["inputSchema"].(map[string]any)
@@ -2041,7 +2041,7 @@ func TestPlaybookPrintMCPDispatch(t *testing.T) {
 	// req.Params is the JSON for the tools/call params object:
 	// {"name": "<tool-name>", "arguments": {...}}
 	reqParams, _ := json.Marshal(map[string]any{
-		"name": "playbook.print",
+		"name": "playbook.read",
 		"arguments": map[string]any{
 			"name": "novars",
 		},
@@ -2361,7 +2361,7 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 
 // TestSkillBodyGoldenLeadVerifyDiscussion verifies lead-verify-discussion
 // resolves from the real skills tree as a static inlined SKILL.md body.
-// lead-verify-discussion is no longer a playbook.print-backed rsrc playbook
+// lead-verify-discussion is no longer a playbook.read-backed rsrc playbook
 // (its procedure body was inlined directly into SKILL.md), so this reads
 // through wsrsrc.LoadSkillBody rather than printPlaybook. The former
 // delegates:true continuity-tip and mercenary-path paragraphs were removed
@@ -2453,9 +2453,9 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	if !strings.Contains(body, "WS Workflow Primitives") {
 		t.Errorf("body %q: expected heading 'WS Workflow Primitives'", body)
 	}
-	// Verify the dead-path fix: self-reinvoke uses playbook.print, not ws:lead-workflow-manual.
-	if !strings.Contains(body, `ws/playbook.print(name: "lead-workflow-manual")`) {
-		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.print", body)
+	// Verify the dead-path fix: self-reinvoke uses playbook.read, not ws:lead-workflow-manual.
+	if !strings.Contains(body, `ws/playbook.read(name: "lead-workflow-manual")`) {
+		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.read", body)
 	}
 	if strings.Contains(body, "{{.") {
 		t.Errorf("body %q: unsubstituted placeholder remains", body)
@@ -2556,7 +2556,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		t.Errorf("body %q: expected doctrine text 'execution attention'", body)
 	}
 	for _, want := range []string{
-		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
+		"Gather `target`, `facts`, and explicit caller `policy` for `ws/route.resolve_implement`",
 		"For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output.",
 		"Treat the installed todo list as the ordered runbook",
 		"Stop for unresolved binding decisions before source edits.",
@@ -2744,12 +2744,12 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		t.Errorf("body %q: expected doctrine text 'workflow attention'", body)
 	}
 	for _, want := range []string{
-		`enter.proceed`,
+		`route.resolve_proceed`,
 		"Follow `Next:` exactly",
-		"Treat an `enter.proceed` verdict as authoritative",
+		"Treat an `route.resolve_proceed` verdict as authoritative",
 		"judge: direct-execution",
 		"- On `Yes`",
-		"return without calling `enter.proceed`",
+		"return without calling `route.resolve_proceed`",
 		"scope_blocked=no-unfinished-phase",
 		"scope_blocked=container-ticket",
 		"scope_blocked=multiple-explicit-phases",
@@ -2943,11 +2943,11 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	}{
 		{
 			skill:   "lead-implement",
-			wantAll: []string{"enter.implement", "`target`", "`facts`", "`policy`"},
+			wantAll: []string{"route.resolve_implement", "`target`", "`facts`", "`policy`"},
 		},
 		{
 			skill:    "lead-proceed",
-			wantAll:  []string{"enter.proceed", "Treat an `enter.proceed` verdict as authoritative", "Follow `Next:` exactly"},
+			wantAll:  []string{"route.resolve_proceed", "Treat an `route.resolve_proceed` verdict as authoritative", "Follow `Next:` exactly"},
 			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 	}
@@ -2974,7 +2974,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 
 // TestPhase3bSkillRepoint verifies that the four repointed lead skills call
 // ws.workflow_manual and reference lead-revive instead of the removed
-// playbook.print(name: "lead-workflow-manual") self-load pattern, and that the
+// playbook.read(name: "lead-workflow-manual") self-load pattern, and that the
 // lead-revive skill exists while lead-load-workflow-manual does not.
 func TestPhase3bSkillRepoint(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
@@ -2983,7 +2983,7 @@ func TestPhase3bSkillRepoint(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Verify the surviving repointed skills call workflow_manual and lead-revive,
-	// and no longer contain the removed playbook.print self-load call. The
+	// and no longer contain the removed playbook.read self-load call. The
 	// original four included lead-sprint and lead-salvage, both since retired.
 	repointed := []string{"lead-proceed", "lead-discuss"}
 	for _, skill := range repointed {
@@ -2998,8 +2998,8 @@ func TestPhase3bSkillRepoint(t *testing.T) {
 			if !strings.Contains(body, "lead-revive") {
 				t.Errorf("%s: rendered body must contain 'lead-revive'", skill)
 			}
-			if strings.Contains(body, `playbook.print(name: "lead-workflow-manual")`) {
-				t.Errorf("%s: rendered body must not contain removed playbook.print self-load call", skill)
+			if strings.Contains(body, `playbook.read(name: "lead-workflow-manual")`) {
+				t.Errorf("%s: rendered body must not contain removed playbook.read self-load call", skill)
 			}
 		})
 	}

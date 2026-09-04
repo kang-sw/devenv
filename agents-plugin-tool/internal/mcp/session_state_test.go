@@ -1232,7 +1232,7 @@ func TestProceedNextInstructions(t *testing.T) {
 			name:     "implement instruction names playbook and pre-source boundary",
 			args:     proceedReadyArgs("text"),
 			wantNext: "lead-implement",
-			wantText: `Routing to next action: lead-implement. Call wsflow/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
+			wantText: `Routing to next action: lead-implement. Call wsflow/playbook.read(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
 		},
 		{
 			name: "write ticket instruction names playbook and reroute",
@@ -1242,7 +1242,7 @@ func TestProceedNextInstructions(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantNext: "lead-write-ticket",
-			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/enter.proceed`,
+			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/route.resolve_proceed`,
 		},
 		{
 			name: "discussion instruction names skill namespace",
@@ -1263,7 +1263,7 @@ func TestProceedNextInstructions(t *testing.T) {
 			}),
 			wantNext:   "stop",
 			wantText:   "Routing to next action: stop. Stop. Report the blocker in Reason",
-			wantNoText: "playbook.print",
+			wantNoText: "playbook.read",
 		},
 	}
 
@@ -1299,109 +1299,85 @@ func TestProceedInputRejectsNonStringFactTypes(t *testing.T) {
 	}
 }
 
-func TestEnterProceedSchemaAdvertisesNullableFacts(t *testing.T) {
-	useLeadProfile(t)
-	server := NewServer(t.TempDir(), "test")
-	properties := toolPropertiesByName(t, callToolsList(t, server), "enter.proceed")
-	target := objectProperties(t, properties["target"])
-	assertNullableSchema(t, target["ticket_path"])
-	assertNullableSchema(t, target["kind"])
-
-	facts := objectProperties(t, properties["facts"])
-	ticketFacts := objectProperties(t, facts["ticket"])
-	gateFacts := objectProperties(t, facts["gates"])
-	workFacts := objectProperties(t, facts["work"])
-	for name, schema := range map[string]any{
-		"ticket.status":          ticketFacts["status"],
-		"ticket.phase":           ticketFacts["phase"],
-		"gates.scope_blocked":    gateFacts["scope_blocked"],
-		"gates.migration_anchor": gateFacts["migration_anchor"],
-		"work.slice":             workFacts["slice"],
-	} {
-		t.Run(name, func(t *testing.T) {
-			assertNullableSchema(t, schema)
-		})
-	}
-}
-
-func TestEnterImplementSchemaRequiresTargetAndAdvertisesNullableFacts(t *testing.T) {
-	useLeadProfile(t)
-	server := NewServer(t.TempDir(), "test")
+// assertRouteResolveSchemaIsOpaque asserts the published tools/list schema for
+// toolName is fully opaque: properties are exactly session_key + params,
+// params is a bare object with no nested properties, required is exactly
+// [session_key], and both the tool description and params description point
+// at the owning skill by name (pointer-text/naming-consistency proof for the
+// companion redirect-guard ticket).
+func assertRouteResolveSchemaIsOpaque(t *testing.T, listLine, toolName, skillPointer string) {
+	t.Helper()
 	var listResp map[string]any
-	if err := json.Unmarshal([]byte(callToolsList(t, server)), &listResp); err != nil {
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
 		t.Fatal(err)
 	}
 	result, _ := listResp["result"].(map[string]any)
 	listedTools, _ := result["tools"].([]any)
-	var schema map[string]any
+	var tool map[string]any
 	for _, rawTool := range listedTools {
-		tool, _ := rawTool.(map[string]any)
-		if tool["name"] == "enter.implement" {
-			schema, _ = tool["inputSchema"].(map[string]any)
+		candidate, _ := rawTool.(map[string]any)
+		if candidate["name"] == toolName {
+			tool = candidate
 			break
 		}
 	}
-	if schema == nil {
-		t.Fatal("ws.enter.implement schema not found")
+	if tool == nil {
+		t.Fatalf("tools/list missing %s", toolName)
 	}
-	required, _ := schema["required"].([]any)
-	if !containsAnyString(required, "target") {
-		t.Fatalf("required = %#v, want target", required)
+	description, _ := tool["description"].(string)
+	if !strings.Contains(description, skillPointer) {
+		t.Fatalf("%s description = %q, want it to contain %q", toolName, description, skillPointer)
+	}
+
+	schema, _ := tool["inputSchema"].(map[string]any)
+	if schema == nil {
+		t.Fatalf("%s missing inputSchema", toolName)
 	}
 
 	properties, _ := schema["properties"].(map[string]any)
-	target := objectProperties(t, properties["target"])
-	assertNullableSchema(t, target["ticket_path"])
-	assertNullableSchema(t, target["kind"])
+	if len(properties) != 2 {
+		t.Fatalf("%s properties = %#v, want exactly session_key and params", toolName, properties)
+	}
+	for _, forbidden := range []string{"target", "facts", "policy"} {
+		if _, present := properties[forbidden]; present {
+			t.Fatalf("%s properties still advertise %q; want opaque params only", toolName, forbidden)
+		}
+	}
+	if _, ok := properties["session_key"]; !ok {
+		t.Fatalf("%s properties missing session_key: %#v", toolName, properties)
+	}
 
-	facts := objectProperties(t, properties["facts"])
-	scope := objectProperties(t, facts["scope"])
-	assertNullableSchema(t, scope["span"])
-	assertNullableSchema(t, scope["surface"])
-	policy := objectProperties(t, properties["policy"])
-	assertNullableSchema(t, policy["low_ceremony_if_safe"])
-	docs := objectProperties(t, policy["docs"])
-	assertNullableSchema(t, docs["mode"])
+	params, _ := properties["params"].(map[string]any)
+	if params == nil {
+		t.Fatalf("%s properties missing params object: %#v", toolName, properties)
+	}
+	if params["type"] != "object" {
+		t.Fatalf("%s params type = %#v, want \"object\"", toolName, params["type"])
+	}
+	if _, hasNestedProperties := params["properties"]; hasNestedProperties {
+		t.Fatalf("%s params has residual nested properties: %#v", toolName, params)
+	}
+	paramsDescription, _ := params["description"].(string)
+	if !strings.Contains(paramsDescription, skillPointer) {
+		t.Fatalf("%s params description = %q, want it to contain %q", toolName, paramsDescription, skillPointer)
+	}
+
+	required, _ := schema["required"].([]any)
+	if len(required) != 1 || required[0] != "session_key" {
+		t.Fatalf("%s required = %#v, want exactly [\"session_key\"]", toolName, required)
+	}
 }
 
-func objectProperties(t *testing.T, raw any) map[string]any {
-	t.Helper()
-	obj, _ := raw.(map[string]any)
-	props, _ := obj["properties"].(map[string]any)
-	if props == nil {
-		t.Fatalf("schema missing object properties: %#v", raw)
-	}
-	return props
+func TestRouteResolveProceedSchemaIsOpaque(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_proceed", "ws:lead-proceed")
 }
 
-func assertNullableSchema(t *testing.T, raw any) {
-	t.Helper()
-	schema, _ := raw.(map[string]any)
-	types, _ := schema["type"].([]any)
-	hasString, hasNull := false, false
-	for _, typ := range types {
-		switch typ {
-		case "string":
-			hasString = true
-		case "null":
-			hasNull = true
-		}
-	}
-	if !hasString || !hasNull {
-		t.Fatalf("schema type = %#v, want string+null in %#v", schema["type"], schema)
-	}
-	if enumValues, ok := schema["enum"].([]any); ok {
-		hasNullEnum := false
-		for _, value := range enumValues {
-			if value == nil {
-				hasNullEnum = true
-				break
-			}
-		}
-		if !hasNullEnum {
-			t.Fatalf("nullable enum missing null value: %#v", enumValues)
-		}
-	}
+func TestRouteResolveImplementSchemaIsOpaque(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	assertRouteResolveSchemaIsOpaque(t, callToolsList(t, server), "route.resolve_implement", "ws:lead-implement")
 }
 
 func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
@@ -1412,8 +1388,8 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903500, root, nil))
 
-	_ = callToolWithKey(t, server, 1, key, "todo.append", map[string]any{"key": "stale", "title": "stale"})
-	text := callToolWithKey(t, server, 2, key, "enter.proceed", proceedReadyArgs("text"))
+	_ = callToolWithKey(t, server, 1, key, "todo.add", map[string]any{"key": "stale", "title": "stale"})
+	text := callToolWithKey(t, server, 2, key, "route.resolve_proceed", proceedReadyArgs("text"))
 	nonEmpty := nonEmptyLines(text)
 	if len(nonEmpty) < 3 {
 		t.Fatalf("raw verdict too short:\n%s", text)
@@ -1430,7 +1406,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 		t.Fatal("session record not found")
 	}
 	if !eqKeys(keysOf(record.Todos), "route-context", "resolve-verdict") {
-		t.Fatalf("enter.proceed did not replace todo list: %v", keysOf(record.Todos))
+		t.Fatalf("route.resolve_proceed did not replace todo list: %v", keysOf(record.Todos))
 	}
 	var agenda proceedAgenda
 	if err := json.Unmarshal(record.Agenda["proceed"], &agenda); err != nil {
@@ -1449,8 +1425,8 @@ func TestEnterProceedJSONIncludesRawVerdict(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903600, root, nil))
 
-	raw := callToolWithKey(t, server, 1, key, "enter.proceed", proceedReadyArgs("text"))
-	jsonText := callToolWithKey(t, server, 2, key, "enter.proceed", proceedReadyArgs("json"))
+	raw := callToolWithKey(t, server, 1, key, "route.resolve_proceed", proceedReadyArgs("text"))
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_proceed", proceedReadyArgs("json"))
 	var result proceedResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -1491,7 +1467,7 @@ func TestEnterProceedWarningsAndErrors(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903700, root, nil))
-	respLine := callToolLineWithKey(t, server, 1, key, "enter.proceed", proceedArgs("ticket-path", "bad enum", nil, map[string]any{
+	respLine := callToolLineWithKey(t, server, 1, key, "route.resolve_proceed", proceedArgs("ticket-path", "bad enum", nil, map[string]any{
 		"ticket": map[string]any{"status": "blocked"},
 	}))
 	if !toolIsError(t, respLine) || !strings.Contains(toolText(t, respLine), "invalid status") {
@@ -1736,11 +1712,11 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 900100, root, nil))
 
-	enter := callToolWithKey(t, server, 1, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(enter, "entered implement mode") {
-		t.Fatalf("enter.implement response unexpected: %s", enter)
+		t.Fatalf("route.resolve_implement response unexpected: %s", enter)
 	}
 
 	full := callToolWithKey(t, server, 2, key, "todo.list", map[string]any{"mode": "full"})
@@ -1774,7 +1750,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902500, root, nil))
 
-	enter := callToolWithKey(t, server, 1, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 1, key, "route.resolve_implement", map[string]any{
 		"delegation":   "direct-edit",
 		"plan_depth":   "none",
 		"review_alloc": "single",
@@ -1786,11 +1762,11 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		"- [ ] {review} Review (single)",
 	} {
 		if !strings.Contains(enter, want) {
-			t.Fatalf("enter.implement output missing %q:\n%s", want, enter)
+			t.Fatalf("route.resolve_implement output missing %q:\n%s", want, enter)
 		}
 	}
 
-	if got := callToolWithKey(t, server, 2, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 2, key, "route.resolve_implement", map[string]any{
 		"plan_depth":   "brief",
 		"review_alloc": "single",
 		"need_review":  true,
@@ -1798,7 +1774,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("invalid plan_depth error expected, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 3, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 3, key, "route.resolve_implement", map[string]any{
 		"delegation":   "direct-edit",
 		"review_alloc": "single",
 		"need_review":  true,
@@ -1808,7 +1784,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("direct-edit omitted plan_depth exposed planner path: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 4, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 4, key, "route.resolve_implement", map[string]any{
 		"delegation":   "delegated",
 		"plan_depth":   "research",
 		"review_alloc": "single",
@@ -1817,7 +1793,7 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("legacy research plan_depth should be rejected with survey escalation guidance, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 5, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 5, key, "route.resolve_implement", map[string]any{
 		"delegation":   "direct-edit",
 		"plan_depth":   "research",
 		"review_alloc": "single",
@@ -1826,14 +1802,14 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		t.Fatalf("direct-edit research plan_depth should be rejected, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 6, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 6, key, "route.resolve_implement", map[string]any{
 		"review_alloc": "single",
 		"need_review":  true,
 	}); !strings.Contains(got, "- [ ] {prep} Prep (survey plan)") || !strings.Contains(got, "- [ ] {edit} Edit (delegated)") {
 		t.Fatalf("legacy omitted delegation/plan_depth should default to delegated survey, got: %s", got)
 	}
 
-	if got := callToolWithKey(t, server, 7, key, "enter.implement", map[string]any{
+	if got := callToolWithKey(t, server, 7, key, "route.resolve_implement", map[string]any{
 		"review_alloc": "singel",
 		"need_review":  true,
 	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
@@ -1851,7 +1827,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
-	text := callToolWithKey(t, server, 2, key, "enter.implement", implementReadyArgs("text"))
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 	for _, want := range []string{
 		"Implementation Verdict",
 		"Mode: delegated",
@@ -1864,11 +1840,11 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		"standard documentation gates",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("enter.implement verdict missing %q:\n%s", want, text)
+			t.Fatalf("route.resolve_implement verdict missing %q:\n%s", want, text)
 		}
 	}
 
-	jsonText := callToolWithKey(t, server, 3, key, "enter.implement", implementReadyArgs("json"))
+	jsonText := callToolWithKey(t, server, 3, key, "route.resolve_implement", implementReadyArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -1892,7 +1868,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		t.Fatalf("unexpected agenda: %+v", agenda)
 	}
 	if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge") {
-		t.Fatalf("enter.implement did not replace todo list: %v", keysOf(record.Todos))
+		t.Fatalf("route.resolve_implement did not replace todo list: %v", keysOf(record.Todos))
 	}
 	readPrep := callToolWithKey(t, server, 4, key, "todo.read", map[string]any{"key": "prep"})
 	var prepPayload todoReadPayload
@@ -1940,7 +1916,7 @@ func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t
 	risk["test"] = "low"
 	risk["security_or_contract"] = "low"
 
-	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2028,7 +2004,7 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
-	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", implementDirectSkipDocsArgs("json"))
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementDirectSkipDocsArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2093,7 +2069,7 @@ func TestEnterImplementUnbornRepositoryFallsBackFromCurrentBranchCompletion(t *t
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
-	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", implementDirectSkipDocsArgs("json"))
+	jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", implementDirectSkipDocsArgs("json"))
 	var result implementResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2210,7 +2186,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			if tc.mutateArgs != nil {
 				tc.mutateArgs(args)
 			}
-			jsonText := callToolWithKey(t, server, 2, key, "enter.implement", args)
+			jsonText := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 			var result implementResult
 			if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 				t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
@@ -2253,7 +2229,7 @@ func TestEnterImplementStopsOnImplementBranchWithoutMergeTarget(t *testing.T) {
 
 	args := implementReadyArgs("json")
 	delete(args["policy"].(map[string]any)["branch"].(map[string]any), "merge_target")
-	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
@@ -2307,7 +2283,7 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 
 	args := implementReadyArgs("json")
 	args["policy"].(map[string]any)["branch"].(map[string]any)["allow_rename"] = "yes"
-	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
@@ -2331,7 +2307,7 @@ func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
 // only proves deriveImplementBranchPlan's response to a conflict, not that
 // the ancestor-path scan actually finds one against a real repo. Here a
 // legacy single-segment ref "impl/ws-dashboard-dev" is pre-created as a real
-// branch, then enter.implement is driven for a fresh create on current
+// branch, then route.resolve_implement is driven for a fresh create on current
 // branch "ws-dashboard-dev" — whose derived target is
 // "impl/ws-dashboard-dev/<stem>" — so the scan's second ancestor probe
 // (segments[:2] == "impl/ws-dashboard-dev") must rev-parse-verify a ref that
@@ -2357,7 +2333,7 @@ func TestEnterImplementCreatePathMergeRootRefConflictDetectedByRealGit(t *testin
 	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
 
 	args := implementReadyArgs("json")
-	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	text := callToolWithKey(t, server, 2, key, "route.resolve_implement", args)
 	var result implementResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
@@ -2924,12 +2900,12 @@ func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903000, root, nil))
 
-	if got := callToolWithKey(t, server, 1, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key": "Review.Step_1", "title": "Review",
-	}); !strings.Contains(got, "todo appended: review.step_1") {
+	}); !strings.Contains(got, "todo added: review.step_1") {
 		t.Fatalf("append did not report normalized key: %s", got)
 	}
-	if got := callToolWithKey(t, server, 2, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
 		"key": "review.step_1", "title": "dup",
 	}); !strings.Contains(got, "already exists") {
 		t.Fatalf("duplicate-after-normalization error expected, got: %s", got)
@@ -2942,15 +2918,194 @@ func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	if full := callToolWithKey(t, server, 4, key, "todo.list", map[string]any{"mode": "full"}); !strings.Contains(full, "- [x] {review.step_1} Review") {
 		t.Fatalf("full list missing normalized rendered key: %s", full)
 	}
-	if got := callToolWithKey(t, server, 5, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 5, key, "todo.add", map[string]any{
 		"key": "{bad}", "title": "bad",
 	}); !strings.Contains(got, "invalid character") {
 		t.Fatalf("invalid key error expected, got: %s", got)
 	}
-	if got := callToolWithKey(t, server, 6, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 6, key, "todo.add", map[string]any{
 		"key": " Review ", "title": "bad",
 	}); !strings.Contains(got, "leading or trailing whitespace") {
 		t.Fatalf("whitespace key error expected, got: %s", got)
+	}
+}
+
+func TestServeStdioTodoAddErrorBranches(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903200, root, nil))
+
+	// position not in the end|before|after enum.
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "middle",
+	}); !strings.Contains(got, "todo.add: position must be one of end, before, after") {
+		t.Fatalf("bad position error expected, got: %s", got)
+	}
+
+	// ref_key missing entirely for position before/after.
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "before",
+	}); !strings.Contains(got, "todo.add: ref_key is required when position is before") {
+		t.Fatalf("missing ref_key(before) error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 3, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "after",
+	}); !strings.Contains(got, "todo.add: ref_key is required when position is after") {
+		t.Fatalf("missing ref_key(after) error expected, got: %s", got)
+	}
+
+	// ref_key present but empty for before/after -> same "required" message
+	// (missing and empty are equivalent per the ticket's fail-loud wording).
+	if got := callToolWithKey(t, server, 4, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "before", "ref_key": "",
+	}); !strings.Contains(got, "todo.add: ref_key is required when position is before") {
+		t.Fatalf("empty ref_key(before) error expected, got: %s", got)
+	}
+
+	// ref_key supplied for position: end -> rejected, both with an explicit
+	// "end" and with position omitted entirely (implicit default).
+	if got := callToolWithKey(t, server, 5, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "end", "ref_key": "whatever",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("ref_key-for-end(explicit) error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 6, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "ref_key": "whatever",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("ref_key-for-end(implicit) error expected, got: %s", got)
+	}
+
+	// ref_key supplied but EMPTY for position: end -> still rejected (both
+	// explicit "end" and implicit/omitted position). This is the load-bearing
+	// case for the comma-ok `args["ref_key"]` presence check in handleTodoAdd:
+	// a regression back to rawStringArg's empty-string-means-missing collapse
+	// would silently accept this and must be caught here.
+	if got := callToolWithKey(t, server, 601, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "end", "ref_key": "",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("empty ref_key-for-end(explicit) error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 602, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "ref_key": "",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("empty ref_key-for-end(implicit) error expected, got: %s", got)
+	}
+
+	// None of the error paths above should have mutated the list.
+	if rec, ok := server.sessions.readState(key); !ok || len(rec.Todos) != 0 {
+		t.Fatalf("error paths must not mutate the todo list: %v", keysOf(rec.Todos))
+	}
+
+	// Pin the other side of the comma-ok distinction: an ABSENT ref_key for
+	// position: end must still be accepted, both with an explicit "end" and
+	// with position omitted entirely (implicit default).
+	if got := callToolWithKey(t, server, 603, key, "todo.add", map[string]any{
+		"key": "end-explicit-no-ref", "title": "T", "position": "end",
+	}); !strings.Contains(got, "todo added: end-explicit-no-ref") {
+		t.Fatalf("absent ref_key with explicit position=end should be accepted, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 604, key, "todo.add", map[string]any{
+		"key": "end-implicit-no-ref", "title": "T",
+	}); !strings.Contains(got, "todo added: end-implicit-no-ref") {
+		t.Fatalf("absent ref_key with implicit (omitted) position should be accepted, got: %s", got)
+	}
+
+	// Reused verbatim error messages (from todoAppend/todoInsert/normalizeTodoKey)
+	// still fire through the new todo.add dispatch, wrapped under the new tool name.
+	if got := callToolWithKey(t, server, 7, key, "todo.add", map[string]any{
+		"key": "seed", "title": "Seed",
+	}); !strings.Contains(got, "todo added: seed") {
+		t.Fatalf("seed add unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 8, key, "todo.add", map[string]any{
+		"key": "seed", "title": "dup",
+	}); !strings.Contains(got, `todo key "seed" already exists`) {
+		t.Fatalf("duplicate key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 9, key, "todo.add", map[string]any{
+		"key": "{bad}", "title": "bad",
+	}); !strings.Contains(got, "invalid character") {
+		t.Fatalf("invalid key format error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 10, key, "todo.add", map[string]any{
+		"key": " seed ", "title": "bad",
+	}); !strings.Contains(got, "leading or trailing whitespace") {
+		t.Fatalf("whitespace key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 11, key, "todo.add", map[string]any{
+		"key": "missing-ref", "title": "T", "position": "before", "ref_key": "does-not-exist",
+	}); !strings.Contains(got, `ref_key "does-not-exist" not found`) {
+		t.Fatalf("unknown ref_key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 12, key, "todo.add", map[string]any{
+		"key": "bad-instruction", "title": "T", "instruction": 42,
+	}); !strings.Contains(got, "instruction must be a string or null") {
+		t.Fatalf("bad instruction type error expected, got: %s", got)
+	}
+}
+
+// TestServeStdioTodoAddReproducesOldPlacements is the byte-identical mutation
+// backstop for the merge: todo.add(position: end) and the pre-merge append
+// tool must produce the same list state, and todo.add(position: before|after,
+// ref_key) must match the pre-merge insert-before/after core-function
+// behavior already proven by TestTodoInsertAndCheck. This verifies the
+// dispatch-level wiring reuses todoAppend/todoInsert unchanged.
+func TestServeStdioTodoAddReproducesOldPlacements(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903300, root, nil))
+
+	// end (equivalent to the old plain-append tool): a, then c.
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
+		"key": "a", "title": "A",
+	}); !strings.Contains(got, "todo added: a") {
+		t.Fatalf("add(end) a unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
+		"key": "c", "title": "C",
+	}); !strings.Contains(got, "todo added: c") {
+		t.Fatalf("add(end) c unexpected: %s", got)
+	}
+	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "c") {
+		t.Fatalf("post-append order wrong: %v", keysOf(rec.Todos))
+	}
+
+	// before (equivalent to the old insert-before tool): insert b before c -> a,b,c.
+	if got := callToolWithKey(t, server, 3, key, "todo.add", map[string]any{
+		"key": "b", "title": "B", "position": "before", "ref_key": "c",
+	}); !strings.Contains(got, "todo added: b") {
+		t.Fatalf("add(before) b unexpected: %s", got)
+	}
+	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c") {
+		t.Fatalf("post-insert_before order wrong: %v", keysOf(rec.Todos))
+	}
+
+	// after (equivalent to the old insert-after tool): insert a2 after a -> a,a2,b,c.
+	if got := callToolWithKey(t, server, 4, key, "todo.add", map[string]any{
+		"key": "a2", "title": "A2", "position": "after", "ref_key": "a",
+	}); !strings.Contains(got, "todo added: a2") {
+		t.Fatalf("add(after) a2 unexpected: %s", got)
+	}
+	rec, ok := server.sessions.readState(key)
+	if !ok || !eqKeys(keysOf(rec.Todos), "a", "a2", "b", "c") {
+		t.Fatalf("post-insert_after order wrong: %v", keysOf(rec.Todos))
+	}
+	// This is the exact list shape TestTodoInsertAndCheck proves for the
+	// unchanged todoAppend/todoInsert cores called directly — confirming the
+	// dispatch-level todo.add reproduces the pre-merge tools' mutations
+	// byte-for-byte, not just "no error".
+	for _, item := range rec.Todos {
+		if item.Status != todoPending {
+			t.Fatalf("newly added item %q must be pending, got %v", item.Key, item.Status)
+		}
 	}
 }
 
@@ -2963,27 +3118,29 @@ func TestServeStdioTodoInstructionReadSurface(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903100, root, nil))
 
-	if got := callToolWithKey(t, server, 1, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key":         "a",
 		"title":       "A",
 		"instruction": "Alpha full instruction",
-	}); !strings.Contains(got, "todo appended: a") {
+	}); !strings.Contains(got, "todo added: a") {
 		t.Fatalf("append with instruction unexpected: %s", got)
 	}
-	if got := callToolWithKey(t, server, 2, key, "todo.insert_before", map[string]any{
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
+		"position":    "before",
 		"ref_key":     "a",
 		"key":         "b",
 		"title":       "B",
 		"instruction": nil,
-	}); !strings.Contains(got, "todo inserted: b") {
+	}); !strings.Contains(got, "todo added: b") {
 		t.Fatalf("insert_before null instruction unexpected: %s", got)
 	}
-	if got := callToolWithKey(t, server, 3, key, "todo.insert_after", map[string]any{
+	if got := callToolWithKey(t, server, 3, key, "todo.add", map[string]any{
+		"position":    "after",
 		"ref_key":     "a",
 		"key":         "c",
 		"title":       "C",
 		"instruction": "Charlie full instruction",
-	}); !strings.Contains(got, "todo inserted: c") {
+	}); !strings.Contains(got, "todo added: c") {
 		t.Fatalf("insert_after with instruction unexpected: %s", got)
 	}
 	if got := callToolWithKey(t, server, 4, key, "todo.check", map[string]any{
@@ -3019,7 +3176,7 @@ func TestServeStdioTodoInstructionReadSurface(t *testing.T) {
 		t.Fatalf("null instruction = %#v, want nil", nullPayload.Instruction)
 	}
 
-	if got := callToolWithKey(t, server, 8, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 8, key, "todo.add", map[string]any{
 		"key": "bad", "title": "Bad", "instruction": []any{"not", "string"},
 	}); !strings.Contains(got, "instruction must be a string or null") {
 		t.Fatalf("invalid instruction error expected, got: %s", got)
@@ -3041,11 +3198,11 @@ func TestServeStdioTodoListInstructionRendering(t *testing.T) {
 	wantPreview := "Render this instruction preview through summary mode while p"
 	wantTail := "reserving full mode details beyond sixty characters."
 
-	if got := callToolWithKey(t, server, 1, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key":         "render",
 		"title":       "Render instruction",
 		"instruction": longInstruction,
-	}); !strings.Contains(got, "todo appended: render") {
+	}); !strings.Contains(got, "todo added: render") {
 		t.Fatalf("append unexpected: %s", got)
 	}
 
@@ -3080,9 +3237,9 @@ func TestServeStdioTodoCheckCheckpointRendering(t *testing.T) {
 		{"c", "C", "Charlie adjacent instruction"},
 		{"d", "D", "Delta non-adjacent instruction"},
 	} {
-		if got := callToolWithKey(t, server, i+1, key, "todo.append", map[string]any{
+		if got := callToolWithKey(t, server, i+1, key, "todo.add", map[string]any{
 			"key": item.key, "title": item.title, "instruction": item.instruction,
-		}); !strings.Contains(got, "todo appended: "+item.key) {
+		}); !strings.Contains(got, "todo added: "+item.key) {
 			t.Fatalf("append %s unexpected: %s", item.key, got)
 		}
 	}
@@ -3157,9 +3314,9 @@ func TestServeStdioTodoReorderHandler(t *testing.T) {
 	// Build a known list a,b,c,d via the append handler so the reorder handler
 	// operates on real on-disk state.
 	for i, k := range []string{"a", "b", "c", "d"} {
-		if got := callToolWithKey(t, server, 1000+i, key, "todo.append", map[string]any{
+		if got := callToolWithKey(t, server, 1000+i, key, "todo.add", map[string]any{
 			"key": k, "title": strings.ToUpper(k),
-		}); !strings.Contains(got, "todo appended: "+k) {
+		}); !strings.Contains(got, "todo added: "+k) {
 			t.Fatalf("append %s unexpected: %s", k, got)
 		}
 	}
@@ -3594,11 +3751,11 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5100, root, nil))
 
 	// Enter implement mode to populate agenda+todos.
-	enter := callToolWithKey(t, server, 5101, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 5101, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(enter, "entered implement mode") {
-		t.Fatalf("enter.implement unexpected: %s", enter)
+		t.Fatalf("route.resolve_implement unexpected: %s", enter)
 	}
 
 	// Continue mode: key present and resolves.
@@ -3642,11 +3799,11 @@ func TestWorkflowManualTodoInstructionPreview(t *testing.T) {
 	wantPreview := "Restore this todo instruction through the workflow manual su"
 	wantTail := "mmary path without showing the extra full detail."
 
-	if got := callToolWithKey(t, server, 5111, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 5111, key, "todo.add", map[string]any{
 		"key":         "restore",
 		"title":       "Restore instruction",
 		"instruction": longInstruction,
-	}); !strings.Contains(got, "todo appended: restore") {
+	}); !strings.Contains(got, "todo added: restore") {
 		t.Fatalf("append unexpected: %s", got)
 	}
 
@@ -3712,7 +3869,7 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5300, root, nil))
 
 	// Enter implement mode to populate todos.
-	callToolWithKey(t, server, 5301, key, "enter.implement", map[string]any{
+	callToolWithKey(t, server, 5301, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 
@@ -3840,11 +3997,11 @@ func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5500, root, nil))
 
 	// Enter implement mode to populate agenda+todos.
-	enter := callToolWithKey(t, server, 5501, key, "enter.implement", map[string]any{
+	enter := callToolWithKey(t, server, 5501, key, "route.resolve_implement", map[string]any{
 		"delegation": "delegated", "need_review": true, "need_doc": false,
 	})
 	if !strings.Contains(enter, "entered implement mode") {
-		t.Fatalf("enter.implement unexpected: %s", enter)
+		t.Fatalf("route.resolve_implement unexpected: %s", enter)
 	}
 
 	manualResp := callToolWithKey(t, server, 5502, key, "workflow_manual", nil)

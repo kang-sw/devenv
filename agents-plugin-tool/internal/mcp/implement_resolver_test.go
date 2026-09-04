@@ -1041,7 +1041,7 @@ func ticketPhaseInput(ticketStem, scopeLabel string) implementInput {
 }
 
 // TestResolveImplementSameTicketStemAcrossPhasesContinues verifies the core
-// ticket contract: entering enter.implement for the same ticket across
+// ticket contract: entering route.resolve_implement for the same ticket across
 // successive phases (same ticket_stem, differing scope_label) derives the
 // same impl-branch stem, so the second phase's observation of the first
 // phase's branch resolves to "continue" rather than "stop" or "rename".

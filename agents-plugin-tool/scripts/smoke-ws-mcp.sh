@@ -74,7 +74,7 @@ call(
         },
     }
 )
-call({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "runtime.info", "arguments": {}}})
+call({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "runtime.read", "arguments": {}}})
 
 assert proc.stdin is not None
 proc.stdin.close()

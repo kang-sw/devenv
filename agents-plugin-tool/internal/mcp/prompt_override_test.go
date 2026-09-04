@@ -444,8 +444,8 @@ func TestOverrideProductionPath(t *testing.T) {
 }
 
 // TestOverridePrintProductionPath mirrors TestOverrideProductionPath for the
-// playbook.print dispatch path: it stores an override via the session-scope
-// resolver and then calls playbook.print with the same session_key, proving the
+// playbook.read dispatch path: it stores an override via the session-scope
+// resolver and then calls playbook.read with the same session_key, proving the
 // print-path override-lookup wiring (and the print inputSchema's session_key
 // advertisement) resolves overrides end-to-end. Marker syntax must never appear.
 func TestOverridePrintProductionPath(t *testing.T) {
@@ -475,8 +475,8 @@ func TestOverridePrintProductionPath(t *testing.T) {
 		t.Fatalf("seed override via resolver: %v", err)
 	}
 
-	// Call playbook.print through the production dispatch path, passing session_key.
-	printResp := callToolOnce(t, s, 1, "playbook.print", map[string]any{
+	// Call playbook.read through the production dispatch path, passing session_key.
+	printResp := callToolOnce(t, s, 1, "playbook.read", map[string]any{
 		"name":        "override-pb",
 		"session_key": key,
 	})
@@ -663,7 +663,7 @@ func assertManualStructureIntact(t *testing.T, label, body string) {
 //  1. Calling config.prompt.set with a lead session key writes the override
 //     through the real layered config resolver.
 //  2. Rendering lead-workflow-manual via buildOverrideLookup + printPlaybook
-//     (the same path used by playbook.print dispatch) shows the stored override
+//     (the same path used by playbook.read dispatch) shows the stored override
 //     in the shipped UserPreferenceSection slot.
 //  3. Marker syntax is absent; manual structure is intact.
 //  4. Harness-exact match vs all-bucket: a harness-specific override (claude)

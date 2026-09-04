@@ -17,8 +17,8 @@ Branch
 - Merge commits follow repository commit rules and include `## AI Context`.
 
 Execution
-- Call `{{.McpNamespace}}/enter.implement` once after facts are complete.
-- No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict. On `delegated`, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
+- Call `{{.McpNamespace}}/route.resolve_implement` once after facts are complete.
+- No Edit or Write tool call is permitted until `route.resolve_implement` returns a `direct-edit` verdict. On `delegated`, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
 - Name workflow skill handoffs with `{{.SkillNamespace}}:<skill>` notation.
 - Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.
 - Treat the installed todo list as the ordered runbook; do not create a parallel task list.
@@ -35,16 +35,76 @@ Review
 - Preserve settled or deferred dispositions.
 - Summarize review evidence before deleting temporary review files.
 
+## Fact Contract
+
+`{{.McpNamespace}}/route.resolve_implement`'s published schema is opaque
+(`params: object`); this table is the authoritative field contract the
+resolver reads. Send `session_key`, `target`, `facts`, `policy`, and
+`format` as top-level call arguments.
+
+`target`
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | `ticket\|inline\|unknown` | |
+| `label` | string\|null | |
+| `ticket_stem` | string\|null | |
+| `ticket_path` | string\|null | |
+| `scope_label` | string\|null | Selected implementation scope label. |
+| `scope_slug` | string\|null | Kebab-case branch suffix; ignored with a warning for ticket targets (deterministic word-key is authoritative). |
+
+`facts.scope`
+| Field | Enum |
+|-------|------|
+| `span` | `single-file\|multi-file\|unknown` |
+| `surface` | `internal\|public-interface\|cross-module\|unknown` |
+| `new_public_symbol` | `yes\|no\|unknown` |
+| `new_type_contract` | `yes\|no\|unknown` |
+| `test_surface` | `none\|existing\|new-files\|unknown` |
+| `explicit_delegation_request` | `yes\|no\|unknown` |
+| `explicit_direct_edit_request` | `yes\|no\|unknown` (overrides all other scope facts to direct-edit when `yes`) |
+
+`facts.complexity`
+| Field | Enum |
+|-------|------|
+| `change_points` | `clear\|partially-known\|unknown` |
+| `reuse_points` | `confirmed\|unconfirmed\|not-applicable\|unknown` |
+| `strategy_shape` | `single-obvious\|multiple-viable\|unknown` |
+| `side_effect_risk` | `low\|moderate\|high\|unknown` |
+| `cold_context` | `yes\|no\|unknown` |
+
+`facts.risk`
+| Field | Enum |
+|-------|------|
+| `correctness` | `low\|moderate\|high\|unknown` |
+| `fit` | `low\|moderate\|high\|unknown` |
+| `test` | `low\|moderate\|high\|unknown` |
+| `security_or_contract` | `low\|moderate\|high\|unknown` |
+
+`policy`
+| Field | Enum/Type |
+|-------|-----------|
+| `low_ceremony_if_safe` | `yes\|no\|unknown` |
+| `branch.merge_target` | string; required only while already on an implementation branch |
+| `branch.allow_rename` | `yes\|no\|unknown` (defaults to allowed) |
+| `branch.merge_confirm` | `skip\|ask\|unknown` (defaults to ask) |
+| `review.override` | `auto\|lead-only\|single\|partitioned` |
+| `docs.mode` | `standard\|skip-with-reason\|unknown` |
+| `docs.reason` | string; required when `docs.mode=skip-with-reason` |
+
+`format`: `text` (default) \| `json`. Groups and fields are optional;
+unknown/null values are normalized by the resolver. MCP observes Git branch
+state itself — do not pass observed branch facts as caller policy.
+
 ## On: invoke
 
 ### 1. Route
 
 1. Parse target: ticket path or inline description.
 2. If ticket-driven, read the ticket and extract stem, selected scope, artifacts, and caller slice.
-3. Gather `target`, `facts`, and explicit caller `policy` for `{{.McpNamespace}}/enter.implement`; use `unknown` unless a value is directly supported by the caller, ticket, loaded docs, file contents, command output, or MCP verdict.
+3. Gather `target`, `facts`, and explicit caller `policy` for `{{.McpNamespace}}/route.resolve_implement`; use `unknown` unless a value is directly supported by the caller, ticket, loaded docs, file contents, command output, or MCP verdict.
 4. Do not set decision fields for delegation, branch mode, plan depth, review allocation, review need, or documentation need.
 5. Use the current lead `session_key` from `{{.McpNamespace}}/workflow_manual`; stop if no lead key is available.
-6. Call `{{.McpNamespace}}/enter.implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
+6. Call `{{.McpNamespace}}/route.resolve_implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
 
 Policy rules:
 - Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.
@@ -55,7 +115,7 @@ Policy rules:
 
 `explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
 
-**Fact-source rule**: Freeze `facts.scope` before the `enter.implement` call. For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output. Unsupported facts stay `unknown`; do not revise frozen facts after the call. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
+**Fact-source rule**: Freeze `facts.scope` before the `route.resolve_implement` call. For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output. Unsupported facts stay `unknown`; do not revise frozen facts after the call. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
 
 ### 2. Execute Verdict
 
@@ -75,7 +135,7 @@ Policy rules:
 
 ### 5. Documentation
 
-- `{doc-pre-pass}`: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")`.
+- `{doc-pre-pass}`: print and execute `{{.McpNamespace}}/playbook.read(name: "lead-update-spec")`.
 - `{doc-commit-gate}`: if `ai-docs/_index.md` exists, refresh it only for new skills, agents, or major patterns (pre-dissolution coexistence only); otherwise update `AGENTS.md`'s `## Project Orientation` section only when repo identity, topology, or canonical flows changed.
 - Commit spec and mental-model changes separately when both changed.
 

@@ -66,7 +66,7 @@ harness. The detected harness is exposed through session inspection output.
 
 ## Runtime And Debug Metadata Tools {#260505-runtime-debug-metadata-tools}
 
-`runtime.info` returns runtime compatibility metadata: the runtime version and
+`runtime.read` returns runtime compatibility metadata: the runtime version and
 source commit. (Prompt bundle metadata was removed when the embedded prompt
 bundle was retired in favor of the rsrc tree.) Launchers and workflow checks use
 this output to detect stale or incompatible runtime binaries.
@@ -268,18 +268,23 @@ blobs` rather than an empty list. These are the fallback primitives for modes
 not covered by a typed enter tool, and let a caller discover or clear
 orphaned blobs without guessing key names from tool descriptions.
 
-**Enter (typed mode switches).** `enter.implement` and `enter.proceed` each
+**Enter (typed mode switches).** `route.resolve_implement` and `route.resolve_proceed` each
 perform one atomic write that both stores the typed payload as an agenda blob (keyed by the mode name) and
 **replaces** the entire todo list with items derived from the mode. Because the
 list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
-`todo.append` loop is needed for a covered mode:
+`todo.add` loop is needed for a covered mode:
 
-- `implement`: `enter.implement` is the public mode-switch call for the
-  implementation-facts-complete boundary. It accepts `session_key`, a required
-  `target` object, optional grouped `facts.scope` / `facts.complexity` /
-  `facts.risk` objects, a small `policy` object, and optional `format:
-  text|json`. MCP observes Git branch state from the session root, including the
+- `implement`: `route.resolve_implement` is the public mode-switch call for the
+  implementation-facts-complete boundary. Its published `inputSchema` is
+  opaque (`session_key` plus a `params: object` and a pointer to
+  `ws:lead-implement`); the real field contract — a required `target` object,
+  optional grouped `facts.scope` / `facts.complexity` / `facts.risk` objects, a
+  small `policy` object, and optional `format: text|json` — is documented in
+  `ws:lead-implement`'s `Fact Contract` section, not in the published schema.
+  The Go decoder still internally parses and validates that same field set,
+  reading `target`/`facts`/`policy`/`format` as top-level call arguments;
+  routing behavior is unchanged. MCP observes Git branch state from the session root, including the
   current branch, HEAD/start commit, target branch existence, and
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
@@ -390,10 +395,15 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   focused verification, one logical explicit-path commit with `## AI Context`,
   retained branch and commit-range reporting, and no push; final-action and
   merge todos are absent only for this result.
-- `proceed`: `enter.proceed` is the public mode-switch call for the
-  routing-facts-complete boundary. It accepts `session_key`, a required
-  `target` object, optional grouped `facts.ticket` / `facts.gates` /
-  `facts.work` objects, and optional `format: text|json`. It normalizes the
+- `proceed`: `route.resolve_proceed` is the public mode-switch call for the
+  routing-facts-complete boundary. Its published `inputSchema` is opaque
+  (`session_key` plus a `params: object` and a pointer to `ws:lead-proceed`);
+  the real field contract — a required `target` object, optional grouped
+  `facts.ticket` / `facts.gates` / `facts.work` objects, and optional `format:
+  text|json` — is documented in `ws:lead-proceed`'s `Fact Contract` section,
+  not in the published schema. The Go decoder still internally parses and
+  validates that same field set, reading `target`/`facts`/`format` as
+  top-level call arguments; routing behavior is unchanged. It normalizes the
   current proceed route vocabulary (`target-kind`, `ticket-missing`,
   `has-ticket`, `status`, `migration-anchor`, `actionable`,
   `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
@@ -411,9 +421,12 @@ letters, digits, `.`, `_`, and `-`, and are rejected when they include leading o
 trailing whitespace. Todo items persist `key`, `title`, `status`, and an
 optional nullable `instruction` field for full execution prose. Existing session
 records without `instruction` remain valid and read as `null`. A duplicate key is
-rejected after normalization, and an erased key is reusable. Creation mutations
-(`todo.append`, `todo.insert_before`, and `todo.insert_after`) accept optional
-nullable `instruction` and reject non-string non-null values. Status and order
+rejected after normalization, and an erased key is reusable. The single creation
+mutation `todo.add(position: end|before|after = "end", ref_key?)` adds a new
+item; `ref_key` is required when `position` is `before` or `after`, and
+rejected when `position` is `end` (including the implicit default). It accepts
+optional nullable `instruction` and rejects non-string non-null values, and
+returns the unified confirmation `todo added: <key>`. Status and order
 mutations do not rewrite untouched item payloads, so existing `instruction`
 values are preserved through status and order changes. `todo.check` returns a
 compact confirmation followed by a checkpoint todo rendering. Other status/order
@@ -447,7 +460,7 @@ are always explicit via `todo.check`.
 
 ## Note Tools {#260810-note-tools}
 
-`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.search`
+`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.query`
 implement four note-memory layers: the two non-tracked layers from 260807
 Phase 1 — **machine**
 (PC-global, project-agnostic — lives beside the global ws config file, e.g.
@@ -474,7 +487,7 @@ its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
 key `a/b.c` becomes `612f622e63.json`) — deterministic across every
 clone/OS/locale, collision-free, and immune to the slash/dot-as-path hazard,
 since hex output only ever contains `[0-9a-f]`. The filename is purely a
-storage detail: `note.search`/`workflow_manual` always report the record's
+storage detail: `note.query`/`workflow_manual` always report the record's
 real `key` field, never the encoded filename. This is a fresh surface,
 sharing no code or store with `session.note`
 (`#260619-session-key-lineage-children`), which is a distinct one-line
@@ -483,7 +496,7 @@ per-child annotation on the session-key store, not a note-memory layer.
 All five tools require `session_key`. `note.write`/`note.erase`/`note.mute`/
 `note.unmute` additionally require a single-string `layer` argument
 (`"machine"`, `"worktree"`, `"clone"`, or `"repo"`) — this asymmetry with
-`note.search` below is by design (read-vs-mutation asymmetry, not an
+`note.query` below is by design (read-vs-mutation asymmetry, not an
 inconsistency to "fix" later): a mutation always targets exactly one layer,
 while a search may reasonably span several. None of the five tools carry a
 `session.`/`config.`/`lead.` prefix, so — like `todo.*`/`agenda.*` — they are
@@ -565,17 +578,17 @@ positional-array precedent anywhere in the tool surface.
   never touch `written_at` or any other field. A missing key is a no-op,
   matching `note.erase`'s precedent. Muting excludes a note from the injected
   `# Notes` block and its priority cap (`#260810-note-injection`) without
-  erasing it — `note.search` continues to return muted records unchanged.
-- **`note.search(session_key, layer?, glob?, from?, then?)`** returns every
+  erasing it — `note.query` continues to return muted records unchanged.
+- **`note.query(session_key, layer?, glob?, from?, then?)`** returns every
   matching record whose `key` matches `glob` (shell-glob syntax, e.g.
   `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
   falls within the inclusive `[from, then]` bound when those are supplied.
   Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
-  `"2026-08-01"`), compared as strings. `note.search` applies no `visible`
+  `"2026-08-01"`), compared as strings. `note.query` applies no `visible`
   filtering — muted records are returned unchanged alongside visible ones.
   This is the retrieval path for notes elided from the ambient `# Notes`
   block (`#260810-note-injection`), muted or not — a caller that sees the
-  elision or muted-count line uses `note.search` with a narrower glob to read
+  elision or muted-count line uses `note.query` with a narrower glob to read
   a specific elided or muted note.
   - Unlike the other four tools, `layer` is **optional** here and accepts
     either a single layer string or an array of layer names. Omitting
@@ -587,7 +600,7 @@ positional-array precedent anywhere in the tool surface.
     with a `layer` field naming the layer it came from — even for a
     one-element array — mirroring the ambient block's `[<layer>]` line
     prefix.
-  - Every `note.search` call, single-layer or multi-layer, orders results by
+  - Every `note.query` call, single-layer or multi-layer, orders results by
     the same comparator: priority descending, then `written_at` descending,
     then `key` ascending — the exact order `#260810-note-injection`'s
     `Compute` uses for the ambient block. This is one shared comparator, not
@@ -621,7 +634,7 @@ valid `session_key` is **required**, and the tool is **lead-only**
 (`isLeadOnlyTool`): a `session_key` resolving to a delegate/leaf scope is rejected
 at the keyed capability gate before the handler runs (mirroring `ferrule`). It
 renders the `lead-workflow-manual` playbook through the same variable substitution
-as `playbook.print` — the rsrc playbook stays the single prompt source of truth —
+as `playbook.read` — the rsrc playbook stays the single prompt source of truth —
 and branches on `session_key`:
 
 - **fresh** (`session_key` equals the reserved fresh-bootstrap sentinel — a
@@ -682,7 +695,7 @@ keeps this section concept-only (guardrails stay in enforcement, mechanical
 content stays in Go) is specified in the documentation-system spec under
 Ticket-System Concept Grounding (`260723-ticket-system-concept-grounding`).
 
-> Known residual: `playbook.print(name: "lead-workflow-manual")` — and printing the
+> Known residual: `playbook.read(name: "lead-workflow-manual")` — and printing the
 > repointed lead skills — is not role-gated and re-exposes the gated bootstrap line
 > and the fresh-bootstrap sentinel to any caller that knows the stem; the defense
 > there is obscurity. Tracked in idea ticket
@@ -871,10 +884,10 @@ visible:
   condition, not off zero-visible.
 
 When more visible notes exist than the cap, the block ends with a visible `(N
-lower-priority notes elided — use note.search to retrieve.)` line; the elided
-notes are never dropped, only deferred to an explicit `note.search` call
+lower-priority notes elided — use note.query to retrieve.)` line; the elided
+notes are never dropped, only deferred to an explicit `note.query` call
 (`#260810-note-tools`). Independently, whenever any note across any layer is
-muted, the block ends with a `(N muted — use note.search to view.)` line
+muted, the block ends with a `(N muted — use note.query to view.)` line
 naming the total muted count; both lines render together when both
 conditions apply, in that order (elision line first, muted line second), and
 either can appear alone. In the all-muted edge case — every note on a layer
@@ -1164,7 +1177,7 @@ full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
 folds remaining orphan `idea/` tickets — those without `parent:`, regardless
 of `related:` — into a single hidden-count line so the raw idea backlog does
 not dominate the tree, and their full bodies remain reachable via
-`tickets.list(status: "idea")` or `tickets.find`.
+`tickets.query(status: "idea")`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
@@ -1182,12 +1195,19 @@ slug.
 `spec_index.verify` checks the spec corpus for anchor-index health problems such
 as duplicate stems.
 
-`specs.list`, `specs.find`, and `specs.status` provide read-only spec discovery.
-They expose spec file metadata, anchors, ticket references, query
-matches, and exact-stem status without requiring callers to scan the spec tree
-manually.
+`specs.query` is the single read-only spec discovery tool, serving three call
+shapes. Called with no arguments (no `query`, `spec_stem`, or `ticket_stem`) it
+enumerates the spec tree — the former `specs.list` shape. Called with
+`spec_stem` alone (no `query`, no `ticket_stem`) it point-resolves that one
+anchor stem and returns its locations and file metadata as a single JSON
+object — the former `specs.status` shape — erroring when the stem is not found
+rather than returning an empty result. Any other combination — a `query` text
+search, or a `ticket_stem` filter alongside or instead of `spec_stem` — is a
+discovery search returning a JSON array of matching files. All three shapes
+expose spec file metadata, anchors, ticket references, query matches, and
+exact-stem status without requiring callers to scan the spec tree manually.
 
-All three tools, including `specs.find`'s query path, additionally emit a
+Every shape, including the point-resolve and query-text paths, additionally emits a
 compatibility advisory for each spec file that still carries a legacy planned
 marker — the contract-first planned-entry mechanism being retired by
 `260726-refactor-retire-spec-planned-marker-mechanism`. Detection keys on the
@@ -1226,18 +1246,27 @@ line-level match evidence. Convention lookup accepts common aliases such as
 
 ## Ticket Discovery Tools {#260505-ticket-discovery-tools}
 
-`tickets.list` returns ticket paths and structured status metadata across ticket
-status directories. Active discovery includes `ready/`, `todo/`, and `idea/` by
-default; archived `.done/` and `.dropped/` tickets are omitted unless explicitly
+`tickets.query` is the single read-only ticket discovery tool, serving three
+call shapes. Called with no `ticket_stem` (optionally with `statuses` and the
+`include_done`/`include_dropped` flags) it returns ticket paths and structured
+status metadata across ticket status directories — the former `tickets.list`
+shape. Active discovery includes `ready/`, `todo/`, and `idea/` by default;
+archived `.done/` and `.dropped/` tickets are omitted unless explicitly
 requested. `ready/` identifies spec-addressed implementation work, while
 `todo/` remains accepted backlog.
 
-`tickets.find` locates tickets by text query, exact ticket stem, mentioned
-ticket stem, and optional status filters. `tickets.status` returns structured
-metadata for a single ticket stem and can optionally include archived done or
-dropped tickets. All three enumerate from the git index as well as the working
-tree, so a worktree-local sparse-checkout narrows what is *marked*, never what is
-found (`#260806-worktree-sparse-checkout-ticket-scope`).
+Called with `ticket_stem` alone (no `query`, no `mentions_ticket_stem`, no
+`statuses`) it point-resolves that one stem and returns its structured status
+metadata as a single JSON object — the former `tickets.status` shape —
+erroring when the stem is not found rather than returning an empty result; it
+can optionally include archived done or dropped tickets via the same
+`include_done`/`include_dropped` flags. Any other combination — a `query` text
+search, a `mentions_ticket_stem` filter, or `statuses` given alongside
+`ticket_stem` — locates tickets by text query, exact ticket stem, mentioned
+ticket stem, and optional status filters, returning a JSON array of matches.
+All three shapes enumerate from the git index as well as the working tree, so
+a worktree-local sparse-checkout narrows what is *marked*, never what is found
+(`#260806-worktree-sparse-checkout-ticket-scope`).
 
 `tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
 (status=dropped), writing the appropriate `completed:` or `dropped:` date into
@@ -1252,7 +1281,7 @@ address tip. Closing while the current branch is an `impl/<root>/<stem>` branch
 that still carries unmerged commits ahead of its merge root additionally returns
 a second, independent soft `next_instruction` nudging the lead to review and
 merge that branch into `<root>` after the close-move commit lands; this reuses
-the `enter.implement` ahead-of-merge-root observation, is advisory only, and the
+the `route.resolve_implement` ahead-of-merge-root observation, is advisory only, and the
 tool itself performs no merge (consistent with never committing). The nudge is
 absent on a merged or clean impl branch and on any non-`impl/*` branch. Under an
 active worktree sparse-checkout the scope pre-flight runs
@@ -1694,17 +1723,20 @@ subprocesses. The scope path is additive, never a new cost on the ordinary path.
 
 Under an active scope:
 
-- `tickets.list`, `tickets.find`, and `tickets.status` enumerate hidden tickets
-  alongside checked-out ones. Each hidden entry carries `hidden` in its bracketed
-  flag list in text mode and `hidden: true` in JSON, so the caller reports
-  "filtered", not "absent".
-- `tickets.list` appends one trailing `scope:` line naming how many tickets this
-  worktree's scope hides and stating that they remain in the index and resolvable
-  by stem. It is text-mode only; a JSON listing gets the per-ticket `hidden` mark
-  but no aggregate count, because adding one would turn the response from an
-  array into an object. The line is suppressed when the caller's status filters
-  select nothing at all — an empty listing then has a cause unrelated to the
-  scope — and when the hidden count is zero.
+- `tickets.query` enumerates hidden tickets alongside checked-out ones, in every
+  call shape (enumerate, point-resolve by `ticket_stem`, and text/mentions
+  search). Each hidden entry carries `hidden` in its bracketed flag list in text
+  mode and `hidden: true` in JSON, so the caller reports "filtered", not
+  "absent".
+- The enumerate and search shapes (no `ticket_stem` given) append one trailing
+  `scope:` line naming how many tickets this worktree's scope hides and stating
+  that they remain in the index and resolvable by stem. It is text-mode only; a
+  JSON listing gets the per-ticket `hidden` mark but no aggregate count, because
+  adding one would turn the response from an array into an object. The line is
+  suppressed when the caller's status filters select nothing at all — an empty
+  listing then has a cause unrelated to the scope — and when the hidden count is
+  zero. The point-resolve shape (`ticket_stem` given) never appends this line:
+  a single resolved ticket already carries its own `hidden` flag instead.
 - `tickets.move` and `tickets.close` pre-flight both the resolved source and the
   destination against the scope **before the first write to the source file**,
   and refuse with a message naming the path, the governing config
@@ -1740,9 +1772,21 @@ make. {#260806-worktree-sparse-checkout-ticket-scope}
 `mental_models.list` returns available mental-model documents with domain,
 description, and source metadata.
 
-`mental_models.find` locates mental-model paths by text query, domain, or spec
+`mental_models.query` locates mental-model paths by text query, domain, or spec
 stem reference. `mental_models.status` returns path-first metadata for documents
 selected by domain or path.
+
+**Noted exception.** The `260903-refactor-mcp-read-surface-collapse` list/query/
+status collapse deliberately does not touch `mental_models`: its audit found
+the triple is not a clean superset the way `tickets`/`specs` were —
+`mental_models.list` is a divergent legacy implementation with its own struct
+and formatter (no JSON path through `MentalModelsList`), and `mental_models.query`
+lacks the `path` argument that `mental_models.status` carries, so `query`
+cannot absorb `status` without behavior loss. `mental_models.list`,
+`mental_models.query` (verb-aligned by the earlier find-to-query rename), and
+`mental_models.status` therefore remain three separate tools here. Whether and
+how to reconcile this surface is tracked separately at
+`260904-research-mental-models-query-reconciliation`.
 
 ## Reference Trace Tool {#260505-reference-trace-tool}
 
@@ -1937,7 +1981,7 @@ error.
 
 An optional `format: "json"` argument switches the response to a structured
 `{base, head, verdict, ref, found}` object built from the same frontier
-entry, mirroring `tickets.status`'s `format=json` convention
+entry, mirroring `tickets.query`'s point-resolve `format=json` convention
 (`wantsJSON`/`toolJSONResponse`). This is the bare-SHA, no-string-scraping
 output a caller like the `lead-ship` release gate consumes to resolve
 `<frontier-head>..HEAD` without parsing the text-mode sentence.
@@ -1968,8 +2012,8 @@ Four tools each surface a cheap, read-only advisory when the review-watermark
 ledger looks stale relative to the project's review track (the resolved
 default branch — `origin/HEAD`'s target, else local `main`, else local
 `master`): `tickets.close`, `workflow_manual` (FRESH-with-root and CONTINUE
-branches only), `enter.implement` (both direct and delegated branches), and
-`enter.proceed`. The nudge is fail-open and purely advisory: it never blocks
+branches only), `route.resolve_implement` (both direct and delegated branches), and
+`route.resolve_proceed`. The nudge is fail-open and purely advisory: it never blocks
 the call it rides on, and a resolution failure (no review track, no
 readable ledger) silently produces no text rather than an error.
 
@@ -2001,7 +2045,7 @@ review track's tip. Three states:
 - **Fresh** (below the staleness threshold): no text.
 
 Each of the four call sites injects the same advisory text, differing only in
-presentation. `tickets.close`, `enter.implement`, and `enter.proceed` prefix
+presentation. `tickets.close`, `route.resolve_implement`, and `route.resolve_proceed` prefix
 it `review-watermark: ` and append it to their own response text (the
 text-mode raw verdict, for the latter two). The two `workflow_manual`
 branches instead prepend it unprefixed as a top-of-body banner block, using
@@ -2053,7 +2097,7 @@ plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
 different setup name is advertised.
 
 The playbook surface also follows product mode. In no-agent mode,
-`playbook.print` and `playbook.render` serve the shared rsrc playbook bodies
+`playbook.read` and `playbook.render` serve the shared rsrc playbook bodies
 through product-aware selection: `<!-- ws:full-only:start/end -->` regions are
 omitted, `<!-- ws:wsflow-only:start/end -->` regions are included, marker
 comments are never emitted, and the remaining user-facing namespace notation is
@@ -2071,7 +2115,7 @@ wsflow-only predecessor for delegate prompt materialization; it is no longer
 advertised or callable in either product mode. Legacy wsflow delegate context
 materialization is preserved through `playbook.render`.
 
-`playbook.print(name, context?)` returns the named playbook's procedure text
+`playbook.read(name, context?)` returns the named playbook's procedure text
 inline in the tool result, with `context` values substituted and declared
 includes resolved. It is the lead-facing successor of internal workflow-skill
 bodies.
@@ -2092,7 +2136,7 @@ dispatch uses the resolved binding metadata supported by its harness; Codex maps
 `recommended-model` to `spawn_agent.model` and the optional
 `recommended-reasoning-effort` to `spawn_agent.reasoning_effort`. Mercenary
 dispatch continues to pass `recommended-tier` as `mercenary.register`'s `tier`.
-`playbook.print` remains tier-only: it may surface `recommended-tier`, but never
+`playbook.read` remains tier-only: it may surface `recommended-tier`, but never
 the render-only model or reasoning-effort lines. Neither tool carries a routing
 or strategy decision — the caller selects `name`, and the tool only returns or
 materializes the requested playbook. `root_override`, when set, rebinds both the
@@ -2128,7 +2172,7 @@ redistribution. {#260609-playbook-harness-rendering}
 
 Product-mode content selection is separate from harness selection. Shared rsrc
 playbooks may mark full-ws-only or wsflow-only sections with the product markers
-documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.print` and
+documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.read` and
 `playbook.render` select those sections after harness rendering and before
 returning text or writing a prompt file. User-facing namespace notation in
 shared playbooks is authored with reserved implicit variables (`McpNamespace`
@@ -2144,7 +2188,7 @@ available without frontmatter declarations, and override caller-supplied
 semantic variable is introduced.
 
 A playbook may declare text dependencies in its frontmatter; the renderer
-auto-includes that text at print/render time, so a single `playbook.print(name)`
+auto-includes that text at print/render time, so a single `playbook.read(name)`
 call returns the procedure together with its required conventions. The include
 set is fixed at authoring time, not chosen by the caller per call. This does not
 replace `convention.read` / `infra.read`, which remain standalone discovery tools
@@ -2152,11 +2196,11 @@ for raw access.
 
 Code-side pragmatic playbook concatenation is renderer-owned behavior, not a
 source-template syntax. When global `"workflow.prefer_subagent"` resolves to
-`on`, `playbook.print(name: "lead-workflow-manual")` renders
+`on`, `playbook.read(name: "lead-workflow-manual")` renders
 `lead-prefer-subagent` through the same harness-aware renderer, prompt override
 resolver, and product-mode pass, then appends it to the manual. The appended
 body is wrapped as `<playbook name="lead-prefer-subagent" title="Prefer Subagent">...</playbook>`.
-Standalone `playbook.print` and `playbook.render` output remains Markdown, and
+Standalone `playbook.read` and `playbook.render` output remains Markdown, and
 no duplicate-insertion guard is applied.
 
 A playbook marked as delegating carries a compact continuation tip in its
@@ -2228,7 +2272,7 @@ open and close markers is the **inline seed default** — there is no separate
 default field, so the shipped wording stays in the `.md` body and is readable in
 review. `desc` is a short human-readable summary of the point.
 
-The override pass runs during both `playbook.print` and `playbook.render`,
+The override pass runs during both `playbook.read` and `playbook.render`,
 alongside product-mode marker selection (`#260513-wsflow-agentless-runtime-mode`)
 and after harness rendering. For each override-point it resolves a value along
 two orthogonal axes:

@@ -9,7 +9,7 @@ variables:
 # Workflow Manual
 
 > **Session invariant:** Must reload after session compaction or continuation. Call
-> `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute inline.
+> `{{.McpNamespace}}/playbook.read(name: "lead-workflow-manual")` and execute inline.
 > When in doubt, reload — a duplicate load is safe.
 
 ## On: invoke
@@ -129,7 +129,7 @@ reviewers.
 
 ### Runtime metadata
 
-Use `{{.McpNamespace}}/runtime.info` for runtime compatibility checks and feature detection.
+Use `{{.McpNamespace}}/runtime.read` for runtime compatibility checks and feature detection.
 
 ### Reference discovery
 
@@ -138,14 +138,14 @@ path/status/reference lookup before shell search. Use native file reads after a
 discovery tool returns the path to inspect or edit.
 
 Prefer:
-- `{{.McpNamespace}}/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
-- `{{.McpNamespace}}/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
-- `{{.McpNamespace}}/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
-- `{{.McpNamespace}}/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
-- `{{.McpNamespace}}/specs.find(spec_stem: "<stem>")` for anchor lookup.
-- `{{.McpNamespace}}/specs.find(ticket_stem: "<stem>")` for ticket-linked specs.
-- `{{.McpNamespace}}/specs.status(spec_stem: "<stem>")` for duplicate-safe anchor location.
-- `{{.McpNamespace}}/mental_models.find(query: "<topic>")` for domain discovery.
+- `{{.McpNamespace}}/tickets.query(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
+- `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>")` for ticket lookup by stem.
+- `{{.McpNamespace}}/tickets.query(mentions_ticket_stem: "<stem>")` for parent/related scans.
+- `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", include_done: true)` for status checks.
+- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for anchor lookup.
+- `{{.McpNamespace}}/specs.query(ticket_stem: "<stem>")` for ticket-linked specs.
+- `{{.McpNamespace}}/specs.query(spec_stem: "<stem>")` for duplicate-safe anchor location.
+- `{{.McpNamespace}}/mental_models.query(query: "<topic>")` for domain discovery.
 - `{{.McpNamespace}}/mental_models.status(domain: "<domain>")` for known-domain docs.
 - `{{.McpNamespace}}/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
 - `{{.McpNamespace}}/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
@@ -153,7 +153,7 @@ Prefer:
 ### Notes / durable memory
 
 `{{.McpNamespace}}/note.write` records durable cross-session context;
-`{{.McpNamespace}}/note.search` reads it back, and the ambient `# Notes` block
+`{{.McpNamespace}}/note.query` reads it back, and the ambient `# Notes` block
 surfaces active notes at session start. Write one when a future session would
 otherwise re-derive a fact that has no better home — a non-obvious environment
 quirk, a standing gotcha, or the live consequence of a past decision. Prefer the
@@ -289,7 +289,7 @@ grouping with no decomposition ownership.
 <!-- ws:full-only:start -->
 ## Planned Or Specialized
 
-Check `{{.McpNamespace}}/runtime.info` before assuming richer interrupt or
+Check `{{.McpNamespace}}/runtime.read` before assuming richer interrupt or
 active-agent/message-queue behavior than the runtime exposes; basic async
 cancellation exists through `mercenary.cancel`, with retry via `mercenary.call`.
 <!-- ws:full-only:end -->

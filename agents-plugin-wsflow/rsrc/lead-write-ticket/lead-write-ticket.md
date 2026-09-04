@@ -49,7 +49,7 @@ Movement
 
 1. New ticket: call `{{.McpNamespace}}/tickets.create_empty(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")` and follow its returned next_instruction.
 2. Existing ticket: apply the requested change — phase update, content update, or status move — directly to the loaded body.
-3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.append` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
+3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.add` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
 4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
 5. For actionable tickets, apply `judge: ticket-shape` for phase count and granularity.
 6. For epic/workset detail that belongs to a child or included ticket: stop this invocation; start a separate `lead-write-ticket` invocation scoped to that ticket. When that child does not exist yet, record it as the skeleton's `- Planned:` entry carrying the constraint and continue.
@@ -58,7 +58,7 @@ Movement
 
 ### 4. Verify
 
-1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
+1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.add` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
 2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check** and **Dependency Closure Check**.
 
 ### 5. Ground
@@ -120,7 +120,7 @@ For each reviewer named by `tickets.sage_gate`, and for each stage the gate repo
 Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promotion counts as `ready/` for this check).
 
 1. For `todo/` (not promoting): existing `spec:` links are optional recovery hints only; implementation still routes through proceed.
-2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
+2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.query`; keep confirmed stems as-is.
 3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance.
 4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/`; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
 
@@ -157,7 +157,7 @@ Applies to a single edit target; **Cascade Edit** reuses this logic across multi
 
 ## On: Cascade Edit
 
-1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to the project's active ticket inventory (`{{.McpNamespace}}/tickets.list`, or `ai-docs/_index.md` active inventory when the project has not migrated off it) when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
+1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to the project's active ticket inventory (`{{.McpNamespace}}/tickets.query`, or `ai-docs/_index.md` active inventory when the project has not migrated off it) when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
 2. Apply per-target decision recording per **Cross-ticket decision review**.
 3. Do not promote a target to `ready/` unless the user explicitly asked for ready promotion or routed through `{{.SkillNamespace}}:lead-proceed`; for each target entering `ready/`, run **Spec-address Check**, **Dependency Closure Check**, and the **Sage Review Gate** before commit.
 4. Run **Verify** across the edited set; commit one logical documentation unit when the edits are one decision propagation.
