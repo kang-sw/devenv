@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-design-reviewed: b20e3dad1923284f
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b20e3dad1923284f
+completed: 2026-09-04
 ---
 
 # MCP mechanical over-split → signature merge (todo insert-trio → add)
@@ -106,6 +107,39 @@ byte-identical *mutation*, while the confirmation string is the new unified
 `todo appended:`/`todo inserted:` strings — tests assert the new string); every
 error branch fails loud with the specified message; the full Go test suite is
 green (`go test ./...` in `agents-plugin-tool/`).
+
+### Result (645664e1) - 2026-09-04
+
+Collapsed `todo.append`/`todo.insert_before`/`todo.insert_after` into a single
+`todo.add(position: end|before|after = "end", ref_key?)`. `handleTodoAdd`
+branches on `position` to the existing `todoAppend`/`todoInsert` cores (no new
+list logic); the three old tools are removed from registration + dispatch and
+the schema collapses from three entries to one. Confirmation unified to
+`todo added: <key>`. `ref_key` is required iff `position ∈ {before, after}` and
+rejected for `end` — enforced via the comma-ok idiom (`value, ok :=
+args["ref_key"]`) so a *supplied-empty* `ref_key` is still rejected for `end`,
+distinct from absent. Updated `runtime.json` (both packages), `mcp-tools.md`
+`{#260625-session-state-tools}` including the stale "todo.append loop" prose,
+the playbook token call sites plus the regenerated wsflow mirror, and the
+`tickets.checklist` description.
+
+Verification: `go test ./... -count=1` green (13 packages); the
+`todo\.(append|insert_before|insert_after)` grep sweep is clean across code,
+specs, and playbooks; runtime.json drift tests green in both the Go and wsflow
+suites; spec index ok.
+
+Review (partitioned, correctness opus / test sonnet): correctness clean with 2
+Minor recorded and no action — JSON `null` `ref_key` is not special-cased (it is
+rejected fail-loud for `end` rather than treated as absent), and a non-string
+`position` retains the `"end"` default rather than tripping the enum error; both
+are malformed-input-only and outside the frozen contract. Test returned 1
+Important — no coverage of supplied-empty `ref_key` for `end` — dispositioned
+[fixed] via relay #1: the implementer added four assertions pinning
+supplied-empty rejection (explicit `end` + implicit) and absent-acceptance
+(explicit `end` + implicit) at commit 98548123.
+
+Deferred: CLI subcommand verb alignment stays out of scope
+(`260904-refactor-cli-subcommand-verb-alignment`).
 
 ## Spec Impact
 

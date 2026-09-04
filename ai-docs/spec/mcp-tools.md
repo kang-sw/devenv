@@ -273,7 +273,7 @@ perform one atomic write that both stores the typed payload as an agenda blob (k
 **replaces** the entire todo list with items derived from the mode. Because the
 list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
-`todo.append` loop is needed for a covered mode:
+`todo.add` loop is needed for a covered mode:
 
 - `implement`: `enter.implement` is the public mode-switch call for the
   implementation-facts-complete boundary. It accepts `session_key`, a required
@@ -411,9 +411,12 @@ letters, digits, `.`, `_`, and `-`, and are rejected when they include leading o
 trailing whitespace. Todo items persist `key`, `title`, `status`, and an
 optional nullable `instruction` field for full execution prose. Existing session
 records without `instruction` remain valid and read as `null`. A duplicate key is
-rejected after normalization, and an erased key is reusable. Creation mutations
-(`todo.append`, `todo.insert_before`, and `todo.insert_after`) accept optional
-nullable `instruction` and reject non-string non-null values. Status and order
+rejected after normalization, and an erased key is reusable. The single creation
+mutation `todo.add(position: end|before|after = "end", ref_key?)` adds a new
+item; `ref_key` is required when `position` is `before` or `after`, and
+rejected when `position` is `end` (including the implicit default). It accepts
+optional nullable `instruction` and rejects non-string non-null values, and
+returns the unified confirmation `todo added: <key>`. Status and order
 mutations do not rewrite untouched item payloads, so existing `instruction`
 values are preserved through status and order changes. `todo.check` returns a
 compact confirmation followed by a checkpoint todo rendering. Other status/order

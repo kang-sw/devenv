@@ -49,7 +49,7 @@ Movement
 
 1. New ticket: call `{{.McpNamespace}}/tickets.create_empty(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")` and follow its returned next_instruction.
 2. Existing ticket: apply the requested change — phase update, content update, or status move — directly to the loaded body.
-3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.append` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
+3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.add` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
 4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
 5. For actionable tickets, apply `judge: ticket-shape` for phase count and granularity.
 6. For epic/workset detail that belongs to a child or included ticket: stop this invocation; start a separate `lead-write-ticket` invocation scoped to that ticket. When that child does not exist yet, record it as the skeleton's `- Planned:` entry carrying the constraint and continue.
@@ -58,7 +58,7 @@ Movement
 
 ### 4. Verify
 
-1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
+1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.add` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
 2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check** and **Dependency Closure Check**.
 
 ### 5. Ground
