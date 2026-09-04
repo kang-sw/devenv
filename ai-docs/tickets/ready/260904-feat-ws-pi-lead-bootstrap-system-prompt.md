@@ -66,29 +66,29 @@ bridge normalizes session keys mechanically.
   persistent `message`. The extension appends, never replaces: it returns
   `event.systemPrompt + "\n\n" + <ws block>`.
 - Content of the ws block, in order:
-  1. the ws-mcp workflow manual **static body**, obtained by the bridge
-     itself at `session_start` right after the `ferrule` bootstrap through
-     `playbook.print(name: "lead-workflow-manual", session_key: <own key>)` —
-     the same rsrc render `workflow_manual` starts from, *before* ws-mcp
-     injects its per-call material. Nothing ws-mcp recomputes per call goes
-     into the system prompt: not the `## Session Key` line/section, not
-     `## Session State`, not the repo notes, and not the per-call advisory
-     blocks (`bootstrapStalenessWarning`, `docCoverageWarning`,
-     `scopeAnnouncement`, `computeManuals`, review checkpoint / review-track
-     nudges). Those keep their ws-mcp per-call cadence through the mapped
-     call (§3). The manual text has a single source (ws-mcp render); the
-     adapter never carries a copy. Phase 1 verifies that the `playbook.print`
-     render equals `workflow_manual`'s pre-injection body for the Pi harness
-     (same include resolution); if it does not, the fallback is the
-     `workflow_manual` CONTINUE response cut at the first `## Session Key`
-     heading, accepting snapshot semantics for the advisory blocks and
-     recording that in the spec;
+  1. the **full `workflow_manual` CONTINUE response** as of session start,
+     obtained by the bridge itself right after the `ferrule` bootstrap through
+     `workflow_manual(session_key: <own key>)`: the static manual body plus
+     ws-mcp's session-start material — `## Session Key`, `## Session State`,
+     repo notes, and the advisory blocks (`bootstrapStalenessWarning`,
+     `docCoverageWarning`, `scopeAnnouncement`, `computeManuals`, review
+     checkpoint / review-track nudges) — prefixed by one fixed line marking
+     the dynamic part as a **session-start snapshot** ("current state comes
+     from `workflow_manual`"). This is deliberately a one-shot snapshot (user
+     decision 2026-09-04): the dynamic material is refreshed only when an
+     entry-point skill calls `workflow_manual` (§3), the same cadence as on
+     Claude/Codex, never per turn. The manual text has a single source
+     (ws-mcp render); the adapter never carries a copy. The bridge also
+     renders `playbook.print(name: "lead-workflow-manual", session_key: <own
+     key>)` once at session start — `workflow_manual` calls the same
+     `printPlaybook` internally — and keeps it as the **static-body
+     snapshot** §3 cuts by;
   2. the **Pi lead guide**: an adapter-owned prose file
      (`agents-plugin-pi/pi-lead-guide.md`, sibling of `model-catalog.json`,
      read at `session_start`; added to `package.json`'s `files` whitelist so
      the installed tarball ships it, not only a dev `-e` checkout) explaining the Pi-specific lead surface — how
      `session_key` is handled for it (never needed), that the manual is
-     already present so `workflow_manual` returns only session state, and a
+     already present so `workflow_manual` returns only its dynamic part, and a
      **verb routing table** with one row per Pi lead verb. This ticket lands
      **first** in the Pi drain order, so it seeds the rows for the tools that
      exist in the tree today (`ws-agent-spawn`, `ws-agent-continue`,
@@ -105,9 +105,11 @@ bridge normalizes session keys mechanically.
   discussion).
 - Rejected: injecting the manual as a persistent `message` (it would sit in
   the transcript and be subject to compaction; the system prompt survives Pi
-  compaction natively, which is the point); putting dynamic session state in
-  the system prompt (turn-by-turn churn of the system prompt makes prompt
-  debugging opaque, and ws-mcp already separates the two via `workflow_state`).
+  compaction natively, which is the point); **per-turn refresh** of the
+  dynamic part — a `before_agent_start` fetch of the current state/advisories
+  injected as a message when changed — rejected by the user: entry-point
+  cadence is sufficient, and re-delivering accumulating material (repo notes,
+  session state) every turn is not cheap in context.
 
 ### 2. Bridge session-key normalization — narrow, mechanical
 
@@ -138,9 +140,9 @@ everything ws-mcp computes per call — and never the manual body again:
 
 - Primary: the bridge forwards the call to ws-mcp `workflow_manual` with the
   (normalized) key and **cuts the static manual body out of the response**
-  by exact substring match against the `session_start` snapshot (§1), which
-  leaves the per-call advisory blocks, `## Session Key`, `## Session State`,
-  and the repo notes. This preserves ws-mcp's contract that those blocks are
+  by exact substring match against the static-body snapshot (§1, the
+  `playbook.print` render), which leaves the per-call advisory blocks,
+  `## Session Key`, `## Session State`, and the repo notes. This preserves ws-mcp's contract that those blocks are
   recomputed on every call (a staleness or doc-coverage warning the user
   fixes mid-session stops nagging; one that becomes true later surfaces).
 - Fallback: if the snapshot body is not found in the response (renderer
@@ -251,8 +253,9 @@ against `pi-adapter-runtime`:
 ### Phase 1: System-prompt bootstrap + key normalization + manual→state mapping
 
 Implement in `agents-plugin-pi/src/`: the `before_agent_start` hook and ws
-block assembly (manual body fetched at `session_start`, Session State suffix
-stripped, `pi-lead-guide.md` appended); the seeded `pi-lead-guide.md` with the
+block assembly (full `workflow_manual` response fetched at `session_start`
+with the snapshot marker line, `playbook.print` static-body snapshot kept
+for the cut, `pi-lead-guide.md` appended); the seeded `pi-lead-guide.md` with the
 verb table rows for the tools existing at landing; `normalizeSessionKey` in
 front of `resolveSessionKey` with the two §2 cases; the `workflow_manual` ->
 `workflow_state` dispatch mapping (body cut, `workflow_state` fallback,
@@ -270,7 +273,9 @@ Verification:
 
 1. Live `pi -e <ext>` lead: the system prompt (via `ctx.getSystemPrompt()` in
    a debug command or the `systemPromptOptions` dump) contains the manual
-   body and the guide, and does not contain a `## Session State` section.
+   body, the session-start snapshot of state/advisories behind the marker
+   line, and the guide; the block is byte-stable across later turns (no
+   per-turn refresh).
 2. Invoke a canonical `lead-*` skill whose body calls `workflow_manual` with
    the sentinel: the response is the state-only view with the prepended line,
    and ws-mcp's session-key store gained **no** second lead key for that
@@ -282,12 +287,12 @@ Verification:
    agenda/todos.
 5. Fill-or-forward regression: a lead call passing an explicit **child** key
    reaches ws-mcp unchanged (existing behavior preserved).
-6. Static-body equivalence: the `playbook.print("lead-workflow-manual")`
-   render equals the `workflow_manual` CONTINUE body before ws-mcp's
-   injections for the Pi harness; the mapped call's response carries a
-   per-call advisory (force one, e.g. an unset tier) that is absent from the
-   system prompt, and the advisory disappears from the next mapped response
-   after the condition is fixed.
+6. Static-body cut: the `playbook.print("lead-workflow-manual")` render is
+   found verbatim inside the `workflow_manual` CONTINUE response (same
+   `printPlaybook` render), so the mapped call returns only the dynamic
+   part; force a per-call advisory (e.g. an unset tier) after session start
+   and observe it in the next mapped response, then absent again after the
+   condition is fixed.
 7. Degraded path: with the `ferrule` bootstrap forced to fail, a sentinel
    `workflow_manual` call still mints and returns the manual (today's
    self-heal), and the bridge reported the degraded bootstrap.
