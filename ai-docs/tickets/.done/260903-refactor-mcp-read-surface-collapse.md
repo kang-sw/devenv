@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-design-reviewed: e6c549134d110f98
 sage-review-completeness: completed
 sage-review-completeness-reviewed: e6c549134d110f98
+completed: 2026-09-04
 ---
 
 # MCP read-surface collapse — fold proven-redundant list/find/status triples into query
@@ -145,3 +146,8 @@ Edits to existing anchors only — no new spec stem, no heading `{#slug}` change
 - `mcp-tools.md` `{#260505-mental-model-discovery-tools}` — record the noted
   exception: `mental_models.query` (verb-aligned) coexists with the un-collapsed
   `list`/`status`, with a pointer to the reconciliation follow-up.
+
+
+## Resolution (2026-09-04)
+
+Phase 1 landed: tickets/specs list+status collapsed into the query survivor (bd335c7f, fix d3b2248b) with genuine byte-identical output via status-formatter reuse (design-corrected from the ticket's optimistic "already superset" claim). Verification green (go test -count=1, 13 pkgs; wsflow 10/10). Partitioned review: fit clean; correctness caught+fixed one Critical (stale skills manifest) and recorded one Minor. mental_models left un-collapsed → follow-up 260904-research-mental-models-query-reconciliation; CLI surface excluded → 260904-refactor-cli-subcommand-verb-alignment.
