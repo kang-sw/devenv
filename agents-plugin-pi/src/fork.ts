@@ -244,17 +244,17 @@ export function getForkSourceSessionFile(toolCtx: unknown): string | undefined {
  */
 export function buildForkDirectiveText(): string {
   return [
-    "You are a task-thread fork of the lead session: you share its full context (this is a clone of its session), working laterally alongside it, not as a depth-consuming worker.",
+    "Task-thread fork: this session is a clone of the lead's own session, so its existing context is already shared — work laterally alongside the lead, not as a depth-consuming worker.",
     "",
-    `Work the task given in the next message. If you need the lead's input before you can continue, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" and end your turn there.`,
+    `Work the task given in the next message. If the lead's input is needed before continuing, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" and end the turn there.`,
     "",
-    `When the task is fully done, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"final" and a message in exactly this shape, one field per line:`,
+    `Once the task is fully done, call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"final" and a message in exactly this shape, one field per line:`,
     "Outcome: <what happened>",
     "Files changed: <paths, or none>",
-    "Verification: <what you ran or checked, and the result>",
+    "Verification: <what was run or checked, and the result>",
     "Blockers: <or none>",
     "Commit: <hash or range, or the literal \"none\">",
-    "Decisions: <notable choices you made>",
+    "Decisions: <notable choices made>",
     "",
     `Never end a turn with no tool call and no ${REPORT_TO_LEAD_TOOL_NAME} report — always either keep working (call a tool) or report (kind:"question" or kind:"final") before stopping.`,
   ].join("\n");
@@ -280,13 +280,26 @@ export interface ForkSessionCtx {
  * seen this turn (`turnReportKind`) — then, on `agent_settled`, classifies
  * the turn via `classifyForkTurnOutcome` and acts:
  * - `"question"`/`"final"`: reset the nudge counter (a valid stop).
- * - `"acknowledge-and-return"`: reset the nudge counter — a tool call is
- *   real progress, not a bleed signal (the ticket rules out prose-only
- *   bleed mitigation; a turn that did SOMETHING is not nudged).
- * - `"no-signal"`: `shouldNudge` — inject a steer nudge, or, once
- *   `MAX_FORK_NUDGES` is exhausted, fail loud with a transcript tail
- *   (`tailLines` over `record.sessionPath`, best-effort) and tell the lead
- *   not to harvest a result from this fork.
+ * - Anything else (`"acknowledge-and-return"` or `"no-signal"`) is §4's
+ *   "reached idle without `kind:"final"`" case — checked via
+ *   `isIdleWithoutFinal` against `record.pendingReports`' own undrained
+ *   kinds (so an already-buffered-but-not-yet-harvested `"final"` is not
+ *   re-flagged):
+ *   - `"acknowledge-and-return"`: reset the nudge counter — a tool call is
+ *     real progress, not itself a bleed signal (the ticket rules out
+ *     prose-only bleed mitigation as a *substitute* for this check, not as
+ *     a reason to treat a working turn as silence) — but still surface an
+ *     incomplete-run notice to the LEAD so an idle fork with no
+ *     completion/question signal is never mistaken for a finished result.
+ *   - `"no-signal"`: `shouldNudge` — re-prompt the FORK itself via
+ *     `record.client.prompt(...)` (never the lead's session — a spawned
+ *     child only runs another turn when re-prompted on its OWN RPC handle;
+ *     this mirrors `sendToAgent`'s live-idle branch, including clearing
+ *     `record.idlePending` first so a racing `ws-agent-wait` cannot
+ *     busy-return a stale pre-nudge snapshot). Once `MAX_FORK_NUDGES` is
+ *     exhausted, fail loud to the LEAD with a transcript tail (`tailLines`
+ *     over `record.sessionPath`, best-effort) and tell it not to harvest a
+ *     result from this fork.
  *
  * A `kind:"final"` report is additionally validated inline, the instant its
  * `tool_execution_start` is observed: `validateFinalReportShape` (rejects a
@@ -295,8 +308,8 @@ export interface ForkSessionCtx {
  * line. Both surface a steer notice to the lead on failure; neither mutates
  * `record.pendingReports` itself (that FIFO is `spawner.ts`'s own, drained
  * by `ws-agent-wait` as normal — this loop only ever ADDS advisory
- * `pi.sendUserMessage` notices, it never blocks or rewrites the report
- * itself).
+ * `pi.sendUserMessage` notices to the lead, or a nudge `prompt()` to the
+ * fork itself; it never blocks or rewrites the report).
  */
 function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRecord, expectsCommit: boolean): void {
   const client = record.client;
@@ -347,18 +360,52 @@ function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRe
     if (e.type !== "agent_settled") return;
 
     const outcome = classifyForkTurnOutcome({ hadToolCall: hadToolCallThisTurn, reportKind: turnReportKind });
-    if (outcome === "question" || outcome === "final" || outcome === "acknowledge-and-return") {
+
+    if (outcome === "question" || outcome === "final") {
       nudgeCount = 0;
       return;
     }
 
-    // "no-signal": the actual bleed condition — no tool call, no report.
-    if (shouldNudge(nudgeCount)) {
-      nudgeCount += 1;
+    // Neither "question" nor "final" this turn. §4: a fork reaching idle
+    // (agent_settled) without a completion/question signal is
+    // non-completion. Check the record's own undrained report queue (not
+    // just this turn) so an already-buffered-but-not-yet-harvested
+    // kind:"final" is not re-flagged as idle-without-final.
+    if (!isIdleWithoutFinal(record.pendingReports.map((r) => r.kind))) {
+      nudgeCount = 0;
+      return;
+    }
+
+    if (outcome === "acknowledge-and-return") {
+      // A tool call happened this turn — real progress, not itself a bleed
+      // signal, so it is not auto-nudged. It is still §4's
+      // idle-without-final case, though: surface it to the lead so an idle
+      // fork with no completion/question signal is never mistaken for a
+      // finished result.
+      nudgeCount = 0;
       pi.sendUserMessage(
-        `Fork ${agentId}: your last turn ended with no tool call and no ${REPORT_TO_LEAD_TOOL_NAME} report (nudge ${nudgeCount}/${MAX_FORK_NUDGES}). Continue the task, or call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" or kind:"final".`,
+        `Fork ${agentId} went idle after doing work, but has not reported completion (kind:"final") or asked a question (kind:"question"). Do not treat this as a finished result yet.`,
         { deliverAs: "steer" },
       );
+      return;
+    }
+
+    // "no-signal": the actual bleed condition — no tool call, no report.
+    // Re-prompt the FORK itself (never the lead — see this function's own
+    // doc comment).
+    if (shouldNudge(nudgeCount)) {
+      nudgeCount += 1;
+      record.idlePending = false; // mirrors sendToAgent's live-idle clearing: an internal re-prompt must not let a racing ws-agent-wait busy-return with the stale pre-nudge snapshot.
+      client
+        .prompt(
+          `Your last turn ended with no tool call and no ${REPORT_TO_LEAD_TOOL_NAME} report (nudge ${nudgeCount}/${MAX_FORK_NUDGES}). Continue the task, or call ${REPORT_TO_LEAD_TOOL_NAME} with kind:"question" or kind:"final".`,
+        )
+        .catch((err: unknown) => {
+          pi.sendUserMessage(
+            `Fork ${agentId}: failed to deliver an anti-bleed nudge to it (${err instanceof Error ? err.message : String(err)}). Treat this fork as potentially stalled.`,
+            { deliverAs: "steer" },
+          );
+        });
       return;
     }
 

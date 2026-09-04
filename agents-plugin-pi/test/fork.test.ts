@@ -276,4 +276,15 @@ describe("buildForkDirectiveText", () => {
       assert.ok(text.includes(`${field}:`), `expected the directive to name required field "${field}"`);
     }
   });
+
+  test("carries no identity-framing persona opener", () => {
+    const text = buildForkDirectiveText();
+    assert.ok(!/\byou\s+are\s+a\b/i.test(text), `directive text must not open with "you are a ..." identity framing: ${text}`);
+  });
+
+  test("carries no ALL-CAPS override-style words", () => {
+    const text = buildForkDirectiveText();
+    const allCapsWords = text.match(/\b[A-Z]{4,}\b/g) ?? [];
+    assert.deepEqual(allCapsWords, [], `directive text must not carry ALL-CAPS override word(s): ${JSON.stringify(allCapsWords)}`);
+  });
 });
