@@ -17,7 +17,7 @@ import (
 // markers (ws:full-only, ws:wsflow-only, ws:mercenary-on) and the override
 // markers (ws:override:) so none of those passes consume or choke on them.
 //
-// Under playbook.print the markers surface verbatim as inert HTML comments
+// Under playbook.read the markers surface verbatim as inert HTML comments
 // (invisible when Markdown renders), preserving backward compatibility.
 // The ONLY consumer is stripModeGatedRegion in this file.
 const (
@@ -231,7 +231,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	}
 
 	// Render the manual body (FRESH + CONTINUE only) through the same pipeline as
-	// playbook.print.
+	// playbook.read.
 	rsrcRoot, err := resolveRsrcRoot("")
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: resolve rsrc root: %w", err))

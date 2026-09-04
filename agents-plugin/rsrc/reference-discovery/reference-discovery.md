@@ -26,7 +26,7 @@ Source-level reference mapping is a different role (`plan-populator-survey`).
 1. Discover candidates through:
    - `{{.McpNamespace}}/specs.list()`
    - `{{.McpNamespace}}/mental_models.list()`
-   - `{{.McpNamespace}}/mental_models.find(query: "<brief topic>")`
+   - `{{.McpNamespace}}/mental_models.query(query: "<brief topic>")`
    - `{{.McpNamespace}}/tickets.list(status: "ready")`
    - `{{.McpNamespace}}/tickets.list(status: "todo")`
    - `{{.McpNamespace}}/tickets.list(status: "idea")`

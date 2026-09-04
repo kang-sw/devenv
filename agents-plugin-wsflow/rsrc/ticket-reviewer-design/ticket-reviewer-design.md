@@ -35,12 +35,12 @@ verdict text only.
 ## Process
 
 1. Read the ticket file at the provided path.
-2. Read the spec area this ticket targets, via `{{.McpNamespace}}/specs.find`: entries in
+2. Read the spec area this ticket targets, via `{{.McpNamespace}}/specs.query`: entries in
    `spec:` frontmatter, and the spec named in the ticket's `## Spec Impact` section. A
    ticket may address specs through either surface — do not skip the spec read because
    `spec:` frontmatter is absent.
 3. If `related-mental-model:` entries present: read referenced mental-model docs via
-   `{{.McpNamespace}}/mental_models.find`. If `parent:` is present: read that epic body
+   `{{.McpNamespace}}/mental_models.query`. If `parent:` is present: read that epic body
    for cross-child invariants, which epics own and child tickets do not restate.
 4. List `ready/` tickets via `{{.McpNamespace}}/tickets.list` and read their
    `## Spec Impact` sections, to see what other landing-committed work claims the same

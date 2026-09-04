@@ -66,7 +66,7 @@ harness. The detected harness is exposed through session inspection output.
 
 ## Runtime And Debug Metadata Tools {#260505-runtime-debug-metadata-tools}
 
-`runtime.info` returns runtime compatibility metadata: the runtime version and
+`runtime.read` returns runtime compatibility metadata: the runtime version and
 source commit. (Prompt bundle metadata was removed when the embedded prompt
 bundle was retired in favor of the rsrc tree.) Launchers and workflow checks use
 this output to detect stale or incompatible runtime binaries.
@@ -447,7 +447,7 @@ are always explicit via `todo.check`.
 
 ## Note Tools {#260810-note-tools}
 
-`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.search`
+`note.write`, `note.erase`, `note.mute`, `note.unmute`, and `note.query`
 implement four note-memory layers: the two non-tracked layers from 260807
 Phase 1 — **machine**
 (PC-global, project-agnostic — lives beside the global ws config file, e.g.
@@ -474,7 +474,7 @@ its filename as hex of the key's raw UTF-8 bytes plus a `.json` suffix (e.g.
 key `a/b.c` becomes `612f622e63.json`) — deterministic across every
 clone/OS/locale, collision-free, and immune to the slash/dot-as-path hazard,
 since hex output only ever contains `[0-9a-f]`. The filename is purely a
-storage detail: `note.search`/`workflow_manual` always report the record's
+storage detail: `note.query`/`workflow_manual` always report the record's
 real `key` field, never the encoded filename. This is a fresh surface,
 sharing no code or store with `session.note`
 (`#260619-session-key-lineage-children`), which is a distinct one-line
@@ -483,7 +483,7 @@ per-child annotation on the session-key store, not a note-memory layer.
 All five tools require `session_key`. `note.write`/`note.erase`/`note.mute`/
 `note.unmute` additionally require a single-string `layer` argument
 (`"machine"`, `"worktree"`, `"clone"`, or `"repo"`) — this asymmetry with
-`note.search` below is by design (read-vs-mutation asymmetry, not an
+`note.query` below is by design (read-vs-mutation asymmetry, not an
 inconsistency to "fix" later): a mutation always targets exactly one layer,
 while a search may reasonably span several. None of the five tools carry a
 `session.`/`config.`/`lead.` prefix, so — like `todo.*`/`agenda.*` — they are
@@ -565,17 +565,17 @@ positional-array precedent anywhere in the tool surface.
   never touch `written_at` or any other field. A missing key is a no-op,
   matching `note.erase`'s precedent. Muting excludes a note from the injected
   `# Notes` block and its priority cap (`#260810-note-injection`) without
-  erasing it — `note.search` continues to return muted records unchanged.
-- **`note.search(session_key, layer?, glob?, from?, then?)`** returns every
+  erasing it — `note.query` continues to return muted records unchanged.
+- **`note.query(session_key, layer?, glob?, from?, then?)`** returns every
   matching record whose `key` matches `glob` (shell-glob syntax, e.g.
   `"ticket.*"`; omitted or `"*"` matches every key) and whose `written_at`
   falls within the inclusive `[from, then]` bound when those are supplied.
   Bounds accept either a full RFC3339 timestamp or a bare date prefix (e.g.
-  `"2026-08-01"`), compared as strings. `note.search` applies no `visible`
+  `"2026-08-01"`), compared as strings. `note.query` applies no `visible`
   filtering — muted records are returned unchanged alongside visible ones.
   This is the retrieval path for notes elided from the ambient `# Notes`
   block (`#260810-note-injection`), muted or not — a caller that sees the
-  elision or muted-count line uses `note.search` with a narrower glob to read
+  elision or muted-count line uses `note.query` with a narrower glob to read
   a specific elided or muted note.
   - Unlike the other four tools, `layer` is **optional** here and accepts
     either a single layer string or an array of layer names. Omitting
@@ -587,7 +587,7 @@ positional-array precedent anywhere in the tool surface.
     with a `layer` field naming the layer it came from — even for a
     one-element array — mirroring the ambient block's `[<layer>]` line
     prefix.
-  - Every `note.search` call, single-layer or multi-layer, orders results by
+  - Every `note.query` call, single-layer or multi-layer, orders results by
     the same comparator: priority descending, then `written_at` descending,
     then `key` ascending — the exact order `#260810-note-injection`'s
     `Compute` uses for the ambient block. This is one shared comparator, not
@@ -621,7 +621,7 @@ valid `session_key` is **required**, and the tool is **lead-only**
 (`isLeadOnlyTool`): a `session_key` resolving to a delegate/leaf scope is rejected
 at the keyed capability gate before the handler runs (mirroring `ferrule`). It
 renders the `lead-workflow-manual` playbook through the same variable substitution
-as `playbook.print` — the rsrc playbook stays the single prompt source of truth —
+as `playbook.read` — the rsrc playbook stays the single prompt source of truth —
 and branches on `session_key`:
 
 - **fresh** (`session_key` equals the reserved fresh-bootstrap sentinel — a
@@ -682,7 +682,7 @@ keeps this section concept-only (guardrails stay in enforcement, mechanical
 content stays in Go) is specified in the documentation-system spec under
 Ticket-System Concept Grounding (`260723-ticket-system-concept-grounding`).
 
-> Known residual: `playbook.print(name: "lead-workflow-manual")` — and printing the
+> Known residual: `playbook.read(name: "lead-workflow-manual")` — and printing the
 > repointed lead skills — is not role-gated and re-exposes the gated bootstrap line
 > and the fresh-bootstrap sentinel to any caller that knows the stem; the defense
 > there is obscurity. Tracked in idea ticket
@@ -871,10 +871,10 @@ visible:
   condition, not off zero-visible.
 
 When more visible notes exist than the cap, the block ends with a visible `(N
-lower-priority notes elided — use note.search to retrieve.)` line; the elided
-notes are never dropped, only deferred to an explicit `note.search` call
+lower-priority notes elided — use note.query to retrieve.)` line; the elided
+notes are never dropped, only deferred to an explicit `note.query` call
 (`#260810-note-tools`). Independently, whenever any note across any layer is
-muted, the block ends with a `(N muted — use note.search to view.)` line
+muted, the block ends with a `(N muted — use note.query to view.)` line
 naming the total muted count; both lines render together when both
 conditions apply, in that order (elision line first, muted line second), and
 either can appear alone. In the all-muted edge case — every note on a layer
@@ -1164,7 +1164,7 @@ full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
 folds remaining orphan `idea/` tickets — those without `parent:`, regardless
 of `related:` — into a single hidden-count line so the raw idea backlog does
 not dominate the tree, and their full bodies remain reachable via
-`tickets.list(status: "idea")` or `tickets.find`.
+`tickets.list(status: "idea")` or `tickets.query`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
@@ -1182,12 +1182,12 @@ slug.
 `spec_index.verify` checks the spec corpus for anchor-index health problems such
 as duplicate stems.
 
-`specs.list`, `specs.find`, and `specs.status` provide read-only spec discovery.
+`specs.list`, `specs.query`, and `specs.status` provide read-only spec discovery.
 They expose spec file metadata, anchors, ticket references, query
 matches, and exact-stem status without requiring callers to scan the spec tree
 manually.
 
-All three tools, including `specs.find`'s query path, additionally emit a
+All three tools, including `specs.query`'s query path, additionally emit a
 compatibility advisory for each spec file that still carries a legacy planned
 marker — the contract-first planned-entry mechanism being retired by
 `260726-refactor-retire-spec-planned-marker-mechanism`. Detection keys on the
@@ -1232,7 +1232,7 @@ default; archived `.done/` and `.dropped/` tickets are omitted unless explicitly
 requested. `ready/` identifies spec-addressed implementation work, while
 `todo/` remains accepted backlog.
 
-`tickets.find` locates tickets by text query, exact ticket stem, mentioned
+`tickets.query` locates tickets by text query, exact ticket stem, mentioned
 ticket stem, and optional status filters. `tickets.status` returns structured
 metadata for a single ticket stem and can optionally include archived done or
 dropped tickets. All three enumerate from the git index as well as the working
@@ -1694,7 +1694,7 @@ subprocesses. The scope path is additive, never a new cost on the ordinary path.
 
 Under an active scope:
 
-- `tickets.list`, `tickets.find`, and `tickets.status` enumerate hidden tickets
+- `tickets.list`, `tickets.query`, and `tickets.status` enumerate hidden tickets
   alongside checked-out ones. Each hidden entry carries `hidden` in its bracketed
   flag list in text mode and `hidden: true` in JSON, so the caller reports
   "filtered", not "absent".
@@ -1740,7 +1740,7 @@ make. {#260806-worktree-sparse-checkout-ticket-scope}
 `mental_models.list` returns available mental-model documents with domain,
 description, and source metadata.
 
-`mental_models.find` locates mental-model paths by text query, domain, or spec
+`mental_models.query` locates mental-model paths by text query, domain, or spec
 stem reference. `mental_models.status` returns path-first metadata for documents
 selected by domain or path.
 
@@ -2053,7 +2053,7 @@ plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
 different setup name is advertised.
 
 The playbook surface also follows product mode. In no-agent mode,
-`playbook.print` and `playbook.render` serve the shared rsrc playbook bodies
+`playbook.read` and `playbook.render` serve the shared rsrc playbook bodies
 through product-aware selection: `<!-- ws:full-only:start/end -->` regions are
 omitted, `<!-- ws:wsflow-only:start/end -->` regions are included, marker
 comments are never emitted, and the remaining user-facing namespace notation is
@@ -2071,7 +2071,7 @@ wsflow-only predecessor for delegate prompt materialization; it is no longer
 advertised or callable in either product mode. Legacy wsflow delegate context
 materialization is preserved through `playbook.render`.
 
-`playbook.print(name, context?)` returns the named playbook's procedure text
+`playbook.read(name, context?)` returns the named playbook's procedure text
 inline in the tool result, with `context` values substituted and declared
 includes resolved. It is the lead-facing successor of internal workflow-skill
 bodies.
@@ -2092,7 +2092,7 @@ dispatch uses the resolved binding metadata supported by its harness; Codex maps
 `recommended-model` to `spawn_agent.model` and the optional
 `recommended-reasoning-effort` to `spawn_agent.reasoning_effort`. Mercenary
 dispatch continues to pass `recommended-tier` as `mercenary.register`'s `tier`.
-`playbook.print` remains tier-only: it may surface `recommended-tier`, but never
+`playbook.read` remains tier-only: it may surface `recommended-tier`, but never
 the render-only model or reasoning-effort lines. Neither tool carries a routing
 or strategy decision — the caller selects `name`, and the tool only returns or
 materializes the requested playbook. `root_override`, when set, rebinds both the
@@ -2128,7 +2128,7 @@ redistribution. {#260609-playbook-harness-rendering}
 
 Product-mode content selection is separate from harness selection. Shared rsrc
 playbooks may mark full-ws-only or wsflow-only sections with the product markers
-documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.print` and
+documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.read` and
 `playbook.render` select those sections after harness rendering and before
 returning text or writing a prompt file. User-facing namespace notation in
 shared playbooks is authored with reserved implicit variables (`McpNamespace`
@@ -2144,7 +2144,7 @@ available without frontmatter declarations, and override caller-supplied
 semantic variable is introduced.
 
 A playbook may declare text dependencies in its frontmatter; the renderer
-auto-includes that text at print/render time, so a single `playbook.print(name)`
+auto-includes that text at print/render time, so a single `playbook.read(name)`
 call returns the procedure together with its required conventions. The include
 set is fixed at authoring time, not chosen by the caller per call. This does not
 replace `convention.read` / `infra.read`, which remain standalone discovery tools
@@ -2152,11 +2152,11 @@ for raw access.
 
 Code-side pragmatic playbook concatenation is renderer-owned behavior, not a
 source-template syntax. When global `"workflow.prefer_subagent"` resolves to
-`on`, `playbook.print(name: "lead-workflow-manual")` renders
+`on`, `playbook.read(name: "lead-workflow-manual")` renders
 `lead-prefer-subagent` through the same harness-aware renderer, prompt override
 resolver, and product-mode pass, then appends it to the manual. The appended
 body is wrapped as `<playbook name="lead-prefer-subagent" title="Prefer Subagent">...</playbook>`.
-Standalone `playbook.print` and `playbook.render` output remains Markdown, and
+Standalone `playbook.read` and `playbook.render` output remains Markdown, and
 no duplicate-insertion guard is applied.
 
 A playbook marked as delegating carries a compact continuation tip in its
@@ -2228,7 +2228,7 @@ open and close markers is the **inline seed default** — there is no separate
 default field, so the shipped wording stays in the `.md` body and is readable in
 review. `desc` is a short human-readable summary of the point.
 
-The override pass runs during both `playbook.print` and `playbook.render`,
+The override pass runs during both `playbook.read` and `playbook.render`,
 alongside product-mode marker selection (`#260513-wsflow-agentless-runtime-mode`)
 and after harness rendering. For each override-point it resolves a value along
 two orthogonal axes:

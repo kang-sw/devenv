@@ -120,7 +120,7 @@ For each reviewer named by `tickets.sage_gate`, and for each stage the gate repo
 Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promotion counts as `ready/` for this check).
 
 1. For `todo/` (not promoting): existing `spec:` links are optional recovery hints only; implementation still routes through proceed.
-2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
+2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.query` or `specs.status`; keep confirmed stems as-is.
 3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance.
 4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/`; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
 

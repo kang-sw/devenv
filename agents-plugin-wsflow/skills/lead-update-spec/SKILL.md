@@ -5,5 +5,5 @@ description: Post-implementation spec audit primitive for explicit commit ranges
 
 # Update Spec
 
-Call `wsflow/playbook.print(name: "lead-update-spec")` and execute the returned procedure
+Call `wsflow/playbook.read(name: "lead-update-spec")` and execute the returned procedure
 inline against the current user request. If this call fails to connect, run `/wsflow:mcp-server-repair`.

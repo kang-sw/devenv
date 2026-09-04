@@ -306,7 +306,7 @@ func withRecommendedTier(payload, tier string) string {
 // failures intentionally preserve the tier-only contract so callers can still
 // choose a native default or the mercenary tier fallback.
 //
-// playbook.print deliberately continues to use withRecommendedTier only: its
+// playbook.read deliberately continues to use withRecommendedTier only: its
 // tier-only return contract is host-neutral and unchanged by render bindings.
 func withRecommendedRenderBinding(payload, harness, tier string, configOpts wsconfig.Options) string {
 	payload = withRecommendedTier(payload, tier)
@@ -512,7 +512,7 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 // layered-config resolver. When sessionKey is empty, only code-owned builtin
 // prompt defaults participate; user/project/global prompt overrides still require
 // a session-keyed render. It is the single construction site shared by the
-// playbook.print and playbook.render dispatch paths, reusing the same
+// playbook.read and playbook.render dispatch paths, reusing the same
 // sessionConfigAdapter + resolver shape as the workflow config read paths.
 //
 // Override values are stored under dynamic keys `prompt.<pointId>.<harness>`; the

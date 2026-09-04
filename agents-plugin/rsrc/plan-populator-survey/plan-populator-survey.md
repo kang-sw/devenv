@@ -56,7 +56,7 @@ strategy, contract, or reuse judgment, exit to research.
 2. Read prior phase results only when ticket authority needs them to understand the requested slice.
 3. Clip the relevant contract: requirements, non-goals, verification boundary,
    spec impact, and settled decisions that govern the selected phase or inline target.
-4. Use `{{.McpNamespace}}/mental_models.find` for missing mental-model areas.
+4. Use `{{.McpNamespace}}/mental_models.query` for missing mental-model areas.
 5. Treat historical or adjacent artifacts as inputs only when the selected authority explicitly references them.
 
 ### 2. Survey
@@ -78,7 +78,7 @@ Search the codebase for:
   runtime fallback — a specified execution branch such as graceful
   degradation — is not a shortcut signal and must be planned in full.
 
-Use focused search for project code and `{{.McpNamespace}}/mental_models.find` for doc gaps.
+Use focused search for project code and `{{.McpNamespace}}/mental_models.query` for doc gaps.
 Read candidates to confirm relevance.
 For risk signals, report evidence and why it may matter.
 

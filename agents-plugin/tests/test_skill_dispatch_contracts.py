@@ -11,7 +11,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
         shim = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
         text = (RSRC_DIR / "lead-proceed" / "lead-proceed.md").read_text(encoding="utf-8")
 
-        self.assertIn('ws/playbook.print(name: "lead-proceed")', shim)
+        self.assertIn('ws/playbook.read(name: "lead-proceed")', shim)
         self.assertIn("Route only; do not implement or plan here.", text)
         self.assertIn("Always route code-editing work through `lead-implement`", text)
         self.assertIn("{{.McpNamespace}}/enter.proceed(session_key:", text)
@@ -56,21 +56,21 @@ class SkillDispatchContractsTest(unittest.TestCase):
 
     def test_verify_discussion_is_inlined_static_body(self):
         # lead-verify-discussion's body is inlined directly in SKILL.md (no
-        # rsrc playbook, no playbook.print indirection) since the
+        # rsrc playbook, no playbook.read indirection) since the
         # substitution-mirrored inline-mirror work landed.
         text = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertNotIn('ws/playbook.print(name: "lead-verify-discussion")', text)
+        self.assertNotIn('ws/playbook.read(name: "lead-verify-discussion")', text)
         self.assertIn("Treat user preference as input, not evidence.", text)
         self.assertIn("Build the strongest concise countercase", text)
 
     def test_drain_ready_queue_is_inlined_static_body(self):
         # lead-drain-ready-queue's body is inlined directly in SKILL.md (no
-        # rsrc playbook, no playbook.print indirection), mirroring the
+        # rsrc playbook, no playbook.read indirection), mirroring the
         # lead-verify-discussion inline-body shape.
         text = (SKILLS_DIR / "lead-drain-ready-queue" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertNotIn('ws/playbook.print(name: "lead-drain-ready-queue")', text)
+        self.assertNotIn('ws/playbook.read(name: "lead-drain-ready-queue")', text)
         self.assertIn("light-tier Explore-style subagent", text)
         self.assertIn("(FIFO)", text)
         self.assertIn("prerequisite", text)

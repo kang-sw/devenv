@@ -5,6 +5,6 @@ description: Persist a user-requested workflow rule. Use only when the user expl
 
 # Add Rule
 
-Call `ws/playbook.print(name: "lead-add-rule")` and execute the returned procedure
+Call `ws/playbook.read(name: "lead-add-rule")` and execute the returned procedure
 inline against the user request.
 If this call fails to connect, run `/ws:mcp-server-repair`.

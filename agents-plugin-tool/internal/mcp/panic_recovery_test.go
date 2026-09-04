@@ -33,7 +33,7 @@ func TestServeStdioRecoversPanicAndPersistsCrashTrace(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","id":"panic-1","method":"tools/call","params":{"name":"todo.append","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":"after-1","method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":"after-1","method":"tools/call","params":{"name":"runtime.read","arguments":{}}}`,
 	}, "\n")
 
 	var out bytes.Buffer

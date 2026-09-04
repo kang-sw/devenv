@@ -146,12 +146,12 @@ func TestTicketsStatusResolvesHiddenStemOverMCP(t *testing.T) {
 		t.Fatalf("tickets.status did not mark the resolved ticket hidden:\n%s", status)
 	}
 
-	find := callScopedTool(t, root, 2, "tickets.find", map[string]any{"ticket_stem": "260102-feat-shadow"})
+	find := callScopedTool(t, root, 2, "tickets.query", map[string]any{"ticket_stem": "260102-feat-shadow"})
 	if !strings.Contains(find, "260102-feat-shadow") {
-		t.Fatalf("tickets.find(ticket_stem:) did not resolve the out-of-scope ticket:\n%s", find)
+		t.Fatalf("tickets.query(ticket_stem:) did not resolve the out-of-scope ticket:\n%s", find)
 	}
 	if !strings.Contains(find, "[hidden]") {
-		t.Fatalf("tickets.find(ticket_stem:) did not mark the resolved ticket hidden:\n%s", find)
+		t.Fatalf("tickets.query(ticket_stem:) did not mark the resolved ticket hidden:\n%s", find)
 	}
 
 	// A visible ticket must not carry the flag, so "[hidden]" is proven to
@@ -163,12 +163,12 @@ func TestTicketsStatusResolvesHiddenStemOverMCP(t *testing.T) {
 
 	// The query form stays a discovery surface: it lists nothing hidden and
 	// carries the aggregate count instead.
-	query := callScopedTool(t, root, 4, "tickets.find", map[string]any{"query": "Shadow"})
+	query := callScopedTool(t, root, 4, "tickets.query", map[string]any{"query": "Shadow"})
 	if strings.Contains(query, "260102-feat-shadow") {
-		t.Fatalf("tickets.find(query:) listed a hidden ticket:\n%s", query)
+		t.Fatalf("tickets.query(query:) listed a hidden ticket:\n%s", query)
 	}
 	if !strings.Contains(query, "scope: 1 ticket(s) hidden") {
-		t.Fatalf("tickets.find(query:) missing the hidden-count annotation:\n%s", query)
+		t.Fatalf("tickets.query(query:) missing the hidden-count annotation:\n%s", query)
 	}
 }
 

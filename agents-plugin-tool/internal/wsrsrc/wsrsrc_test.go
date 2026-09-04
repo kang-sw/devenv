@@ -752,7 +752,7 @@ func TestValidateUndeclaredVariable(t *testing.T) {
 
 func TestValidateImplicitVariables(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, root, "pb/pb.md", "---\nkind: print\n---\nUse {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.\n")
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\n---\nUse {{.McpNamespace}}/tickets.query and {{.SkillNamespace}}:lead-discuss.\n")
 	m, _ := GenerateManifest(root)
 	if err := WriteManifest(root, m); err != nil {
 		t.Fatalf("WriteManifest: %v", err)

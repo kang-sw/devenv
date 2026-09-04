@@ -49,7 +49,7 @@ Post-compaction: call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` be
 
 1. Search loaded tickets and docs first.
 2. For each loaded stem, call `{{.McpNamespace}}/references.trace`.
-3. Query `{{.McpNamespace}}/tickets.find`, `{{.McpNamespace}}/specs.find`, and `{{.McpNamespace}}/mental_models.find` with concrete terms.
+3. Query `{{.McpNamespace}}/tickets.query`, `{{.McpNamespace}}/specs.query`, and `{{.McpNamespace}}/mental_models.query` with concrete terms.
 4. Stop when a documented answer is found.
 5. If no documented answer, say that before inferring.
 
@@ -58,10 +58,10 @@ Post-compaction: call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` be
 Triggers on user request to change ticket status.
 
 1. **Triage (idea/ → todo/)**: `{{.McpNamespace}}/tickets.move(stem, to: "todo")`; fall back to `git mv`. Do not require spec creation.
-2. **Ready promotion (todo/ → ready/)**: call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` inline (Edit path). It owns spec addressing, frontmatter, move, focus update, and commit. Stop after it returns.
+2. **Ready promotion (todo/ → ready/)**: call `{{.McpNamespace}}/playbook.read(name: "lead-write-ticket")` inline (Edit path). It owns spec addressing, frontmatter, move, focus update, and commit. Stop after it returns.
 3. **Drop (→ .dropped/)**:
    a. Read the ticket. For each `spec:` field and `{#YYMMDD-slug}` reference: check if any other non-dropped ticket also references it.
-   b. No other ticket → `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` inline to close the linked spec entry.
+   b. No other ticket → `{{.McpNamespace}}/playbook.read(name: "lead-write-spec")` inline to close the linked spec entry.
    c. Other tickets reference it, or coverage is ambiguous → ask before removing.
    d. `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`; fall back to `git mv`.
 4. Commit through `{{.McpNamespace}}/git.commit`.
@@ -70,7 +70,7 @@ Triggers on user request to change ticket status.
 
 1. If implementation, hand off to `{{.SkillNamespace}}:lead-proceed` and stop.
 2. If durable capture requested and artifact not approved, ask whether to persist; stop until answered.
-3. Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` inline; it handles ticket creation/update and any required spec addressing.
+3. Call `{{.McpNamespace}}/playbook.read(name: "lead-write-ticket")` inline; it handles ticket creation/update and any required spec addressing.
 4. If artifact is unclear, ask one clarifying question and stop.
 5. Write only what the user approves. If nothing written, report current conclusion and any unresolved decision.
 

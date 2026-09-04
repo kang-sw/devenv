@@ -142,7 +142,7 @@ func noteLayerArg(toolName string, args map[string]any) (wsnote.Layer, error) {
 	}
 }
 
-// allNoteLayers is the full four-layer set note.search searches when "layer"
+// allNoteLayers is the full four-layer set note.query searches when "layer"
 // is omitted, mirroring wsnote.Compute's own layer aggregation.
 var allNoteLayers = []wsnote.Layer{wsnote.LayerMachine, wsnote.LayerWorktree, wsnote.LayerClone, wsnote.LayerRepo}
 
@@ -159,7 +159,7 @@ func isValidNoteLayer(raw string) bool {
 	}
 }
 
-// noteSearchLayersArg parses note.search's "layer" argument, which — unlike
+// noteSearchLayersArg parses note.query's "layer" argument, which — unlike
 // the other four note.* tools — is optional and accepts either a single
 // string or an array of strings:
 //   - absent/nil: search all four layers; tagged = true (multi-layer result,
@@ -417,7 +417,7 @@ func (s *Server) handleNoteSetVisible(id json.RawMessage, args map[string]any, m
 }
 
 // taggedNoteRecord is a Record tagged with the layer it was loaded from, for
-// note.search's cross-layer/array result shape (sub-decision a: only this
+// note.query's cross-layer/array result shape (sub-decision a: only this
 // tagged shape carries "layer" — a single-string layer call keeps returning
 // plain []wsnote.Record). Embedding Record lets it marshal via ordinary
 // field promotion with no custom MarshalJSON, mirroring inject.go's
@@ -429,7 +429,7 @@ type taggedNoteRecord struct {
 }
 
 func (s *Server) handleNoteSearch(id json.RawMessage, args map[string]any, meta map[string]any) response {
-	const tool = "note.search"
+	const tool = "note.query"
 	layers, tagged, err := noteSearchLayersArg(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -475,7 +475,7 @@ func (s *Server) handleNoteSearch(id json.RawMessage, args map[string]any, meta 
 
 // searchNoteLayers resolves, loads, and filters each of layers independently
 // (a resolution/load failure on one layer is not degraded away here — unlike
-// wsnote.Compute's ambient block, note.search is an explicit query the
+// wsnote.Compute's ambient block, note.query is an explicit query the
 // caller is entitled to see fail loudly), tags each surviving record with
 // its origin layer, and returns the combined set ordered by the same 3-key
 // comparator wsnote.Search uses (sub-decision b), so layer:"x" and
@@ -548,7 +548,7 @@ func formatNoteSearch(records []wsnote.Record) string {
 
 // formatNoteSearchTagged mirrors formatNoteSearch but prefixes each line
 // with "[<layer>] ", matching inject.go's "# Notes" block line style
-// ("- [%s] %s (priority %d, %s): %s\n"), for note.search's omitted/array
+// ("- [%s] %s (priority %d, %s): %s\n"), for note.query's omitted/array
 // layer result (sub-decision a: only the tagged multi-layer shape gets a
 // layer prefix; single-string layer calls keep formatNoteSearch's untagged
 // line style).

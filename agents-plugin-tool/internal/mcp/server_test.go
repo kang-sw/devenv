@@ -357,7 +357,7 @@ func TestNamespaceTermsSubstitution(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"use ws/specs.find here", "use wsflow/specs.find here"},
+		{"use ws/specs.query here", "use wsflow/specs.query here"},
 		{"call ws:lead-implement skill", "call wsflow:lead-implement skill"},
 		{"rows: many items", "rows: many items"},
 		{"news/feed here", "news/feed here"},
@@ -508,7 +508,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	// tools/list advertises the full lead surface (schema visibility is advisory;
 	// the keyed call gate is the enforcement). Restricted tools remain visible.
 	listResp := callToolsList(t, server)
-	for _, name := range []string{"mercenary.status", "config.tune", "config.list", "runtime.info"} {
+	for _, name := range []string{"mercenary.status", "config.tune", "config.list", "runtime.read"} {
 		if !strings.Contains(listResp, name) {
 			t.Fatalf("tools/list must advertise full lead surface, missing %s: %s", name, listResp)
 		}
@@ -541,11 +541,11 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	}
 
 	// Read-only runtime/cache discovery is permitted for a leaf scope.
-	allowedInfo := callToolOnce(t, server, 5, "runtime.info", map[string]any{
+	allowedInfo := callToolOnce(t, server, 5, "runtime.read", map[string]any{
 		"session_key": leafKey,
 	})
 	if !strings.Contains(allowedInfo, "version:") {
-		t.Fatalf("leaf key wrongly rejected runtime.info: %s", allowedInfo)
+		t.Fatalf("leaf key wrongly rejected runtime.read: %s", allowedInfo)
 	}
 	allowedAPIList := callToolOnce(t, server, 6, "api.list", map[string]any{
 		"session_key": leafKey,
@@ -563,7 +563,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
-	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,ws.mercenary.status,config.list")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.read,ws.mercenary.status,config.list")
 
 	server := NewServer(root, "test")
 	leafKey, err := server.sessions.mint(root, roleLeaf, "")
@@ -573,16 +573,16 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 
 	// The allowlist constrains tools/list visibility (only allowlisted tools show).
 	listResp := callToolsList(t, server)
-	if !strings.Contains(listResp, "runtime.info") {
-		t.Fatalf("allowlist hid allowlisted runtime.info: %s", listResp)
+	if !strings.Contains(listResp, "runtime.read") {
+		t.Fatalf("allowlist hid allowlisted runtime.read: %s", listResp)
 	}
 
-	// runtime.info is both allowlisted and scope-permitted: it is callable.
-	allowedInfo := callToolOnce(t, server, 2, "runtime.info", map[string]any{
+	// runtime.read is both allowlisted and scope-permitted: it is callable.
+	allowedInfo := callToolOnce(t, server, 2, "runtime.read", map[string]any{
 		"session_key": leafKey,
 	})
 	if !strings.Contains(allowedInfo, "version:") {
-		t.Fatalf("allowlist+leaf wrongly rejected runtime.info: %s", allowedInfo)
+		t.Fatalf("allowlist+leaf wrongly rejected runtime.read: %s", allowedInfo)
 	}
 
 	// ws.mercenary.status and config.list are allowlisted but DENIED by the leaf scope.
@@ -722,7 +722,7 @@ func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.find","arguments":{"spec_stem":"260504-demo"}}}` + "\n"
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.query","arguments":{"spec_stem":"260504-demo"}}}` + "\n"
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
@@ -731,7 +731,7 @@ func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 	}
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
 	if !strings.Contains(text, "ticket_stem") || !strings.Contains(out.String(), `"isError":true`) {
-		t.Fatalf("tickets.find accepted spec_stem argument: %s", out.String())
+		t.Fatalf("tickets.query accepted spec_stem argument: %s", out.String())
 	}
 }
 
@@ -992,15 +992,15 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"infra.read","arguments":{"name":"impl-playbook"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"path.generate","arguments":{"kind":"review","stems":["direct"]}}}`,
-		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.read","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
 		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
-		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"specs.find","arguments":{"query":"discovery","format":"json"}}}`,
-		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"query":"discovery","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.query","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
+		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.query","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
+		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.query","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
+		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"specs.query","arguments":{"query":"discovery","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mental_models.query","arguments":{"query":"discovery","format":"json"}}}`,
 		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
 	}, "\n")
 
@@ -1063,9 +1063,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	rootAwareTools := []string{
 		"api.list",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
-		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "path.generate", "playbook.render",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.query", "specs.status",
+		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
+		"tickets.list", "tickets.query", "tickets.status", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
@@ -1080,8 +1080,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "path.generate") {
 		t.Fatalf("tools/list missing path.generate: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], "runtime.info") {
-		t.Fatalf("tools/list missing runtime.info: %s", byID["2"])
+	if !strings.Contains(byID["2"], "runtime.read") {
+		t.Fatalf("tools/list missing runtime.read: %s", byID["2"])
 	}
 	if !strings.Contains(byID["2"], "ferrule") {
 		t.Fatalf("tools/list missing ws.ferrule: %s", byID["2"])
@@ -1110,7 +1110,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"system_prompt_text\"") {
 		t.Fatalf("tools/list ws.mercenary.register schema missing system_prompt_text: %s", byID["2"])
 	}
-	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"mercenary.wait", "mercenary.result", "mercenary.status", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events", "mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.query", "tickets.status", "specs.list", "specs.query", "specs.status", "mental_models.query", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -1137,7 +1137,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		t.Fatalf("path.generate response missing review path: %s", byID["5"])
 	}
 	if !strings.Contains(byID["6"], "version:") || !strings.Contains(byID["6"], "source_commit:") {
-		t.Fatalf("runtime.info response missing version/source_commit: %s", byID["6"])
+		t.Fatalf("runtime.read response missing version/source_commit: %s", byID["6"])
 	}
 	if !strings.Contains(toolText(t, byID["7"]), "dirty:") || !strings.Contains(toolText(t, byID["7"]), "ai-docs/") {
 		t.Fatalf("git.status response missing readable status: %s", byID["7"])
@@ -1151,21 +1151,21 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	ticketsText := toolText(t, byID["10"])
 	if !strings.Contains(ticketsText, "260503-feat-demo") || !strings.Contains(ticketsText, "mentions_ticket_stem") {
-		t.Fatalf("tickets.find response missing mention result: %s", byID["10"])
+		t.Fatalf("tickets.query response missing mention result: %s", byID["10"])
 	}
 	specsText := toolText(t, byID["11"])
 	if !strings.Contains(specsText, "1 candidate spec for query=\"discovery\"") || !strings.Contains(specsText, "ai-docs/spec/demo.md\tscore=") || strings.Contains(specsText, "matched:") {
-		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
+		t.Fatalf("specs.query response missing spec result: %s", byID["11"])
 	}
 	mentalModelsText := toolText(t, byID["12"])
 	if !strings.Contains(mentalModelsText, "1 candidate mental model for query=\"discovery\"") || !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md\tscore=") || strings.Contains(mentalModelsText, "matched:") {
-		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
+		t.Fatalf("mental_models.query response missing result: %s", byID["12"])
 	}
 	if !strings.Contains(byID["13"], "matches") || !strings.Contains(byID["13"], "matched_terms") {
-		t.Fatalf("specs.find json missing evidence: %s", byID["13"])
+		t.Fatalf("specs.query json missing evidence: %s", byID["13"])
 	}
 	if !strings.Contains(byID["14"], "matches") || !strings.Contains(byID["14"], "matched_terms") {
-		t.Fatalf("mental_models.find json missing evidence: %s", byID["14"])
+		t.Fatalf("mental_models.query json missing evidence: %s", byID["14"])
 	}
 	referencesText := toolText(t, byID["15"])
 	if !strings.Contains(referencesText, "input: spec") || !strings.Contains(referencesText, "tickets:") || !strings.Contains(referencesText, "mental_models:") {
@@ -1398,7 +1398,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.list", "playbook.print", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.list", "config.tune", "tickets.list", "playbook.read", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
@@ -1429,7 +1429,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.query for details"}}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"target_kind":"ticket","ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","inline_contract":"","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
 	}, "\n") + "\n"
 
@@ -1454,7 +1454,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 		t.Fatalf("read code-reviewer render: %v", err)
 	}
 	codeReviewerText := string(codeReviewerData)
-	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details", "- reviewer_scope: correctness only"} {
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.query for details", "- reviewer_scope: correctness only"} {
 		if !strings.Contains(codeReviewerText, want) {
 			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
 		}
@@ -1524,12 +1524,12 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 		t.Fatalf("render metadata = %q, want %q", got, want)
 	}
 
-	printed := callToolOnce(t, s, 3, "playbook.print", map[string]any{"name": "model-pb", "session_key": leadKey})
+	printed := callToolOnce(t, s, 3, "playbook.read", map[string]any{"name": "model-pb", "session_key": leadKey})
 	if toolIsError(t, printed) {
-		t.Fatalf("playbook.print returned error: %s", printed)
+		t.Fatalf("playbook.read returned error: %s", printed)
 	}
 	if got := toolText(t, printed); strings.Contains(got, "recommended-model:") || strings.Contains(got, "recommended-reasoning-effort:") || !strings.HasSuffix(strings.TrimSpace(got), "recommended-tier: medium") {
-		t.Fatalf("playbook.print contract changed: %q", got)
+		t.Fatalf("playbook.read contract changed: %q", got)
 	}
 }
 

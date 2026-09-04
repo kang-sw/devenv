@@ -304,7 +304,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	s.observeHarness("test", "codex")
 	key, _ := parseLoginResponse(t, callLogin(t, s, 900006, root, nil))
 
-	offText := toolText(t, callToolOnce(t, s, 1, "playbook.print", map[string]any{
+	offText := toolText(t, callToolOnce(t, s, 1, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
 	if strings.Contains(offText, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
@@ -320,7 +320,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 		t.Fatalf("subagent on call must succeed: %s", onResp)
 	}
 
-	onText := toolText(t, callToolOnce(t, s, 3, "playbook.print", map[string]any{
+	onText := toolText(t, callToolOnce(t, s, 3, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
 	for _, want := range []string{
@@ -344,7 +344,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	if !strings.Contains(toolText(t, offResp), "workflow.prefer_subagent: off [scope:global]") {
 		t.Fatalf("subagent off call must succeed: %s", offResp)
 	}
-	offAgainText := toolText(t, callToolOnce(t, s, 5, "playbook.print", map[string]any{
+	offAgainText := toolText(t, callToolOnce(t, s, 5, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
 	if strings.Contains(offAgainText, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
@@ -385,7 +385,7 @@ func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testin
 		t.Fatalf("subagent on call must succeed: %s", onResp)
 	}
 
-	text := toolText(t, callToolOnce(t, s, 2, "playbook.print", map[string]any{
+	text := toolText(t, callToolOnce(t, s, 2, "playbook.read", map[string]any{
 		"name": "lead-workflow-manual",
 	}))
 	if !strings.Contains(text, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {

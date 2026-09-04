@@ -1232,7 +1232,7 @@ func TestProceedNextInstructions(t *testing.T) {
 			name:     "implement instruction names playbook and pre-source boundary",
 			args:     proceedReadyArgs("text"),
 			wantNext: "lead-implement",
-			wantText: `Routing to next action: lead-implement. Call wsflow/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
+			wantText: `Routing to next action: lead-implement. Call wsflow/playbook.read(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
 		},
 		{
 			name: "write ticket instruction names playbook and reroute",
@@ -1242,7 +1242,7 @@ func TestProceedNextInstructions(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantNext: "lead-write-ticket",
-			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/enter.proceed`,
+			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/enter.proceed`,
 		},
 		{
 			name: "discussion instruction names skill namespace",
@@ -1263,7 +1263,7 @@ func TestProceedNextInstructions(t *testing.T) {
 			}),
 			wantNext:   "stop",
 			wantText:   "Routing to next action: stop. Stop. Report the blocker in Reason",
-			wantNoText: "playbook.print",
+			wantNoText: "playbook.read",
 		},
 	}
 
