@@ -72,6 +72,7 @@ import {
   buildRpcClientOptions,
   buildChildProcessEnv,
   inheritModelFromToolCtx,
+  resolveSpawnToolGroup,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -149,9 +150,25 @@ describe("TOOL_GROUPS / resolveTools", () => {
     assert.notEqual(resolved, resolveTools("full-worker", record.wsToolNames), "must not fall back to the old hardcoded full-worker group");
   });
 
-  test("resolveTools(record.toolGroup, ...) threading: a fake record with no explicit toolGroup override still defaults to full-worker's tool list", () => {
-    const record = freshRpcRecord({ wsToolNames: ["ws__ferrule"] });
+  test("resolveTools(record.toolGroup, ...) threading: a record whose toolGroup field is \"full-worker\" resolves full-worker's tool list", () => {
+    const record = freshRpcRecord({ toolGroup: "full-worker", wsToolNames: ["ws__ferrule"] });
     assert.equal(resolveTools(record.toolGroup, record.wsToolNames), resolveTools("full-worker", ["ws__ferrule"]));
+  });
+});
+
+describe("resolveSpawnToolGroup (review fix, relay #1, TEST finding #3)", () => {
+  test("an omitted (undefined) explicit toolGroup defaults to full-worker — spawnAgent's actual ctx.toolGroup ?? \"full-worker\" seam", () => {
+    assert.equal(resolveSpawnToolGroup(undefined), "full-worker");
+  });
+
+  test("an explicit toolGroup is passed through unchanged, never overridden by the default", () => {
+    assert.equal(resolveSpawnToolGroup("execute-worker"), "execute-worker");
+    assert.equal(resolveSpawnToolGroup("read-only"), "read-only");
+    assert.equal(resolveSpawnToolGroup("recon"), "recon");
+  });
+
+  test("an explicit \"full-worker\" is indistinguishable from omission (both resolve to full-worker) — the intended no-op case", () => {
+    assert.equal(resolveSpawnToolGroup("full-worker"), resolveSpawnToolGroup(undefined));
   });
 });
 
@@ -522,7 +539,7 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
       toolCallId: "call-123",
       args: { command: "rm -rf build", rationale: "clean stale build output" },
     });
-    assert.deepEqual(record.pendingApproval, { cmdId: "call-123", command: "rm -rf build", rationale: "clean stale build output" });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-123", command: "rm -rf build", rationale: "clean stale build output", cwd: undefined });
   });
 
   test("rationale is omitted (undefined) when args.rationale is not a string", () => {
@@ -533,7 +550,7 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
       toolCallId: "call-456",
       args: { command: "echo hi" },
     });
-    assert.deepEqual(record.pendingApproval, { cmdId: "call-456", command: "echo hi", rationale: undefined });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-456", command: "echo hi", rationale: undefined, cwd: undefined });
   });
 
   test("a missing toolCallId is ignored — pendingApproval is never set without a usable cmd_id", () => {
@@ -559,7 +576,26 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
     const record = freshRpcRecord();
     applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo one" } });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-2", args: { command: "echo two" } });
-    assert.deepEqual(record.pendingApproval, { cmdId: "call-2", command: "echo two", rationale: undefined });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-2", command: "echo two", rationale: undefined, cwd: undefined });
+  });
+
+  test("review fix (relay #1, CORRECTNESS finding #1): a string args.cwd override is captured onto pendingApproval.cwd", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-1",
+      args: { command: "echo hi", cwd: "/repo/subdir" },
+    });
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "echo hi", rationale: undefined, cwd: "/repo/subdir" });
+  });
+
+  test("cwd is omitted (undefined) when args.cwd is missing or not a string", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo hi" } });
+    assert.equal(record.pendingApproval?.cwd, undefined);
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-2", args: { command: "echo hi", cwd: 42 } });
+    assert.equal(record.pendingApproval?.cwd, undefined);
   });
 });
 

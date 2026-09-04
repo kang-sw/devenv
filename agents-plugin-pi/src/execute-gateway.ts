@@ -158,6 +158,8 @@ export interface PendingApproval {
   cmdId: string;
   command: string;
   rationale?: string;
+  /** Worker-supplied per-call cwd override (mirrors `ws-worker-exec`'s own `cwd?` param) — see `resolveApprovalContextCwd`. */
+  cwd?: string;
 }
 
 export type ValidatePendingApprovalResult = { ok: true } | { ok: false; reason: string };
@@ -278,6 +280,60 @@ export interface ApprovalDecision {
 }
 
 /**
+ * Pure cwd-fallback selector for the approval-relay's ground-truth context
+ * scrape (review fix, relay #1, CORRECTNESS finding #1): a worker-supplied
+ * per-call `cwd` override (`pending.cwd`, captured onto `record.pendingApproval`
+ * by `spawner.ts`'s `applyRpcEvent`) takes precedence over the session's base
+ * `sessionCwd`, so `createApprovalRelay` scrapes the SAME directory the
+ * command will actually run in — matching `ws-worker-exec`'s own `execute()`,
+ * which resolves the command's cwd as `p.cwd ?? sessionCtx.cwd`. Extracted
+ * (rather than inlined in `createApprovalRelay`) purely for direct unit
+ * coverage, since `createApprovalRelay` itself is IO (closes over `pi`).
+ */
+export function resolveApprovalContextCwd(pending: { cwd?: string }, sessionCwd: string): string {
+  return pending.cwd ?? sessionCwd;
+}
+
+export type ValidateApprovalDecisionResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Pure required-field validation for `ws-approve`'s `execute()` (review fix,
+ * relay #1, CORRECTNESS finding #2): the tool's own parameter schema already
+ * documents `reason` as "Required context for decision:deny" and `command`
+ * as needed for `decision:run-instead`, but nothing previously enforced
+ * either before writing the decision file — an empty/omitted `command` on
+ * `run-instead` silently fell through to `ws-worker-exec`'s own `p.command`
+ * fallback (treating it as a no-op approve), and an empty/omitted `reason`
+ * on `deny` produced a confusing blank-reason denial. Checked BEFORE
+ * `validatePendingApproval`'s race-binding gate is acted on (i.e. before any
+ * decision file is written), rejecting with a reason a caller can act on.
+ * Whitespace-only values are treated the same as missing (`.trim()`).
+ */
+export function validateApprovalDecisionInput(decision: "approve" | "deny" | "run-instead", reason: string | undefined, command: string | undefined): ValidateApprovalDecisionResult {
+  if (decision === "run-instead" && (!command || command.trim().length === 0)) {
+    return { ok: false, reason: "decision \"run-instead\" requires a non-empty command" };
+  }
+  if (decision === "deny" && (!reason || reason.trim().length === 0)) {
+    return { ok: false, reason: "decision \"deny\" requires a non-empty reason" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Pure line-slicing logic for the ugly-named read tool (review fix, relay
+ * #1, TEST finding #4): extracted out of that tool's `execute()` body so it
+ * has direct unit coverage without a live `pi` session. 1-indexed `offset`
+ * (matching the tool's own param description); `limit` caps the number of
+ * lines returned. Both are optional — omitting both returns the whole file.
+ */
+export function sliceLines(raw: string, offset?: number, limit?: number): string {
+  const lines = raw.split("\n");
+  const start = offset ? Math.max(0, offset - 1) : 0;
+  const end = limit !== undefined ? Math.min(start + limit, lines.length) : lines.length;
+  return lines.slice(start, end).join("\n");
+}
+
+/**
  * IO: best-effort git ground-truth scrape of `cwd`'s working context for the
  * §7 payload's `context` field — adapter-scraped, NOT worker-reported (§7).
  * Runs on the PARENT side, same machine/filesystem as the worker's `cwd`
@@ -311,9 +367,13 @@ function tryGit(args: string[], cwd: string): string | undefined {
  * early with `"aborted"` on `signal`'s `"abort"` event — the abort-unblocks-
  * execute path (`ws-agent-stop` -> `client.abort()` -> this tool call's own
  * `AbortSignal` fires). Mirrors the installed package's own `exec.js`
- * `execCommand` abort-listener pattern. Genuinely live-gate only (real
- * filesystem + timers) — not unit-tested, see test/execute-gateway.test.ts's
- * header comment.
+ * `execCommand` abort-listener pattern.
+ *
+ * Review fix (relay #1, TEST finding #5): despite living next to genuinely
+ * live-gate-only code, this function itself needs only a real filesystem +
+ * timers — no subprocess, model, or `RpcClient` — so it IS unit-tested
+ * directly (test/execute-gateway.test.ts), using a real temp directory, a
+ * delayed `writeFileSync`, and a real/aborted `AbortController`.
  */
 export function waitForDecisionFile(path: string, signal: AbortSignal | undefined, pollMs = 200): Promise<ApprovalDecision | "aborted"> {
   return new Promise((resolve) => {
@@ -377,7 +437,7 @@ export function createApprovalRelay(pi: ExtensionAPI, sessionCtx: { cwd: string 
   return (record) => {
     const pending = record.pendingApproval;
     if (!pending) return;
-    const context = scrapeWorkingContext(sessionCtx.cwd);
+    const context = scrapeWorkingContext(resolveApprovalContextCwd(pending, sessionCtx.cwd));
     const text = buildApprovalPromptText({
       agent_id: record.agentId,
       cmd_id: pending.cmdId,
@@ -519,6 +579,10 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
         const reason = validation.ok ? "unknown agent_id" : validation.reason;
         throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} rejected: ${reason}`);
       }
+      const inputValidation = validateApprovalDecisionInput(p.decision, p.reason, p.command);
+      if (!inputValidation.ok) {
+        throw new Error(`ws-pi-agent: ${APPROVE_TOOL_NAME} rejected: ${inputValidation.reason}`);
+      }
 
       const sessionDir = dirname(record.sessionPath);
       const decisionPath = approvalDecisionPath(sessionDir, p.cmd_id);
@@ -548,10 +612,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
       const p = params as { path: string; offset?: number; limit?: number };
       const absolutePath = isAbsolute(p.path) ? p.path : join(sessionCtx.cwd, p.path);
       const raw = readFileSync(absolutePath, "utf8");
-      const lines = raw.split("\n");
-      const start = p.offset ? Math.max(0, p.offset - 1) : 0;
-      const end = p.limit !== undefined ? Math.min(start + p.limit, lines.length) : lines.length;
-      return { content: [{ type: "text", text: lines.slice(start, end).join("\n") }] };
+      return { content: [{ type: "text", text: sliceLines(raw, p.offset, p.limit) }] };
     },
   });
 }

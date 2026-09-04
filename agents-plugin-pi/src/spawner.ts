@@ -348,6 +348,20 @@ export function inheritModelFromToolCtx(toolCtx: unknown): string | undefined {
   return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
 }
 
+/**
+ * Review fix (relay #1, TEST finding #3): pure extraction of `spawnAgent`'s
+ * `ctx.toolGroup ?? "full-worker"` default — previously inlined directly in
+ * `spawnAgent`, leaving no seam a unit test could exercise independent of a
+ * real `RpcClient` spawn. `RpcSpawnCtx.toolGroup`'s own doc comment already
+ * states the contract this codifies: "Omitted (or explicit `"full-worker"`)
+ * preserves every existing `ws-agent-spawn` caller's behavior unchanged."
+ * Mirrors `inheritModelFromToolCtx`'s own extraction-for-testability shape
+ * immediately above.
+ */
+export function resolveSpawnToolGroup(explicit: ToolGroup | undefined): ToolGroup {
+  return explicit ?? "full-worker";
+}
+
 // ---------------------------------------------------------------------------
 // One-shot `explore` machinery (unchanged from Phase 2-3, only its model
 // resolution call switches to the reframed alias lookup).
@@ -654,8 +668,18 @@ export interface RpcAgentRecord {
    * `ws-approve` once a decision is written. `undefined` means "no gated
    * command is currently awaiting lead approval on this agent" — the
    * condition `validatePendingApproval` (execute-gateway.ts) rejects against.
+   *
+   * Review fix (relay #1): also carries `cwd`, captured from the gated-exec
+   * tool call's own `args.cwd` override when the worker supplied one (the
+   * same `ws-worker-exec` `cwd?` param `execute-gateway.ts`'s `execute()`
+   * itself falls back on via `p.cwd ?? sessionCtx.cwd`) — the approval-relay
+   * callback (`createApprovalRelay`) must scrape the SAME directory the
+   * command will actually run in, not unconditionally the worker's base
+   * `sessionCtx.cwd`, or a `cwd`-overridden command's ground-truth git
+   * context (branch/dirty/ahead_behind) would silently describe the wrong
+   * directory to the lead.
    */
-  pendingApproval?: { cmdId: string; command: string; rationale?: string };
+  pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
 }
 
 export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
@@ -789,6 +813,12 @@ export function drainReports(record: RpcAgentRecord): { reports: string[]; repor
  * `toolCallId` and a string `args.command`; a missing/malformed event is
  * silently ignored (never throws) — matches the report branch's own
  * best-effort shape-tolerance above.
+ *
+ * Review fix (relay #1): also captures `args.cwd` (the same optional
+ * per-call working-directory override `ws-worker-exec`'s own `execute()`
+ * accepts) onto `record.pendingApproval.cwd` when it is a string — omitted
+ * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
+ * exactly as `execute-gateway.ts`'s `execute()` itself does.
  */
 export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; toolName?: string; args?: unknown; toolCallId?: string }): void {
   if (evt.type === "agent_start") {
@@ -803,13 +833,14 @@ export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; tool
       enqueueReport(record, message);
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
-    const args = evt.args as { command?: unknown; rationale?: unknown } | undefined;
+    const args = evt.args as { command?: unknown; rationale?: unknown; cwd?: unknown } | undefined;
     const command = args?.command;
     if (typeof command === "string" && typeof evt.toolCallId === "string") {
       record.pendingApproval = {
         cmdId: evt.toolCallId,
         command,
         rationale: typeof args?.rationale === "string" ? args.rationale : undefined,
+        cwd: typeof args?.cwd === "string" ? args.cwd : undefined,
       };
     }
   }
@@ -879,7 +910,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   const catalogConfig = params.modelName ? readModelCatalog(ctx.modelCatalogPath) : undefined;
   const modelBase = resolveModelForAlias(catalogConfig, params.modelName, ctx.inheritModel);
 
-  const toolGroup: ToolGroup = ctx.toolGroup ?? "full-worker";
+  const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const record: RpcAgentRecord = {
     agentId,
     sessionPath,

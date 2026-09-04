@@ -4,24 +4,33 @@
  * `resolveExecuteModelAlias`, `validatePendingApproval` (the ticket's own
  * `cmd_id` race-binding requirement), `computeLeadActiveTools` (the §8 lead
  * `--tools` reshaping + auto-include-footgun fix), `buildApprovalPromptText`
- * (the §7 payload formatter), and `approvalDecisionPath` (the parent/child
- * decision-file path both sides must agree on).
+ * (the §7 payload formatter), `approvalDecisionPath` (the parent/child
+ * decision-file path both sides must agree on), `resolveApprovalContextCwd`
+ * and `validateApprovalDecisionInput` (review fix, relay #1, CORRECTNESS
+ * findings #1/#2), `sliceLines` (review fix, relay #1, TEST finding #4), and
+ * `waitForDecisionFile` (review fix, relay #1, TEST finding #5 — needs only a
+ * real filesystem + timers, not a subprocess/model, so it does not belong in
+ * the live-gate-only bucket below).
  *
  * NOT covered here — genuinely live-gate only, per the plan's Verification
  * Plan split and mirroring test/spawner.test.ts's own documented pure/IO
- * split: `scrapeWorkingContext` (real `git` subprocess calls),
- * `waitForDecisionFile` (real filesystem polling + timers), and the
+ * split: `scrapeWorkingContext` (real `git` subprocess calls), and the
  * `ws-worker-exec`/`ws-execute`/`ws-approve`/ugly-read tool `execute()`
  * bodies plus `createApprovalRelay`'s `pi.sendUserMessage` call (all need a
- * live `pi --mode rpc` session or a real `RpcClient`/filesystem). Exercised
- * only by the plan's documented manual verification gate (no provider
- * credentials in this sandbox — deferred, not faked).
+ * live `pi --mode rpc` session or a real `RpcClient`) — their pure inner
+ * logic (`sliceLines`, `resolveApprovalContextCwd`,
+ * `validateApprovalDecisionInput`) is extracted and covered directly instead.
+ * Exercised only by the plan's documented manual verification gate (no
+ * provider credentials in this sandbox — deferred, not faked).
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildExecuteWorkerPrompt,
   resolveExecuteModelAlias,
@@ -29,6 +38,10 @@ import {
   computeLeadActiveTools,
   buildApprovalPromptText,
   approvalDecisionPath,
+  resolveApprovalContextCwd,
+  validateApprovalDecisionInput,
+  sliceLines,
+  waitForDecisionFile,
   EXECUTE_TOOL_NAME,
   APPROVE_TOOL_NAME,
   UGLY_READ_TOOL_NAME,
@@ -180,5 +193,137 @@ describe("approvalDecisionPath", () => {
     const a = approvalDecisionPath("/tmp/ws-pi-agent-x", "call-1");
     const b = approvalDecisionPath("/tmp/ws-pi-agent-x", "call-2");
     assert.notEqual(a, b);
+  });
+});
+
+describe("resolveApprovalContextCwd (review fix, relay #1, CORRECTNESS finding #1)", () => {
+  test("a worker-supplied cwd override on pendingApproval takes precedence over the session's base cwd", () => {
+    assert.equal(resolveApprovalContextCwd({ cwd: "/repo/subdir" }, "/repo"), "/repo/subdir");
+  });
+
+  test("falls back to the session's base cwd when pendingApproval carries no override", () => {
+    assert.equal(resolveApprovalContextCwd({ cwd: undefined }, "/repo"), "/repo");
+    assert.equal(resolveApprovalContextCwd({}, "/repo"), "/repo");
+  });
+});
+
+describe("validateApprovalDecisionInput (review fix, relay #1, CORRECTNESS finding #2)", () => {
+  test("decision:approve requires neither reason nor command", () => {
+    assert.deepEqual(validateApprovalDecisionInput("approve", undefined, undefined), { ok: true });
+  });
+
+  test("decision:run-instead with a non-empty command is accepted", () => {
+    assert.deepEqual(validateApprovalDecisionInput("run-instead", undefined, "echo substituted"), { ok: true });
+  });
+
+  test("decision:run-instead with a missing, empty, or whitespace-only command is rejected", () => {
+    for (const command of [undefined, "", "   "]) {
+      const result = validateApprovalDecisionInput("run-instead", undefined, command);
+      assert.equal(result.ok, false, `expected run-instead with command=${JSON.stringify(command)} to be rejected`);
+    }
+  });
+
+  test("decision:deny with a non-empty reason is accepted", () => {
+    assert.deepEqual(validateApprovalDecisionInput("deny", "not safe", undefined), { ok: true });
+  });
+
+  test("decision:deny with a missing, empty, or whitespace-only reason is rejected", () => {
+    for (const reason of [undefined, "", "   "]) {
+      const result = validateApprovalDecisionInput("deny", reason, undefined);
+      assert.equal(result.ok, false, `expected deny with reason=${JSON.stringify(reason)} to be rejected`);
+    }
+  });
+
+  test("decision:approve ignores an omitted reason/command even though deny/run-instead would reject them", () => {
+    assert.deepEqual(validateApprovalDecisionInput("approve", "", ""), { ok: true });
+  });
+});
+
+describe("sliceLines (review fix, relay #1, TEST finding #4)", () => {
+  const raw = ["line1", "line2", "line3", "line4", "line5"].join("\n");
+
+  test("no offset/limit returns the whole file unchanged", () => {
+    assert.equal(sliceLines(raw), raw);
+  });
+
+  test("offset (1-indexed) starts from that line, to EOF when limit is omitted", () => {
+    assert.equal(sliceLines(raw, 3), "line3\nline4\nline5");
+  });
+
+  test("limit caps the number of lines returned from the start (or from offset)", () => {
+    assert.equal(sliceLines(raw, undefined, 2), "line1\nline2");
+    assert.equal(sliceLines(raw, 2, 2), "line2\nline3");
+  });
+
+  test("offset beyond EOF returns an empty string", () => {
+    assert.equal(sliceLines(raw, 100), "");
+  });
+
+  test("limit 0 returns an empty string", () => {
+    assert.equal(sliceLines(raw, 1, 0), "");
+  });
+
+  test("limit extending past EOF is clamped to the last available line, never throws", () => {
+    assert.equal(sliceLines(raw, 4, 100), "line4\nline5");
+  });
+
+  test("offset 0 or negative is treated the same as offset 1 (start of file)", () => {
+    assert.equal(sliceLines(raw, 0), raw);
+    assert.equal(sliceLines(raw, -5), raw);
+  });
+});
+
+describe("waitForDecisionFile (review fix, relay #1, TEST finding #5)", () => {
+  async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-agent-decision-test-"));
+    try {
+      return await fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("resolves with the parsed decision as soon as the file appears (short poll interval, real timers)", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "call-1.decision.json");
+      const decision = { decision: "approve" as const };
+      setTimeout(() => writeFileSync(path, JSON.stringify(decision)), 20);
+      const result = await waitForDecisionFile(path, undefined, 5);
+      assert.deepEqual(result, decision);
+    });
+  });
+
+  test("a pre-aborted signal resolves immediately with \"aborted\", never touching the filesystem poll", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "never-written.decision.json");
+      const controller = new AbortController();
+      controller.abort();
+      const result = await waitForDecisionFile(path, controller.signal, 5);
+      assert.equal(result, "aborted");
+    });
+  });
+
+  test("aborting mid-poll resolves with \"aborted\" and stops polling (no late resolution once the file later appears)", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "call-2.decision.json");
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 15);
+      const resultPromise = waitForDecisionFile(path, controller.signal, 5);
+      const result = await resultPromise;
+      assert.equal(result, "aborted");
+      // Writing the file after abort must not cause a second resolution (the
+      // promise already settled) — this only verifies no throw/hang occurs.
+      writeFileSync(path, JSON.stringify({ decision: "approve" }));
+    });
+  });
+
+  test("a partially-written (malformed JSON) file is tolerated — polling continues until a valid decision file appears", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "call-3.decision.json");
+      writeFileSync(path, "{not valid json");
+      setTimeout(() => writeFileSync(path, JSON.stringify({ decision: "deny", reason: "no" })), 20);
+      const result = await waitForDecisionFile(path, undefined, 5);
+      assert.deepEqual(result, { decision: "deny", reason: "no" });
+    });
   });
 });
