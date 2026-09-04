@@ -407,7 +407,7 @@ func ticketIndexPathParts(rel string) (status, stem string, ok bool) {
 
 // TicketScopeInfo reports whether this worktree hides part of the ticket board
 // and how much. It is the path-only index enumeration the discovery surfaces
-// (tickets.list, tickets.find's query form, project_tree) use for their
+// (tickets.list, tickets.query's query form, project_tree) use for their
 // hidden-count annotation: it reads no blob and never touches loadTicketGraph,
 // so a discovery call never pays for .done/.dropped body reads.
 type TicketScopeInfo struct {

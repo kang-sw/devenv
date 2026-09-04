@@ -75,16 +75,16 @@ a pattern from inference. Its derived scope covers `ready/`, `todo/`, and
 capture-staging mechanism. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`,
-and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
+and `lead-update-spec` — are internal procedures served as `ws/playbook.read`
 content invoked by caller skills, not directly user-invoked entry points;
 `lead-write-ticket` and `lead-write-spec` are orchestration-only. The
 classification axis is whether the user is meant to type `/ws:<name>` directly, not
 cross-skill invocation count. Each entry skill's own procedure body is likewise
-served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
+served from a `ws/playbook.read` playbook behind a thin trigger shim: the SKILL.md
 surface carries only the trigger description and delegates execution to its
 playbook. Context-heavy entry skills (lead-discuss) are an
 exception: their SKILL.md carries a parallel init declaration —
-`playbook.print` plus `workflow_manual` called in parallel — rather than a pure
+`playbook.read` plus `workflow_manual` called in parallel — rather than a pure
 routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel rounds.
 {#260610-entry-skill-surface-reduction}
 
@@ -239,7 +239,7 @@ bootstrap, release, verification, and reconstruction workflows:
 The wsflow package excludes skeleton flows: `lead-write-skeleton`.
 Shipped wsflow `SKILL.md` files are thin entry shims:
 they keep package-local bare `name: lead-*` frontmatter, call
-`wsflow/playbook.print(name: "<lead-name>")`, execute the returned procedure
+`wsflow/playbook.read(name: "<lead-name>")`, execute the returned procedure
 against the current user request, and report a blocker if the playbook cannot
 load. Procedure behavior lives in shared rsrc playbooks rendered in wsflow
 product mode, not in separately curated wsflow skill bodies.
@@ -521,7 +521,7 @@ invocation — including simple tasks like commits — to a subagent per
 goal, rather than restating that posture's body. The skill's body is
 inlined as static text directly in
 `agents-plugin/skills/lead-drain-ready-queue/SKILL.md` (no rsrc playbook, no
-`playbook.print` indirection), matching the `lead-verify-discussion`/
+`playbook.read` indirection), matching the `lead-verify-discussion`/
 `lead-prefer-subagent` inline-body shape, and is mirrored byte-identically
 into `agents-plugin-wsflow`.
 {#260703-drain-ready-queue-skill}
@@ -1116,7 +1116,7 @@ failure, stop, and post-write reroute rails. After `lead-write-ticket` refresh o
 promotion returns, the `Next:` instruction requires `lead-proceed` to rebuild
 route context and enter `ws.enter.proceed` again instead of continuing from an
 old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
-`lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
+`lead-proceed` to call `ws/playbook.read(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
 implementation-tool use. Outside the direct-execution judgment, `lead-proceed`
 does not apply sibling `lead-implement` judges, compute direct/delegated

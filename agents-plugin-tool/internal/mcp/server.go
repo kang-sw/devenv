@@ -502,7 +502,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
 	// are not rejected here; root-aware tools surface the unknown_session error
 	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g.
-	// runtime.info) silently ignore an unrecognised session_key.
+	// runtime.read) silently ignore an unrecognised session_key.
 	//
 	// Lead-only tools (see isLeadOnlyTool) are additionally blocked for any
 	// non-lead scoped key to prevent self-bootstrap escalation: a delegate or
@@ -523,7 +523,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	}
 
 	switch params.Name {
-	case "runtime.info":
+	case "runtime.read":
 		info, err := runtimeInfo(s.version, s.sourceCommit)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1042,9 +1042,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatSpecs(result), err)
-	case "specs.find":
+	case "specs.query":
 		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.find uses ticket_stem, not mentions_ticket_stem"))
+			return toolTextResponse(req.ID, "", fmt.Errorf("specs.query uses ticket_stem, not mentions_ticket_stem"))
 		}
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1082,9 +1082,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
-	case "mental_models.find":
+	case "mental_models.query":
 		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.find uses spec_stem, not ticket_stem"))
+			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.query uses spec_stem, not ticket_stem"))
 		}
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1124,7 +1124,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleNoteMute(req.ID, params.Arguments, params.Meta)
 	case "note.unmute":
 		return s.handleNoteUnmute(req.ID, params.Arguments, params.Meta)
-	case "note.search":
+	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "references.trace":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1155,7 +1155,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatTickets(result)+ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments)), err)
-	case "tickets.find":
+	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
@@ -1451,7 +1451,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
-	case "playbook.print":
+	case "playbook.read":
 		// Phase 2: name + context; rsrc root is call-site-overridable seam for M3.
 		// Argument parsing is named/extensible (not positional) for forward-compat
 		// with M3's session_key prepend.
@@ -1503,7 +1503,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		var parentKey string
 		var preferMercenary bool
 		// Override lookup is built for any present session_key (shared helper with
-		// the playbook.print path); it is independent of the lead-gate.
+		// the playbook.read path); it is independent of the lead-gate.
 		renderSessionKey, _ := params.Arguments["session_key"].(string)
 		renderOverrideLookup := buildOverrideLookup(s, renderSessionKey)
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
@@ -2487,7 +2487,7 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 
 // formatSpecFind inherits nothing from formatSpecs: it delegates wholly to
 // formatDocumentFind, which knows nothing of SpecInfo. The legacy-marker
-// advisory therefore has to be appended here explicitly, or the specs.find
+// advisory therefore has to be appended here explicitly, or the specs.query
 // query path silently loses it while the no-query fallback keeps it. Each line
 // is prefixed with the spec path so the note stays attributable.
 //
@@ -3405,7 +3405,7 @@ func errorResponse(id json.RawMessage, code int, message string) response {
 func tools() []map[string]any {
 	toolList := []map[string]any{
 		{
-			"name":        "runtime.info",
+			"name":        "runtime.read",
 			"description": "Return ws-mcp runtime metadata for compatibility checks.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3995,8 +3995,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "specs.find",
-			"description": "Find spec files by query, spec anchor stem, or ticket stem reference. Defaults to compact text; use format=json for structured metadata.",
+			"name":        "specs.query",
+			"description": "Query spec files by text query, spec anchor stem, or ticket stem reference. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4028,8 +4028,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "mental_models.find",
-			"description": "Find mental-model paths by query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
+			"name":        "mental_models.query",
+			"description": "Query mental-model paths by text query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4080,7 +4080,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.mute",
-			"description": "Mute notes by key on the machine, worktree, clone, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.search still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
+			"description": "Mute notes by key on the machine, worktree, clone, or repo note layer: sets visible=false so they are excluded from the workflow_manual ambient Notes block and its cap budget (a muted note frees a slot for a previously elided visible note), but note.query still returns them unchanged. Idempotent (muting an already-muted key is a no-op) and never restamps written_at.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4105,8 +4105,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "note.search",
-			"description": "Search notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") searches just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, searches multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
+			"name":        "note.query",
+			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"machine\", \"worktree\", \"clone\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Retrieves notes elided from the workflow_manual ambient Notes block.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4138,8 +4138,8 @@ func tools() []map[string]any {
 			"inputSchema": ticketDiscoverySchema(false),
 		},
 		{
-			"name":        "tickets.find",
-			"description": "Find ticket paths by query, ticket stem, or mentions of another ticket stem. Defaults to compact text; use format=json for structured metadata.",
+			"name":        "tickets.query",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4326,7 +4326,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "playbook.print",
+			"name":        "playbook.read",
 			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -4528,9 +4528,9 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
-		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.query", "specs.status",
+		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
+		"tickets.list", "tickets.query", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
@@ -5064,7 +5064,7 @@ func enumStringProperty(description string, values []string) map[string]any {
 
 // enumStringOrArrayProperty returns an inputSchema property accepting either
 // a single enum string or an array of that same enum, via "anyOf" — the
-// shape note.search's "layer" argument needs (optional, single-or-array)
+// shape note.query's "layer" argument needs (optional, single-or-array)
 // and no existing helper here covers, since every other enum property in
 // this file is single-shape only.
 func enumStringOrArrayProperty(description string, values []string) map[string]any {

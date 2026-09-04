@@ -166,7 +166,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"description: .+\n"
                 r"---\n\n"
                 r"# .+\n\n"
-                rf"Call `wsflow/playbook\.print\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
+                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. If the playbook cannot be loaded, stop\n"
                 r"and report that blocker\.\n",
                 text,
@@ -190,7 +190,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"description: .+\n"
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
-                rf"Call `wsflow/playbook\.print\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
+                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. "
                 r"If this call fails to connect, run `/wsflow:mcp-server-repair`\.\n",
                 text,
@@ -221,9 +221,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
                 r"Call in parallel:\n"
-                rf"- `wsflow/playbook\.print\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
+                rf"- `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
                 r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
-                r"After both return, execute the procedure returned by `wsflow/playbook\.print`\."
+                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\."
                 + pointer_tail[skill]
                 + r"\n",
                 text,

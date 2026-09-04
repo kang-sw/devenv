@@ -350,9 +350,9 @@ func proceedNextInstruction(next string) string {
 	namespace := RuntimeNamespace()
 	switch next {
 	case "lead-implement":
-		return fmt.Sprintf(`Routing to next action: lead-implement. Call %s/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source, planning, editing, or calling implementation tools. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace)
+		return fmt.Sprintf(`Routing to next action: lead-implement. Call %s/playbook.read(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source, planning, editing, or calling implementation tools. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace)
 	case "lead-write-ticket":
-		return fmt.Sprintf(`Routing to next action: lead-write-ticket. Call %s/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun %s/enter.proceed for that ticket. Otherwise stop and report the remaining readiness blocker. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace, namespace)
+		return fmt.Sprintf(`Routing to next action: lead-write-ticket. Call %s/playbook.read(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun %s/enter.proceed for that ticket. Otherwise stop and report the remaining readiness blocker. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace, namespace)
 	case "lead-discuss":
 		return fmt.Sprintf("Routing to next action: lead-discuss. Continue through %s:lead-discuss with the blocker in Reason. Verify the invoked stage result from stage output when applicable. Stop on failure or user interruption.", namespace)
 	case "stop":

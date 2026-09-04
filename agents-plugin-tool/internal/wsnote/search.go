@@ -29,7 +29,7 @@ var dateOnlyBound = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //
 // The result order matches Compute's comparator exactly (priority desc ->
 // written_at desc -> key asc, via CompareRecords) so a single-layer
-// note.search and a multi-layer note.search never diverge in order, only in
+// note.query and a multi-layer note.query never diverge in order, only in
 // whether each record carries a layer tag.
 func Search(records map[string]Record, glob string, from, then string) ([]Record, error) {
 	out, err := FilterRecords(records, glob, from, then)
@@ -44,7 +44,7 @@ func Search(records map[string]Record, glob string, from, then string) ([]Record
 
 // FilterRecords applies Search's glob/from/then filtering without sorting.
 // It is exported (rather than kept package-private) because the multi-layer
-// note.search merge path lives in package mcp, not wsnote: that path filters
+// note.query merge path lives in package mcp, not wsnote: that path filters
 // each layer independently via this same function before combining and
 // sorting the tagged result once, so the two paths' filtering can never
 // diverge.
@@ -82,7 +82,7 @@ func FilterRecords(records map[string]Record, glob string, from, then string) ([
 // note-ordering comparator: priority desc -> written_at desc -> key asc.
 // This is the exact comparator Compute (inject.go) uses for the ambient
 // "# Notes" block, shared here so Search's single-layer order and the
-// multi-layer note.search merge order can never diverge from it.
+// multi-layer note.query merge order can never diverge from it.
 func CompareRecords(a, b Record) bool {
 	if a.Priority != b.Priority {
 		return a.Priority > b.Priority

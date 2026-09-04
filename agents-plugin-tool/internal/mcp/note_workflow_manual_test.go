@@ -223,7 +223,7 @@ func TestWorkflowManualNotesBlockRendersEmptyStateHintWhenNoNotesExist(t *testin
 // TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable verifies
 // more than notesInjectionCap notes cap the injected block at the
 // highest-priority items, show the "N lower-priority notes elided" line, and
-// that elided items are still retrievable via note.search.
+// that elided items are still retrievable via note.query.
 func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
@@ -264,20 +264,20 @@ func TestWorkflowManualNotesBlockElidesBeyondCapAndRemainsSearchable(t *testing.
 		t.Fatalf("workflow_manual CONTINUE dropped the highest-priority note %s: %s", highestKey, continueResp)
 	}
 
-	// The elided lowest-priority note must still be retrievable via note.search.
-	searchResp := callToolWithKey(t, s, 4, key, "note.search", map[string]any{
+	// The elided lowest-priority note must still be retrievable via note.query.
+	searchResp := callToolWithKey(t, s, 4, key, "note.query", map[string]any{
 		"layer": "worktree",
 		"glob":  "elide.00",
 	})
 	if !strings.Contains(searchResp, "elide.00") {
-		t.Fatalf("note.search did not retrieve the elided note elide.00: %s", searchResp)
+		t.Fatalf("note.query did not retrieve the elided note elide.00: %s", searchResp)
 	}
 }
 
 // TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable is the
 // ticket's core end-to-end verification boundary: write a note, mute it, and
 // confirm workflow_manual's "# Notes" block no longer carries the note's
-// key/value while the muted-count line is present, but note.search still
+// key/value while the muted-count line is present, but note.query still
 // returns the record unchanged.
 func TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
@@ -310,12 +310,12 @@ func TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable(t *testing.T) {
 		t.Fatalf("workflow_manual after mute missing the muted-count line: %s", afterMute)
 	}
 
-	searchResp := callToolWithKey(t, s, 6, key, "note.search", map[string]any{
+	searchResp := callToolWithKey(t, s, 6, key, "note.query", map[string]any{
 		"layer": "worktree",
 		"glob":  "mute.me",
 	})
 	if !strings.Contains(searchResp, "mute.me") || !strings.Contains(searchResp, "muted content") {
-		t.Fatalf("note.search after mute did not still return the muted note: %s", searchResp)
+		t.Fatalf("note.query after mute did not still return the muted note: %s", searchResp)
 	}
 
 	// Unmute restores the block.
@@ -327,7 +327,7 @@ func TestWorkflowManualMutedNoteDropsFromBlockButStaysSearchable(t *testing.T) {
 	if !strings.Contains(afterUnmute, "mute.me") || !strings.Contains(afterUnmute, "muted content") {
 		t.Fatalf("workflow_manual after unmute did not restore the note: %s", afterUnmute)
 	}
-	if strings.Contains(afterUnmute, "note.search to view") {
+	if strings.Contains(afterUnmute, "note.query to view") {
 		t.Fatalf("workflow_manual after unmute unexpectedly still shows a muted-count line: %s", afterUnmute)
 	}
 }
@@ -434,7 +434,7 @@ func TestWorkflowManualRendersMutedLineAndElisionLineTogether(t *testing.T) {
 		t.Fatalf("workflow_manual missing the muted-count line: %s", resp)
 	}
 	elisionIdx := strings.Index(resp, "lower-priority notes elided")
-	mutedIdx := strings.Index(resp, "note.search to view")
+	mutedIdx := strings.Index(resp, "note.query to view")
 	if elisionIdx < 0 || mutedIdx < 0 || elisionIdx > mutedIdx {
 		t.Fatalf("workflow_manual did not render the elision line before the muted line: %s", resp)
 	}

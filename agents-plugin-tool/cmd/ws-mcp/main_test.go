@@ -848,19 +848,19 @@ func TestToolsCommandShowMatchesInputSchema(t *testing.T) {
 	wantTools := inProcessToolsList(t)
 	var wantSchema map[string]any
 	for _, tool := range wantTools {
-		if name, _ := tool["name"].(string); name == "runtime.info" {
+		if name, _ := tool["name"].(string); name == "runtime.read" {
 			wantSchema, _ = tool["inputSchema"].(map[string]any)
 			break
 		}
 	}
 	if wantSchema == nil {
-		t.Fatal("runtime.info missing inputSchema in in-process tools/list")
+		t.Fatal("runtime.read missing inputSchema in in-process tools/list")
 	}
 
-	cmd := exec.Command(bin, "tools", "runtime.info")
+	cmd := exec.Command(bin, "tools", "runtime.read")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("ws-mcp tools runtime.info failed: %v\n%s", err, string(out))
+		t.Fatalf("ws-mcp tools runtime.read failed: %v\n%s", err, string(out))
 	}
 	var gotSchema map[string]any
 	if err := json.Unmarshal(out, &gotSchema); err != nil {
@@ -869,7 +869,7 @@ func TestToolsCommandShowMatchesInputSchema(t *testing.T) {
 	wantJSON, _ := json.Marshal(wantSchema)
 	gotJSON, _ := json.Marshal(gotSchema)
 	if string(wantJSON) != string(gotJSON) {
-		t.Fatalf("tools runtime.info schema = %s, want %s", gotJSON, wantJSON)
+		t.Fatalf("tools runtime.read schema = %s, want %s", gotJSON, wantJSON)
 	}
 }
 
@@ -943,7 +943,7 @@ func TestCallCommandMalformedJSONExitsNonZero(t *testing.T) {
 		t.Fatalf("go build failed: %v\n%s", err, string(out))
 	}
 
-	cmd := exec.Command(bin, "call", "runtime.info", "not-json")
+	cmd := exec.Command(bin, "call", "runtime.read", "not-json")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected non-zero exit for malformed JSON, got success: %s", out)

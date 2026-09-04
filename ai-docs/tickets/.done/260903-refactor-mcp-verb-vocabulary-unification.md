@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 842fd35951b43002
 sage-review-completeness-reviewed: 842fd35951b43002
+completed: 2026-09-04
 ---
 
 # MCP read-surface verb-vocabulary unification (deterministic scripted rename)
@@ -107,6 +108,32 @@ grep sweep is clean), the full Go test suite is green (`go test ./...` in
 byte-unchanged — this is a rename only, no handler
 logic touched.
 
+### Result
+
+Applied the six frozen verb pairs by scripted rename in commit `f8101dc6`
+(100 files: Go registration/dispatch + tool descriptions, both `runtime.json`
+tools sections, canonical `agents-plugin/rsrc/**` playbooks + the regenerated
+wsflow mirror + both manifests, `SKILL.md` shims, `mcp-tools.md` +
+`workflow-skills.md`, and Go/Python tests). Behavior byte-unchanged (symmetric
+406/406 diff; no handler logic touched). `mental_models.list`/`status` left
+unrenamed (noted exception); `playbook.render` untouched.
+
+Verification: `go test ./...` in `agents-plugin-tool/` green (14 packages,
+including `wsrsrc` mirror/manifest drift guards); wsflow Python suite 10/10;
+`agents-plugin/tests` 45/46 with the one failure
+(`test_proceed_keeps_implementation_route_only`) verified pre-existing on the
+base tree and rename-unrelated; `tools/list` shows the canonical verbs; grep
+sweep clean. One full-scope review returned clean-with-2-minor (stale old names
+in `documentation-system.md`/`plugin-runtime.md`), both fixed in `7e669fc8`.
+Descriptive-doc drift (mental-models + manuals) retired in `6f9022ca`.
+
+Scope decisions (recorded, not settled by the ticket): the CLI subcommand
+surface (`main.go case "find"`, `runtime.json "commands"`,
+`runtimeCapabilityCommandNames`) was deliberately left unchanged — out of the
+frozen map; and planning/research tickets that reference the old names as design
+prose (`260703`, `260731`, `260723`) were left as point-in-time records. Both
+captured for a follow-up.
+
 ## Spec Impact
 
 Tool-name renames within existing anchors only — no new spec stem, and no heading
@@ -120,3 +147,8 @@ Tool-name renames within existing anchors only — no new spec stem, and no head
   `{#260505-runtime-debug-metadata-tools}` (`runtime.info→read`).
 - `workflow-skills.md`: wherever the renamed tools are named in skill procedure
   text (the `references.trace` sweep at implementation enumerates the sites).
+
+
+## Resolution (2026-09-04)
+
+Phase 1 landed: scripted six-verb rename (f8101dc6) with byte-unchanged behavior, spec + descriptive-doc drift cleaned (7e669fc8, 6f9022ca), all suites green, one full-scope review clean-with-2-minor (both fixed). CLI subcommand surface and planning-ticket prose left out of scope and captured in follow-up 260904-refactor-cli-subcommand-verb-alignment. Locks the canonical `query`/`read` survivor names for layers ③ and ②.
