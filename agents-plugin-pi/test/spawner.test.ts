@@ -24,6 +24,11 @@
  * `pi` child process, per the plan's Verification Plan split between unit
  * and live coverage.
  *
+ * Review fix (cycle 1, 260903 Phase 1 goal-loop): also covers
+ * `buildRpcClientOptions`/`buildChildProcessEnv`'s `WS_PI_AGENT_CHILD_ENV`
+ * marker placement at both spawn call sites — previously left to a manual
+ * spot-check with zero automated coverage.
+ *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
 
@@ -48,6 +53,9 @@ import {
   listAgents,
   waitForAgents,
   sendToAgent,
+  buildRpcClientOptions,
+  buildChildProcessEnv,
+  WS_PI_AGENT_CHILD_ENV,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -775,5 +783,46 @@ describe("getAgentTranscriptPath", () => {
   test("unknown agent id throws matching /unknown agentId/", () => {
     const registry: RpcAgentRegistry = new Map();
     assert.throws(() => getAgentTranscriptPath(registry, "missing"), /unknown agentId/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spawned-child env marker (review fix, cycle 1): `WS_PI_AGENT_CHILD_ENV`
+// placement, previously covered only by a manual spot-check. Each spawn
+// call site's env-building is a pure function (buildRpcClientOptions for
+// the RPC path, buildChildProcessEnv for the one-shot `explore` path via
+// spawnPiProcess), so both are asserted directly without spawning a real
+// process. See goal-loop.test.ts's `isChildProcess` suite for the
+// consuming-side (agent_settled no-op) coverage.
+// ---------------------------------------------------------------------------
+
+describe("buildRpcClientOptions (WS_PI_AGENT_CHILD_ENV placement)", () => {
+  test("built options carry the spawned-child marker", () => {
+    const options = buildRpcClientOptions("/repo", "provider/model", "/tmp/session.jsonl", "/tmp/system.md", "read,bash");
+    assert.deepEqual(options.env, { [WS_PI_AGENT_CHILD_ENV]: "1" });
+  });
+
+  test("the marker is the sole env entry (RpcClient.start() merges it over process.env itself, so this function must not pre-spread it)", () => {
+    const options = buildRpcClientOptions("/repo", undefined, "/tmp/session.jsonl", "/tmp/system.md", "read");
+    assert.deepEqual(Object.keys(options.env ?? {}), [WS_PI_AGENT_CHILD_ENV]);
+  });
+});
+
+describe("buildChildProcessEnv (WS_PI_AGENT_CHILD_ENV placement for spawnPiProcess)", () => {
+  test("sets the spawned-child marker to \"1\"", () => {
+    const env = buildChildProcessEnv({});
+    assert.equal(env[WS_PI_AGENT_CHILD_ENV], "1");
+  });
+
+  test("preserves every inherited variable from the base env (no dropped vars)", () => {
+    const env = buildChildProcessEnv({ PATH: "/usr/bin", HOME: "/home/user" });
+    assert.equal(env.PATH, "/usr/bin");
+    assert.equal(env.HOME, "/home/user");
+    assert.equal(env[WS_PI_AGENT_CHILD_ENV], "1");
+  });
+
+  test("an existing WS_PI_AGENT_CHILD value in the base env is overwritten to \"1\"", () => {
+    const env = buildChildProcessEnv({ [WS_PI_AGENT_CHILD_ENV]: "stale" });
+    assert.equal(env[WS_PI_AGENT_CHILD_ENV], "1");
   });
 });

@@ -152,6 +152,18 @@ export function disarmGoal(): GoalLoopState {
 }
 
 /**
+ * Pure predicate: `true` when `env` carries the spawned-child marker
+ * (`WS_PI_AGENT_CHILD_ENV`, set by spawner.ts on every spawned child's
+ * process environment). Extracted from the `agent_settled` handler (review
+ * fix, cycle 1) — mirroring `decideOnSettle`'s own pure-reducer extraction —
+ * so the "no-op in a spawned child" guard is unit-testable without spawning
+ * a real process.
+ */
+export function isChildProcess(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env[WS_PI_AGENT_CHILD_ENV]);
+}
+
+/**
  * Records that a tool call happened this cycle. No-op when goal mode is
  * inactive. Any tool call resets the runaway streak on the next settle — not
  * just the goal-lever tools — matching the ticket's "no tool call" wording.
@@ -238,7 +250,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     // fact). Each child also starts with its own inert module-level state,
     // but this guard protects against a `/goal …`-prefixed message reaching
     // a child's input pipeline regardless.
-    if (process.env[WS_PI_AGENT_CHILD_ENV]) return;
+    if (isChildProcess(process.env)) return;
 
     const threshold = resolveRunawayThreshold(readGoalLoopConfig(opts.goalLoopConfigPath));
     const { next, decision } = decideOnSettle(state, threshold);

@@ -1,9 +1,15 @@
 /**
  * Unit tests for goal-loop.ts's pure exports (config reader, threshold
- * resolver, message builders, and the state machine). No `pi.*` IO is
- * exercised here — `registerGoalLoop`'s IO glue is covered by the live
- * `pi --mode json` gate (see the 260903 Phase 1 plan's Verification Plan),
- * not by this unit suite.
+ * resolver, message builders, the state machine, and the spawned-child
+ * `isChildProcess` predicate — review fix, cycle 1: extracted from the
+ * `agent_settled` handler's inline `process.env` check so the
+ * lead-session-only guard has automated positive/negative coverage instead
+ * of relying solely on a manual spot-check). No `pi.*` IO is exercised here
+ * — `registerGoalLoop`'s IO glue is covered by the live `pi --mode json`
+ * gate (see the 260903 Phase 1 plan's Verification Plan), not by this unit
+ * suite. The companion env-marker-placement coverage
+ * (`buildRpcClientOptions`/`buildChildProcessEnv`) lives in
+ * `test/spawner.test.ts`.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -23,9 +29,11 @@ import {
   disarmGoal,
   recordToolCall,
   decideOnSettle,
+  isChildProcess,
   DEFAULT_RUNAWAY_THRESHOLD,
   type GoalLoopConfig,
 } from "../src/goal-loop.ts";
+import { WS_PI_AGENT_CHILD_ENV } from "../src/spawner.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-goal-loop-test-"));
 after(() => {
@@ -137,7 +145,10 @@ describe("initialGoalLoopState / armGoal / disarmGoal", () => {
 describe("recordToolCall", () => {
   test("is a no-op when goal mode is inactive", () => {
     const state = initialGoalLoopState();
-    assert.deepEqual(recordToolCall(state), state);
+    // Reference identity (assert.equal), not just structural equality — the
+    // inactive branch must return the SAME object, not an equivalent clone
+    // (matches decideOnSettle's analogous "ignores an inactive state" test).
+    assert.equal(recordToolCall(state), state);
   });
 
   test("sets sawToolCallThisCycle when active", () => {
@@ -196,5 +207,19 @@ describe("decideOnSettle", () => {
     assert.equal(decision.action, "force-stop");
     ({ next: state, decision } = decideOnSettle(state, threshold));
     assert.deepEqual(decision, { action: "ignore" });
+  });
+});
+
+describe("isChildProcess", () => {
+  test("true when the spawned-child marker is set (matches spawner.ts's WS_PI_AGENT_CHILD_ENV key)", () => {
+    assert.equal(isChildProcess({ [WS_PI_AGENT_CHILD_ENV]: "1" }), true);
+  });
+
+  test("false when the marker is absent (lead session)", () => {
+    assert.equal(isChildProcess({}), false);
+  });
+
+  test("false when other env vars are present but the marker is not among them", () => {
+    assert.equal(isChildProcess({ PATH: "/usr/bin", HOME: "/home/user" }), false);
   });
 });

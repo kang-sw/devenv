@@ -84,6 +84,18 @@ export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
 export const WS_PI_AGENT_CHILD_ENV = "WS_PI_AGENT_CHILD";
 
 /**
+ * Pure env-builder for the one-shot `explore` path's `spawn(...)` call
+ * (`spawnPiProcess` below): merges `WS_PI_AGENT_CHILD_ENV=1` over `baseEnv`
+ * without dropping any inherited variable. Extracted (review fix, cycle 1)
+ * so the marker-placement logic is unit-testable without invoking a real
+ * child process — mirrors `buildRpcClientOptions`'s export for the same
+ * reason on the RPC path.
+ */
+export function buildChildProcessEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...baseEnv, [WS_PI_AGENT_CHILD_ENV]: "1" };
+}
+
+/**
  * Built-in Pi tool names per curated group (docs/usage.md's `### Tool
  * Options`: `read, bash, edit, write, grep, find, ls`).
  *
@@ -412,7 +424,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
   const invocation = getPiInvocation(args);
   const proc = spawn(invocation.command, invocation.args, {
     cwd,
-    env: { ...process.env, [WS_PI_AGENT_CHILD_ENV]: "1" },
+    env: buildChildProcessEnv(process.env),
     stdio: ["ignore", "pipe", "pipe"],
   });
   record.proc = proc;
@@ -614,7 +626,14 @@ export interface RpcResumeCtx {
   cwd: string;
 }
 
-function buildRpcClientOptions(
+/**
+ * Exported (review fix, cycle 1) so `test/spawner.test.ts` can assert the
+ * `WS_PI_AGENT_CHILD_ENV` marker directly against the built options object
+ * instead of leaving it covered only by a manual spot-check — `RpcClient`'s
+ * own `env: {...process.env, ...this.options.env}` merge means this function
+ * only needs to carry the marker itself (no `process.env` spread here).
+ */
+export function buildRpcClientOptions(
   cwd: string,
   model: string | undefined,
   sessionPath: string,
