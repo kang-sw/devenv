@@ -13,7 +13,8 @@
     "rsrc/",
     "skills/",
     "runtime.json",
-    "model-catalog.json"
+    "model-catalog.json",
+    "goal-loop-config.json"
   ],
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.4"

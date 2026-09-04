@@ -72,6 +72,18 @@ export type ToolGroup = "read-only" | "recon" | "full-worker";
 export const REPORT_TO_LEAD_TOOL_NAME = "ws-report-to-lead";
 
 /**
+ * Env var marker set on every spawned child's process environment
+ * (`buildRpcClientOptions`'s RPC path and `spawnPiProcess`'s one-shot
+ * `explore` path both carry it) so the goal-loop's `agent_settled` handler
+ * (goal-loop.ts) can no-op when the running process is itself a spawned
+ * child, never the lead session — defense-in-depth against a message that
+ * happens to start with `/goal …` reaching a child's input pipeline (e.g. a
+ * lead-authored `ws-agent-send` message), per the 260903 Phase 1 ticket's
+ * "lead session only" settled cross-ticket fact.
+ */
+export const WS_PI_AGENT_CHILD_ENV = "WS_PI_AGENT_CHILD";
+
+/**
  * Built-in Pi tool names per curated group (docs/usage.md's `### Tool
  * Options`: `read, bash, edit, write, grep, find, ls`).
  *
@@ -400,6 +412,7 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
   const invocation = getPiInvocation(args);
   const proc = spawn(invocation.command, invocation.args, {
     cwd,
+    env: { ...process.env, [WS_PI_AGENT_CHILD_ENV]: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   record.proc = proc;
@@ -611,6 +624,7 @@ function buildRpcClientOptions(
   return {
     cliPath: RPC_CLI_PATH,
     cwd,
+    env: { [WS_PI_AGENT_CHILD_ENV]: "1" },
     model,
     args: ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools],
   };

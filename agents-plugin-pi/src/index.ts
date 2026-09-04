@@ -33,6 +33,17 @@
  * and instructs the model to dispatch one `explore` recon leaf (spawner) —
  * proving skills-load + bridge + spawner compose end-to-end on Pi.
  *
+ * The 260903 ticket's Phase 1 adds the goal-mode arming + `agent_settled`
+ * re-injection loop (src/goal-loop.ts, `registerGoalLoop`): a `/goal <goal>`
+ * command arms the loop, an armed `agent_settled` re-fire re-injects a
+ * reminder naming the goal and its two terminal levers
+ * (`goal-achieved`/`goal-blocked`, both model-invoked `pi.registerTool()`
+ * calls per the ticket's "explicit skill calls, zero prose parsing" design
+ * constraint), and a config-tunable runaway backstop force-stops the loop
+ * after N consecutive no-tool-call re-fires. Registered at factory top
+ * level alongside the other commands/tools below — no subprocess involved,
+ * so it needs no `session_start` gating either.
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -58,6 +69,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startBridge, type BridgeHandle } from "./bridge.ts";
 import { registerAgentTools, type AgentToolsHandle } from "./spawner.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
+import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +79,7 @@ const skillsDir = resolveSkillsDir(pluginDir, repoRoot);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
 const modelCatalogPath = join(pluginDir, "model-catalog.json");
+const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
@@ -107,6 +120,8 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       pi.sendUserMessage(buildDiscussKickoff(args), { expandPromptTemplates: true });
     },
   });
+
+  registerGoalLoop(pi, { goalLoopConfigPath });
 
   pi.on("session_start", async (_event, ctx) => {
     handle = await startBridge(pi, {
