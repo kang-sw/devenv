@@ -96,11 +96,15 @@ companion bug ticket as the runtime surface of L3's internal validation.
 
 - Final naming: `route.resolve_proceed`/`route.resolve_implement` (preferred) vs
   `proceed.resolve_verdict`/`implement.resolve_verdict`.
-- Deprecation path: old tool names appear in both `agents-plugin` and
+- Deprecation path: **settled — one-shot hard cut, inherited from the epic** (no
+  alias window). Old tool names appear in both `agents-plugin` and
   `agents-plugin-wsflow` lead-proceed/lead-implement playbooks, `runtime.json`,
   spec docs (`mcp-tools.md`, `workflow-skills.md`), and the resolver
-  next-instruction text (`proceed_resolver.go:355` "rerun enter.proceed") — an
-  alias/transition window vs a hard rename needs deciding.
+  next-instruction text (`proceed_resolver.go:355` "rerun enter.proceed"); all
+  are in-package and rewritten atomically. The one out-of-package leak —
+  downstream sessions' learned direct-call habit — is softened by the redirect
+  guard (companion bug ticket `260901-bug-enter-proceed-misplaced-facts-silent-unknown-status`),
+  not by an alias.
 - How much of the input contract genuinely moves to the skill body vs. stays as
   a minimal published hint, and whether `enter.implement`'s self-read git state
   changes the opaque-params story for that tool.

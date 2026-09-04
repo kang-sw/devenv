@@ -163,8 +163,17 @@ playbooks (`lead-proceed`/`lead-implement`) up to 3× — organize on
 - **Coordinate with skill-playbook-diet.** Its Lever B pushes more decision logic
   INTO `enter.*`; this epic makes those tools less visible. A tool must not be
   expanded by diet immediately before this epic renames or reshapes it.
-- **Deprecation posture is per-child** (hard cut vs alias window); each child
-  states its own, given downstream callers exist.
+- **Deprecation posture — one-shot hard cut (all children).** Old tool names
+  have no persisted cross-version consumer: every caller (Go dispatch,
+  `runtime.json`, playbook tokens, specs, workflow manual, wsflow mirror) ships
+  in-package and is swept atomically by ④'s script, so the rename is a one-shot
+  atomic operation, not a compat break — no alias/transition window. Keeping an
+  alias would only re-surface dead names in the workflow manual, re-widening the
+  very surface this epic cuts. The two out-of-package leaks are the misuse this
+  epic removes: downstream sessions' learned `enter.*` direct-call habit
+  (softened by the redirect guard in the companion bug ticket, not by an alias)
+  and any downstream hardcode of an old name. Children inherit this posture; none
+  re-decides it.
 
 ## Child tickets
 

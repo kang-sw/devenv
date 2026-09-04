@@ -1,6 +1,9 @@
 ---
 title: "MCP mechanical over-split → signature merge (todo insert-trio → add; note visibility)"
 parent: 260903-epic-mcp-tool-surface-affordance-reduction
+sage-review-design: completed
+sage-review-design-reviewed: 9d10d44f552ffc22
+sage-review-completeness: required
 ---
 
 # MCP mechanical over-split → signature merge (todo insert-trio → add; note visibility)
@@ -42,6 +45,9 @@ not derived.
   surface.
 - Boundary: naming/shape hygiene stays elsewhere; this ticket owns the one
   place the epic changes a call *shape* (not just a name).
+- Deprecation posture: one-shot hard cut inherited from the epic — no alias for
+  the removed leaf tools (`insert_before`/`insert_after`, and `note.mute`/`unmute`
+  if the note candidate lands).
 
 ## Open questions
 
@@ -50,7 +56,6 @@ not derived.
   all.
 - Whether `todo.read` folds into `todo.list` (granularity difference argues no).
 - `note.set_visible` inclusion — worth the churn, or drop the note candidate?
-- Deprecation posture (hard cut vs alias) for the removed leaf tools.
 
 ## Spec Impact
 

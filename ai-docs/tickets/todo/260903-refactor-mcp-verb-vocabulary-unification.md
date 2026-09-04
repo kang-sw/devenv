@@ -3,6 +3,9 @@ title: "MCP read-surface verb-vocabulary unification (deterministic scripted ren
 parent: 260903-epic-mcp-tool-surface-affordance-reduction
 related:
   260903-refactor-mcp-read-surface-collapse: sibling layer ③ — collapse depends on this layer's `query` survivor naming; for tickets/specs rename and collapse coincide
+sage-review-design: completed
+sage-review-completeness: required
+sage-review-design-reviewed: ae7feeadf1d08c7b
 ---
 
 # MCP read-surface verb-vocabulary unification (deterministic scripted rename)
@@ -38,6 +41,15 @@ tokens, and tests. Verify by diff + test run. Only a thin prose-cleanup tail
 (surrounding sentences like "find the ticket…") needs a human pass. Hand-editing
 name-by-name is out of method.
 
+## Deprecation posture
+
+One-shot hard cut, inherited from the epic. Old names have no persisted
+cross-version consumer — Go dispatch, `runtime.json`, specs, playbook tokens,
+workflow manual, and the wsflow mirror all ship in-package and are swept by this
+ticket's own script — so the rename is atomic, not a compat break: no
+alias/transition window. The script removes every old-name reference in the same
+pass.
+
 ## Ordering / dependencies
 
 - Runs **first** in the epic's execution order (locks canonical names for ③/②).
@@ -49,8 +61,6 @@ name-by-name is out of method.
 
 - Final verb map, including the `runtime.info→status` and `playbook.print→read`
   candidates (are they read/live-state or something else?).
-- Deprecation posture: hard rename vs alias/transition window, given downstream
-  callers reference the old names. Epic requires this ticket to state its posture.
 - Whether the gated `exec.*`/`mercenary.*` families are swept in the same script
   pass (they adopt the vocabulary but are not the epic's landing gate).
 

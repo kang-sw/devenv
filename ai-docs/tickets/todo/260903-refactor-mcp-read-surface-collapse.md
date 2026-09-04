@@ -3,6 +3,9 @@ title: "MCP read-surface collapse — fold proven-redundant list/find/status tri
 parent: 260903-epic-mcp-tool-surface-affordance-reduction
 related:
   260903-refactor-mcp-verb-vocabulary-unification: sibling layer ④ — this collapse targets the `query` survivor that layer names; for tickets/specs rename and collapse coincide
+sage-review-design: completed
+sage-review-design-reviewed: 1e4284ef082f493f
+sage-review-completeness: required
 ---
 
 # MCP read-surface collapse — fold proven-redundant list/find/status triples into query
@@ -44,6 +47,8 @@ residual `list`/`status` are a noted explicit exception. Any other family with a
 - Boundary: collapse only proven-superset triples; unproven similarity is left
   or routed to a fresh audit, never merged here. Novel merged signatures belong
   to layer ② (`260903-refactor-mcp-todo-signature-merge`), not here.
+- Deprecation posture: one-shot hard cut inherited from the epic — no alias for
+  the removed `list`/`status` names; ④'s script removes them in-package.
 
 ## Open questions
 
@@ -51,7 +56,6 @@ residual `list`/`status` are a noted explicit exception. Any other family with a
   `TicketsFind(ticket_stem)`? If a hot playbook path relies on the cheap
   point-lookup, confirm find-exact short-circuits (does not full-scan) before
   removing `status`.
-- Deprecation posture (hard cut vs alias) for the removed `list`/`status` names.
 - mental_models audit outcome (clean superset or noted exception).
 
 ## Spec Impact
