@@ -152,6 +152,55 @@ export function withOptionalSessionKey(inputSchema: Record<string, unknown>): Re
 }
 
 /**
+ * The fresh-bootstrap sentinel a caller sends in `session_key` when it has no
+ * lead session key yet (mirrors ws-mcp's own `freshBootstrapKey` constant,
+ * `agents-plugin-tool/internal/mcp/workflow_manual.go`, and the identical
+ * literal already shipped verbatim in `agents-plugin/rsrc/lead-proceed/
+ * lead-proceed.md` and sibling skill text — this is the live, already-shipped
+ * value, not an invented one).
+ */
+const FRESH_BOOTSTRAP_SENTINEL = "obsidian-latch";
+
+export interface NormalizeSessionKeyOptions {
+  /** The bridge's own default-filled session key (`defaultSessionKeyRef.current`), or undefined pre-bootstrap. */
+  ownKey: string | undefined;
+  /** The fresh-bootstrap sentinel value that rewrites to `ownKey`. */
+  sentinel: string;
+  /** The env-delivered parent lead key (fork-only, `WS_PI_PARENT_SESSION_KEY`), when set. */
+  parentLeadKey?: string;
+}
+
+/**
+ * Rewrites exactly two explicit `session_key` values to the bridge's own key,
+ * ahead of `resolveSessionKey`'s fill-or-forward: the fresh-bootstrap sentinel
+ * (`opts.sentinel`), and — fork-only — the env-delivered parent lead key
+ * (`opts.parentLeadKey`). Every other explicit key (including an explicit
+ * child key) passes through completely untouched — widening this to any other
+ * rewrite case is explicitly rejected by the ticket contract.
+ *
+ * When `opts.ownKey` is unset (degraded bootstrap: the bridge's own ferrule
+ * mint hasn't resolved, or failed), both rewrites are disabled and `params` is
+ * returned unchanged — the sentinel self-heals exactly as today (ws-mcp's own
+ * fresh-bootstrap path still recognizes it directly).
+ *
+ * Never mutates `params` — copy-on-write, same contract as
+ * `resolveSessionKey`.
+ */
+export function normalizeSessionKey(
+  params: Record<string, unknown> | undefined,
+  opts: NormalizeSessionKeyOptions,
+): Record<string, unknown> | undefined {
+  if (!opts.ownKey) {
+    return params;
+  }
+  const provided = params?.session_key;
+  if (provided === opts.sentinel || (opts.parentLeadKey !== undefined && provided === opts.parentLeadKey)) {
+    return { ...(params ?? {}), session_key: opts.ownKey };
+  }
+  return params;
+}
+
+/**
  * session_key fill-or-forward: if the caller omitted session_key (undefined,
  * null, or empty string), splice in the bridge's default-filled key; an
  * explicit session_key passes through completely unchanged. This is what
@@ -225,7 +274,20 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         async execute(_toolCallId, params) {
           // Dispatch always uses the RAW dotted name — sanitization is
           // registration-only, never part of the ws-mcp wire call.
-          const args = resolveSessionKey(params as Record<string, unknown> | undefined, defaultKeyRef);
+          // normalizeSessionKey runs in front of resolveSessionKey's own
+          // fill-or-forward: it rewrites the two ticket-mandated sentinel/
+          // parent-key explicit cases to the bridge's own key, then
+          // resolveSessionKey handles the (separate) omitted-key fill.
+          const normalized = normalizeSessionKey(params as Record<string, unknown> | undefined, {
+            ownKey: defaultKeyRef.current,
+            sentinel: FRESH_BOOTSTRAP_SENTINEL,
+            // WS_PI_PARENT_SESSION_KEY is unset until a future fork-spawning
+            // ticket sets it (out of scope here — this phase only reserves
+            // the env var name); reading it directly by string keeps this
+            // call site independent of process-role.ts's module boundary.
+            parentLeadKey: process.env.WS_PI_PARENT_SESSION_KEY,
+          });
+          const args = resolveSessionKey(normalized, defaultKeyRef);
           const result = await client.callTool(rawName, args);
           if (result.isError) {
             // Throwing is how Pi's tool contract signals isError: true —

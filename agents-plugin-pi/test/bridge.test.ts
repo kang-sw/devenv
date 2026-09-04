@@ -15,7 +15,14 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeToolName, withOptionalSessionKey, resolveSessionKey, maybeAppendModelCatalogAdvisory, MODEL_CATALOG_ADVISORY } from "../src/bridge.ts";
+import {
+  sanitizeToolName,
+  withOptionalSessionKey,
+  resolveSessionKey,
+  normalizeSessionKey,
+  maybeAppendModelCatalogAdvisory,
+  MODEL_CATALOG_ADVISORY,
+} from "../src/bridge.ts";
 import type { ModelCatalogConfig } from "../src/model-catalog.ts";
 
 // Live snapshot of ws-mcp's tools/list response (60 tools), captured via a
@@ -157,6 +164,65 @@ describe("resolveSessionKey", () => {
     const input = { session_key: "", root: "." };
     const inputSnapshot = { ...input };
     resolveSessionKey(input, { current: "default-key-123" });
+    assert.deepEqual(input, inputSnapshot, "input params object must not be mutated");
+  });
+});
+
+describe("normalizeSessionKey", () => {
+  const SENTINEL = "obsidian-latch";
+
+  test("rewrites the sentinel to the bridge's own key", () => {
+    const result = normalizeSessionKey({ session_key: SENTINEL }, { ownKey: "own-key-1", sentinel: SENTINEL });
+    assert.equal(result?.session_key, "own-key-1");
+  });
+
+  test("rewrites an explicit parentLeadKey (fork-only) to the bridge's own key", () => {
+    const result = normalizeSessionKey(
+      { session_key: "parent-lead-key" },
+      { ownKey: "own-key-1", sentinel: SENTINEL, parentLeadKey: "parent-lead-key" },
+    );
+    assert.equal(result?.session_key, "own-key-1");
+  });
+
+  test("leaves an unrelated explicit (child) key completely unchanged — regression: must still reach ws-mcp unchanged", () => {
+    const result = normalizeSessionKey(
+      { session_key: "some-child-session-key" },
+      { ownKey: "own-key-1", sentinel: SENTINEL, parentLeadKey: "parent-lead-key" },
+    );
+    assert.equal(result?.session_key, "some-child-session-key");
+  });
+
+  test("leaves an omitted session_key untouched (resolveSessionKey's job, not normalizeSessionKey's)", () => {
+    const result = normalizeSessionKey({ root: "." }, { ownKey: "own-key-1", sentinel: SENTINEL });
+    assert.equal("session_key" in (result ?? {}), false);
+    assert.equal(result?.root, ".");
+  });
+
+  test("degraded bootstrap (ownKey unset): sentinel passes through unchanged, both rewrites disabled", () => {
+    const result = normalizeSessionKey(
+      { session_key: SENTINEL },
+      { ownKey: undefined, sentinel: SENTINEL, parentLeadKey: "parent-lead-key" },
+    );
+    assert.equal(result?.session_key, SENTINEL);
+  });
+
+  test("degraded bootstrap (ownKey unset): parentLeadKey match also passes through unchanged", () => {
+    const result = normalizeSessionKey(
+      { session_key: "parent-lead-key" },
+      { ownKey: undefined, sentinel: SENTINEL, parentLeadKey: "parent-lead-key" },
+    );
+    assert.equal(result?.session_key, "parent-lead-key");
+  });
+
+  test("handles undefined params (no explicit key at all)", () => {
+    const result = normalizeSessionKey(undefined, { ownKey: "own-key-1", sentinel: SENTINEL });
+    assert.equal(result, undefined);
+  });
+
+  test("does not mutate the input params object", () => {
+    const input = { session_key: SENTINEL };
+    const inputSnapshot = { ...input };
+    normalizeSessionKey(input, { ownKey: "own-key-1", sentinel: SENTINEL });
     assert.deepEqual(input, inputSnapshot, "input params object must not be mutated");
   });
 });
