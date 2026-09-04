@@ -70,6 +70,18 @@
  * footgun fix — see execute-gateway.ts's doc comment) while adding
  * `ws-execute`/`ws-approve`/the ugly-named read tool.
  *
+ * The 260904 "side-thread fork question surface" ticket's Phase 1 adds
+ * `ws-fork` (src/fork.ts, `registerFork`): a `pi --fork <own session>`
+ * lateral peer sharing the caller's full context, plus the anti-bleed
+ * mechanical loop. `session_start` calls `registerFork` right after
+ * `registerExecuteGateway` (same shared `agentTools.rpcRegistry`), then,
+ * inside the same lead/fork-only `isLeadOrFork` block as
+ * `computeLeadActiveTools` above, applies `addForkToolIfLead` as a
+ * SEPARATE, role-differentiated `setActiveTools` step — `role === undefined`
+ * (the true top lead) only, never a fork — so a fork's own active-tools
+ * surface never regains `ws-fork` (no recursive forking; see fork.ts's own
+ * doc comment for the full risk-signal trace).
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -101,6 +113,7 @@ import { resolveSkillsDir } from "./skills-dir.ts";
 import { buildWsBlock, registerLeadBootstrap } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
 import { computeLeadActiveTools, createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
+import { addForkToolIfLead, registerFork } from "./fork.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -180,6 +193,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       executeWorkerPromptPath: executeWorkerGuidePath,
       onApprovalPending,
     });
+    // 260904 Phase 1 (side-thread fork): registered declaratively/globally,
+    // same pattern as registerExecuteGateway above — a fork child re-runs
+    // session_start too and needs ws-fork registered so computeForkToolSurface's
+    // own exclusion of it has something to exclude. Whether it is ever ACTIVE
+    // is addForkToolIfLead's job below, not this registration.
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath });
 
     // §1/§4: fill the ws system-prompt block only when startBridge actually
     // produced both snapshots (lead/fork role, non-degraded bootstrap — see
@@ -208,6 +227,15 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // this call would otherwise clobber it.
     if (isLeadOrFork(readSpawnRole(process.env))) {
       pi.setActiveTools(computeLeadActiveTools(pi.getActiveTools()));
+      // 260904 Phase 1 (side-thread fork): a SEPARATE, role-differentiated
+      // step from computeLeadActiveTools above — deliberately not folded
+      // into that function's shared LEAD_ADDED_TOOL_NAMES list, which is
+      // applied identically to lead and fork roles. addForkToolIfLead only
+      // adds ws-fork for the true top lead (role === undefined); a fork
+      // never regains it, keeping a fork's own surface excluding ws-fork
+      // (no recursive forking) even though isLeadOrFork treats lead/fork
+      // identically for the gates above.
+      pi.setActiveTools(addForkToolIfLead(pi.getActiveTools(), readSpawnRole(process.env)));
     }
   });
 

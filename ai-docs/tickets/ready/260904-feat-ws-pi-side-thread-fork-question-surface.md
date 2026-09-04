@@ -436,6 +436,59 @@ Verification (report which mode was achieved, as `260904` Phase 1 does):
    `capability: lead` + `parent_session_key` mint so `session.children` on
    the lead lists the fork.
 
+### Result (ecaa86c8) - 2026-09-05
+
+Landed the `ws-fork` task-thread mechanism and the anti-bleed completion loop
+(offline-implementable surface; the two live-only verification items are
+deferred, see the Blocked note below).
+
+- **Spawn seam** (`agents-plugin-pi/src/spawner.ts`): `RpcSpawnCtx`/
+  `RpcAgentRecord` gained `forkFrom`/`explicitTools`/`parentSessionKey`;
+  `buildRpcClientOptions` emits `--fork <leadSession>` (role marker `"fork"`,
+  `WS_PI_PARENT_SESSION_KEY` when both present) on the initial spawn vs
+  `--session` on resume; `spawnAgent` overwrites `record.sessionPath` from
+  `getState().sessionFile` post-`start()` and fails loud if absent. Dormant
+  resume never re-passes `--fork` (uses the discovered `--session` path,
+  tools rebuilt from cached `explicitTools`). `ws-report-to-lead` gained an
+  optional `kind: "question" | "final"`, changing `pendingReports`/
+  `WaitForAgentsResult.reports` to `Array<{message, kind?}>` (additive;
+  existing worker/execute-worker callers unaffected).
+- **New `agents-plugin-pi/src/fork.ts`**: `FORK_TOOL_NAME`,
+  `computeForkToolSurface` (lead surface − fork verbs + `ws-report-to-lead`;
+  Phase 1 excludes only `ws-fork`), the role-differentiated `addForkToolIfLead`
+  (adds `ws-fork` for `role === undefined` only — the fix that also blocks
+  fork recursion at the tool layer and keeps `ws-fork` off a fork's own
+  surface), the anti-bleed pure predicates (`shouldNudge`,
+  `classifyForkTurnOutcome`, `isIdleWithoutFinal`, `validateFinalReportShape`,
+  `checkExpectsCommitCompletion`), and `registerFork`'s IO glue wiring a second
+  `RpcClient.onEvent()` listener. `index.ts` wires `registerFork` after the
+  execute gateway and applies `addForkToolIfLead` as a separate
+  role-differentiated `setActiveTools` step. `pi-lead-guide.md` gained a
+  `ws-fork` verb row. Approval-routing-to-the-spawning-parent needed no new
+  code — it is emergent from the per-process session-start registration.
+- **Verification**: `cd agents-plugin-pi && npm test` → 340/340 pass. Offline
+  coverage: tool-surface arithmetic incl. the role-differentiation fix, all
+  anti-bleed predicates, report-shape + `expects_commit` checks, and the
+  `--fork`/`--session` arg branch. Golden rule held (no `agents-plugin-tool/`
+  or `agents-plugin/skills/` change).
+- **Review**: partitioned (correctness=large, test). Review #1 found 1 Critical
+  + 2 Important; all `[fixed]` in relay #1 (`ecaa86c8`) — Critical (nudge was
+  mis-targeted to the lead session; now delivered to the fork via
+  `record.client`) verified `[resolved]` by a Critical-scoped review #2
+  (clean). Importants: `isIdleWithoutFinal` now enforced (idle-without-final
+  surfaced to the lead as incomplete, never harvested); the spawn directive's
+  identity-framing opener removed and negative assertions added. 4 Minors
+  recorded, not fixed (substring-test discrimination; listener-attach ordering;
+  resumed-fork role marker on dormant resume — a Phase 2 concern; orphaned
+  registry entry on the `getState` fail-loud throw — consistent with
+  pre-existing non-fork behavior).
+- **Deviations**: none in scope. `isIdleWithoutFinal`'s `"acknowledge-and-return"`
+  case (a tool call was made but no `kind:"final"`) is not auto-nudged — a tool
+  call is treated as real progress — but is surfaced to the lead as an
+  incomplete-run advisory, so §4 is enforced directly with no silent residual.
+- **Spec**: `ai-docs/spec/pi-adapter-runtime.md`
+  `{#260905-pi-side-thread-fork-task-thread}` (commit `af4a8683`).
+
 ### Phase 2: Owner question surface (`ws.ask`, registry, overlay chat, lazy discussion fork, injection)
 
 Depends on Phase 1.
@@ -498,3 +551,23 @@ Verification:
   path; overlay auto-pop; using side threads for heavy reading with a clear
   question (that is `ws.execute(complex)` / fresh reviewers); any change to
   ws-mcp Go.
+
+## Blocked (2026-09-05)
+
+Phase 1 landed (see its `### Result`). Phase 2 is not autonomously advanceable
+in the current build environment:
+
+- The ticket makes the **bleed proof-of-concept** (Phase 1 verification item 2)
+  the explicit **go/no-go for Phase 2** — whether the structural anti-bleed
+  mitigation actually works must be measured on a real lead session before the
+  owner-question surface is built on top of forks. That measurement needs a live
+  `pi --mode rpc` run with provider credentials, absent from the sandbox.
+- Phase 2's surface (overlay chat `Component`, `/answer`/`/thread` shortcuts,
+  the `aboveEditor` widget, lazy discussion fork at the lead tip) and its
+  verification are TUI-and-live dependent: the two-tier agent-driven TUI loop
+  needs a tmux probe on an isolated socket plus a live `pi` process.
+
+Unblock when a live `pi` environment with provider credentials is available:
+run the Phase 1 live gate (`--fork` composition + bleed PoC), and if the PoC
+clears its go/no-go, proceed to Phase 2. Until then the selector should skip
+this ticket.

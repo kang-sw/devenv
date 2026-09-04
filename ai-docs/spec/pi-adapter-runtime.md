@@ -522,6 +522,70 @@ one registry that holds built-in and extension tools alike.
 > excludes `ws-worker-exec` after a reload before this is treated as fully
 > verified.
 
+## Side-thread task fork {#260905-pi-side-thread-fork-task-thread}
+
+The lead can spawn a **task-thread fork** — a peer session that inherits the
+lead's current context instead of starting cold like a delegation-spawner
+worker. The `ws-fork` tool takes `prompt`, an optional `model_name`, and an
+optional `expects_commit` flag, and spawns a spawn-family RPC child using Pi's
+`--fork <lead session file>` (a copy-on-fork of the lead's session), as opposed
+to the fresh-context `--session` spawns the delegation spawner uses. Pi names the
+forked session file itself; the adapter discovers the real path after the child
+starts and fails loud if it is absent. A fork is lateral, not a worker: it does
+not consume delegation depth.
+
+- **Own lead-scope key, never the lead's.** The fork spawns carrying the fork
+  role marker and the parent lead's session key as the parent-session-key
+  environment value; it mints its **own** lead-scope key rather than reusing the
+  lead's. The session-key normalization described under "Session key stays
+  optional and caller-controllable" rewrites an explicit key equal to that
+  parent value to the fork's own key, so the fork's todo/agenda/state are its
+  own and the lead's are left untouched.
+- **Tool surface = lead's, minus the fork verbs, plus the report channel.** A
+  fork's active tools are the lead's exact active surface at spawn time minus the
+  side-thread verbs (`ws-fork`, and — once they exist — `ws-ask`/`ws-resolve`)
+  plus `ws-report-to-lead`. In this phase only `ws-fork` is excluded, since
+  `ws-ask`/`ws-resolve` are not yet built. `ws-fork` is added to the **top lead
+  only** (a role-differentiated step, kept separate from the shared lead
+  tool-surface reshaping described under "Lead native tool-surface reshaping" so
+  it is never re-added to a fork), which is also what makes recursion fail at the
+  tool layer: a fork has no `ws-fork` in its allowlist, so it cannot fork again.
+  Because the fork loads the same extension as a lead-or-fork role, it inherits
+  the reshaped lead surface (no native `bash`/`read`; `ws-execute`/`ws-approve`
+  and the ugly-named direct read tool present).
+- **Approval routing follows the spawning parent.** A mutation-approval request
+  from a worker that a fork itself spawned through the lead-execute approval
+  gateway routes to that **fork**, not the top lead. This is emergent from the
+  per-process registration model: the fork re-runs the session-start handler and
+  gets its own approval gateway and its own approval relay, so the child's
+  request is injected into the fork's session.
+- **Anti-bleed completion loop (task threads).** A fork reports back only through
+  `ws-report-to-lead`, whose reports carry an optional `kind` of `"question"` or
+  `"final"` (see "Child→lead report channel"). A `kind:"final"` report must carry
+  the fields `Outcome`, `Files changed`, `Verification`, `Blockers`, `Commit`,
+  and `Decisions`; `Commit` is always present, with the literal `none` when
+  nothing was committed. When `expects_commit` is true and the final report's
+  `Commit` line is `none`, the run is flagged as non-completion. If a fork ends a
+  turn without making a tool call, the adapter auto-nudges the fork (delivered to
+  the fork's own session, at most twice) and then fails loud to the lead with a
+  transcript tail rather than looping forever. A fork that reaches idle without
+  having emitted a `kind:"final"` report is surfaced to the lead as an incomplete
+  run and is never harvested as a result. The spawn directive is short,
+  task-focused natural language: no identity or persona framing and no XML or
+  all-caps override language, which were found to backfire.
+
+> [!note] Implementation Gap · 2026-09-05
+> Missing behavior (Phase 1 verification outstanding): the exact `pi --fork`
+> command composition with `--mode rpc`/`--tools`/`--append-system-prompt` and
+> its at-leaf clone semantics, and the bleed proof-of-concept that gates the
+> side-thread surface's next phase (measuring the acknowledge-and-return rate
+> with the loop on versus off on a real lead session), both require a live
+> `pi --mode rpc` run with provider credentials, absent from the build sandbox.
+> The offline surface — tool-surface arithmetic, the anti-bleed predicates, the
+> report-shape and `expects_commit` checks, and the session-key rewrite — is
+> unit-covered; the live end-to-end confirmation of depth, completion
+> enforcement, and session-key isolation is deferred to that gate.
+
 ## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
 
 The adapter drives a **lead-session goal loop**: while a goal is active, each time
