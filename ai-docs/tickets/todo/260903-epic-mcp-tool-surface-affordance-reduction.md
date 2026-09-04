@@ -186,19 +186,19 @@ playbooks (`lead-proceed`/`lead-implement`) up to 3× — organize on
 
 ## Child tickets
 
-- **①** `260904-refactor-enter-affordance-rename-route-opaque` — at `todo/`
-  (design review passed). Implements the affordance rename (`route.resolve_*`) +
+- **①** `260904-refactor-enter-affordance-rename-route-opaque` — at `ready/`
+  (design + completeness passed). Implements the affordance rename (`route.resolve_*`) +
   full-opaque params; research
   `260901-research-enter-tool-direct-call-affordance-rename` is its
   settled-direction input (stays at `idea/` as reference).
-- **④** `260903-refactor-mcp-verb-vocabulary-unification` — at `todo/` (design
-  review passed). Scripted rename to canonical verbs; carries the name map.
-- **③** `260903-refactor-mcp-read-surface-collapse` — at `todo/` (design review
-  passed). `tickets`/`specs` list+status → query, plus `mental_models` and any
-  other corpus triple (audit-gated per the table note); depends on ④'s survivor
-  naming.
-- **②** `260903-refactor-mcp-todo-signature-merge` — at `todo/` (design review
-  passed). `todo` insert-trio → `add`; note candidate dropped; the judgment-heavy
+- **④** `260903-refactor-mcp-verb-vocabulary-unification` — at `ready/` (design +
+  completeness passed). Scripted rename to canonical verbs; carries the name map.
+- **③** `260903-refactor-mcp-read-surface-collapse` — at `ready/` (design +
+  completeness passed). `tickets`/`specs` list+status → query; `mental_models`
+  audited NOT a clean superset → verb-aligned only, full collapse deferred;
+  depends on ④'s survivor naming.
+- **②** `260903-refactor-mcp-todo-signature-merge` — at `ready/` (design +
+  completeness passed). `todo` insert-trio → `add`; note candidate dropped; the judgment-heavy
   one.
 
 ## Closure conditions

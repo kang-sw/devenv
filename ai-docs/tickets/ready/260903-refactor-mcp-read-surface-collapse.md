@@ -4,8 +4,9 @@ parent: 260903-epic-mcp-tool-surface-affordance-reduction
 related:
   260903-refactor-mcp-verb-vocabulary-unification: sibling layer ④ — this collapse targets the `query` survivor that layer names; for tickets/specs rename and collapse coincide
 sage-review-design: completed
-sage-review-design-reviewed: 1e4284ef082f493f
-sage-review-completeness: required
+sage-review-design-reviewed: e6c549134d110f98
+sage-review-completeness: completed
+sage-review-completeness-reviewed: e6c549134d110f98
 ---
 
 # MCP read-surface collapse — fold proven-redundant list/find/status triples into query
@@ -83,16 +84,20 @@ captured as a separate follow-up rather than forced here.
 Remove `tickets.list`, `tickets.status`, `specs.list`, `specs.status`; the
 ④-renamed `tickets.query`/`specs.query` survivor serves all three prior call
 shapes (enumerate / point-resolve by stem / search). Apply the fixed param remap
-for old `status` call sites (`status(X)` → `query(ticket_stem=X)`), and update Go
-registration + dispatch, `runtime.json`, the MCP/workflow specs, playbook token
-call sites (and the wsflow mirror via the mirror script), and tests. `mental_models`
-is **not** in this phase (audit: not a clean superset — verb-aligned by ④ only).
+for old `status` call sites (`tickets.status(X)` → `tickets.query(ticket_stem=X)`;
+`specs.status(X)` → `specs.query(spec_stem=X)`), and update Go registration +
+dispatch, `runtime.json`, the MCP/workflow specs, playbook token call sites (and
+the wsflow mirror — regenerated via the mirror generator in
+`agents-plugin-tool/internal/wsrsrc/`, not hand-edited), and tests. `mental_models`
+is **not** collapsed in this phase (audit: not a clean superset — verb-aligned by
+④ only); this phase's spec pass records that noted exception in the mental-model
+discovery anchor (below).
 
 Acceptance: the two survivor tools return byte-identical output to the removed
 tools for every prior call shape; the removed names are gone in-package (a
-`references.trace` / grep sweep is clean); the full test suite is green; and
-playbook paths that called `status` now call `query(ticket_stem)` with unchanged
-results.
+`references.trace` / grep sweep is clean); the full Go test suite is green
+(`go test ./...` in `agents-plugin-tool/`); and playbook paths that called
+`status` now call `query(ticket_stem)`/`query(spec_stem)` with unchanged results.
 
 ## Spec Impact
 

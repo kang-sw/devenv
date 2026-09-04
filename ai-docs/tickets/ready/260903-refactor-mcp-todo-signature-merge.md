@@ -2,8 +2,9 @@
 title: "MCP mechanical over-split → signature merge (todo insert-trio → add)"
 parent: 260903-epic-mcp-tool-surface-affordance-reduction
 sage-review-design: completed
-sage-review-design-reviewed: 9d10d44f552ffc22
-sage-review-completeness: required
+sage-review-design-reviewed: b20e3dad1923284f
+sage-review-completeness: completed
+sage-review-completeness-reviewed: b20e3dad1923284f
 ---
 
 # MCP mechanical over-split → signature merge (todo insert-trio → add)
@@ -90,14 +91,21 @@ list-manipulation logic). Remove `todo.append`, `todo.insert_before`,
 `todo.insert_after` from registration + dispatch. Update `runtime.json`,
 `mcp-tools.md`, the playbook token call sites that name the old tools
 (`agents-plugin/rsrc/lead-write-ticket/`, `lead-forge-spec/`,
-`lead-forge-mental-model/`, and the wsflow mirrors via the mirror script), the
+`lead-forge-mental-model/`, and the wsflow mirror — regenerated via the mirror
+generator in `agents-plugin-tool/internal/wsrsrc/`, not hand-edited), the
 `tickets.checklist` description that mentions "a single todo.append instruction",
-and tests.
+and tests. The grep sweep covers spec **prose** too, not just tool entries — the
+`{#260625-session-state-tools}` anchor also names the tool in a sentence ("no
+skill-side todo.append loop is needed…") that goes stale after the merge.
 
-Acceptance: the three old tools are gone in-package (a `references.trace` / grep
-sweep is clean); `todo.add` reproduces each old placement with byte-identical
-mutation + confirmation output; every error branch fails loud with the specified
-message; the full test suite is green.
+Acceptance: the three old tools are gone in-package (a `references.trace` /
+`grep -r "todo\.(append|insert_before|insert_after)"` sweep across code, specs,
+and playbooks is clean); `todo.add` reproduces each old placement with a
+byte-identical *mutation*, while the confirmation string is the new unified
+`todo added: <key>` (deliberately replacing the old per-position
+`todo appended:`/`todo inserted:` strings — tests assert the new string); every
+error branch fails loud with the specified message; the full Go test suite is
+green (`go test ./...` in `agents-plugin-tool/`).
 
 ## Spec Impact
 
