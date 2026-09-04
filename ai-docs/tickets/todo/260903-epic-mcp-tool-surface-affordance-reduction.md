@@ -2,7 +2,8 @@
 title: "Epic: MCP tool-surface affordance reduction & surface sanitize"
 sage-review-design: completed
 related:
-  260901-research-enter-tool-direct-call-affordance-rename: child ① — the settled affordance/rename work (enter.* → mechanical-op + opaque params); this epic owns its scheduling and the shared execution model
+  260904-refactor-enter-affordance-rename-route-opaque: child ① (implementation) — enter.* → route.resolve_* rename + full-opaque published params; the actionable layer-① ticket
+  260901-research-enter-tool-direct-call-affordance-rename: input to child ① — the settled affordance direction (route.* rename, full-opaque params, collapse rejected) and rationale the impl ticket implements
   260630-epic-skill-playbook-diet: coordinate, not owned here — that epic moves contracts INTO tools (Lever B MCP-ification) and can grow the very tools this epic reshapes; sequence so a tool is not expanded immediately before it is renamed/collapsed
   260901-bug-enter-proceed-misplaced-facts-silent-unknown-status: explicitly OUT of scope — diagnosability hardening, not surface reduction
   260901-bug-ticket-scanner-silently-skips-noncanonical-status-dir: explicitly OUT of scope — scanner robustness, not surface reduction
@@ -45,10 +46,12 @@ Numeric labels are identities, **not** the execution order (see the organizing
 model for the cost-ordered sequence ④ → ③ → ②).
 
 - **① Semantic / affordance (judgment: settled).** The workflow-entry-shaped
-  tools that read as user intent. Settled direction (L1 mechanical rename + L3
-  opaque published `params`, L2 collapse rejected) lives in child
-  `260901-research-enter-tool-direct-call-affordance-rename`. Highest value —
-  the only layer actively blocking downstream — and design already frozen.
+  tools that read as user intent. Direction settled (L1 rename to
+  `route.resolve_*` + L3 full-opaque published `params`, L2 collapse rejected):
+  the rationale lives in research
+  `260901-research-enter-tool-direct-call-affordance-rename`, and the actionable
+  work is child `260904-refactor-enter-affordance-rename-route-opaque`. Highest
+  value — the only layer actively blocking downstream — and design already frozen.
 - **② Mechanical over-split → signature merge (JUDGMENT-heavy).** Fold
   over-split families to the operation callers actually compose. Concrete win:
   `todo.append`/`insert_before`/`insert_after` differ only by position anchor →
@@ -138,7 +141,7 @@ playbooks (`lead-proceed`/`lead-implement`) up to 3× — organize on
   *prose/structure*. To avoid re-authoring those two skills twice, run ④'s script
   first (or last) as a mechanical sweep and let ① do its single authoring pass
   against canonical names — ① never re-runs ④'s rename by hand. Default: ④ script
-  → ① authoring. Confirm at child creation.
+  → ① authoring (stated in the ① impl child).
 
 ## Cross-child invariants
 
@@ -179,15 +182,20 @@ playbooks (`lead-proceed`/`lead-implement`) up to 3× — organize on
 
 ## Child tickets
 
-- **①** `260901-research-enter-tool-direct-call-affordance-rename` — exists at
-  `idea/`; promote under this epic. Owns the affordance rename + opaque-params.
-- **④** verb-vocabulary unification (scripted rename to canonical verbs) — to be
-  created; carries the frozen name map.
-- **③** read-surface collapse (`tickets`/`specs` list+status → query; plus
-  `mental_models` and any other corpus triple, audit-gated per the table note) —
-  to be created; depends on ④'s survivor naming.
-- **②** mechanical signature merge (`todo` insert-trio → `add`; candidate
-  `note.mute/unmute`) — to be created; the judgment-heavy one.
+- **①** `260904-refactor-enter-affordance-rename-route-opaque` — at `todo/`
+  (design review passed). Implements the affordance rename (`route.resolve_*`) +
+  full-opaque params; research
+  `260901-research-enter-tool-direct-call-affordance-rename` is its
+  settled-direction input (stays at `idea/` as reference).
+- **④** `260903-refactor-mcp-verb-vocabulary-unification` — at `todo/` (design
+  review passed). Scripted rename to canonical verbs; carries the name map.
+- **③** `260903-refactor-mcp-read-surface-collapse` — at `todo/` (design review
+  passed). `tickets`/`specs` list+status → query, plus `mental_models` and any
+  other corpus triple (audit-gated per the table note); depends on ④'s survivor
+  naming.
+- **②** `260903-refactor-mcp-todo-signature-merge` — at `todo/` (design review
+  passed). `todo` insert-trio → `add`; note candidate dropped; the judgment-heavy
+  one.
 
 ## Closure conditions
 
