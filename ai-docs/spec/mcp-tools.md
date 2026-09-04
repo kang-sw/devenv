@@ -276,10 +276,15 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
 `todo.add` loop is needed for a covered mode:
 
 - `implement`: `route.resolve_implement` is the public mode-switch call for the
-  implementation-facts-complete boundary. It accepts `session_key`, a required
-  `target` object, optional grouped `facts.scope` / `facts.complexity` /
-  `facts.risk` objects, a small `policy` object, and optional `format:
-  text|json`. MCP observes Git branch state from the session root, including the
+  implementation-facts-complete boundary. Its published `inputSchema` is
+  opaque (`session_key` plus a `params: object` and a pointer to
+  `ws:lead-implement`); the real field contract — a required `target` object,
+  optional grouped `facts.scope` / `facts.complexity` / `facts.risk` objects, a
+  small `policy` object, and optional `format: text|json` — is documented in
+  `ws:lead-implement`'s `Fact Contract` section, not in the published schema.
+  The Go decoder still internally parses and validates that same field set,
+  reading `target`/`facts`/`policy`/`format` as top-level call arguments;
+  routing behavior is unchanged. MCP observes Git branch state from the session root, including the
   current branch, HEAD/start commit, target branch existence, and
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
@@ -391,9 +396,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   retained branch and commit-range reporting, and no push; final-action and
   merge todos are absent only for this result.
 - `proceed`: `route.resolve_proceed` is the public mode-switch call for the
-  routing-facts-complete boundary. It accepts `session_key`, a required
-  `target` object, optional grouped `facts.ticket` / `facts.gates` /
-  `facts.work` objects, and optional `format: text|json`. It normalizes the
+  routing-facts-complete boundary. Its published `inputSchema` is opaque
+  (`session_key` plus a `params: object` and a pointer to `ws:lead-proceed`);
+  the real field contract — a required `target` object, optional grouped
+  `facts.ticket` / `facts.gates` / `facts.work` objects, and optional `format:
+  text|json` — is documented in `ws:lead-proceed`'s `Fact Contract` section,
+  not in the published schema. The Go decoder still internally parses and
+  validates that same field set, reading `target`/`facts`/`format` as
+  top-level call arguments; routing behavior is unchanged. It normalizes the
   current proceed route vocabulary (`target-kind`, `ticket-missing`,
   `has-ticket`, `status`, `migration-anchor`, `actionable`,
   `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
