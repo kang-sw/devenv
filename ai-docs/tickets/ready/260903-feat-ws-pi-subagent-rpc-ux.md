@@ -208,6 +208,54 @@ worker able to spawn an `explore` leaf but NOT another worker; children torn dow
 on shutdown. cliPath resolves via `process.argv[1]` (distribution gap #6).
 Registry/select logic unit-tested where seam-extractable.
 
+### Result (8abefa9b) - 2026-09-04
+
+Landed the one-shot `-p` → persistent `RpcClient` (`--mode rpc`) rewrite in
+`agents-plugin-pi/`. Shape-A thin-launcher tools `ws-agent-spawn({system_prompt_path,
+prompt, model_name?, model_effort?}) -> {agent_id}`, `ws-agent-send(agent_id,
+message, interrupt?)`, `ws-agent-wait(agent_ids[], timeout?)`, `ws-agent-list()`,
+`ws-agent-stop(agent_id)`; `ws-agent-continue` folded into `ws-agent-send`.
+`model-catalog.ts` reframed from a closed `tiers` map to a generic
+name→`provider/id` `aliases` table (D-A); `isModelCatalogUnset` re-keyed to the
+empty alias table (D-C session_key kept across auto-resume; D-D edge/consume wait).
+Depth ≤ 2 (D-B) wired: `full-worker` `--tools` now names the literal `explore`
+leaf and excludes every `ws-agent-*` driving tool.
+
+Design corrections applied during implementation (within settled intent):
+- `ws-agent-send` branches on tracked streaming state — `prompt()` for an
+  idle/just-resumed child, `steer()` for `interrupt` mid-stream, `followUp()` to
+  queue during an active run. Traced against installed `@earendil-works/pi-coding-agent@0.84.4`:
+  `followUp()`/`steer()` only drain inside an active run, so the ticket's literal
+  followUp-for-send mapping would silently never deliver to an idle child.
+- `model_effort` applied via post-launch `setThinkingLevel()` (no CLI flag);
+  `cliPath: process.argv[1]` on every `RpcClient` construction (distribution gap #6
+  confirmed).
+
+Verification: `agents-plugin-pi` `npm test` → 115/115 pass; `node --check` +
+dynamic `import()` smoke test confirm the new `RpcClient` runtime import resolves
+(dependency promoted from type-only to a real `dependencies` entry). The live
+`pi --mode rpc` gate (spawn+follow-up, dormant auto-resume on the same
+`session_key`, wait-over-two-children first-finisher, worker-can-spawn-explore-but-not-worker,
+`session_shutdown` teardown) was NOT run — no live provider credentials in this
+environment; it is a deferred manual live-gate pass before the phase is
+considered fully field-verified.
+
+Review: partitioned (correctness/fit/test). Review #1 → 2 Critical (`full-worker`
+omitted the literal `explore`; `sendToAgent` live-idle branch left a stale
+`idlePending` causing a busy-return in `ws-agent-wait`) + 2 Important (missing
+direct unit tests for `waitForAgents` and `sendToAgent`). All fixed in relay #1
+(fix commit `8abefa9b`, +14 tests); Critical-scoped review #2 → clean.
+
+Spec: `pi-adapter-runtime.md` delegation anchors revised in place + new
+`{#260904-pi-spawner-bounded-depth-explore-leaf}` (commit `f54c567d`).
+
+Deviations: the RPC registry and the one-shot `explore` registry are kept as
+separate `Map`s (different completion signals: `agent_settled` vs child-process
+close), so an `explore({async: true})` leaf is no longer harvestable via the new
+`ws-agent-wait` — a pre-existing doc-comment promise now stale; accepted as
+low-risk and documented in the explore spec anchor. Deferred (per Remaining open
+questions): in-process `AgentSession` variant, idle-timeout auto-reap (Phase 2+).
+
 ### Phase 2: child->lead report channel + path-only transcript
 
 Add the child-side `ws-report-to-lead(message)` tool relayed over the parent's
