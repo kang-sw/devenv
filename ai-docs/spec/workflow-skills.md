@@ -747,7 +747,10 @@ Implementation skills execute code changes and close the documentation loop.
 `lead-implement` is the implementation harness. It gathers normalized target,
 scope, complexity, risk, and policy facts, calls `ws.route.resolve_implement`, follows
 the MCP-authored Implementation Verdict, then runs the shared
-post-implementation documentation pipeline before reporting completion. The MCP
+post-implementation documentation pipeline before reporting completion.
+`route.resolve_implement`'s published schema is opaque (`session_key` plus
+`params: object`); `lead-implement`'s `Fact Contract` section is now the
+authoritative field list for `target`/`facts`/`policy`/`format`. The MCP
 verdict owns deterministic implementation labels and branch preflight: it chooses
 direct-edit or delegated mode, branch action, delegated survey planning,
 review allocation, review need, and documentation mode from facts, policy, and
@@ -1104,7 +1107,10 @@ authorizes ticket-file reading.
 
 For every normal route, `lead-proceed` calls `ws.route.resolve_proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one
-`NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
+`NEXT:` value plus a concrete `Next:` instruction.
+`route.resolve_proceed`'s published schema is opaque (`session_key` plus
+`params: object`); `lead-proceed`'s `Fact Contract` section is now the
+authoritative field list for `target`/`facts`/`format`. The MCP resolver owns
 deterministic route-row precedence, normalization warnings, raw verdict text,
 the JSON `next_instruction`, proceed agenda storage, and proceed todo
 replacement; the playbook owns artifact reads, uncertain judgments,
