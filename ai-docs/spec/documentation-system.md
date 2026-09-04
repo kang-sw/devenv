@@ -131,7 +131,7 @@ committing. Planned-but-unbuilt behavior stays in the owning ticket's
 
 `ws/spec_stem.generate` creates collision-free anchor stems. `ws/spec_index.verify`
 checks the spec corpus for duplicate anchors. `ws/specs.list`,
-`ws/specs.find`, and `ws/specs.status` provide read-only spec discovery by
+`ws/specs.query`, and `ws/specs.status` provide read-only spec discovery by
 metadata, anchors, ticket references, query matches, and exact
 stem.
 
@@ -181,7 +181,7 @@ coordination artifacts exempt from ready spec gating and normally stay in
 `idea/` or `todo/`, not `ready/`.
 {#260524-workset-ticket-conventions}
 
-`ws/tickets.list`, `ws/tickets.find`, and `ws/tickets.status` provide structured
+`ws/tickets.list`, `ws/tickets.query`, and `ws/tickets.status` provide structured
 ticket discovery across active and archived statuses, including phase/result
 state, snippets, relationships, spec links, plans, skeletons, and status
 metadata.
@@ -205,7 +205,7 @@ user-authored prescriptions scoped to that domain. When a sub-domain document is
 loaded, ancestor index documents are loaded first so inherited domain rules are
 visible before work begins.
 
-`ws/mental_models.list`, `ws/mental_models.find`, and
+`ws/mental_models.list`, `ws/mental_models.query`, and
 `ws/mental_models.status` expose domain, path, description, sources, spec
 references, snippets, and hierarchy hints without requiring callers to scan the
 tree manually.
