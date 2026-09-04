@@ -553,12 +553,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleEnterImplement(req.ID, params.Arguments)
 	case "enter.proceed":
 		return s.handleEnterProceed(req.ID, params.Arguments)
-	case "todo.append":
-		return s.handleTodoAppend(req.ID, params.Arguments)
-	case "todo.insert_before":
-		return s.handleTodoInsert(req.ID, params.Arguments, false)
-	case "todo.insert_after":
-		return s.handleTodoInsert(req.ID, params.Arguments, true)
+	case "todo.add":
+		return s.handleTodoAdd(req.ID, params.Arguments)
 	case "todo.check":
 		return s.handleTodoCheck(req.ID, params.Arguments)
 	case "todo.erase":
@@ -3618,8 +3614,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "todo.append",
-			"description": "Append a new pending todo item with a caller-provided key (unique within the active list) and title. Erased keys are reusable.",
+			"name":        "todo.add",
+			"description": "Add a new pending todo item with a caller-provided key (unique within the active list) and title. position defaults to \"end\" (append); \"before\"/\"after\" insert relative to ref_key, which is required for those positions and rejected for \"end\". Erased keys are reusable.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3627,38 +3623,10 @@ func tools() []map[string]any {
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
 					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
+					"position":    enumStringProperty(`Where to add the item. Defaults to "end" (append). "before"/"after" require ref_key; "end" must not carry one.`, []string{"end", "before", "after"}),
+					"ref_key":     stringProperty("Existing item key to insert before/after. Required when position is before or after; must be omitted when position is end."),
 				},
 				"required": []string{"session_key", "key", "title"},
-			},
-		},
-		{
-			"name":        "todo.insert_before",
-			"description": "Insert a new pending todo item immediately before ref_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"ref_key":     stringProperty("Existing item key to insert before."),
-					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
-					"title":       stringProperty("Human-facing item title."),
-					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
-				},
-				"required": []string{"session_key", "ref_key", "key", "title"},
-			},
-		},
-		{
-			"name":        "todo.insert_after",
-			"description": "Insert a new pending todo item immediately after ref_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"ref_key":     stringProperty("Existing item key to insert after."),
-					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
-					"title":       stringProperty("Human-facing item title."),
-					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
-				},
-				"required": []string{"session_key", "ref_key", "key", "title"},
 			},
 		},
 		{
@@ -4171,7 +4139,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.checklist",
-			"description": "Return a ticket-authoring phase's checklist item list as data, for installing into a single todo.append instruction. Use instead of following the phase's static prose section directly.",
+			"description": "Return a ticket-authoring phase's checklist item list as data, for installing into a single todo.add instruction. Use instead of following the phase's static prose section directly.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

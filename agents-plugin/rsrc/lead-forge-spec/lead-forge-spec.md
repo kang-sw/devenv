@@ -103,11 +103,11 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the todo list
 
-Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order.
+Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.add` per confirmed domain, in confirmed order.
 The title schema is resume state: `Source paths:` stores comma-separated module paths; `old spec files:` stores comma-separated archived spec paths or `none`.
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
+{{.McpNamespace}}/todo.add(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
@@ -295,7 +295,7 @@ No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once 
 ### Todo entry
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
+{{.McpNamespace}}/todo.add(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
 ```
 
 ## Doctrine

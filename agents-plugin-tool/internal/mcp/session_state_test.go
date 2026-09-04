@@ -1412,7 +1412,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903500, root, nil))
 
-	_ = callToolWithKey(t, server, 1, key, "todo.append", map[string]any{"key": "stale", "title": "stale"})
+	_ = callToolWithKey(t, server, 1, key, "todo.add", map[string]any{"key": "stale", "title": "stale"})
 	text := callToolWithKey(t, server, 2, key, "enter.proceed", proceedReadyArgs("text"))
 	nonEmpty := nonEmptyLines(text)
 	if len(nonEmpty) < 3 {
@@ -2924,12 +2924,12 @@ func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903000, root, nil))
 
-	if got := callToolWithKey(t, server, 1, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key": "Review.Step_1", "title": "Review",
-	}); !strings.Contains(got, "todo appended: review.step_1") {
+	}); !strings.Contains(got, "todo added: review.step_1") {
 		t.Fatalf("append did not report normalized key: %s", got)
 	}
-	if got := callToolWithKey(t, server, 2, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
 		"key": "review.step_1", "title": "dup",
 	}); !strings.Contains(got, "already exists") {
 		t.Fatalf("duplicate-after-normalization error expected, got: %s", got)
@@ -2942,15 +2942,164 @@ func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	if full := callToolWithKey(t, server, 4, key, "todo.list", map[string]any{"mode": "full"}); !strings.Contains(full, "- [x] {review.step_1} Review") {
 		t.Fatalf("full list missing normalized rendered key: %s", full)
 	}
-	if got := callToolWithKey(t, server, 5, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 5, key, "todo.add", map[string]any{
 		"key": "{bad}", "title": "bad",
 	}); !strings.Contains(got, "invalid character") {
 		t.Fatalf("invalid key error expected, got: %s", got)
 	}
-	if got := callToolWithKey(t, server, 6, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 6, key, "todo.add", map[string]any{
 		"key": " Review ", "title": "bad",
 	}); !strings.Contains(got, "leading or trailing whitespace") {
 		t.Fatalf("whitespace key error expected, got: %s", got)
+	}
+}
+
+func TestServeStdioTodoAddErrorBranches(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903200, root, nil))
+
+	// position not in the end|before|after enum.
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "middle",
+	}); !strings.Contains(got, "todo.add: position must be one of end, before, after") {
+		t.Fatalf("bad position error expected, got: %s", got)
+	}
+
+	// ref_key missing entirely for position before/after.
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "before",
+	}); !strings.Contains(got, "todo.add: ref_key is required when position is before") {
+		t.Fatalf("missing ref_key(before) error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 3, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "after",
+	}); !strings.Contains(got, "todo.add: ref_key is required when position is after") {
+		t.Fatalf("missing ref_key(after) error expected, got: %s", got)
+	}
+
+	// ref_key present but empty for before/after -> same "required" message
+	// (missing and empty are equivalent per the ticket's fail-loud wording).
+	if got := callToolWithKey(t, server, 4, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "before", "ref_key": "",
+	}); !strings.Contains(got, "todo.add: ref_key is required when position is before") {
+		t.Fatalf("empty ref_key(before) error expected, got: %s", got)
+	}
+
+	// ref_key supplied for position: end -> rejected, both with an explicit
+	// "end" and with position omitted entirely (implicit default).
+	if got := callToolWithKey(t, server, 5, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "position": "end", "ref_key": "whatever",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("ref_key-for-end(explicit) error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 6, key, "todo.add", map[string]any{
+		"key": "x", "title": "X", "ref_key": "whatever",
+	}); !strings.Contains(got, "todo.add: ref_key must be omitted when position is end") {
+		t.Fatalf("ref_key-for-end(implicit) error expected, got: %s", got)
+	}
+
+	// None of the error paths above should have mutated the list.
+	if rec, ok := server.sessions.readState(key); !ok || len(rec.Todos) != 0 {
+		t.Fatalf("error paths must not mutate the todo list: %v", keysOf(rec.Todos))
+	}
+
+	// Reused verbatim error messages (from todoAppend/todoInsert/normalizeTodoKey)
+	// still fire through the new todo.add dispatch, wrapped under the new tool name.
+	if got := callToolWithKey(t, server, 7, key, "todo.add", map[string]any{
+		"key": "seed", "title": "Seed",
+	}); !strings.Contains(got, "todo added: seed") {
+		t.Fatalf("seed add unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 8, key, "todo.add", map[string]any{
+		"key": "seed", "title": "dup",
+	}); !strings.Contains(got, `todo key "seed" already exists`) {
+		t.Fatalf("duplicate key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 9, key, "todo.add", map[string]any{
+		"key": "{bad}", "title": "bad",
+	}); !strings.Contains(got, "invalid character") {
+		t.Fatalf("invalid key format error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 10, key, "todo.add", map[string]any{
+		"key": " seed ", "title": "bad",
+	}); !strings.Contains(got, "leading or trailing whitespace") {
+		t.Fatalf("whitespace key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 11, key, "todo.add", map[string]any{
+		"key": "missing-ref", "title": "T", "position": "before", "ref_key": "does-not-exist",
+	}); !strings.Contains(got, `ref_key "does-not-exist" not found`) {
+		t.Fatalf("unknown ref_key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 12, key, "todo.add", map[string]any{
+		"key": "bad-instruction", "title": "T", "instruction": 42,
+	}); !strings.Contains(got, "instruction must be a string or null") {
+		t.Fatalf("bad instruction type error expected, got: %s", got)
+	}
+}
+
+// TestServeStdioTodoAddReproducesOldPlacements is the byte-identical mutation
+// backstop for the merge: todo.add(position: end) and the pre-merge append
+// tool must produce the same list state, and todo.add(position: before|after,
+// ref_key) must match the pre-merge insert-before/after core-function
+// behavior already proven by TestTodoInsertAndCheck. This verifies the
+// dispatch-level wiring reuses todoAppend/todoInsert unchanged.
+func TestServeStdioTodoAddReproducesOldPlacements(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903300, root, nil))
+
+	// end (equivalent to the old plain-append tool): a, then c.
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
+		"key": "a", "title": "A",
+	}); !strings.Contains(got, "todo added: a") {
+		t.Fatalf("add(end) a unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
+		"key": "c", "title": "C",
+	}); !strings.Contains(got, "todo added: c") {
+		t.Fatalf("add(end) c unexpected: %s", got)
+	}
+	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "c") {
+		t.Fatalf("post-append order wrong: %v", keysOf(rec.Todos))
+	}
+
+	// before (equivalent to the old insert-before tool): insert b before c -> a,b,c.
+	if got := callToolWithKey(t, server, 3, key, "todo.add", map[string]any{
+		"key": "b", "title": "B", "position": "before", "ref_key": "c",
+	}); !strings.Contains(got, "todo added: b") {
+		t.Fatalf("add(before) b unexpected: %s", got)
+	}
+	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c") {
+		t.Fatalf("post-insert_before order wrong: %v", keysOf(rec.Todos))
+	}
+
+	// after (equivalent to the old insert-after tool): insert a2 after a -> a,a2,b,c.
+	if got := callToolWithKey(t, server, 4, key, "todo.add", map[string]any{
+		"key": "a2", "title": "A2", "position": "after", "ref_key": "a",
+	}); !strings.Contains(got, "todo added: a2") {
+		t.Fatalf("add(after) a2 unexpected: %s", got)
+	}
+	rec, ok := server.sessions.readState(key)
+	if !ok || !eqKeys(keysOf(rec.Todos), "a", "a2", "b", "c") {
+		t.Fatalf("post-insert_after order wrong: %v", keysOf(rec.Todos))
+	}
+	// This is the exact list shape TestTodoInsertAndCheck proves for the
+	// unchanged todoAppend/todoInsert cores called directly — confirming the
+	// dispatch-level todo.add reproduces the pre-merge tools' mutations
+	// byte-for-byte, not just "no error".
+	for _, item := range rec.Todos {
+		if item.Status != todoPending {
+			t.Fatalf("newly added item %q must be pending, got %v", item.Key, item.Status)
+		}
 	}
 }
 
@@ -2963,27 +3112,29 @@ func TestServeStdioTodoInstructionReadSurface(t *testing.T) {
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 903100, root, nil))
 
-	if got := callToolWithKey(t, server, 1, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key":         "a",
 		"title":       "A",
 		"instruction": "Alpha full instruction",
-	}); !strings.Contains(got, "todo appended: a") {
+	}); !strings.Contains(got, "todo added: a") {
 		t.Fatalf("append with instruction unexpected: %s", got)
 	}
-	if got := callToolWithKey(t, server, 2, key, "todo.insert_before", map[string]any{
+	if got := callToolWithKey(t, server, 2, key, "todo.add", map[string]any{
+		"position":    "before",
 		"ref_key":     "a",
 		"key":         "b",
 		"title":       "B",
 		"instruction": nil,
-	}); !strings.Contains(got, "todo inserted: b") {
+	}); !strings.Contains(got, "todo added: b") {
 		t.Fatalf("insert_before null instruction unexpected: %s", got)
 	}
-	if got := callToolWithKey(t, server, 3, key, "todo.insert_after", map[string]any{
+	if got := callToolWithKey(t, server, 3, key, "todo.add", map[string]any{
+		"position":    "after",
 		"ref_key":     "a",
 		"key":         "c",
 		"title":       "C",
 		"instruction": "Charlie full instruction",
-	}); !strings.Contains(got, "todo inserted: c") {
+	}); !strings.Contains(got, "todo added: c") {
 		t.Fatalf("insert_after with instruction unexpected: %s", got)
 	}
 	if got := callToolWithKey(t, server, 4, key, "todo.check", map[string]any{
@@ -3019,7 +3170,7 @@ func TestServeStdioTodoInstructionReadSurface(t *testing.T) {
 		t.Fatalf("null instruction = %#v, want nil", nullPayload.Instruction)
 	}
 
-	if got := callToolWithKey(t, server, 8, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 8, key, "todo.add", map[string]any{
 		"key": "bad", "title": "Bad", "instruction": []any{"not", "string"},
 	}); !strings.Contains(got, "instruction must be a string or null") {
 		t.Fatalf("invalid instruction error expected, got: %s", got)
@@ -3041,11 +3192,11 @@ func TestServeStdioTodoListInstructionRendering(t *testing.T) {
 	wantPreview := "Render this instruction preview through summary mode while p"
 	wantTail := "reserving full mode details beyond sixty characters."
 
-	if got := callToolWithKey(t, server, 1, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 1, key, "todo.add", map[string]any{
 		"key":         "render",
 		"title":       "Render instruction",
 		"instruction": longInstruction,
-	}); !strings.Contains(got, "todo appended: render") {
+	}); !strings.Contains(got, "todo added: render") {
 		t.Fatalf("append unexpected: %s", got)
 	}
 
@@ -3080,9 +3231,9 @@ func TestServeStdioTodoCheckCheckpointRendering(t *testing.T) {
 		{"c", "C", "Charlie adjacent instruction"},
 		{"d", "D", "Delta non-adjacent instruction"},
 	} {
-		if got := callToolWithKey(t, server, i+1, key, "todo.append", map[string]any{
+		if got := callToolWithKey(t, server, i+1, key, "todo.add", map[string]any{
 			"key": item.key, "title": item.title, "instruction": item.instruction,
-		}); !strings.Contains(got, "todo appended: "+item.key) {
+		}); !strings.Contains(got, "todo added: "+item.key) {
 			t.Fatalf("append %s unexpected: %s", item.key, got)
 		}
 	}
@@ -3157,9 +3308,9 @@ func TestServeStdioTodoReorderHandler(t *testing.T) {
 	// Build a known list a,b,c,d via the append handler so the reorder handler
 	// operates on real on-disk state.
 	for i, k := range []string{"a", "b", "c", "d"} {
-		if got := callToolWithKey(t, server, 1000+i, key, "todo.append", map[string]any{
+		if got := callToolWithKey(t, server, 1000+i, key, "todo.add", map[string]any{
 			"key": k, "title": strings.ToUpper(k),
-		}); !strings.Contains(got, "todo appended: "+k) {
+		}); !strings.Contains(got, "todo added: "+k) {
 			t.Fatalf("append %s unexpected: %s", k, got)
 		}
 	}
@@ -3642,11 +3793,11 @@ func TestWorkflowManualTodoInstructionPreview(t *testing.T) {
 	wantPreview := "Restore this todo instruction through the workflow manual su"
 	wantTail := "mmary path without showing the extra full detail."
 
-	if got := callToolWithKey(t, server, 5111, key, "todo.append", map[string]any{
+	if got := callToolWithKey(t, server, 5111, key, "todo.add", map[string]any{
 		"key":         "restore",
 		"title":       "Restore instruction",
 		"instruction": longInstruction,
-	}); !strings.Contains(got, "todo appended: restore") {
+	}); !strings.Contains(got, "todo added: restore") {
 		t.Fatalf("append unexpected: %s", got)
 	}
 

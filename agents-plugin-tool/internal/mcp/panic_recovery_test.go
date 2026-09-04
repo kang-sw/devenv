@@ -12,7 +12,7 @@ import (
 
 // TestServeStdioRecoversPanicAndPersistsCrashTrace is the Phase 1 regression
 // test for 260724-bug-windows-mcp-mid-session-disconnect: a deliberately
-// panicking write handler (todo.append, forced via testPanicHook) must fail
+// panicking write handler (todo.add, forced via testPanicHook) must fail
 // only its own request with a visible JSON-RPC error, persist the panic value
 // and stack to the always-on crash file, and leave the process able to serve
 // a normal subsequent request. Silently swallowing the panic (no crash-file
@@ -22,9 +22,9 @@ func TestServeStdioRecoversPanicAndPersistsCrashTrace(t *testing.T) {
 	cacheHome := filepath.Join(t.TempDir(), "cache")
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 
-	const panicMessage = "deliberate test panic: todo.append"
+	const panicMessage = "deliberate test panic: todo.add"
 	testPanicHook = func(name string) {
-		if name == "todo.append" {
+		if name == "todo.add" {
 			panic(panicMessage)
 		}
 	}
@@ -32,7 +32,7 @@ func TestServeStdioRecoversPanicAndPersistsCrashTrace(t *testing.T) {
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{}}`,
-		`{"jsonrpc":"2.0","id":"panic-1","method":"tools/call","params":{"name":"todo.append","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":"panic-1","method":"tools/call","params":{"name":"todo.add","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":"after-1","method":"tools/call","params":{"name":"runtime.read","arguments":{}}}`,
 	}, "\n")
 
