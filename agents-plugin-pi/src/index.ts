@@ -55,6 +55,21 @@
  * once `session_start`'s `startBridge` call resolves — same seam
  * `registerAgentTools` already uses.
  *
+ * The 260904 "execute-approve-gateway" ticket's Phase 1 adds the end-to-end
+ * `ws-execute`/`ws-approve` approval gateway (src/execute-gateway.ts,
+ * `registerExecuteGateway`): a fixed-prompt `execute-worker` (spawner.ts's
+ * new `"execute-worker"` `toolGroup`) whose every shell command elevates
+ * through a lead-approval gate. `session_start` builds the approval-request
+ * injection callback (`createApprovalRelay`) BEFORE calling
+ * `registerAgentTools` (so it can be threaded into that call too — a
+ * dormant-resumed execute-worker keeps its relay wired even if later driven
+ * through the generic `ws-agent-*` tools), then calls
+ * `registerExecuteGateway`, then — lead/fork sessions only —
+ * `pi.setActiveTools(computeLeadActiveTools(...))` to remove native
+ * `bash`/`read` (and exclude the gated-exec tool itself, the auto-include
+ * footgun fix — see execute-gateway.ts's doc comment) while adding
+ * `ws-execute`/`ws-approve`/the ugly-named read tool.
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -85,6 +100,7 @@ import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
 import { buildWsBlock, registerLeadBootstrap } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
+import { computeLeadActiveTools, createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -95,6 +111,7 @@ const runtimeJsonPath = join(pluginDir, "runtime.json");
 const modelCatalogPath = join(pluginDir, "model-catalog.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
+const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
@@ -149,7 +166,20 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       cwd: ctx.cwd,
       ui: ctx.ui,
     });
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath });
+
+    // Built BEFORE registerAgentTools (not after, unlike registerExecuteGateway
+    // below) so it can be threaded into that call too — see
+    // spawner.ts's registerAgentTools doc comment for why a
+    // dormant-resumed execute-worker needs the SAME callback wired through
+    // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
+    const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd });
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath }, onApprovalPending);
+    registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
+      cwd: ctx.cwd,
+      modelCatalogPath,
+      executeWorkerPromptPath: executeWorkerGuidePath,
+      onApprovalPending,
+    });
 
     // §1/§4: fill the ws system-prompt block only when startBridge actually
     // produced both snapshots (lead/fork role, non-degraded bootstrap — see
@@ -167,6 +197,17 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
         // still a strict improvement over no ws block at all.
       }
       wsBlockRef.current = buildWsBlock(handle.manualSnapshotRef.current, guideText);
+    }
+
+    // §8: reshape the LEAD's (or a fork's) own tool surface — bash/read
+    // removed, ws-execute/ws-approve/the ugly-read tool added, and the
+    // gated-exec tool itself excluded even though it was just registered
+    // globally (the auto-include footgun fix — see execute-gateway.ts's
+    // computeLeadActiveTools doc comment). Never applied to a worker/explore
+    // child: those spawn with an explicit `--tools` allowlist already, and
+    // this call would otherwise clobber it.
+    if (isLeadOrFork(readSpawnRole(process.env))) {
+      pi.setActiveTools(computeLeadActiveTools(pi.getActiveTools()));
     }
   });
 
