@@ -101,7 +101,7 @@ func TestTicketsListScopeAnnotationTextOnly(t *testing.T) {
 	mustWrite(t, control, "ai-docs/tickets/todo/260101-feat-visible.md", "---\ntitle: Visible\n---\n# Visible\n")
 	initGit(t, control)
 
-	text := callScopedTool(t, scoped, 1, "tickets.list", nil)
+	text := callScopedTool(t, scoped, 1, "tickets.query", nil)
 	if !strings.Contains(text, "260101-feat-visible") {
 		t.Fatalf("tickets.list text lost the visible ticket:\n%s", text)
 	}
@@ -112,8 +112,8 @@ func TestTicketsListScopeAnnotationTextOnly(t *testing.T) {
 		t.Fatalf("tickets.list text missing the hidden-count annotation:\n%s", text)
 	}
 
-	scopedJSON := callScopedTool(t, scoped, 2, "tickets.list", map[string]any{"format": "json"})
-	controlJSON := callScopedTool(t, control, 3, "tickets.list", map[string]any{"format": "json"})
+	scopedJSON := callScopedTool(t, scoped, 2, "tickets.query", map[string]any{"format": "json"})
+	controlJSON := callScopedTool(t, control, 3, "tickets.query", map[string]any{"format": "json"})
 	var parsed []map[string]any
 	if err := json.Unmarshal([]byte(scopedJSON), &parsed); err != nil {
 		t.Fatalf("tickets.list json mode is not a bare array: %v\n%s", err, scopedJSON)
@@ -138,7 +138,7 @@ func TestTicketsStatusResolvesHiddenStemOverMCP(t *testing.T) {
 		"ai-docs/tickets/todo/260102-feat-shadow.md":  "---\ntitle: Shadow\n---\n# Shadow\n",
 	}, "ai-docs/tickets/todo/260101-feat-visible.md")
 
-	status := callScopedTool(t, root, 1, "tickets.status", map[string]any{"ticket_stem": "260102-feat-shadow"})
+	status := callScopedTool(t, root, 1, "tickets.query", map[string]any{"ticket_stem": "260102-feat-shadow"})
 	if !strings.Contains(status, "260102-feat-shadow") {
 		t.Fatalf("tickets.status did not resolve the out-of-scope ticket:\n%s", status)
 	}
@@ -156,7 +156,7 @@ func TestTicketsStatusResolvesHiddenStemOverMCP(t *testing.T) {
 
 	// A visible ticket must not carry the flag, so "[hidden]" is proven to
 	// track TicketInfo.Hidden rather than being present unconditionally.
-	visible := callScopedTool(t, root, 3, "tickets.status", map[string]any{"ticket_stem": "260101-feat-visible"})
+	visible := callScopedTool(t, root, 3, "tickets.query", map[string]any{"ticket_stem": "260101-feat-visible"})
 	if strings.Contains(visible, "[hidden]") {
 		t.Fatalf("a checked-out ticket was marked hidden:\n%s", visible)
 	}
@@ -189,7 +189,7 @@ func TestTicketsListScopeAnnotationSuppressedWhenFilterSelectsNothing(t *testing
 	// wsdoc.ticketStatuses drops an explicit "done" unless include_done is set,
 	// so this listing is empty because of the caller's own arguments. Blaming
 	// the scope would invert the annotation's purpose.
-	text := callScopedTool(t, root, 1, "tickets.list", map[string]any{"statuses": []any{"done"}})
+	text := callScopedTool(t, root, 1, "tickets.query", map[string]any{"statuses": []any{"done"}})
 	if strings.Contains(text, "scope:") {
 		t.Fatalf("an archive listing gated off by include_done was blamed on the scope:\n%s", text)
 	}
@@ -197,7 +197,7 @@ func TestTicketsListScopeAnnotationSuppressedWhenFilterSelectsNothing(t *testing
 	// Positive control: with the gate opened, the same request must report the
 	// hidden archive ticket - so the suppression above is the gating, not a
 	// blanket silence.
-	opened := callScopedTool(t, root, 2, "tickets.list", map[string]any{"statuses": []any{"done"}, "include_done": true})
+	opened := callScopedTool(t, root, 2, "tickets.query", map[string]any{"statuses": []any{"done"}, "include_done": true})
 	if !strings.Contains(opened, "scope: 1 ticket(s) hidden") {
 		t.Fatalf("include_done listing lost the hidden-count annotation:\n%s", opened)
 	}

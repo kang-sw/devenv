@@ -20,7 +20,7 @@ correction list. You never edit the ticket; the caller applies what you return.
 - Give every correction an evidence line naming what you actually read: one or more `path#Lstart-Lend` when the correction points at text that exists, the full path when a whole file is the evidence, or the exact search you ran and its empty result when the correction is that something is absent. A correction with no evidence line is not reportable.
 - Read the ticket, the files it names, and whatever search is needed to confirm or refute a specific claim.
 - A claim about state that a named unlanded ticket or an unfinished earlier phase will create is not a correction, however clearly the tree contradicts it: report it as unverified and name the dependency it waits on.
-- Sweep the ticket corpus with one `{{.McpNamespace}}/tickets.list` call and read in full only the tickets it shortlists; corpus reading beyond that one pass is out of scope.
+- Sweep the ticket corpus with one `{{.McpNamespace}}/tickets.query` call and read in full only the tickets it shortlists; corpus reading beyond that one pass is out of scope.
 - Do not survey for implementation strategy, reusable components, or a plan; a claim the ticket does not make is out of scope, except for the corpus checks named in Process.
 - Report a claim you could not settle as unverified rather than guessing either way.
 - All output in English regardless of input language.
@@ -28,7 +28,7 @@ correction list. You never edit the ticket; the caller applies what you return.
 ## Process
 
 1. Read the ticket file at the provided path.
-2. Call `{{.McpNamespace}}/tickets.list` once. Shortlist tickets whose title or unresolved phase titles cover work this ticket also claims, read those in full, and report a real overlap as a decision gap naming both stems.
+2. Call `{{.McpNamespace}}/tickets.query` once. Shortlist tickets whose title or unresolved phase titles cover work this ticket also claims, read those in full, and report a real overlap as a decision gap naming both stems.
 3. From that same listing, record the current status of every ticket this one names as a blocker, predecessor, or landing-order constraint; report as a decision gap any such ticket sitting behind this ticket's landing status.
 4. List every checkable claim the ticket makes about the tree. A claim is checkable when reading the tree can show it true or false.
 5. Verify each claim against the tree. Prefer reading the named file over searching for its name.

@@ -1029,19 +1029,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.VerifySpecIndex(root)
 		return toolTextResponse(req.ID, text, err)
-	case "specs.list":
-		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.list does not accept ticket_stem parameters"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		result, err := wsdoc.SpecsList(root)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatSpecs(result), err)
 	case "specs.query":
 		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
 			return toolTextResponse(req.ID, "", fmt.Errorf("specs.query uses ticket_stem, not mentions_ticket_stem"))
@@ -1053,6 +1040,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		query, _ := params.Arguments["query"].(string)
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
+		// A pure point-resolve call - spec_stem set, no query text and no
+		// ticket_stem filter - is exactly the old specs.status shape: reuse its
+		// logic (SpecsStatus + formatSpecStatus) so the object-shaped JSON and
+		// not-found error survive the collapse byte-identically instead of
+		// falling through to SpecsFind's array/empty-on-miss discovery shape.
+		if strings.TrimSpace(specStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(ticketStem) == "" {
+			result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, result, err)
+			}
+			return toolTextResponse(req.ID, formatSpecStatus(result), err)
+		}
 		result, err := wsdoc.SpecsFind(root, wsdoc.SpecFindOptions{Query: query, SpecStem: specStem, TicketStem: ticketStem})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
@@ -1061,20 +1060,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, formatSpecFind(query, result), err)
 		}
 		return toolTextResponse(req.ID, formatSpecs(result), err)
-	case "specs.status":
-		if hasTicketStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("specs.status uses spec_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		specStem, _ := params.Arguments["spec_stem"].(string)
-		result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatSpecStatus(result), err)
 	case "mental_models.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1138,23 +1123,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, err)
 		}
 		return toolTextResponse(req.ID, formatReferenceTrace(result), err)
-	case "tickets.list":
-		if hasSpecStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		result, err := wsdoc.TicketsList(root, wsdoc.TicketListOptions{
-			Statuses:       stringList(params.Arguments["statuses"]),
-			IncludeDone:    boolArgument(params.Arguments["include_done"]),
-			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
-		})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		return toolTextResponse(req.ID, formatTickets(result)+ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments)), err)
 	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1166,12 +1134,39 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		query, _ := params.Arguments["query"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		mentionsTicketStem, _ := params.Arguments["mentions_ticket_stem"].(string)
+		statuses := stringList(params.Arguments["statuses"])
+		// A pure point-resolve call - ticket_stem set, no query text, no
+		// mentions_ticket_stem filter, and no statuses override - is exactly
+		// the old tickets.status shape: reuse its logic (TicketsStatus +
+		// formatTickets over a single-element slice) so the object-shaped
+		// JSON and not-found error survive the collapse byte-identically
+		// instead of falling through to TicketsFind's array/empty-on-miss
+		// discovery shape.
+		if strings.TrimSpace(ticketStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(mentionsTicketStem) == "" && len(statuses) == 0 {
+			result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
+				TicketStem:     ticketStem,
+				IncludeDone:    boolArgument(params.Arguments["include_done"]),
+				IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
+				// This point-resolve branch is a resolution surface by
+				// definition: it answers "where is this stem", so a hidden
+				// ticket must be reported as hidden-but-found rather than
+				// absent.
+				Resolve: true,
+			})
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, result, err)
+			}
+			if result == nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
+		}
 		// The explicit-stem form is a resolution query and must report a
 		// hidden-but-found ticket; the free-text query form stays a discovery
 		// surface, filesystem-only plus the aggregate hidden count below.
 		resolve := strings.TrimSpace(ticketStem) != ""
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
-			Statuses:           stringList(params.Arguments["statuses"]),
+			Statuses:           statuses,
 			IncludeDone:        boolArgument(params.Arguments["include_done"]),
 			IncludeDropped:     boolArgument(params.Arguments["include_dropped"]),
 			Query:              query,
@@ -1187,31 +1182,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += ticketScopeAnnotation(root, effectiveTicketStatuses(params.Arguments))
 		}
 		return toolTextResponse(req.ID, text, err)
-	case "tickets.status":
-		if hasSpecStemArgument(params.Arguments) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
-		}
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		ticketStem, _ := params.Arguments["ticket_stem"].(string)
-		result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
-			TicketStem:     ticketStem,
-			IncludeDone:    boolArgument(params.Arguments["include_done"]),
-			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
-			// tickets.status is a resolution surface by definition: it answers
-			// "where is this stem", so a hidden ticket must be reported as
-			// hidden-but-found rather than absent.
-			Resolve: true,
-		})
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, err)
-		}
-		if result == nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
 	case "tickets.close":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2976,7 +2946,7 @@ func ticketScopeAnnotation(root string, statuses []string) string {
 // wsdoc.EffectiveTicketStatuses so the hidden count covers exactly the statuses
 // the accompanying listing covered — including its archive gating, which drops
 // an explicitly requested .done/.dropped unless the matching include flag is
-// set. Without that half, tickets.list(statuses: ["done"]) with include_done
+// set. Without that half, tickets.query(statuses: ["done"]) with include_done
 // unset would render an empty listing and then blame the scope for it. The rule
 // itself lives in wsdoc rather than being mirrored here: mcp already imports
 // wsdoc freely, so there is no import-boundary reason to keep a second copy that
@@ -3985,38 +3955,16 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "specs.list",
-			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, and ticket refs.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-			},
-		},
-		{
 			"name":        "specs.query",
-			"description": "Query spec files by text query, spec anchor stem, or ticket stem reference. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query spec files by text query, spec anchor stem, or ticket stem reference. A spec_stem given alone (no query, no ticket_stem) point-resolves that anchor and returns its locations and file metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query":       stringProperty("Optional case-insensitive text query."),
-					"spec_stem":   stringProperty("Optional exact spec anchor stem."),
+					"spec_stem":   stringProperty("Optional exact spec anchor stem. Given alone, point-resolves that anchor."),
 					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-			},
-		},
-		{
-			"name":        "specs.status",
-			"description": "Return locations and file metadata for one spec anchor stem. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"spec_stem": stringProperty("Spec anchor stem to inspect."),
-					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-				"required": []string{"spec_stem"},
 			},
 		},
 		{
@@ -4133,13 +4081,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "tickets.list",
-			"description": "List ticket paths and status metadata without reading full document bodies. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": ticketDiscoverySchema(false),
-		},
-		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; otherwise this is a discovery search. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4147,24 +4090,10 @@ func tools() []map[string]any {
 					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
 					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
 					"query":                stringProperty("Optional case-insensitive text query."),
-					"ticket_stem":          stringProperty("Optional exact ticket stem."),
+					"ticket_stem":          stringProperty("Optional exact ticket stem. Given alone, point-resolves that ticket."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
 					"format":               stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-			},
-		},
-		{
-			"name":        "tickets.status",
-			"description": "Return status metadata for a single ticket stem. Defaults to compact text; use format=json for structured metadata.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"ticket_stem":     stringProperty("Ticket stem to inspect."),
-					"include_done":    boolProperty("Allow lookup under ai-docs/tickets/.done when true."),
-					"include_dropped": boolProperty("Allow lookup under ai-docs/tickets/.dropped when true."),
-					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-				},
-				"required": []string{"ticket_stem"},
 			},
 		},
 		{
@@ -4528,9 +4457,9 @@ func toolSchemaRequiresSessionKey(name string) bool {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
-		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.query", "specs.status",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.query",
 		"mental_models.list", "mental_models.query", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.query", "tickets.status", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
+		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify", "path.generate", "playbook.render",
 		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
@@ -4901,22 +4830,6 @@ func execRawGrepSchema() map[string]any {
 	props["regex"] = boolProperty("Treat pattern as a regular expression when true.")
 	s["required"] = []string{"exec_key", "pattern"}
 	return s
-}
-
-func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"statuses":        stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
-			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
-			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
-			"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
-		},
-	}
-	if requireTicketStem {
-		schema["required"] = []string{"ticket_stem"}
-	}
-	return schema
 }
 
 func stringMapArgument(value any) map[string]string {

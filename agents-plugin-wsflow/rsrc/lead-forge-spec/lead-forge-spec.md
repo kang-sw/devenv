@@ -59,7 +59,7 @@ Format: markdown bullets grouped by module/area.
 Query 2 — ticket domain survey:
 
 ```text
-Survey all tickets through `{{.McpNamespace}}/tickets.list(include_done: true, include_dropped: true)`.
+Survey all tickets through `{{.McpNamespace}}/tickets.query(include_done: true, include_dropped: true)`.
 
 Extract title, status directory, and public-facing or user-visible behavior.
 Group by inferred behavioral domain.

@@ -42,7 +42,7 @@ verdict text only.
 3. If `related-mental-model:` entries present: read referenced mental-model docs via
    `{{.McpNamespace}}/mental_models.query`. If `parent:` is present: read that epic body
    for cross-child invariants, which epics own and child tickets do not restate.
-4. List `ready/` tickets via `{{.McpNamespace}}/tickets.list` and read their
+4. List `ready/` tickets via `{{.McpNamespace}}/tickets.query` and read their
    `## Spec Impact` sections, to see what other landing-committed work claims the same
    spec territory.
 5. Attempt to produce a coherent high-level implementation plan sketch for the ticket's

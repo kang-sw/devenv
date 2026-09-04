@@ -143,7 +143,7 @@ captures rough ideas before triage, `todo/` holds accepted backlog with
 recoverable ticket intent, and `ready/` holds spec-addressed implementation
 work.
 Completed or dropped work moves to `.done/` or `.dropped/`. Active attention is
-discovered from the status directories via `tickets.list`/`project_tree`, not a
+discovered from the status directories via `tickets.query`/`project_tree`, not a
 cached index section; only `ready/` entries are direct implementation targets.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable

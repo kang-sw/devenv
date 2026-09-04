@@ -24,12 +24,12 @@ Source-level reference mapping is a different role (`plan-populator-survey`).
 
 0. Read project context: `AGENTS.md`'s `## Project Orientation` section (or `ai-docs/_index.md` if the project has not migrated off it), and `ai-docs/mental-model.md` if present. Do not rank these; use them for relevance judgments.
 1. Discover candidates through:
-   - `{{.McpNamespace}}/specs.list()`
+   - `{{.McpNamespace}}/specs.query()`
    - `{{.McpNamespace}}/mental_models.list()`
    - `{{.McpNamespace}}/mental_models.query(query: "<brief topic>")`
-   - `{{.McpNamespace}}/tickets.list(status: "ready")`
-   - `{{.McpNamespace}}/tickets.list(status: "todo")`
-   - `{{.McpNamespace}}/tickets.list(status: "idea")`
+   - `{{.McpNamespace}}/tickets.query(status: "ready")`
+   - `{{.McpNamespace}}/tickets.query(status: "todo")`
+   - `{{.McpNamespace}}/tickets.query(status: "idea")`
 2. Read returned paths.
 3. Judge each file's relevance:
    - **`[Must]`** — directly covers behavior, patterns, or constraints the implementer needs before starting.

@@ -1164,7 +1164,7 @@ full, plus any `idea/` ticket carrying a `parent:` key (epic children); it
 folds remaining orphan `idea/` tickets — those without `parent:`, regardless
 of `related:` — into a single hidden-count line so the raw idea backlog does
 not dominate the tree, and their full bodies remain reachable via
-`tickets.list(status: "idea")` or `tickets.query`.
+`tickets.query(status: "idea")`.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
@@ -1182,12 +1182,19 @@ slug.
 `spec_index.verify` checks the spec corpus for anchor-index health problems such
 as duplicate stems.
 
-`specs.list`, `specs.query`, and `specs.status` provide read-only spec discovery.
-They expose spec file metadata, anchors, ticket references, query
-matches, and exact-stem status without requiring callers to scan the spec tree
-manually.
+`specs.query` is the single read-only spec discovery tool, serving three call
+shapes. Called with no arguments (no `query`, `spec_stem`, or `ticket_stem`) it
+enumerates the spec tree — the former `specs.list` shape. Called with
+`spec_stem` alone (no `query`, no `ticket_stem`) it point-resolves that one
+anchor stem and returns its locations and file metadata as a single JSON
+object — the former `specs.status` shape — erroring when the stem is not found
+rather than returning an empty result. Any other combination — a `query` text
+search, or a `ticket_stem` filter alongside or instead of `spec_stem` — is a
+discovery search returning a JSON array of matching files. All three shapes
+expose spec file metadata, anchors, ticket references, query matches, and
+exact-stem status without requiring callers to scan the spec tree manually.
 
-All three tools, including `specs.query`'s query path, additionally emit a
+Every shape, including the point-resolve and query-text paths, additionally emits a
 compatibility advisory for each spec file that still carries a legacy planned
 marker — the contract-first planned-entry mechanism being retired by
 `260726-refactor-retire-spec-planned-marker-mechanism`. Detection keys on the
@@ -1226,18 +1233,27 @@ line-level match evidence. Convention lookup accepts common aliases such as
 
 ## Ticket Discovery Tools {#260505-ticket-discovery-tools}
 
-`tickets.list` returns ticket paths and structured status metadata across ticket
-status directories. Active discovery includes `ready/`, `todo/`, and `idea/` by
-default; archived `.done/` and `.dropped/` tickets are omitted unless explicitly
+`tickets.query` is the single read-only ticket discovery tool, serving three
+call shapes. Called with no `ticket_stem` (optionally with `statuses` and the
+`include_done`/`include_dropped` flags) it returns ticket paths and structured
+status metadata across ticket status directories — the former `tickets.list`
+shape. Active discovery includes `ready/`, `todo/`, and `idea/` by default;
+archived `.done/` and `.dropped/` tickets are omitted unless explicitly
 requested. `ready/` identifies spec-addressed implementation work, while
 `todo/` remains accepted backlog.
 
-`tickets.query` locates tickets by text query, exact ticket stem, mentioned
-ticket stem, and optional status filters. `tickets.status` returns structured
-metadata for a single ticket stem and can optionally include archived done or
-dropped tickets. All three enumerate from the git index as well as the working
-tree, so a worktree-local sparse-checkout narrows what is *marked*, never what is
-found (`#260806-worktree-sparse-checkout-ticket-scope`).
+Called with `ticket_stem` alone (no `query`, no `mentions_ticket_stem`, no
+`statuses`) it point-resolves that one stem and returns its structured status
+metadata as a single JSON object — the former `tickets.status` shape —
+erroring when the stem is not found rather than returning an empty result; it
+can optionally include archived done or dropped tickets via the same
+`include_done`/`include_dropped` flags. Any other combination — a `query` text
+search, a `mentions_ticket_stem` filter, or `statuses` given alongside
+`ticket_stem` — locates tickets by text query, exact ticket stem, mentioned
+ticket stem, and optional status filters, returning a JSON array of matches.
+All three shapes enumerate from the git index as well as the working tree, so
+a worktree-local sparse-checkout narrows what is *marked*, never what is found
+(`#260806-worktree-sparse-checkout-ticket-scope`).
 
 `tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
 (status=dropped), writing the appropriate `completed:` or `dropped:` date into
@@ -1694,17 +1710,20 @@ subprocesses. The scope path is additive, never a new cost on the ordinary path.
 
 Under an active scope:
 
-- `tickets.list`, `tickets.query`, and `tickets.status` enumerate hidden tickets
-  alongside checked-out ones. Each hidden entry carries `hidden` in its bracketed
-  flag list in text mode and `hidden: true` in JSON, so the caller reports
-  "filtered", not "absent".
-- `tickets.list` appends one trailing `scope:` line naming how many tickets this
-  worktree's scope hides and stating that they remain in the index and resolvable
-  by stem. It is text-mode only; a JSON listing gets the per-ticket `hidden` mark
-  but no aggregate count, because adding one would turn the response from an
-  array into an object. The line is suppressed when the caller's status filters
-  select nothing at all — an empty listing then has a cause unrelated to the
-  scope — and when the hidden count is zero.
+- `tickets.query` enumerates hidden tickets alongside checked-out ones, in every
+  call shape (enumerate, point-resolve by `ticket_stem`, and text/mentions
+  search). Each hidden entry carries `hidden` in its bracketed flag list in text
+  mode and `hidden: true` in JSON, so the caller reports "filtered", not
+  "absent".
+- The enumerate and search shapes (no `ticket_stem` given) append one trailing
+  `scope:` line naming how many tickets this worktree's scope hides and stating
+  that they remain in the index and resolvable by stem. It is text-mode only; a
+  JSON listing gets the per-ticket `hidden` mark but no aggregate count, because
+  adding one would turn the response from an array into an object. The line is
+  suppressed when the caller's status filters select nothing at all — an empty
+  listing then has a cause unrelated to the scope — and when the hidden count is
+  zero. The point-resolve shape (`ticket_stem` given) never appends this line:
+  a single resolved ticket already carries its own `hidden` flag instead.
 - `tickets.move` and `tickets.close` pre-flight both the resolved source and the
   destination against the scope **before the first write to the source file**,
   and refuse with a message naming the path, the governing config
@@ -1743,6 +1762,18 @@ description, and source metadata.
 `mental_models.query` locates mental-model paths by text query, domain, or spec
 stem reference. `mental_models.status` returns path-first metadata for documents
 selected by domain or path.
+
+**Noted exception.** The `260903-refactor-mcp-read-surface-collapse` list/query/
+status collapse deliberately does not touch `mental_models`: its audit found
+the triple is not a clean superset the way `tickets`/`specs` were —
+`mental_models.list` is a divergent legacy implementation with its own struct
+and formatter (no JSON path through `MentalModelsList`), and `mental_models.query`
+lacks the `path` argument that `mental_models.status` carries, so `query`
+cannot absorb `status` without behavior loss. `mental_models.list`,
+`mental_models.query` (verb-aligned by the earlier find-to-query rename), and
+`mental_models.status` therefore remain three separate tools here. Whether and
+how to reconcile this surface is tracked separately at
+`260904-research-mental-models-query-reconciliation`.
 
 ## Reference Trace Tool {#260505-reference-trace-tool}
 
@@ -1937,7 +1968,7 @@ error.
 
 An optional `format: "json"` argument switches the response to a structured
 `{base, head, verdict, ref, found}` object built from the same frontier
-entry, mirroring `tickets.status`'s `format=json` convention
+entry, mirroring `tickets.query`'s point-resolve `format=json` convention
 (`wantsJSON`/`toolJSONResponse`). This is the bare-SHA, no-string-scraping
 output a caller like the `lead-ship` release gate consumes to resolve
 `<frontier-head>..HEAD` without parsing the text-mode sentence.
