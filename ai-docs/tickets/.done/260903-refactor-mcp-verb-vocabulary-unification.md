@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 842fd35951b43002
 sage-review-completeness-reviewed: 842fd35951b43002
+completed: 2026-09-04
 ---
 
 # MCP read-surface verb-vocabulary unification (deterministic scripted rename)
@@ -146,3 +147,8 @@ Tool-name renames within existing anchors only — no new spec stem, and no head
   `{#260505-runtime-debug-metadata-tools}` (`runtime.info→read`).
 - `workflow-skills.md`: wherever the renamed tools are named in skill procedure
   text (the `references.trace` sweep at implementation enumerates the sites).
+
+
+## Resolution (2026-09-04)
+
+Phase 1 landed: scripted six-verb rename (f8101dc6) with byte-unchanged behavior, spec + descriptive-doc drift cleaned (7e669fc8, 6f9022ca), all suites green, one full-scope review clean-with-2-minor (both fixed). CLI subcommand surface and planning-ticket prose left out of scope and captured in follow-up 260904-refactor-cli-subcommand-verb-alignment. Locks the canonical `query`/`read` survivor names for layers ③ and ②.
