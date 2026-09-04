@@ -12,6 +12,8 @@ spec:
   - pi-adapter-runtime
 sage-review-design: completed
 sage-review-design-reviewed: d1adbf443f708c3e
+sage-review-completeness: completed
+sage-review-completeness-reviewed: c97852f5cf200bc5
 ---
 
 # Pi lead-execute approval gateway: delegated mutation via ws.execute + per-mutation ws.approve
@@ -117,7 +119,9 @@ ws.execute(command?, prompt, complex?: bool) -> report
 ### 4. `ws.approve` — per-command adjudication (+ abort factored out)
 
 ```
-ws.approve(agent_id, cmd_id, decision: "approve"|"deny"|"run-instead", reason?, command?) 
+ws.approve(agent_id, cmd_id, decision: "approve"|"deny"|"run-instead", reason?, command?)
+// reason  — required when decision = "deny"; optional otherwise
+// command — required when decision = "run-instead"; rejected otherwise
 ```
 
 - `deny(reason)`: reject THIS command; the worker re-plans and brings back a
@@ -304,8 +308,8 @@ tool + mutation-incapable read-family (§5); the adapter-authoritative approval
 payload / working-context header (§7); the lead tool-surface change (bash
 removed, ugly-read retained, §6); the two-path accountability invariant (§2). The
 approval-handshake baseline (prompt-injection relay) is the documented contract;
-pause/resume is an optimization. Not spec-addressed yet (todo/); addressed at the
-ready boundary.
+pause/resume is an optimization. Spec anchors are authored contract-first at
+proceed (first implementation slice), against the `spec:` stem above.
 
 ## Phases
 
@@ -316,7 +320,7 @@ Implement the adapter gated-exec worker tool (every free-form command elevates)
 and the mutation-incapable read-family on the worker `--tools`; `ws.execute(command?,
 prompt, complex?)` spawning a worker (reusing 260903 spawn) whose exec elevates,
 `complex?`→tier; the prompt-injection approval relay + `ws.approve(agent_id,
-cmd_id, decision, reason?, command?)` with `approve`/`deny(reason)`/`run-instead`;
+cmd_id, decision, reason?, command?)` with `approve`/`deny(reason)`/`run-instead(command)`;
 the adapter-authoritative approval payload with the §7 context header + required
 worker rationale; `cmd_id` race-binding; abort via `ws-agent-stop` (unblock
 execute with "aborted", dormant+retain); lead `--tools` change (bash removed,

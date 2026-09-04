@@ -9,12 +9,16 @@ related:
   260723-refactor-fork-removal-prefer-subagent: cautionary precedent — the Claude-host fork deletion whose recorded failure modes this design must answer structurally, not by prose
   260625-research-fork-posture-leak-system-guarantee: failure-mode evidence (posture leak; 0 tool calls echoing deferral narrative)
   260629-research-fork-worker-persona-bleed: failure-mode evidence (lead-voice narration; template-correct prompt insufficient; tier-lock)
+  260626-bug-prefer-subagent-recursive-delegate-escape: dropped precedent — the recursive-escape class §3 closes structurally via the fork allowlist
+  260626-feat-session-key-format-and-retention: retention philosophy the §9 dormant-thread policy follows
 related-mental-model:
   - workflow-skills
 spec:
   - pi-adapter-runtime
 sage-review-design: completed
 sage-review-design-reviewed: c3cf97dd3b2030ba
+sage-review-completeness: completed
+sage-review-completeness-reviewed: c04a2e0f41765757
 ---
 
 # Pi lead side-thread: context-inheriting fork (`ws.fork`) + owner-facing question surface (`ws.ask` / `/answer` overlay chat)
@@ -26,8 +30,10 @@ the Pi lead, the heaviest remaining load on the lead context is
 **conversation-as-input work**: running the `lead-write-ticket` ceremony
 (Populate → Verify → Ground → Sage → Commit), sage review handling, and
 decision synthesis — work that *must* be done with the lead's accumulated
-context (the central authoring whitelist exists precisely because a fresh spawn
-working from a summary loses the reasoning a correct write depends on), yet
+context (the central authoring whitelist — the `lead-prefer-subagent` skill
+rule that durable-artifact authoring stays with the session holding the
+authoritative context — exists precisely because a fresh spawn working from a
+summary loses the reasoning a correct write depends on), yet
 whose *output* the lead needs is only verdict prose (ticket path, sage verdict,
 commit hash, unresolved questions). Doing it inline pollutes the lead;
 delegating it fresh is lossy. Heavy reading that has a clear question (read this
@@ -239,7 +245,7 @@ mechanism; none is prompt text.
   attaches the new one.
 - **Registry is persisted**, not in-memory only: thread records live in the
   adapter's per-lead-session state file next to the `260903` D-C
-  `agent_id → session` mapping (which must already persist for dormant
+  (session_key lineage decision) `agent_id → session` mapping (which must already persist for dormant
   resume), so pending `ws.ask` questions and dormant threads survive a lead
   restart.
 
@@ -294,8 +300,8 @@ The overlay is the TUI optimization over these baselines — the same shape
 - **Closed threads are dormant + retained** (`260903` `ws-agent-stop`
   semantics) and reopenable. A retained task fork **owns the authored
   artifact's context** — follow-up edits to a ticket it wrote route to it via
-  `ws-agent-send`, per the central authoring whitelist ("the delegated
-  subagent's own continuing session when settled there").
+  `ws-agent-send`, per the central authoring whitelist in `lead-prefer-subagent`
+  ("the delegated subagent's own continuing session when settled there").
 - **Thread rebase is a non-goal**: a fork's knowledge is its spawn-time
   snapshot; a long discussion that needs newer lead state closes and reopens
   as a new thread. Retention policy follows the session-key retention
@@ -349,8 +355,8 @@ delegate's evidence alone, exactly as the playbook already requires.
 
 ## Spec Impact
 
-Not spec-addressed yet (`todo/`); anchors are authored at the `ready/`
-boundary.
+Spec anchors are authored contract-first at proceed (first implementation
+slice), against the `spec:` stem above.
 
 - `pi-adapter-runtime` spec: new lead tools `ws.fork` / `ws.ask` / `ws.resolve`;
   `ws-report-to-lead` gains `kind: question | final` and the required report
