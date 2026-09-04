@@ -44,6 +44,17 @@
  * level alongside the other commands/tools below — no subprocess involved,
  * so it needs no `session_start` gating either.
  *
+ * The 260904 ticket's Phase 1 adds the system-prompt bootstrap
+ * (src/lead-bootstrap.ts, `registerLeadBootstrap`): a `before_agent_start`
+ * handler appends a fixed ws block (the session-start `workflow_manual`
+ * snapshot plus `pi-lead-guide.md`) to the system prompt on every turn, for
+ * the host lead and a future `fork` child only (never `worker`/`explore`).
+ * `registerLeadBootstrap` itself is declarative (factory top level, no
+ * subprocess); the actual snapshot fetch happens inside `startBridge`
+ * (bridge.ts), and this file fills `wsBlockRef.current` from that result
+ * once `session_start`'s `startBridge` call resolves — same seam
+ * `registerAgentTools` already uses.
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -63,6 +74,7 @@
  * package-local-first resolver above.
  */
 
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -71,6 +83,8 @@ import { registerAgentTools, type AgentToolsHandle } from "./spawner.ts";
 import { buildDiscussKickoff } from "./discuss.ts";
 import { registerGoalLoop } from "./goal-loop.ts";
 import { resolveSkillsDir } from "./skills-dir.ts";
+import { buildWsBlock, registerLeadBootstrap } from "./lead-bootstrap.ts";
+import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -80,10 +94,12 @@ const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
 const modelCatalogPath = join(pluginDir, "model-catalog.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
+const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 
 export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
+  const wsBlockRef: { current: string | undefined } = { current: undefined };
 
   pi.on("resources_discover", () => ({
     skillPaths: [skillsDir],
@@ -122,6 +138,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
 
   registerGoalLoop(pi, { goalLoopConfigPath });
+  registerLeadBootstrap(pi, wsBlockRef);
 
   pi.on("session_start", async (_event, ctx) => {
     handle = await startBridge(pi, {
@@ -133,6 +150,24 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       ui: ctx.ui,
     });
     agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath });
+
+    // §1/§4: fill the ws system-prompt block only when startBridge actually
+    // produced both snapshots (lead/fork role, non-degraded bootstrap — see
+    // bridge.ts's all-or-nothing fetch). Otherwise leave wsBlockRef.current
+    // unset — computeBeforeAgentStartResult's own guard already treats that
+    // as "no override" for every before_agent_start firing, matching §3's
+    // degraded-bootstrap behavior (no ws block, no crash).
+    if (isLeadOrFork(readSpawnRole(process.env)) && handle.manualSnapshotRef.current) {
+      let guideText = "";
+      try {
+        guideText = readFileSync(piLeadGuidePath, "utf8");
+      } catch {
+        // Tolerate a missing guide file (e.g. a dev -e run against a source
+        // tree that hasn't copied it yet) — the manual snapshot alone is
+        // still a strict improvement over no ws block at all.
+      }
+      wsBlockRef.current = buildWsBlock(handle.manualSnapshotRef.current, guideText);
+    }
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
