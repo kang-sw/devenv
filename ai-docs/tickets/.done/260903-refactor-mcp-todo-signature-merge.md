@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-design-reviewed: b20e3dad1923284f
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b20e3dad1923284f
+completed: 2026-09-04
 ---
 
 # MCP mechanical over-split → signature merge (todo insert-trio → add)
