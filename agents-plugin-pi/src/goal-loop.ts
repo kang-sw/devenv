@@ -6,9 +6,9 @@
  * `agent_settled` event (fired after a run has fully settled with no
  * automatic retry/compaction/continuation queued — see
  * `AgentSettledEvent`'s doc comment in the installed Pi type defs) re-injects
- * a reminder naming the goal and the two terminal levers, UNLESS a runaway
- * backstop trips first. A settle outside goal mode is an ordinary stop — the
- * handler no-ops.
+ * a reminder naming the goal and its levers (two terminal, one non-terminal —
+ * see Phase 2 below), UNLESS a runaway backstop trips first. A settle outside
+ * goal mode is an ordinary stop — the handler no-ops.
  *
  * Two terminal levers end the run: `goal-achieved` and `goal-blocked`, both
  * implemented as `pi.registerTool()` calls (model-invoked function calls),
@@ -48,12 +48,27 @@
  * Following the bridge.ts/spawner.ts convention (not discuss.ts's
  * single-call-site convention): this one file mixes pure, unit-tested
  * state-machine/config-reader functions with the `registerGoalLoop` IO glue,
- * since the goal-loop's IO surface (1 command + 2 tools + 2 event listeners)
+ * since the goal-loop's IO surface (1 command + 3 tools + 3 event listeners)
  * is closer in shape to spawner.ts than to discuss.ts.
+ *
+ * Phase 2 (260903) adds a third, non-terminal lever: `goal-compact-and-continue`
+ * compacts context with model-supplied carry-forward prose via `ctx.compact()`
+ * and re-enters the loop (it does not call `disarmGoal()`). Compaction stays
+ * model-driven, not extension-gated: the reinject reminder surfaces
+ * `ctx.getContextUsage().percent` plus a static compression-safety heuristic
+ * (phase-boundary/merge-gate stops are generally safe to compact, non-phase
+ * stops are not) as advisory prose only — the model decides, the extension
+ * never autonomously compacts. A `session_before_compact` listener is
+ * observe-only (never `cancel`s, never overrides `compaction`): it notifies
+ * when a compaction fires while goal mode is active, leaving Pi's own
+ * `reason: "threshold"` overflow auto-compaction as the untouched last-resort
+ * backstop. Both the compaction-advisory percent and an optional
+ * context-window override are additional knobs on the same
+ * `goal-loop-config.json` file as Phase 1's `runaway_threshold`.
  */
 
 import { readFileSync } from "node:fs";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { WS_PI_AGENT_CHILD_ENV } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
@@ -64,10 +79,17 @@ import { WS_PI_AGENT_CHILD_ENV } from "./spawner.ts";
 
 export interface GoalLoopConfig {
   runaway_threshold?: number;
+  /** Advisory context-usage percent (0, 100] surfaced in the reinject reminder as a nudge point — not a gate. */
+  compaction_advisory_percent?: number;
+  /** Optional context-window token override for `computeContextPercent`, used when the model's own `getContextUsage().contextWindow` should be superseded. */
+  context_window_override?: number;
 }
 
 /** Default number of consecutive no-tool-call re-fires before the loop force-stops, absent (or overridden by) a config file. */
 export const DEFAULT_RUNAWAY_THRESHOLD = 10;
+
+/** Default advisory context-usage percent (adapter-chosen, no ticket-pinned value; config-tunable) surfaced in the reinject reminder. */
+export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 70;
 
 /**
  * Reads and parses the goal-loop config data file. Returns `undefined` —
@@ -102,6 +124,29 @@ export function resolveRunawayThreshold(config: GoalLoopConfig | undefined): num
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_RUNAWAY_THRESHOLD;
 }
 
+/**
+ * Resolves the effective compaction-advisory percent: the config file's
+ * `compaction_advisory_percent` when it is a finite number in `(0, 100]`,
+ * else `DEFAULT_COMPACTION_ADVISORY_PERCENT`. Never hard-fails on a
+ * malformed value — falls back to the default instead. Mirrors
+ * `resolveRunawayThreshold`'s exact never-hard-fail shape.
+ */
+export function resolveCompactionAdvisoryPercent(config: GoalLoopConfig | undefined): number {
+  const value = config?.compaction_advisory_percent;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : DEFAULT_COMPACTION_ADVISORY_PERCENT;
+}
+
+/**
+ * Resolves an optional context-window override: the config file's
+ * `context_window_override` when it is a finite positive number, else
+ * `undefined` (no override — the model's own `getContextUsage().contextWindow`
+ * is used as-is). Never hard-fails on a malformed value.
+ */
+export function resolveContextWindowOverride(config: GoalLoopConfig | undefined): number | undefined {
+  const value = config?.context_window_override;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Pure message builders.
 // ---------------------------------------------------------------------------
@@ -112,16 +157,59 @@ export function buildGoalAnnouncement(goal: string): string {
 }
 
 /**
- * The re-injected reminder on each armed `agent_settled` re-fire. Names the
- * goal and both terminal lever tool names, plus the runaway-backstop
- * caveat. Exact wording is a presentation detail, not pinned by the ticket
- * beyond "carrying the goal + the levers."
+ * Pure helper: resolves the effective context-usage percent from
+ * `ctx.getContextUsage()` and an optional config override, without ever
+ * dividing by zero or crashing on `null` fields. `usage.percent`/`tokens` are
+ * `null` right after a compaction until the next LLM response — this
+ * function returns `null` in that case (and whenever nothing computable is
+ * available), letting callers render "unknown" gracefully instead.
+ *
+ * - No `usage` at all -> `null`.
+ * - `usage.percent` is a number and no override is set -> that percent, as-is.
+ * - `usage.tokens` is a number, and either an override is set or
+ *   `usage.percent` is `null` -> recomputed as
+ *   `(tokens / (contextWindowOverride ?? usage.contextWindow)) * 100`.
+ * - Otherwise -> `null`.
  */
-export function buildGoalReminder(goal: string): string {
+export function computeContextPercent(usage: ContextUsage | undefined, contextWindowOverride?: number): number | null {
+  if (!usage) return null;
+  if (typeof usage.percent === "number" && contextWindowOverride === undefined) {
+    return usage.percent;
+  }
+  if (typeof usage.tokens === "number" && (contextWindowOverride !== undefined || usage.percent === null)) {
+    const window = contextWindowOverride ?? usage.contextWindow;
+    return (usage.tokens / window) * 100;
+  }
+  return null;
+}
+
+/**
+ * The re-injected reminder on each armed `agent_settled` re-fire. Names the
+ * goal and all three lever tool names (two terminal, one non-terminal
+ * compact-and-continue), the runaway-backstop caveat, the current
+ * context-usage percent (surfaced from IO-glue-only `ctx.getContextUsage()`,
+ * hence the caller-supplied `info` rather than this function reaching for it
+ * itself), and a static compression-safety heuristic. The heuristic is
+ * advisory prose the model weighs — never a computed gate the extension
+ * enforces. Exact wording is a presentation detail beyond the ticket's
+ * pinned framing of "the model decides."
+ */
+export function buildGoalReminder(goal: string, info: { percent: number | null; advisoryPercent: number }): string {
+  const { percent, advisoryPercent } = info;
+  const usageLine =
+    percent === null
+      ? "Context usage: unknown."
+      : percent >= advisoryPercent
+        ? `Context usage: ${Math.round(percent)}% of window — at or above the advisory point (${advisoryPercent}%); consider goal-compact-and-continue if you are at a safe compaction point.`
+        : `Context usage: ${Math.round(percent)}% of window.`;
   return (
-    `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> ` +
-    "for a state transition. Silence keeps re-injecting this reminder; enough consecutive " +
-    "re-fires with no tool call force-stops the goal loop."
+    `Goal yet running: "${goal}". Call goal-achieved <summary> or goal-blocked <reason> for a state ` +
+    "transition, or goal-compact-and-continue <carry-forward> to compact context and keep pursuing the " +
+    "same goal. Silence keeps re-injecting this reminder; enough consecutive re-fires with no tool call " +
+    "force-stops the goal loop.\n" +
+    `${usageLine}\n` +
+    "Compression-safety heuristic (advisory only — you weigh it, the extension never gates or auto-compacts): " +
+    "a phase-boundary or merge-gate stop is generally safe to compact; a non-phase-boundary stop is generally not."
   );
 }
 
@@ -175,14 +263,20 @@ export function recordToolCall(state: GoalLoopState): GoalLoopState {
 
 export type SettleDecision =
   | { action: "ignore" }
-  | { action: "reinject"; reminder: string }
+  | { action: "reinject"; goal: string }
   | { action: "force-stop"; reason: string };
 
 /**
  * Pure reducer for an `agent_settled` firing: decides whether to ignore
- * (goal mode inactive), re-inject the reminder (under threshold), or
+ * (goal mode inactive), re-inject a reminder (under threshold), or
  * force-stop (streak reached `threshold`). Streak resets to 0 whenever a
  * tool call happened this cycle; otherwise it increments.
+ *
+ * The `"reinject"` decision carries only the bare `goal` string, not a
+ * precomputed reminder: this reducer has no access to `ctx.getContextUsage()`
+ * or the goal-loop config file (both IO-context-only), so `buildGoalReminder`
+ * is called by `registerGoalLoop`'s IO glue instead, right where that context
+ * is already available (Phase 2, 260903).
  */
 export function decideOnSettle(state: GoalLoopState, threshold: number): { next: GoalLoopState; decision: SettleDecision } {
   if (!state.active) {
@@ -197,8 +291,19 @@ export function decideOnSettle(state: GoalLoopState, threshold: number): { next:
   }
   return {
     next: { ...state, noToolCallStreak: streak, sawToolCallThisCycle: false },
-    decision: { action: "reinject", reminder: buildGoalReminder(state.goal!) },
+    decision: { action: "reinject", goal: state.goal! },
   };
+}
+
+/**
+ * Pure builder for the observational `ctx.ui.notify` message emitted by the
+ * `session_before_compact` listener while goal mode is active. Never a veto,
+ * never a `compaction` override — purely informational, matching the
+ * ticket's resolved "not an extension gate" design. Extracted for unit
+ * coverage while keeping the listener itself thin IO glue.
+ */
+export function buildCompactionObservation(goal: string, reason: "manual" | "threshold" | "overflow"): string {
+  return `Compaction observed while goal-loop is active (goal: "${goal}", reason: ${reason}). Advisory-only observation — the goal loop does not cancel or override this compaction.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,11 +316,12 @@ export interface RegisterGoalLoopOptions {
 }
 
 /**
- * Registers the `/goal` command, the `goal-achieved`/`goal-blocked` tools,
- * and the `tool_call`/`agent_settled` listeners that drive the goal-loop
- * state machine above. Called at extension factory top level (not inside
- * `session_start`) — command/tool registration is declarative here, same as
- * every other command/tool in index.ts.
+ * Registers the `/goal` command, the `goal-achieved`/`goal-blocked`/
+ * `goal-compact-and-continue` tools, and the
+ * `tool_call`/`agent_settled`/`session_before_compact` listeners that drive
+ * the goal-loop state machine above. Called at extension factory top level
+ * (not inside `session_start`) — command/tool registration is declarative
+ * here, same as every other command/tool in index.ts.
  */
 export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions): void {
   let state: GoalLoopState = initialGoalLoopState();
@@ -252,7 +358,8 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
     // a child's input pipeline regardless.
     if (isChildProcess(process.env)) return;
 
-    const threshold = resolveRunawayThreshold(readGoalLoopConfig(opts.goalLoopConfigPath));
+    const config = readGoalLoopConfig(opts.goalLoopConfigPath);
+    const threshold = resolveRunawayThreshold(config);
     const { next, decision } = decideOnSettle(state, threshold);
     state = next;
 
@@ -261,7 +368,21 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       ctx.ui.notify(`Goal loop force-stopped: ${decision.reason}`, "warning");
       return;
     }
-    pi.sendUserMessage(decision.reminder);
+    const advisoryPercent = resolveCompactionAdvisoryPercent(config);
+    const contextWindowOverride = resolveContextWindowOverride(config);
+    const percent = computeContextPercent(ctx.getContextUsage(), contextWindowOverride);
+    pi.sendUserMessage(buildGoalReminder(decision.goal, { percent, advisoryPercent }));
+  });
+
+  // Observe-only: never `cancel`s, never supplies a `compaction` override.
+  // Fires for both our own `/goal-compact-and-continue`-triggered manual
+  // compaction (reason: "manual") and Pi's own overflow/threshold
+  // auto-compaction backstop — matching the ticket's resolved "not an
+  // extension gate" design (see this file's top-of-file doc comment).
+  pi.on("session_before_compact", (event, ctx) => {
+    if (isChildProcess(process.env)) return;
+    if (!state.active || !state.goal) return;
+    ctx.ui.notify(buildCompactionObservation(state.goal, event.reason), "info");
   });
 
   pi.registerTool({
@@ -297,6 +418,36 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
       const p = params as { reason: string };
       state = disarmGoal();
       return { content: [{ type: "text", text: `Goal blocked: ${p.reason}` }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "goal-compact-and-continue",
+    label: "goal-compact-and-continue",
+    description:
+      "Non-terminal lever: compact context now, carrying <carry_forward> prose into the compaction summary, then continue pursuing the same active goal. Call this at a safe compaction point (phase boundary / merge gate) instead of manually summarizing progress in prose.",
+    parameters: {
+      type: "object",
+      properties: {
+        carry_forward: { type: "string", description: "Prose carried forward into the compaction summary as custom instructions." },
+      },
+      required: ["carry_forward"],
+    } as never,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+      const p = params as { carry_forward: string };
+      // Does NOT call disarmGoal() — non-terminal. ctx.compact() aborts the
+      // in-flight turn (the one that invoked this very tool call) and, once
+      // compaction completes, the resulting fresh settle re-enters through
+      // the existing armed `agent_settled` reinject path above — no separate
+      // manual "continue" call is needed here beyond returning this tool's
+      // own result and triggering the compaction (see this file's top-of-file
+      // doc comment's risk-signal note).
+      ctx.compact({
+        customInstructions: p.carry_forward,
+        onComplete: () => ctx.ui.notify("Compaction completed", "info"),
+        onError: (error) => ctx.ui.notify(`Compaction failed: ${error.message}`, "error"),
+      });
+      return { content: [{ type: "text", text: `Compacting and continuing goal with carry-forward: ${p.carry_forward}` }] };
     },
   });
 }
