@@ -46,7 +46,10 @@ Claude harness (`260723-refactor-fork-removal-prefer-subagent`;
 `mental-model/workflow-skills.md` records it is not a routing option) after forks
 echoed the lead's delegation narrative instead of executing and inherited the
 parent persona — the persona-bleed failure partially transfers to a
-"summarize-your-own-work" fork; (b) splice is **lossy on ephemeral bash output**
+"summarize-your-own-work" fork — note this rejects the *auto-fork self-summarize
+splice*, not context-inheriting delegates on Pi as such: the structurally
+mitigated, lead-invoked side thread is a separate decision in
+`260904-feat-ws-pi-side-thread-fork-question-surface`; (b) splice is **lossy on ephemeral bash output**
 (a mis-summary of a one-time command result is unrecoverable); (c) it needs
 message-tree surgery, more invasive than any compaction call. Delegation cost is
 not a counter-argument: keeping the lead lean has **compounding** returns (every
@@ -138,7 +141,10 @@ ws.approve(agent_id, cmd_id, decision: "approve"|"deny"|"run-instead", reason?, 
   termination. On abort: (a) unblock the waiting `ws.execute` with an "aborted"
   result; (b) `dormant+retain` (per 260903) so an accidental abort is inspectable
   via `ws-agent-transcript` — terminal teardown stays a separate `session_shutdown`.
-- **Approver is the lead model, uniformly.** No separate human-approval
+- **Approver is the spawning parent** — the top lead for its own workers; for a
+  worker spawned by a side-thread fork
+  (`260904-feat-ws-pi-side-thread-fork-question-surface`) the approver is that
+  fork, which holds the same consensus context. No separate human-approval
   primitive: genuinely destructive/outward actions are handled by the lead's
   **existing** discipline of confirming hard-to-reverse or outward-facing actions
   with the user before proceeding at its approval turn — an emergent property of
