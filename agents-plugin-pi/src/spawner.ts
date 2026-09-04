@@ -1,33 +1,38 @@
 /**
- * Self-built delegation spawner: `ws-agent-spawn` / `ws-agent-continue` /
- * `ws-agent-wait` / `explore`.
+ * Self-built delegation spawner: `ws-agent-spawn` / `ws-agent-send` /
+ * `ws-agent-wait` / `ws-agent-list` / `ws-agent-stop` / `explore`.
  *
- * Spawns a separate `pi` child process (`--mode json -p`) per delegated
- * agent, capturing its NDJSON event stream to extract the final assistant
- * text and `stopReason`, and gates `state:"done"` on the child's `close`
- * event rather than on an in-stream terminal `stopReason` — the `--session`
- * file is only flush-guaranteed after the process exits (see
- * ai-docs/tickets/idea/260802-research-ws-pi-native-framework.md#L760-766),
- * so an immediate `ws-agent-continue` right after `ws-agent-wait` harvests a
- * "done" agent must be safe to read that file. The last-seen `stopReason` is
- * carried only as metadata, never as the completion signal.
+ * Phase 1 replaces the one-shot `pi --mode json -p` worker spawner with
+ * persistent `RpcClient` (`--mode rpc`) children: `ws-agent-spawn` starts a
+ * long-lived `pi` subprocess wired through `@earendil-works/pi-coding-agent`'s
+ * `RpcClient`, `ws-agent-send` drives it (prompt/followUp/steer, branching on
+ * locally-tracked streaming state — see the doc comment on `sendToAgent`),
+ * `ws-agent-wait` races `agent_settled` events across a set of agent ids,
+ * `ws-agent-list` reports live/idle/dormant status, and `ws-agent-stop`
+ * gracefully stops a child's process while keeping its `agent_id` ->
+ * session/prompt/model mapping registered for a later auto-resume (D-C).
+ * `ws-agent-continue` folds into `ws-agent-send` (an id with no live
+ * `RpcClient` is "dormant," not a separate tool).
  *
- * Zero on-disk agent-profile files: tool-group curation lives entirely in
- * the in-memory `TOOL_GROUPS` table below plus `pi` CLI flags
- * (`--tools`/`--model`/`--append-system-prompt`/`--session`), matching the
- * ticket's Decisions section (no `.pi/agents/` writes, no global profile
- * files).
+ * The spawn tool carries **no tier** parameter (D-A / Shape A): the caller
+ * (the lead) passes an already-rendered `system_prompt_path` — this module
+ * never calls `playbook.render` itself for the RPC-backed path — plus an
+ * optional `model_name` resolved against the adapter-owned model-catalog
+ * alias table (model-catalog.ts), or omits it to inherit the parent
+ * session's model.
  *
- * `--model` resolves tier-first, inherit-fallback (Phase 3): a caller-
- * supplied `tier` (ws-agent-spawn) or the implicit `"small"` tier
- * (explore/exploreLeaf) is looked up in the adapter-owned model-catalog
- * data file (model-catalog.ts); when mapped, that `provider/id` is used.
- * Otherwise (catalog unset, tier unmapped, or no tier at all) this falls
- * back to the Phase 2 inherit behavior: the active model (`ctx.model`) of
- * the *calling* tool-execute context is forwarded verbatim as
- * `provider/id`, or omitted entirely when unset, mirroring the shipped
- * `examples/extensions/subagent/index.ts`'s `dispatchDefaults.model`
- * pattern.
+ * `explore` is the one exception left untouched: it remains the one-shot
+ * `pi --mode json -p --no-session --tools=recon` recon leaf from Phases 2-3
+ * (`spawnPiProcess`/`AgentEventLineBuffer`/`handleAgentEvent`/`waitForDone`
+ * below), self-reaping, non-recursive (depth <= 2: lead -> worker ->
+ * explore-leaf; explore cannot spawn explore, since none of the five
+ * `ws-agent-*` tools are in `TOOL_GROUPS`). Only its implicit model
+ * resolution switches from the old tier lookup to the reframed alias lookup
+ * (still keyed on the fixed name `"small"`).
+ *
+ * `--tools` per-spawn group curation (`read-only`/`recon`/`full-worker`) is
+ * retained unchanged — zero on-disk agent-profile files, curation lives in
+ * the in-memory `TOOL_GROUPS` table below plus `pi` CLI flags.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -37,26 +42,16 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
-import { readModelCatalog, resolveTierModel, type ModelCatalogConfig, type ModelTier } from "./model-catalog.ts";
-
-const VALID_MODEL_TIERS: ReadonlySet<string> = new Set(["small", "medium", "large", "xlarge"]);
-
-/**
- * Casts an arbitrary caller-supplied tier string to a `ModelTier`, or
- * `undefined` when it does not match one of the four valid values —
- * treated as unset/inherit, never a validation error, per "never
- * hard-fail."
- */
-export function asModelTier(tier: string | undefined): ModelTier | undefined {
-  return tier !== undefined && VALID_MODEL_TIERS.has(tier) ? (tier as ModelTier) : undefined;
-}
+import { readModelCatalog, resolveAlias, type ModelCatalogConfig } from "./model-catalog.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers: tool-group resolution, terminal-stopReason classification,
 // spawn-arg building. Unit-tested directly (test/spawner.test.ts) with no
-// subprocess involved.
+// subprocess involved. Shared by both the one-shot `explore` path and the
+// RPC-backed path below.
 // ---------------------------------------------------------------------------
 
 export type ToolGroup = "read-only" | "recon" | "full-worker";
@@ -76,7 +71,10 @@ export type ToolGroup = "read-only" | "recon" | "full-worker";
  *   default-filled key instead of a scoped one.
  * - `full-worker`: everything, plus the live `ws__*` bridge tool names
  *   (passed in by the caller, not hardcoded, so this group tracks ws-mcp's
- *   actual registered tool set instead of drifting from it).
+ *   actual registered tool set instead of drifting from it). Deliberately
+ *   excludes every `ws-agent-*` driving/spawn tool (D-B): a worker can
+ *   spawn `explore` but never another worker, so nested spawn depth never
+ *   exceeds lead -> worker -> explore-leaf.
  */
 export const TOOL_GROUPS: Record<ToolGroup, readonly string[]> = {
   "read-only": ["read", "grep", "find", "ls"],
@@ -101,8 +99,9 @@ export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = 
  * (docs/session-format.md#L88): `"stop" | "length" | "toolUse" | "error" |
  * "aborted"`. `"toolUse"` is NOT terminal (the agent is still working);
  * `"pending"` is stream-only and never appears in a persisted message. This
- * classification is metadata only — never the completion signal, see the
- * module doc comment above.
+ * classification is metadata only, used by the one-shot `explore` path's
+ * event handling — never the completion signal, see `handleAgentEvent`'s
+ * doc comment below.
  */
 const TERMINAL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "error", "aborted"]);
 
@@ -110,7 +109,7 @@ export function isTerminalStopReason(reason: string | undefined): boolean {
   return reason !== undefined && TERMINAL_STOP_REASONS.has(reason);
 }
 
-export type SpawnMode = "spawn" | "continue" | "explore";
+export type SpawnMode = "explore";
 
 export interface BuildSpawnArgsOptions {
   mode: SpawnMode;
@@ -128,17 +127,19 @@ export interface BuildSpawnArgsOptions {
 }
 
 /**
- * Builds the `pi` CLI argv for a spawn/continue/explore invocation, mirroring
+ * Builds the `pi` CLI argv for a one-shot `explore` invocation, mirroring
  * the shipped reference example's flag-ordering
  * (`examples/extensions/subagent/index.ts#L300-341`):
  * `--mode json -p [--session <path> | --no-session]
  * [--append-system-prompt <path>] [--tools <list>] [--model <pattern>]
  * "<task>"`.
  *
- * `sessionPath` and `noSession` are mutually exclusive by contract (a
- * `--session <path>` continuation must never also carry `--no-session`, and
- * an `explore` leaf must never persist a session file) — passing both, or
+ * `sessionPath` and `noSession` are mutually exclusive by contract (an
+ * `explore` leaf must never persist a session file) — passing both, or
  * neither, is a caller bug and throws rather than silently picking one.
+ * Phase 1 narrows `SpawnMode` to `"explore"` only: the RPC-backed
+ * spawn/send path builds its `pi` argv directly via `RpcClientOptions.args`
+ * (see `buildRpcClientOptions` below), not through this helper.
  */
 export function buildSpawnArgs(opts: BuildSpawnArgsOptions): string[] {
   if (opts.noSession && opts.sessionPath) {
@@ -174,7 +175,9 @@ export function buildSpawnArgs(opts: BuildSpawnArgsOptions): string[] {
  * parallel class, not an import — this buffer parses bare NDJSON event
  * objects, not JSON-RPC envelopes) — deliberately NOT the shipped example's
  * naive per-chunk `data.toString()` split, which corrupts a UTF-8 codepoint
- * split across a `'data'` chunk boundary.
+ * split across a `'data'` chunk boundary. Used only by the one-shot
+ * `explore` path; the RPC-backed path gets its events from `RpcClient`'s
+ * own `onEvent()`.
  */
 export class AgentEventLineBuffer {
   private readonly decoder = new StringDecoder("utf8");
@@ -227,8 +230,30 @@ export class AgentEventLineBuffer {
   }
 }
 
+/**
+ * Pure alias-first, inherit-fallback model resolution: when `alias` is
+ * given and mapped in `config`, that `provider/id` wins; otherwise (no
+ * `alias`, catalog unset, or that specific alias unmapped) falls back to
+ * `inheritModel` unchanged. Split out from the IO wrapper that re-reads the
+ * catalog file fresh per call so the resolution rule itself is directly
+ * unit-testable with no file I/O involved. Used by both the RPC-backed
+ * `spawnAgent`'s `model_name` and `explore`'s fixed `"small"` lookup.
+ */
+export function resolveModelForAlias(
+  config: ModelCatalogConfig | undefined,
+  alias: string | undefined,
+  inheritModel: string | undefined,
+): string | undefined {
+  if (alias) {
+    const aliasModel = resolveAlias(config, alias);
+    if (aliasModel) return aliasModel;
+  }
+  return inheritModel;
+}
+
 // ---------------------------------------------------------------------------
-// Module-state registry and async spawn/continue/wait engine.
+// One-shot `explore` machinery (unchanged from Phase 2-3, only its model
+// resolution call switches to the reframed alias lookup).
 // ---------------------------------------------------------------------------
 
 export type AgentState = "running" | "done";
@@ -236,11 +261,10 @@ export type AgentState = "running" | "done";
 export interface AgentRecord {
   agentId: string;
   playbook: string;
-  tier?: string;
   /** Absolute path to the ws-owned `--session` file; undefined for `noSession` (explore) records. */
   sessionPath?: string;
   noSession: boolean;
-  /** Rendered playbook prompt path (cached, reused unchanged across `continue`). */
+  /** Rendered playbook prompt path (cached, reused unchanged across resumes). */
   systemPromptPath?: string;
   state: AgentState;
   /** Last-seen `stopReason` — metadata only, never the completion signal. */
@@ -268,7 +292,10 @@ function firstText(result: McpToolCallResult): string | undefined {
  * (works regardless of whether `pi` is on PATH), falling back to a bare
  * `pi` command otherwise. The Bun-virtual-script branch from the reference
  * is dropped — this package only ever runs under Node (package.json's
- * `"test": "node --test"`), so that branch would be dead code here.
+ * `"test": "node --test"`), so that branch would be dead code here. Used
+ * only by the one-shot `explore` path; the RPC-backed path always passes
+ * `cliPath: process.argv[1]` directly with no fallback (see
+ * `RPC_CLI_PATH` below) since `RpcClient` itself has no bare-`pi` fallback.
  */
 function getPiInvocation(extraArgs: string[]): { command: string; args: string[] } {
   const currentScript = process.argv[1];
@@ -278,7 +305,14 @@ function getPiInvocation(extraArgs: string[]): { command: string; args: string[]
   return { command: "pi", args: extraArgs };
 }
 
-function settleWaiters(record: AgentRecord): void {
+/**
+ * Resolves every pending one-shot waiter on `record` (its `waiters` array is
+ * drained and each resolved). Generic over any record shape carrying a
+ * `waiters: Array<() => void>` field so it is reusable verbatim by both the
+ * one-shot `explore` registry (`AgentRecord`) and the RPC-backed registry
+ * (`RpcAgentRecord`) below.
+ */
+function settleWaiters<T extends { waiters: Array<() => void> }>(record: T): void {
   const waiters = record.waiters;
   record.waiters = [];
   for (const resolve of waiters) resolve();
@@ -292,11 +326,12 @@ function waitForDone(record: AgentRecord): Promise<void> {
 /**
  * Extracts `stopReason`/`errorMessage`/final text from a `message_end`
  * event onto `record`. Deliberately NEVER touches `record.state` — the
- * load-bearing invariant (module doc comment / `spawnPiProcess` doc comment)
- * is that `state:"done"` is flipped only by the child's `close` event, never
- * by observing a terminal `stopReason` in the stream. Exported so that
- * invariant has direct unit coverage (test/spawner.test.ts) instead of only
- * being reachable through a live subprocess.
+ * load-bearing invariant is that `state:"done"` is flipped only by the
+ * child's `close` event, never by observing a terminal `stopReason` in the
+ * stream (the `--session` file is only flush-guaranteed complete after the
+ * process exits). Exported so that invariant has direct unit coverage
+ * (test/spawner.test.ts) instead of only being reachable through a live
+ * subprocess.
  */
 export function handleAgentEvent(record: AgentRecord, evt: unknown): void {
   if (!evt || typeof evt !== "object") return;
@@ -330,10 +365,10 @@ export function handleAgentEvent(record: AgentRecord, evt: unknown): void {
  *
  * `state:"done"` is flipped ONLY from the child's `close` event — never from
  * an in-stream terminal `stopReason` — because the `--session` file is only
- * flush-guaranteed complete after the process has actually exited (see the
- * module doc comment). `close` (not `exit`) is used deliberately: it fires
- * after stdio streams have ended, so `record.outputText`/`stopReason` are
- * guaranteed fully drained by the time waiters are settled.
+ * flush-guaranteed complete after the process has actually exited. `close`
+ * (not `exit`) is used deliberately: it fires after stdio streams have
+ * ended, so `record.outputText`/`stopReason` are guaranteed fully drained by
+ * the time waiters are settled.
  */
 function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void {
   const invocation = getPiInvocation(args);
@@ -376,12 +411,6 @@ function spawnPiProcess(record: AgentRecord, args: string[], cwd: string): void 
   });
 }
 
-export interface SpawnAgentParams {
-  playbook: string;
-  task: string;
-  tier?: string;
-}
-
 export interface AgentCallCtx {
   /** The calling (lead) session's session_key, used for `playbook.render`. */
   sessionKey: string;
@@ -392,146 +421,18 @@ export interface AgentCallCtx {
   wsToolNames: readonly string[];
 }
 
-/**
- * Renders `params.playbook` via the already-bridged `playbook.render` (which
- * itself materializes the prompt to a worktree-scoped temp file and, for a
- * role-bearing playbook called by a lead-scoped session_key, mints and
- * splices in a fresh child session key — see
- * `ai-docs/spec/mcp-tools.md#L1871-1896` / `#L2179-2186`), then spawns a
- * `pi --mode json -p --session <ws-owned-path>` child process and registers
- * it as a `state:"running"` entry.
- */
-export async function spawnAgent(
-  client: McpStdioClient,
-  registry: AgentRegistry,
-  ctx: AgentCallCtx,
-  params: SpawnAgentParams,
-): Promise<{ agentId: string; state: AgentState }> {
-  const renderResult = await client.callTool("playbook.render", {
-    session_key: ctx.sessionKey,
-    name: params.playbook,
-  });
-  const text = firstText(renderResult);
-  if (renderResult.isError || !text) {
-    throw new Error(`ws-pi-agent: playbook.render("${params.playbook}") failed: ${text ?? "no content returned"}`);
-  }
-  const systemPromptPath = text.split("\n")[0]?.trim();
-  if (!systemPromptPath) {
-    throw new Error(`ws-pi-agent: playbook.render("${params.playbook}") returned no prompt path`);
-  }
-
-  const agentId = randomUUID();
-  const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
-  const sessionPath = join(sessionDir, "session.jsonl");
-
-  const record: AgentRecord = {
-    agentId,
-    playbook: params.playbook,
-    tier: params.tier,
-    sessionPath,
-    noSession: false,
-    systemPromptPath,
-    state: "running",
-    outputText: "",
-    exitCode: null,
-    exitSignal: null,
-    selfReap: false,
-    waiters: [],
-  };
-  registry.set(agentId, record);
-
-  const args = buildSpawnArgs({
-    mode: "spawn",
-    sessionPath,
-    noSession: false,
-    promptPath: systemPromptPath,
-    tools: resolveTools("full-worker", ctx.wsToolNames),
-    model: ctx.model,
-    task: params.task,
-  });
-  spawnPiProcess(record, args, ctx.cwd);
-
-  return { agentId, state: record.state };
+export interface ExploreParams {
+  query: string;
+  /**
+   * `false`/omitted (default): block until the leaf finishes and return its
+   * output directly. `true`: register a running entry and return
+   * immediately, for the caller to harvest later.
+   */
+  async?: boolean;
 }
 
-/**
- * Resumes a `state:"done"` worker's session file with a follow-up task, via
- * a fresh `pi --session <same-path>` process. Reuses the cached
- * `systemPromptPath` unchanged — no re-render — so the append-system-prompt
- * text does not duplicate across resumes.
- */
-export async function continueAgent(
-  registry: AgentRegistry,
-  ctx: Omit<AgentCallCtx, "sessionKey">,
-  agentId: string,
-  task: string,
-): Promise<{ agentId: string; state: AgentState }> {
-  const record = registry.get(agentId);
-  if (!record) {
-    throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
-  }
-  if (record.noSession) {
-    throw new Error(`ws-pi-agent: agent "${agentId}" has no persisted session (explore leaves cannot be continued)`);
-  }
-  if (record.state !== "done") {
-    throw new Error(`ws-pi-agent: agent "${agentId}" is not done yet (state="${record.state}"); wait for completion before continuing`);
-  }
-
-  record.state = "running";
-  record.exitCode = null;
-  record.exitSignal = null;
-  record.outputText = "";
-  record.stopReason = undefined;
-  record.errorMessage = undefined;
-
-  const args = buildSpawnArgs({
-    mode: "continue",
-    sessionPath: record.sessionPath,
-    noSession: false,
-    promptPath: record.systemPromptPath,
-    tools: resolveTools("full-worker", ctx.wsToolNames),
-    model: ctx.model,
-    task,
-  });
-  spawnPiProcess(record, args, ctx.cwd);
-
-  return { agentId, state: record.state };
-}
-
-export type WaitPolicy = "any" | "all";
-
-export interface WaitResultEntry {
-  agentId: string;
-  state: AgentState;
-  stopReason?: string;
-  output: string;
-  exitCode: number | null;
-  errorMessage?: string;
-}
-
-export interface WaitAgentsResult {
-  done: WaitResultEntry[];
-  pending: string[];
-  timedOut: boolean;
-}
-
-async function raceOrAll(promises: Promise<void>[], policy: WaitPolicy): Promise<void> {
-  if (policy === "any") {
-    await Promise.race(promises);
-  } else {
-    await Promise.all(promises);
-  }
-}
-
-function harvest(id: string, record: AgentRecord, registry: AgentRegistry): WaitResultEntry {
-  const entry: WaitResultEntry = {
-    agentId: id,
-    state: record.state,
-    stopReason: record.stopReason,
-    output: record.outputText,
-    exitCode: record.exitCode,
-    errorMessage: record.errorMessage,
-  };
+function harvestExplore(id: string, record: AgentRecord, registry: AgentRegistry): { output: string; stopReason?: string } {
+  const entry = { output: record.outputText, stopReason: record.stopReason };
   // Explore leaves have no continue path — reap right after the first
   // harvest instead of lingering in the registry forever.
   if (record.selfReap) {
@@ -541,78 +442,13 @@ function harvest(id: string, record: AgentRecord, registry: AgentRegistry): Wait
 }
 
 /**
- * Partitions `agentIds` into done/pending, waiting up to `timeoutMs` (if
- * given) for `policy` ("any" one, or "all") of them to reach `state:"done"`.
- * NEVER kills a running process on timeout (ticket #L215) — a timed-out
- * agent simply stays in the registry as `running` for a later wait/continue.
- */
-export async function waitAgents(
-  registry: AgentRegistry,
-  agentIds: string[],
-  policy: WaitPolicy,
-  timeoutMs?: number,
-): Promise<WaitAgentsResult> {
-  if (agentIds.length === 0) {
-    // Promise.race([]) never settles — an empty agentIds with policy:"any"
-    // and no timeout would otherwise hang ws-agent-wait forever. Fail fast
-    // instead (there is nothing to wait for by construction).
-    throw new Error('ws-pi-agent: waitAgents requires at least one agentId in "agent-ids"');
-  }
-
-  const records = agentIds.map((id) => {
-    const record = registry.get(id);
-    if (!record) {
-      throw new Error(`ws-pi-agent: unknown agentId "${id}"`);
-    }
-    return { id, record };
-  });
-
-  const waitPromise = raceOrAll(
-    records.map(({ record }) => waitForDone(record)),
-    policy,
-  );
-
-  let timedOut = false;
-  if (timeoutMs && timeoutMs > 0) {
-    let timer: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), timeoutMs);
-    });
-    const result = await Promise.race([waitPromise.then(() => "done" as const), timeoutPromise]);
-    clearTimeout(timer);
-    timedOut = result === "timeout";
-  } else {
-    await waitPromise;
-  }
-
-  const done: WaitResultEntry[] = [];
-  const pending: string[] = [];
-  for (const { id, record } of records) {
-    if (record.state === "done") {
-      done.push(harvest(id, record, registry));
-    } else {
-      pending.push(id);
-    }
-  }
-  return { done, pending, timedOut };
-}
-
-export interface ExploreParams {
-  query: string;
-  /**
-   * `false`/omitted (default): block until the leaf finishes and return its
-   * output directly. `true`: register a running entry and return
-   * immediately, for the caller to harvest later via `ws-agent-wait`
-   * alongside other in-flight agents.
-   */
-  async?: boolean;
-}
-
-/**
  * Thin one-shot `explore` preset: fixed `playbook: "explore"`,
  * `--tools=recon`, `--no-session`, no continuation. The leaf self-reaps from
- * the registry once its output has been harvested — either synchronously
- * here (default) or later via `ws-agent-wait` (when `async: true`).
+ * the registry once its output has been harvested — synchronously here by
+ * default (Phase 1 drops the shared `ws-agent-wait` integration this used to
+ * lean on for `async: true`, since that tool now only tracks the RPC-backed
+ * registry below; `async: true` still registers the running entry, it just
+ * has no dedicated harvesting tool of its own in this phase).
  */
 export async function exploreLeaf(
   client: McpStdioClient,
@@ -663,8 +499,385 @@ export async function exploreLeaf(
   }
 
   await waitForDone(record);
-  const harvested = harvest(agentId, record, registry);
+  const harvested = harvestExplore(agentId, record, registry);
   return { agentId, state: "done", output: harvested.output, stopReason: harvested.stopReason };
+}
+
+// ---------------------------------------------------------------------------
+// RPC-backed persistent-child engine (`ws-agent-spawn` / `ws-agent-send` /
+// `ws-agent-wait` / `ws-agent-list` / `ws-agent-stop`).
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `new RpcClient(...)` construction passes `cliPath: process.argv[1]`
+ * explicitly — spawn and resume-from-dormant alike. `RpcClient.start()` in
+ * the installed `@earendil-works/pi-coding-agent` package always does
+ * `spawn("node", [cliPath, ...args])` with `cliPath = this.options.cliPath
+ * ?? "dist/cli.js"`; there is no bare-`pi` fallback inside `RpcClient`
+ * itself (unlike this module's own `getPiInvocation()` used by the one-shot
+ * `explore` path above). If `process.argv[1]` is ever missing/non-existent
+ * there is no client-side fallback path — this is the ticket's settled
+ * answer, carried forward as-is, not something to re-derive.
+ */
+const RPC_CLI_PATH = process.argv[1];
+
+export interface RpcAgentRecord {
+  agentId: string;
+  /** The live RPC child, or `undefined` when dormant (stopped but resumable — D-C). */
+  client?: RpcClient;
+  /** Absolute path to the ws-owned `--session` file, reused unchanged across every (re)start. */
+  sessionPath: string;
+  /** Lead-rendered playbook prompt path, passed via `--append-system-prompt`; reused unchanged across resumes (no re-render). */
+  systemPromptPath: string;
+  /** Resolved `provider/id`, or undefined to inherit pi's own default resolution. Cached so a dormant resume reuses the same model. */
+  modelBase?: string;
+  /** Caller-supplied thinking level, applied via `setThinkingLevel()` after every (re)start. */
+  modelEffort?: string;
+  /** Cached bridge `ws__*` tool names, for `--tools` re-resolution on a dormant resume. */
+  wsToolNames: readonly string[];
+  /** `true` while an agent run is actively looping (between `agent_start` and `agent_settled`). */
+  streaming: boolean;
+  /** Edge-consume flag: set by the `agent_settled` listener, cleared by whichever `ws-agent-wait` call harvests it first. */
+  idlePending: boolean;
+  waiters: Array<() => void>;
+  /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
+  lastText?: string;
+  /** Detaches the current `client.onEvent(...)` listener; re-armed on every (re)start. */
+  unsubscribe?: () => void;
+}
+
+export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
+
+export type AgentStatus = "running" | "idle" | "dormant";
+
+export interface SpawnAgentParams {
+  systemPromptPath: string;
+  prompt: string;
+  modelName?: string;
+  modelEffort?: string;
+}
+
+export interface RpcSpawnCtx {
+  cwd: string;
+  /** `provider/id`, forwarded from the calling tool-execute ctx.model, or undefined to inherit pi's own default. */
+  inheritModel?: string;
+  /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
+  wsToolNames: readonly string[];
+  /** Path to the adapter-owned model-catalog data file, read fresh per spawn. */
+  modelCatalogPath: string;
+}
+
+export interface RpcResumeCtx {
+  cwd: string;
+}
+
+function buildRpcClientOptions(
+  cwd: string,
+  model: string | undefined,
+  sessionPath: string,
+  systemPromptPath: string,
+  tools: string,
+): RpcClientOptions {
+  return {
+    cliPath: RPC_CLI_PATH,
+    cwd,
+    model,
+    args: ["--session", sessionPath, "--append-system-prompt", systemPromptPath, "--tools", tools],
+  };
+}
+
+/**
+ * Applies an `agent_start`/`agent_settled` RPC event onto `record`'s
+ * locally-tracked streaming state. Exported so the idle-edge-consume waiter
+ * logic (`ws-agent-send`'s prompt-vs-followUp/steer branch, `ws-agent-wait`'s
+ * `idlePending` fast path) has direct unit coverage without a real
+ * `RpcClient` subprocess — mirrors `handleAgentEvent`'s test-injection
+ * pattern for the one-shot `explore` path above. All other event types are
+ * ignored here; they only matter to a live streaming UI, not to this
+ * module's idle/running bookkeeping.
+ */
+export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string }): void {
+  if (evt.type === "agent_start") {
+    record.streaming = true;
+  } else if (evt.type === "agent_settled") {
+    record.streaming = false;
+    record.idlePending = true;
+    settleWaiters(record);
+  }
+}
+
+function attachEventListener(record: RpcAgentRecord, client: RpcClient): void {
+  record.unsubscribe = client.onEvent((evt) => applyRpcEvent(record, evt as { type?: string }));
+}
+
+/**
+ * Best-effort `setThinkingLevel()` after `start()`: Pi has no separate
+ * `--reasoning-effort` CLI launch flag, so `model_effort` is applied as a
+ * live post-start RPC call instead (decoupled from whether `model_name` was
+ * also given). Never hard-fails — an unsupported/unrecognized level string
+ * degrades to a no-op, matching the ticket's own fallback wording (Out of
+ * Scope: validating against Pi's exact `ThinkingLevel` enum is not this
+ * phase's job; the caller's string is forwarded as-is).
+ */
+async function applyModelEffort(client: RpcClient, modelEffort: string | undefined): Promise<void> {
+  if (!modelEffort) return;
+  try {
+    await client.setThinkingLevel(modelEffort as Parameters<RpcClient["setThinkingLevel"]>[0]);
+  } catch {
+    // never-hard-fail — see doc comment above.
+  }
+}
+
+/**
+ * Spawns a persistent `RpcClient` child from an already-rendered system
+ * prompt file. Unlike the Phase 2-3 spawner, this performs **no**
+ * `playbook.render` call itself (D-A): the caller (the lead) renders the
+ * playbook and passes the resulting path directly as `systemPromptPath`.
+ *
+ * `modelBase` resolves `model_name`-first (against the alias table), falling
+ * back to `ctx.inheritModel` unchanged when `model_name` is unset or
+ * unmapped — same shape as `resolveModelForAlias` (and the old tier-based
+ * `resolveModelForTier` it replaces).
+ *
+ * Returns as soon as `client.prompt()` has sent the initial message — that
+ * call only awaits transmission, not full-run completion (docs/rpc.md) — so
+ * this satisfies the ticket's "returns immediately" contract while still
+ * surfacing a synchronous spawn-time failure (bad `cliPath`, provider auth)
+ * to the caller instead of swallowing it.
+ */
+export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, params: SpawnAgentParams): Promise<{ agent_id: string }> {
+  const agentId = randomUUID();
+  const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
+  const sessionPath = join(sessionDir, "session.jsonl");
+
+  const catalogConfig = params.modelName ? readModelCatalog(ctx.modelCatalogPath) : undefined;
+  const modelBase = resolveModelForAlias(catalogConfig, params.modelName, ctx.inheritModel);
+
+  const record: RpcAgentRecord = {
+    agentId,
+    sessionPath,
+    systemPromptPath: params.systemPromptPath,
+    modelBase,
+    modelEffort: params.modelEffort,
+    wsToolNames: ctx.wsToolNames,
+    streaming: false,
+    idlePending: false,
+    waiters: [],
+  };
+  registry.set(agentId, record);
+
+  const client = new RpcClient(
+    buildRpcClientOptions(ctx.cwd, modelBase, sessionPath, params.systemPromptPath, resolveTools("full-worker", ctx.wsToolNames)),
+  );
+  record.client = client;
+
+  await client.start();
+  await applyModelEffort(client, params.modelEffort);
+  attachEventListener(record, client);
+  await client.prompt(params.prompt);
+
+  return { agent_id: agentId };
+}
+
+/**
+ * Delivers `message` to `agentId`, branching on locally-tracked streaming
+ * state — this is a real behavior gap in the ticket's literal
+ * `followUp()`/`steer()` tool mapping, traced through the installed
+ * package's RPC mode and agent-loop source: `followUp`/`steer` only
+ * *enqueue*; the queue is drained solely inside an *active* agent-loop run.
+ * A freshly-started or freshly-resumed idle client has no active run, so
+ * calling `followUp()`/`steer()` against it would silently queue a message
+ * that is never delivered. So:
+ *
+ * - Dormant (`!record.client`): rebuild a fresh `RpcClient` against the
+ *   SAME cached session/prompt/model (auto-resume, D-C), then deliver via
+ *   `prompt()` regardless of `interrupt` — nothing is running yet to
+ *   interrupt or queue behind. This is also where D-C's "auto-resumed child
+ *   on the SAME ws session_key" lineage falls out for free: the reused
+ *   `systemPromptPath` already has any session key spliced in by the lead's
+ *   own prior `playbook.render` call, and passing it unchanged via
+ *   `--append-system-prompt` on every relaunch never re-derives or
+ *   duplicates it.
+ * - Live and idle (including the instant after this function's own
+ *   auto-resume branch, or right after `spawnAgent`'s initial `prompt()`
+ *   settles): also `prompt()`, regardless of `interrupt`.
+ * - Live and streaming: `interrupt ? steer() : followUp()`, per the
+ *   ticket's literal flag semantics — this is the one case where an active
+ *   run actually exists for the queue to drain into.
+ */
+export async function sendToAgent(
+  registry: RpcAgentRegistry,
+  ctx: RpcResumeCtx,
+  agentId: string,
+  message: string,
+  interrupt?: boolean,
+): Promise<{ agent_id: string }> {
+  const record = registry.get(agentId);
+  if (!record) {
+    throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
+  }
+
+  if (!record.client) {
+    const client = new RpcClient(
+      buildRpcClientOptions(ctx.cwd, record.modelBase, record.sessionPath, record.systemPromptPath, resolveTools("full-worker", record.wsToolNames)),
+    );
+    record.client = client;
+    record.idlePending = false;
+    await client.start();
+    await applyModelEffort(client, record.modelEffort);
+    attachEventListener(record, client);
+    await client.prompt(message);
+    return { agent_id: agentId };
+  }
+
+  if (record.streaming) {
+    if (interrupt) {
+      await record.client.steer(message);
+    } else {
+      await record.client.followUp(message);
+    }
+  } else {
+    await record.client.prompt(message);
+  }
+  return { agent_id: agentId };
+}
+
+/**
+ * Pure selection helper: the first entry (in caller-given order) whose
+ * `idlePending` edge-consume flag is already latched, or `undefined` when
+ * none is. Split out of `waitForAgents` so the "already-settled since the
+ * last wait/send" fast path is directly unit-testable against fake records
+ * with no async plumbing or real `RpcClient` involved.
+ */
+export function firstIdlePendingAgentId(records: ReadonlyArray<{ id: string; record: RpcAgentRecord }>): string | undefined {
+  return records.find(({ record }) => record.idlePending)?.id;
+}
+
+export interface WaitForAgentsResult {
+  agent_id?: string;
+  last_message?: string;
+  timed_out: boolean;
+}
+
+async function harvestLastMessage(record: RpcAgentRecord): Promise<string | undefined> {
+  if (!record.client) return record.lastText;
+  try {
+    const text = await record.client.getLastAssistantText();
+    if (text !== null && text !== undefined) {
+      record.lastText = text;
+    }
+  } catch {
+    // best effort — fall back to whatever lastText was last cached.
+  }
+  return record.lastText;
+}
+
+/**
+ * Races `agentIds` for the first to settle (`agent_settled`), NEVER killing
+ * a still-running agent on timeout — a timed-out wait simply leaves every
+ * agent registered exactly as it was for a later wait/send. Drops the old
+ * `policy: "any"|"all"` axis entirely (Phase 1's `ws-agent-wait(agent_ids[],
+ * timeout?)` signature always behaves as first-finisher).
+ *
+ * An agent whose `idlePending` flag is already latched at call time (it
+ * settled since the last wait/send) is harvested immediately with no race
+ * at all — see `firstIdlePendingAgentId`.
+ */
+export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string[], timeoutMs?: number): Promise<WaitForAgentsResult> {
+  if (agentIds.length === 0) {
+    // Racing zero promises would never settle — an empty agentIds with no
+    // timeout would otherwise hang ws-agent-wait forever. Fail fast instead.
+    throw new Error('ws-pi-agent: waitForAgents requires at least one agentId in "agent_ids"');
+  }
+
+  const records = agentIds.map((id) => {
+    const record = registry.get(id);
+    if (!record) {
+      throw new Error(`ws-pi-agent: unknown agentId "${id}"`);
+    }
+    return { id, record };
+  });
+
+  const alreadyIdle = firstIdlePendingAgentId(records);
+  if (alreadyIdle) {
+    const record = registry.get(alreadyIdle) as RpcAgentRecord;
+    record.idlePending = false;
+    return { agent_id: alreadyIdle, last_message: await harvestLastMessage(record), timed_out: false };
+  }
+
+  const winner = new Promise<string>((resolve) => {
+    for (const { id, record } of records) {
+      record.waiters.push(() => resolve(id));
+    }
+  });
+
+  let winnerId: string | undefined;
+  if (timeoutMs && timeoutMs > 0) {
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    const result = await Promise.race([winner, timeoutPromise]);
+    clearTimeout(timer);
+    if (result !== "timeout") winnerId = result;
+  } else {
+    winnerId = await winner;
+  }
+
+  if (!winnerId) {
+    return { timed_out: true };
+  }
+
+  const winnerRecord = registry.get(winnerId) as RpcAgentRecord;
+  winnerRecord.idlePending = false;
+  return { agent_id: winnerId, last_message: await harvestLastMessage(winnerRecord), timed_out: false };
+}
+
+/**
+ * Maps every registered agent to a `{agent_id, status}` pair: `"dormant"`
+ * when there is no live client (stopped, resumable — D-C), else
+ * `"running"`/`"idle"` from the locally-tracked streaming flag. Pure — no
+ * IO, no RPC round trip — so directly unit-testable against fake records.
+ */
+export function listAgents(registry: RpcAgentRegistry): Array<{ agent_id: string; status: AgentStatus }> {
+  return [...registry.entries()].map(([agentId, record]) => ({
+    agent_id: agentId,
+    status: record.client ? (record.streaming ? "running" : "idle") : "dormant",
+  }));
+}
+
+/**
+ * Best-effort graceful stop of `agentId`'s live RPC child (`abort()` then
+ * `stop()`, both best-effort — a child that already exited or never
+ * finished starting must not turn a routine stop into an unhandled
+ * rejection). The registry entry is NEVER deleted here — per D-C, a stopped
+ * agent stays registered as dormant/resumable; `ws-agent-send` auto-resumes
+ * it later via the same cached session file. Throws only when `agentId`
+ * itself is unknown.
+ */
+export async function stopAgent(registry: RpcAgentRegistry, agentId: string): Promise<{ agent_id: string }> {
+  const record = registry.get(agentId);
+  if (!record) {
+    throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
+  }
+  const client = record.client;
+  if (client) {
+    try {
+      await client.abort();
+    } catch {
+      // best effort
+    }
+    try {
+      await client.stop();
+    } catch {
+      // best effort
+    }
+    record.unsubscribe?.();
+    record.unsubscribe = undefined;
+    record.client = undefined;
+    record.streaming = false;
+  }
+  return { agent_id: agentId };
 }
 
 // ---------------------------------------------------------------------------
@@ -672,51 +885,40 @@ export async function exploreLeaf(
 // ---------------------------------------------------------------------------
 
 export interface AgentToolsHandle {
-  /** Best-effort SIGTERM over any still-`running` registry entries (session_shutdown cleanup). */
-  killRunning(): void;
+  /**
+   * Graceful teardown for `session_shutdown`: awaits a best-effort
+   * `client.stop()` over every live RPC-backed child (renamed from the old
+   * synchronous `killRunning` — the shutdown semantics changed from a fire-
+   * and-forget SIGTERM to an awaited graceful RPC stop), plus a SIGTERM of
+   * any still-running one-shot `explore` process (that machinery is
+   * untouched, so it keeps the old kill style).
+   */
+  stopAll(): Promise<void>;
 }
 
 /**
- * Pure tier-first, inherit-fallback model resolution: when `tier` is given
- * and mapped in `config`, that `provider/id` wins; otherwise (no `tier`,
- * catalog unset, or that specific tier unmapped) falls back to
- * `inheritModel` unchanged. Split out from `registerAgentTools`'s
- * `resolveModel` closure (which owns the IO — re-reading the catalog file
- * fresh per call) so the resolution rule itself is directly unit-testable
- * with no file I/O or toolCtx shape involved, matching this module's
- * existing pure-helper/IO-wrapper split (e.g. `buildSpawnArgs` vs
- * `spawnPiProcess`).
- */
-export function resolveModelForTier(
-  config: ModelCatalogConfig | undefined,
-  tier: ModelTier | undefined,
-  inheritModel: string | undefined,
-): string | undefined {
-  if (tier) {
-    const tierModel = resolveTierModel(config, tier);
-    if (tierModel) return tierModel;
-  }
-  return inheritModel;
-}
-
-/**
- * Registers the four delegation-spawner tools (`ws-agent-spawn`,
- * `ws-agent-continue`, `ws-agent-wait`, `explore`) against the extension's
- * own module-state registry, reusing the bridge's already-connected
- * `McpStdioClient` and default session key (threaded out via `BridgeHandle`)
- * rather than opening a second ws-mcp connection.
+ * Registers the five RPC-backed delegation tools (`ws-agent-spawn`,
+ * `ws-agent-send`, `ws-agent-wait`, `ws-agent-list`, `ws-agent-stop`) plus
+ * the unchanged one-shot `explore` tool, against two separate in-extension
+ * registries: `rpcRegistry` (RPC-backed, persistent children) and
+ * `exploreRegistry` (one-shot, self-reaping recon leaves). They are kept
+ * separate rather than unified because their completion signals are
+ * fundamentally different (an `agent_settled` RPC event vs. a child
+ * process's `close` event) — see `waitForAgents` vs `waitForDone`.
  *
- * MVP depth is 0->1 leaf: none of these four tools are themselves part of
- * any `TOOL_GROUPS` entry, so a depth-1 worker/leaf spawned through them
- * never receives a nested-spawn tool in its own `--tools` allowlist even
- * though its own `pi` process loads this same extension.
+ * MVP depth is 0->1 leaf (D-B): none of the five `ws-agent-*` tools are
+ * themselves part of any `TOOL_GROUPS` entry, so a worker spawned through
+ * `ws-agent-spawn` never receives a nested-spawn tool in its own `--tools`
+ * allowlist even though its own `pi` process loads this same extension —
+ * only the non-recursive `explore` leaf is reachable from a worker.
  */
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
   sessionCtx: { cwd: string; modelCatalogPath: string },
 ): AgentToolsHandle {
-  const registry: AgentRegistry = new Map();
+  const rpcRegistry: RpcAgentRegistry = new Map();
+  const exploreRegistry: AgentRegistry = new Map();
 
   function inheritModel(toolCtx: unknown): string | undefined {
     const model = (toolCtx as { model?: { provider?: string; id?: string } } | undefined)?.model;
@@ -724,71 +926,83 @@ export function registerAgentTools(
   }
 
   /**
-   * IO wrapper around `resolveModelForTier`: re-reads the model-catalog file
-   * fresh on every call (no caching) so a hand-edit applies without
-   * restarting Pi, matching bridge.ts's workflow_manual advisory's
-   * no-caching choice.
+   * IO wrapper around `resolveModelForAlias` for `explore`'s implicit
+   * `"small"` lookup: re-reads the model-catalog file fresh on every call
+   * (no caching) so a hand-edit applies without restarting Pi, matching
+   * bridge.ts's workflow_manual advisory's no-caching choice.
    */
-  function resolveModel(toolCtx: unknown, tier: ModelTier | undefined): string | undefined {
-    const config = tier ? readModelCatalog(sessionCtx.modelCatalogPath) : undefined;
-    return resolveModelForTier(config, tier, inheritModel(toolCtx));
+  function resolveExploreModel(toolCtx: unknown): string | undefined {
+    const config = readModelCatalog(sessionCtx.modelCatalogPath);
+    return resolveModelForAlias(config, "small", inheritModel(toolCtx));
   }
 
   pi.registerTool({
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a delegated pi subagent as a background process, rendering `playbook` via ws/playbook.render as its system-prompt append. Returns immediately with a running registry entry; harvest with ws-agent-wait.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id} immediately after the initial prompt is sent; harvest progress with ws-agent-wait.",
     parameters: {
       type: "object",
       properties: {
-        playbook: { type: "string", description: 'Playbook stem to render, e.g. "implementer".' },
-        task: { type: "string", description: "Task text passed as the spawned process's initial prompt." },
-        tier: {
+        system_prompt_path: {
+          type: "string",
+          description: "Path to the lead-rendered playbook prompt file, appended as the child's system prompt via --append-system-prompt.",
+        },
+        prompt: { type: "string", description: "Initial task prompt sent to the spawned agent." },
+        model_name: {
           type: "string",
           description:
-            'Model tier hint ("small"|"medium"|"large"|"xlarge"), resolved against model-catalog.json; falls back to inherit (the calling session\'s model) when unset, unmapped, or unrecognized.',
+            "Optional alias name resolved against model-catalog.json's aliases map; omitted or unmapped inherits the parent session's model.",
+        },
+        model_effort: {
+          type: "string",
+          description:
+            "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max), applied via setThinkingLevel after start; an unsupported value degrades to a no-op.",
         },
       },
-      required: ["playbook", "task"],
+      required: ["system_prompt_path", "prompt"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
-      const p = params as SpawnAgentParams;
+      const p = params as { system_prompt_path: string; prompt: string; model_name?: string; model_effort?: string };
       const result = await spawnAgent(
-        bridge.client,
-        registry,
+        rpcRegistry,
         {
-          sessionKey: bridge.defaultSessionKeyRef.current ?? "",
           cwd: sessionCtx.cwd,
-          model: resolveModel(toolCtx, asModelTier(p.tier)),
+          inheritModel: inheritModel(toolCtx),
           wsToolNames: bridge.wsToolNames,
+          modelCatalogPath: sessionCtx.modelCatalogPath,
         },
-        p,
+        {
+          systemPromptPath: p.system_prompt_path,
+          prompt: p.prompt,
+          modelName: p.model_name,
+          modelEffort: p.model_effort,
+        },
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
 
   pi.registerTool({
-    name: "ws-agent-continue",
-    label: "ws-agent-continue",
-    description: "Resume a done agent's session with a follow-up task, reusing its cached system prompt and session file.",
+    name: "ws-agent-send",
+    label: "ws-agent-send",
+    description:
+      "Send a message to a spawned agent. Delivers via prompt() when idle (including immediately after auto-resuming a dormant agent); while mid-stream, interrupt:true steers it and interrupt:false/omitted queues a follow-up. A dormant (ws-agent-stop'd) agent_id is auto-resumed from its cached session file first.",
     parameters: {
       type: "object",
       properties: {
-        agentId: { type: "string", description: "agentId returned by ws-agent-spawn." },
-        task: { type: "string", description: "Follow-up task text for the resumed session." },
+        agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." },
+        message: { type: "string", description: "Message text to deliver." },
+        interrupt: {
+          type: "boolean",
+          description: "While the agent is mid-stream: true steers (interrupts) it, false/omitted queues a follow-up. Ignored while idle or dormant.",
+        },
       },
-      required: ["agentId", "task"],
+      required: ["agent_id", "message"],
     } as never,
-    async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
-      const p = params as { agentId: string; task: string };
-      const result = await continueAgent(
-        registry,
-        { cwd: sessionCtx.cwd, model: resolveModel(toolCtx, undefined), wsToolNames: bridge.wsToolNames },
-        p.agentId,
-        p.task,
-      );
+    async execute(_toolCallId, params) {
+      const p = params as { agent_id: string; message: string; interrupt?: boolean };
+      const result = await sendToAgent(rpcRegistry, { cwd: sessionCtx.cwd }, p.agent_id, p.message, p.interrupt);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -797,19 +1011,46 @@ export function registerAgentTools(
     name: "ws-agent-wait",
     label: "ws-agent-wait",
     description:
-      "Wait for any or all of the given agentIds to finish (gated on their process exit, not merely an in-stream stopReason). Never kills a running process on timeout.",
+      "Wait for the first of the given agent_ids to settle (agent_settled), returning its agent_id and last assistant message. Never kills a running agent on timeout.",
     parameters: {
       type: "object",
       properties: {
-        "agent-ids": { type: "array", items: { type: "string" }, description: "agentIds to wait on." },
-        policy: { type: "string", enum: ["any", "all"], description: 'Wait for "any" one, or "all", of the given agents.' },
+        agent_ids: { type: "array", items: { type: "string" }, description: "agentIds to race for first-finisher." },
         timeout: { type: "number", description: "Optional timeout in milliseconds." },
       },
-      required: ["agent-ids", "policy"],
+      required: ["agent_ids"],
     } as never,
     async execute(_toolCallId, params) {
-      const p = params as { "agent-ids": string[]; policy: WaitPolicy; timeout?: number };
-      const result = await waitAgents(registry, p["agent-ids"], p.policy, p.timeout);
+      const p = params as { agent_ids: string[]; timeout?: number };
+      const result = await waitForAgents(rpcRegistry, p.agent_ids, p.timeout);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "ws-agent-list",
+    label: "ws-agent-list",
+    description: "List every tracked agent_id and its status (running/idle/dormant).",
+    parameters: { type: "object", properties: {} } as never,
+    async execute() {
+      const result = listAgents(rpcRegistry);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "ws-agent-stop",
+    label: "ws-agent-stop",
+    description:
+      "Gracefully stop a spawned agent's live RPC process. It stays registered as dormant/resumable — ws-agent-send auto-resumes it later via its cached session file.",
+    parameters: {
+      type: "object",
+      properties: { agent_id: { type: "string", description: "agentId returned by ws-agent-spawn." } },
+      required: ["agent_id"],
+    } as never,
+    async execute(_toolCallId, params) {
+      const p = params as { agent_id: string };
+      const result = await stopAgent(rpcRegistry, p.agent_id);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });
@@ -825,7 +1066,7 @@ export function registerAgentTools(
         query: { type: "string", description: "One-shot exploration question." },
         async: {
           type: "boolean",
-          description: "When true, returns immediately with a running registry entry for ws-agent-wait instead of blocking until done.",
+          description: "When true, returns immediately with a running registry entry instead of blocking until done.",
         },
       },
       required: ["query"],
@@ -834,11 +1075,11 @@ export function registerAgentTools(
       const p = params as ExploreParams;
       const result = await exploreLeaf(
         bridge.client,
-        registry,
-        // explore resolves implicitly through the "small" tier — no
-        // caller-facing tier param on ExploreParams (ticket: explore is a
-        // role, not a caller-supplied tier).
-        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolveModel(toolCtx, "small") },
+        exploreRegistry,
+        // explore resolves implicitly through the "small" alias — no
+        // caller-facing model param on ExploreParams (ticket: explore is a
+        // role, not a caller-supplied alias/tier).
+        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolveExploreModel(toolCtx) },
         p,
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
@@ -846,8 +1087,13 @@ export function registerAgentTools(
   });
 
   return {
-    killRunning() {
-      for (const record of registry.values()) {
+    async stopAll(): Promise<void> {
+      const rpcStops = [...rpcRegistry.values()]
+        .filter((record): record is RpcAgentRecord & { client: RpcClient } => !!record.client)
+        .map((record) => record.client.stop().catch(() => {}));
+      await Promise.allSettled(rpcStops);
+
+      for (const record of exploreRegistry.values()) {
         if (record.state === "running" && record.proc && !record.proc.killed) {
           try {
             record.proc.kill();

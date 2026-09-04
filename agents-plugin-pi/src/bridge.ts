@@ -75,26 +75,27 @@ function firstText(result: McpToolCallResult): string | undefined {
 
 /**
  * Advisory appended to every `workflow_manual` response while the model
- * catalog's `small` tier is unset. Mirrors the Go core's blockquote
+ * catalog's alias table is empty. Mirrors the Go core's blockquote
  * bootstrap-staleness-advisory convention (`bootstrap_alarm.go`) — a `>
  * [!note]`-style block, re-warning on every read while the condition holds
  * rather than once per session (no ticket-mandated exact copy).
  */
 export const MODEL_CATALOG_ADVISORY =
   "> [!note]\n" +
-  "> **Pi model tier map is unset.** ws-agent-spawn and explore currently " +
+  "> **Pi model alias table is empty.** ws-agent-spawn and explore currently " +
   "silently inherit the parent session's model for every delegated agent — " +
-  "costly for cheap recon/explore work. Configure at least the `small` tier " +
-  "in `agents-plugin-pi/model-catalog.json` (sibling to `runtime.json`) to " +
-  "route explore/recon to a cheaper model; other tiers (`medium`, `large`, " +
-  "`xlarge`) are optional. Changes apply immediately — no restart needed.";
+  "costly for cheap recon/explore work. Curate at least a `small` alias " +
+  "in `agents-plugin-pi/model-catalog.json`'s `aliases` map (sibling to " +
+  "`runtime.json`) to route explore/recon to a cheaper model; other alias " +
+  "names are entirely up to you. Changes apply immediately — no restart " +
+  "needed.";
 
 /**
  * Appends `MODEL_CATALOG_ADVISORY` as a new `{type:"text"}` item onto a
  * COPY of `content` (never mutated in place) when `rawName ===
- * "workflow_manual"` and the catalog's `small`/explore tier is unset;
- * otherwise returns `content` unchanged (same reference). Extracted as a
- * pure function — independent of the live MCP round-trip — so the
+ * "workflow_manual"` and the catalog's alias table is empty; otherwise
+ * returns `content` unchanged (same reference). Extracted as a pure
+ * function — independent of the live MCP round-trip — so the
  * append-not-prepend/copy-not-mutate/unset-gated contract is directly
  * unit-testable, same as resolveSessionKey/withOptionalSessionKey above.
  */

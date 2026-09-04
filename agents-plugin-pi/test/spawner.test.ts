@@ -1,13 +1,20 @@
 /**
  * Unit tests for spawner.ts's pure-logic seams: resolveTools,
  * isTerminalStopReason, buildSpawnArgs, AgentEventLineBuffer's
- * multibyte-split safety, and handleAgentEvent's state-non-mutation
- * invariant.
+ * multibyte-split safety, handleAgentEvent's state-non-mutation invariant
+ * (one-shot `explore` path), resolveModelForAlias (Phase 1's alias-first,
+ * inherit-fallback resolution, replacing the old tier-based
+ * resolveModelForTier), applyRpcEvent's streaming/idlePending bookkeeping,
+ * firstIdlePendingAgentId's idle-edge-consume selection, and listAgents's
+ * status mapping — the RPC-backed registry's seam-extractable pure logic
+ * (Phase 1 ticket verification boundary: "Registry/select logic
+ * unit-tested where seam-extractable").
  *
- * The async spawn/continue/wait engine (spawnAgent/continueAgent/waitAgents/
- * exploreLeaf) is exercised only by the live gate (a lead-scoped Pi session
- * spawning a real `pi` child process) — not here, per the plan's
- * Verification Plan split between unit and live coverage.
+ * The real RpcClient-backed spawn/send/wait/stop engine (spawnAgent/
+ * sendToAgent/waitForAgents/stopAgent) and the one-shot exploreLeaf are
+ * exercised only by the live gate (a lead-scoped Pi session spawning a real
+ * `pi` child process) — not here, per the plan's Verification Plan split
+ * between unit and live coverage; this file never mocks RpcClient itself.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -21,10 +28,15 @@ import {
   AgentEventLineBuffer,
   TOOL_GROUPS,
   handleAgentEvent,
-  resolveModelForTier,
-  asModelTier,
+  resolveModelForAlias,
+  applyRpcEvent,
+  firstIdlePendingAgentId,
+  listAgents,
   type AgentRecord,
+  type RpcAgentRecord,
+  type RpcAgentRegistry,
 } from "../src/spawner.ts";
+import type { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ModelCatalogConfig } from "../src/model-catalog.ts";
 
 function freshRunningRecord(): AgentRecord {
@@ -284,53 +296,131 @@ describe("AgentEventLineBuffer", () => {
   });
 });
 
-describe("resolveModelForTier", () => {
+describe("resolveModelForAlias", () => {
   const catalog: ModelCatalogConfig = {
-    tiers: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
+    aliases: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
   };
 
-  test("tier set + mapped in catalog -> resolved model", () => {
-    assert.equal(resolveModelForTier(catalog, "small", "inherited/model"), "openrouter/cheap-model");
-    assert.equal(resolveModelForTier(catalog, "large", "inherited/model"), "openrouter/big-model");
+  test("alias set + mapped in catalog -> resolved model", () => {
+    assert.equal(resolveModelForAlias(catalog, "small", "inherited/model"), "openrouter/cheap-model");
+    assert.equal(resolveModelForAlias(catalog, "large", "inherited/model"), "openrouter/big-model");
   });
 
-  test("tier set + catalog present but that tier unmapped -> inherit", () => {
-    assert.equal(resolveModelForTier(catalog, "medium", "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForTier(catalog, "xlarge", undefined), undefined);
+  test("alias set + catalog present but that alias unmapped -> inherit", () => {
+    assert.equal(resolveModelForAlias(catalog, "medium", "inherited/model"), "inherited/model");
+    assert.equal(resolveModelForAlias(catalog, "xlarge", undefined), undefined);
   });
 
-  test("no tier (spawn regression) -> inherit unchanged", () => {
-    assert.equal(resolveModelForTier(catalog, undefined, "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForTier(catalog, undefined, undefined), undefined);
+  test("no alias (model_name omitted) -> inherit unchanged", () => {
+    assert.equal(resolveModelForAlias(catalog, undefined, "inherited/model"), "inherited/model");
+    assert.equal(resolveModelForAlias(catalog, undefined, undefined), undefined);
   });
 
-  test("tier set but catalog unset -> inherit", () => {
-    assert.equal(resolveModelForTier(undefined, "small", "inherited/model"), "inherited/model");
+  test("alias set but catalog unset -> inherit", () => {
+    assert.equal(resolveModelForAlias(undefined, "small", "inherited/model"), "inherited/model");
   });
 
-  test("explore's implicit small tier -> resolved when catalog has tiers.small, inherit otherwise", () => {
-    assert.equal(resolveModelForTier(catalog, "small", "inherited/model"), "openrouter/cheap-model");
-    const unmappedSmall: ModelCatalogConfig = { tiers: { large: "openrouter/big-model" } };
-    assert.equal(resolveModelForTier(unmappedSmall, "small", "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForTier(undefined, "small", "inherited/model"), "inherited/model");
+  test("explore's implicit small alias -> resolved when catalog has aliases.small, inherit otherwise", () => {
+    assert.equal(resolveModelForAlias(catalog, "small", "inherited/model"), "openrouter/cheap-model");
+    const unmappedSmall: ModelCatalogConfig = { aliases: { large: "openrouter/big-model" } };
+    assert.equal(resolveModelForAlias(unmappedSmall, "small", "inherited/model"), "inherited/model");
+    assert.equal(resolveModelForAlias(undefined, "small", "inherited/model"), "inherited/model");
+  });
+
+  test("an arbitrary user-chosen alias name (not one of the old four tier names) resolves normally", () => {
+    const reviewerCatalog: ModelCatalogConfig = { aliases: { reviewer: "openrouter/big-model" } };
+    assert.equal(resolveModelForAlias(reviewerCatalog, "reviewer", "inherited/model"), "openrouter/big-model");
   });
 });
 
-describe("asModelTier", () => {
-  test("passes through each of the four valid tier values", () => {
-    assert.equal(asModelTier("small"), "small");
-    assert.equal(asModelTier("medium"), "medium");
-    assert.equal(asModelTier("large"), "large");
-    assert.equal(asModelTier("xlarge"), "xlarge");
+function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
+  return {
+    agentId: "rpc-agent-1",
+    sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
+    systemPromptPath: "/tmp/ws-pi-agent-x/prompt.md",
+    wsToolNames: [],
+    streaming: false,
+    idlePending: false,
+    waiters: [],
+    ...overrides,
+  };
+}
+
+describe("applyRpcEvent", () => {
+  test("agent_start flips streaming true, leaves idlePending untouched", () => {
+    const record = freshRpcRecord({ idlePending: true });
+    applyRpcEvent(record, { type: "agent_start" });
+    assert.equal(record.streaming, true);
+    assert.equal(record.idlePending, true, "agent_start must not clear a still-latched idlePending flag");
   });
 
-  test("an unrecognized tier value resolves to undefined (unset/inherit), not a validation error", () => {
-    assert.equal(asModelTier("huge"), undefined);
-    assert.equal(asModelTier(""), undefined);
+  test("agent_settled flips streaming false, latches idlePending, and settles waiters", () => {
+    const record = freshRpcRecord({ streaming: true });
+    let settled = false;
+    record.waiters.push(() => {
+      settled = true;
+    });
+    applyRpcEvent(record, { type: "agent_settled" });
+    assert.equal(record.streaming, false);
+    assert.equal(record.idlePending, true);
+    assert.equal(settled, true, "agent_settled must drain and resolve pending waiters");
+    assert.deepEqual(record.waiters, [], "waiters array must be drained after settling");
   });
 
-  test("undefined stays undefined", () => {
-    assert.equal(asModelTier(undefined), undefined);
+  test("other event types (e.g. message_update) are ignored — no streaming/idlePending mutation", () => {
+    const record = freshRpcRecord({ streaming: true, idlePending: false });
+    applyRpcEvent(record, { type: "message_update" });
+    assert.equal(record.streaming, true);
+    assert.equal(record.idlePending, false);
+  });
+});
+
+describe("firstIdlePendingAgentId", () => {
+  test("returns undefined when no record has idlePending latched", () => {
+    const records = [
+      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b" }) },
+    ];
+    assert.equal(firstIdlePendingAgentId(records), undefined);
+  });
+
+  test("returns the first (in given order) record with idlePending latched", () => {
+    const records = [
+      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b", idlePending: true }) },
+      { id: "c", record: freshRpcRecord({ agentId: "c", idlePending: true }) },
+    ];
+    assert.equal(firstIdlePendingAgentId(records), "b");
+  });
+});
+
+describe("listAgents", () => {
+  test("maps a record with no live client to status dormant", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant" }]);
+  });
+
+  test("maps a live, non-streaming record to status idle", () => {
+    const record = freshRpcRecord({ agentId: "a", client: {} as RpcClient, streaming: false });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "idle" }]);
+  });
+
+  test("maps a live, streaming record to status running", () => {
+    const record = freshRpcRecord({ agentId: "a", client: {} as RpcClient, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "running" }]);
+  });
+
+  test("maps multiple agents in insertion order with independent statuses", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["dormant-one", freshRpcRecord({ agentId: "dormant-one" })],
+      ["running-one", freshRpcRecord({ agentId: "running-one", client: {} as RpcClient, streaming: true })],
+    ]);
+    assert.deepEqual(listAgents(registry), [
+      { agent_id: "dormant-one", status: "dormant" },
+      { agent_id: "running-one", status: "running" },
+    ]);
   });
 });
 
