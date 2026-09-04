@@ -120,10 +120,13 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath });
   });
 
-  pi.on("session_shutdown", () => {
-    // Kill any still-running spawned `pi` children before tearing down the
-    // bridge connection they were dispatching ws__* tool calls through.
-    agentTools?.killRunning();
+  pi.on("session_shutdown", async (_event, _ctx) => {
+    // Await graceful RPC teardown of any still-live spawned `pi` children
+    // before tearing down the bridge connection they were dispatching ws__*
+    // tool calls through (agentTools.stopAll() is itself async now that
+    // teardown is a graceful RpcClient.stop() rather than a fire-and-forget
+    // SIGTERM — see spawner.ts's AgentToolsHandle doc comment).
+    await agentTools?.stopAll();
     agentTools = undefined;
     handle?.shutdown();
     handle = undefined;

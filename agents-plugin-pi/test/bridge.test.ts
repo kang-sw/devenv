@@ -163,7 +163,7 @@ describe("resolveSessionKey", () => {
 
 describe("maybeAppendModelCatalogAdvisory", () => {
   const unsetConfig: ModelCatalogConfig | undefined = undefined;
-  const setConfig: ModelCatalogConfig = { tiers: { small: "openrouter/cheap-model" } };
+  const setConfig: ModelCatalogConfig = { aliases: { small: "openrouter/cheap-model" } };
 
   test("appends the advisory for workflow_manual when the catalog is unset", () => {
     const content = [{ type: "text", text: "manual body" }];

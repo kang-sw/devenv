@@ -22,6 +22,7 @@ agents-plugin-wsflow/.local-devenv-runtime
 agents-plugin-pi/.runtime/
 agents-plugin-pi/.local-devenv-runtime
 agents-plugin-pi/skills/
+agents-plugin-pi/node_modules/
 agents-plugin-tool/dist/
 ai-docs/presentation/node_modules/
 ai-docs/presentation/package.json

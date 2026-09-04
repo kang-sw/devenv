@@ -1,7 +1,8 @@
 /**
  * Unit tests for model-catalog.ts: readModelCatalog (missing/malformed file
  * -> undefined, never throws; empty `{}` -> `{}`; populated file -> parsed),
- * resolveTierModel, isModelCatalogUnset.
+ * resolveAlias, isModelCatalogUnset. Phase 1 reframes the old `tiers`-shaped
+ * config to a generic `aliases` map (D-A).
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -11,7 +12,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readModelCatalog, resolveTierModel, isModelCatalogUnset, type ModelCatalogConfig } from "../src/model-catalog.ts";
+import { readModelCatalog, resolveAlias, isModelCatalogUnset, type ModelCatalogConfig } from "../src/model-catalog.ts";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "ws-model-catalog-test-"));
 after(() => {
@@ -36,9 +37,9 @@ describe("readModelCatalog", () => {
     assert.deepEqual(readModelCatalog(path), {});
   });
 
-  test("populated file parses tiers and catalog", () => {
+  test("populated file parses aliases and catalog", () => {
     const config: ModelCatalogConfig = {
-      tiers: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
+      aliases: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
       catalog: [{ provider: "openrouter", id: "cheap-model", label: "Cheap" }],
     };
     const path = writeCatalog("populated.json", JSON.stringify(config));
@@ -52,23 +53,28 @@ describe("readModelCatalog", () => {
   });
 });
 
-describe("resolveTierModel", () => {
-  test("returns the mapped model for a configured tier", () => {
-    const config: ModelCatalogConfig = { tiers: { small: "openrouter/cheap-model" } };
-    assert.equal(resolveTierModel(config, "small"), "openrouter/cheap-model");
+describe("resolveAlias", () => {
+  test("returns the mapped model for a configured alias", () => {
+    const config: ModelCatalogConfig = { aliases: { small: "openrouter/cheap-model" } };
+    assert.equal(resolveAlias(config, "small"), "openrouter/cheap-model");
   });
 
-  test("returns undefined for an unmapped tier", () => {
-    const config: ModelCatalogConfig = { tiers: { small: "openrouter/cheap-model" } };
-    assert.equal(resolveTierModel(config, "large"), undefined);
+  test("returns undefined for an unmapped alias", () => {
+    const config: ModelCatalogConfig = { aliases: { small: "openrouter/cheap-model" } };
+    assert.equal(resolveAlias(config, "large"), undefined);
   });
 
   test("returns undefined when config is undefined (unset catalog)", () => {
-    assert.equal(resolveTierModel(undefined, "small"), undefined);
+    assert.equal(resolveAlias(undefined, "small"), undefined);
   });
 
-  test("returns undefined when tiers is absent", () => {
-    assert.equal(resolveTierModel({}, "small"), undefined);
+  test("returns undefined when aliases is absent", () => {
+    assert.equal(resolveAlias({}, "small"), undefined);
+  });
+
+  test("resolves an arbitrary user-chosen alias name, not just the four old tier names", () => {
+    const config: ModelCatalogConfig = { aliases: { reviewer: "openrouter/big-model" } };
+    assert.equal(resolveAlias(config, "reviewer"), "openrouter/big-model");
   });
 });
 
@@ -77,15 +83,19 @@ describe("isModelCatalogUnset", () => {
     assert.equal(isModelCatalogUnset(undefined), true);
   });
 
-  test("true when config is {} (no tiers at all)", () => {
+  test("true when config is {} (no aliases at all)", () => {
     assert.equal(isModelCatalogUnset({}), true);
   });
 
-  test("true when tiers is present but small is unmapped", () => {
-    assert.equal(isModelCatalogUnset({ tiers: { large: "openrouter/big-model" } }), true);
+  test("true when aliases is present but empty", () => {
+    assert.equal(isModelCatalogUnset({ aliases: {} }), true);
   });
 
-  test("false when small is mapped", () => {
-    assert.equal(isModelCatalogUnset({ tiers: { small: "openrouter/cheap-model" } }), false);
+  test("false when at least one alias is mapped", () => {
+    assert.equal(isModelCatalogUnset({ aliases: { small: "openrouter/cheap-model" } }), false);
+  });
+
+  test("false when a non-small alias is mapped (coarser than the old small-only check)", () => {
+    assert.equal(isModelCatalogUnset({ aliases: { reviewer: "openrouter/big-model" } }), false);
   });
 });
