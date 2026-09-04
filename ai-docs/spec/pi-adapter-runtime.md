@@ -143,12 +143,14 @@ abstraction. Five tools are registered:
   session (keeping the same ws `session_key`) and then delivers — so resume is
   subsumed by send, and there is no separate continue tool.
 - `ws-agent-wait(agent_ids[], timeout?)` — block until the FIRST child in the set
-  reaches idle, then return that child with its last message. Idle harvest is
-  edge/consume: a child returned as idle is consumed, so a later wait on an array
-  still listing it does not busy-return it and later finishers are not starved. On
-  `timeout` expiry with no finisher, the call returns a timed-out marker and leaves
-  every child registered; an empty `agent_ids` list is a caller error and fails
-  fast.
+  reaches idle **or** emits a report (see the report channel below), then return
+  it. Idle harvest is edge/consume: a child returned as idle is consumed, so a
+  later wait on an array still listing it does not busy-return it and later
+  finishers are not starved. The result carries `reason: idle | report` plus any
+  pending reports for the woken child (drained in FIFO order), and an idle wake
+  additionally carries the child's last message. On `timeout` expiry with no
+  finisher, the call returns a timed-out marker and leaves every child registered;
+  an empty `agent_ids` list is a caller error and fails fast.
 - `ws-agent-list()` — enumerate live children with their status.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
   mapping and on-disk session, leaving it **dormant/resumable** (a later
@@ -256,6 +258,34 @@ the original in place) and is added only on a successful `workflow_manual` resul
 never on an error response. Spawns and explores still degrade silently to inherit
 while the table is empty; the advisory is the only pressure and never blocks work.
 
+### Child→lead report channel {#260904-pi-report-to-lead-channel}
+
+A worker can push an out-of-band message to its lead mid-run through the child-side
+tool `ws-report-to-lead(message)` — the only child→lead tool the delegation layer
+adds, and included in the `full-worker` `--tools` allowlist so a worker can reach
+it. It needs no new transport: the call surfaces to the parent on the child's
+existing RPC event stream (the tool-invocation event), and the adapter routes it
+into a **per-agent report buffer**. Because the report rides the invocation event,
+it reaches the lead as soon as the model calls the tool, independent of the tool's
+own return value.
+
+The buffer is a bounded FIFO, default capacity 32. On overflow the oldest report is
+dropped and a per-agent dropped-count is incremented, so a lead that later drains
+the buffer sees a truncation marker rather than silently losing reports. On each
+`ws-agent-wait` wake for that child, **all** pending reports drain at once in FIFO
+order (a woken lead sees the whole queue, not one at a time) and the count resets;
+a report that arrives while no wait is pending simply buffers until the next wait.
+Reports survive `ws-agent-stop` (they are not cleared when a child goes dormant),
+so a stopped-then-resumed child does not lose an unread report.
+
+### Transcript path accessor {#260904-pi-agent-transcript-path}
+
+`ws-agent-transcript(agent_id) -> { transcript_path }` returns the filesystem path
+to the child's Pi session JSONL transcript. It marshals no transcript content — the
+lead greps or reads the file with its own filesystem tools. This is an
+advanced/rare accessor; it is registered as a tool but is not in any worker
+`--tools` group, so a worker cannot call it.
+
 ## Proof-of-concept command {#260903-pi-poc-discuss-command}
 
 The adapter registers one proof-of-concept command, `/ws-discuss`, via
@@ -328,9 +358,8 @@ fires both hooks, so the copy runs redundantly but idempotently.
 
 > [!note] Constraints
 > - This contract covers the bridge, the delegation spawner (upgraded to
->   persistent RPC children with bounded depth ≤ 2), the model catalog alias table,
->   and the `/ws-discuss` PoC command. Post-MVP surfaces still deferred to
->   follow-up tickets under the epic — the child→lead report channel and path-only
->   transcript (`ws-report-to-lead` / `ws-agent-transcript`, this ticket's Phase 2),
->   an always-visible TODO, the goal-loop, and compaction hooks — are not part of
->   this contract yet.
+>   persistent RPC children with bounded depth ≤ 2, a child→lead report channel,
+>   and a path-only transcript accessor), the model catalog alias table, and the
+>   `/ws-discuss` PoC command. Post-MVP surfaces still deferred to follow-up
+>   tickets under the epic — an always-visible TODO, the goal-loop, and compaction
+>   hooks — are not part of this contract yet.
