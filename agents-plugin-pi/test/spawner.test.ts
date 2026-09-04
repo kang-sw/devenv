@@ -39,6 +39,12 @@ import {
   resolveModelForAlias,
   applyRpcEvent,
   firstIdlePendingAgentId,
+  firstReportPendingAgentId,
+  enqueueReport,
+  drainReports,
+  REPORT_TO_LEAD_TOOL_NAME,
+  REPORT_BUFFER_CAP,
+  getAgentTranscriptPath,
   listAgents,
   waitForAgents,
   sendToAgent,
@@ -78,15 +84,15 @@ describe("TOOL_GROUPS / resolveTools", () => {
     assert.equal(resolveTools("recon"), "read,grep,find,ls,bash");
   });
 
-  test("full-worker includes built-ins plus the literal explore tool plus every passed ws__* name, in order", () => {
+  test("full-worker includes built-ins plus the literal explore and ws-report-to-lead tools plus every passed ws__* name, in order", () => {
     assert.equal(
       resolveTools("full-worker", ["ws__playbook_render", "ws__ferrule"]),
-      "read,bash,edit,write,grep,find,ls,explore,ws__playbook_render,ws__ferrule",
+      "read,bash,edit,write,grep,find,ls,explore,ws-report-to-lead,ws__playbook_render,ws__ferrule",
     );
   });
 
-  test("full-worker with an empty ws tool list still includes explore (D-B: a worker can spawn explore)", () => {
-    assert.equal(resolveTools("full-worker", []), "read,bash,edit,write,grep,find,ls,explore");
+  test("full-worker with an empty ws tool list still includes explore and ws-report-to-lead (D-B: a worker can spawn explore and report)", () => {
+    assert.equal(resolveTools("full-worker", []), "read,bash,edit,write,grep,find,ls,explore,ws-report-to-lead");
   });
 
   test("full-worker never includes any ws-agent-* driving/spawn tool name (D-B: depth stays lead -> worker -> explore-leaf)", () => {
@@ -357,6 +363,8 @@ function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord
     streaming: false,
     idlePending: false,
     waiters: [],
+    pendingReports: [],
+    reportsDropped: 0,
     ...overrides,
   };
 }
@@ -409,6 +417,86 @@ describe("firstIdlePendingAgentId", () => {
   });
 });
 
+describe("applyRpcEvent: ws-report-to-lead", () => {
+  test("a tool_execution_start for ws-report-to-lead with a string message enqueues it and settles a waiter", () => {
+    const record = freshRpcRecord();
+    let settled = false;
+    record.waiters.push(() => {
+      settled = true;
+    });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "halfway done" } });
+    assert.deepEqual(record.pendingReports, ["halfway done"]);
+    assert.equal(settled, true, "a report must settle any pending waiter, same as agent_settled");
+  });
+
+  test("a tool_execution_start for a different toolName is ignored (no mutation)", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: "bash", args: { message: "not a report" } });
+    assert.deepEqual(record.pendingReports, []);
+  });
+
+  test("a missing or non-string args.message is ignored", () => {
+    const record = freshRpcRecord();
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: {} });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: 42 } });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME });
+    assert.deepEqual(record.pendingReports, []);
+  });
+});
+
+describe("enqueueReport / drainReports", () => {
+  test("pushing REPORT_BUFFER_CAP + 1 messages keeps exactly the most recent REPORT_BUFFER_CAP and sets reportsDropped to 1", () => {
+    const record = freshRpcRecord();
+    for (let i = 0; i < REPORT_BUFFER_CAP + 1; i++) {
+      enqueueReport(record, `report-${i}`);
+    }
+    assert.equal(record.pendingReports.length, REPORT_BUFFER_CAP);
+    assert.equal(record.pendingReports[0], "report-1", "the oldest (report-0) must be dropped, not the newest");
+    assert.equal(record.pendingReports[record.pendingReports.length - 1], `report-${REPORT_BUFFER_CAP}`);
+    assert.equal(record.reportsDropped, 1);
+  });
+
+  test("drainReports returns buffered messages in FIFO (push) order plus the dropped count, and resets both", () => {
+    const record = freshRpcRecord();
+    enqueueReport(record, "first");
+    enqueueReport(record, "second");
+    const drained = drainReports(record);
+    assert.deepEqual(drained, { reports: ["first", "second"], reports_dropped: 0 });
+    assert.deepEqual(record.pendingReports, []);
+    assert.equal(record.reportsDropped, 0);
+  });
+
+  test("drainReports surfaces a non-zero reports_dropped after overflow, then resets it", () => {
+    const record = freshRpcRecord();
+    for (let i = 0; i < REPORT_BUFFER_CAP + 3; i++) {
+      enqueueReport(record, `r${i}`);
+    }
+    const drained = drainReports(record);
+    assert.equal(drained.reports.length, REPORT_BUFFER_CAP);
+    assert.equal(drained.reports_dropped, 3);
+    assert.equal(record.reportsDropped, 0, "reportsDropped must reset after drain");
+  });
+});
+
+describe("firstReportPendingAgentId", () => {
+  test("returns undefined when no record has a pending report", () => {
+    const records = [
+      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b" }) },
+    ];
+    assert.equal(firstReportPendingAgentId(records), undefined);
+  });
+
+  test("returns the first (in given order) record with a pending report", () => {
+    const records = [
+      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b", pendingReports: ["x"] }) },
+      { id: "c", record: freshRpcRecord({ agentId: "c", pendingReports: ["y"] }) },
+    ];
+    assert.equal(firstReportPendingAgentId(records), "b");
+  });
+});
+
 /**
  * Duck-typed `RpcClient` stand-in exposing only the methods these tests
  * drive (`steer`/`followUp`/`prompt`/`getLastAssistantText`), cast as
@@ -447,7 +535,7 @@ describe("waitForAgents", () => {
     const record = freshRpcRecord({ agentId: "a", idlePending: true, lastText: "cached final answer" });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
     const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, { agent_id: "a", last_message: "cached final answer", timed_out: false });
+    assert.deepEqual(result, { agent_id: "a", reason: "idle", last_message: "cached final answer", reports: [], reports_dropped: 0, timed_out: false });
     assert.equal(record.idlePending, false, "the fast path must consume (clear) idlePending, not just read it");
   });
 
@@ -456,7 +544,7 @@ describe("waitForAgents", () => {
     const record = freshRpcRecord({ agentId: "a", client, streaming: true });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
     const result = await waitForAgents(registry, ["a"], 15);
-    assert.deepEqual(result, { timed_out: true });
+    assert.deepEqual(result, { timed_out: true, reports: [], reports_dropped: 0 });
     assert.equal(registry.has("a"), true, "a timed-out agent must stay registered, never killed/removed");
     assert.equal(record.streaming, true, "timeout must not mutate the agent's tracked state");
   });
@@ -471,7 +559,7 @@ describe("waitForAgents", () => {
     const record = freshRpcRecord({ agentId: "a" });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
     const result = await waitForAgents(registry, ["a"], 15);
-    assert.deepEqual(result, { timed_out: true });
+    assert.deepEqual(result, { timed_out: true, reports: [], reports_dropped: 0 });
   });
 
   test("winning race: applyRpcEvent's agent_settled resolves the pending wait with the settled agent's last message", async () => {
@@ -487,8 +575,56 @@ describe("waitForAgents", () => {
     applyRpcEvent(record, { type: "agent_settled" });
 
     const result = await resultPromise;
-    assert.deepEqual(result, { agent_id: "a", last_message: "the final answer", timed_out: false });
+    assert.deepEqual(result, { agent_id: "a", reason: "idle", last_message: "the final answer", reports: [], reports_dropped: 0, timed_out: false });
     assert.equal(record.idlePending, false, "the winning path must also consume idlePending");
+  });
+
+  test("dormant-but-reported: a report enqueued on a clientless agent is harvested via the report fast path without hitting the all-dormant rejection", async () => {
+    const record = freshRpcRecord({ agentId: "a" }); // no client
+    enqueueReport(record, "buffered while dormant");
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const result = await waitForAgents(registry, ["a"]);
+    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: ["buffered while dormant"], reports_dropped: 0, timed_out: false });
+  });
+
+  test("a report arriving while a waitForAgents call is already pending resolves the wait with reason:report and the message", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const resultPromise = waitForAgents(registry, ["a"]);
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "mid-run update" } });
+
+    const result = await resultPromise;
+    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: ["mid-run update"], reports_dropped: 0, timed_out: false });
+  });
+
+  test("multiple reports enqueued before any wait call are all drained in one response, FIFO order", async () => {
+    const record = freshRpcRecord({ agentId: "a" });
+    enqueueReport(record, "first");
+    enqueueReport(record, "second");
+    enqueueReport(record, "third");
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const result = await waitForAgents(registry, ["a"]);
+    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: ["first", "second", "third"], reports_dropped: 0, timed_out: false });
+  });
+
+  test("tie-break: an idle-settled agent with a pending report on the SAME agent reports reason:idle but still returns the buffered report(s)", async () => {
+    const record = freshRpcRecord({ agentId: "a", idlePending: true, lastText: "final answer" });
+    enqueueReport(record, "report before settle");
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const result = await waitForAgents(registry, ["a"]);
+    assert.deepEqual(result, {
+      agent_id: "a",
+      reason: "idle",
+      last_message: "final answer",
+      reports: ["report before settle"],
+      reports_dropped: 0,
+      timed_out: false,
+    });
   });
 
   test("winning race among multiple agentIds: the one that settles first wins, others stay pending/registered", async () => {
@@ -626,5 +762,18 @@ describe("handleAgentEvent", () => {
     handleAgentEvent(record, { type: "message_end", message: { role: "toolResult", stopReason: "stop" } });
     assert.equal(record.stopReason, undefined);
     assert.equal(record.state, "running");
+  });
+});
+
+describe("getAgentTranscriptPath", () => {
+  test("known agent id returns { transcript_path: record.sessionPath }", () => {
+    const record = freshRpcRecord({ agentId: "a", sessionPath: "/tmp/ws-pi-agent-x/session.jsonl" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(getAgentTranscriptPath(registry, "a"), { transcript_path: "/tmp/ws-pi-agent-x/session.jsonl" });
+  });
+
+  test("unknown agent id throws matching /unknown agentId/", () => {
+    const registry: RpcAgentRegistry = new Map();
+    assert.throws(() => getAgentTranscriptPath(registry, "missing"), /unknown agentId/);
   });
 });
