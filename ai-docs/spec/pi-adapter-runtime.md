@@ -403,6 +403,125 @@ lead greps or reads the file with its own filesystem tools. This is an
 advanced/rare accessor; it is registered as a tool but is not in any worker
 `--tools` group, so a worker cannot call it.
 
+## Lead-execute approval gateway {#260905-pi-execute-approval-gateway}
+
+The adapter gives the Pi lead a **delegated-mutation** path whose purpose is to
+keep the lead's context free of raw command output: instead of running shell
+itself, the lead delegates every mutation to a worker, and its context holds only
+a compact approval request plus the worker's final report. Raw output is
+firewalled into the (cheap-model) worker by construction. This layers on the
+delegation spawner (the delegation spawner section above) and adds no new spawn
+depth.
+
+Two lead verbs are registered:
+
+- `ws-execute({ command?, prompt, complex? }) -> { agent_id }` — spawn a worker
+  that carries out a mutation task. `prompt` (required) states intent and what to
+  report; the worker derives and runs the command(s) itself. `command?` (optional)
+  is a verbatim anchor the adapter runs first, handing `{command, output}` to the
+  worker — for destructive exact-match cases where a reconstructed command would
+  be unsafe. `complex?` selects the worker's model tier only (a light-model
+  default; a lead-class model when set). The worker is spawned through the same
+  machinery as `ws-agent-spawn` with a fixed adapter-owned system prompt (the lead
+  authors no prompt prose). The call returns an `agent_id` immediately and never
+  blocks the lead's turn awaiting approvals; the worker's report is delivered
+  later through the report channel. A `command?` supplied here runs in the lead's
+  own process **without** a gate — the lead itself supplied that exact string, at
+  the lead's own trust level.
+- `ws-approve({ agent_id, cmd_id, decision, reason?, command? })` — adjudicate one
+  pending worker command. `decision` is one of `approve` / `deny` / `run-instead`.
+  `deny` requires `reason` and returns the worker a re-plan instruction without
+  executing; `run-instead` requires `command` and substitutes the lead's own exact
+  command, whose output still routes to the worker (hygiene preserved) with a note
+  that the lead substituted it; `approve` runs the worker's command. A
+  `run-instead` with no `command`, or a `deny` with no `reason`, is **rejected**
+  before any command runs (so a lead that chose `run-instead` because the original
+  was unsafe never has the original executed by omission). `cmd_id` binds the
+  decision to exactly one pending request, so timing skew can never approve a
+  previous command or pre-authorize a next one; a `cmd_id` that does not match the
+  worker's currently-pending request is rejected. `agent_id` addresses the exact
+  worker among all live and dormant/retained agents.
+
+Aborting a worker mid-plan is **not** an `ws-approve` decision — it reuses
+`ws-agent-stop(agent_id)`, so it works even when no command is pending. An abort
+unblocks the waiting `ws-execute` with an "aborted" result and leaves the worker
+dormant/retained (inspectable via the transcript accessor), distinct from the
+terminal `session_shutdown`.
+
+**Two-path accountability invariant** (the reason the gate exists):
+
+> The per-mutation lead-approval gate on `ws.execute` exists because
+> `ws.execute` proxies actions the lead would otherwise perform directly under
+> user consensus and extreme care; the gate preserves that lead↔user consensus
+> across proxy execution — it is not distrust of subagents. General delegated
+> workers carry no consensus-caliber actions and therefore need no approval
+> gate.
+
+Accordingly the gate applies only to the `ws-execute` worker path; ordinary
+`ws-agent-spawn` workers stay ungated.
+
+### Gated exec and the mutation-incapable read family {#260905-pi-worker-gated-exec}
+
+The `ws-execute` worker's tool group is **not** the general `full-worker` set. It
+gets structured, mutation-incapable read tools (the same `read-only` family
+`ls`/`read`/`grep`/`find` the recon leaf uses — cannot write by construction),
+the report and `explore` tools, and **one** free-form execution tool
+(`ws-worker-exec`) — but **not** native `bash`. "Anything that can write is
+gated" therefore holds by construction, with no command-string parsing:
+compound commands, `find … -exec`, and redirection all flow through the single
+adapter-owned exec tool, which always elevates to lead approval. Reads stay
+native and ungated.
+
+When the worker calls `ws-worker-exec`, its execution **pauses** and the adapter
+surfaces an approval request to the lead as an out-of-band injected turn (the
+lead is not suspended inside a synchronous tool call). The request carries an
+adapter-authoritative, compact working-context header — **scraped by the adapter
+at exec time, not self-reported by the worker**:
+
+```
+{ agent_id, cmd_id, command, rationale,
+  context: { cwd, worktree_root, branch, ahead_behind?, dirty } }
+```
+
+`rationale` (the worker's one-line "why") is required. The `context` block
+reflects the directory the command will actually run in — including a
+worker-supplied `cwd` override — so a push or merge from the wrong worktree is
+visible before approval. Full `git status`, diffs, and env dumps are excluded as
+context bombs; the lead `deny`s to ask for more. The unset-catalog advisory
+cadence and the report channel are unchanged. Once the lead decides, the adapter
+relays the decision back to the paused worker, which resumes (or re-plans, on
+`deny`). This prompt-injection relay is the documented baseline; a harness-native
+pause/resume is a later optimization.
+
+## Lead native tool-surface reshaping {#260905-pi-lead-tool-surface-execute-gateway}
+
+So the structural "no raw exec for the lead" guarantee holds by construction and
+not merely by prompt convention, the adapter reshapes the **host lead session's**
+active tool set at session start (gated on the lead/fork role, like the system
+prompt injection): it removes native `bash` and native `read`, adds `ws-execute`,
+`ws-approve`, and a deliberately ugly-named direct read tool
+(`do-i-really-have-to-read-this-myself`) that stays available as a
+soft-discouraged escape hatch, and **excludes the worker-only `ws-worker-exec`
+from the lead's active set**. That last exclusion is load-bearing: `ws-worker-exec`
+must be registered so a worker process (loading the same extension) can activate
+it via its own tool allowlist, but if it were also active on the lead the lead
+could bypass the approval gate entirely — and, since nothing observes the lead's
+own tool calls the way a parent observes a child's, such a call would block
+forever. Removing native `bash` is feasible because the reshaping operates on the
+one registry that holds built-in and extension tools alike.
+
+> [!note] Implementation Gap · 2026-09-05
+> Missing behavior (Phase 1 verification outstanding): the reshaping's durability
+> across a Pi `/reload` depends on the session-start handler re-firing (which
+> re-applies the reduced set) rather than on the reduced list alone — on reload,
+> extension-registered tools (including `ws-worker-exec`) are otherwise re-added,
+> while the removed built-ins stay removed. For an interactive lead with UI
+> bindings the handler does re-fire, restoring the exclusion; a headless lead
+> without bindings may not. The live `pi --mode rpc` gate (no provider
+> credentials in the build sandbox) must confirm `getActiveTools()` still
+> excludes `ws-worker-exec` after a reload before this is treated as fully
+> verified.
+
 ## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
 
 The adapter drives a **lead-session goal loop**: while a goal is active, each time
