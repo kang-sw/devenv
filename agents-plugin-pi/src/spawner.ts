@@ -1894,6 +1894,109 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
 }
 
 /**
+ * 260905 (alias/park/cap ticket): the alias half of `spawnAgent`'s guard
+ * clauses, run before any side effect (`mkdtempSync`/`randomUUID`). No-op
+ * (`{ ok: true }`) when `alias` is unset. Otherwise scans for the current
+ * holder of `alias`: a `running`/`threadBound` holder blocks the spawn
+ * outright (rejection, not silent skip — the ticket's own wording); any other
+ * holder (dormant/idle) is returned as `holder` for the caller to clear.
+ *
+ * Review relay #1 (Critical): this function does **not** mutate `holder`
+ * itself — it only locates and validates. `runSpawnGuards` below commits
+ * `holder.alias = undefined` only once every guard (this one and
+ * `evictForCapacity`) has actually succeeded, so a rejected spawn (this
+ * guard, `evictForCapacity`, or anything else `spawnAgent` throws before
+ * registering) leaves the previous holder's alias completely untouched —
+ * still resolvable by `ws-agent-send <alias>`. Exported for direct unit
+ * coverage without a real `RpcClient`.
+ */
+export function reserveAgentAlias(
+  registry: RpcAgentRegistry,
+  alias: string | undefined,
+): { ok: true; holder?: RpcAgentRecord } | { ok: false; error: string } {
+  if (!alias) return { ok: true };
+  for (const holder of registry.values()) {
+    if (holder.alias !== alias) continue;
+    if (holder.running || holder.threadBound) {
+      const state = holder.running ? "running" : "threadBound";
+      return {
+        ok: false,
+        error: `ws-pi-agent: ws-agent-spawn rejected: alias "${alias}" is held by agent ${holder.agentId}, which is ${state}`,
+      };
+    }
+    return { ok: true, holder };
+  }
+  return { ok: true };
+}
+
+/**
+ * 260905 (alias/park/cap ticket): the registry-cap half of `spawnAgent`'s
+ * guard clauses. While the registry is at or over `cap`, evicts the dormant
+ * (`!record.client`), non-`running`, non-`threadBound` record with the
+ * oldest last-activity stamp (`max(lastLeadPromptAt, last reportLog entry)`)
+ * until the new spawn fits. Never evicts a `running`/`threadBound` record —
+ * when none remain to evict, the spawn fails outright rather than silently
+ * exceeding the cap. Only forgets the registry entry (never touches the
+ * evicted agent's on-disk session file). Exported for direct unit coverage
+ * without a real `RpcClient`.
+ */
+export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+  const evictedLabels: string[] = [];
+  while (registry.size >= cap) {
+    let candidate: RpcAgentRecord | undefined;
+    let candidateActivity = Number.POSITIVE_INFINITY;
+    for (const record of registry.values()) {
+      if (record.client || record.running || record.threadBound) continue;
+      const activity = Math.max(record.lastLeadPromptAt ?? 0, record.reportLog.at(-1)?.at ?? 0);
+      if (activity < candidateActivity) {
+        candidate = record;
+        candidateActivity = activity;
+      }
+    }
+    if (!candidate) {
+      return {
+        ok: false,
+        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
+      };
+    }
+    registry.delete(candidate.agentId);
+    evictedLabels.push(candidate.alias ?? candidate.agentId);
+  }
+  return evictedLabels.length > 0 ? { ok: true, evictedLabel: evictedLabels.join(", ") } : { ok: true };
+}
+
+/**
+ * 260905 (alias/park/cap ticket, review relay #1 CRITICAL fix): the single
+ * gate `spawnAgent` calls before any side effect (`mkdtempSync`/
+ * `randomUUID`/`registry.set`). Runs `reserveAgentAlias` then
+ * `evictForCapacity` and returns the first failure unmutated — neither guard
+ * commits anything on its own. Only once BOTH guards succeed does this
+ * function clear the previous alias holder's `alias` (the actual transfer).
+ * This ordering is load-bearing: the original implementation cleared the
+ * holder's alias as a side effect of `reserveAgentAlias` itself, so a
+ * subsequent `evictForCapacity` rejection (e.g. every other record is
+ * running/threadBound/live) still left the spawn un-registered but had
+ * already destroyed the previous holder's alias, making it unresolvable by
+ * name even though its record was never touched otherwise. Exported for
+ * direct unit coverage of the exact ordering guarantee without a real
+ * `RpcClient`.
+ */
+export function runSpawnGuards(
+  registry: RpcAgentRegistry,
+  alias: string | undefined,
+  cap: number,
+): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+  const aliasReservation = reserveAgentAlias(registry, alias);
+  if (!aliasReservation.ok) return aliasReservation;
+  const eviction = evictForCapacity(registry, cap);
+  if (!eviction.ok) return eviction;
+  if (aliasReservation.holder) {
+    aliasReservation.holder.alias = undefined;
+  }
+  return eviction;
+}
+
+/**
  * Spawns a persistent `RpcClient` child from an already-rendered system
  * prompt file. Unlike the Phase 2-3 spawner, this performs **no**
  * `playbook.render` call itself (D-A): the caller (the lead) renders the
@@ -1923,84 +2026,23 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
  * Throws — never silently degrades — when `getState()` returns no
  * `sessionFile`, mirroring the codebase's existing never-silently-degrade
  * convention (e.g. `bridge.ts`'s ferrule-mint failure handling).
+ *
+ * 260905 (alias/park/cap ticket): the very first thing this function does is
+ * call `runSpawnGuards` (alias reservation + cap eviction, committed only
+ * once both succeed) — see that function's doc comment for why the ordering
+ * there is load-bearing. A guard rejection throws before any of the above
+ * side effects (`mkdtempSync`, `randomUUID`, `registry.set`) run, so a
+ * rejected spawn leaves no trace and no other record touched.
  */
-/**
- * 260905 (alias/park/cap ticket): the alias half of `spawnAgent`'s guard
- * clauses, run before any side effect (`mkdtempSync`/`randomUUID`). No-op
- * (`{ ok: true }`) when `alias` is unset. Otherwise scans for the current
- * holder of `alias`: a `running`/`threadBound` holder blocks the spawn
- * outright (rejection, not silent skip — the ticket's own wording); any other
- * holder (dormant/idle) has its `alias` cleared (its `title` is left alone)
- * so the new spawn can take it. Exported for direct unit coverage without a
- * real `RpcClient`.
- */
-export function reserveAgentAlias(registry: RpcAgentRegistry, alias: string | undefined): { ok: true } | { ok: false; error: string } {
-  if (!alias) return { ok: true };
-  for (const holder of registry.values()) {
-    if (holder.alias !== alias) continue;
-    if (holder.running || holder.threadBound) {
-      const state = holder.running ? "running" : "threadBound";
-      return {
-        ok: false,
-        error: `ws-pi-agent: ws-agent-spawn rejected: alias "${alias}" is held by agent ${holder.agentId}, which is ${state}`,
-      };
-    }
-    holder.alias = undefined;
-    return { ok: true };
-  }
-  return { ok: true };
-}
-
-/**
- * 260905 (alias/park/cap ticket): the registry-cap half of `spawnAgent`'s
- * guard clauses, run before any side effect and after `reserveAgentAlias`
- * (per the plan's ordering). While the registry is at or over `cap`, evicts
- * the dormant (`!record.client`), non-`running`, non-`threadBound` record
- * with the oldest last-activity stamp (`max(lastLeadPromptAt, last reportLog
- * entry)`) until the new spawn fits. Never evicts a `running`/`threadBound`
- * record — when none remain to evict, the spawn fails outright rather than
- * silently exceeding the cap. Only forgets the registry entry (never touches
- * the evicted agent's on-disk session file). Exported for direct unit
- * coverage without a real `RpcClient`.
- */
-export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
-  const evictedLabels: string[] = [];
-  while (registry.size >= cap) {
-    let candidate: RpcAgentRecord | undefined;
-    let candidateActivity = Number.POSITIVE_INFINITY;
-    for (const record of registry.values()) {
-      if (record.client || record.running || record.threadBound) continue;
-      const activity = Math.max(record.lastLeadPromptAt ?? 0, record.reportLog.at(-1)?.at ?? 0);
-      if (activity < candidateActivity) {
-        candidate = record;
-        candidateActivity = activity;
-      }
-    }
-    if (!candidate) {
-      return {
-        ok: false,
-        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
-      };
-    }
-    registry.delete(candidate.agentId);
-    evictedLabels.push(candidate.alias ?? candidate.agentId);
-  }
-  return evictedLabels.length > 0 ? { ok: true, evictedLabel: evictedLabels.join(", ") } : { ok: true };
-}
-
 export async function spawnAgent(
   registry: RpcAgentRegistry,
   ctx: RpcSpawnCtx,
   params: SpawnAgentParams,
 ): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
   // Guard clauses first, before any side effect (mkdtempSync/randomUUID) and
-  // before `registry.set` — a rejected spawn leaves no trace. Order matches
-  // the plan: alias reservation, then cap enforcement.
-  const aliasReservation = reserveAgentAlias(registry, params.alias);
-  if (!aliasReservation.ok) {
-    throw new Error(aliasReservation.error);
-  }
-  const eviction = evictForCapacity(registry, resolveAgentRegistryCap());
+  // before `registry.set` — a rejected spawn leaves no trace, including on
+  // the previous alias holder (see `runSpawnGuards`'s doc comment).
+  const eviction = runSpawnGuards(registry, params.alias, resolveAgentRegistryCap());
   if (!eviction.ok) {
     throw new Error(eviction.error);
   }
@@ -2276,6 +2318,18 @@ export async function stopAgent(
   }
   const client = record.client;
   if (client) {
+    // Review relay #1 (Important, alias/park/cap): clear live state
+    // SYNCHRONOUSLY, before either await below, not after both resolve. A
+    // record that still reads `client`-live during `abort()`/`stop()` is a
+    // race window: a concurrent `ws-agent-send` (or overlay `ForkChannel`
+    // send) sees a live-idle record and calls `promptAgent` on a client
+    // that's mid-teardown, losing the turn silently once `stop()` lands.
+    // Clearing here first means that same racing send instead takes
+    // `sendToAgent`'s dormant-resume branch, exactly as if this record had
+    // already finished parking — the automatic park path (which now runs
+    // after every settle, not just on an explicit stop) makes this window
+    // hot enough to close rather than accept.
+    clearLiveState(record);
     try {
       await client.abort();
     } catch {
@@ -2286,7 +2340,6 @@ export async function stopAgent(
     } catch {
       // best effort
     }
-    clearLiveState(record);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
