@@ -341,7 +341,7 @@ tool, so an explore leaf spawns neither another explore nor a worker — it is t
 non-recursive terminal of the delegation tree (see bounded depth below).
 `explore` is the one delegation tool a worker itself may reach. An explore leaf
 is not a registry member: it returns through its own tool result, pushes no
-message and is outside the pushed status line's `N of M` count; the common
+message and is outside the pushed status line's running count; the common
 synchronous `explore` is unaffected.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
@@ -490,17 +490,20 @@ yields one lead run that sees the messages in order. `steer` families
 they are dropped with it at `session_shutdown`, exactly like Pi's own queue.
 
 **Fan-in stays with the model.** Every push whose process has at least one
-delegated agent carries a status line `N of M delegated agents still running`,
-followed by `: <running ids>` when N > 0; with no delegated agent (M = 0) the
-line is omitted from both content and `details`. M is this process's
-registry members that are neither dormant nor stopped/exited and not
-thread-bound (workers, execute workers, task forks), and N is the subset that is
-running and has not yet sent `final` or `question` this turn. A child blocked on
+delegated agent carries a status line `N delegated agents still running`; with
+no delegated agent the line is omitted from both content and `details`. The
+delegated set is this process's registry members that are neither dormant nor
+stopped/exited and not thread-bound (workers, execute workers, task forks),
+and N is the subset that is running and has not yet sent `final` or `question`
+this turn. The line names no total and no ids: the delegated set only grows
+across a session (an idle child keeps its process until stopped or exited),
+and which children are running is `ws-agent-list`'s job. A child blocked on
 an approval is running; a child parked on a question is thread-bound; a child
 that settled idle or reported `final` leaves N until it is prompted again. The
-last `final` of a fan-out reads `0 of M`, and a worker that never reports
-`final` reaches `0 of M` through its `ws-agent-settled`, so the lead can tell
-"not yet — end the turn again" (N > 0) from "all in — synthesize" (N = 0).
+last `final` of a fan-out reads `0 delegated agents still running`, and a
+worker that never reports `final` reaches it through its `ws-agent-settled`,
+so the lead can tell "not yet — end the turn again" (N > 0) from "all in —
+synthesize" (N = 0).
 The idle-without-final advisory reads the record's bounded report log
 (`{kind, at}`, which also feeds `ws-agent-list`'s last-report time) considering
 only entries since the lead's last send to that record, so a re-tasked fork is

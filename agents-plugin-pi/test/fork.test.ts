@@ -384,7 +384,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
       },
     } as unknown as ExtensionAPI;
     // Two extra live siblings so the status line this loop's registry argument
-    // produces is distinguishable from the `0 of 0` an empty/wrong registry
+    // produces is distinguishable from the absent line an empty/wrong registry
     // would render (review relay #1, I4).
     const registry: RpcAgentRegistry = new Map([
       ["a1", record],
@@ -523,7 +523,7 @@ describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2, 260
     assert.deepEqual(advisories(h.pushes), ["acknowledge-and-return"]);
     assert.equal(
       h.pushes[0].details?.status,
-      "2 of 3 delegated agents still running: sibling-1, sibling-2",
+      "2 delegated agents still running",
       "the two live siblings are what distinguish the real shared registry from an empty stand-in",
     );
     assert.equal(h.pushes[0].details?.agent_id, "a1");

@@ -439,8 +439,8 @@ export interface ExecuteGatewaySessionCtx {
  * `registryRef` is a mutable holder rather than the registry itself because
  * the relay must exist BEFORE `registerAgentTools` creates that registry; the
  * ref is filled immediately afterwards. Its only use is the fan-in status
- * line every push carries, so a still-empty ref degrades to `0 of 0`, never
- * to a crash.
+ * line every push carries, so a still-empty ref degrades to no status line,
+ * never to a crash.
  *
  * 260905: the push is unconditional. The former `info.waiterWoken`
  * suppression existed only because a blocked `ws-agent-wait` was a second

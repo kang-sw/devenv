@@ -23,8 +23,8 @@
  * in one of six families — `ws-agent-report`, `ws-agent-settled`,
  * `ws-agent-question`, `ws-agent-approval`, `ws-agent-advisory`,
  * `ws-agent-orphaned` — each carrying `details.agent_id`, its own payload, and
- * a fan-in status line (`computeRunningStatusLine`) naming how many delegated
- * agents are still outstanding and which. The lead therefore ends its turn
+ * a fan-in status line (`computeRunningStatusLine`) counting how many
+ * delegated agents are still outstanding. The lead therefore ends its turn
  * after dispatching work and is woken by the pushes themselves; it never
  * blocks in a wait call, so an approval request can reach it mid-flight
  * instead of queueing behind an unfinished wait turn.
@@ -704,7 +704,7 @@ export interface RpcAgentRecord {
    * until it settles, is stopped, exits, or fails to spawn. Deliberately a
    * DIFFERENT, narrower flag than `streaming` (which is event-confirmed and
    * still the right signal for `ws-agent-list`'s display status): this one
-   * exists only to feed `computeRunningStatusLine`'s N/M arithmetic, where a
+   * exists only to feed `computeRunningStatusLine`'s running count, where a
    * just-dispatched child must already count as outstanding.
    */
   running: boolean;
@@ -748,8 +748,9 @@ export interface RpcAgentRecord {
    * `openThread`) and on fork-raised question registration
    * (`handleForkRaisedQuestion`), cleared only when the thread actually closes
    * (`/done`, the respondent's own fork final, `ws-resolve`). While set, this
-   * agent produces no settle/advisory push and is excluded from both N and M:
-   * the exchange belongs to the owner, and the lead is not part of it.
+   * agent produces no settle/advisory push and is left out of the fan-in
+   * status line entirely: the exchange belongs to the owner, and the lead is
+   * not part of it.
    *
    * Deliberately distinct from `overlayAttached`, which is per-VIEW (an owner
    * pressing Esc clears the overlay while the thread stays bound).
@@ -933,46 +934,43 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
 }
 
 /**
- * The fan-in status line every pushed message carries: `N of M ... still
- * running`, computed fresh at push time over the shared registry.
+ * The fan-in status line every pushed message carries: `N delegated agents
+ * still running`, computed fresh at push time over the shared registry.
  *
- * - M counts every registry member that is neither dormant nor
+ * - The line is PRESENT whenever any registry member is neither dormant nor
  *   stopped/exited (`record.client` present — the one flag all three of those
  *   resting states clear) and NOT `threadBound`. An `explore` leaf is never in
  *   this registry at all (it has its own).
- * - N is the M subset that is still `running` and has not yet filed a
- *   `final`/`question` this turn (`terminalThisTurn`), so the agent whose own
- *   terminal report triggered this very push has already removed itself.
+ * - N counts the subset of those that is still `running` and has not yet
+ *   filed a `final`/`question` this turn (`terminalThisTurn`), so the agent
+ *   whose own terminal report triggered this very push has already removed
+ *   itself. `0 delegated agents still running` is the lead's synthesis cue.
  *
- * Review relay #1 (I3): M is deliberately NOT keyed on `running`. A child that
- * filed its final settles moments later, and `agent_settled` clears `running`
- * — keying M on it made the DENOMINATOR shrink between messages (`2 of 3` ->
- * `1 of 2` -> `0 of 1`), so the ticket's own "the last of three finals reads
- * `0 of 3`" cue could never actually occur in the real event order. A live but
- * idle child is none of dormant/stopped/exited, so it stays in M and only
- * leaves N.
+ * Presence is deliberately NOT keyed on `running`: a live but idle child is
+ * none of dormant/stopped/exited, so it keeps the line present and only
+ * leaves N. That is what makes the zero line reachable in the real event
+ * order (each child settles moments after filing its final).
  *
- * Two live-run corrections (Phase 1 Edition):
- * - When N > 0 the line names the outstanding ids (`: a1, a2`). "2 of 3" alone
- *   told a lead how many were missing but not WHICH, so it could not act on
- *   the difference (chase one, keep waiting on another) without a
- *   `ws-agent-list` round-trip.
- * - When M is 0 there is no line at all (`undefined`), so a push that has
- *   nothing to do with delegation fan-in — an `ws-agent-orphaned` roll-call at
- *   session start, a `spawn-failed` for the only child — no longer ends with a
- *   contentless `0 of 0 delegated agents still running`.
+ * Owner decision after the second live run (2026-09-05): the former
+ * running-out-of-total form with an id suffix is gone. The total only ever
+ * grew across a session (an idle child keeps its process, so it stayed counted
+ * until stopped/exited) and the id suffix duplicated what `ws-agent-list`
+ * already answers, so both were noise. The omission rule survives unchanged:
+ * when nothing live is delegated
+ * there is no line at all (`undefined`), so a push that has nothing to do with
+ * delegation fan-in — a `ws-agent-orphaned` roll-call at session start, a
+ * `spawn-failed` for the only child — never ends with a contentless zero line.
  */
 export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string | undefined {
-  let m = 0;
-  const runningIds: string[] = [];
+  let present = false;
+  let running = 0;
   for (const record of registry?.values() ?? []) {
     if (record.threadBound || !record.client) continue;
-    m += 1;
-    if (record.running && !record.terminalThisTurn) runningIds.push(record.agentId);
+    present = true;
+    if (record.running && !record.terminalThisTurn) running += 1;
   }
-  if (m === 0) return undefined;
-  const head = `${runningIds.length} of ${m} delegated agent${m === 1 ? "" : "s"} still running`;
-  return runningIds.length > 0 ? `${head}: ${runningIds.join(", ")}` : head;
+  if (!present) return undefined;
+  return `${running} delegated agent${running === 1 ? "" : "s"} still running`;
 }
 
 /**
@@ -1035,9 +1033,10 @@ interface HeldPush {
  * owner-typed prompts; see `agent-session.ts`'s `prompt()` vs
  * `sendCustomMessage`), so a message built at ARRIVAL time carried a status
  * line already stale by the time the lead read it. A worker that finished
- * while the lead was still spawning its siblings said `0 of 1`, the next said
- * `0 of 2`, and only the last said `0 of 3` — three separate invitations to
- * synthesize early. Holding the push here and building the message at FLUSH
+ * while the lead was still spawning its siblings reported zero still running
+ * (its siblings were not registered yet), and so did the next — three
+ * separate invitations to synthesize early. Holding the push here and building
+ * the message at FLUSH
  * time is the fix: the status line is then computed against the registry as it
  * stands when the lead actually reads it.
  *

@@ -417,7 +417,7 @@ describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", (
       const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
       createApprovalRelay(pi.api, { cwd }, { current: registry })(record);
 
-      assert.equal(pi.sent[0].message.details?.status, `1 of 1 delegated agent still running: ${record.agentId}`);
+      assert.equal(pi.sent[0].message.details?.status, "1 delegated agent still running");
     });
   });
 

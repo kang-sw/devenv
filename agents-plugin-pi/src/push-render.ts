@@ -47,7 +47,7 @@ export interface PushRenderLines {
 }
 
 /** The status line's own shape (`computeRunningStatusLine`), used to recognize it positionally. */
-const STATUS_LINE_PATTERN = /^\d+ of \d+ delegated agents? still running(: .+)?$/;
+const STATUS_LINE_PATTERN = /^\d+ delegated agents? still running$/;
 
 /** Pulls the plain text out of a custom message's `content` (string or text parts). */
 function extractText(content: unknown): string {

@@ -64,15 +64,14 @@ substitute for it. Each child signal arrives on its own as a message:
 | `ws-agent-advisory` | The adapter's own judgment about a child: a malformed `kind:"final"`, a missing `Commit:`, a fork that went idle without reporting, a stall. Advisories are about the child, never from it. |
 | `ws-agent-orphaned` | A previous run of this session left children behind mid-turn. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. Each one listed individually was cut off mid-turn and resumes from its last flushed turn, so re-issue that instruction when you revive it. This message appears only when something was cut off; children that were idle at shutdown are re-registered silently, and `ws-agent-list` is where you see them. |
 
-Each of these ends with a line like `1 of 3 delegated agents still running:
-w3` whenever you have anything delegated at all. Read it as your fan-in state:
-the second number is how many children you still have alive, the first is how
-many of those have yet to report this turn, and the ids name exactly which
-ones. While the first number is above zero, more is coming — end your turn
-again rather than concluding early; `0 of 3` is the cue that all three have
-reported. A child leaves the second number only when it is stopped, dies, or
-goes dormant. Agents in an owner discussion thread are counted in neither
-number; they are not yours to wait on.
+Each of these ends with a line like `1 delegated agent still running` whenever
+you have anything delegated at all. Read it as your fan-in state: the number is
+how many of your children have yet to report this turn. While it is above zero,
+more is coming — end your turn again rather than concluding early;
+`0 delegated agents still running` is the cue that everything you dispatched
+has reported. The line does not say which children are outstanding —
+`ws-agent-list` does. Agents in an owner discussion thread are not counted;
+they are not yours to wait on.
 
 That line is accurate as of the moment it reaches you, not as of the moment the
 child spoke: a report raised while you are mid-turn is held and released when
@@ -96,8 +95,8 @@ answer it yourself, and do not ask the owner about it — just end your turn.
 That fork keeps running its task through and after the discussion; what was
 decided reaches you in its own pushed `kind:"final"` report, under
 `Decisions:` — not as a separate thread-summary message. While that thread is
-open the fork is excluded from your `N of M` count, so a message with no status
-line at all does not mean it is gone.
+open the fork is excluded from your still-running count, so a message with no
+status line at all does not mean it is gone.
 
 This table grows as later tickets land more primitives — treat any verb not
 listed here as not yet available, not as a naming mismatch to guess around.
