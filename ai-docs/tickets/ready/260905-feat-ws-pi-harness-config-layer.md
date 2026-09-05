@@ -228,6 +228,23 @@ Record in the Result whether the Pi bridge's clientInfo name had to change and,
 if so, land that adapter change on the Pi track with a matching spec note in
 `pi-adapter-runtime`.
 
+Finding (2026-09-05, dogfood via `lead-tune` in another session): the harness
+vocabulary is not discoverable before a write, so a lead cannot tell whether
+`pi` is accepted. `prompt.*` declares `Enum: promptHarnessEnum` on its
+`harness` selector, so `config.list` prints `harness[claude|codex|*]` and
+`config.tune` rejects an unknown value up front; `agents.tier`'s `harness`
+selector (`config_registry.go`) declares no enum, so `config.list` prints a
+bare `harness`, the `config.tune` enum guard is skipped, and an unknown value
+is only rejected later by `aliasTargetKey`. The two surfaces also use
+different wildcard spellings (`*` for prompt overrides, `default` for
+`agents.tier`). Phase 2 should, alongside adding `pi`: give the `agents.tier`
+harness selector an explicit enum so `config.list` lists it (`claude`, `codex`,
+`pi`, `default`), make the `config.tune` rejection text name the full enum per
+key rather than the hard-coded "claude, codex, or *", and have the `lead-tune`
+playbook tell the lead to read the selector enum from `config.list` before
+proposing a harness value. The playbook change goes through the wsflow
+mirroring check.
+
 ### Phase 3: Tier resolution read tool for adapters
 
 Depends on Phase 2. Expose one MCP read tool (working name
