@@ -237,30 +237,52 @@ abstraction. Four tools are registered — there is no blocking wait tool; every
 child signal is pushed into the lead session as a message (see "Child→lead
 report channel" below):
 
-- `ws-agent-spawn({ system_prompt_path, prompt, model_name?, model_effort? })
-  -> { agent_id }` — start a persistent worker. `system_prompt_path` is the
+- `ws-agent-spawn({ system_prompt_path, prompt, model_name?, model_effort?, alias?, title? })
+  -> { agent_id, alias?, evicted? }` — start a persistent worker. `system_prompt_path` is the
   lead-rendered playbook file, passed as `--append-system-prompt`; `prompt` is the
   raw task text, delivered as the child's first turn. `model_name` is an optional
   alias resolved through the catalog (see below) to `--model`, omitted → inherit
   the parent's model; `model_effort` is an optional reasoning-effort override
-  applied after launch. The call returns an `agent_id` immediately; the worker runs
-  in the background. Every child is launched with an explicit CLI path, so it
-  resolves the installed `pi` entry with no bare-`pi` fallback.
+  applied after launch. `alias` and `title` (260905) are optional, purely
+  lead-supplied labels — never derived from prompt text — persisted on the
+  registry record for `ws-agent-list` and for alias-or-uuid resolution
+  everywhere an `agent_id` param is accepted; reusing an alias already held by a
+  dormant/idle record silently reassigns it (clearing the old holder's alias,
+  keeping its title) while reusing one held by a running or thread-bound record
+  rejects the spawn instead of stealing it out from under it. The registry is
+  capped (`WS_PI_AGENT_REGISTRY_CAP`, default 256); a spawn that would exceed
+  the cap evicts the oldest fully-dormant, non-thread-bound record(s) first and
+  reports the evicted label(s) back as `evicted`, rejecting only if every
+  remaining record is running or thread-bound. The call returns immediately;
+  the worker runs in the background. Every child is launched with an explicit
+  CLI path, so it resolves the installed `pi` entry with no bare-`pi` fallback.
 - `ws-agent-send(agent_id, message, interrupt?)` — send a message into a child.
-  The delivery mechanism is chosen from the child's state: a message starts a new
-  turn on an idle child, `interrupt: true` steers an actively streaming child
-  mid-run, and a non-interrupt message during an active run queues after the
-  current turn. A message to a **dormant** child auto-resumes it from its on-disk
+  `agent_id` accepts either the alias or the raw uuid, resolved through one
+  shared helper shared with `ws-agent-stop`, `ws-agent-transcript` and
+  `ws-approve` (260905). The delivery mechanism is chosen from the child's
+  state: a message starts a new turn on an idle child, `interrupt: true` steers
+  an actively streaming child mid-run, and a non-interrupt message during an
+  active run queues after the current turn. A message to a **dormant** child
+  (this now includes one the adapter parked automatically after it settled —
+  see "Turn completion is gated on RPC idle") auto-resumes it from its on-disk
   session (keeping the same ws `session_key`) and then delivers — so resume is
   subsumed by send, and there is no separate continue tool.
-- `ws-agent-list()` — enumerate live children with their status (running / idle /
-  dormant) and the time of their last report.
+- `ws-agent-list({ include_prompt? })` — enumerate registry members with their
+  status, alias and title. Status vocabulary is `running` / `idle` / `dormant`,
+  but `idle` (260905) is now transient rather than a resting state: an idle,
+  non-thread-bound record is parked to `dormant` by the adapter shortly after
+  it settles (see "Turn completion is gated on RPC idle"), so `idle` is mostly
+  observed mid-transition, not as a steady status to poll for. `include_prompt`
+  (default `false`) additionally surfaces each record's original spawn prompt,
+  stored head-truncated to 4KB.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
   mapping and on-disk session, leaving it **dormant/resumable** (a later
-  `ws-agent-send` revives it). The tool pushes a `ws-agent-settled` message with
-  `reason: "stopped"`; adapter-internal stops (a thread close, the shutdown
-  teardown) are silent. This is distinct from `session_shutdown`, the terminal
-  teardown of every child.
+  `ws-agent-send` revives it) — the same end state the automatic park below
+  reaches on its own for a settled, non-thread-bound child. The tool pushes a
+  `ws-agent-settled` message with `reason: "stopped"`; adapter-internal stops (a
+  thread close, the automatic park itself, the shutdown teardown) are silent.
+  This is distinct from `session_shutdown`, the terminal teardown of every
+  child.
 
 The former `ws-agent-wait` tool is **removed, not deprecated**: a tool that
 blocks the lead is the hazard (the approval-relay deadlock class and the
@@ -283,11 +305,14 @@ Still-running workers are terminated when the session is torn down
 (`session_shutdown`), before the bridge connection they dispatch through is
 closed. Their identities are not lost: before the teardown the adapter writes a
 sidecar `<leadSessionFile>.ws-agents.json` (the `.ws-threads.json` precedent)
-listing every non-dormant child — `agent_id`, role (`worker` /
-`execute-worker` / `fork`), the exact resume set the dormant-send path consumes
-(`sessionPath`, `modelBase`, `modelEffort`, `systemPromptPath`, `toolGroup`,
-`explicitTools`, `wsToolNames`), its state at shutdown (`running` / `idle`) and
-its last-report time. On the next `session_start` for the **same** lead session
+listing every non-thread-bound child, dormant/parked ones included (260905:
+capture no longer skips a record for lacking a live client — only
+thread-bound records are excluded) — `agent_id`, alias, title, prompt
+(head-truncated), role (`worker` / `execute-worker` / `fork`), the exact
+resume set the dormant-send path consumes (`sessionPath`, `modelBase`,
+`modelEffort`, `systemPromptPath`, `toolGroup`, `explicitTools`,
+`wsToolNames`), its state at shutdown (`running` / `idle` / `dormant`) and its
+last-report time. On the next `session_start` for the **same** lead session
 file (resume, `/reload`) the sidecar is consumed exactly once: each entry is
 re-registered as a **dormant** record with its role wiring re-armed (`fork` →
 the fork hooks: question report, anti-bleed loop, final report;
@@ -310,8 +335,16 @@ to a process that no longer exists.
 
 Because a worker is now a persistent RPC child rather than a one-shot process, a
 turn's completion is signalled by the child reaching **idle** (its RPC
-`agent_settled` event), not by the child process closing its stdio. The child
-stays alive after settling, ready for the next `ws-agent-send`. A settle that
+`agent_settled` event), not by the child process closing its stdio. As the
+last step of settle handling — after the idle/final push described below and
+after the anti-bleed nudge (fork.ts) has had its chance to re-prompt the
+child synchronously — the adapter automatically parks a settled child that is
+neither thread-bound nor already running again: it is silently stopped
+(the same as `ws-agent-stop`, but with no `ws-agent-settled` push of its
+own) and becomes dormant. So a settled child does **not** stay alive
+indefinitely waiting for the next `ws-agent-send`; it is transparently
+resumed from its on-disk session the moment one arrives, exactly like a
+sidecar-revived orphan. A settle that
 ends a turn in which the child sent **no** `kind:"final"` (or `kind:"question"`)
 report pushes a `ws-agent-settled` message to the lead with `reason: "idle"`
 and the child's last message, so a worker whose playbook never says
@@ -495,18 +528,25 @@ they are dropped with it at `session_shutdown`, exactly like Pi's own queue.
 **Fan-in stays with the model.** Every push whose process has at least one
 delegated agent carries a status line `N delegated agents still running`; with
 no delegated agent the line is omitted from both content and `details`. The
-delegated set is this process's registry members that are neither dormant nor
-stopped/exited and not thread-bound (workers, execute workers, task forks),
-and N is the subset that is running and has not yet sent `final` or `question`
-this turn. The line names no total and no ids: the delegated set only grows
-across a session (an idle child keeps its process until stopped or exited),
-and which children are running is `ws-agent-list`'s job. A child blocked on
-an approval is running; a child parked on a question is thread-bound; a child
-that settled idle or reported `final` leaves N until it is prompted again. The
-last `final` of a fan-out reads `0 delegated agents still running`, and a
-worker that never reports `final` reaches it through its `ws-agent-settled`,
-so the lead can tell "not yet — end the turn again" (N > 0) from "all in —
-synthesize" (N = 0).
+delegated set is this process's registry members that are **not** thread-bound
+(260905: presence no longer requires a live client — a parked/dormant record
+counts as delegated just as much as a running or idle one, since parking is
+now the normal fate of a settled child, not an exit), and N is the subset
+that is running and has not yet sent `final` or `question` this turn. The
+line names no total and no ids: because parking keeps a settled child's
+registry record rather than removing it, the delegated set effectively only
+shrinks through the registry cap's eviction of old dormant records (or a
+thread closing) rather than through settling, and which children are running
+is `ws-agent-list`'s job. A child blocked on an approval is running; a child
+parked on a question is thread-bound; a child that settled idle or reported
+`final` leaves N — and is itself parked to dormant shortly after, per "Turn
+completion is gated on RPC idle" — until it is prompted again. The last
+`final` of a fan-out reads `0 delegated agents still running`, and a worker
+that never reports `final` reaches it through its `ws-agent-settled`, so the
+lead can tell "not yet — end the turn again" (N > 0) from "all in —
+synthesize" (N = 0). `0 delegated agents still running` is consequently the
+ordinary steady state once anything has ever been spawned this session, not
+evidence the registry is empty.
 The idle-without-final advisory reads the record's bounded report log
 (`{kind, at}`, which also feeds `ws-agent-list`'s last-report time) considering
 only entries since the lead's last send to that record, so a re-tasked fork is

@@ -30,10 +30,10 @@ Route a task to the right primitive by what you actually need done:
 
 | You want to... | Call |
 | --- | --- |
-| Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`) |
-| Send a follow-up or steer a running subagent | `ws-agent-send` |
+| Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`; also pass `alias` and `title` — a short slug and a one-line description — so you and `ws-agent-list` can refer to it by name instead of by uuid) |
+| Send a follow-up or steer a subagent, running or parked | `ws-agent-send <alias-or-agent_id>` — a parked (dormant) subagent is transparently resumed from its own session file, so there is no separate "wake it up" step |
 | Wait for a subagent to finish or report progress | **Nothing — end your turn.** There is no wait verb. Every child signal is pushed into your session as a message that starts a turn on arrival. |
-| See every subagent's status (running/idle/dormant) | `ws-agent-list` |
+| See every subagent's status (running/idle/dormant), alias and title | `ws-agent-list` (pass `include_prompt:true` to also see each one's original prompt, head-truncated; off by default to keep the listing short) |
 | Gracefully stop a subagent (keeps it resumable) | `ws-agent-stop` |
 | Read a subagent's full session transcript | `ws-agent-transcript` |
 | (as a subagent) surface an intermediate finding to your lead | `ws-report-to-lead` |
@@ -47,6 +47,22 @@ Route a task to the right primitive by what you actually need done:
 | Delegate a task-thread fork that shares your full current context (lateral peer, not a depth-consuming worker) | `ws-fork` (`prompt`, optional `model_name`/`expects_commit`; it reports back ONLY via `ws-report-to-lead(kind:"question"|"final")` — never treat a bare turn-end as its result) |
 | Ask the owner a question without blocking or interrupting them | `ws-ask` (`title`, `question`, optional `context` — 2-3 sentences of background, no paths or hashes). Returns `{question_id}` and spawns nothing; keep working on whatever does not depend on the answer. |
 | Withdraw a question you no longer need answered | `ws-resolve` (`question_id`) — clears it from the owner's pending count; nothing is injected back, since you already know the answer |
+
+`agent_id` on `ws-agent-send`, `ws-agent-stop`, `ws-agent-transcript` and
+`ws-approve` accepts either the alias you gave at spawn time or the raw uuid —
+whichever you have on hand.
+
+## Subagents park themselves — you never have to stop them for hygiene
+
+Shortly after a subagent's turn settles (`ws-agent-settled`) with nothing left
+to say, the adapter automatically parks it: its process is silently stopped
+and it becomes dormant, exactly like a manual `ws-agent-stop`. A subagent that
+is `threadBound` (open in an owner discussion thread) or still running is
+never parked. You do not need to call `ws-agent-stop` just to free resources
+after a subagent finishes — it already happened. Parking changes nothing
+about how you address the subagent afterwards: `ws-agent-send` to its alias
+or `agent_id` transparently resumes it from its own session file, same as
+reviving one listed under `ws-agent-orphaned`.
 
 ## Delegated children push to you — never poll, never block
 
@@ -65,20 +81,26 @@ substitute for it. Each child signal arrives on its own as a message:
 | `ws-agent-orphaned` | A previous run of this session left children behind mid-turn. They are registered as dormant: `ws-agent-send` revives one from its own session file, `ws-agent-transcript` reads what it did, `ws-agent-stop` drops it. Each one listed individually was cut off mid-turn and resumes from its last flushed turn, so re-issue that instruction when you revive it. This message appears only when something was cut off; children that were idle at shutdown are re-registered silently, and `ws-agent-list` is where you see them. |
 
 Each of these ends with a line like `1 delegated agent still running` whenever
-you have anything delegated at all. Read it as your fan-in state: the number is
-how many of your children have yet to report this turn. While it is above zero,
-more is coming — end your turn again rather than concluding early;
-`0 delegated agents still running` is the cue that everything you dispatched
-has reported. The line does not say which children are outstanding —
-`ws-agent-list` does. Agents in an owner discussion thread are not counted;
-they are not yours to wait on.
+your registry holds at least one non-threadBound subagent — running, idle, or
+parked/dormant. Read it as your fan-in state: the number is how many of your
+children have yet to report this turn. While it is above zero, more is
+coming — end your turn again rather than concluding early; `0 delegated
+agents still running` is the cue that everything you dispatched has reported.
+Because parking keeps a subagent's record in the registry (it does not delete
+it — the same as a manual `ws-agent-stop`), `0 delegated agents still
+running` is the normal steady state once you have ever spawned anything in
+this session, not a signal that the registry is empty. The line does not say
+which children are outstanding — `ws-agent-list` does. Agents in an owner
+discussion thread are not counted; they are not yours to wait on.
 
 That line is accurate as of the moment it reaches you, not as of the moment the
 child spoke: a report raised while you are mid-turn is held and released when
 your turn settles, so the count you read already includes everything that
 happened while you were working. Trust it as the current picture and do not
-reconstruct one from earlier messages. When you have nothing delegated the line
-is absent entirely — a message with no status line is telling you there is no
+reconstruct one from earlier messages. The line is absent entirely only when
+the registry has no non-threadBound member at all — nothing has ever been
+spawned yet this session, or every prior record has since been evicted by the
+registry cap — a message with no status line is telling you there is no
 fan-in to wait on.
 
 The owner side of a question is theirs, not yours: `/answer <id>` opens one in
