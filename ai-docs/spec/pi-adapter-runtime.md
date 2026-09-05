@@ -23,7 +23,13 @@ bounded depth ≤ 2), the user-curated model catalog alias table, and the
 ## Tool exposure and name sanitization {#260903-pi-bridge-tool-registration}
 
 Every tool the ws-mcp server advertises through `tools/list` is registered as a
-Pi tool. ws-mcp tool names are bare and dotted (`playbook.print`, `tickets.list`,
+Pi tool, **except** the mercenary surface: the bridge drops every raw tool name
+starting with `mercenary.` (e.g. `mercenary.register`, `mercenary.call`,
+`mercenary.debug.tail`) from the list before registration and before building
+`wsToolNames`, independent of the server-side `workflow.prefer_mercenary`
+visibility knob — so no Pi process, lead or child, can see or call the
+mercenary surface (Open Decision #3, `260905-feat-ws-pi-harness-config-layer`).
+ws-mcp tool names are bare and dotted (`playbook.print`, `tickets.list`,
 `workflow_manual`, `ferrule`). Pi tool names are serialized into the model
 provider's tool-call payload, and common provider wire formats (OpenAI-compatible
 function calling) reject names containing `/` or `.`, so the registered name is

@@ -265,6 +265,20 @@ export function sanitizeToolName(rawName: string): string {
   return `ws__${rawName.replaceAll(".", "_")}`;
 }
 
+const MERCENARY_RAW_PREFIX = "mercenary.";
+
+/**
+ * Drops every ws-mcp tool whose raw (pre-sanitization) name starts with
+ * `mercenary.` from the list the bridge registers with Pi and exposes via
+ * `wsToolNames` — independent of the server-side `workflow.prefer_mercenary`
+ * knob (Open Decision #3, 260905-feat-ws-pi-harness-config-layer): no Pi
+ * process, lead or child, can see or call the mercenary surface. Pure so it
+ * is unit-testable without a live ws-mcp subprocess.
+ */
+export function filterOutMercenaryTools<T extends { name: string }>(tools: readonly T[]): T[] {
+  return tools.filter((tool) => !tool.name.startsWith(MERCENARY_RAW_PREFIX));
+}
+
 /**
  * Drops `session_key` from a JSON-Schema's `required` array (keeping it in
  * `properties`, unchanged, so a caller can still supply it explicitly).
@@ -403,7 +417,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     });
     assertVersionPin(runtime, initResult.serverInfo.version);
 
-    tools = await client.listTools();
+    tools = filterOutMercenaryTools(await client.listTools());
 
     for (const tool of tools) {
       const rawName = tool.name;
