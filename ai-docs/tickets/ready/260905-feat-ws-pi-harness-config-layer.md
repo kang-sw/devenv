@@ -126,11 +126,18 @@ ws side can answer the same lookup.
   normalization, and `InferBackend` stay in one place. Missing alias stays
   "inherit the parent model", never an error, preserving the adapter's
   never-hard-fail rule.
-- **Golden rule for the Pi track is respected by sequencing, not violated.**
-  Phases 2–3 are ws-mcp Go changes and land on `develop` through the normal
-  ws release flow; Phases 1 and 4 are adapter changes on the Pi track, and
-  Phase 4 is gated on a ws release carrying Phases 2–3 (the adapter's version pin already
-  enforces this ordering).
+- **Deliberate golden-rule exception: every phase lands on the Pi track.**
+  (Owner decision, 2026-09-05, replacing the earlier "respected by
+  sequencing" wording, which had the intent backwards.) The Pi track's
+  standing rule "never modify ws-mcp Go source" is waived for this ticket
+  only: Phases 2–3 change `agents-plugin-tool/` on the Pi-track branch, in
+  the same series as Phases 1 and 4, and reach `develop` when the track
+  merges. The exception is bounded by the AGENTS.md harness-peer clause: the
+  ws-mcp changes carry no Pi-specific logic, add `pi` only where `codex` and
+  `claude` are already spelled, and would apply to any later host. Phase 4
+  runs against the source-built ws-mcp from the same branch, so the adapter's
+  version pin is satisfied by the branch's own `runtime.json` rather than by
+  a published release.
 
 ## Constraints
 
@@ -204,17 +211,20 @@ Review (single, full scope): one Important — the two implementation
 commits lacked `## Spec` and `## Ticket Updates` sections — [fixed] by
 rewording the local commits (tree unchanged). No Critical.
 
-## Blocked (2026-09-05)
+## Blocked (2026-09-05) — resolved the same day, kept as history
 
-Phases 2 and 3 are ws-mcp Go changes that land on `develop` through the
-normal ws release flow, and Phase 4 is gated on a released ws that carries
-them. None of the three can advance on the Pi-track goal branch this run
-is draining; the next step is a `develop`-based run (or the owner) picking
-up Phase 2. Phase 1 is complete.
+The drain run recorded Phases 2–3 as `develop`-only ws-mcp changes and Phase
+4 as gated on a ws release, following the ticket's then-current Decisions
+wording. The owner clarified that this ticket is a deliberate golden-rule
+exception (see Decisions), so all remaining phases advance on the Pi-track
+branch. Not a blocker; the next selector pass should pick this ticket up at
+Phase 2.
 
 ### Phase 2: `pi` harness bucket end to end
 
-Add `pi` to the harness enum and detection, wire it through `config.tune`
+Lands on the Pi-track branch under the golden-rule exception in Decisions
+(ws-mcp Go changes in `agents-plugin-tool/`, host-neutral). Add `pi` to the
+harness enum and detection, wire it through `config.tune`
 (prompt overrides and `agents.tier` with `harness: "pi"`), the tier→model
 resolver used by `playbook.render` and the tier playbook variables, and the
 rsrc loader's harness-variant selection. Verify with Go tests covering:
@@ -261,7 +271,9 @@ tier rejected.
 
 ### Phase 4: Pi adapter resolves models through ws-mcp; catalog retires
 
-Depends on Phase 3 being in a released ws the adapter pins. On the Pi track
+Depends on Phase 3 being on the same branch; the adapter is verified against
+the source-built ws-mcp from that branch (the version pin is the branch's own
+`runtime.json`). On the Pi track
 (`agents-plugin-pi/`): route `resolveModelForAlias` (spawner) and the explore
 leaf's / `ws-execute complex:false`'s `"small"` through the bridge to the
 Phase 3 tool, treating a non-`pi` answering bucket as inherit; carry `effort`
