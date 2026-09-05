@@ -643,7 +643,7 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     assert.equal(
       computeRunningStatusLine(registry),
       undefined,
-      "a question-parked fork is outside both N and M, and an empty fan-in produces no line at all",
+      "a question-parked fork is outside the fan-in count entirely, and an empty fan-in produces no line at all",
     );
   });
 
@@ -666,7 +666,7 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
       args: { kind: "final", message: "Outcome: rebased." },
     });
 
-    assert.equal(live.threadBound, false, "without this the fork is outside N and M, and settle-suppressed, forever");
+    assert.equal(live.threadBound, false, "without this the fork is outside the fan-in count, and settle-suppressed, forever");
     assert.equal(handle.threads.get(thread.threadId)!.status, "dormant", "the owner has nothing left to answer");
     assert.deepEqual(outcome, {}, "Edition: a final is stashed, not pushed at tool-invocation time");
     assert.equal(live.pendingFinal, "Outcome: rebased.", "a fork-raised final is still the lead's completion signal — it is released when the fork's turn ends");

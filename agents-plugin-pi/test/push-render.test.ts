@@ -33,7 +33,7 @@ import { buildPushContent, PUSH_FAMILIES } from "../src/spawner.ts";
 
 describe("buildPushRenderLines", () => {
   test("splits a real pushed message into head, payload and status", () => {
-    const status = "1 of 2 delegated agents still running: w2";
+    const status = "1 delegated agent still running";
     const content = buildPushContent("ws-agent-report", "w1", { kind: "final", report: "Outcome: done" }, status);
 
     assert.deepEqual(buildPushRenderLines({ content, details: { status } }), {
@@ -53,9 +53,9 @@ describe("buildPushRenderLines", () => {
   });
 
   test("without a details.status the status line is still recognized by shape", () => {
-    const content = ["[ws-agent-settled] agent a1", "reason: idle", "0 of 1 delegated agent still running"].join("\n");
+    const content = ["[ws-agent-settled] agent a1", "reason: idle", "0 delegated agents still running"].join("\n");
     const parts = buildPushRenderLines({ content });
-    assert.equal(parts?.status, "0 of 1 delegated agent still running");
+    assert.equal(parts?.status, "0 delegated agents still running");
     assert.deepEqual(parts?.body, ["reason: idle"]);
   });
 
@@ -67,8 +67,8 @@ describe("buildPushRenderLines", () => {
   });
 
   test("details.status wins over the shape guess, so a report QUOTING a status line is not eaten", () => {
-    const status = "0 of 1 delegated agent still running";
-    const content = ["[ws-agent-report] agent a1", "report: the sub-lead saw `2 of 3 delegated agents still running`", status].join("\n");
+    const status = "0 delegated agents still running";
+    const content = ["[ws-agent-report] agent a1", "report: the sub-lead saw `2 delegated agents still running`", status].join("\n");
     const parts = buildPushRenderLines({ content, details: { status } });
     assert.equal(parts?.status, status);
     assert.equal(parts?.body.length, 1);
@@ -126,7 +126,7 @@ function fakeTui(): { modules: PushTuiModules; boxes: Array<{ padding: number[];
 }
 
 describe("buildPushComponent", () => {
-  const status = "1 of 2 delegated agents still running: w2";
+  const status = "1 delegated agent still running";
   const message = {
     content: buildPushContent("ws-agent-report", "w1", { kind: "final", report: "Outcome: done" }, status),
     details: { status },

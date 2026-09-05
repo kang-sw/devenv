@@ -727,9 +727,9 @@ export function handleForkRaisedQuestion(
   // fix the bind set above could only ever be released by an owner who
   // actually opened the thread — and in headless (§8) there is no owner
   // surface at all, so a fork-raised question latched `threadBound` forever:
-  // permanently outside N and M, settles permanently suppressed, anti-bleed
-  // permanently disarmed, and the lead's fan-in reading `0 of 0` while the
-  // fork was still working. Armed at registration, the fork's OWN
+  // permanently outside the fan-in count, settles permanently suppressed,
+  // anti-bleed permanently disarmed, and the lead's fan-in showing no status
+  // line while the fork was still working. Armed at registration, the fork's OWN
   // `kind:"final"` closes the thread and releases the bind with no owner
   // involvement (`handleRespondentFinalReport` -> `detachForkRaisedThread`).
   if (pi) armFinalReportHook(pi, handle, rpcRegistry, record.threadId, agentId);
@@ -1207,7 +1207,8 @@ export async function ensureRespondent(
  * registration; cleared only where the thread itself actually closes
  * (`detachForkRaisedThread`, `injectDiscussionSummary`, `ws-resolve`), never
  * on a mere overlay Esc. While set, `spawner.ts` emits no settle push for the
- * record and `computeRunningStatusLine` excludes it from both N and M.
+ * record and `computeRunningStatusLine` leaves it out entirely — it is neither
+ * counted as running nor keeps the status line present.
  */
 function bindThread(rpcRegistry: RpcAgentRegistry, agentId: string, bound: boolean): void {
   const record = rpcRegistry.get(agentId);

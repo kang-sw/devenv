@@ -19,8 +19,8 @@
  * `first*AgentId` selectors are all DELETED, not deprecated — their tests are
  * gone with them rather than rewritten, because nothing selects a winner any
  * more. In their place this file covers the push model's own seams:
- * `shouldPushToLead` (the role gate), `computeRunningStatusLine` (the `N of
- * M` fan-in arithmetic), `buildPushContent`/`pushToLead` (message shape and
+ * `shouldPushToLead` (the role gate), `computeRunningStatusLine` (the fan-in
+ * running count), `buildPushContent`/`pushToLead` (message shape and
  * best-effort delivery), `promptAgent` (the single `running`/
  * `terminalThisTurn`/`lastLeadPromptAt` funnel), `recordReport`/
  * `reportKindsSinceLeadPrompt` (the bounded report log that replaced
@@ -492,9 +492,9 @@ function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord
 }
 
 /**
- * A record in the LIVE resting state: `client` present is what
- * `computeRunningStatusLine` reads for M (a dormant/stopped/exited record has
- * none), so every fan-in fixture needs one. Never a real `RpcClient`.
+ * A record in the LIVE resting state: `client` present is what keeps
+ * `computeRunningStatusLine`'s line present at all (a dormant/stopped/exited
+ * record has none), so every fan-in fixture needs one. Never a real `RpcClient`.
  */
 function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return freshRpcRecord({ client: {} as RpcClient, ...overrides });
@@ -803,8 +803,8 @@ describe("shouldPushToLead (the push gate)", () => {
   });
 });
 
-describe("computeRunningStatusLine (fan-in N of M)", () => {
-  test("Edition: an empty/absent registry produces NO line at all — a push with nothing delegated said `0 of 0`", () => {
+describe("computeRunningStatusLine (fan-in running count)", () => {
+  test("Edition: an empty/absent registry produces NO line at all — a push with nothing delegated once carried a contentless zero line", () => {
     assert.equal(computeRunningStatusLine(new Map()), undefined);
     assert.equal(computeRunningStatusLine(undefined), undefined);
   });
@@ -814,28 +814,28 @@ describe("computeRunningStatusLine (fan-in N of M)", () => {
     assert.equal(computeRunningStatusLine(registry), undefined);
   });
 
-  test("M counts every live, non-threadBound record; N is the subset with no terminal report this turn, named by id", () => {
+  test("counts the live, non-threadBound records with no terminal report this turn — no total, no ids", () => {
     const registry: RpcAgentRegistry = new Map([
       ["a", liveRpcRecord({ agentId: "a", running: true })],
       ["b", liveRpcRecord({ agentId: "b", running: true, terminalThisTurn: true })],
       ["c", liveRpcRecord({ agentId: "c", running: true })],
     ]);
-    assert.equal(computeRunningStatusLine(registry), "2 of 3 delegated agents still running: a, c");
+    assert.equal(computeRunningStatusLine(registry), "2 delegated agents still running");
   });
 
-  test("Edition: the ids are listed only while N > 0 — a `0 of M` line has nothing to name", () => {
+  test("Edition: live records that are all settled/reported keep the line present at zero — the synthesis cue", () => {
     const registry: RpcAgentRegistry = new Map([
       ["a", liveRpcRecord({ agentId: "a", running: true, terminalThisTurn: true })],
       ["b", liveRpcRecord({ agentId: "b" })],
     ]);
-    assert.equal(computeRunningStatusLine(registry), "0 of 2 delegated agents still running");
+    assert.equal(computeRunningStatusLine(registry), "0 delegated agents still running");
   });
 
-  test("I3: the denominator holds across a real 3-way fan-out — 2 of 3, 1 of 3, 0 of 3", () => {
+  test("I3: the count descends across a real 3-way fan-out — 2, 1, 0 — with the line present throughout", () => {
     // The event order the runtime actually produces: each worker files its
     // final (terminalThisTurn) and then settles (running cleared) BEFORE the
-    // next one reports. Keying M on `running` made this read 2 of 3 -> 1 of 2
-    // -> 0 of 1, so the ticket's "0 of 3" completion cue could never occur.
+    // next one reports. Presence is keyed on `client`, not `running`, so the
+    // settled siblings keep the line present and the zero cue is reachable.
     const ids = ["a", "b", "c"];
     const registry: RpcAgentRegistry = new Map(ids.map((id) => [id, liveRpcRecord({ agentId: id, running: true })] as const));
     const lines: Array<string | undefined> = [];
@@ -846,44 +846,49 @@ describe("computeRunningStatusLine (fan-in N of M)", () => {
       applyRpcEvent(record, { type: "agent_settled" });
     }
     assert.deepEqual(lines, [
-      "2 of 3 delegated agents still running: b, c",
-      "1 of 3 delegated agents still running: c",
-      "0 of 3 delegated agents still running",
+      "2 delegated agents still running",
+      "1 delegated agent still running",
+      "0 delegated agents still running",
     ]);
   });
 
-  test("I3: a live child that settled idle stays in M and only leaves N", () => {
+  test("I3: a live child that settled idle keeps the line present and only leaves the count", () => {
     const idle = liveRpcRecord({ agentId: "idle", running: true });
     const registry: RpcAgentRegistry = new Map([
       ["busy", liveRpcRecord({ agentId: "busy", running: true })],
       ["idle", idle],
     ]);
     applyRpcEvent(idle, { type: "agent_settled" });
-    assert.equal(computeRunningStatusLine(registry), "1 of 2 delegated agents still running: busy");
+    assert.equal(computeRunningStatusLine(registry), "1 delegated agent still running");
   });
 
-  test("stopped/exited/dormant records (no client) are absent from M entirely", () => {
+  test("stopped/exited/dormant records (no client) neither count nor keep the line present", () => {
     const registry: RpcAgentRegistry = new Map([
       ["live", liveRpcRecord({ agentId: "live", running: true })],
       ["stopped", freshRpcRecord({ agentId: "stopped", running: false })],
       ["dormant", freshRpcRecord({ agentId: "dormant" })],
     ]);
-    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running: live");
+    assert.equal(computeRunningStatusLine(registry), "1 delegated agent still running");
   });
 
-  test("a threadBound agent is excluded from BOTH N and M — the owner exchange is not the lead's fan-in", () => {
+  test("a threadBound agent is excluded from BOTH the count and the presence check — the owner exchange is not the lead's fan-in", () => {
     const registry: RpcAgentRegistry = new Map([
       ["worker", liveRpcRecord({ agentId: "worker", running: true })],
       ["discussing", liveRpcRecord({ agentId: "discussing", running: true, threadBound: true })],
     ]);
-    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running: worker");
+    assert.equal(computeRunningStatusLine(registry), "1 delegated agent still running");
+    assert.equal(
+      computeRunningStatusLine(new Map([["discussing", liveRpcRecord({ agentId: "discussing", running: true, threadBound: true })]])),
+      undefined,
+      "a registry whose only live record is threadBound produces no line at all",
+    );
   });
 
   test("an approval-blocked child is still counted — it is outstanding, and the lead is what unblocks it", () => {
     const registry: RpcAgentRegistry = new Map([
       ["a", liveRpcRecord({ agentId: "a", running: true, pendingApproval: { cmdId: "c1", command: "echo hi" } })],
     ]);
-    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running: a");
+    assert.equal(computeRunningStatusLine(registry), "1 delegated agent still running");
   });
 
   test("a child counts from the prompt-issue instant, before any agent_start event has arrived", async () => {
@@ -892,23 +897,24 @@ describe("computeRunningStatusLine (fan-in N of M)", () => {
     const registry: RpcAgentRegistry = new Map([["a", record]]);
     await promptAgent(record, client, "go");
     assert.equal(record.streaming, false, "no agent_start has been observed yet");
-    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running: a");
+    assert.equal(computeRunningStatusLine(registry), "1 delegated agent still running");
   });
 
-  test("singular/plural agreement follows M", () => {
-    assert.equal(computeRunningStatusLine(new Map([["a", liveRpcRecord({ agentId: "a", running: true })]])), "1 of 1 delegated agent still running: a");
+  test("singular/plural agreement follows the running count", () => {
+    assert.equal(computeRunningStatusLine(new Map([["a", liveRpcRecord({ agentId: "a", running: true })]])), "1 delegated agent still running");
+    assert.equal(computeRunningStatusLine(new Map([["a", liveRpcRecord({ agentId: "a" })]])), "0 delegated agents still running");
   });
 });
 
 describe("buildPushContent", () => {
   test("renders a head line naming the family and agent, one key: value line per payload field, and the status line last", () => {
-    const content = buildPushContent("ws-agent-report", "a1", { kind: "final", report: "done" }, "0 of 1 delegated agent still running");
-    assert.equal(content, ["[ws-agent-report] agent a1", "kind: final", "report: done", "0 of 1 delegated agent still running"].join("\n"));
+    const content = buildPushContent("ws-agent-report", "a1", { kind: "final", report: "done" }, "0 delegated agents still running");
+    assert.equal(content, ["[ws-agent-report] agent a1", "kind: final", "report: done", "0 delegated agents still running"].join("\n"));
   });
 
   test("an agent-less family (ws-agent-orphaned) drops the agent from the head line", () => {
-    const content = buildPushContent("ws-agent-orphaned", undefined, { count: 2 }, "0 of 1 delegated agent still running");
-    assert.equal(content, ["[ws-agent-orphaned]", "count: 2", "0 of 1 delegated agent still running"].join("\n"));
+    const content = buildPushContent("ws-agent-orphaned", undefined, { count: 2 }, "0 delegated agents still running");
+    assert.equal(content, ["[ws-agent-orphaned]", "count: 2", "0 delegated agents still running"].join("\n"));
   });
 
   test("Edition: an absent status line contributes no trailing line at all", () => {
@@ -939,14 +945,14 @@ describe("pushToLead", () => {
     const [{ message, options }] = pi.sent;
     assert.equal(message.customType, "ws-agent-report");
     assert.equal(message.display, true);
-    assert.deepEqual(message.details, { agent_id: "a", report: "halfway", status: "1 of 1 delegated agent still running: a" });
+    assert.deepEqual(message.details, { agent_id: "a", report: "halfway", status: "1 delegated agent still running" });
     assert.deepEqual(options, { deliverAs: "followUp", triggerTurn: true }, "triggerTurn is what makes an IDLE lead act on the signal at once");
   });
 
   test("an absent record still pushes (the orphan roll-call), and with nothing delegated it carries NO status field", () => {
     const pi = fakePi();
     pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 2 }, "followUp");
-    assert.deepEqual(pi.sent[0].message.details, { count: 2 }, "Edition: `0 of 0 delegated agents still running` told the lead nothing");
+    assert.deepEqual(pi.sent[0].message.details, { count: 2 }, "Edition: a zero line with nothing delegated told the lead nothing");
     assert.equal(pi.sent[0].message.content, ["[ws-agent-orphaned]", "count: 2"].join("\n"));
   });
 
@@ -993,9 +999,9 @@ describe("pushToLead", () => {
  * What went wrong without this: Pi queues a mid-turn `followUp` in its own
  * `PendingMessageQueue` and delivers it after the turn, but offers no hook at
  * that delivery — so the status line was frozen at arrival time. A worker that
- * finished while the lead was still spawning its siblings delivered `0 of 1`,
- * the next `0 of 2`, and only the last `0 of 3`: three separate invitations to
- * synthesize before the fan-out was in.
+ * finished while the lead was still spawning its siblings delivered a zero
+ * count (its siblings were not registered yet), and so did the next: three
+ * separate invitations to synthesize before the fan-out was in.
  *
  * `leadIdleRef` and `heldPushQueue` are module state, so every test here
  * resets both.
@@ -1065,7 +1071,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.deepEqual(heldPushQueue, [], "a blocked child cannot wait for the lead's turn to end");
   });
 
-  test("the live-run failure itself: three workers, two finals landing mid-turn, read 1 of 3 then 0 of 3 — never 0 of 1", () => {
+  test("the live-run failure itself: three workers, two finals landing mid-turn, read 1 then 0 — never a premature 0", () => {
     idle = false;
     const pi = fakePi();
     const ids = ["w1", "w2", "w3"];
@@ -1086,8 +1092,8 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
     assert.equal(flushHeldPushes(pi.api), 2);
     assert.deepEqual(
       pi.sent.map((entry) => (entry.message.details as { status?: string }).status),
-      ["1 of 3 delegated agents still running: w3", "1 of 3 delegated agents still running: w3"],
-      "at release time one worker is genuinely still out — arrival-time lines said `0 of 1` and `0 of 2`",
+      ["1 delegated agent still running", "1 delegated agent still running"],
+      "at release time one worker is genuinely still out — arrival-time lines said zero",
     );
     assert.deepEqual(
       pi.sent.map((entry) => (entry.message.details as { report?: string }).report),
@@ -1106,7 +1112,7 @@ describe("pushToLead: holding a mid-turn push until the lead's turn settles", ()
 
     assert.equal(
       (pi.sent[2].message.details as { status?: string }).status,
-      "0 of 3 delegated agents still running",
+      "0 delegated agents still running",
       "the synthesis cue lands on the message that actually completes the fan-out",
     );
   });
@@ -1211,7 +1217,7 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
       agent_id: "a",
       reason: "idle",
       last_message: "the last thing it said",
-      status: "0 of 1 delegated agent still running",
+      status: "0 delegated agents still running",
     });
     assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
   });
@@ -1230,7 +1236,7 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
       kind: "final",
       report: "Outcome: done",
       settled_reason: "idle",
-      status: "0 of 1 delegated agent still running",
+      status: "0 delegated agents still running",
     });
     assert.equal(h.record.pendingFinal, undefined, "released, not re-pushable");
   });
