@@ -589,7 +589,7 @@ Two lead verbs are registered:
   is a verbatim anchor the adapter runs first, handing `{command, output}` to the
   worker — for destructive exact-match cases where a reconstructed command would
   be unsafe. `complex?` selects the worker's model tier only (a light-model
-  default; a lead-class model when set). The worker is spawned through the same
+  default; the lead's own model when set). The worker is spawned through the same
   machinery as `ws-agent-spawn` with a fixed adapter-owned system prompt (the lead
   authors no prompt prose). The call returns an `agent_id` immediately and never
   blocks the lead's turn awaiting approvals; the worker's report is delivered

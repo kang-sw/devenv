@@ -90,8 +90,8 @@ describe("buildExecuteWorkerPrompt", () => {
 });
 
 describe("resolveExecuteModelAlias", () => {
-  test("complex:true resolves to the \"complex\" alias", () => {
-    assert.equal(resolveExecuteModelAlias(true), "complex");
+  test("complex:true resolves to undefined (inherits the lead's own model)", () => {
+    assert.equal(resolveExecuteModelAlias(true), undefined);
   });
 
   test("complex:false or omitted resolves to the existing \"small\" alias", () => {
