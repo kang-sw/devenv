@@ -62,9 +62,29 @@ export interface OverlayChatOptions {
   title: string;
   threadId: string;
   question?: string;
+  /** ISO timestamp the thread was registered at, rendered in the header (review relay #1 I4). */
+  createdAt?: string;
   channel: ForkChannel;
   /** Called once, with the fork's own summary, when the owner ends the thread with `/done`. */
   onDone: (summary: string) => void;
+}
+
+/** Terminal bracketed-paste markers (`\x1b[?2004h` mode), which Pi enables on the real TTY. */
+export const PASTE_START = "\x1b[200~";
+export const PASTE_END = "\x1b[201~";
+
+/**
+ * Review relay #1 I4: owner-facing rendering of a thread's registration time.
+ * Deliberately UTC-and-labeled rather than locale-formatted so the header is
+ * identical in a test run, a CI container and the owner's terminal.
+ * `undefined` for a missing or unparseable timestamp — an old registry entry
+ * must not break the header.
+ */
+export function formatSpawnTime(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return undefined;
+  return `${at.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /**
@@ -160,6 +180,10 @@ export class OverlayChatComponent {
   private input = "";
   private cursor = 0;
   private cachedLines: string[] | undefined;
+  /** Width `cachedLines` was produced for — the cache is only valid for that width (review relay #1 I2). */
+  private cachedWidth: number | undefined;
+  /** Inside a bracketed paste whose start marker arrived in an earlier chunk (review relay #1 I3). */
+  private pasting = false;
 
   constructor(tui: OverlayTui, options: OverlayChatOptions, done: (result: undefined) => void) {
     this.tui = tui;
@@ -207,6 +231,7 @@ export class OverlayChatComponent {
 
   private refresh(): void {
     this.cachedLines = undefined;
+    this.cachedWidth = undefined;
     this.tui.requestRender();
   }
 
@@ -222,6 +247,7 @@ export class OverlayChatComponent {
 
   invalidate(): void {
     this.cachedLines = undefined;
+    this.cachedWidth = undefined;
   }
 
   private submit(): void {
@@ -235,6 +261,10 @@ export class OverlayChatComponent {
 
     if (text === DONE_COMMAND) {
       this.donePending = true;
+      // Any half-streamed turn belongs to the exchange the owner just ended;
+      // leaving it in the buffer would make it the leading text of the
+      // summary turn (review relay #1 M11).
+      this.streaming = "";
       this.entries.push({ who: "note", text: "ending the thread — asking for a summary…" });
       this.deliver(buildDoneSummaryPrompt());
       this.refresh();
@@ -256,7 +286,47 @@ export class OverlayChatComponent {
     });
   }
 
+  /**
+   * Review relay #1 I3: a terminal in bracketed-paste mode wraps pasted text
+   * in `\x1b[200~`/`\x1b[201~`, so the whole paste starts with ESC and the
+   * catch-all escape filter below would drop it silently. Markers are
+   * stripped and the payload inserted as text; `pasting` carries the state
+   * across chunks, since a large paste arrives split across several reads.
+   * Newlines inside a paste become spaces rather than submits — a pasted
+   * paragraph must not fire off half-messages.
+   */
+  private handlePaste(data: string): void {
+    let text = data;
+    if (!this.pasting) {
+      text = text.slice(PASTE_START.length);
+      this.pasting = true;
+    }
+    const end = text.indexOf(PASTE_END);
+    if (end >= 0) {
+      text = text.slice(0, end);
+      this.pasting = false;
+    }
+    this.insertText(text.replace(/\r\n|\r|\n/g, " "));
+  }
+
+  /** Inserts the printable characters of `text` at the cursor; ignores the rest. */
+  private insertText(text: string): void {
+    const printable = [...text].filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code >= 0x20 && code !== 0x7f;
+    });
+    if (printable.length === 0) return;
+    const inserted = printable.join("");
+    this.input = this.input.slice(0, this.cursor) + inserted + this.input.slice(this.cursor);
+    this.cursor += inserted.length;
+    this.refresh();
+  }
+
   handleInput(data: string): void {
+    if (this.pasting || data.startsWith(PASTE_START)) {
+      this.handlePaste(data);
+      return;
+    }
     if (data === "\r" || data === "\n") {
       this.submit();
       return;
@@ -303,26 +373,24 @@ export class OverlayChatComponent {
     }
     // Printable text only — every other control/escape sequence is ignored
     // rather than pasted into the input box as mojibake.
-    const printable = [...data].filter((char) => {
-      const code = char.codePointAt(0) ?? 0;
-      return code >= 0x20 && code !== 0x7f;
-    });
-    if (printable.length === 0) return;
-    const inserted = printable.join("");
-    this.input = this.input.slice(0, this.cursor) + inserted + this.input.slice(this.cursor);
-    this.cursor += inserted.length;
-    this.refresh();
+    this.insertText(data);
   }
 
   render(width: number): string[] {
-    if (this.cachedLines) return this.cachedLines;
     const w = Math.max(1, width);
+    // The cache is keyed on width: every line here is wrapped to `w`, so a
+    // resize between renders must re-wrap rather than replay lines built for
+    // the old width (review relay #1 I2).
+    if (this.cachedLines && this.cachedWidth === w) return this.cachedLines;
     const lines: string[] = [];
 
     // §5: the header names the thread explicitly, so the two lead-voiced
     // agents (the lead itself and this discussion fork) can never be
-    // confused for one another on screen.
+    // confused for one another on screen. The registration time (I4) sits
+    // with it, so a reopened dormant thread is placeable in time.
     lines.push(...wrapLine(`── ws thread ${this.options.threadId} · ${this.options.title}`, w));
+    const opened = formatSpawnTime(this.options.createdAt);
+    if (opened) lines.push(...wrapLine(`   opened ${opened}`, w));
     lines.push("");
 
     for (const line of this.transcriptLines(w)) lines.push(line);
@@ -332,6 +400,7 @@ export class OverlayChatComponent {
     lines.push(...wrapLine(`${DONE_COMMAND} to end the thread · Esc closes this view (the thread keeps running)`, w));
 
     this.cachedLines = lines;
+    this.cachedWidth = w;
     return lines;
   }
 

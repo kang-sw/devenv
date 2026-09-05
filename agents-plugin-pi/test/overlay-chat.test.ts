@@ -24,11 +24,14 @@ import {
   buildDoneSummaryPrompt,
   visibleWidth,
   wrapLine,
+  formatSpawnTime,
+  PASTE_START,
+  PASTE_END,
   type ForkChannel,
 } from "../src/overlay-chat.ts";
 import { resolveOwnerSendInterrupt } from "../src/ask.ts";
 
-function harness(options: { question?: string; streaming?: boolean } = {}) {
+function harness(options: { question?: string; streaming?: boolean; createdAt?: string } = {}) {
   const sent: string[] = [];
   const listeners = new Set<(evt: unknown) => void>();
   let unsubscribed = 0;
@@ -57,6 +60,7 @@ function harness(options: { question?: string; streaming?: boolean } = {}) {
       title: "Rebase or merge?",
       threadId: "q3",
       question: options.question,
+      createdAt: options.createdAt,
       channel,
       onDone: (summary) => summaries.push(summary),
     },
@@ -129,16 +133,46 @@ describe("visibleWidth / wrapLine", () => {
   });
 });
 
+describe("formatSpawnTime", () => {
+  test("renders an ISO timestamp as a labeled UTC minute, and degrades to undefined", () => {
+    assert.equal(formatSpawnTime("2026-09-05T11:52:30.000Z"), "2026-09-05 11:52 UTC");
+    assert.equal(formatSpawnTime(undefined), undefined);
+    assert.equal(formatSpawnTime(""), undefined);
+    assert.equal(formatSpawnTime("nonsense"), undefined);
+  });
+});
+
 describe("render(width)", () => {
   test("every rendered line fits the requested width, at several widths", () => {
     const h = harness({ question: "Should we rebase onto develop, or merge it in and keep both histories intact?" });
     h.delta("A long streamed answer that will certainly need wrapping at narrow widths. ".repeat(3));
-    for (const width of [20, 40, 80, 120]) {
-      h.component.invalidate();
+    // No invalidate() between widths: review relay #1 I2 — the render cache is
+    // keyed on width, so a resize with no other state change must still
+    // re-wrap rather than replay the previous width's lines.
+    for (const width of [20, 40, 80, 120, 20]) {
       for (const line of h.component.render(width)) {
         assert.ok(visibleWidth(line) <= width, `line ${JSON.stringify(line)} exceeds width ${width}`);
       }
     }
+  });
+
+  test("I2: the cache is reused only for the width it was built for", () => {
+    const h = harness({ question: "A question long enough that its wrapping visibly differs between widths." });
+    const wide = h.component.render(120);
+    const narrow = h.component.render(20);
+    assert.notDeepEqual(narrow, wide, "a narrower render must not replay the wide cache");
+    assert.deepEqual(h.component.render(120), wide, "and re-rendering at the original width is stable");
+  });
+
+  test("I4: the header carries the thread's registration time when known, and omits it otherwise", () => {
+    const withTime = harness({ createdAt: "2026-09-05T11:52:30.000Z" }).component.render(80).join("\n");
+    assert.ok(withTime.includes("2026-09-05 11:52 UTC"), withTime);
+
+    const withoutTime = harness().component.render(80).join("\n");
+    assert.ok(!/opened /.test(withoutTime), "no timestamp line without a createdAt");
+
+    const badTime = harness({ createdAt: "not-a-date" }).component.render(80).join("\n");
+    assert.ok(!/opened /.test(badTime), "an unparseable timestamp must not break the header");
   });
 
   test("the header names the thread id and title (never let the two lead-voiced agents be confused)", () => {
@@ -247,6 +281,43 @@ describe("owner input routing", () => {
     assert.equal(h.sent.length, 0);
   });
 
+  test("I3: a bracketed paste lands in the input box instead of being swallowed as an escape sequence", async () => {
+    const h = harness();
+    h.component.handleInput(`${PASTE_START}pasted decision text${PASTE_END}`);
+    assert.ok(h.component.render(80).join("\n").includes("> pasted decision text"));
+    h.enter();
+    await flush();
+    assert.deepEqual(h.sent, ["pasted decision text"]);
+  });
+
+  test("I3: a paste split across chunks is reassembled, and newlines inside it never submit", async () => {
+    const h = harness();
+    h.component.handleInput(`${PASTE_START}first line\n`);
+    h.component.handleInput("second line");
+    assert.deepEqual(h.sent, [], "a newline inside a paste is not an Enter");
+    h.component.handleInput(` tail${PASTE_END}`);
+    h.enter();
+    await flush();
+    assert.deepEqual(h.sent, ["first line second line tail"]);
+  });
+
+  test("I3: paste handling does not reopen the escape-sequence leak", () => {
+    const h = harness();
+    h.component.handleInput("\x1b[A");
+    h.component.handleInput("\x1b[6~");
+    assert.ok(!h.component.render(80).join("\n").includes("> ["), "arrow/function keys must still be dropped whole");
+  });
+
+  test("I3: text pasted at the cursor respects an existing cursor position", async () => {
+    const h = harness();
+    h.type("ab");
+    h.component.handleInput("\x1b[D");
+    h.component.handleInput(`${PASTE_START}XY${PASTE_END}`);
+    h.enter();
+    await flush();
+    assert.deepEqual(h.sent, ["aXYb"]);
+  });
+
   test("§5's prompt()-vs-steer() discriminator: a streaming fork is interrupted, an idle one is prompted", () => {
     assert.equal(resolveOwnerSendInterrupt(true), true, "streaming -> steer");
     assert.equal(resolveOwnerSendInterrupt(false), false, "idle/dormant -> prompt");
@@ -305,6 +376,16 @@ describe("/done (the single fixed round-trip)", () => {
     h.settle();
     assert.deepEqual(h.summaries, ["decided"]);
     assert.equal(h.doneCalls, 1);
+  });
+
+  test("M11: a half-streamed pre-/done turn does not leak into the summary", () => {
+    const h = harness();
+    h.delta("partial answer that never settled");
+    h.type(DONE_COMMAND);
+    h.enter();
+    h.delta("the actual summary");
+    h.settle();
+    assert.deepEqual(h.summaries, ["the actual summary"]);
   });
 
   test("the summary request text asks for a summary now, with no questions back", () => {
