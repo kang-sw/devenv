@@ -867,19 +867,19 @@ export const REPORT_BUFFER_CAP = 32;
  * `full-worker`/`execute-worker` report round-trips as `{message}` — no
  * `kind` key at all — unchanged in shape from before this field existed.
  *
- * Returns `settleWaiters`'s own woken-count (260904 Phase 2, re-scoped
- * 2026-09-05) so `applyRpcEvent`'s `ws-report-to-lead` branch can mirror the
- * gated-exec branch's `waiterWoken` capture-and-return for consistency, even
- * though nothing downstream currently reads it for this branch.
+ * Stays `void` (review fix, relay #1 Minor): nothing reads a woken-count for
+ * the `ws-report-to-lead` branch — `applyRpcEvent`'s report branch below
+ * returns `{waiterWoken: false}` unconditionally rather than threading a
+ * count through this exported `enqueue*` verb for zero current benefit.
  */
-export function enqueueReport(record: RpcAgentRecord, message: string, kind?: "question" | "final"): number {
+export function enqueueReport(record: RpcAgentRecord, message: string, kind?: "question" | "final"): void {
   const entry: AgentReport = kind === undefined ? { message } : { message, kind };
   record.pendingReports.push(entry);
   if (record.pendingReports.length > REPORT_BUFFER_CAP) {
     record.pendingReports.shift();
     record.reportsDropped += 1;
   }
-  return settleWaiters(record);
+  settleWaiters(record);
 }
 
 /**
@@ -946,8 +946,8 @@ export function applyRpcEvent(
     const message = args?.message;
     if (typeof message === "string") {
       const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
-      const woken = enqueueReport(record, message, kind);
-      return { waiterWoken: woken > 0 };
+      enqueueReport(record, message, kind);
+      return { waiterWoken: false };
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {
     const args = evt.args as { command?: unknown; rationale?: unknown; cwd?: unknown } | undefined;
@@ -1361,23 +1361,45 @@ export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string
     );
   }
 
+  // Keep a handle to every pushed resolver so it can be unregistered again —
+  // `record.waiters.length` is now a load-bearing "is a lead actually
+  // blocked here" signal (Phase 2, 260904 re-scope) consumed via
+  // `settleWaiters`'s return count. Leaving a resolver behind after this
+  // wait concludes (win or timeout) would let a LATER unrelated event drain
+  // a dead resolver and report `waiterWoken: true` with nobody listening —
+  // resolving an already-settled promise is harmless, but the count lying
+  // about liveness is not.
+  const pushed: Array<{ record: RpcAgentRecord; fn: () => void }> = [];
   const winner = new Promise<string>((resolve) => {
     for (const { id, record } of records) {
-      record.waiters.push(() => resolve(id));
+      const fn = () => resolve(id);
+      record.waiters.push(fn);
+      pushed.push({ record, fn });
     }
   });
 
   let winnerId: string | undefined;
-  if (timeoutMs && timeoutMs > 0) {
-    let timer: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), timeoutMs);
-    });
-    const result = await Promise.race([winner, timeoutPromise]);
-    clearTimeout(timer);
-    if (result !== "timeout") winnerId = result;
-  } else {
-    winnerId = await winner;
+  try {
+    if (timeoutMs && timeoutMs > 0) {
+      let timer: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), timeoutMs);
+      });
+      const result = await Promise.race([winner, timeoutPromise]);
+      clearTimeout(timer);
+      if (result !== "timeout") winnerId = result;
+    } else {
+      winnerId = await winner;
+    }
+  } finally {
+    // Unregister every resolver this call pushed. The winner's own record
+    // was already drained by `settleWaiters` (indexOf finds nothing there,
+    // a harmless no-op); every losing/timed-out record still has its
+    // resolver present and must have it spliced out here.
+    for (const { record, fn } of pushed) {
+      const idx = record.waiters.indexOf(fn);
+      if (idx !== -1) record.waiters.splice(idx, 1);
+    }
   }
 
   if (!winnerId) {

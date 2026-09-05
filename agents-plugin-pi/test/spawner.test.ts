@@ -958,6 +958,77 @@ describe("waitForAgents", () => {
     assert.equal(result.reason, "approval-pending", "the blocking approval wins the harvest reason");
     assert.deepEqual(result.reports, [{ message: "a question before the gate" }], "a report buffered before the gate is still drained, not stranded");
   });
+
+  test("review fix (relay #1, CRITICAL): a timed-out waitForAgents unregisters its resolver — a later gated-exec event reports waiterWoken:false, not a stale true", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const timedOut = await waitForAgents(registry, ["a"], 15);
+    assert.equal(timedOut.timed_out, true, "sanity: the wait must actually time out before the event below fires");
+    assert.deepEqual(record.waiters, [], "the timed-out wait's resolver must be unregistered, not left as a dead waiter");
+
+    const eventResult = applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-after-timeout",
+      args: { command: "echo hi" },
+    });
+    assert.deepEqual(
+      eventResult,
+      { waiterWoken: false },
+      "the lead that timed out and moved on is a non-waiting lead — the relay's steer fallback must still fire for it",
+    );
+  });
+
+  test("review fix (relay #1, CRITICAL): a multi-agent race's loser has its resolver unregistered on the winner's settle — a later gated-exec event on the loser reports waiterWoken:false", async () => {
+    const { client: aClient } = fakeRpcClient();
+    const a = freshRpcRecord({ agentId: "a", client: aClient, streaming: true });
+    const { client: bClient } = fakeRpcClient({ getLastAssistantText: async () => "a settled first" });
+    const b = freshRpcRecord({ agentId: "b", client: bClient, streaming: true });
+    const registry: RpcAgentRegistry = new Map([
+      ["a", a],
+      ["b", b],
+    ]);
+
+    const resultPromise = waitForAgents(registry, ["a", "b"]);
+    applyRpcEvent(b, { type: "agent_settled" }); // b wins the race, not a
+
+    const result = await resultPromise;
+    assert.equal(result.agent_id, "b", "sanity: b must be the winner for this scenario");
+    assert.deepEqual(a.waiters, [], "the losing agent's resolver must be spliced out once the race concludes, not left as a dead waiter");
+
+    const eventResult = applyRpcEvent(a, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-on-loser",
+      args: { command: "echo hi" },
+    });
+    assert.deepEqual(
+      eventResult,
+      { waiterWoken: false },
+      "a's resolver was already dead from b's win — a later event on a must not falsely report a live waiter",
+    );
+  });
+
+  test("review fix (relay #1, CRITICAL): a live wait still reports waiterWoken:true and resolves with reason:approval-pending", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const resultPromise = waitForAgents(registry, ["a"]);
+    const eventResult = applyRpcEvent(record, {
+      type: "tool_execution_start",
+      toolName: GATED_EXEC_TOOL_NAME,
+      toolCallId: "call-live",
+      args: { command: "echo hi" },
+    });
+    assert.deepEqual(eventResult, { waiterWoken: true }, "a genuinely blocked ws-agent-wait must still be reported as woken");
+
+    const result = await resultPromise;
+    assert.equal(result.reason, "approval-pending");
+    assert.deepEqual(result.pending_approval, { cmd_id: "call-live", command: "echo hi", rationale: undefined });
+  });
 });
 
 describe("listAgents", () => {
