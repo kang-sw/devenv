@@ -523,12 +523,16 @@ pushes, its only delegate being the explore leaf. Six families:
   idle"). `followUp`.
 - `ws-agent-question` — `kind:"question"` in the headless relay case; `steer`,
   since the child is blocked on the answer. In TUI the question is consumed by
-  the owner question surface instead.
+  the owner question surface instead, and the lead receives the registration
+  notice as a `ws-agent-advisory` push (`fork-question-thread`, below) rather
+  than the question text itself.
 - `ws-agent-approval` — an execute-gateway approval request; `steer` (see the
   approval gateway).
 - `ws-agent-advisory` — the fork anti-bleed advisories (idle-without-final,
-  fail-loud transcript tail, `expects_commit` non-completion;
-  `details.advisory` names which). `followUp`.
+  fail-loud transcript tail, `expects_commit` non-completion) plus
+  `fork-question-thread` (a fork-raised question was just registered as an
+  owner thread; `details.detail` carries the registration-notice text);
+  `details.advisory` names which. `followUp`.
 - `ws-agent-orphaned` — at most once per resumed session, from the shutdown
   sidecar and only when a child was cut off mid-turn (see "Process
   lifecycle"). `followUp`.
@@ -547,10 +551,14 @@ injection) is not pushed, while a `fork-raised` final closes its thread and is
 then pushed. A record that is **thread-bound** — bound to a non-closed owner
 thread, from thread open (first open and every reopen) or from question
 registration until the thread closes (`/done`, fork final, `ws-resolve`) —
-pushes no settle or advisory and is outside the status line, so owner↔fork
-exchanges reach the lead only through the summary / fork-final paths. A child's
-turn therefore never reaches the lead twice, and within a live session no push
-is dropped or duplicated.
+pushes no further settle or advisory and is outside the status line, so
+owner↔fork exchanges reach the lead only through the summary / fork-final
+paths. The one carve-out is the `fork-question-thread` registration notice
+itself: it is pushed for the very record the same hook call just made
+thread-bound, since that push is how the lead learns the thread exists at
+all; every later settle or advisory for that record is suppressed as above. A
+child's turn therefore never reaches the lead twice, and within a live
+session no push is dropped or duplicated.
 
 **Delivery is held until the lead's turn settles.** Pi offers no hook at the
 moment a queued followUp is delivered, so a message built while the lead is
@@ -886,14 +894,18 @@ channel for an owner question: it registers and carries on.
   fork reports `kind:"question"` from a TUI lead, the adapter registers a
   `fork-raised` thread whose respondent is that fork, increments the pending
   count, and hands the lead a **notice** in place of the question text: the
-  owner answers via `/answer <id>`; the lead must not relay, answer, or ask
-  the owner — it ends its turn, and the fork's own final report will arrive as
-  a pushed message. Registration marks the fork **thread-bound** (outside the
-  pushed status line, no settle or advisory pushed) until the thread closes,
-  whether or not the owner ever opens it. `/answer` attaches the overlay to the
-  existing process — no new spawn. While an owner overlay is attached, the
-  fork's anti-bleed loop treats the fork's turns as owner-driven (no nudge, no
-  fail-loud) and re-arms the moment the overlay detaches.
+  notice is delivered as a pushed `ws-agent-advisory` message
+  (`fork-question-thread`, `followUp`) so the lead sees it before the owner
+  ever opens `/answer <id>`; the lead must not relay, answer, or ask the owner
+  — it ends its turn, and the fork's own final report will arrive as a pushed
+  message. Registration marks the fork **thread-bound** until the thread
+  closes, whether or not the owner ever opens it; the registration notice
+  above is the one push a thread-bound record still gets — every later
+  settle or advisory for it is outside the pushed status line and suppressed.
+  `/answer` attaches the overlay to the existing process — no new spawn. While
+  an owner overlay is attached, the fork's anti-bleed loop treats the fork's
+  turns as owner-driven (no nudge, no fail-loud) and re-arms the moment the
+  overlay detaches.
 - **Overlay chat.** Owner text goes to the respondent as a `prompt` when it is
   idle and as a `steer` when it is streaming; child text deltas render into the
   overlay. Pasted input is delivered as one message. The transcript is
