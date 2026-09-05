@@ -412,6 +412,8 @@ func normalizedHarness(value string) string {
 		return "codex"
 	case "claude":
 		return "claude"
+	case "pi":
+		return "pi"
 	default:
 		return ""
 	}
@@ -425,7 +427,7 @@ func aliasTargetKey(harness string) (string, error) {
 	if key := normalizedHarness(value); key != "" {
 		return key, nil
 	}
-	return "", fmt.Errorf("harness must be codex, claude, or default")
+	return "", fmt.Errorf("harness must be codex, claude, pi, or default")
 }
 
 func normalizeOptionalEffort(values ...string) (string, bool, error) {

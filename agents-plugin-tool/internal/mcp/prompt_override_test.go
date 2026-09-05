@@ -767,6 +767,52 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	assertManualStructureIntact(t, "config.prompt.set precedence render", precedenceBody)
 }
 
+// TestConfigPromptSetForPiHarness is a condensed version of
+// TestConfigPromptSetEndToEnd proving harness "pi" is a first-class,
+// independently-stored prompt-override bucket (not folded into "all"):
+// config.tune(key: "prompt.<point>", harness: "pi", ...) must report
+// "prompt override set: <point>/pi", and a subsequent render must pick up the
+// stored pi-bucket text.
+func TestConfigPromptSetForPiHarness(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "pi")
+
+	key, _ := parseLoginResponse(t, callLogin(t, s, 910200, root, nil))
+
+	const overrideText = "Pi-specific status update preference."
+
+	setResp := callToolOnce(t, s, 1, "config.tune", map[string]any{
+		"session_key": key,
+		"key":         "prompt.UserPreferenceSection",
+		"harness":     "pi",
+		"value":       overrideText,
+		"scope":       "session",
+	})
+	setText := toolText(t, setResp)
+	if !strings.Contains(setText, "prompt override set: UserPreferenceSection/pi") {
+		t.Fatalf("config.tune prompt-set (pi) confirmation missing: %s", setText)
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (pi override): %v", err)
+	}
+	if !strings.Contains(body, overrideText) {
+		t.Errorf("config.prompt.set (pi): stored override must appear in render:\n%s", body)
+	}
+}
+
 // TestConfigPromptUnsetSessionScope verifies ticket 260702-bug-config-unset-asymmetry:
 // config.prompt.unset now supports scope: "session", removing only the
 // session-scoped override and falling back to the next-broader scope (project
@@ -1091,7 +1137,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	text := toolText(t, textResp)
 	for _, want := range []string{
 		"prompt.SeedSection",
-		"harness[claude|codex|*]",
+		"harness[claude|codex|pi|*]",
 		"scope[session|project|global]",
 		`"scope":"session"`,
 	} {
@@ -1107,7 +1153,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	if promptKnob.Reset == nil || promptKnob.Reset.Tool != "config.tune" || promptKnob.Reset.FixedArguments["key"] != "prompt.SeedSection" || promptKnob.Reset.FixedArguments["reset"] != "true" {
 		t.Fatalf("prompt knob reset mismatch: %+v", promptKnob.Reset)
 	}
-	assertFieldEnum(t, promptKnob.SelectorFields, "harness", []string{"claude", "codex", "*"})
+	assertFieldEnum(t, promptKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
 	assertFieldEnum(t, promptKnob.SelectorFields, "scope", []string{"session", "project", "global"})
 	assertFieldRequired(t, promptKnob.ValueFields, "prompt", true)
 	if !strings.Contains(mustMarshalJSON(t, promptKnob.Current), `"scope":"session"`) {
@@ -1138,6 +1184,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
+	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
 }
 
 func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
@@ -1176,6 +1223,7 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
+	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
 }
 
 func parseTuningCatalogResponse(t *testing.T, line string) tuningCatalog {

@@ -14,11 +14,12 @@ import (
 // pure internal refactor — nothing about tools/list schema shape or order
 // changes, only where these enum values live.
 var (
-	onOffEnum           = []string{"on", "off"}
-	preferMercenaryEnum = []string{"on", "off", "hide"}
-	agentsTierEnum      = []string{"small", "medium", "large", "xlarge"}
-	agentsEffortEnum    = []string{"", "none", "low", "medium", "high", "xhigh"}
-	promptHarnessEnum   = []string{"claude", "codex", "*"}
+	onOffEnum             = []string{"on", "off"}
+	preferMercenaryEnum   = []string{"on", "off", "hide"}
+	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
+	agentsEffortEnum      = []string{"", "none", "low", "medium", "high", "xhigh"}
+	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
+	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
 )
 
 // configKeyEntry is the per-key config registry row: the single source of
@@ -158,6 +159,7 @@ var configRegistry = []configKeyEntry{
 			{
 				Name:        "harness",
 				Description: "Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known.",
+				Enum:        agentsTierHarnessEnum,
 			},
 		},
 		ValueFields: []tuningField{
