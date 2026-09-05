@@ -295,6 +295,18 @@ export class OverlayChatComponent {
   private cachedLines: string[] | undefined;
   /** Width `cachedLines` was produced for — the cache is only valid for that width (review relay #1 I2). */
   private cachedWidth: number | undefined;
+  /**
+   * `channel.isStreaming()` value `cachedLines` was produced for (review
+   * relay #1 Critical). The flag can flip with NO event this component ever
+   * observes — the dormant-relaunch channel attaches its listener only after
+   * `sendToAgent` resolves, so an early `agent_start` on the freshly-created
+   * client never reaches `handleEvent`, and `clearLiveState` can drop the
+   * flag on a failed liveness probe with no event at all. Keying the cache on
+   * this value too means ANY repaint (not only ones a known event triggered)
+   * re-derives the marker from the current flag, so a stale cached frame can
+   * never outlive the state it was built from.
+   */
+  private cachedStreaming: boolean | undefined;
   /** Inside a bracketed paste whose start marker arrived in an earlier chunk (review relay #1 I3). */
   private pasting = false;
 
@@ -345,6 +357,18 @@ export class OverlayChatComponent {
       this.refresh();
       return;
     }
+    // Review relay #1 Critical: this component's own render cache also keys
+    // on `channel.isStreaming()` now (see `render()`), so this refresh is
+    // belt-and-suspenders rather than the sole trigger — but it is still the
+    // one that makes the working marker appear PROMPTLY (well before any
+    // delta) for a channel whose listener was already attached when the
+    // fork's run started (the live, already-open-overlay case): without it,
+    // nothing requests a repaint until the next unrelated event, and the
+    // marker would only appear once something else happened to redraw.
+    if (e.type === "agent_start") {
+      this.refresh();
+      return;
+    }
     if (e.type !== "agent_settled") return;
 
     const settled = this.streaming.trim();
@@ -370,6 +394,7 @@ export class OverlayChatComponent {
   private refresh(): void {
     this.cachedLines = undefined;
     this.cachedWidth = undefined;
+    this.cachedStreaming = undefined;
     this.tui.requestRender();
   }
 
@@ -386,6 +411,7 @@ export class OverlayChatComponent {
   invalidate(): void {
     this.cachedLines = undefined;
     this.cachedWidth = undefined;
+    this.cachedStreaming = undefined;
   }
 
   private submit(): void {
@@ -423,12 +449,24 @@ export class OverlayChatComponent {
 
   private deliver(text: string): void {
     // Fire-and-report: a delivery failure becomes a transcript note rather
-    // than an unhandled rejection inside a keystroke handler.
-    void this.options.channel.send(text).catch((err: unknown) => {
-      this.append({ who: "note", text: `delivery failed: ${err instanceof Error ? err.message : String(err)}` });
-      this.donePending = false;
-      this.refresh();
-    });
+    // than an unhandled rejection inside a keystroke handler. The success
+    // refresh (review relay #1 Critical) covers the dormant-relaunch path:
+    // `createForkChannel`'s own listener sync (`ask.ts`) attaches to a
+    // freshly-spawned client only AFTER `sendToAgent` resolves, so an
+    // `agent_start` the new client already emitted during that call never
+    // reaches this component's `handleEvent` — but `isStreaming()` reads the
+    // registry flag directly, independent of that listener, so it is already
+    // correct by the time `send()` resolves; this refresh is what gets a
+    // `render()` call to look at it, rather than replaying whatever was
+    // cached before the send.
+    void this.options.channel.send(text).then(
+      () => this.refresh(),
+      (err: unknown) => {
+        this.append({ who: "note", text: `delivery failed: ${err instanceof Error ? err.message : String(err)}` });
+        this.donePending = false;
+        this.refresh();
+      },
+    );
   }
 
   /**
@@ -535,10 +573,16 @@ export class OverlayChatComponent {
    */
   render(width: number): string[] {
     const w = Math.max(1, width);
-    // The cache is keyed on width: every line here is wrapped to `w`, so a
-    // resize between renders must re-wrap rather than replay lines built for
-    // the old width (review relay #1 I2).
-    if (this.cachedLines && this.cachedWidth === w) return this.cachedLines;
+    const streamingNow = this.options.channel.isStreaming();
+    // The cache is keyed on width (a resize between renders must re-wrap
+    // rather than replay lines built for the old width — review relay #1 I2)
+    // AND on `channel.isStreaming()` (review relay #1 Critical): the working
+    // marker is read fresh from the flag every render, not only when a known
+    // event refreshed the cache, so a repaint that this component did not
+    // itself request (or one whose triggering event this component drops)
+    // still reflects the CURRENT flag rather than replaying a frame built
+    // when it last differed.
+    if (this.cachedLines && this.cachedWidth === w && this.cachedStreaming === streamingNow) return this.cachedLines;
 
     const boxed = w >= BOX_MIN_WIDTH;
     const inner = boxed ? w - 4 : w;
@@ -581,6 +625,7 @@ export class OverlayChatComponent {
 
     this.cachedLines = lines;
     this.cachedWidth = w;
+    this.cachedStreaming = streamingNow;
     return lines;
   }
 
