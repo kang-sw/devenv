@@ -48,6 +48,7 @@ Route a task to the right primitive by what you actually need done:
 | Ask the owner a question without blocking or interrupting them | `ws-ask` (`title`, `question`, optional `context` — 2-3 sentences of background, no paths or hashes). Returns `{question_id}` and spawns nothing; keep working on whatever does not depend on the answer. |
 | Withdraw a question you no longer need answered | `ws-resolve` (`question_id`) — clears it from the owner's pending count; nothing is injected back, since you already know the answer |
 | Read one file yourself when delegating the read would be absurd | `do-i-really-have-to-read-this-myself` (`path`, optional `offset`/`limit`). Native `read` and `bash` are removed from your surface; this is the only direct read you have, and the name is the point — it is a fallback for a must-look moment, not your first move. Prefer `explore` or a worker for anything wider than one file. |
+| Run one short command yourself when you need its output inline right now | `do-i-really-have-to-run-this-myself` (`command`, `why`). Fixed 30s timeout (bounds only that direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line, with a hint if truncated) — never yours to raise. The name is the point: single short command, nothing multi-step/long-running/mutating. Anything wider goes through `ws-execute`. |
 
 `agent_id` on `ws-agent-send`, `ws-agent-stop`, `ws-agent-transcript` and
 `ws-approve` accepts either the alias you gave at spawn time or the raw uuid —

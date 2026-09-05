@@ -415,12 +415,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     }
 
     // §8: reshape the LEAD's (or a fork's) own tool surface — bash/read
-    // removed, ws-execute/ws-approve/the ugly-read tool added, and the
-    // gated-exec tool itself excluded even though it was just registered
-    // globally (the auto-include footgun fix — see execute-gateway.ts's
-    // computeLeadActiveTools doc comment). Never applied to a worker/explore
-    // child: those spawn with an explicit `--tools` allowlist already, and
-    // this call would otherwise clobber it.
+    // removed, ws-execute/ws-approve/the ugly-read tool/the one-liner exec
+    // hatch added, and the gated-exec tool itself excluded even though it
+    // was just registered globally (the auto-include footgun fix — see
+    // execute-gateway.ts's computeLeadActiveTools doc comment). Never applied
+    // to a worker/explore child: those spawn with an explicit `--tools`
+    // allowlist already, and this call would otherwise clobber it.
     if (isLeadOrFork(readSpawnRole(process.env))) {
       pi.setActiveTools(computeLeadActiveTools(pi.getActiveTools()));
       // 260904 Phase 1 (side-thread fork): a SEPARATE, role-differentiated
