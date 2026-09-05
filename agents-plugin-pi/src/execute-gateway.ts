@@ -66,7 +66,8 @@
  *     waiting on a decision file nobody will ever write, since nothing
  *     observes the lead's OWN `tool_execution_start` the way a parent
  *     observes a spawned child's), and adds `ws-execute`/`ws-approve`/
- *     `UGLY_READ_TOOL_NAME` if not already present. Applied in index.ts via
+ *     `UGLY_READ_TOOL_NAME`/`ONE_LINER_EXEC_TOOL_NAME` if not already present.
+ *     Applied in index.ts via
  *     `pi.setActiveTools(computeLeadActiveTools(pi.getActiveTools()))`,
  *     gated on `isLeadOrFork` — see that file's `session_start` handler.
  *   - `UGLY_READ_TOOL_NAME`
@@ -74,11 +75,20 @@
  *     name, adopted verbatim): a plain file-read tool retained for the lead
  *     once native `read` is removed from its active list — "ugly-named read
  *     retained," not eliminated, per the ticket's lead `--tools` change.
+ *   - `ONE_LINER_EXEC_TOOL_NAME`
+ *     (`do-i-really-have-to-run-this-myself`, 260905): the exec sibling to
+ *     `UGLY_READ_TOOL_NAME`, same soft-discouraged-by-name posture. Bounded
+ *     by construction — fixed 30s timeout, fixed 4KB output cap
+ *     (byte-capped then trimmed to the last complete line, with a
+ *     `ws-execute` drop-hint on truncation), both module constants, never
+ *     caller-supplied — and ungated for the same reason `ws-worker-exec` is
+ *     excluded from the lead's own active set (nothing observes the lead's
+ *     own tool calls, so a gated lead tool would hang forever).
  *
  * Following spawner.ts's own convention (not discuss.ts's single-call-site
  * one): this file mixes pure, unit-tested helpers (test/execute-gateway.test.ts)
  * with the `registerExecuteGateway`/`createApprovalRelay` IO glue, since its
- * IO surface (3 tools + 1 injection callback) is closer in shape to
+ * IO surface (5 tools + 1 injection callback) is closer in shape to
  * spawner.ts than to discuss.ts.
  *
  * Golden rule: imports FROM spawner.ts only (`spawnAgent`,
@@ -92,6 +102,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import {
@@ -120,6 +131,66 @@ export const APPROVE_TOOL_NAME = "ws-approve";
  * list (§8: "retained," not eliminated).
  */
 export const UGLY_READ_TOOL_NAME = "do-i-really-have-to-read-this-myself";
+
+/**
+ * 260905 (one-liner exec hatch): the ugly-named direct-exec sibling to
+ * `UGLY_READ_TOOL_NAME`, same soft-discouraged-by-name posture. For a single
+ * short command whose output the lead needs inline and that changes nothing
+ * needing review — anything multi-step, long-running, or mutating goes
+ * through `ws-execute` instead. Bounded by construction (`ONE_LINER_TIMEOUT_MS`/
+ * `ONE_LINER_OUTPUT_CAP_BYTES` below, never caller-supplied) and ungated —
+ * same rationale as `GATED_EXEC_TOOL_NAME`'s exclusion from the lead's own
+ * active set: nothing observes the lead's own tool calls, so a gated lead
+ * tool would hang forever.
+ */
+export const ONE_LINER_EXEC_TOOL_NAME = "do-i-really-have-to-run-this-myself";
+
+/**
+ * Fixed timeout for `ONE_LINER_EXEC_TOOL_NAME` — a module constant, never
+ * wired to a tool parameter (no caller-tunable timeout, per the ticket's
+ * Decisions section).
+ */
+export const ONE_LINER_TIMEOUT_MS = 30_000;
+
+/**
+ * Fixed output cap (bytes) for `ONE_LINER_EXEC_TOOL_NAME`'s merged
+ * stdout+stderr — a module constant, never wired to a tool parameter.
+ */
+export const ONE_LINER_OUTPUT_CAP_BYTES = 4096;
+
+/**
+ * Hint line `capOutput` appends whenever it truncates, pointing at
+ * `EXECUTE_TOOL_NAME` for anything wider than a one-liner's output.
+ */
+const CAP_OUTPUT_DROP_HINT = `\n…[output truncated — use ${EXECUTE_TOOL_NAME} for bulk output]`;
+
+/**
+ * Pure byte-cap-to-last-complete-line helper for `ONE_LINER_EXEC_TOOL_NAME`'s
+ * merged stdout+stderr. Mirrors `spawner.ts`'s `truncatePromptForStorage`
+ * multibyte-safe cutting technique (`Buffer` + `node:string_decoder`'s
+ * `StringDecoder`, never a naive `Buffer.slice` that could straddle a
+ * multibyte codepoint) but additionally trims to the last complete line
+ * inside the cap — a requirement `truncatePromptForStorage` does not have.
+ *
+ * - `raw` already fits (`<= limitBytes` UTF-8 bytes): returned unchanged, no
+ *   hint.
+ * - Over the cap: byte-decode-safe cut to `limitBytes`, then, if that decoded
+ *   head contains a newline, cut again to the last one (dropping the
+ *   trailing partial line) and append the drop-hint.
+ * - Over the cap with NO newline anywhere in the decoded head (a single line
+ *   longer than the cap): the whole character-boundary-safe head is kept
+ *   as-is — per the ticket's explicit "kept... instead of dropping to
+ *   nothing" — and the same drop-hint is still appended.
+ */
+export function capOutput(raw: string, limitBytes: number): string {
+  const buf = Buffer.from(raw, "utf8");
+  if (buf.length <= limitBytes) return raw;
+  const decoder = new StringDecoder("utf8");
+  const head = decoder.write(buf.subarray(0, limitBytes));
+  const lastNewline = head.lastIndexOf("\n");
+  const trimmed = lastNewline >= 0 ? head.slice(0, lastNewline) : head;
+  return `${trimmed}${CAP_OUTPUT_DROP_HINT}`;
+}
 
 export interface ExecuteWorkerPromptInput {
   /** Verbatim command the lead already ran (via `ws-execute`'s own `command?`), or omitted when `ws-execute` was called with only a `prompt`. */
@@ -199,13 +270,14 @@ export function validatePendingApproval(pending: PendingApproval | undefined, cm
 }
 
 const LEAD_REMOVED_TOOL_NAMES: ReadonlySet<string> = new Set(["bash", "read", GATED_EXEC_TOOL_NAME]);
-const LEAD_ADDED_TOOL_NAMES: readonly string[] = [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME];
+const LEAD_ADDED_TOOL_NAMES: readonly string[] = [EXECUTE_TOOL_NAME, APPROVE_TOOL_NAME, UGLY_READ_TOOL_NAME, ONE_LINER_EXEC_TOOL_NAME];
 
 /**
  * Pure §8 lead `--tools` reshaping: removes native `bash`/`read` and (the
  * auto-include footgun fix, see spawner.ts's Codebase Findings for the full
  * trace) `GATED_EXEC_TOOL_NAME` from `currentActive`, then adds
- * `ws-execute`/`ws-approve`/the ugly-read tool if not already present.
+ * `ws-execute`/`ws-approve`/the ugly-read tool/the one-liner exec hatch if
+ * not already present.
  * Deduped; order is otherwise preserved (kept names first, then any newly
  * added names).
  *
@@ -483,12 +555,13 @@ export function createApprovalRelay(
 /**
  * Registers `ws-worker-exec` (child-side, gated), `ws-execute` (lead-side,
  * spawns an `execute-worker`), `ws-approve` (lead-side, resolves a pending
- * gated command), and the ugly-named read tool. All four are registered
- * declaratively/globally (same pattern as `ws-report-to-lead`,
- * spawner.ts) — `ws-worker-exec` is reachable only from an `execute-worker`
- * child's own `--tools` list (`TOOL_GROUPS`, spawner.ts); `ws-execute`/
- * `ws-approve`/the ugly-read tool are reachable by the lead only after
- * index.ts's `pi.setActiveTools(computeLeadActiveTools(...))` call (§8).
+ * gated command), the ugly-named read tool, and the ugly-named one-liner
+ * exec hatch. All five are registered declaratively/globally (same pattern
+ * as `ws-report-to-lead`, spawner.ts) — `ws-worker-exec` is reachable only
+ * from an `execute-worker` child's own `--tools` list (`TOOL_GROUPS`,
+ * spawner.ts); `ws-execute`/`ws-approve`/the ugly-read tool/the one-liner
+ * exec hatch are reachable by the lead only after index.ts's
+ * `pi.setActiveTools(computeLeadActiveTools(...))` call (§8).
  *
  * Call once, unconditionally, from index.ts's `session_start` handler —
  * mirrors `registerAgentTools`'s own unconditional call (the tools are
@@ -649,6 +722,31 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
       const absolutePath = isAbsolute(p.path) ? p.path : join(sessionCtx.cwd, p.path);
       const raw = readFileSync(absolutePath, "utf8");
       return { content: [{ type: "text", text: sliceLines(raw, p.offset, p.limit) }] };
+    },
+  });
+
+  pi.registerTool({
+    name: ONE_LINER_EXEC_TOOL_NAME,
+    label: "exec",
+    description:
+      "Run a single short shell command yourself, right now, when you need its output inline and it changes nothing that would need review — anything multi-step, long-running, or mutating goes through ws-execute instead. Fixed 30s timeout and 4KB output cap (trimmed to the last complete line); exceeding either is not an error, you get what fit plus a hint. The name is the point: this is a fallback for a quick look, not your first move.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Single short shell command (sh -c semantics) to run in your own cwd. No cwd/env override — always your own session's." },
+        why: { type: "string", description: "One-sentence reason this needs to run directly rather than through a delegated worker; echoed first in the result." },
+      },
+      required: ["command", "why"],
+    } as never,
+    async execute(_toolCallId, params, signal) {
+      const p = params as { command: string; why: string };
+      const execResult = await pi.exec("sh", ["-c", p.command], { cwd: sessionCtx.cwd, timeout: ONE_LINER_TIMEOUT_MS, signal });
+      const merged = `${execResult.stdout}${execResult.stderr}`;
+      const lines = [`why: ${p.why}`, `exit code: ${execResult.code}`, capOutput(merged, ONE_LINER_OUTPUT_CAP_BYTES)];
+      if (execResult.killed) {
+        lines.push(`(timed out after ${ONE_LINER_TIMEOUT_MS / 1000}s)`);
+      }
+      return { content: [{ type: "text", text: lines.join("\n") }] };
     },
   });
 }
