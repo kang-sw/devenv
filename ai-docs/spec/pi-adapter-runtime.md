@@ -723,14 +723,18 @@ revived.
 
 ## Lead native tool-surface reshaping {#260905-pi-lead-tool-surface-execute-gateway}
 
-So the structural "no raw exec for the lead" guarantee holds by construction and
+So the structural "no unbounded exec for the lead" guarantee holds by construction and
 not merely by prompt convention, the adapter reshapes the **host lead session's**
 active tool set at session start (gated on the lead/fork role, like the system
 prompt injection): it removes native `bash` and native `read`, adds `ws-execute`,
-`ws-approve`, and a deliberately ugly-named direct read tool
-(`do-i-really-have-to-read-this-myself`) that stays available as a
-soft-discouraged escape hatch, and **excludes the worker-only `ws-worker-exec`
-from the lead's active set**. That last exclusion is load-bearing: `ws-worker-exec`
+`ws-approve`, a deliberately ugly-named direct read tool
+(`do-i-really-have-to-read-this-myself`), and a deliberately ugly-named
+one-liner exec hatch (`do-i-really-have-to-run-this-myself`, fixed 30s
+timeout, fixed 4KB output cap) — the read tool and the one-liner exec hatch
+both staying available as soft-discouraged escape hatches, the latter with no
+approval gate for the same reason as `ws-worker-exec`'s exclusion below —
+and **excludes the worker-only `ws-worker-exec` from the lead's active set**.
+That last exclusion is load-bearing: `ws-worker-exec`
 must be registered so a worker process (loading the same extension) can activate
 it via its own tool allowlist, but if it were also active on the lead the lead
 could bypass the approval gate entirely — and, since nothing observes the lead's
