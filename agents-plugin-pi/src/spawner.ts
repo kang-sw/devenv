@@ -934,6 +934,25 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
 }
 
 /**
+ * The shared registry walk behind both `computeRunningStatusLine` (below) and
+ * the goal-loop yield predicate (`hasRunningAgents`, 260905 Phase 2): skips
+ * `threadBound`/no-`client` records, and reports whether anything counts as
+ * "present" (live, non-threadBound) at all plus how many of those are still
+ * `running` and not `terminalThisTurn`. Extracted so the two call sites can
+ * never drift apart in what they count as fan-in.
+ */
+function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolean; running: number } {
+  let present = false;
+  let running = 0;
+  for (const record of registry?.values() ?? []) {
+    if (record.threadBound || !record.client) continue;
+    present = true;
+    if (record.running && !record.terminalThisTurn) running += 1;
+  }
+  return { present, running };
+}
+
+/**
  * The fan-in status line every pushed message carries: `N delegated agents
  * still running`, computed fresh at push time over the shared registry.
  *
@@ -962,15 +981,18 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
  * `spawn-failed` for the only child — never ends with a contentless zero line.
  */
 export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string | undefined {
-  let present = false;
-  let running = 0;
-  for (const record of registry?.values() ?? []) {
-    if (record.threadBound || !record.client) continue;
-    present = true;
-    if (record.running && !record.terminalThisTurn) running += 1;
-  }
+  const { present, running } = computeFanIn(registry);
   if (!present) return undefined;
   return `${running} delegated agent${running === 1 ? "" : "s"} still running`;
+}
+
+/**
+ * Phase 2 (260905) goal-loop yield predicate: true when N > 0 under the
+ * same fan-in walk computeRunningStatusLine uses, so the yield decision
+ * can never drift from the pushed status line's own arithmetic.
+ */
+export function hasRunningAgents(registry: RpcAgentRegistry | undefined): boolean {
+  return computeFanIn(registry).running > 0;
 }
 
 /**

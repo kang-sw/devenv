@@ -371,6 +371,44 @@ describe("decideOnSettle", () => {
     ({ next: state, decision } = decideOnSettle(state, threshold));
     assert.deepEqual(decision, { action: "ignore" });
   });
+
+  test("Phase 2 (260905): yielding on an active goal neither re-injects nor advances the streak", () => {
+    const state = armGoal("a goal");
+    const { next, decision } = decideOnSettle(state, 10, true);
+    assert.deepEqual(decision, { action: "yield" });
+    // Reference identity, not just structural equality — no streak
+    // increment, no sawToolCallThisCycle reset: a true no-op pass-through.
+    assert.equal(next, state);
+  });
+
+  test("Phase 2 (260905): yielding on an INACTIVE goal still ignores — yielding never resurrects an inactive loop", () => {
+    const state = initialGoalLoopState();
+    const { next, decision } = decideOnSettle(state, 10, true);
+    assert.deepEqual(decision, { action: "ignore" });
+    assert.equal(next, state);
+  });
+
+  test("Phase 2 (260905): a yield decision followed by a non-yielding settle continues the same streak as if the yield had never happened", () => {
+    let state = armGoal("a goal");
+    state = decideOnSettle(state, 10).next; // streak 1
+
+    // Branch A: an intervening yielding settle, then a non-yielding settle.
+    let withYield = decideOnSettle(state, 10, true).next; // yield: no-op
+    const afterYield = decideOnSettle(withYield, 10, false);
+
+    // Branch B: the non-yielding settle called directly, no yield in between.
+    const direct = decideOnSettle(state, 10, false);
+
+    assert.deepEqual(afterYield.decision, direct.decision);
+    assert.deepEqual(afterYield.next, direct.next);
+  });
+
+  test("Phase 2 (260905): omitting the third argument still defaults to false — pre-existing two-argument call sites are unaffected", () => {
+    const state = armGoal("a goal");
+    const withDefault = decideOnSettle(state, 10);
+    const explicitFalse = decideOnSettle(state, 10, false);
+    assert.deepEqual(withDefault, explicitFalse);
+  });
 });
 
 describe("isChildProcess", () => {

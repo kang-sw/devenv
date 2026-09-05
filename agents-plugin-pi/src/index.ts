@@ -223,7 +223,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     },
   });
 
-  registerGoalLoop(pi, { goalLoopConfigPath });
+  registerGoalLoop(pi, { goalLoopConfigPath, rpcRegistryRef });
   registerLeadBootstrap(pi, wsBlockRef);
   // 260905 Edition: releases the child pushes that arrived while this session
   // was mid-turn, each with a status line computed at release time. Factory
