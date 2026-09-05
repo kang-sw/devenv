@@ -913,9 +913,11 @@ export interface RpcAgentRecord {
    * §1 says the lead is not involved in a fork-raised question and §8 scopes
    * the lead relay to headless, so in TUI mode `ask.ts` registers the thread
    * on the owner surface and returns that notice — which, since 260905, is
-   * read as a SUPPRESSION signal: a defined return means the question was
-   * consumed there and no `ws-agent-question` push reaches the lead at all.
-   * Set by `fork.ts`'s `registerFork`; `spawner.ts`
+   * the LEAD NOTICE to push: a defined return means the question itself is
+   * answered on the owner surface, not by the lead, but the returned string
+   * is still pushed to the lead as a `ws-agent-advisory`/`fork-question-thread`
+   * message in place of the `ws-agent-question` the headless baseline would
+   * send. Set by `fork.ts`'s `registerFork`; `spawner.ts`
    * stays generic and supplies no implementation, mirroring
    * `onApprovalPending`'s existing callback-injection convention.
    */
@@ -1071,10 +1073,13 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
  *   see the liveness probe), or `"spawn-failed"`.
  * - `ws-agent-question` — a headless `kind:"question"` report the lead itself
- *   must answer (in TUI the owner surface consumes it and nothing is pushed).
+ *   must answer (in TUI the owner surface consumes it, and the lead instead
+ *   gets the `fork-question-thread` advisory below).
  * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
- * - `ws-agent-advisory` — `fork.ts`'s anti-bleed loop has something to say
- *   about a fork's turn shape.
+ * - `ws-agent-advisory` — the adapter's own statement about a child: emitted
+ *   by `fork.ts`'s anti-bleed loop (a fork's turn shape) and, since 260905,
+ *   by this module's question branch registering a fork-raised thread
+ *   (`advisory: "fork-question-thread"`, `followUp`).
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
  */
@@ -1802,7 +1807,9 @@ export interface RpcEventOutcome {
  * `buildForkQuestionLeadNotice` — the lead must still be told a thread now
  * exists, just not asked to answer it. A DEFINED (string) return is pushed to
  * the lead as `ws-agent-advisory`/`fork-question-thread` (`detail` is that
- * notice text) so the lead sees the notice before the owner ever opens
+ * notice text) so the lead is told the thread exists rather than seeing
+ * nothing at all — `followUp` delivery only guarantees the notice is queued
+ * for the lead's next turn boundary, not that it precedes the owner's
  * `/answer`; `undefined` is the headless baseline and the question is pushed
  * as `ws-agent-question`/`steer` for the lead to answer directly. A throwing
  * hook degrades to that same headless baseline rather than dropping the

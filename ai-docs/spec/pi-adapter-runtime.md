@@ -895,10 +895,12 @@ channel for an owner question: it registers and carries on.
   `fork-raised` thread whose respondent is that fork, increments the pending
   count, and hands the lead a **notice** in place of the question text: the
   notice is delivered as a pushed `ws-agent-advisory` message
-  (`fork-question-thread`, `followUp`) so the lead sees it before the owner
-  ever opens `/answer <id>`; the lead must not relay, answer, or ask the owner
-  — it ends its turn, and the fork's own final report will arrive as a pushed
-  message. Registration marks the fork **thread-bound** until the thread
+  (`fork-question-thread`, `followUp`) so the lead is told the thread exists
+  rather than seeing nothing at all — `followUp` delivery only guarantees the
+  notice is queued for the lead's next turn boundary, not that it is ordered
+  against the owner's `/answer <id>`; the lead must not relay, answer, or ask
+  the owner — it ends its turn, and the fork's own final report will arrive
+  as a pushed message. Registration marks the fork **thread-bound** until the thread
   closes, whether or not the owner ever opens it; the registration notice
   above is the one push a thread-bound record still gets — every later
   settle or advisory for it is outside the pushed status line and suppressed.
