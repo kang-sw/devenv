@@ -34,6 +34,7 @@ import {
   resolveContextWindowOverride,
   computeContextPercent,
   buildGoalAnnouncement,
+  buildCompactionLeverResult,
   buildGoalReminder,
   buildCompactionObservation,
   initialGoalLoopState,
@@ -219,7 +220,15 @@ describe("computeContextPercent", () => {
 
 describe("buildGoalAnnouncement", () => {
   test("wraps the goal verbatim per the ticket's pinned wording", () => {
-    assert.equal(buildGoalAnnouncement("ship the widget"), "Goal settled: ship the widget");
+    assert.equal(buildGoalAnnouncement("ship the widget"), "Goal armed: ship the widget");
+  });
+});
+
+describe("buildCompactionLeverResult", () => {
+  test("names the requested compaction and carries the carry-forward argument verbatim", () => {
+    const text = buildCompactionLeverResult("phase 1 done, phase 2 next");
+    assert.ok(text.startsWith("Compaction requested"));
+    assert.ok(text.includes("phase 1 done, phase 2 next"));
   });
 });
 

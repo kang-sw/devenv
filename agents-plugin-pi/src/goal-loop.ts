@@ -158,7 +158,17 @@ export function resolveContextWindowOverride(config: GoalLoopConfig | undefined)
 
 /** The goal-entry announcement injected by `/goal <goal>`. Wording pinned verbatim by the ticket. */
 export function buildGoalAnnouncement(goal: string): string {
-  return `Goal settled: ${goal}`;
+  return `Goal armed: ${goal}`;
+}
+
+/**
+ * The `goal-compact-and-continue` lever's returned tool text. Extracted as a
+ * pure helper so the wording is unit-testable without stubbing `ctx.compact`
+ * (this file's `registerGoalLoop` IO glue is otherwise covered by the live
+ * `pi --mode json` gate, not this unit suite).
+ */
+export function buildCompactionLeverResult(carryForward: string): string {
+  return `Compaction requested; the conversation will resume from a summary carrying: ${carryForward}`;
 }
 
 /**
@@ -523,7 +533,7 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
         onComplete: () => ctx.ui.notify("Compaction completed", "info"),
         onError: (error) => ctx.ui.notify(`Compaction failed: ${error.message}`, "error"),
       });
-      return { content: [{ type: "text", text: `Compacting and continuing goal with carry-forward: ${p.carry_forward}` }] };
+      return { content: [{ type: "text", text: buildCompactionLeverResult(p.carry_forward) }] };
     },
   });
 }
