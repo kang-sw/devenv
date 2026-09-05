@@ -211,7 +211,7 @@ Review (single, full scope): one Important — the two implementation
 commits lacked `## Spec` and `## Ticket Updates` sections — [fixed] by
 rewording the local commits (tree unchanged). No Critical.
 
-## Blocked (2026-09-05) — resolved the same day, kept as history
+## Resolved block (2026-09-05) — kept as history, not a blocker
 
 The drain run recorded Phases 2–3 as `develop`-only ws-mcp changes and Phase
 4 as gated on a ws release, following the ticket's then-current Decisions
@@ -493,7 +493,7 @@ recorded for the owner to accept or overrule:
    `{#260903-pi-model-catalog-config-file}` sentence remains scheduled
    (Phase 4).
 
-## Blocked (2026-09-05) — resolved, kept as history
+## Resolved block (2026-09-05) — design round 1, kept as history
 
 Superseded the same day: every `missing` row below was settled under
 `## Open Decisions`, and the design re-review returned `concern` with all
