@@ -1795,13 +1795,18 @@ export interface RpcEventOutcome {
  * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
  * exactly as `execute-gateway.ts`'s `execute()` itself does.
  *
- * 260904 Phase 2 (side-thread question surface, review relay #1 I6): a
- * `kind:"question"` report is passed through `record.onQuestionReport` (when
- * set) first. Under the push model that hook's existing return contract IS
- * the suppression signal: a DEFINED return means a TUI owner surface has
- * taken the question (§1 keeps the lead out of that exchange entirely), so
- * nothing is pushed at all; `undefined` is the headless baseline and the
- * question is pushed as `ws-agent-question`/`steer` for the lead to answer.
+ * 260905 Phase 1 (fork-question lead notice, was 260904 Phase 2 / review
+ * relay #1 I6): a `kind:"question"` report is passed through
+ * `record.onQuestionReport` (when set) first. That hook thread-binds the
+ * record and, in TUI mode, returns the registration-notice string built by
+ * `buildForkQuestionLeadNotice` — the lead must still be told a thread now
+ * exists, just not asked to answer it. A DEFINED (string) return is pushed to
+ * the lead as `ws-agent-advisory`/`fork-question-thread` (`detail` is that
+ * notice text) so the lead sees the notice before the owner ever opens
+ * `/answer`; `undefined` is the headless baseline and the question is pushed
+ * as `ws-agent-question`/`steer` for the lead to answer directly. A throwing
+ * hook degrades to that same headless baseline rather than dropping the
+ * report.
  *
  * `record.onFinalReport` gained the parallel contract: returning `true` means
  * the hook fully consumed the report (a `lead-ask` discussion thread, whose
@@ -1841,18 +1846,22 @@ export function applyRpcEvent(
       }
 
       if (kind === "question") {
-        // A defined return means the owner surface consumed it (TUI); only
-        // the headless `undefined` case reaches the lead. A throwing hook
-        // degrades to the headless baseline rather than dropping the report.
-        let consumed = false;
+        // A defined (string) return is the registration notice for a fork
+        // thread the hook just bound: push it to the lead as an advisory
+        // instead of the raw question. `undefined` is the headless case;
+        // a throwing hook degrades to that same baseline rather than
+        // dropping the report.
+        let notice: string | undefined;
         if (record.onQuestionReport) {
           try {
-            consumed = record.onQuestionReport(record, message) !== undefined;
+            notice = record.onQuestionReport(record, message);
           } catch {
-            consumed = false;
+            notice = undefined;
           }
         }
-        return consumed ? {} : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
+        return notice !== undefined
+          ? { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }
+          : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
       }
 
       if (kind === "final") {
