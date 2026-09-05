@@ -183,13 +183,28 @@ const CAP_OUTPUT_DROP_HINT = `\n…[output truncated — use ${EXECUTE_TOOL_NAME
  *   nothing" — and the same drop-hint is still appended.
  */
 export function capOutput(raw: string, limitBytes: number): string {
+  if (Buffer.byteLength(raw, "utf8") <= limitBytes) return raw;
   const buf = Buffer.from(raw, "utf8");
-  if (buf.length <= limitBytes) return raw;
   const decoder = new StringDecoder("utf8");
   const head = decoder.write(buf.subarray(0, limitBytes));
   const lastNewline = head.lastIndexOf("\n");
   const trimmed = lastNewline >= 0 ? head.slice(0, lastNewline) : head;
   return `${trimmed}${CAP_OUTPUT_DROP_HINT}`;
+}
+
+/**
+ * Pure stdout+stderr merge for `ONE_LINER_EXEC_TOOL_NAME` (review relay #1,
+ * Minor a): a bare `${stdout}${stderr}` concatenation (the convention
+ * `ws-execute`'s own pre-run merge uses, `:639` below) glues stderr onto
+ * stdout's last line whenever stdout lacks a trailing newline — which also
+ * shifts what `capOutput` treats as "the last complete line". Inserts a
+ * newline between the two streams only when both are non-empty and stdout
+ * doesn't already end in one; never adds a newline the caller didn't need
+ * (stdout-only or stderr-only output is untouched).
+ */
+export function mergeExecOutput(stdout: string, stderr: string): string {
+  if (!stdout || !stderr) return `${stdout}${stderr}`;
+  return stdout.endsWith("\n") ? `${stdout}${stderr}` : `${stdout}\n${stderr}`;
 }
 
 export interface ExecuteWorkerPromptInput {
@@ -729,7 +744,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
     name: ONE_LINER_EXEC_TOOL_NAME,
     label: "exec",
     description:
-      "Run a single short shell command yourself, right now, when you need its output inline and it changes nothing that would need review — anything multi-step, long-running, or mutating goes through ws-execute instead. Fixed 30s timeout and 4KB output cap (trimmed to the last complete line); exceeding either is not an error, you get what fit plus a hint. The name is the point: this is a fallback for a quick look, not your first move.",
+      "Run a single short shell command yourself, right now, when you need its output inline and it changes nothing that would need review — anything multi-step, long-running, or mutating goes through ws-execute instead. Fixed 30s timeout (bounds only this direct command, not a descendant it backgrounds) and 4KB output cap (trimmed to the last complete line); exceeding either is not an error, you get what fit plus a hint. The name is the point: this is a fallback for a quick look, not your first move.",
     parameters: {
       type: "object",
       properties: {
@@ -741,10 +756,19 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
     async execute(_toolCallId, params, signal) {
       const p = params as { command: string; why: string };
       const execResult = await pi.exec("sh", ["-c", p.command], { cwd: sessionCtx.cwd, timeout: ONE_LINER_TIMEOUT_MS, signal });
-      const merged = `${execResult.stdout}${execResult.stderr}`;
-      const lines = [`why: ${p.why}`, `exit code: ${execResult.code}`, capOutput(merged, ONE_LINER_OUTPUT_CAP_BYTES)];
+      const merged = mergeExecOutput(execResult.stdout, execResult.stderr);
+      // Review relay #1, Important: `execResult.killed` fires for BOTH the
+      // 30s timeout and the caller's own AbortSignal (one shared
+      // `killProcess` in the installed package's exec.js) — indistinguishable
+      // from `execResult` alone. `signal?.aborted` is the only thing that can
+      // tell them apart. A killed child also exits by signal, so Node
+      // reports `code: null` and the installed package coerces it to `0`;
+      // annotating the exit-code line (rather than leaving a bare "exit
+      // code: 0") stops that coerced zero from reading as a clean success.
+      const exitCodeLine = execResult.killed ? `exit code: ${execResult.code} (killed — not a clean exit)` : `exit code: ${execResult.code}`;
+      const lines = [`why: ${p.why}`, exitCodeLine, capOutput(merged, ONE_LINER_OUTPUT_CAP_BYTES)];
       if (execResult.killed) {
-        lines.push(`(timed out after ${ONE_LINER_TIMEOUT_MS / 1000}s)`);
+        lines.push(signal?.aborted ? "(interrupted before completion)" : `(timed out after ${ONE_LINER_TIMEOUT_MS / 1000}s)`);
       }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },

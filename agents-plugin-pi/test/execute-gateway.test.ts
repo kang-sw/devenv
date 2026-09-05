@@ -53,6 +53,7 @@ import {
   validateApprovalDecisionInput,
   sliceLines,
   capOutput,
+  mergeExecOutput,
   waitForDecisionFile,
   createApprovalRelay,
   EXECUTE_TOOL_NAME,
@@ -317,9 +318,11 @@ describe("capOutput (byte-cap-to-last-complete-line for the one-liner exec hatch
   });
 
   test("a multibyte character straddling the cut is never corrupted — the partial trailing codepoint is dropped cleanly", () => {
-    // Each "🙂" is 4 UTF-8 bytes; cutting at 10 bytes lands mid-emoji (byte 8
-    // is the second byte of the third emoji), mirroring
-    // spawner.test.ts's truncatePromptForStorage multibyte test.
+    // Each "🙂" is 4 UTF-8 bytes (emoji1 = bytes 0-3, emoji2 = 4-7, emoji3 =
+    // 8-11); cutting at 10 bytes lands mid-emoji, keeping only the third
+    // emoji's first two bytes (byte 8 is that emoji's first byte, not its
+    // second), mirroring spawner.test.ts's truncatePromptForStorage
+    // multibyte test.
     const raw = "🙂🙂🙂🙂🙂";
     const capped = capOutput(raw, 10);
     assert.ok(capped.startsWith("🙂🙂"));
@@ -347,6 +350,22 @@ describe("capOutput (byte-cap-to-last-complete-line for the one-liner exec hatch
   test("module constants: 30s timeout, 4KB cap", () => {
     assert.equal(ONE_LINER_TIMEOUT_MS, 30_000);
     assert.equal(ONE_LINER_OUTPUT_CAP_BYTES, 4096);
+  });
+});
+
+describe("mergeExecOutput (review relay #1, Minor a)", () => {
+  test("stdout already ends with a newline: concatenated with no extra separator", () => {
+    assert.equal(mergeExecOutput("out\n", "err"), "out\nerr");
+  });
+
+  test("stdout has no trailing newline: a newline is inserted so stderr is never glued onto stdout's last line", () => {
+    assert.equal(mergeExecOutput("out", "err"), "out\nerr");
+  });
+
+  test("stdout-only or stderr-only output is returned unchanged, never gains a spurious newline", () => {
+    assert.equal(mergeExecOutput("out", ""), "out");
+    assert.equal(mergeExecOutput("", "err"), "err");
+    assert.equal(mergeExecOutput("", ""), "");
   });
 });
 
@@ -546,12 +565,28 @@ describe("do-i-really-have-to-run-this-myself (the one-liner exec hatch's execut
     assert.ok(text.includes("hello"));
   });
 
-  test("a timed-out command (killed:true) resolves normally with the partial output plus a timeout line — never a thrown error", async () => {
-    const tool = registerAndCapture(async () => ({ stdout: "partial", stderr: "", code: 143, killed: true }));
+  test("a timed-out command (killed:true, signal not aborted) resolves normally with the partial output plus a timeout line — never a thrown error", async () => {
+    // Review relay #1, Important: a real SIGTERM'd child exits by signal, so
+    // the installed package's exec.js coerces the null exit code to 0
+    // (`code ?? 0`) — not the plan's original 143 assumption. This stub
+    // reflects the actual shipped shape.
+    const tool = registerAndCapture(async () => ({ stdout: "partial", stderr: "", code: 0, killed: true }));
     const result = await tool.execute("call-2", { command: "sleep 60", why: "check a slow command" });
     const text = result.content[0].text;
     assert.ok(text.includes("partial"), "partial output must still be returned");
     assert.ok(text.includes("timed out"), "a timeout line must be appended when the timeout fired");
+    assert.ok(!text.split("\n").includes("exit code: 0"), "a killed run's exit-code line must never read as a bare, unannotated clean exit");
+  });
+
+  test("an interrupted command (killed:true, signal.aborted:true) reports an interrupt, never a fabricated timeout claim", async () => {
+    const tool = registerAndCapture(async () => ({ stdout: "started", stderr: "", code: 0, killed: true }));
+    const controller = new AbortController();
+    controller.abort();
+    const result = await tool.execute("call-2b", { command: "sleep 60", why: "check an interrupted command" }, controller.signal);
+    const text = result.content[0].text;
+    assert.ok(text.includes("interrupted"), "an aborted signal must be reported as an interrupt, not a timeout");
+    assert.ok(!text.includes("timed out"), "an interrupt must never be misreported as the 30s timeout firing");
+    assert.ok(!text.split("\n").includes("exit code: 0"), "a killed run's exit-code line must never read as a bare, unannotated clean exit");
   });
 
   test("no timeout line when the command finished on its own (killed:false)", async () => {

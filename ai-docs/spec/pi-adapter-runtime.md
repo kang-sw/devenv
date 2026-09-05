@@ -730,9 +730,11 @@ prompt injection): it removes native `bash` and native `read`, adds `ws-execute`
 `ws-approve`, a deliberately ugly-named direct read tool
 (`do-i-really-have-to-read-this-myself`), and a deliberately ugly-named
 one-liner exec hatch (`do-i-really-have-to-run-this-myself`, fixed 30s
-timeout, fixed 4KB output cap) — the read tool and the one-liner exec hatch
-both staying available as soft-discouraged escape hatches, the latter with no
-approval gate for the same reason as `ws-worker-exec`'s exclusion below —
+timeout bounding only that direct command and not a descendant it
+backgrounds, fixed 4KB output cap) — the read tool and the one-liner exec
+hatch both staying available as soft-discouraged escape hatches, the latter
+with no approval gate for the same reason as `ws-worker-exec`'s exclusion
+below —
 and **excludes the worker-only `ws-worker-exec` from the lead's active set**.
 That last exclusion is load-bearing: `ws-worker-exec`
 must be registered so a worker process (loading the same extension) can activate
