@@ -82,6 +82,18 @@
  * surface never regains `ws-fork` (no recursive forking; see fork.ts's own
  * doc comment for the full risk-signal trace).
  *
+ * That ticket's Phase 2 adds the owner-question surface (src/ask.ts +
+ * src/overlay-chat.ts): `ws-ask`/`ws-resolve`, a persisted per-lead-session
+ * thread registry, the `N pending` widget, `/thread`, `/answer <id>` (which
+ * lazily forks a discussion thread at the lead's tip AT OPEN TIME and
+ * attaches an overlay chat to it), and the `/done` summary injected back
+ * into the lead as a Pi custom message. `session_start` re-captures `ctx`
+ * into the registry handle on every firing (§5's captured-ctx staleness
+ * rule), hydrates the registry from its sibling state file, threads
+ * `handleForkRaisedQuestion` into `registerFork` as its new `onQuestion`
+ * callback, and applies `addAskToolsIfLead` as a third role-differentiated
+ * active-tools step.
+ *
  * HAND-SYNC NOTE: bin/ws-mcp-launcher.py, runtime.json, and rsrc/ in this
  * package are byte-identical copies of the same-named files under
  * agents-plugin/ (same precedent as agents-plugin-wsflow's copies — no
@@ -114,6 +126,16 @@ import { buildWsBlock, registerLeadBootstrap } from "./lead-bootstrap.ts";
 import { isLeadOrFork, readSpawnRole } from "./process-role.ts";
 import { computeLeadActiveTools, createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { addForkToolIfLead, registerFork } from "./fork.ts";
+import {
+  addAskToolsIfLead,
+  createThreadRegistryHandle,
+  handleForkRaisedQuestion,
+  hydrateThreadRegistry,
+  refreshPendingWidget,
+  registerAsk,
+  registerThreadCommands,
+  threadRegistryPath,
+} from "./ask.ts";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pluginDir = dirname(srcDir); // agents-plugin-pi/
@@ -130,6 +152,11 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   let handle: BridgeHandle | undefined;
   let agentTools: AgentToolsHandle | undefined;
   const wsBlockRef: { current: string | undefined } = { current: undefined };
+  // 260904 Phase 2 (side-thread question surface): one thread registry per
+  // extension instance. Its in-memory map is hydrated from (and written back
+  // to) a sibling file of the lead's own session file on every session_start
+  // — see ask.ts's header for why that file exists at all.
+  const threadHandle = createThreadRegistryHandle();
 
   pi.on("resources_discover", () => ({
     skillPaths: [skillsDir],
@@ -198,7 +225,33 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // session_start too and needs ws-fork registered so computeForkToolSurface's
     // own exclusion of it has something to exclude. Whether it is ever ACTIVE
     // is addForkToolIfLead's job below, not this registration.
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath });
+    // 260904 Phase 2: the onQuestion callback is what makes a task fork's own
+    // ws-report-to-lead(kind:"question") land in the owner-question registry
+    // with `respondent` already set to that live fork (Entry A meets Entry B)
+    // — fork.ts stays generic and never imports ask.ts.
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, (agentId, message) =>
+      handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message),
+    );
+
+    // 260904 Phase 2 (owner question surface), same declarative/global
+    // registration placement as registerFork above: ws-ask/ws-resolve must
+    // exist in a fork child's own process too, so computeForkToolSurface has
+    // them present to exclude. Whether they are ever ACTIVE is
+    // addAskToolsIfLead's job below.
+    //
+    // §5's captured-ctx staleness rule: re-capture ctx on EVERY session_start
+    // (never a factory-scope ctx), and hydrate the persisted registry so
+    // pending questions and dormant threads survive a lead restart. Only a
+    // lead/fork session owns a thread registry — a worker/explore child has
+    // none.
+    threadHandle.ctxRef.current = ctx;
+    if (isLeadOrFork(readSpawnRole(process.env))) {
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      if (sessionFile) hydrateThreadRegistry(threadHandle, threadRegistryPath(sessionFile));
+      refreshPendingWidget(ctx, threadHandle);
+    }
+    registerAsk(pi, threadHandle);
+    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, modelCatalogPath });
 
     // §1/§4: fill the ws system-prompt block only when startBridge actually
     // produced both snapshots (lead/fork role, non-degraded bootstrap — see
@@ -236,6 +289,12 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       // (no recursive forking) even though isLeadOrFork treats lead/fork
       // identically for the gates above.
       pi.setActiveTools(addForkToolIfLead(pi.getActiveTools(), readSpawnRole(process.env)));
+      // 260904 Phase 2: a third role-differentiated step, alongside (never
+      // folded into) the two above for the same reason addForkToolIfLead is
+      // kept separate — computeLeadActiveTools is applied to lead and fork
+      // alike, so folding ws-ask/ws-resolve in there would hand a fork the
+      // very tools FORK_EXCLUDED_TOOL_NAMES exists to keep away from it.
+      pi.setActiveTools(addAskToolsIfLead(pi.getActiveTools(), readSpawnRole(process.env)));
     }
   });
 
