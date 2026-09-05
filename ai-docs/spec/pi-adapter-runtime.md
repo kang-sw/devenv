@@ -230,7 +230,9 @@ running or dormant child rather than the one-shot `-p`-per-task model. Each work
 still runs as its own child process, preserving out-of-process isolation. The
 spawn tool is a **thin launcher**: the lead renders the playbook itself (surfacing
 the tier/model recommendation at render time), so the spawn tool carries no tier
-abstraction. Five tools are registered:
+abstraction. Four tools are registered — there is no blocking wait tool; every
+child signal is pushed into the lead session as a message (see "Child→lead
+report channel" below):
 
 - `ws-agent-spawn({ system_prompt_path, prompt, model_name?, model_effort? })
   -> { agent_id }` — start a persistent worker. `system_prompt_path` is the
@@ -248,20 +250,20 @@ abstraction. Five tools are registered:
   current turn. A message to a **dormant** child auto-resumes it from its on-disk
   session (keeping the same ws `session_key`) and then delivers — so resume is
   subsumed by send, and there is no separate continue tool.
-- `ws-agent-wait(agent_ids[], timeout?)` — block until the FIRST child in the set
-  reaches idle **or** emits a report (see the report channel below), then return
-  it. Idle harvest is edge/consume: a child returned as idle is consumed, so a
-  later wait on an array still listing it does not busy-return it and later
-  finishers are not starved. The result carries `reason: idle | report` plus any
-  pending reports for the woken child (drained in FIFO order), and an idle wake
-  additionally carries the child's last message. On `timeout` expiry with no
-  finisher, the call returns a timed-out marker and leaves every child registered;
-  an empty `agent_ids` list is a caller error and fails fast.
-- `ws-agent-list()` — enumerate live children with their status.
+- `ws-agent-list()` — enumerate live children with their status (running / idle /
+  dormant) and the time of their last report.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
   mapping and on-disk session, leaving it **dormant/resumable** (a later
-  `ws-agent-send` revives it). This is distinct from `session_shutdown`, the
-  terminal teardown of every child.
+  `ws-agent-send` revives it). The tool pushes a `ws-agent-settled` message with
+  `reason: "stopped"`; adapter-internal stops (a thread close, the shutdown
+  teardown) are silent. This is distinct from `session_shutdown`, the terminal
+  teardown of every child.
+
+The former `ws-agent-wait` tool is **removed, not deprecated**: a tool that
+blocks the lead is the hazard (the approval-relay deadlock class and the
+poll-with-timeout loop both came from it), so the approval-pending wake, the
+idle edge-consume flag and the waiter bookkeeping went with it. The lead spawns,
+ends its turn, and is woken by the pushed message.
 
 Each spawned child inherits a **process-role marker** in its environment so the
 extension running inside it can tell what kind of process it is: `WS_PI_SPAWN_ROLE`
@@ -276,19 +278,47 @@ no-ops).
 
 Still-running workers are terminated when the session is torn down
 (`session_shutdown`), before the bridge connection they dispatch through is
-closed.
+closed. Their identities are not lost: before the teardown the adapter writes a
+sidecar `<leadSessionFile>.ws-agents.json` (the `.ws-threads.json` precedent)
+listing every non-dormant child — `agent_id`, role (`worker` /
+`execute-worker` / `fork`), the exact resume set the dormant-send path consumes
+(`sessionPath`, `modelBase`, `modelEffort`, `systemPromptPath`, `toolGroup`,
+`explicitTools`, `wsToolNames`), its state at shutdown (`running` / `idle`) and
+its last-report time. On the next `session_start` for the **same** lead session
+file (resume, `/reload`) the sidecar is consumed exactly once: each entry is
+re-registered as a **dormant** record with its role wiring re-armed (`fork` →
+the fork hooks: question report, anti-bleed loop, final report;
+`execute-worker` → the approval relay; `worker` → none), and one
+`ws-agent-orphaned` custom message (`followUp`, `triggerTurn: true`) is pushed
+listing them with their state and a revival hint — `ws-agent-send <id>`
+auto-resumes a dormant record from its cached session file, so the hint is
+literally executable. A `running` entry resumes from its last flushed turn and
+is marked "was mid-turn; re-issue the instruction". What each child was doing is
+not restated; the resumed lead's own transcript already has it. A different
+session (`/new`) leaves the sidecar beside the old session file to fire on that
+session's later resume. Reports are never replayed from the sidecar: they belong
+to a process that no longer exists.
 
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
 Because a worker is now a persistent RPC child rather than a one-shot process, a
 turn's completion is signalled by the child reaching **idle** (its RPC
-`agent_settled` event), not by the child process closing its stdio. `ws-agent-wait`
-races that idle signal across the waited set; the child stays alive after settling,
-ready for the next `ws-agent-send`. Streaming-vs-idle state is tracked per child so
-a send is routed correctly (start a new turn / steer / queue). A spawn that fails
-to launch (bad interpreter, missing binary) settles its waiters rather than
-hanging, and a set of children with no live process and no pending idle in an
-untimed wait fails fast rather than blocking forever.
+`agent_settled` event), not by the child process closing its stdio. The child
+stays alive after settling, ready for the next `ws-agent-send`. A settle that
+ends a turn in which the child sent **no** `kind:"final"` (or `kind:"question"`)
+report pushes a `ws-agent-settled` message to the lead with `reason: "idle"`
+and the child's last message, so a worker whose playbook never says
+`ws-report-to-lead` still signals completion; a turn that did report `final`
+or `question` pushes only that report, and the settle is silent.
+`details.reason` takes one of `idle`, `stopped` (the `ws-agent-stop` tool),
+`exited` (process gone, see the liveness backstop in the report channel) or
+`spawn-failed` (bad interpreter, missing binary — pushed synchronously from the
+failed spawn). Streaming-vs-idle state is tracked per child so a send is routed
+correctly (start a new turn / steer / queue); `running` is set the moment the
+adapter issues a prompt to the child (every prompt site goes through one
+`promptAgent` helper, so there is no spawn→`agent_start` window in which a
+just-launched child reads as not running), confirmed by `agent_start`, and
+cleared on settle, stop, exit or spawn failure.
 
 ### explore — one-shot recon leaf {#260903-pi-explore-recon-leaf}
 
@@ -299,9 +329,9 @@ entry is dropped once the leaf completes). An `explore` leaf has no `continue`
 path, and its own `recon` allowlist excludes `explore` and every `ws-agent-*`
 tool, so an explore leaf spawns neither another explore nor a worker — it is the
 non-recursive terminal of the delegation tree (see bounded depth below).
-`explore` is the one delegation tool a worker itself may reach. Because the
-persistent-child `ws-agent-wait` tracks only RPC children, a one-shot
-`explore({ async: true })` leaf is not harvestable through it; the common
+`explore` is the one delegation tool a worker itself may reach. An explore leaf
+is not a registry member: it returns through its own tool result, pushes no
+message and is outside the pushed status line's `N of M` count; the common
 synchronous `explore` is unaffected.
 
 ### Per-spawn tool curation {#260903-pi-spawner-tool-groups}
@@ -312,7 +342,7 @@ tool-name allowlist. Built-in Pi tools are named directly; the `full-worker` gro
 additionally includes the bridge's live `ws__*` tool names, taken from the running
 bridge rather than hardcoded so the group tracks the actual ws-mcp tool set. A
 worker's `full-worker` allowlist **excludes every delegation-driving tool**
-(`ws-agent-spawn` / `-send` / `-wait` / `-list` / `-stop`), so a worker cannot
+(`ws-agent-spawn` / `-send` / `-list` / `-stop`), so a worker cannot
 spawn or drive a further generation of persistent workers, but it **includes the
 literal `explore` tool** — a pi-native custom tool, not a `ws__*` bridge name, so
 it must be named explicitly to survive Pi's `--tools` allowlist — so a worker may
@@ -386,19 +416,71 @@ A worker can push an out-of-band message to its lead mid-run through the child-s
 tool `ws-report-to-lead(message)` — the only child→lead tool the delegation layer
 adds, and included in the `full-worker` `--tools` allowlist so a worker can reach
 it. It needs no new transport: the call surfaces to the parent on the child's
-existing RPC event stream (the tool-invocation event), and the adapter routes it
-into a **per-agent report buffer**. Because the report rides the invocation event,
-it reaches the lead as soon as the model calls the tool, independent of the tool's
-own return value.
+existing RPC event stream (the tool-invocation event). Because the report rides
+the invocation event, it reaches the lead as soon as the model calls the tool,
+independent of the tool's own return value.
 
-The buffer is a bounded FIFO, default capacity 32. On overflow the oldest report is
-dropped and a per-agent dropped-count is incremented, so a lead that later drains
-the buffer sees a truncation marker rather than silently losing reports. On each
-`ws-agent-wait` wake for that child, **all** pending reports drain at once in FIFO
-order (a woken lead sees the whole queue, not one at a time) and the count resets;
-a report that arrives while no wait is pending simply buffers until the next wait.
-Reports survive `ws-agent-stop` (they are not cleared when a child goes dormant),
-so a stopped-then-resumed child does not lose an unread report.
+**Every child signal is pushed; nothing is harvested.** The adapter holds no
+report buffer of its own. Each signal becomes a `pi.sendMessage` custom message
+(`display: true`, `details` carrying `agent_id`, the family payload and the
+status line below), issued by whichever process owns the child's registry — the
+lead for its children, a fork process into its own session for the fork's
+workers and execute workers (`isLeadOrFork` gate); a `worker` process never
+pushes, its only delegate being the explore leaf. Six families:
+
+- `ws-agent-report` — `ws-report-to-lead` with `kind:"final"` or untagged
+  progress (`details.kind`); pushed mid-turn from the tool-invocation branch. A
+  `final` first marks the sender `terminalThisTurn`, so the status line on that
+  very message no longer counts it. `followUp`, `triggerTurn: true`.
+- `ws-agent-settled` — a persistent child left the running state without a
+  `final` that turn; `details.reason` is `idle` (with `last_message`),
+  `stopped`, `exited` or `spawn-failed` (see "Turn completion is gated on RPC
+  idle"). `followUp`.
+- `ws-agent-question` — `kind:"question"` in the headless relay case; `steer`,
+  since the child is blocked on the answer. In TUI the question is consumed by
+  the owner question surface instead.
+- `ws-agent-approval` — an execute-gateway approval request; `steer` (see the
+  approval gateway).
+- `ws-agent-advisory` — the fork anti-bleed advisories (idle-without-final,
+  fail-loud transcript tail, `expects_commit` non-completion;
+  `details.advisory` names which). `followUp`.
+- `ws-agent-orphaned` — once per resumed session, from the shutdown sidecar
+  (see "Process lifecycle"). `followUp`.
+
+The report branch consults the record's owner-thread hooks first: a report the
+hook consumes (a `lead-ask` thread's final, which becomes the `ws-thread-summary`
+injection) is not pushed, while a `fork-raised` final closes its thread and is
+then pushed. A record that is **thread-bound** — bound to a non-closed owner
+thread, from thread open (first open and every reopen) or from question
+registration until the thread closes (`/done`, fork final, `ws-resolve`) —
+pushes no settle or advisory and is outside the status line, so owner↔fork
+exchanges reach the lead only through the summary / fork-final paths. A child's
+turn therefore never reaches the lead twice, and within a live session no push
+is dropped or duplicated: Pi's followUp queue is the only buffer, draining
+mid-turn arrivals one per loop iteration in arrival order, so a fan-out burst
+yields one lead run that sees the messages in order.
+
+**Fan-in stays with the model.** Every push carries a status line
+`N of M spawned agents still running: <ids>`, where M is this process's
+registry members that are neither dormant nor stopped/exited and not
+thread-bound (workers, execute workers, task forks), and N is the subset that is
+running and has not yet sent `final` or `question` this turn. A child blocked on
+an approval is running; a child parked on a question is thread-bound; a child
+that settled idle or reported `final` leaves N until it is prompted again. The
+last `final` of a fan-out reads `0 of M`, and a worker that never reports
+`final` reaches `0 of M` through its `ws-agent-settled`, so the lead can tell
+"not yet — end the turn again" (N > 0) from "all in — synthesize" (N = 0).
+The idle-without-final advisory reads the record's bounded report log
+(`{kind, at}`, which also feeds `ws-agent-list`'s last-report time) considering
+only entries since the lead's last send to that record, so a re-tasked fork is
+judged on its new task.
+
+**Liveness backstop.** Process death is not observable on the RPC event stream,
+so the spawner probes `client.getState()` — which rejects once the child is
+gone — on every registry transition and on a coarse timer (order of 30 s) while
+N > 0, and treats the rejection of any in-flight request the same way; a dead
+running child is transitioned to `exited` and pushed. This replaces the timeout
+the removed wait tool used to provide.
 
 ### Transcript path accessor {#260904-pi-agent-transcript-path}
 
@@ -478,8 +560,9 @@ adapter-owned exec tool, which always elevates to lead approval. Reads stay
 native and ungated.
 
 When the worker calls `ws-worker-exec`, its execution **pauses** and the adapter
-surfaces an approval request to the lead as an out-of-band injected turn (the
-lead is not suspended inside a synchronous tool call). The request carries an
+surfaces an approval request to the lead as a pushed `ws-agent-approval` custom
+message, delivered `steer` so it interrupts even a mid-turn lead (the lead is
+never suspended inside a synchronous tool call). The request carries an
 adapter-authoritative, compact working-context header — **scraped by the adapter
 at exec time, not self-reported by the worker**:
 
@@ -496,41 +579,14 @@ context bombs; the lead `deny`s to ask for more. The unset-catalog advisory
 cadence and the report channel are unchanged. Once the lead decides, the adapter
 relays the decision back to the paused worker, which resumes (or re-plans, on
 `deny`). The pause is tool-level (the worker's gated exec blocks until a decision
-arrives) and needs no harness pause/resume capability; the injected turn is the
-notification path for a lead that is **not** blocked in a wait — see the
-suppression rule below for a waiting lead.
-
-The out-of-band injected turn assumes the lead reaches a turn boundary to receive
-it — the injected approval request is turn-boundary-only. That assumption breaks
-when the lead is blocked inside a synchronous `ws-agent-wait` on the very worker
-that just paused for approval: the worker cannot proceed until approved, the wait
-cannot return until the worker proceeds, and the injected approval request queues
-behind the unfinished wait turn — a circular deadlock broken only by the wait
-timeout. Because the documented harvest pattern is spawn-then-`ws-agent-wait`,
-this is the common path, not an edge case.
-
-The adapter closes it by waking the wait: when a worker enters a pending-approval
-state, any `ws-agent-wait` on that agent returns immediately with
-`reason:"approval-pending"` and a `pending_approval: { cmd_id, command,
-rationale }` payload, handing the lead back to a turn boundary. The lead calls
-`ws-approve` with that `cmd_id`, then calls `ws-agent-wait` again to harvest the
-eventual report — it must not keep blocking. The wake reuses the same
-waiter machinery as the settle and report wakes; pending-approval is not an
-edge-consumed flag (it is real state cleared by `ws-approve`), so a re-wait
-before approving correctly re-reports `approval-pending` rather than looping. A
-pending approval takes priority over a same-agent settle or buffered report at
-harvest time, and buffered reports are still drained alongside it.
-
-**Single-notification rule.** A pending-approval event notifies the lead through
-exactly one path. When the event woke a lead blocked in `ws-agent-wait`, the
-out-of-band injected approval turn is **suppressed** — the wait's
-`approval-pending` return already carries the request, and the injected copy
-would arrive at the next turn boundary as a stale duplicate. When no lead was
-waiting on that agent, the injected turn is emitted as before and remains the
-sole notification path. "Waiting" means a wait that is actually live at event
-time: a wait that has already timed out, or a multi-agent wait that another
-agent already won, no longer counts as waiting, so the injected turn still
-fires for those leads.
+arrives) and needs no harness pause/resume capability. Because the lead never
+blocks on a child, the pushed message is the **sole** notification path: there
+is no wait to wake, no `approval-pending` return payload and no suppression
+rule. A worker blocked on an approval is mid-tool-call and therefore still
+`running` in the pushed status line. Pending-approval is real state cleared by
+`ws-approve`; the relay is armed on the execute-worker record itself, so a
+worker re-registered from the shutdown sidecar keeps its relay when it is
+revived.
 
 ## Lead native tool-surface reshaping {#260905-pi-lead-tool-surface-execute-gateway}
 
@@ -632,7 +688,8 @@ not consume delegation depth.
 > forked session that inherits the lead's full transcript; the fork's tool
 > surface carries `ws-report-to-lead` and excludes `ws-fork`; the fork emits a
 > `kind:"final"` report in the required shape (Outcome/Files changed/
-> Verification/Blockers/Commit), which the lead harvests via `ws-agent-wait`; the
+> Verification/Blockers/Commit), which arrives in the lead session as a pushed
+> `ws-agent-report` (at the time of the run, via the since-removed wait); the
 > anti-bleed nudge is delivered to the fork's own session (not the lead's), so a
 > no-report turn is re-prompted in place with no lead-context pollution. The
 > bleed PoC's go/no-go for the next phase therefore clears: the structural loop
@@ -711,7 +768,10 @@ channel for an owner question: it registers and carries on.
   `fork-raised` thread whose respondent is that fork, increments the pending
   count, and hands the lead a **notice** in place of the question text: the
   owner answers via `/answer <id>`; the lead must not relay, answer, or ask
-  the owner, but keep waiting on the fork. `/answer` attaches the overlay to the
+  the owner — it ends its turn, and the fork's own final report will arrive as
+  a pushed message. Registration marks the fork **thread-bound** (outside the
+  pushed status line, no settle or advisory pushed) until the thread closes,
+  whether or not the owner ever opens it. `/answer` attaches the overlay to the
   existing process — no new spawn. While an owner overlay is attached, the
   fork's anti-bleed loop treats the fork's turns as owner-driven (no nudge, no
   fail-loud) and re-arms the moment the overlay detaches.
@@ -740,12 +800,15 @@ channel for an owner question: it registers and carries on.
   - `fork-raised` — no summary, no injection, no stop: the overlay closes at
     once and the thread goes `dormant` while the task fork carries on. What was
     decided reaches the lead through that fork's own `kind:"final"` report under
-    `Decisions:`; stopping the fork here would destroy its in-flight task and
-    strand the lead's `ws-agent-wait`, which only a live child can settle.
+    `Decisions:`; stopping the fork here would destroy its in-flight task, and
+    the fork's own final is the lead's completion signal. Closing the thread
+    clears the fork's thread-bound flag, so it re-enters the pushed status
+    line and its final is pushed as an ordinary `ws-agent-report`.
   The lead session is never rewound; injection is forward-only.
 - **Headless baseline preserved.** Off the TUI (`ctx.mode !== "tui"`, e.g.
-  `--mode rpc`), a fork-raised question is relayed to the lead byte-for-byte as
-  before (the lead asks the owner and answers with `ws-agent-send`); a lead
+  `--mode rpc`), a fork-raised question is pushed to the lead byte-for-byte as
+  a `ws-agent-question` custom message delivered `steer` (the lead asks the
+  owner and answers with `ws-agent-send`); a lead
   `ws-ask` registers the thread and fires a `notify` toward the RPC host, spawns
   no fork, and the owner's reply arrives as an ordinary lead turn. The overlay
   is the TUI optimization over these baselines.
@@ -797,7 +860,7 @@ this surface.
   a `WS_PI_AGENT_CHILD=1` environment marker, and the `agent_settled` handler
   no-ops when that marker is present — so a child's own settles never arm a loop or
   a reminder, matching the delegation model where children are driven by the lead
-  through `ws-agent-send` / `ws-agent-wait`.
+  through `ws-agent-send`, with their reports pushed back into the lead session.
 
 ### Model-driven compaction {#260904-pi-goal-loop-model-driven-compaction}
 
