@@ -13,7 +13,6 @@
     "rsrc/",
     "skills/",
     "runtime.json",
-    "model-catalog.json",
     "goal-loop-config.json",
     "pi-lead-guide.md",
     "execute-worker-guide.md"

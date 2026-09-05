@@ -387,6 +387,72 @@ the tier names `lead-tune` shows (and to drop the "anything the user names"
 sentence). Verify with the adapter's `npm test` and one live spawn per kind
 (a set `pi` tier, an unset tier → inherit, `complex:true` → inherit).
 
+### Result (4798a605) - 2026-09-06
+
+Landed as `bb3d1877` (survey plan), `2e021e83` (adapter code and tests),
+`866139bc` (spec and lead guide), `4798a605` (review relay #1), plus one
+doc-only closeout commit, on the implementation branch under the goal
+branch. Adapter-only change under `agents-plugin-pi/`; nothing under
+`agents-plugin-tool/` or `agents-plugin/skills/`.
+
+Behavioral delta:
+
+- `model_name` on `ws-agent-spawn`/`ws-fork`/`ws-execute`/the discussion
+  fork, and `explore`'s implicit `small`, resolve through
+  `config.resolve_agent(tier, format:"json")` with no explicit harness (the
+  bridge's detected `pi` session harness applies). A hit counts only when
+  `resolved_from == "pi"` and the model carries a `provider/id` slash
+  (Phase 3 Forward (a) guard); every other shape, including `isError`,
+  transport errors and unparsable text, inherits the parent model.
+- Effort: a single `effectiveModelEffort(caller, resolved)` fold with `||`
+  semantics is stored on the record and applied at both spawn time and
+  dormant resume; empty resolved effort applies nothing. The explore leaf
+  has no effort surface and receives only the model.
+- The `workflow_manual` advisory now reads "tier table has no `pi`
+  entries", sourced from the same tool (four round-trips, only on
+  `workflow_manual`, in both the mapped and raw dispatch paths). Four failed
+  lookups also fire it.
+- `model-catalog.ts`, `model-catalog.json` and their tests are deleted;
+  `ws-model-catalog-list` stays as a registry lister. The genuine-hit
+  predicate lives once, in `resolveModelForAliasViaWsMcp`, which
+  `bridge.ts` reuses.
+- `agents-plugin-pi/runtime.json` resynced byte-identically from
+  `agents-plugin/runtime.json` (0.44.4, `config.resolve_agent` listed) with
+  a disk-reading identity test.
+- Spec: the three `pi-adapter-runtime` anchors rewritten in place (ids
+  unchanged); `pi-lead-guide.md` names the four tiers as the legal
+  `model_name` values. Adapter `npm test`: 735 pass, 0 fail.
+
+Review (partitioned correctness/fit/test): one Critical (config-resolved
+effort was folded into the record but the spawn-time apply still read the
+caller value) fixed in relay #1 and confirmed by a Critical-scoped
+re-review; three Important (stale runtime.json pin, duplicated guard,
+untested raw-dispatch gate) fixed in the same relay. Minor, recorded:
+resolver JSDoc displaced above the new call-tool interface; the
+source-text guard test in `spawner.test.ts` is a formatting-brittle
+stopgap for a live-gate-only `spawnAgent`.
+
+Owner-run live checks remain outstanding, with one caveat: the adapter's
+`assertVersionPin` is an exact string match, so a source-built ws-mcp
+reporting `0.44.4-dev` is rejected against the pinned `0.44.4`. Run the
+live spawns against a build whose version string equals the pin (or build
+with the release version), or loosen the pin rule in a follow-up; the
+released 0.44.4 binary matches as-is.
+
+Forward: `agents-plugin-pi/rsrc/` has drifted from `agents-plugin/rsrc/`
+(nine playbooks plus `manifest.json`) despite the same byte-identical
+hand-sync declaration; only `runtime.json` is now guarded by a test.
+Captured as `260906-bug-ws-pi-rsrc-mirror-drift`.
+
+## Blocked (2026-09-06) — owner sign-off pending, not a work item
+
+All four phases carry a Result; no autonomous work remains. Closing waits
+on the owner-run live checks listed in Phases 1, 2 and 4 (each spawn kind
+against a ws-mcp whose version string matches the adapter pin, see the
+Phase 4 Result caveat) and on the AGENTS.md owner-clause wording question
+raised in the Decisions section. Once those are done, close the ticket to
+`.done/`.
+
 ## Non-goals
 
 - Authoring any `.pi.md` playbook overlays. This ticket makes them selectable;

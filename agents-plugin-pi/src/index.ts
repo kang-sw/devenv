@@ -20,12 +20,15 @@
  *
  * Phase 2 adds the self-built delegation spawner (`ws-agent-spawn` /
  * `ws-agent-continue` / `explore`, see src/spawner.ts) on
- * top of the Phase 1 bridge. Phase 3 adds the adapter-owned model-catalog
- * curation data file (`model-catalog.json`, see src/model-catalog.ts):
- * tier-aware `--model` resolution in the spawner, an unset-tier advisory
- * appended to every `workflow_manual` bridge response (bridge.ts), and a
- * read-only `ws-model-catalog-list` command exercising Pi's
- * `ctx.scopedModels` read API to help the user hand-curate the catalog.
+ * top of the Phase 1 bridge. Phase 3 added (and the
+ * `260905-feat-ws-pi-harness-config-layer` ticket's Phase 4 retired) an
+ * adapter-owned tier-curation data file: tier-aware `--model` resolution now
+ * goes through ws-mcp's `config.resolve_agent` tool
+ * (`resolveModelForAliasViaWsMcp`, spawner.ts) instead of a hand-edited JSON
+ * file, the unset-tier advisory in bridge.ts is sourced from the same tool,
+ * and the read-only `ws-model-catalog-list` command below still exercises
+ * Pi's `ctx.scopedModels` read API but now points the user at `config.tune
+ * agents.tier harness:pi` / `lead-tune` for curation instead of a data file.
  *
  * Phase 4 ships the `/ws-discuss` proof-of-concept command (kickoff built by
  * src/discuss.ts): a single `pi.sendUserMessage` that loads the lead-discuss
@@ -179,7 +182,6 @@ const repoRoot = dirname(pluginDir);
 const skillsDir = resolveSkillsDir(pluginDir, repoRoot);
 const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
 const runtimeJsonPath = join(pluginDir, "runtime.json");
-const modelCatalogPath = join(pluginDir, "model-catalog.json");
 const goalLoopConfigPath = join(pluginDir, "goal-loop-config.json");
 const piLeadGuidePath = join(pluginDir, "pi-lead-guide.md");
 const executeWorkerGuidePath = join(pluginDir, "execute-worker-guide.md");
@@ -214,11 +216,11 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
   }));
 
   // Read-only: lists Pi's currently scoped (or, if unscoped, all available)
-  // models as `provider/id` candidates for the user to hand-copy into
-  // model-catalog.json's `tiers`/`catalog` fields. No writes — curation
-  // stays a hand-edited data file (see model-catalog.ts's doc comment).
+  // models as `provider/id` candidates for the user to hand-copy into a
+  // `config.tune agents.tier harness:pi` write (see lead-tune). No writes —
+  // curation stays a ws-mcp config edit, not an adapter-owned data file.
   pi.registerCommand("ws-model-catalog-list", {
-    description: "List provider/id model candidates for curating model-catalog.json's tiers.",
+    description: "List provider/id model candidates for curating harness pi's agents.tier entries via config.tune / lead-tune.",
     handler: async (_args, ctx) => {
       const models = ctx.scopedModels.length > 0 ? ctx.scopedModels.map((sm) => sm.model) : ctx.modelRegistry.getAvailable();
       const lines = models.map((m) => `${m.provider}/${m.id}`);
@@ -286,7 +288,6 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       launcherPath,
       pluginDir,
       runtimeJsonPath,
-      modelCatalogPath,
       cwd: ctx.cwd,
       ui: ctx.ui,
     });
@@ -297,11 +298,10 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // dormant-resumed execute-worker needs the SAME callback wired through
     // ws-agent-send's auto-resume branch, not just ws-execute's own spawn.
     const onApprovalPending = createApprovalRelay(pi, { cwd: ctx.cwd }, rpcRegistryRef);
-    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd, modelCatalogPath }, onApprovalPending);
+    agentTools = registerAgentTools(pi, handle, { cwd: ctx.cwd }, onApprovalPending);
     rpcRegistryRef.current = agentTools.rpcRegistry;
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
-      modelCatalogPath,
       executeWorkerPromptPath: executeWorkerGuidePath,
       onApprovalPending,
     });
@@ -327,7 +327,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message, pi);
       return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
     };
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, onForkQuestion);
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd }, onForkQuestion);
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must
@@ -394,7 +394,7 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
       }
     }
     registerAsk(pi, threadHandle, agentTools.rpcRegistry);
-    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd, modelCatalogPath });
+    registerThreadCommands(pi, handle, agentTools.rpcRegistry, threadHandle, { cwd: ctx.cwd });
 
     // §1/§4: fill the ws system-prompt block only when startBridge actually
     // produced both snapshots (lead/fork role, non-degraded bootstrap — see
