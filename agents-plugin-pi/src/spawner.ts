@@ -37,11 +37,12 @@
  * boundary (`pendingFinal`) and pushed when that child's own turn ends, so
  * "done" is never announced while its author is still working.
  *
- * The spawn tool carries **no tier** parameter (D-A / Shape A): the caller
- * (the lead) passes an already-rendered `system_prompt_path` — this module
- * never calls `playbook.render` itself for the RPC-backed path — plus an
- * optional `model_name` resolved against the adapter-owned model-catalog
- * alias table (model-catalog.ts), or omits it to inherit the parent
+ * The spawn tool's `model_name` param names one of the four fixed tiers
+ * (`small`/`medium`/`large`/`xlarge`); the caller (the lead) passes an
+ * already-rendered `system_prompt_path` — this module never calls
+ * `playbook.render` itself for the RPC-backed path — plus that optional
+ * `model_name`, resolved through ws-mcp's `config.resolve_agent` tool
+ * (`resolveModelForAliasViaWsMcp` below), or omits it to inherit the parent
  * session's model.
  *
  * `explore` is the one exception left untouched: it remains the one-shot
@@ -80,7 +81,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { RpcClient, type RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "./mcp-stdio-client.ts";
 import type { BridgeHandle } from "./bridge.ts";
-import { readModelCatalog, resolveAlias, type ModelCatalogConfig } from "./model-catalog.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV, isLeadOrFork, readSpawnRole } from "./process-role.ts";
 
 // ---------------------------------------------------------------------------
@@ -339,24 +339,53 @@ export class AgentEventLineBuffer {
 }
 
 /**
- * Pure alias-first, inherit-fallback model resolution: when `alias` is
- * given and mapped in `config`, that `provider/id` wins; otherwise (no
- * `alias`, catalog unset, or that specific alias unmapped) falls back to
- * `inheritModel` unchanged. Split out from the IO wrapper that re-reads the
- * catalog file fresh per call so the resolution rule itself is directly
- * unit-testable with no file I/O involved. Used by both the RPC-backed
- * `spawnAgent`'s `model_name` and `explore`'s fixed `"small"` lookup.
+ * Async, ws-mcp-backed tier resolution (Phase 4: replaces the old
+ * file-catalog-backed `resolveModelForAlias`): when `alias` (one of the four
+ * fixed tiers `small|medium|large|xlarge`) is given, calls ws-mcp's
+ * `config.resolve_agent` tool (`{tier: alias, format: "json"}`) and accepts
+ * its answer only when it is a GENUINE `pi`-labeled hit — `resolved_from ===
+ * "pi"` AND the returned model string contains a `/` (Phase 3 Forward (a): a
+ * partial `config.tune agents.tier harness:pi` write can seed the `pi`
+ * bucket from the codex default, so `resolved_from === "pi"` alone is not
+ * proof of a real Pi `provider/id` string — a codex-shaped fallback model
+ * carries no `/`).
+ *
+ * NEVER HARD-FAILS: no alias, an `isError` result, a missing/unparsable text
+ * body, a non-`pi` `resolved_from`, or a `pi`-labeled-but-slash-less model
+ * all degrade to `{model: inheritModel}` — matching this adapter's existing
+ * "the adapter reads the resolution from ws-mcp; missing/unmapped stays
+ * inherit, never an error" contract. `effort` is only ever populated
+ * alongside a genuine hit, and only when the resolved effort string is
+ * non-empty (an empty resolved effort means "no explicit override" — the
+ * caller passes no `modelEffort` at all rather than an empty one).
+ *
+ * Used by both the RPC-backed `spawnAgent`'s `model_name` and `explore`'s
+ * fixed `"small"` lookup.
  */
-export function resolveModelForAlias(
-  config: ModelCatalogConfig | undefined,
+export async function resolveModelForAliasViaWsMcp(
+  client: McpStdioClient,
   alias: string | undefined,
   inheritModel: string | undefined,
-): string | undefined {
-  if (alias) {
-    const aliasModel = resolveAlias(config, alias);
-    if (aliasModel) return aliasModel;
+): Promise<{ model?: string; effort?: string }> {
+  if (!alias) return { model: inheritModel };
+  try {
+    const result = await client.callTool("config.resolve_agent", { tier: alias, format: "json" });
+    if (result.isError) return { model: inheritModel };
+    const text = result.content.find((item) => item.type === "text")?.text;
+    if (!text) return { model: inheritModel };
+    let parsed: { model?: string; effort?: string; resolved_from?: string };
+    try {
+      parsed = JSON.parse(text) as { model?: string; effort?: string; resolved_from?: string };
+    } catch {
+      return { model: inheritModel };
+    }
+    if (parsed.resolved_from !== "pi" || !parsed.model || !parsed.model.includes("/")) {
+      return { model: inheritModel };
+    }
+    return { model: parsed.model, effort: parsed.effort || undefined };
+  } catch {
+    return { model: inheritModel };
   }
-  return inheritModel;
 }
 
 /**
@@ -665,9 +694,10 @@ export interface RpcAgentRecord {
   agentId: string;
   /**
    * 260905 (alias/park/cap ticket): caller-supplied, human-chosen short name
-   * for THIS agent record — a different concept from `resolveModelForAlias`/
-   * `resolveAlias`'s "alias," which names a *model-catalog* entry (L342-366
-   * above). Optional; the adapter never derives one from the prompt. Resolved
+   * for THIS agent record — a different concept from
+   * `resolveModelForAliasViaWsMcp`'s "alias," which names a fixed *tier*
+   * resolved through ws-mcp's `config.resolve_agent` tool (see above).
+   * Optional; the adapter never derives one from the prompt. Resolved
    * through `resolveAgentId` alongside the raw `agentId` uuid on every
    * `ws-agent-send`/`ws-agent-stop`/`ws-agent-transcript`/`ws-approve` call.
    * Reusing an alias on a new spawn overwrites a dormant/idle holder (clearing
@@ -1517,8 +1547,8 @@ export interface RpcSpawnCtx {
   inheritModel?: string;
   /** Bridge's sanitized `ws__*` registered tool names, for the `full-worker` group. */
   wsToolNames: readonly string[];
-  /** Path to the adapter-owned model-catalog data file, read fresh per spawn. */
-  modelCatalogPath: string;
+  /** ws-mcp client used to resolve `model_name` through `config.resolve_agent` (`resolveModelForAliasViaWsMcp`), read fresh per spawn. */
+  client: McpStdioClient;
   /** Curated `--tools` group for this spawn. Omitted (or explicit `"full-worker"`) preserves every existing `ws-agent-spawn` caller's behavior unchanged — only `ws-execute` (execute-gateway.ts) passes `"execute-worker"`. */
   toolGroup?: ToolGroup;
   /**
@@ -2068,10 +2098,12 @@ export function runSpawnGuards(
  * `playbook.render` call itself (D-A): the caller (the lead) renders the
  * playbook and passes the resulting path directly as `systemPromptPath`.
  *
- * `modelBase` resolves `model_name`-first (against the alias table), falling
- * back to `ctx.inheritModel` unchanged when `model_name` is unset or
- * unmapped — same shape as `resolveModelForAlias` (and the old tier-based
- * `resolveModelForTier` it replaces).
+ * `modelBase` resolves `model_name`-first through `config.resolve_agent`
+ * (`resolveModelForAliasViaWsMcp`), falling back to `ctx.inheritModel`
+ * unchanged when `model_name` is unset or resolves to a non-genuine `pi`
+ * answer. A config-resolved `effort` is folded into `record.modelEffort`
+ * only when the caller passed no explicit `params.modelEffort` — an explicit
+ * caller effort always wins.
  *
  * Returns as soon as `client.prompt()` has sent the initial message — that
  * call only awaits transmission, not full-run completion (docs/rpc.md) — so
@@ -2117,8 +2149,7 @@ export async function spawnAgent(
   const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
   const sessionPath = join(sessionDir, "session.jsonl");
 
-  const catalogConfig = params.modelName ? readModelCatalog(ctx.modelCatalogPath) : undefined;
-  const modelBase = resolveModelForAlias(catalogConfig, params.modelName, ctx.inheritModel);
+  const { model: modelBase, effort: resolvedEffort } = await resolveModelForAliasViaWsMcp(ctx.client, params.modelName, ctx.inheritModel);
 
   const toolGroup: ToolGroup = resolveSpawnToolGroup(ctx.toolGroup);
   const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
@@ -2129,7 +2160,8 @@ export async function spawnAgent(
     sessionPath,
     systemPromptPath: params.systemPromptPath,
     modelBase,
-    modelEffort: params.modelEffort,
+    // Explicit caller effort always wins over the config-resolved one.
+    modelEffort: params.modelEffort ?? resolvedEffort,
     wsToolNames: ctx.wsToolNames,
     toolGroup,
     explicitTools: ctx.explicitTools,
@@ -2509,7 +2541,7 @@ export interface AgentToolsHandle {
 export function registerAgentTools(
   pi: ExtensionAPI,
   bridge: BridgeHandle,
-  sessionCtx: { cwd: string; modelCatalogPath: string },
+  sessionCtx: { cwd: string },
   /**
    * 260904 Phase 1: see `RpcSpawnCtx.onApprovalPending`'s doc comment.
    * Threaded into both `ws-agent-spawn`'s `spawnAgent` call and
@@ -2527,14 +2559,15 @@ export function registerAgentTools(
   const stopLivenessProbe = startLivenessProbe(pi, rpcRegistry);
 
   /**
-   * IO wrapper around `resolveModelForAlias` for `explore`'s implicit
-   * `"small"` lookup: re-reads the model-catalog file fresh on every call
-   * (no caching) so a hand-edit applies without restarting Pi, matching
-   * bridge.ts's workflow_manual advisory's no-caching choice.
+   * IO wrapper around `resolveModelForAliasViaWsMcp` for `explore`'s implicit
+   * `"small"` lookup: re-resolves through `config.resolve_agent` fresh on
+   * every call (no caching) so a `config.tune agents.tier harness:pi` edit
+   * applies without restarting Pi, matching bridge.ts's advisory's
+   * no-caching choice.
    */
-  function resolveExploreModel(toolCtx: unknown): string | undefined {
-    const config = readModelCatalog(sessionCtx.modelCatalogPath);
-    return resolveModelForAlias(config, "small", inheritModelFromToolCtx(toolCtx));
+  async function resolveExploreModel(toolCtx: unknown): Promise<string | undefined> {
+    const { model } = await resolveModelForAliasViaWsMcp(bridge.client, "small", inheritModelFromToolCtx(toolCtx));
+    return model;
   }
 
   pi.registerTool({
@@ -2553,7 +2586,7 @@ export function registerAgentTools(
         model_name: {
           type: "string",
           description:
-            "Optional alias name resolved against model-catalog.json's aliases map; omitted or unmapped inherits the parent session's model.",
+            "Optional tier name (small|medium|large|xlarge) resolved against harness pi's config.tune agents.tier entries (see lead-tune/config.list); omitted or unmapped inherits the parent session's model.",
         },
         model_effort: {
           type: "string",
@@ -2588,7 +2621,7 @@ export function registerAgentTools(
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
-          modelCatalogPath: sessionCtx.modelCatalogPath,
+          client: bridge.client,
           onApprovalPending,
         },
         {
@@ -2746,7 +2779,7 @@ export function registerAgentTools(
         // explore resolves implicitly through the "small" alias — no
         // caller-facing model param on ExploreParams (ticket: explore is a
         // role, not a caller-supplied alias/tier).
-        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: resolveExploreModel(toolCtx) },
+        { sessionKey: bridge.defaultSessionKeyRef.current ?? "", cwd: sessionCtx.cwd, model: await resolveExploreModel(toolCtx) },
         p,
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };

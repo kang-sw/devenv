@@ -2,9 +2,10 @@
  * Unit tests for spawner.ts's pure-logic seams: resolveTools,
  * isTerminalStopReason, buildSpawnArgs, AgentEventLineBuffer's
  * multibyte-split safety, handleAgentEvent's state-non-mutation invariant
- * (one-shot `explore` path), resolveModelForAlias (Phase 1's alias-first,
- * inherit-fallback resolution, replacing the old tier-based
- * resolveModelForTier), applyRpcEvent's streaming/report bookkeeping and its
+ * (one-shot `explore` path), resolveModelForAliasViaWsMcp (Phase 4:
+ * async, ws-mcp-`config.resolve_agent`-backed tier resolution against a stub
+ * `client.callTool`, replacing the old file-catalog-backed
+ * `resolveModelForAlias`), applyRpcEvent's streaming/report bookkeeping and its
  * push OUTCOMES, listAgents's status mapping, and sendToAgent's three LIVE
  * branches (streaming+interrupt->steer, streaming+no-interrupt->followUp,
  * idle->prompt) via a duck-typed `steer`/`followUp`/`prompt` stub cast as
@@ -81,7 +82,7 @@ import {
   AgentEventLineBuffer,
   TOOL_GROUPS,
   handleAgentEvent,
-  resolveModelForAlias,
+  resolveModelForAliasViaWsMcp,
   applyRpcEvent,
   attachEventListener,
   buildPushContent,
@@ -128,7 +129,7 @@ import {
 } from "../src/spawner.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import type { RpcClient } from "@earendil-works/pi-coding-agent";
-import type { ModelCatalogConfig } from "../src/model-catalog.ts";
+import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
 
 function freshRunningRecord(): AgentRecord {
   return {
@@ -436,40 +437,93 @@ describe("AgentEventLineBuffer", () => {
   });
 });
 
-describe("resolveModelForAlias", () => {
-  const catalog: ModelCatalogConfig = {
-    aliases: { small: "openrouter/cheap-model", large: "openrouter/big-model" },
-  };
+describe("resolveModelForAliasViaWsMcp", () => {
+  function textResult(text: string): McpToolCallResult {
+    return { content: [{ type: "text", text }] };
+  }
 
-  test("alias set + mapped in catalog -> resolved model", () => {
-    assert.equal(resolveModelForAlias(catalog, "small", "inherited/model"), "openrouter/cheap-model");
-    assert.equal(resolveModelForAlias(catalog, "large", "inherited/model"), "openrouter/big-model");
+  /** Builds a duck-typed `McpStdioClient` stub whose `callTool` is the given fake. */
+  function stubClient(callTool: McpStdioClient["callTool"]): McpStdioClient {
+    return { callTool } as unknown as McpStdioClient;
+  }
+
+  test("no alias (model_name omitted) -> inherit unchanged, no call made", async () => {
+    let called = false;
+    const client = stubClient(async () => {
+      called = true;
+      return textResult("{}");
+    });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, undefined, "inherited/model"), { model: "inherited/model" });
+    assert.equal(called, false, "no alias means no config.resolve_agent round-trip at all");
   });
 
-  test("alias set + catalog present but that alias unmapped -> inherit", () => {
-    assert.equal(resolveModelForAlias(catalog, "medium", "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForAlias(catalog, "xlarge", undefined), undefined);
+  test("a genuine pi hit wins: resolved_from pi + a provider/id model", async () => {
+    const client = stubClient(async (name, args) => {
+      assert.equal(name, "config.resolve_agent");
+      assert.deepEqual(args, { tier: "small", format: "json" });
+      return textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/cheap-model", effort: "low" }));
+    });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), {
+      model: "openrouter/cheap-model",
+      effort: "low",
+    });
   });
 
-  test("no alias (model_name omitted) -> inherit unchanged", () => {
-    assert.equal(resolveModelForAlias(catalog, undefined, "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForAlias(catalog, undefined, undefined), undefined);
+  test("a non-pi resolved_from inherits", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra" })));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
   });
 
-  test("alias set but catalog unset -> inherit", () => {
-    assert.equal(resolveModelForAlias(undefined, "small", "inherited/model"), "inherited/model");
+  test("Forward (a) guard: a pi-labeled but slash-less (codex-shaped) model inherits", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "gpt-5.6-terra" })));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
   });
 
-  test("explore's implicit small alias -> resolved when catalog has aliases.small, inherit otherwise", () => {
-    assert.equal(resolveModelForAlias(catalog, "small", "inherited/model"), "openrouter/cheap-model");
-    const unmappedSmall: ModelCatalogConfig = { aliases: { large: "openrouter/big-model" } };
-    assert.equal(resolveModelForAlias(unmappedSmall, "small", "inherited/model"), "inherited/model");
-    assert.equal(resolveModelForAlias(undefined, "small", "inherited/model"), "inherited/model");
+  test("an isError result inherits", async () => {
+    const client = stubClient(async () => ({ content: [{ type: "text", text: "boom" }], isError: true }));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
   });
 
-  test("an arbitrary user-chosen alias name (not one of the old four tier names) resolves normally", () => {
-    const reviewerCatalog: ModelCatalogConfig = { aliases: { reviewer: "openrouter/big-model" } };
-    assert.equal(resolveModelForAlias(reviewerCatalog, "reviewer", "inherited/model"), "openrouter/big-model");
+  test("no text content inherits", async () => {
+    const client = stubClient(async () => ({ content: [] }));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+  });
+
+  test("unparsable JSON text inherits", async () => {
+    const client = stubClient(async () => textResult("not json"));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+  });
+
+  test("a thrown call inherits (never-hard-fail)", async () => {
+    const client = stubClient(async () => {
+      throw new Error("stdio pipe broke");
+    });
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, "small", "inherited/model"), { model: "inherited/model" });
+  });
+
+  test("no alias and no inherit model -> undefined model, no call made", async () => {
+    const client = stubClient(async () => textResult("{}"));
+    assert.deepEqual(await resolveModelForAliasViaWsMcp(client, undefined, undefined), { model: undefined });
+  });
+
+  test("effort is carried through only on a genuine pi hit, and omitted when the resolved effort is empty", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/big-model", effort: "" })));
+    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model");
+    assert.equal(resolved.model, "openrouter/big-model");
+    assert.equal(resolved.effort, undefined, "an empty resolved effort string must not surface as a truthy value");
+  });
+
+  test("effort is absent from a non-pi (inherit) resolution even if the payload carried one", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "codex", model: "gpt-5.6-terra", effort: "high" })));
+    const resolved = await resolveModelForAliasViaWsMcp(client, "large", "inherited/model");
+    assert.deepEqual(resolved, { model: "inherited/model" });
+  });
+
+  test("an arbitrary tier name still resolves normally (no closed vocabulary enforced by this function itself)", async () => {
+    const client = stubClient(async () => textResult(JSON.stringify({ resolved_from: "pi", model: "openrouter/reviewer-model" })));
+    const resolved = await resolveModelForAliasViaWsMcp(client, "reviewer", "inherited/model");
+    assert.equal(resolved.model, "openrouter/reviewer-model");
+    assert.equal(resolved.effort, undefined);
   });
 });
 

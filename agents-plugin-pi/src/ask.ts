@@ -292,7 +292,7 @@ export function threadRegistryPath(sessionFile: string): string {
   return `${sessionFile}.ws-threads.json`;
 }
 
-/** Stable, pretty-printed on-disk form (a hand-inspectable adapter data file, like model-catalog.json). */
+/** Stable, pretty-printed on-disk form (a hand-inspectable adapter data file). */
 export function serializeThreadRegistry(records: readonly ThreadRecord[]): string {
   return `${JSON.stringify({ threads: records }, null, 2)}\n`;
 }
@@ -684,7 +684,6 @@ function nowIso(): string {
 
 export interface AskSessionCtx {
   cwd: string;
-  modelCatalogPath: string;
 }
 
 /**
@@ -1184,7 +1183,7 @@ export async function ensureRespondent(
       cwd: sessionCtx.cwd,
       inheritModel: inheritModelFromToolCtx(ctx),
       wsToolNames: bridge.wsToolNames,
-      modelCatalogPath: sessionCtx.modelCatalogPath,
+      client: bridge.client,
       forkFrom,
       explicitTools: computeForkToolSurface(pi.getActiveTools()).join(","),
       parentSessionKey: bridge.defaultSessionKeyRef.current,

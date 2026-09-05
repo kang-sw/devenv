@@ -1151,7 +1151,7 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
  */
 describe("ensureRespondent (threadBound on open and on reopen)", () => {
   const bridge = { wsToolNames: [], defaultSessionKeyRef: { current: undefined } } as never;
-  const sessionCtx = { cwd: "/repo", modelCatalogPath: "/repo/model-catalog.json" };
+  const sessionCtx = { cwd: "/repo" };
 
   function askCtx() {
     const notices: Array<{ message: string; type?: string }> = [];

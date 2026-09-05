@@ -315,7 +315,6 @@ export function buildForkInitialMessage(leadPrompt: string): string {
 
 export interface ForkSessionCtx {
   cwd: string;
-  modelCatalogPath: string;
 }
 
 /**
@@ -585,7 +584,7 @@ export function buildForkSpawnCtx(
     cwd: sessionCtx.cwd,
     inheritModel: opts.inheritModel,
     wsToolNames: bridge.wsToolNames,
-    modelCatalogPath: sessionCtx.modelCatalogPath,
+    client: bridge.client,
     forkFrom: opts.forkFrom,
     explicitTools: opts.explicitTools,
     parentSessionKey: bridge.defaultSessionKeyRef.current,
@@ -669,7 +668,7 @@ export function registerFork(
         },
         model_name: {
           type: "string",
-          description: "Optional alias resolved against model-catalog.json's aliases map; omitted or unmapped inherits your own model.",
+          description: "Optional tier name (small|medium|large|xlarge) resolved against harness pi's config.tune agents.tier entries (see lead-tune/config.list); omitted or unmapped inherits your own model.",
         },
         expects_commit: {
           type: "boolean",

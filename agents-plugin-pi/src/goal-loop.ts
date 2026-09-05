@@ -30,11 +30,11 @@
  * Runaway backstop: N consecutive re-fires with no intervening tool call
  * force-stop the loop (disarm goal mode) — Pi has no session-kill primitive
  * that fits here (`ctx.shutdown()` exits the whole process). The threshold
- * is adapter-owned data-file config (`goal-loop-config.json`, sibling to
- * `model-catalog.json`), a built-in constant default overridden by a file
- * read fresh on every use — mirrors `model-catalog.ts`'s
- * never-hard-fail/no-caching convention exactly. Never lives in ws-mcp (Go
- * core) — the goal-loop is entirely adapter-local (golden rule).
+ * is adapter-owned data-file config (`goal-loop-config.json`), a built-in
+ * constant default overridden by a file read fresh on every use — the same
+ * never-hard-fail/no-caching convention this module's own
+ * `readGoalLoopConfig` codifies below. Never lives in ws-mcp (Go core) — the
+ * goal-loop is entirely adapter-local (golden rule).
  *
  * Settled cross-ticket fact: the goal-loop runs on the lead session only.
  * The `agent_settled` handler no-ops when the running process is itself a
@@ -79,9 +79,8 @@ import { readSpawnRole } from "./process-role.ts";
 import { hasRunningAgents, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
-// Config: adapter-owned runaway-threshold data file, sibling to
-// model-catalog.json. Copies readModelCatalog's exact never-hard-fail,
-// read-fresh-per-call shape.
+// Config: adapter-owned runaway-threshold data file. Never-hard-fail,
+// read-fresh-per-call shape — no module-level caching.
 // ---------------------------------------------------------------------------
 
 export interface GoalLoopConfig {
@@ -102,8 +101,7 @@ export const DEFAULT_COMPACTION_ADVISORY_PERCENT = 70;
  * Reads and parses the goal-loop config data file. Returns `undefined` —
  * never throws — when the file is missing, unreadable, or not valid JSON, so
  * "unset" (fall back to `DEFAULT_RUNAWAY_THRESHOLD`) is the expected default
- * state. Read fresh on every call by design (no module-level caching),
- * mirroring `model-catalog.ts#readModelCatalog` exactly.
+ * state. Read fresh on every call by design (no module-level caching).
  */
 export function readGoalLoopConfig(path: string): GoalLoopConfig | undefined {
   let raw: string;

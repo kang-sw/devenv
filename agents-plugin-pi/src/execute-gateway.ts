@@ -157,14 +157,15 @@ export function buildExecuteWorkerPrompt(input: ExecuteWorkerPromptInput): strin
 }
 
 /**
- * Pure model-alias selection for `ws-execute`'s `complex?` param: `true`
+ * Pure model-tier selection for `ws-execute`'s `complex?` param: `true`
  * returns `undefined` (no `model_name` at all), so `spawnAgent`'s existing
- * inherit-fallback path (`resolveModelForAlias` in spawner.ts) resolves to
- * the lead's own model instead of reading any catalog alias — `complex:true`
- * was always meant to inherit the lead's model deliberately, not by
- * catalog-miss accident. `false`/omitted still picks the existing `"small"`
- * alias (the same key `explore` already resolves through, model-catalog.ts)
- * — zero new curation burden for a user who already set up `small`.
+ * inherit-fallback path (`resolveModelForAliasViaWsMcp` in spawner.ts)
+ * resolves to the lead's own model instead of a `config.resolve_agent`
+ * round-trip — `complex:true` was always meant to inherit the lead's model
+ * unconditionally, not by tier-miss accident. `false`/omitted still picks the
+ * existing `"small"` tier (the same key `explore` already resolves through)
+ * — zero new curation burden for a user who already configured `small` for
+ * harness `pi`.
  */
 export function resolveExecuteModelAlias(complex?: boolean): string | undefined {
   return complex ? undefined : "small";
@@ -354,7 +355,7 @@ export function sliceLines(raw: string, offset?: number, limit?: number): string
  * §7 payload's `context` field — adapter-scraped, NOT worker-reported (§7).
  * Runs on the PARENT side, same machine/filesystem as the worker's `cwd`
  * (the parent already knows it from spawn time). Each git call is
- * independently try/caught and NEVER throws — matches model-catalog.ts's
+ * independently try/caught and NEVER throws — matches this adapter's
  * never-hard-fail convention; a non-git `cwd` or missing `git` binary simply
  * degrades every field to `undefined` (except `cwd` itself, always present).
  */
@@ -431,7 +432,6 @@ export function waitForDecisionFile(path: string, signal: AbortSignal | undefine
 
 export interface ExecuteGatewaySessionCtx {
   cwd: string;
-  modelCatalogPath: string;
   /** Fixed, adapter-authored execute-worker system prompt (execute-worker-guide.md) — NOT lead-rendered, see that file's header comment. */
   executeWorkerPromptPath: string;
   /** See spawner.ts's `RpcSpawnCtx.onApprovalPending` — threaded into every `spawnAgent` call this module makes for `ws-execute`. */
@@ -573,7 +573,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,
-          modelCatalogPath: sessionCtx.modelCatalogPath,
+          client: bridge.client,
           toolGroup: "execute-worker",
           onApprovalPending: sessionCtx.onApprovalPending,
         },
