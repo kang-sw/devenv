@@ -577,9 +577,8 @@ not consume delegation depth.
   own and the lead's are left untouched.
 - **Tool surface = lead's, minus the fork verbs, plus the report channel.** A
   fork's active tools are the lead's exact active surface at spawn time minus the
-  side-thread verbs (`ws-fork`, and — once they exist — `ws-ask`/`ws-resolve`)
-  plus `ws-report-to-lead`. In this phase only `ws-fork` is excluded, since
-  `ws-ask`/`ws-resolve` are not yet built. `ws-fork` is added to the **top lead
+  side-thread verbs (`ws-fork`, `ws-ask`, `ws-resolve`) plus
+  `ws-report-to-lead`. `ws-fork` is added to the **top lead
   only** (a role-differentiated step, kept separate from the shared lead
   tool-surface reshaping described under "Lead native tool-surface reshaping" so
   it is never re-added to a fork), which is also what makes recursion fail at the
@@ -643,9 +642,113 @@ not consume delegation depth.
 > fails. The report/relay channel is available to spawned agents only under an
 > installed adapter.
 >
-> Not yet exercised live: Phase 2's owner-question TUI overlay (interactive
-> component + `/answer`/`/thread` shortcuts), which needs a live interactive TUI
-> rather than the `--print` non-interactive path used here.
+> The owner-question surface built on top of this fork (next section) has its
+> own live-verification status recorded there.
+
+## Side-thread owner question surface {#260905-pi-side-thread-owner-question-surface}
+
+The lead can hand a decision to the **owner** (the human at the TUI) without
+blocking on it, and a task fork's own `kind:"question"` report is routed to the
+same owner surface. One primitive — a **thread** — has two entry points: the lead
+registers a question (`ws-ask`), or a running task fork raises one. Both show up
+in the owner's pending count; the owner opens either in a chat overlay, and the
+thread's *origin* decides what closing it does. The lead is never the answering
+channel for an owner question: it registers and carries on.
+
+- **`ws-ask` / `ws-resolve` (lead tools, register-only).** `ws-ask(title,
+  question, context?)` records a thread and returns `{question_id}` at once; it
+  spawns nothing and never blocks. `ws-resolve(question_id)` withdraws a
+  question the lead answered by itself (status `closed`, removed from the
+  pending count, no owner notification, no injection); an unknown id is an
+  error. Both are added to the **top lead only** through the same
+  role-differentiated step pattern as `ws-fork`, and both are excluded from a
+  fork's surface (see "Tool surface" above), so a fork cannot ask the owner
+  through the lead's tool — it raises questions through `ws-report-to-lead`.
+- **`context` is bounded by warning, not truncation.** The lead-authored
+  `context` (2–3 sentences, no paths or hashes) is stored unchanged; past an
+  adapter-side character budget (400) the lead receives a warning notification.
+  The excerpt mechanism below carries exact question-time context, so `context`
+  never has to.
+- **Thread registry, persisted next to the lead session.** Each thread record
+  carries an id, title, question, context, the lead-session `entry_id` at
+  registration (lead-ask only), a status (`pending` → `open` → `dormant` |
+  `closed`), the respondent agent id once known, an `origin` (`lead-ask` |
+  `fork-raised`), and — once a respondent has run — a denormalized resume
+  snapshot (session path, system-prompt path, tool surface, ws tool names,
+  tool group, model, effort). The registry is written on every transition to
+  `<lead session file>.ws-threads.json` and reloaded on `session_start`; load
+  and save never throw (a missing or malformed file reads as empty; an
+  unwritable target is a no-op). A record with no recognizable `origin`
+  normalizes to `fork-raised`, the direction that can only under-act. The
+  adapter re-captures its UI context on every `session_start` and keeps only
+  plain data in the registry, since Pi invalidates captured contexts across
+  new-session/fork/reload.
+- **Owner surface (TUI lead).** An `aboveEditor` widget shows
+  `ws: N pending question(s)` while any thread is pending; `/thread` lists
+  pending, open and dormant threads; `/answer <id>` opens one (a bare
+  `/answer`, or the `ctrl+shift+a` shortcut where the terminal can deliver it,
+  reopens the most recent reopenable thread). The overlay **never auto-pops**:
+  registration notifies and updates the widget, nothing more. One overlay is
+  attached at a time; the overlay header shows the thread title and the time
+  it was opened, so two lead-voiced agents cannot be mistaken for one.
+- **Lazy discussion fork at the lead's tip (lead-ask threads).** A registered
+  question costs nothing until the owner opens it. Opening a `lead-ask` thread
+  for the first time forks a **discussion** fork from the lead's *current* tip
+  (`pi --fork`), carrying the lead's surface minus the side-thread verbs plus
+  the report channel; its first message is `context + question` and, when the
+  thread's `entry_id` is no longer on the lead's live branch (a compaction has
+  passed it), a **verbatim excerpt** of the lead-session entries around that id,
+  read from the append-only session file. A discussion fork gets **no**
+  structural anti-bleed frame and **no** completion loop (it converses; it does
+  not report), and it is spawned only from a TUI lead.
+- **Attach to a live task fork (fork-raised threads).** When a `ws-fork` task
+  fork reports `kind:"question"` from a TUI lead, the adapter registers a
+  `fork-raised` thread whose respondent is that fork, increments the pending
+  count, and hands the lead a **notice** in place of the question text: the
+  owner answers via `/answer <id>`; the lead must not relay, answer, or ask
+  the owner, but keep waiting on the fork. `/answer` attaches the overlay to the
+  existing process — no new spawn. While an owner overlay is attached, the
+  fork's anti-bleed loop treats the fork's turns as owner-driven (no nudge, no
+  fail-loud) and re-arms the moment the overlay detaches.
+- **Overlay chat.** Owner text goes to the respondent as a `prompt` when it is
+  idle and as a `steer` when it is streaming; child text deltas render into the
+  overlay. Pasted input is delivered as one message. `Esc` closes the view only:
+  the thread stays `open` and the fork keeps running, reattachable at any time.
+  `/done` typed in the overlay closes the **thread**, on its origin:
+  - `lead-ask` — the discussion fork is asked for a summary turn; on settle the
+    adapter injects `context + question + summary` into the lead session as a
+    custom message (type `ws-thread-summary`, delivered `followUp` so it lands
+    only once the lead is idle, in close order when several threads close). The
+    message carries **owner authority**. The fork's resume snapshot is captured,
+    the fork is stopped (`ws-agent-stop` semantics: dormant, retained), and the
+    thread goes `dormant` — reopenable later, rehydrated into a plain dormant
+    record and resumed on its own session file.
+  - `fork-raised` — no summary, no injection, no stop: the overlay closes at
+    once and the thread goes `dormant` while the task fork carries on. What was
+    decided reaches the lead through that fork's own `kind:"final"` report under
+    `Decisions:`; stopping the fork here would destroy its in-flight task and
+    strand the lead's `ws-agent-wait`, which only a live child can settle.
+  The lead session is never rewound; injection is forward-only.
+- **Headless baseline preserved.** Off the TUI (`ctx.mode !== "tui"`, e.g.
+  `--mode rpc`), a fork-raised question is relayed to the lead byte-for-byte as
+  before (the lead asks the owner and answers with `ws-agent-send`); a lead
+  `ws-ask` registers the thread and fires a `notify` toward the RPC host, spawns
+  no fork, and the owner's reply arrives as an ordinary lead turn. The overlay
+  is the TUI optimization over these baselines.
+
+> [!note] Live verification · 2026-09-05
+> Offline coverage (unit tier of the ticket's two-tier loop): overlay
+> `render(width)` across widths with visible-width bounds, `handleInput`
+> including bracketed paste and `/done` interception, registry round-trip and
+> malformed-file tolerance, origin normalization, both `/done` routes,
+> excerpt/anchoring against fake branches, dormant rehydration, and the
+> anti-bleed suppression while an overlay is attached. Not yet exercised live:
+> a real owner↔fork exchange with injection timing, a fork-raised live attach
+> with `Decisions:` in the final report, post-compaction anchoring, the headless
+> `--mode rpc` baseline, restart rehydration, and visual/IME/CJK polish — these
+> are packaged as a one-shot owner runbook in the ticket's Phase 2 Result. The
+> `ctrl+shift+a` shortcut is distinguishable from `ctrl+a` only under a terminal
+> that reports CSI-u extended keys.
 
 ## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
 
@@ -793,6 +896,9 @@ fires both hooks, so the copy runs redundantly but idempotently.
 >   `/ws-discuss` PoC command, and the lead-session goal loop (arming, the
 >   `agent_settled` re-fire, the terminal levers, the runaway backstop, and the
 >   model-driven compaction lever with its advisory surfacing, config knobs, and
->   observe-only `session_before_compact` companion). The one post-MVP surface
+>   observe-only `session_before_compact` companion), the side-thread task fork
+>   with its anti-bleed loop, and the side-thread owner question surface
+>   (`ws-ask`/`ws-resolve`, the persisted thread registry, the overlay chat,
+>   origin-routed `/done`, and the `ws-thread-summary` injection). The one post-MVP surface
 >   still deferred to a follow-up ticket under the epic — an always-visible TODO —
 >   is not part of this contract yet.
