@@ -15,6 +15,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 32284652afca6610
 sage-review-completeness-reviewed: 32284652afca6610
+completed: 2026-09-05
 ---
 
 # Pi adapter: push every child report into the lead session and retire `ws-agent-wait`
@@ -547,6 +548,49 @@ probe while yielding ends the yield through its `exited` push. Live check:
 `/goal` a task that spawns a worker and confirm the lead does not re-fire
 until the worker's message lands.
 
+### Result (4aef0afc) - 2026-09-05
+
+Landed as `373ce297` (survey plan), `e9df8dd7` (feature), `4aef0afc`
+(review relay #1), `e818d193` (spec), on the implementation branch under the
+goal branch.
+
+Behavioral delta:
+
+- `spawner.ts` exports `hasRunningAgents(registry)`; it and
+  `computeRunningStatusLine` share one private `computeFanIn` walk, so the
+  yield gate and the pushed status line can never disagree on who counts as
+  running (live client, mid-turn, not `terminalThisTurn`, not
+  `threadBound`).
+- `decideOnSettle(state, threshold, yielding)` gained a third parameter and
+  a `{action: "yield"}` decision, checked right after the inactive-state
+  check: state passes through unchanged (no reminder, no streak advance).
+  `registerGoalLoop` takes an optional `rpcRegistryRef` (the factory-scope
+  ref `index.ts` already built for the approval relay) and degrades to
+  "never yield" when it is absent or empty.
+- While yielding the footer shows `Goal loop: yielding to running agents`
+  under the `ws-goal-loop-yield` status key; a factory-scope `agent_start`
+  listener clears it on the next lead turn whatever started that turn. The
+  listener no-ops while no goal is active so a headless `--mode rpc` session
+  does not emit a no-op UI request per turn (review relay #1, minor).
+- Tests (648/648): seven `hasRunningAgents` cases mirroring the status-line
+  fixtures (running, idle, dormant, stopped, `final` this turn, thread-bound
+  only, empty/absent registry), four `decideOnSettle` yield cases (no
+  re-fire, no streak change, inactive-state precedence, yield-then-normal
+  re-fire), the probe-death case (`probeAgentLiveness` finding the child gone
+  flips the predicate false), and the registry-state half of the
+  push-arrival case (`agent_settled` on the child flips it false).
+
+Deferred, per the phase text's own live-check sentence: the "pushed message
+starts the continuing turn" half depends on Pi scheduling a turn from
+`pushToLead`'s `triggerTurn: true`, which the offline suite does not mock;
+the `/goal`-with-a-worker live check remains owner-run.
+
+Review: correctness clean (2 minor, both applied), fit clean, test one
+Important [fixed]. Spec: `pi-adapter-runtime` goal-loop entry gains the
+"Yield to live children" bullet and the lead-session-only bullet now names
+the `WS_PI_SPAWN_ROLE` marker (the `WS_PI_AGENT_CHILD=1` wording was stale
+since 260904 Phase 1).
+
 ## Non-goals
 
 - Changing the shared ws doctrine or ws-mcp's own agent primitives for Claude
@@ -611,3 +655,8 @@ the registry through a `session_start`-filled ref; the goal-loop anchor's
 `ws-agent-wait` mention and the stale "overlay-attached" phrasing in Spec
 Impact are fixed; advisory suppression has its own test item. Posture:
 completed/completed.
+
+
+## Resolution (2026-09-05)
+
+Both phases landed on the goal branch: Phase 1 (push channel, `ws-agent-wait` removal, sidecar, two Editions) and Phase 2 (goal loop yields to running children). Owner-run live checks still outstanding: the `N delegated agents still running` countdown, orphan gating across `/reload`, and `/goal` with a worker not re-firing until the worker's message lands.
