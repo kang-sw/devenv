@@ -739,7 +739,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Harness: load-bearing for prompt.* and agents.tier; accepted but ignored
 		// (warning-only, Decision 5) for keys that do not vary by harness.
 		harness, _ := params.Arguments["harness"].(string)
-		harness = strings.TrimSpace(harness)
+		// Case-insensitive, matching the wsconfig/CLI paths: aliasTargetKey
+		// lowercases via strings.ToLower before matching codex/claude/pi/default,
+		// so a caller spelling "Claude", "CODEX", or "Default" must be accepted
+		// here too, not just downstream. Lowercasing "*" is a no-op.
+		harness = strings.ToLower(strings.TrimSpace(harness))
 		if entry.HarnessApplicable {
 			if harness == "" {
 				harness = s.currentHarness()
@@ -2024,7 +2028,7 @@ type promptOverridePoint struct {
 // promptOverrideHarnessBuckets is the fixed set of harness buckets a stored
 // override can target, in listing order. "all" is the stored spelling of the
 // caller-facing "*".
-var promptOverrideHarnessBuckets = []string{"claude", "codex", "all"}
+var promptOverrideHarnessBuckets = []string{"claude", "codex", "pi", "all"}
 
 // buildPromptOverrideListing resolves the current override value+scope for each
 // declared point across every harness bucket. Unset buckets (empty resolved
