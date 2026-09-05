@@ -19,6 +19,7 @@ sage-review-design: completed
 sage-review-design-reviewed: c3cf97dd3b2030ba
 sage-review-completeness: completed
 sage-review-completeness-reviewed: c04a2e0f41765757
+completed: 2026-09-05
 ---
 
 # Pi lead side-thread: context-inheriting fork (`ws.fork`) + owner-facing question surface (`ws.ask` / `/answer` overlay chat)
@@ -298,6 +299,10 @@ loop.
   (session_key lineage decision) `agent_id → session` mapping (which must already persist for dormant
   resume), so pending `ws.ask` questions and dormant threads survive a lead
   restart.
+  > Note (2026-09-05, Phase 2): the "must already persist" premise was wrong —
+  > the `260903` RPC registry is in-memory only. Phase 2 persists the thread
+  > records in their own `<lead session>.ws-threads.json` with a denormalized
+  > fork-resume snapshot per thread instead; see the Phase 2 Result.
 
 ### 6. Injection back into the lead session
 
@@ -577,6 +582,123 @@ Verification:
 6. Overlay hygiene: never auto-pops; close/reopen leaves the fork running;
    header shows title + spawn time.
 
+### Result (dce59483) - 2026-09-05
+
+Landed the owner question surface end to end on the offline-implementable
+side; the live/TUI verification items are packaged as a one-shot owner runbook
+(below) rather than claimed.
+
+- **New `agents-plugin-pi/src/ask.ts`**: the thread registry (`ThreadRecord`
+  with `origin: "lead-ask" | "fork-raised"`, status `pending|open|dormant|
+  closed`, denormalized `forkResume` snapshot), persisted at
+  `<lead session>.ws-threads.json` on every transition and rehydrated on
+  `session_start` (load/save never throw; a missing `origin` normalizes to
+  `fork-raised`); `ws-ask` (register-only, returns `{question_id}`, warns
+  above `MAX_CONTEXT_CHARS = 400` without truncating) and `ws-resolve`;
+  `addAskToolsIfLead` as a third role-differentiated `setActiveTools` step;
+  `handleForkRaisedQuestion` hooked at the report-enqueue site so a TUI lead
+  sees a "do not relay, keep waiting" notice instead of the question text
+  (headless: byte-identical Phase 1 relay); `/thread`, `/answer [<id>]`, and
+  the `ctrl+shift+a` reopen shortcut; lazy discussion fork at the lead tip via
+  `spawnAgent` + `forkFrom` with `entry_id` anchoring and a verbatim
+  post-compaction excerpt (`EXCERPT_WINDOW = 4`, 400 chars per entry); no
+  structural frame and no anti-bleed loop on discussion forks;
+  `closeThreadOnDone` routed on origin — `lead-ask` → summary turn →
+  `pi.sendMessage(customType: "ws-thread-summary", deliverAs: "followUp")` →
+  snapshot → `stopAgent` → dormant; `fork-raised` → detach only (no stop, no
+  summary, no injection), fork keeps running and reports via `Decisions:`.
+- **New `agents-plugin-pi/src/overlay-chat.ts`**: `OverlayChatComponent` for
+  `ctx.ui.custom({overlay: true})` — width-keyed render cache, local
+  `visibleWidth`/`wrapLine` (pi-tui is not resolvable from the package at
+  test time; Pi aliases it only under its jiti loader), bracketed-paste
+  unwrapping, prompt-vs-steer on `streaming`, `/done` interception with
+  `summarizeOnDone`, header `title · opened <UTC minute>`, Esc = close view
+  only.
+- **`fork.ts` / `spawner.ts` / `index.ts`**: `FORK_EXCLUDED_TOOL_NAMES` now
+  lists `ws-ask`/`ws-resolve` (literal, drift-guarded by test, to avoid an
+  import cycle); `RpcAgentRecord.overlayAttached` suppresses the nudge/
+  fail-loud loop while an owner overlay is attached and re-arms on detach;
+  `RpcAgentRecord.onQuestionReport` hook; `askCtxRef` re-captured on every
+  `session_start`. `pi-lead-guide.md` gained the `ws-ask`/`ws-resolve` rows
+  and the owner-side / fork-raised paragraphs.
+- **Verification**: `cd agents-plugin-pi && npm test` → 474/474 pass
+  (+116 over the Phase 1 baseline: `test/ask.test.ts`, `test/overlay-chat.test.ts`,
+  `test/fork.test.ts` additions). Golden rule held (no `agents-plugin-tool/`
+  or `agents-plugin/skills/` change). Unit tier of verification item 1(a) is
+  met; items 1(b)–6 are live/TUI and are in the runbook below.
+- **Review**: partitioned (correctness, fit, test). Review #1: 1 Critical
+  (anti-bleed loop armed during overlay attach → `overlayAttached`), 6
+  Important (incl. §7 context-length warning missing, `ws-ask`/`ws-resolve`
+  tool bodies untested, lead notice still inviting relay) — all `[fixed]` in
+  relay #1 (`9d89652f`, `1b6326b6`). Critical-scoped review #2: C1
+  `[resolved]`, 1 new Critical (`/done` on a fork-raised thread stopped the
+  live task fork and stranded `ws-agent-wait`) → `[fixed]` in relay #2
+  (`dce59483`, origin routing). Critical-scoped review #3: C2 `[resolved]`,
+  clean. Minors recorded, not fixed: `wrapLine` counts width-1 for wide
+  glyphs; cursor not rendered in the overlay input; `ctrl+shift+a` is CSI-u
+  only (cast `as never`); overlay swap unreachable while an overlay holds
+  focus; `hydrateThreadRegistry` rebuilds the map on reload (an open overlay's
+  record is orphaned); `sendMessage` omits `triggerTurn` (an idle lead does not
+  start a turn on injection); dormant-resume listener ordering;
+  `overlayAttached` is agent-scoped not overlay-scoped; a pre-origin
+  `lead-ask` record normalizes to `fork-raised` (decision dropped silently, an
+  `entryId`-based back-compat hint would close it); `detachForkRaisedThread`
+  refreshes `forkResume` for a never-stopped child (double-writer risk on a
+  same-session restart); the overlay footer's `/done` vs Esc contrast is wrong
+  for fork-raised threads; a chmod-based write-failure test is root-insensitive.
+- **Deviations / ticket discrepancies**: §5's claim that the `agent_id →
+  session` mapping "must already persist for dormant resume" is false — the
+  RPC registry is in-memory; resolved by denormalizing a `forkResume` snapshot
+  onto the thread record and lazily rehydrating a plain dormant
+  `RpcAgentRecord` through `sendToAgent`'s existing resume branch. §5's
+  "pi-tui component" is implemented with a locally wrapped component (see
+  above). `registerShortcut` needs a KeyId cast for `ctrl+shift+a`.
+  Fork-raised threads register as `pending` (not `open`) so the widget count
+  increments, per verification item 2. `ws-resolve`'d threads are `closed`
+  (not reopenable), distinct from `/done`'s `dormant`.
+- **Spec**: `ai-docs/spec/pi-adapter-runtime.md`
+  `{#260905-pi-side-thread-owner-question-surface}` (`d9d89f22`); cross-doc
+  Spec Impact items (depth anchor, epic bullet, `workflow-skills` spec +
+  mental-model exception) in `6097de6d`.
+
+#### Owner runbook — live items not exercised by the agent loop
+
+Run on the user-scope-installed adapter (`pi install <abs path>`), one
+interactive `pi` session as the lead. Each item is pass/fail on the stated
+observation.
+
+1. **Lead-ask round trip (items 1b, 6).** Have the lead call `ws-ask` (any
+   decision). Expect: widget line `ws: 1 pending question(s) — /answer <id>,
+   /thread to list` above the editor, no overlay. `/thread` lists it as
+   pending. `/answer <id>` opens the overlay (header: title + `opened …`); a
+   new fork process starts (`ws-agent-list` or `ps`). Exchange two turns.
+   `Esc` closes the view; `/answer` reopens onto the same fork (no new
+   process). Type `/done`: the fork writes a summary, the overlay closes, and
+   once the lead is idle a distinct injected message
+   (`context + question + summary`) appears in the lead transcript. Fail if
+   the message appears mid-turn or never (M14: if the lead is idle, send one
+   trivial turn to observe it).
+2. **Fork-raised attach (item 2).** `ws-fork` a task whose prompt says to
+   ask the owner one question via `ws-report-to-lead(kind:"question")` and
+   then finish. Expect: widget count increments with no lead turn; the lead
+   sees only the notice naming the thread id and keeps waiting. `/answer <id>`
+   attaches to the running fork (no new process). Reply; `/done`. Expect the
+   fork to continue and its `kind:"final"` report's `Decisions:` to reflect the
+   in-overlay answer; the lead's `ws-agent-wait` returns normally.
+3. **Post-compaction anchoring (item 3).** Register a `ws-ask`, then run
+   `/compact` on the lead, then `/answer` it. Inspect the fork's first user
+   message (its session file): it should carry a verbatim excerpt of the
+   lead-session entries around the question.
+4. **Headless baseline (item 4).** `pi --mode rpc` lead: a fork-raised
+   question arrives as the plain relay (no notice); a lead `ws-ask` emits a
+   `notify` `extension_ui_request` and spawns nothing.
+5. **Restart survival (item 5).** With one pending `ws-ask` and one dormant
+   thread, quit and resume the same lead session. `/thread` still lists both;
+   `/answer` on the dormant one resumes it on its own session file.
+6. **Polish (human judgment).** CJK/IME input placement in the overlay, wide
+   glyph wrapping (M7), whether `ctrl+shift+a` reaches Pi in your terminal
+   (CSI-u; otherwise use `/answer`).
+
 ## Non-goals
 
 - Thread rebase onto a newer lead tip; in-process `createAgentSession` forks;
@@ -658,3 +780,8 @@ do not wrap their initial message with it. Human-judgment verification items
 (visual polish, IME/CJK candidate placement, cross-emulator quirks) are to be
 packaged as a one-shot owner runbook at closeout, per Phase 2 verification
 item 1.
+
+
+## Resolution (2026-09-05)
+
+Both phases landed on the Pi track: the `ws-fork` task-thread mechanism with its anti-bleed loop (Phase 1, live-verified) and the owner question surface — `ws-ask`/`ws-resolve`, persisted thread registry, overlay chat, origin-routed `/done`, and `ws-thread-summary` injection (Phase 2, offline-verified; live/TUI items handed to the owner as a one-shot runbook in the Phase 2 Result). Spec anchors `260905-pi-side-thread-fork-task-thread` and `260905-pi-side-thread-owner-question-surface`; cross-doc Spec Impact items recorded.

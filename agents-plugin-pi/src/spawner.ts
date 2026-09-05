@@ -703,6 +703,36 @@ export interface RpcAgentRecord {
    * directory to the lead.
    */
   pendingApproval?: { cmdId: string; command: string; rationale?: string; cwd?: string };
+  /**
+   * 260904 Phase 2 (side-thread question surface, review relay #1 C1): `true`
+   * while an owner overlay chat is attached to this agent (`ask.ts`'s
+   * `openThread` sets it, closing clears it). `fork.ts`'s anti-bleed loop
+   * consults it to suppress its nudge/fail-loud branches for the duration —
+   * an owner<->fork discussion is text-only by design, so §4's
+   * "turn ended with no tool call" bleed signal is meaningless there and would
+   * otherwise inject machine nudges into the owner's conversation and then
+   * declare a healthy fork failed to the lead. Lives on the record (rather
+   * than in a set inside `ask.ts`) so `fork.ts` can read it without importing
+   * `ask.ts` — that direction would cycle.
+   */
+  overlayAttached?: boolean;
+  /**
+   * 260904 Phase 2 (review relay #1 I6): consulted by `applyRpcEvent` the
+   * instant a `kind:"question"` report is observed on this record. It may
+   * return a REPLACEMENT message to enqueue for the lead in place of the
+   * fork's own question text; returning `undefined` enqueues the original
+   * unchanged (the headless baseline, byte-identical to Phase 1).
+   *
+   * §1 says the lead is not involved in a fork-raised question and §8 scopes
+   * the lead relay to headless, so in TUI mode `ask.ts` registers the thread
+   * on the owner surface and returns a short notice naming it — the lead's
+   * `ws-agent-wait` still returns normally (`reason: "report"`, unchanged
+   * semantics), it just no longer receives the question as something to
+   * relay and answer itself. Set by `fork.ts`'s `registerFork`; `spawner.ts`
+   * stays generic and supplies no implementation, mirroring
+   * `onApprovalPending`'s existing callback-injection convention.
+   */
+  onQuestionReport?: (record: RpcAgentRecord, message: string) => string | undefined;
 }
 
 /**
@@ -929,6 +959,12 @@ export function drainReports(record: RpcAgentRecord): { reports: AgentReport[]; 
  * accepts) onto `record.pendingApproval.cwd` when it is a string — omitted
  * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
  * exactly as `execute-gateway.ts`'s `execute()` itself does.
+ *
+ * 260904 Phase 2 (side-thread question surface, review relay #1 I6): a
+ * `kind:"question"` report is passed through `record.onQuestionReport` (when
+ * set) before being enqueued, so the owner-question surface can replace the
+ * lead-visible text with a notice instead of the question itself. See that
+ * field's doc comment; with no hook set this branch is unchanged.
  */
 export function applyRpcEvent(
   record: RpcAgentRecord,
@@ -946,7 +982,21 @@ export function applyRpcEvent(
     const message = args?.message;
     if (typeof message === "string") {
       const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
-      enqueueReport(record, message, kind);
+      // 260904 Phase 2 (review relay #1 I6): a kind:"question" report may be
+      // rewritten for the lead by `record.onQuestionReport` — see that
+      // field's doc comment. Everything else about the enqueue (buffer cap,
+      // waiter wake, `kind` tagging) is unchanged, so `ws-agent-wait`'s own
+      // semantics stay exactly as Phase 1 left them. A throwing/absent hook
+      // falls back to the original message rather than dropping the report.
+      let relayed = message;
+      if (kind === "question" && record.onQuestionReport) {
+        try {
+          relayed = record.onQuestionReport(record, message) ?? message;
+        } catch {
+          relayed = message;
+        }
+      }
+      enqueueReport(record, relayed, kind);
       return { waiterWoken: false };
     }
   } else if (evt.type === "tool_execution_start" && evt.toolName === GATED_EXEC_TOOL_NAME) {

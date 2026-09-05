@@ -7,8 +7,7 @@
  * depth-consuming worker (§3 — no depth-budget consumption, termination
  * unchanged). Its own tool surface is the lead's exact active-tools snapshot
  * at spawn time, minus the small excluded set (`FORK_EXCLUDED_TOOL_NAMES` —
- * Phase 1 excludes only `ws-fork` itself; the ticket's own forward-compat
- * note reserves room for `ws-ask`/`ws-resolve` in Phase 2), plus
+ * `ws-fork` itself, plus Phase 2's `ws-ask`/`ws-resolve`), plus
  * `ws-report-to-lead` (Decision §3). Approval routing for a fork's own
  * `ws-execute`-spawned worker falls out for free from the existing
  * per-process registration pattern (see `spawner.ts`'s Codebase Findings in
@@ -35,7 +34,11 @@
  * listeners, same assumption `spawner.ts`'s own approval-relay callback
  * already rides) — this file never reaches into `spawner.ts`'s internals to
  * do it, keeping that module's own event-wiring untouched. This IO layer is
- * NOT unit-tested here (mirrors `execute-gateway.ts`'s own
+ * (apart from `wireAntiBleedLoop`'s own event-classification wiring, exported
+ * since Phase 2 so `test/fork.test.ts` can drive it against a duck-typed fake
+ * client/record — same testability-driven export precedent as `spawner.ts`'s
+ * `buildRpcClientOptions`) NOT unit-tested here (mirrors
+ * `execute-gateway.ts`'s own
  * `createApprovalRelay`/tool-`execute()` split): it needs a live `RpcClient`
  * subprocess, and the ticket's own Phase 1 task instruction defers the live
  * Bleed PoC / `--fork` composition confirmation to a manual gate (no
@@ -71,15 +74,23 @@ export const FORK_TOOL_NAME = "ws-fork";
 
 /**
  * Tool names excluded from a fork's own computed tool surface
- * (`computeForkToolSurface`). Phase 1 excludes only `ws-fork` itself — a
- * fork can never spawn another fork (lateral, not recursive: §3's depth
- * rule falls out at the tool-allowlist layer, the same way a `full-worker`
- * spawn can never re-reach `ws-agent-spawn`). Phase 2 adds `ws-ask`/
- * `ws-resolve` here once those primitives exist (kept as its own named
- * constant, not folded into a shared exclusion set, so this stays
- * forward-compatible without touching `computeForkToolSurface`'s own logic).
+ * (`computeForkToolSurface`). `ws-fork` itself — a fork can never spawn
+ * another fork (lateral, not recursive: §3's depth rule falls out at the
+ * tool-allowlist layer, the same way a `full-worker` spawn can never
+ * re-reach `ws-agent-spawn`) — plus, since Phase 2, the owner-question
+ * primitives `ws-ask`/`ws-resolve` (§3): a fork's only question path stays
+ * `ws-report-to-lead(kind:"question")`, which the lead surfaces as a thread
+ * of its own (`ask.ts`'s `handleForkRaisedQuestion`).
+ *
+ * The two Phase 2 names are duplicated here as literals ON PURPOSE rather
+ * than imported from `ask.ts` (which owns them as `ASK_TOOL_NAME`/
+ * `RESOLVE_TOOL_NAME`): `ask.ts` imports `computeForkToolSurface` and the
+ * spawn helpers FROM this module, so importing back would create a cycle and
+ * break this file's own "imports FROM `spawner.ts`/`process-role.ts` only"
+ * placement rule. `test/ask.test.ts` asserts the two constants and these two
+ * literals stay equal, so the duplication cannot silently drift.
  */
-export const FORK_EXCLUDED_TOOL_NAMES: ReadonlySet<string> = new Set([FORK_TOOL_NAME]);
+export const FORK_EXCLUDED_TOOL_NAMES: ReadonlySet<string> = new Set([FORK_TOOL_NAME, "ws-ask", "ws-resolve"]);
 
 /**
  * Pure §3 fork tool-surface formula: the lead's own active-tools snapshot at
@@ -305,6 +316,25 @@ export interface ForkSessionCtx {
 }
 
 /**
+ * 260904 Phase 2 seam: fired with `(agentId, message)` the moment a fork
+ * enqueues a `kind:"question"` `ws-report-to-lead` report, carrying that
+ * report's own free-text `message`. `ask.ts` supplies the real behavior
+ * (register a thread whose respondent is this live fork, refresh the pending
+ * widget); `fork.ts` stays generic and never imports it.
+ *
+ * Review relay #1 I6: the return value REPLACES the message the lead sees on
+ * that report. In TUI mode `ask.ts` returns a short notice naming the thread
+ * id and telling the lead the owner answers it (§1: the lead is not involved
+ * in a fork-raised question); in headless mode it returns `undefined`, so the
+ * lead relay stays byte-identical to Phase 1 (§8). This is invoked from
+ * `spawner.ts`'s report-enqueue site rather than from `wireAntiBleedLoop`'s
+ * settle handler, because a lead blocked in `ws-agent-wait` wakes at enqueue
+ * time — the thread must already exist (and the message already be rewritten)
+ * before that wake.
+ */
+export type ForkQuestionCallback = (agentId: string, message: string) => string | undefined;
+
+/**
  * Wires the §4 anti-bleed mechanical loop onto `record.client`'s OWN
  * `onEvent()` stream — a second, independent subscription alongside
  * `spawner.ts`'s own `attachEventListener` (never reached into directly;
@@ -344,8 +374,18 @@ export interface ForkSessionCtx {
  * by `ws-agent-wait` as normal — this loop only ever ADDS advisory
  * `pi.sendUserMessage` notices to the lead, or a nudge `prompt()` to the
  * fork itself; it never blocks or rewrites the report).
+ *
+ * 260904 Phase 2 (review relay #1 C1): every branch that would nudge the fork
+ * or declare it stalled is suppressed while `record.overlayAttached` is set —
+ * an owner is mid-conversation with this fork in the overlay chat, where a
+ * text-only turn is the NORMAL shape, not §4's bleed signal. Without this the
+ * loop re-prompts the fork mid-discussion (the owner watches a machine nudge
+ * appear in their own conversation) and, one exchange later, steers a false
+ * "this fork stalled — do NOT harvest a result from it" verdict into the
+ * lead. The `"question"`/`"final"` branches need no guard: they already
+ * return early as valid stops.
  */
-function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRecord, expectsCommit: boolean): void {
+export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRecord, expectsCommit: boolean): void {
   const client = record.client;
   if (!client) return;
 
@@ -396,6 +436,15 @@ function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRe
     const outcome = classifyForkTurnOutcome({ hadToolCall: hadToolCallThisTurn, reportKind: turnReportKind });
 
     if (outcome === "question" || outcome === "final") {
+      nudgeCount = 0;
+      return;
+    }
+
+    // 260904 Phase 2 (review relay #1 C1): an owner overlay is attached — a
+    // text-only turn is this thread's normal shape, so neither the nudge nor
+    // the fail-loud path applies. Reset the counter so a later, un-attached
+    // stall is still judged from zero.
+    if (record.overlayAttached) {
       nudgeCount = 0;
       return;
     }
@@ -481,7 +530,14 @@ function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRe
  * to have anything to exclude from. Whether it is ever ACTIVE for a given
  * session is `addForkToolIfLead`'s job, not this function's.
  */
-export function registerFork(pi: ExtensionAPI, bridge: BridgeHandle, rpcRegistry: RpcAgentRegistry, sessionCtx: ForkSessionCtx): void {
+export function registerFork(
+  pi: ExtensionAPI,
+  bridge: BridgeHandle,
+  rpcRegistry: RpcAgentRegistry,
+  sessionCtx: ForkSessionCtx,
+  /** 260904 Phase 2: see `ForkQuestionCallback`. Omitted keeps Phase 1 behavior unchanged. */
+  onQuestion?: ForkQuestionCallback,
+): void {
   pi.registerTool({
     name: FORK_TOOL_NAME,
     label: FORK_TOOL_NAME,
@@ -537,6 +593,13 @@ export function registerFork(pi: ExtensionAPI, bridge: BridgeHandle, rpcRegistry
 
       const record = rpcRegistry.get(result.agent_id);
       if (record) {
+        if (onQuestion) {
+          // 260904 Phase 2 (review relay #1 I6): armed at the report-enqueue
+          // site rather than on turn settle, so the thread exists before a
+          // lead blocked in `ws-agent-wait` wakes. The returned string (TUI
+          // only) replaces the lead-visible report message.
+          record.onQuestionReport = (_rec, message) => onQuestion(result.agent_id, message);
+        }
         wireAntiBleedLoop(pi, result.agent_id, record, p.expects_commit ?? false);
       }
 

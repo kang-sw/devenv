@@ -45,7 +45,23 @@ Route a task to the right primitive by what you actually need done:
 | Delegate a lead-consensus-caliber shell task, gated command-by-command | `ws-execute` (spawns an execute-worker; optional `command` runs verbatim first, then `prompt` drives the worker; `complex:true` for a stronger model). This gate exists because `ws-execute` proxies actions at your own trust level — a general `ws-agent-spawn` worker carries no such gate. |
 | Respond to a pending execute-worker command approval request | `ws-approve` (`decision`: `approve` \| `deny` with `reason` \| `run-instead` with `command`; rejected if `cmd_id` is stale or mismatched) |
 | Delegate a task-thread fork that shares your full current context (lateral peer, not a depth-consuming worker) | `ws-fork` (`prompt`, optional `model_name`/`expects_commit`; it reports back ONLY via `ws-report-to-lead(kind:"question"|"final")` — never harvest a bare turn-end as its result) |
+| Ask the owner a question without blocking or interrupting them | `ws-ask` (`title`, `question`, optional `context` — 2-3 sentences of background, no paths or hashes). Returns `{question_id}` and spawns nothing; keep working on whatever does not depend on the answer. |
+| Withdraw a question you no longer need answered | `ws-resolve` (`question_id`) — clears it from the owner's pending count; nothing is injected back, since you already know the answer |
 
-This table grows as later tickets land more primitives (`ws-ask`/`ws-resolve`
-side-thread surfaces are still pending) — treat any verb not listed here as
-not yet available, not as a naming mismatch to guess around.
+The owner side of a question is theirs, not yours: `/answer <id>` opens one in
+a chat overlay (which is when a discussion thread is actually forked, at your
+tip at that moment), `/thread` lists pending, open and dormant threads, and
+`/done` inside the overlay ends one — its summary comes back to you as a
+distinct injected message, not as an owner turn. Never prompt the owner to run
+these; just register the question and carry on.
+
+The same applies when a `ws-fork` you spawned raises a question of its own: in
+an interactive session you receive only a notice naming the thread id, and the
+owner answers that fork directly in their overlay. Do not relay it, do not
+answer it yourself, and do not ask the owner about it — keep waiting on the
+fork (`ws-agent-wait`). That fork keeps running its task through and after the
+discussion; what was decided reaches you in its own `kind:"final"` report,
+under `Decisions:` — not as a separate thread-summary message.
+
+This table grows as later tickets land more primitives — treat any verb not
+listed here as not yet available, not as a naming mismatch to guess around.

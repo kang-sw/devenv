@@ -8,12 +8,16 @@
  * report shape + `expects_commit` non-completion rule), `tailLines`, and
  * `getForkSourceSessionFile`.
  *
+ * `wireAntiBleedLoop`'s own event handling is additionally driven here
+ * against a duck-typed fake client/record for the seams 260904 Phase 2 added
+ * (the overlay-attached suppression, and the question-report hook through its
+ * real `applyRpcEvent` call site).
+ *
  * NOT covered here — genuinely live-gate only, mirroring
  * test/execute-gateway.test.ts's own pure/IO split: `registerFork`'s tool
- * `execute()` body and `wireAntiBleedLoop` (both need a live `pi --mode rpc`
- * session or a real `RpcClient`). Exercised only by the plan's documented
- * manual verification gate (no provider credentials in this sandbox —
- * deferred, not faked).
+ * `execute()` body (needs a live `pi --mode rpc` session or a real
+ * `RpcClient`). Exercised only by the plan's documented manual verification
+ * gate (no provider credentials in this sandbox — deferred, not faked).
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -37,16 +41,18 @@ import {
   getForkSourceSessionFile,
   buildForkDirectiveText,
   buildForkInitialMessage,
+  wireAntiBleedLoop,
 } from "../src/fork.ts";
-import { REPORT_TO_LEAD_TOOL_NAME } from "../src/spawner.ts";
+import { applyRpcEvent, REPORT_TO_LEAD_TOOL_NAME, type RpcAgentRecord } from "../src/spawner.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("FORK_TOOL_NAME / FORK_EXCLUDED_TOOL_NAMES", () => {
   test("FORK_TOOL_NAME is the literal ws-fork", () => {
     assert.equal(FORK_TOOL_NAME, "ws-fork");
   });
 
-  test("Phase 1 excludes only ws-fork itself (ws-ask/ws-resolve don't exist yet)", () => {
-    assert.deepEqual([...FORK_EXCLUDED_TOOL_NAMES], [FORK_TOOL_NAME]);
+  test("excludes ws-fork itself plus Phase 2's ws-ask/ws-resolve (a fork's only question path is ws-report-to-lead)", () => {
+    assert.deepEqual([...FORK_EXCLUDED_TOOL_NAMES].sort(), [FORK_TOOL_NAME, "ws-ask", "ws-resolve"].sort());
   });
 });
 
@@ -67,6 +73,13 @@ describe("computeForkToolSurface", () => {
 
   test("an empty lead tool list still ends up with exactly ws-report-to-lead", () => {
     assert.deepEqual(computeForkToolSurface([]), [REPORT_TO_LEAD_TOOL_NAME]);
+  });
+
+  test("also removes the Phase 2 owner-question primitives ws-ask/ws-resolve", () => {
+    const result = computeForkToolSurface(["bash", "ws-ask", "ws-resolve", FORK_TOOL_NAME]);
+    assert.ok(!result.includes("ws-ask"), 'a fork\'s only question path is ws-report-to-lead(kind:"question")');
+    assert.ok(!result.includes("ws-resolve"));
+    assert.deepEqual([...result].sort(), ["bash", REPORT_TO_LEAD_TOOL_NAME].sort());
   });
 
   test("a lead surface with no ws-fork present is unaffected besides the ws-report-to-lead addition", () => {
@@ -305,5 +318,161 @@ describe("buildForkInitialMessage (260905 structural anti-bleed frame)", () => {
   test("stays calm — no ALL-CAPS override words (chosen over the aggressive header)", () => {
     const allCapsWords = buildForkInitialMessage(task).match(/\b[A-Z]{4,}\b/g) ?? [];
     assert.deepEqual(allCapsWords, [], `framed message must stay calm: ${JSON.stringify(allCapsWords)}`);
+  });
+});
+
+/**
+ * 260904 Phase 2 (review relay #1 C1/I6): the loop's overlay-attached
+ * suppression and the question-report hook, driven against a duck-typed fake
+ * client/record (no subprocess, no real `RpcClient`) — the event stream is
+ * replayed by hand through the listener `wireAntiBleedLoop` registers, and
+ * the hook is exercised through the real `applyRpcEvent` (its actual call
+ * site) rather than through the loop.
+ */
+describe("wireAntiBleedLoop / applyRpcEvent question surface seams (Phase 2)", () => {
+  function harness() {
+    const notices: string[] = [];
+    const prompts: string[] = [];
+    let listener: ((evt: unknown) => void) | undefined;
+    const record = {
+      agentId: "a1",
+      sessionPath: "/nonexistent/session.jsonl",
+      systemPromptPath: "/nonexistent/prompt.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      idlePending: false,
+      waiters: [],
+      pendingReports: [],
+      reportsDropped: 0,
+      client: {
+        onEvent(l: (evt: unknown) => void) {
+          listener = l;
+          return () => {};
+        },
+        prompt(message: string) {
+          prompts.push(message);
+          return Promise.resolve();
+        },
+      },
+    } as unknown as RpcAgentRecord;
+    const pi = {
+      sendUserMessage(text: string) {
+        notices.push(text);
+      },
+    } as unknown as ExtensionAPI;
+    return { pi, record, notices, prompts, emit: (evt: unknown) => listener?.(evt) };
+  }
+
+  const questionTurn = [
+    { type: "agent_start" },
+    { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "Which of the two anchors should I use?" } },
+    { type: "agent_settled" },
+  ];
+
+  const questionReportEvent = {
+    type: "tool_execution_start",
+    toolName: REPORT_TO_LEAD_TOOL_NAME,
+    args: { kind: "question", message: "Which of the two anchors should I use?" },
+  };
+
+  test("a question turn is a valid stop — no nudge, no lead notice", () => {
+    const h = harness();
+    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    for (const evt of questionTurn) h.emit(evt);
+    assert.deepEqual(h.notices, [], "a question turn is a valid stop — no lead notice");
+    assert.deepEqual(h.prompts, [], "a question turn is never nudged");
+  });
+
+  test("C1: an attached owner overlay suppresses the no-signal nudge", () => {
+    const h = harness();
+    (h.record as unknown as { overlayAttached?: boolean }).overlayAttached = true;
+    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    for (let turn = 0; turn < 5; turn += 1) {
+      h.emit({ type: "agent_start" });
+      h.emit({ type: "agent_settled" });
+    }
+    assert.deepEqual(h.prompts, [], "an owner-attached fork must never be re-prompted mid-discussion");
+    assert.deepEqual(h.notices, [], "and must never be reported to the lead as stalled");
+  });
+
+  test("C1: the same record still nudges once the overlay detaches", () => {
+    const h = harness();
+    const record = h.record as unknown as { overlayAttached?: boolean };
+    record.overlayAttached = true;
+    wireAntiBleedLoop(h.pi, "a1", h.record, false);
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "agent_settled" });
+    assert.deepEqual(h.prompts, []);
+    record.overlayAttached = false;
+    h.emit({ type: "agent_start" });
+    h.emit({ type: "agent_settled" });
+    assert.equal(h.prompts.length, 1, "suppression is scoped to the attached window, not permanent");
+  });
+
+  test("I6: a question report is relayed to the lead through record.onQuestionReport", () => {
+    const h = harness();
+    const seen: Array<{ agentId: string; message: string }> = [];
+    h.record.onQuestionReport = (rec, message) => {
+      seen.push({ agentId: rec.agentId, message });
+      return "[ws] thread T1 — the owner answers this; keep waiting.";
+    };
+    applyRpcEvent(h.record, questionReportEvent);
+    assert.deepEqual(seen, [{ agentId: "a1", message: "Which of the two anchors should I use?" }]);
+    assert.deepEqual(
+      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
+      [{ message: "[ws] thread T1 — the owner answers this; keep waiting.", kind: "question" }],
+      "the lead-visible report text is the hook's replacement, not the fork's own question",
+    );
+  });
+
+  test("I6: returning undefined (headless) keeps the Phase 1 report byte-identical", () => {
+    const h = harness();
+    h.record.onQuestionReport = () => undefined;
+    applyRpcEvent(h.record, questionReportEvent);
+    assert.deepEqual(
+      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
+      [{ message: "Which of the two anchors should I use?", kind: "question" }],
+    );
+  });
+
+  test("I6: a throwing hook falls back to the original message rather than dropping the report", () => {
+    const h = harness();
+    h.record.onQuestionReport = () => {
+      throw new Error("boom");
+    };
+    applyRpcEvent(h.record, questionReportEvent);
+    assert.deepEqual(
+      h.record.pendingReports.map((r) => r.message),
+      ["Which of the two anchors should I use?"],
+    );
+  });
+
+  test("I6: a final-kind report never reaches the hook", () => {
+    const h = harness();
+    let calls = 0;
+    h.record.onQuestionReport = () => {
+      calls += 1;
+      return "replaced";
+    };
+    applyRpcEvent(h.record, {
+      type: "tool_execution_start",
+      toolName: REPORT_TO_LEAD_TOOL_NAME,
+      args: { kind: "final", message: "Outcome: x" },
+    });
+    assert.equal(calls, 0);
+    assert.deepEqual(
+      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
+      [{ message: "Outcome: x", kind: "final" }],
+    );
+  });
+
+  test("I6: with no hook set the report branch is unchanged", () => {
+    const h = harness();
+    applyRpcEvent(h.record, questionReportEvent);
+    assert.deepEqual(
+      h.record.pendingReports.map((r) => ({ message: r.message, kind: r.kind })),
+      [{ message: "Which of the two anchors should I use?", kind: "question" }],
+    );
   });
 });
