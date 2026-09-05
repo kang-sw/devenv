@@ -2118,6 +2118,23 @@ describe("listAgents", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
     assert.deepEqual(listAgents(registry, { includePrompt: true }), [{ agent_id: "a", status: "dormant" }]);
   });
+
+  test("260905 (list-model/last-report-fidelity): modelBase + modelEffort lists model as \"<base>/<effort>\"", () => {
+    const record = freshRpcRecord({ agentId: "a", modelBase: "claude-opus-4", modelEffort: "high" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant", model: "claude-opus-4/high" }]);
+  });
+
+  test("260905 (list-model/last-report-fidelity): modelBase alone lists the bare base", () => {
+    const record = freshRpcRecord({ agentId: "a", modelBase: "claude-opus-4" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant", model: "claude-opus-4" }]);
+  });
+
+  test("260905 (list-model/last-report-fidelity): a record with neither modelBase nor modelEffort has no model key", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant" }]);
+  });
 });
 
 describe("sendToAgent (live branches only — dormant auto-resume is live-gate only, see module doc comment)", () => {
@@ -2639,6 +2656,27 @@ describe("evictForCapacity", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
     evictForCapacity(registry, 1);
     assert.equal(registry.size, 0);
+  });
+
+  test("260905 (list-model/last-report-fidelity): prefers to drop a never-active record over a revived orphan whose lastReportAtOverride is newer", () => {
+    // Review relay #1 (Critical): both records must have distinct, non-zero
+    // activity under the FIXED formula, and "revived" is inserted first so
+    // insertion-order tie-breaking cannot coincidentally produce the right
+    // answer for the wrong reason. "never" gets a small lastLeadPromptAt
+    // (100) that is unambiguously below the override (9_000) only once the
+    // override is actually honored — under the pre-fix formula (which
+    // ignores lastReportAtOverride entirely), "revived" scores activity 0
+    // (lowest) and would be evicted instead, so this test fails if the
+    // lastReportAtOverride fallback in evictForCapacity regresses.
+    const revived = freshRpcRecord({ agentId: "revived", lastReportAtOverride: new Date(9_000).toISOString() });
+    const neverActive = freshRpcRecord({ agentId: "never", lastLeadPromptAt: 100 });
+    const registry: RpcAgentRegistry = new Map([
+      ["revived", revived],
+      ["never", neverActive],
+    ]);
+    const result = evictForCapacity(registry, 2);
+    assert.deepEqual(result, { ok: true, evictedLabel: "never" });
+    assert.equal(registry.has("revived"), true);
   });
 });
 

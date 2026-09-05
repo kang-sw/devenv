@@ -274,13 +274,19 @@ report channel" below):
   session (keeping the same ws `session_key`) and then delivers — so resume is
   subsumed by send, and there is no separate continue tool.
 - `ws-agent-list({ include_prompt? })` — enumerate registry members with their
-  status, alias and title. Status vocabulary is `running` / `idle` / `dormant`,
-  but `idle` (260905) is now transient rather than a resting state: an idle,
-  non-thread-bound record is parked to `dormant` by the adapter shortly after
-  it settles (see "Turn completion is gated on RPC idle"), so `idle` is mostly
-  observed mid-transition, not as a steady status to poll for. `include_prompt`
-  (default `false`) additionally surfaces each record's original spawn prompt,
-  stored head-truncated to 4KB.
+  status, alias, title and model. Status vocabulary is `running` / `idle` /
+  `dormant`, but `idle` (260905) is now transient rather than a resting state:
+  an idle, non-thread-bound record is parked to `dormant` by the adapter
+  shortly after it settles (see "Turn completion is gated on RPC idle"), so
+  `idle` is mostly observed mid-transition, not as a steady status to poll
+  for. `model` (260905) is the effective resolved model the child was
+  launched with, omitted only when the record carries no model at all —
+  either a sidecar written before the field existed, or a fresh spawn whose
+  inherited-model lookup itself came back empty (no tool-context model to
+  fall back to); an inheriting child (no catalog entry for its alias) shows
+  the parent's own concrete model, not an absent
+  field. `include_prompt` (default `false`) additionally surfaces each
+  record's original spawn prompt, stored head-truncated to 4KB.
 - `ws-agent-stop(agent_id)` — halt a child's process while retaining its registry
   mapping and on-disk session, leaving it **dormant/resumable** (a later
   `ws-agent-send` revives it) — the same end state the automatic park below
@@ -335,7 +341,10 @@ visible through `ws-agent-list`. What each child was doing is not restated; the
 resumed lead's own transcript already has it. A different
 session (`/new`) leaves the sidecar beside the old session file to fire on that
 session's later resume. Reports are never replayed from the sidecar: they belong
-to a process that no longer exists.
+to a process that no longer exists. A revived record's last-report time is not
+lost, either: it surfaces again as `ws-agent-list`'s `last_report_at` and feeds
+the registry-cap eviction score (see `ws-agent-spawn` above), both falling back
+to the sidecar's captured time until the record reports again for real.
 
 ### Turn completion is gated on RPC idle {#260903-pi-spawner-completion-gating}
 
