@@ -3,7 +3,7 @@ title: "Add `pi` as a first-class harness bucket in ws-mcp and unify the Pi adap
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260802-research-ws-pi-native-framework: research anchor — the Pi adapter is a harness peer of Claude/Codex, so the harness-keyed config layer should know it
-  260903-feat-ws-pi-subagent-rpc-ux: sibling — introduced the adapter-side model catalog (`model-catalog.json` alias → provider model) that Phase 3 of this ticket retires in favour of ws config
+  260903-feat-ws-pi-subagent-rpc-ux: sibling — introduced the adapter-side model catalog (`model-catalog.json` alias → provider model) that Phase 4 of this ticket retires in favour of ws config
 related-mental-model:
   - mcp-runtime
 sage-review-design: blocked
@@ -88,12 +88,14 @@ ws side can answer the same lookup.
 - **Default bucket semantics unchanged.** A Pi session with no `pi`-keyed
   value still resolves through the existing fallback chain (`pi` → `default`),
   so upgrading ws-mcp without touching config is a no-op for current Pi users.
-- **One model table: ws config `agents.model_aliases` under harness `pi`.**
-  The Pi adapter's `model_name` (spawn/fork), the implicit `"small"` (explore
-  leaf) and `"complex"` (`ws-execute`) keys, and `playbook.render`'s
-  `recommended-model`/tier variables all resolve through the same
-  harness-keyed alias map, edited through `lead-tune`/`config.tune
-  agents.tier|model_alias harness:pi`. For Pi the `model` value is the
+- **One model table: ws config `agents.tier` under harness `pi`, tiers
+  only.** The Pi adapter's `model_name` (spawn/fork), the implicit `"small"`
+  (explore leaf and `ws-execute complex:false`), and `playbook.render`'s
+  `recommended-model`/tier variables all resolve through the same fixed
+  four-tier table (`small|medium|large|xlarge`), edited through
+  `lead-tune`/`config.tune agents.tier harness:pi`. There is no user-named
+  alias concept (see Open Decisions #1); `ws-execute complex:true` inherits
+  the lead's model and consults no table. For Pi the `model` value is the
   `provider/id` string Pi's own model registry accepts and `effort` maps onto
   the spawner's `modelEffort` with a fixed table: ws `none` → Pi `off`, and
   `low|medium|high|xhigh` pass through unchanged; Pi's `minimal` and `max`
@@ -110,9 +112,9 @@ ws side can answer the same lookup.
   "inherit the parent model", never an error, preserving the adapter's
   never-hard-fail rule.
 - **Golden rule for the Pi track is respected by sequencing, not violated.**
-  Phases 1–2 are ws-mcp Go changes and land on `develop` through the normal
-  ws release flow; Phase 3 is the adapter change on the Pi track and is gated
-  on a ws release carrying Phases 1–2 (the adapter's version pin already
+  Phases 2–3 are ws-mcp Go changes and land on `develop` through the normal
+  ws release flow; Phases 1 and 4 are adapter changes on the Pi track, and
+  Phase 4 is gated on a ws release carrying Phases 2–3 (the adapter's version pin already
   enforces this ordering).
 
 ## Constraints
@@ -128,7 +130,19 @@ ws side can answer the same lookup.
 
 ## Phases
 
-### Phase 1: `pi` harness bucket end to end
+### Phase 1: `ws-execute complex:true` inherits the lead model (Pi track)
+
+Independent of the ws-side phases; lands on the Pi track (`agents-plugin-pi/`)
+first. Today `complex:true` selects a `"complex"` catalog alias and only
+inherits the lead's model by accident (catalog miss → inherit fallback); a
+user who adds a `complex` entry would silently change its meaning. Make
+`complex:true` pass no `model_name` at all (inherit), keep `complex:false`
+on `"small"`, delete the `"complex"` alias from `resolveExecuteModelAlias`,
+the tool description, `pi-lead-guide.md`, and the `pi-adapter-runtime`
+`ws-execute` wording ("a light-model default; the lead's own model when
+set"). Update the tests. Verify with `npm test`.
+
+### Phase 2: `pi` harness bucket end to end
 
 Add `pi` to the harness enum and detection, wire it through `config.tune`
 (prompt overrides and `agents.tier` with `harness: "pi"`), the tier→model
@@ -144,32 +158,35 @@ Record in the Result whether the Pi bridge's clientInfo name had to change and,
 if so, land that adapter change on the Pi track with a matching spec note in
 `pi-adapter-runtime`.
 
-### Phase 2: Alias resolution read tool for adapters
+### Phase 3: Tier resolution read tool for adapters
 
-Depends on Phase 1. Expose one MCP read tool (working name
-`config.resolve_agent(alias, harness?)`, or an equivalent machine-readable
+Depends on Phase 2. Expose one MCP read tool (working name
+`config.resolve_agent(tier, harness?)`, or an equivalent machine-readable
 mode on an existing config read tool — decide at implementation and record
-the choice) that returns the resolved `{backend, model, effort}` for an alias
-or fixed tier under the session's detected harness, applying the same
-fallback chain and normalization `playbook.render` uses. An unmapped alias
-returns an explicit "unset" result, not an error. Register it in the config
-registry with the no-agent/harness applicability the other config tools
-carry, document it in `mcp-tools.md`, and cover it with Go tests for: fixed
-tier under `pi`, custom alias under `pi`, fallback to `default`, and unset.
+the choice) that returns the resolved `{backend, model, effort}` for a fixed
+tier under the session's detected harness, applying the same fallback chain
+and normalization `playbook.render` uses, and reporting which bucket answered
+(pending Open Decisions #2). Register it in the config registry with the
+no-agent/harness applicability the other config tools carry, document it in
+`mcp-tools.md`, and cover it with Go tests for: each tier under `pi`,
+fallback to `default` with the answering bucket reported, and an unknown
+tier rejected.
 
-### Phase 3: Pi adapter resolves models through ws-mcp; catalog retires
+### Phase 4: Pi adapter resolves models through ws-mcp; catalog retires
 
-Depends on Phase 2 being in a released ws the adapter pins. On the Pi track
-(`agents-plugin-pi/`): route `resolveModelForAlias` (spawner), the explore
-leaf's `"small"`, and `ws-execute`'s `"complex"` through the bridge to the
-Phase 2 tool; carry `effort` into `modelEffort`; replace the "model catalog
+Depends on Phase 3 being in a released ws the adapter pins. On the Pi track
+(`agents-plugin-pi/`): route `resolveModelForAlias` (spawner) and the explore
+leaf's / `ws-execute complex:false`'s `"small"` through the bridge to the
+Phase 3 tool, treating a non-`pi` answering bucket as inherit; carry `effort`
+into `modelEffort`; replace the "model catalog
 unset" `workflow_manual` advisory with an "alias table has no `pi` entries"
 advisory sourced from the same tool; delete `model-catalog.ts`,
 `model-catalog.json`, and their tests; update the `pi-adapter-runtime` spec
 anchors ("Model resolution: name alias, not tier", "Model catalog data file",
 "Unset-catalog advisory") and `pi-lead-guide.md` so the lead is told to pass
-the alias names `lead-tune` shows. Verify with the adapter's `npm test` and
-one live spawn per alias kind (fixed tier, custom alias, unset → inherit).
+the tier names `lead-tune` shows (and to drop the "anything the user names"
+sentence). Verify with the adapter's `npm test` and one live spawn per kind
+(a set `pi` tier, an unset tier → inherit, `complex:true` → inherit).
 
 ## Non-goals
 
@@ -189,13 +206,24 @@ recorded for the owner to accept or overrule:
    looks generic but every writer and reader normalizes the outer key to the
    four fixed tiers (`small|medium|large|xlarge`); `config.tune` has no
    `model_alias` key. The adapter's `"complex"` and any user-named alias would
-   be dropped by Phase 3 as written. Recommendation: add a new Phase (before
-   the read tool) that opens the outer key — a `config.tune agents.model_alias
-   <name> harness:<h>` writer and a resolver that accepts non-tier names —
-   keeping the tier vocabulary as the only names `playbook.render` falls back
-   through. Alternative: retire arbitrary aliases on Pi and map `"complex"` to
-   the `xlarge` tier — cheaper, but loses the "anything the user names"
-   contract the live spec anchor promises.
+   be dropped by the catalog-retirement phase as originally written.
+   **Settled 2026-09-05 (owner): tier only — there is no user-named alias
+   concept.** Tracing the adapter shows only three names ever reach the
+   catalog: `playbook.render`'s `recommended-model` (a ws-config tier value),
+   the explore leaf's fixed `"small"`, and `ws-execute`'s `"complex"`. No lead
+   path invents names and the guide never suggests one. The "generic
+   name → `provider/id`" framing came from `260903` D-A as a *translation
+   shim*: ws config could only hold codex/claude ids, so the adapter needed a
+   table to turn `recommended-model` into a Pi string without placing Pi
+   strings in ws-mcp. A `pi` harness bucket removes the shim's reason to
+   exist. Consequences, folded into the phases below: the model layer is the
+   four fixed tiers under harness `pi`; explore's `"small"` and `ws-execute
+   complex:false` are tier `small`; `complex:true` was always meant to
+   **inherit the lead's model** (no alias at all — today it only does so by
+   accident, through the catalog-miss fallback) and is corrected on the Pi
+   track independently of the ws-side phases; no alias writer or non-tier
+   resolver is added. The live spec anchor's "anything the user names"
+   sentence is amended when the catalog retires.
 2. **`pi` → `default` fallback hands Pi a codex model id.** `wsconfig.Load`
    seeds `default`/`codex`/`claude` for every tier, so a fixed tier is never
    "unset"; Pi cannot accept those ids as `--model`. Recommendation: the read
@@ -215,7 +243,7 @@ recorded for the owner to accept or overrule:
    mercenary path reject a `pi`-backend resolution with a clear error rather
    than attempting a launch. Alternative: keep one normalizer and document the
    mercenary-from-Pi path as unsupported — smaller diff, sharper edge.
-4. **Golden-rule exception and spec territory.** Phases 1–2 are ws-mcp Go
+4. **Golden-rule exception and spec territory.** Phases 2–3 are ws-mcp Go
    changes motivated solely by Pi; branch sequencing does not answer whether
    that is an exception to "ws-mcp Go is never modified for Pi". The live spec
    anchor also says no Pi model strings are placed in the ws-mcp core.
