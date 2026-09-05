@@ -913,9 +913,11 @@ export interface RpcAgentRecord {
    * §1 says the lead is not involved in a fork-raised question and §8 scopes
    * the lead relay to headless, so in TUI mode `ask.ts` registers the thread
    * on the owner surface and returns that notice — which, since 260905, is
-   * read as a SUPPRESSION signal: a defined return means the question was
-   * consumed there and no `ws-agent-question` push reaches the lead at all.
-   * Set by `fork.ts`'s `registerFork`; `spawner.ts`
+   * the LEAD NOTICE to push: a defined return means the question itself is
+   * answered on the owner surface, not by the lead, but the returned string
+   * is still pushed to the lead as a `ws-agent-advisory`/`fork-question-thread`
+   * message in place of the `ws-agent-question` the headless baseline would
+   * send. Set by `fork.ts`'s `registerFork`; `spawner.ts`
    * stays generic and supplies no implementation, mirroring
    * `onApprovalPending`'s existing callback-injection convention.
    */
@@ -1071,10 +1073,13 @@ export function truncatePromptForStorage(prompt: string, capBytes: number = PROM
  *   `"stopped"` (an explicit `ws-agent-stop`), `"exited"` (its process died —
  *   see the liveness probe), or `"spawn-failed"`.
  * - `ws-agent-question` — a headless `kind:"question"` report the lead itself
- *   must answer (in TUI the owner surface consumes it and nothing is pushed).
+ *   must answer (in TUI the owner surface consumes it, and the lead instead
+ *   gets the `fork-question-thread` advisory below).
  * - `ws-agent-approval` — an `execute-worker` is blocked on `ws-approve`.
- * - `ws-agent-advisory` — `fork.ts`'s anti-bleed loop has something to say
- *   about a fork's turn shape.
+ * - `ws-agent-advisory` — the adapter's own statement about a child: emitted
+ *   by `fork.ts`'s anti-bleed loop (a fork's turn shape) and, since 260905,
+ *   by this module's question branch registering a fork-raised thread
+ *   (`advisory: "fork-question-thread"`, `followUp`).
  * - `ws-agent-orphaned` — children that outlived their lead session and are
  *   revivable with `ws-agent-send` (shutdown sidecar, `agent-sidecar.ts`).
  */
@@ -1795,13 +1800,20 @@ export interface RpcEventOutcome {
  * (`undefined`) otherwise, so a caller falls back to the worker's base cwd
  * exactly as `execute-gateway.ts`'s `execute()` itself does.
  *
- * 260904 Phase 2 (side-thread question surface, review relay #1 I6): a
- * `kind:"question"` report is passed through `record.onQuestionReport` (when
- * set) first. Under the push model that hook's existing return contract IS
- * the suppression signal: a DEFINED return means a TUI owner surface has
- * taken the question (§1 keeps the lead out of that exchange entirely), so
- * nothing is pushed at all; `undefined` is the headless baseline and the
- * question is pushed as `ws-agent-question`/`steer` for the lead to answer.
+ * 260905 Phase 1 (fork-question lead notice, was 260904 Phase 2 / review
+ * relay #1 I6): a `kind:"question"` report is passed through
+ * `record.onQuestionReport` (when set) first. That hook thread-binds the
+ * record and, in TUI mode, returns the registration-notice string built by
+ * `buildForkQuestionLeadNotice` — the lead must still be told a thread now
+ * exists, just not asked to answer it. A DEFINED (string) return is pushed to
+ * the lead as `ws-agent-advisory`/`fork-question-thread` (`detail` is that
+ * notice text) so the lead is told the thread exists rather than seeing
+ * nothing at all — `followUp` delivery only guarantees the notice is queued
+ * for the lead's next turn boundary, not that it precedes the owner's
+ * `/answer`; `undefined` is the headless baseline and the question is pushed
+ * as `ws-agent-question`/`steer` for the lead to answer directly. A throwing
+ * hook degrades to that same headless baseline rather than dropping the
+ * report.
  *
  * `record.onFinalReport` gained the parallel contract: returning `true` means
  * the hook fully consumed the report (a `lead-ask` discussion thread, whose
@@ -1841,18 +1853,22 @@ export function applyRpcEvent(
       }
 
       if (kind === "question") {
-        // A defined return means the owner surface consumed it (TUI); only
-        // the headless `undefined` case reaches the lead. A throwing hook
-        // degrades to the headless baseline rather than dropping the report.
-        let consumed = false;
+        // A defined (string) return is the registration notice for a fork
+        // thread the hook just bound: push it to the lead as an advisory
+        // instead of the raw question. `undefined` is the headless case;
+        // a throwing hook degrades to that same baseline rather than
+        // dropping the report.
+        let notice: string | undefined;
         if (record.onQuestionReport) {
           try {
-            consumed = record.onQuestionReport(record, message) !== undefined;
+            notice = record.onQuestionReport(record, message);
           } catch {
-            consumed = false;
+            notice = undefined;
           }
         }
-        return consumed ? {} : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
+        return notice !== undefined
+          ? { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }
+          : { push: { family: "ws-agent-question", payload: { question: message }, deliverAs: "steer" } };
       }
 
       if (kind === "final") {

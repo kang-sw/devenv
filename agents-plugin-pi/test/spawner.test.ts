@@ -730,7 +730,7 @@ describe("applyRpcEvent: ws-report-to-lead (260905 push outcomes)", () => {
     assert.deepEqual(record.reportLog.map((e) => e.kind), [undefined, undefined]);
   });
 
-  test("onQuestionReport returning a string SUPPRESSES the push entirely — the TUI owner surface consumed the question (§1)", () => {
+  test("onQuestionReport returning a string PUSHES the registration notice as ws-agent-advisory — the lead is told a thread exists, not asked to answer (§1)", () => {
     const seen: string[] = [];
     const record = freshRpcRecord({
       onQuestionReport: (_rec, message) => {
@@ -740,8 +740,12 @@ describe("applyRpcEvent: ws-report-to-lead (260905 push outcomes)", () => {
     });
     const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "which branch?", kind: "question" } });
     assert.deepEqual(seen, ["which branch?"]);
-    assert.deepEqual(result, {}, "the lead is not part of a fork-raised question exchange");
-    assert.equal(record.reportLog.length, 1, "the report is still logged — suppression is about the push, not the bookkeeping");
+    assert.deepEqual(
+      result,
+      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] registered as thread q1" }, deliverAs: "followUp" } },
+      "the lead is not part of a fork-raised question exchange, but must still see the notice",
+    );
+    assert.equal(record.reportLog.length, 1, "the report is still logged — the push shape change doesn't affect bookkeeping");
   });
 
   test("onQuestionReport returning undefined (headless) keeps the ws-agent-question push", () => {
@@ -1525,11 +1529,14 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
   });
 
-  test("a hook-consumed question (the TUI owner surface) is not pushed at all", () => {
+  test("a hook-consumed question (the TUI owner surface) pushes the registration notice as ws-agent-advisory", () => {
     const h = listenerHarness();
     h.record.onQuestionReport = () => "[ws] thread q1 — the owner answers this.";
     h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "which anchor?" } });
-    assert.deepEqual(h.pi.sent, []);
+    assert.deepEqual(families(h.pi), ["ws-agent-advisory"]);
+    assert.equal(h.pi.sent[0].message.details && (h.pi.sent[0].message.details as Record<string, unknown>).advisory, "fork-question-thread");
+    assert.equal(h.pi.sent[0].message.details && (h.pi.sent[0].message.details as Record<string, unknown>).detail, "[ws] thread q1 — the owner answers this.");
+    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
   });
 
   test("a dead child's settle transitions it to exited and pushes once (the liveness probe on the transition)", async () => {

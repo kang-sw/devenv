@@ -495,7 +495,11 @@ describe("reviveOrphans (role wiring re-armed on revival)", () => {
       args: { kind: "question", message: "which anchor?" },
     });
     assert.deepEqual(asked, [{ agentId: "fork-1", message: "which anchor?" }]);
-    assert.deepEqual(outcome, {}, "§1: routed to the owner surface, never pushed at the lead as ws-agent-question");
+    assert.deepEqual(
+      outcome,
+      { push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: "[ws] thread q1 — the owner answers this." }, deliverAs: "followUp" } },
+      "§1: routed to the owner surface, and the lead sees the registration notice, not a ws-agent-question",
+    );
 
     const worker = revivedRegistry.get("worker-1")!;
     assert.equal(worker.onQuestionReport, undefined, "a plain worker has no role wiring to re-arm");
