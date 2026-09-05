@@ -268,7 +268,7 @@ that the only model.
     session (idle children keep their process until stopped or exited), and
     the ids duplicated `ws-agent-list`. `0 delegated agents still running`
     remains the synthesis cue. Naming children readably (spawn-time title,
-    context-bearing list) is `260905-feat-ws-pi-agent-title-and-list-context`.
+    context-bearing list) is `260905-feat-ws-pi-agent-alias-park-and-registry-cap`.
 
 ## Constraints
 
@@ -523,7 +523,7 @@ decided the `of M` total and the id suffix were noise (see the last Edition
 decision under `## Decisions`). `5b9fa21c` changes the line to
 `N delegated agents still running`, keeps the omission rule, and updates the
 renderer classifier, the guide, and the tests (634/634). Follow-up for
-readable child names: `260905-feat-ws-pi-agent-title-and-list-context`.
+readable child names: `260905-feat-ws-pi-agent-alias-park-and-registry-cap`.
 Orphan gating (`/reload` all idle → nothing; `/reload` with one running →
 one roll-call naming it) is still owner-run.
 
