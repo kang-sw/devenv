@@ -663,6 +663,25 @@ const RPC_CLI_PATH = process.argv[1];
 
 export interface RpcAgentRecord {
   agentId: string;
+  /**
+   * 260905 (alias/park/cap ticket): caller-supplied, human-chosen short name
+   * for THIS agent record — a different concept from `resolveModelForAlias`/
+   * `resolveAlias`'s "alias," which names a *model-catalog* entry (L342-366
+   * above). Optional; the adapter never derives one from the prompt. Resolved
+   * through `resolveAgentId` alongside the raw `agentId` uuid on every
+   * `ws-agent-send`/`ws-agent-stop`/`ws-agent-transcript`/`ws-approve` call.
+   * Reusing an alias on a new spawn overwrites a dormant/idle holder (clearing
+   * the holder's `alias`, not its `title`) or rejects the spawn outright when
+   * the holder is `running`/`threadBound` — see `spawnAgent`.
+   */
+  alias?: string;
+  /**
+   * 260905: caller-supplied free-text label, independent of `alias` — never
+   * used for resolution, purely descriptive (roll-call/list display). Reusing
+   * an `alias` on a new spawn clears the prior holder's `alias` but leaves its
+   * `title` untouched.
+   */
+  title?: string;
   /** The live RPC child, or `undefined` when dormant (stopped but resumable — D-C). */
   client?: RpcClient;
   /** Absolute path to the ws-owned `--session` file, reused unchanged across every (re)start. */
@@ -758,6 +777,13 @@ export interface RpcAgentRecord {
   threadBound?: boolean;
   /** Last-seen final assistant text, cached across `getLastAssistantText()` calls. */
   lastText?: string;
+  /**
+   * 260905: the head-truncated (`truncatePromptForStorage`,
+   * `PROMPT_STORAGE_CAP_BYTES`) copy of the spawn's initial `prompt`, stashed
+   * for `ws-agent-list`'s opt-in `include_prompt` reply and the shutdown
+   * sidecar. Set once at spawn, never updated by later `ws-agent-send` calls.
+   */
+  prompt?: string;
   /** Detaches the current `client.onEvent(...)` listener; re-armed on every (re)start. */
   unsubscribe?: () => void;
   /**
@@ -871,6 +897,25 @@ export interface AgentReportLogEntry {
 
 export type RpcAgentRegistry = Map<string, RpcAgentRecord>;
 
+/**
+ * 260905 (alias/park/cap ticket): the ONE alias-or-uuid resolution helper
+ * every `agent_id` param goes through (`sendToAgent`, `stopAgent`,
+ * `getAgentTranscriptPath`, and `execute-gateway.ts`'s `ws-approve`), so a
+ * caller may pass either the raw uuid or a record's `alias` interchangeably.
+ * Direct `registry.has(idOrAlias)` wins first (the uuid path, cheap and
+ * unambiguous); otherwise scans for a record whose `alias` matches exactly.
+ * Returns `undefined` on a genuine miss — each call site's existing "unknown
+ * agentId" error path is left unchanged by falling back to the original
+ * input (`resolveAgentId(registry, id) ?? id`).
+ */
+export function resolveAgentId(registry: RpcAgentRegistry, idOrAlias: string): string | undefined {
+  if (registry.has(idOrAlias)) return idOrAlias;
+  for (const record of registry.values()) {
+    if (record.alias === idOrAlias) return record.agentId;
+  }
+  return undefined;
+}
+
 export type AgentStatus = "running" | "idle" | "dormant";
 
 /**
@@ -886,6 +931,55 @@ export type SpawnAgentRole = "worker" | "execute-worker" | "fork";
 
 /** Per-agent cap on retained `reportLog` entries (drop-oldest); see `RpcAgentRecord.reportLog`. */
 export const REPORT_LOG_CAP = 64;
+
+/**
+ * 260905 (alias/park/cap ticket): env var the LEAD process reads at spawn
+ * time to override the registry cap (`DEFAULT_AGENT_REGISTRY_CAP`). Never
+ * forwarded to a child's env — this is lead-process-only config, unlike the
+ * child-carried role markers in `process-role.ts`.
+ */
+export const WS_PI_AGENT_REGISTRY_CAP_ENV = "WS_PI_AGENT_REGISTRY_CAP";
+
+/** Default registry cap when `WS_PI_AGENT_REGISTRY_CAP_ENV` is unset or unparsable. */
+export const DEFAULT_AGENT_REGISTRY_CAP = 256;
+
+/**
+ * Pure env-param resolver for the registry cap, mirroring `shouldPushToLead`'s
+ * testable-default-param shape. A missing, non-numeric, or non-positive value
+ * falls back to `DEFAULT_AGENT_REGISTRY_CAP` rather than throwing or producing
+ * a cap of zero/negative that would reject every spawn.
+ */
+export function resolveAgentRegistryCap(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[WS_PI_AGENT_REGISTRY_CAP_ENV];
+  if (typeof raw !== "string" || raw.trim() === "") return DEFAULT_AGENT_REGISTRY_CAP;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_AGENT_REGISTRY_CAP;
+}
+
+/**
+ * Byte cap on the stored copy of a spawn's `prompt` (`RpcAgentRecord.prompt`),
+ * applied once at spawn time — bounds the record itself, the shutdown sidecar
+ * that serializes it, and the `ws-agent-list` `include_prompt` reply alike.
+ */
+export const PROMPT_STORAGE_CAP_BYTES = 4096;
+
+/** Marker line appended by `truncatePromptForStorage` when a prompt was cut. */
+const PROMPT_TRUNCATION_MARKER = "\n…[truncated for storage]";
+
+/**
+ * Byte-safe head-truncation of a prompt for storage: cuts at `capBytes` UTF-8
+ * bytes (never mid-codepoint — a naive `Buffer.slice` cut can straddle a
+ * multibyte sequence and corrupt the tail) and appends a cut-marker line when
+ * truncation actually happened. Mirrors `AgentEventLineBuffer`'s existing
+ * `StringDecoder`-based multibyte-safe convention.
+ */
+export function truncatePromptForStorage(prompt: string, capBytes: number = PROMPT_STORAGE_CAP_BYTES): string {
+  const buf = Buffer.from(prompt, "utf8");
+  if (buf.length <= capBytes) return prompt;
+  const decoder = new StringDecoder("utf8");
+  const head = decoder.write(buf.subarray(0, capBytes));
+  return `${head}${PROMPT_TRUNCATION_MARKER}`;
+}
 
 /**
  * 260905: the six push families. Each is a Pi custom-message `customType`
@@ -936,16 +1030,17 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
 /**
  * The shared registry walk behind both `computeRunningStatusLine` (below) and
  * the goal-loop yield predicate (`hasRunningAgents`, 260905 Phase 2): skips
- * `threadBound`/no-`client` records, and reports whether anything counts as
- * "present" (live, non-threadBound) at all plus how many of those are still
- * `running` and not `terminalThisTurn`. Extracted so the two call sites can
- * never drift apart in what they count as fan-in.
+ * only `threadBound` records, and reports whether anything counts as
+ * "present" (any non-threadBound registry member — dormant/parked included,
+ * see the alias/park/cap ticket's presence-rule change) at all, plus how many
+ * of those are still `running` and not `terminalThisTurn`. Extracted so the
+ * two call sites can never drift apart in what they count as fan-in.
  */
 function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolean; running: number } {
   let present = false;
   let running = 0;
   for (const record of registry?.values() ?? []) {
-    if (record.threadBound || !record.client) continue;
+    if (record.threadBound) continue;
     present = true;
     if (record.running && !record.terminalThisTurn) running += 1;
   }
@@ -956,27 +1051,27 @@ function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolea
  * The fan-in status line every pushed message carries: `N delegated agents
  * still running`, computed fresh at push time over the shared registry.
  *
- * - The line is PRESENT whenever any registry member is neither dormant nor
- *   stopped/exited (`record.client` present — the one flag all three of those
- *   resting states clear) and NOT `threadBound`. An `explore` leaf is never in
- *   this registry at all (it has its own).
+ * - The line is PRESENT whenever the registry holds any member that is NOT
+ *   `threadBound` — 260905 (alias/park/cap ticket) keys this on registry
+ *   membership, not on a live client: a dormant/parked record still counts as
+ *   present, since automatic parking (see the settle handler below) now
+ *   routinely turns a settled, non-threadBound child dormant. An `explore`
+ *   leaf is never in this registry at all (it has its own).
  * - N counts the subset of those that is still `running` and has not yet
  *   filed a `final`/`question` this turn (`terminalThisTurn`), so the agent
  *   whose own terminal report triggered this very push has already removed
- *   itself. `0 delegated agents still running` is the lead's synthesis cue.
- *
- * Presence is deliberately NOT keyed on `running`: a live but idle child is
- * none of dormant/stopped/exited, so it keeps the line present and only
- * leaves N. That is what makes the zero line reachable in the real event
- * order (each child settles moments after filing its final).
+ *   itself. `0 delegated agents still running` is the lead's synthesis cue —
+ *   and, per the presence rule above, `0 …` stays visible (not omitted) as
+ *   long as any non-threadBound record — dormant included — remains
+ *   registered; cap eviction is what eventually removes it.
  *
  * Owner decision after the second live run (2026-09-05): the former
  * running-out-of-total form with an id suffix is gone. The total only ever
  * grew across a session (an idle child keeps its process, so it stayed counted
  * until stopped/exited) and the id suffix duplicated what `ws-agent-list`
  * already answers, so both were noise. The omission rule survives unchanged:
- * when nothing live is delegated
- * there is no line at all (`undefined`), so a push that has nothing to do with
+ * when nothing at all is registered (or every member is threadBound) there is
+ * no line at all (`undefined`), so a push that has nothing to do with
  * delegation fan-in — a `ws-agent-orphaned` roll-call at session start, a
  * `spawn-failed` for the only child — never ends with a contentless zero line.
  */
@@ -1081,11 +1176,17 @@ function sendPush(
   const status = computeRunningStatusLine(registry);
   const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
   const details = status ? { ...base, status } : base;
+  // 260905 (alias/park/cap ticket): pushed-message heads print the alias when
+  // there is one, followed by the uuid — a one-line, zero-signature-churn
+  // change: compose the display id here and pass it through
+  // `buildPushContent`'s existing bare-`agentId` parameter, leaving that
+  // helper (and `details.agent_id`, which stays the raw uuid) untouched.
+  const displayId = record?.alias ? `${record.alias} (${record.agentId})` : record?.agentId;
   try {
     pi.sendMessage(
       {
         customType: family,
-        content: buildPushContent(family, record?.agentId, payload, status),
+        content: buildPushContent(family, displayId, payload, status),
         display: true,
         details: details as never,
       },
@@ -1340,6 +1441,17 @@ export interface SpawnAgentParams {
   prompt: string;
   modelName?: string;
   modelEffort?: string;
+  /**
+   * 260905 (alias/park/cap ticket): optional human-chosen short name for this
+   * agent, resolved alongside the raw uuid by `resolveAgentId`. Reusing an
+   * alias already held by a `running`/`threadBound` record rejects the spawn;
+   * a dormant/idle holder's alias is overwritten (its `title` is untouched).
+   * Never derived from `prompt` — the adapter only ever uses what the caller
+   * passed.
+   */
+  alias?: string;
+  /** 260905: optional free-text label, independent of `alias` — see `RpcAgentRecord.title`. */
+  title?: string;
 }
 
 export interface RpcSpawnCtx {
@@ -1698,6 +1810,21 @@ export function applyRpcEvent(
  * point (`probeAgentLiveness`) — a child that died mid-turn is reported as
  * `exited` rather than silently going quiet.
  *
+ * 260905 (alias/park/cap ticket): **automatic park** is the last step of this
+ * settle handling, run AFTER `probeAgentLiveness` resolves (so a park never
+ * races the liveness check) and after the (separately-registered) anti-bleed
+ * advisory/nudge judgment has had its chance to re-prompt the child — see the
+ * plan's Codebase Findings for why no explicit ordering call into `fork.ts` is
+ * needed: a synchronous nudge already flips `record.running` before this IIFE
+ * resumes past its own `await`. Parks (silent `stopAgent`) iff
+ * `!record.threadBound && !record.running` at that point: a `threadBound`
+ * record is never parked, and a record the nudge re-prompted is not parked
+ * either. No grace period, and no extra push for the park itself — the
+ * settle/final push above already told the lead the child stopped; parking is
+ * pure resource cleanup, silently resumed later by `sendToAgent`'s dormant
+ * branch. A park failure is swallowed (best effort), matching every other
+ * best-effort branch in this handler.
+ *
  * Exported (review relay #1, test partition C2) purely so the suppression
  * conditions above have direct offline coverage: this listener, not the pure
  * `applyRpcEvent`, is where the `!threadBound && !terminalThisTurn` gate
@@ -1727,6 +1854,16 @@ export function attachEventListener(
           pushToLead(pi, registry, record, "ws-agent-settled", { reason: "idle", last_message: lastMessage }, "followUp");
         }
         await probeAgentLiveness(pi, registry, record);
+        // Automatic park: the last step, after the liveness probe and (by
+        // event-loop ordering) after any synchronous nudge has had its chance
+        // to re-prompt this record. See the doc comment above.
+        if (registry && !record.threadBound && !record.running) {
+          try {
+            await stopAgent(registry, record.agentId, pi, { silent: true });
+          } catch {
+            // best effort — a park failure must not crash the settle handler.
+          }
+        }
       })();
     }
     // Ctx callback first, per-record fallback second (see
@@ -1754,6 +1891,109 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
   } catch {
     // never-hard-fail — see doc comment above.
   }
+}
+
+/**
+ * 260905 (alias/park/cap ticket): the alias half of `spawnAgent`'s guard
+ * clauses, run before any side effect (`mkdtempSync`/`randomUUID`). No-op
+ * (`{ ok: true }`) when `alias` is unset. Otherwise scans for the current
+ * holder of `alias`: a `running`/`threadBound` holder blocks the spawn
+ * outright (rejection, not silent skip — the ticket's own wording); any other
+ * holder (dormant/idle) is returned as `holder` for the caller to clear.
+ *
+ * Review relay #1 (Critical): this function does **not** mutate `holder`
+ * itself — it only locates and validates. `runSpawnGuards` below commits
+ * `holder.alias = undefined` only once every guard (this one and
+ * `evictForCapacity`) has actually succeeded, so a rejected spawn (this
+ * guard, `evictForCapacity`, or anything else `spawnAgent` throws before
+ * registering) leaves the previous holder's alias completely untouched —
+ * still resolvable by `ws-agent-send <alias>`. Exported for direct unit
+ * coverage without a real `RpcClient`.
+ */
+export function reserveAgentAlias(
+  registry: RpcAgentRegistry,
+  alias: string | undefined,
+): { ok: true; holder?: RpcAgentRecord } | { ok: false; error: string } {
+  if (!alias) return { ok: true };
+  for (const holder of registry.values()) {
+    if (holder.alias !== alias) continue;
+    if (holder.running || holder.threadBound) {
+      const state = holder.running ? "running" : "threadBound";
+      return {
+        ok: false,
+        error: `ws-pi-agent: ws-agent-spawn rejected: alias "${alias}" is held by agent ${holder.agentId}, which is ${state}`,
+      };
+    }
+    return { ok: true, holder };
+  }
+  return { ok: true };
+}
+
+/**
+ * 260905 (alias/park/cap ticket): the registry-cap half of `spawnAgent`'s
+ * guard clauses. While the registry is at or over `cap`, evicts the dormant
+ * (`!record.client`), non-`running`, non-`threadBound` record with the
+ * oldest last-activity stamp (`max(lastLeadPromptAt, last reportLog entry)`)
+ * until the new spawn fits. Never evicts a `running`/`threadBound` record —
+ * when none remain to evict, the spawn fails outright rather than silently
+ * exceeding the cap. Only forgets the registry entry (never touches the
+ * evicted agent's on-disk session file). Exported for direct unit coverage
+ * without a real `RpcClient`.
+ */
+export function evictForCapacity(registry: RpcAgentRegistry, cap: number): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+  const evictedLabels: string[] = [];
+  while (registry.size >= cap) {
+    let candidate: RpcAgentRecord | undefined;
+    let candidateActivity = Number.POSITIVE_INFINITY;
+    for (const record of registry.values()) {
+      if (record.client || record.running || record.threadBound) continue;
+      const activity = Math.max(record.lastLeadPromptAt ?? 0, record.reportLog.at(-1)?.at ?? 0);
+      if (activity < candidateActivity) {
+        candidate = record;
+        candidateActivity = activity;
+      }
+    }
+    if (!candidate) {
+      return {
+        ok: false,
+        error: `ws-pi-agent: ws-agent-spawn rejected: registry cap (${cap}) reached and every remaining record is running/threadBound — nothing can be evicted to fit`,
+      };
+    }
+    registry.delete(candidate.agentId);
+    evictedLabels.push(candidate.alias ?? candidate.agentId);
+  }
+  return evictedLabels.length > 0 ? { ok: true, evictedLabel: evictedLabels.join(", ") } : { ok: true };
+}
+
+/**
+ * 260905 (alias/park/cap ticket, review relay #1 CRITICAL fix): the single
+ * gate `spawnAgent` calls before any side effect (`mkdtempSync`/
+ * `randomUUID`/`registry.set`). Runs `reserveAgentAlias` then
+ * `evictForCapacity` and returns the first failure unmutated — neither guard
+ * commits anything on its own. Only once BOTH guards succeed does this
+ * function clear the previous alias holder's `alias` (the actual transfer).
+ * This ordering is load-bearing: the original implementation cleared the
+ * holder's alias as a side effect of `reserveAgentAlias` itself, so a
+ * subsequent `evictForCapacity` rejection (e.g. every other record is
+ * running/threadBound/live) still left the spawn un-registered but had
+ * already destroyed the previous holder's alias, making it unresolvable by
+ * name even though its record was never touched otherwise. Exported for
+ * direct unit coverage of the exact ordering guarantee without a real
+ * `RpcClient`.
+ */
+export function runSpawnGuards(
+  registry: RpcAgentRegistry,
+  alias: string | undefined,
+  cap: number,
+): { ok: true; evictedLabel?: string } | { ok: false; error: string } {
+  const aliasReservation = reserveAgentAlias(registry, alias);
+  if (!aliasReservation.ok) return aliasReservation;
+  const eviction = evictForCapacity(registry, cap);
+  if (!eviction.ok) return eviction;
+  if (aliasReservation.holder) {
+    aliasReservation.holder.alias = undefined;
+  }
+  return eviction;
 }
 
 /**
@@ -1786,8 +2026,27 @@ async function applyModelEffort(client: RpcClient, modelEffort: string | undefin
  * Throws — never silently degrades — when `getState()` returns no
  * `sessionFile`, mirroring the codebase's existing never-silently-degrade
  * convention (e.g. `bridge.ts`'s ferrule-mint failure handling).
+ *
+ * 260905 (alias/park/cap ticket): the very first thing this function does is
+ * call `runSpawnGuards` (alias reservation + cap eviction, committed only
+ * once both succeed) — see that function's doc comment for why the ordering
+ * there is load-bearing. A guard rejection throws before any of the above
+ * side effects (`mkdtempSync`, `randomUUID`, `registry.set`) run, so a
+ * rejected spawn leaves no trace and no other record touched.
  */
-export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, params: SpawnAgentParams): Promise<{ agent_id: string }> {
+export async function spawnAgent(
+  registry: RpcAgentRegistry,
+  ctx: RpcSpawnCtx,
+  params: SpawnAgentParams,
+): Promise<{ agent_id: string; alias?: string; evicted?: string }> {
+  // Guard clauses first, before any side effect (mkdtempSync/randomUUID) and
+  // before `registry.set` — a rejected spawn leaves no trace, including on
+  // the previous alias holder (see `runSpawnGuards`'s doc comment).
+  const eviction = runSpawnGuards(registry, params.alias, resolveAgentRegistryCap());
+  if (!eviction.ok) {
+    throw new Error(eviction.error);
+  }
+
   const agentId = randomUUID();
   const sessionDir = mkdtempSync(join(tmpdir(), "ws-pi-agent-"));
   const sessionPath = join(sessionDir, "session.jsonl");
@@ -1799,6 +2058,8 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
   const tools = ctx.explicitTools ?? resolveTools(toolGroup, ctx.wsToolNames);
   const record: RpcAgentRecord = {
     agentId,
+    alias: params.alias,
+    title: params.title,
     sessionPath,
     systemPromptPath: params.systemPromptPath,
     modelBase,
@@ -1810,6 +2071,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     streaming: false,
     running: false,
     reportLog: [],
+    prompt: truncatePromptForStorage(params.prompt),
   };
   registry.set(agentId, record);
 
@@ -1845,7 +2107,7 @@ export async function spawnAgent(registry: RpcAgentRegistry, ctx: RpcSpawnCtx, p
     throw err;
   }
 
-  return { agent_id: agentId };
+  return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
 }
 
 /**
@@ -1888,7 +2150,11 @@ export async function sendToAgent(
   message: string,
   interrupt?: boolean,
 ): Promise<{ agent_id: string }> {
-  const record = registry.get(agentId);
+  // 260905 (alias/park/cap ticket): resolve alias-or-uuid through the one
+  // shared helper first; an unresolvable input falls back to the original
+  // string so the existing "unknown agentId" error path is unchanged.
+  const resolvedId = resolveAgentId(registry, agentId) ?? agentId;
+  const record = registry.get(resolvedId);
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
@@ -1928,7 +2194,7 @@ export async function sendToAgent(
       // ignored — see above.
     }
     await promptAgent(record, client, message);
-    return { agent_id: agentId };
+    return { agent_id: record.agentId };
   }
 
   const live = record.client;
@@ -1962,7 +2228,7 @@ export async function sendToAgent(
     markAgentExited(ctx.pi, registry, record);
     throw err;
   }
-  return { agent_id: agentId };
+  return { agent_id: record.agentId };
 }
 
 /**
@@ -1996,14 +2262,26 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
  * `status` deliberately keeps deriving from `streaming` rather than the new
  * `running` flag — `streaming` is event-confirmed and is the right thing to
  * DISPLAY, while `running` is the narrower, earlier-set fan-in counter.
+ *
+ * 260905 (alias/park/cap ticket) adds `alias`/`title` on every row (both
+ * omitted when unset), and an opt-in `opts.includePrompt` that additionally
+ * includes the record's stored (already head-truncated at spawn) `prompt`.
+ * Off by default — a full-registry dump with every prompt inlined would be
+ * needlessly large for the common "what's out there" check.
  */
-export function listAgents(registry: RpcAgentRegistry): Array<{ agent_id: string; status: AgentStatus; last_report_at?: string }> {
+export function listAgents(
+  registry: RpcAgentRegistry,
+  opts?: { includePrompt?: boolean },
+): Array<{ agent_id: string; status: AgentStatus; alias?: string; title?: string; last_report_at?: string; prompt?: string }> {
   return [...registry.entries()].map(([agentId, record]) => {
     const lastReport = record.reportLog[record.reportLog.length - 1];
     return {
       agent_id: agentId,
       status: (record.client ? (record.streaming ? "running" : "idle") : "dormant") as AgentStatus,
+      ...(record.alias ? { alias: record.alias } : {}),
+      ...(record.title ? { title: record.title } : {}),
       ...(lastReport ? { last_report_at: new Date(lastReport.at).toISOString() } : {}),
+      ...(opts?.includePrompt && record.prompt ? { prompt: record.prompt } : {}),
     };
   });
 }
@@ -2031,12 +2309,27 @@ export async function stopAgent(
   pi?: ExtensionAPI,
   opts?: { silent?: boolean },
 ): Promise<{ agent_id: string }> {
-  const record = registry.get(agentId);
+  // 260905 (alias/park/cap ticket): resolve alias-or-uuid first — see
+  // `sendToAgent`'s identical resolve-then-`.get()` shape.
+  const resolvedId = resolveAgentId(registry, agentId) ?? agentId;
+  const record = registry.get(resolvedId);
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
   const client = record.client;
   if (client) {
+    // Review relay #1 (Important, alias/park/cap): clear live state
+    // SYNCHRONOUSLY, before either await below, not after both resolve. A
+    // record that still reads `client`-live during `abort()`/`stop()` is a
+    // race window: a concurrent `ws-agent-send` (or overlay `ForkChannel`
+    // send) sees a live-idle record and calls `promptAgent` on a client
+    // that's mid-teardown, losing the turn silently once `stop()` lands.
+    // Clearing here first means that same racing send instead takes
+    // `sendToAgent`'s dormant-resume branch, exactly as if this record had
+    // already finished parking — the automatic park path (which now runs
+    // after every settle, not just on an explicit stop) makes this window
+    // hot enough to close rather than accept.
+    clearLiveState(record);
     try {
       await client.abort();
     } catch {
@@ -2047,7 +2340,6 @@ export async function stopAgent(
     } catch {
       // best effort
     }
-    clearLiveState(record);
     // Review relay #1 (I2): a stop is a thread-close path too — the ticket
     // names "lead stop" alongside `/done`/fork final/`ws-resolve`. Releasing
     // the bind here keeps a stopped agent from carrying a latched flag into a
@@ -2063,7 +2355,7 @@ export async function stopAgent(
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
   }
-  return { agent_id: agentId };
+  return { agent_id: record.agentId };
 }
 
 /**
@@ -2075,7 +2367,10 @@ export async function stopAgent(
  * `sendToAgent`/`stopAgent`.
  */
 export function getAgentTranscriptPath(registry: RpcAgentRegistry, agentId: string): { transcript_path: string } {
-  const record = registry.get(agentId);
+  // 260905 (alias/park/cap ticket): resolve alias-or-uuid first — see
+  // `sendToAgent`'s identical resolve-then-`.get()` shape.
+  const resolvedId = resolveAgentId(registry, agentId) ?? agentId;
+  const record = registry.get(resolvedId);
   if (!record) {
     throw new Error(`ws-pi-agent: unknown agentId "${agentId}"`);
   }
@@ -2174,7 +2469,7 @@ export function registerAgentTools(
     name: "ws-agent-spawn",
     label: "ws-agent-spawn",
     description:
-      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
+      "Spawn a persistent RPC-backed pi subagent from an already-rendered system-prompt file (e.g. via ws/playbook.render). Returns {agent_id, alias?, evicted?} immediately after the initial prompt is sent. Do not wait for it: end your turn, and its reports, questions and completion arrive on their own as ws-agent-* messages carrying a running-count status line.",
     parameters: {
       type: "object",
       properties: {
@@ -2193,11 +2488,27 @@ export function registerAgentTools(
           description:
             "Optional Pi thinking level (off|minimal|low|medium|high|xhigh|max), applied via setThinkingLevel after start; an unsupported value degrades to a no-op.",
         },
+        alias: {
+          type: "string",
+          description:
+            "Optional short name for this agent, usable in place of agent_id on ws-agent-send/stop/transcript/ws-approve. Reusing an alias held by a running/threadBound agent rejects this spawn; a dormant/idle holder's alias is overwritten (its title is kept). Never derived automatically — omit to address this agent by uuid only.",
+        },
+        title: {
+          type: "string",
+          description: "Optional free-text label for this agent, independent of alias (display only, never used for resolution).",
+        },
       },
       required: ["system_prompt_path", "prompt"],
     } as never,
     async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
-      const p = params as { system_prompt_path: string; prompt: string; model_name?: string; model_effort?: string };
+      const p = params as {
+        system_prompt_path: string;
+        prompt: string;
+        model_name?: string;
+        model_effort?: string;
+        alias?: string;
+        title?: string;
+      };
       const result = await spawnAgent(
         rpcRegistry,
         {
@@ -2213,6 +2524,8 @@ export function registerAgentTools(
           prompt: p.prompt,
           modelName: p.model_name,
           modelEffort: p.model_effort,
+          alias: p.alias,
+          title: p.title,
         },
       );
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
@@ -2255,10 +2568,19 @@ export function registerAgentTools(
     name: "ws-agent-list",
     label: "ws-agent-list",
     description:
-      "List every tracked agent_id, its status (running/idle/dormant), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
-    parameters: { type: "object", properties: {} } as never,
-    async execute() {
-      const result = listAgents(rpcRegistry);
+      "List every tracked agent_id, its alias/title (when set), status (running/idle/dormant — most agents park to dormant shortly after settling, so idle is transient), and last_report_at (ISO, absent if it has never reported). Use it to check on a quiet agent — there is no wait tool; every report, question, approval request and completion is pushed to you as a ws-agent-* message on its own.",
+    parameters: {
+      type: "object",
+      properties: {
+        include_prompt: {
+          type: "boolean",
+          description: "When true, also include each agent's stored (head-truncated) initial prompt. Off by default.",
+        },
+      },
+    } as never,
+    async execute(_toolCallId, params) {
+      const p = params as { include_prompt?: boolean };
+      const result = listAgents(rpcRegistry, { includePrompt: p.include_prompt });
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     },
   });

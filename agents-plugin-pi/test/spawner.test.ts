@@ -112,6 +112,15 @@ import {
   buildChildProcessEnv,
   inheritModelFromToolCtx,
   resolveSpawnToolGroup,
+  resolveAgentId,
+  resolveAgentRegistryCap,
+  reserveAgentAlias,
+  evictForCapacity,
+  runSpawnGuards,
+  truncatePromptForStorage,
+  WS_PI_AGENT_REGISTRY_CAP_ENV,
+  DEFAULT_AGENT_REGISTRY_CAP,
+  PROMPT_STORAGE_CAP_BYTES,
   type AgentRecord,
   type RpcAgentRecord,
   type RpcAgentRegistry,
@@ -493,9 +502,11 @@ function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord
 }
 
 /**
- * A record in the LIVE resting state: `client` present is what keeps
- * `computeRunningStatusLine`'s line present at all (a dormant/stopped/exited
- * record has none), so every fan-in fixture needs one. Never a real `RpcClient`.
+ * A record in the LIVE resting state. 260905 (alias/park/cap ticket):
+ * presence no longer depends on `client` — any non-threadBound registry
+ * member (dormant/parked included) keeps `computeRunningStatusLine`'s line
+ * present — but most fan-in fixtures below still want a live client to
+ * exercise `running`/`streaming` transitions. Never a real `RpcClient`.
  */
 function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
   return freshRpcRecord({ client: {} as RpcClient, ...overrides });
@@ -810,8 +821,13 @@ describe("computeRunningStatusLine (fan-in running count)", () => {
     assert.equal(computeRunningStatusLine(undefined), undefined);
   });
 
-  test("Edition: a registry whose every record is dormant/stopped also produces no line", () => {
+  test("260905 (alias/park/cap): a registry whose every record is dormant/stopped now KEEPS the line, at zero — presence keys on registry membership, not on a live client", () => {
     const registry: RpcAgentRegistry = new Map([["gone", freshRpcRecord({ agentId: "gone" })]]);
+    assert.equal(computeRunningStatusLine(registry), "0 delegated agents still running");
+  });
+
+  test("260905 (alias/park/cap): a registry whose only member is threadBound still produces no line", () => {
+    const registry: RpcAgentRegistry = new Map([["t", freshRpcRecord({ agentId: "t", threadBound: true })]]);
     assert.equal(computeRunningStatusLine(registry), undefined);
   });
 
@@ -1069,6 +1085,27 @@ describe("pushToLead", () => {
     const record = liveRpcRecord({ agentId: "a", running: true });
     pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
     assert.equal(pi.sent.length, 1);
+  });
+
+  test("260905 (alias/park/cap): the pushed message HEAD prints the alias, followed by the uuid — details.agent_id stays the bare uuid", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a1", alias: "scout", running: true });
+    const registry: RpcAgentRegistry = new Map([["a1", record]]);
+
+    pushToLead(pi.api, registry, record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent scout (a1)");
+    assert.deepEqual(pi.sent[0].message.details, { agent_id: "a1", report: "halfway", status: "1 delegated agent still running" });
+  });
+
+  test("260905 (alias/park/cap): with no alias, the head is unchanged (bare uuid)", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a1", running: true });
+    const registry: RpcAgentRegistry = new Map([["a1", record]]);
+
+    pushToLead(pi.api, registry, record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent[0].message.content?.split("\n")[0], "[ws-agent-report] agent a1");
   });
 });
 
@@ -1433,6 +1470,98 @@ describe("attachEventListener (the settle-suppression IO gate)", () => {
     listener?.(approvalEvent);
     assert.deepEqual(recordCalls, ["b"], "a resume with no ctx relay still reaches the record's own");
   });
+
+  /**
+   * 260905 (alias/park/cap ticket): automatic park is the LAST step of settle
+   * handling, run after `probeAgentLiveness` resolves. It parks (silent
+   * `stopAgent`) iff `!record.threadBound && !record.running` at that point.
+   */
+  describe("automatic park (260905 alias/park/cap ticket)", () => {
+    function stoppableListenerHarness() {
+      const listeners: Array<(evt: unknown) => void> = [];
+      const stopCalls: string[] = [];
+      const client = {
+        onEvent(l: (evt: unknown) => void) {
+          listeners.push(l);
+          return () => {};
+        },
+        getState: async () => ({ sessionFile: "/tmp/s.jsonl" }),
+        getLastAssistantText: async () => "the last thing it said",
+        abort: async () => void stopCalls.push("abort"),
+        stop: async () => void stopCalls.push("stop"),
+        prompt: async () => {},
+      } as unknown as RpcClient;
+      const pi = fakePi();
+      const record = liveRpcRecord({ agentId: "a", running: true, client });
+      const registry: RpcAgentRegistry = new Map([["a", record]]);
+      attachEventListener(pi.api, registry, record, client);
+      return { pi, record, registry, client, stopCalls, emit: (evt: unknown) => listeners.forEach((l) => l(evt)) };
+    }
+
+    const drainTwice = async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+
+    test("a settled, non-threadBound, non-running record is parked (silent stop) after the settle push, with no extra push for the park itself", async () => {
+      const h = stoppableListenerHarness();
+      h.emit({ type: "agent_settled" });
+      await drainTwice();
+
+      assert.equal(h.record.client, undefined, "parked: client cleared");
+      assert.deepEqual(h.stopCalls, ["abort", "stop"], "the park goes through the existing silent-stop path");
+      assert.deepEqual(
+        h.pi.sent.map((s) => s.message.customType),
+        ["ws-agent-settled"],
+        "the settle notice is the only push — park itself is silent",
+      );
+    });
+
+    test("a threadBound record is never parked, even though it settles with no push at all", async () => {
+      const h = stoppableListenerHarness();
+      h.record.threadBound = true;
+      h.emit({ type: "agent_settled" });
+      await drainTwice();
+
+      assert.notEqual(h.record.client, undefined, "a threadBound record must stay live — the owner exchange is not the lead's business");
+      assert.deepEqual(h.stopCalls, []);
+      assert.deepEqual(h.pi.sent, []);
+    });
+
+    test("a record the nudge re-prompted before the settle IIFE resumed is not parked", async () => {
+      const h = stoppableListenerHarness();
+      // Simulate fork.ts's wireAntiBleedLoop: a SECOND, independent
+      // `client.onEvent` listener registered after attachEventListener's own,
+      // which fires synchronously within the same event dispatch and
+      // re-prompts the record — flipping `running` back to true — before this
+      // module's own settle IIFE resumes past its first `await`.
+      h.client.onEvent(() => {
+        void promptAgent(h.record, h.client, "nudge", { isLeadPrompt: false });
+      });
+
+      h.emit({ type: "agent_settled" });
+      await drainTwice();
+
+      assert.notEqual(h.record.client, undefined, "not parked — the nudge re-prompted it");
+      assert.equal(h.record.running, true);
+      assert.deepEqual(h.stopCalls, [], "no park attempt at all");
+    });
+
+    test("a final still flows through the settle push before the park happens", async () => {
+      const h = stoppableListenerHarness();
+      h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: done" } });
+      h.emit({ type: "agent_settled" });
+      await drainTwice();
+
+      assert.deepEqual(
+        h.pi.sent.map((s) => s.message.customType),
+        ["ws-agent-report"],
+        "the final report is delivered exactly as before",
+      );
+      assert.equal((h.pi.sent[0].message.details as { report?: string }).report, "Outcome: done");
+      assert.equal(h.record.client, undefined, "and the child is still parked afterward");
+    });
+  });
 });
 
 /**
@@ -1453,8 +1582,8 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal(pi.sent[0].message.customType, "ws-agent-settled");
     assert.deepEqual(
       pi.sent[0].message.details,
-      { agent_id: "a", reason: "spawn-failed", error: "spawn ENOENT" },
-      "Edition: the only child failed to start, so there is no fan-in left to describe",
+      { agent_id: "a", reason: "spawn-failed", error: "spawn ENOENT", status: "0 delegated agents still running" },
+      "260905 (alias/park/cap): the failed record stays registered (dormant), so presence — keyed on registry membership, not a live client — keeps the status line at zero",
     );
     assert.equal(record.client, undefined, "a failed spawn leaves no live client behind");
     assert.equal(record.running, false, "and stops counting toward the fan-in immediately");
@@ -1656,6 +1785,10 @@ describe("stopAgent (260905 push + silent)", () => {
       kind: "final",
       report: "Outcome: done",
       settled_reason: "stopped",
+      // 260905 (alias/park/cap): the stopped record stays registered
+      // (dormant), so presence — keyed on registry membership, not a live
+      // client — keeps the status line at zero.
+      status: "0 delegated agents still running",
     });
     assert.equal(record.pendingFinal, undefined);
   });
@@ -1680,6 +1813,56 @@ describe("stopAgent (260905 push + silent)", () => {
 
   test("unknown agentId throws", async () => {
     await assert.rejects(() => stopAgent(new Map(), "missing"), /unknown agentId/);
+  });
+
+  test("260905 (alias/park/cap): resolves by alias — ws-agent-stop <alias> stops the aliased holder", async () => {
+    const pi = fakePi();
+    const { client, calls } = stoppableClient();
+    const record = freshRpcRecord({ agentId: "a", alias: "scout", client, running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const result = await stopAgent(registry, "scout", pi.api);
+
+    assert.deepEqual(result, { agent_id: "a" }, "the canonical uuid is returned, not the alias");
+    assert.deepEqual(calls, ["abort", "stop"]);
+    assert.equal(record.client, undefined);
+  });
+
+  test("260905 review relay #1 (Important): record.client/running are cleared SYNCHRONOUSLY, before abort()/stop() resolve — closes the mid-park send race", async () => {
+    // A concurrent `ws-agent-send` (or overlay ForkChannel) races the park
+    // path: it must see the record as dormant (client undefined) during the
+    // window `stopAgent` awaits `abort()`/`stop()`, not just after both
+    // complete — otherwise it would take the live branch and prompt a
+    // client that's mid-teardown, losing the turn silently.
+    let releaseAbort: () => void = () => {};
+    const abortGate = new Promise<void>((resolve) => {
+      releaseAbort = resolve;
+    });
+    const calls: string[] = [];
+    const client = {
+      abort: async () => {
+        calls.push("abort");
+        await abortGate;
+      },
+      stop: async () => {
+        calls.push("stop");
+      },
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", client, running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const stopPromise = stopAgent(registry, "a", undefined, { silent: true });
+
+    // No `await` needed: an async function runs synchronously up to its
+    // first `await` (inside client.abort() here), so by the time control
+    // returns to this line, clearLiveState has already run.
+    assert.equal(record.client, undefined, "a racing send must see this record as dormant WHILE abort() is still pending");
+    assert.equal(record.running, false);
+    assert.deepEqual(calls, ["abort"], "abort() has been called but not yet resolved");
+
+    releaseAbort();
+    await stopPromise;
+    assert.deepEqual(calls, ["abort", "stop"]);
   });
 });
 
@@ -1773,6 +1956,29 @@ describe("listAgents", () => {
     const record = freshRpcRecord({ agentId: "a", client: {} as RpcClient, streaming: false, running: true });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
     assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "idle" }], "a just-prompted-but-not-yet-started child displays as idle, and is still counted as running by computeRunningStatusLine");
+  });
+
+  test("260905 (alias/park/cap): alias/title are included on a row when set, omitted when not", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["a", freshRpcRecord({ agentId: "a", alias: "scout", title: "Reviews auth" })],
+      ["b", freshRpcRecord({ agentId: "b" })],
+    ]);
+    assert.deepEqual(listAgents(registry), [
+      { agent_id: "a", status: "dormant", alias: "scout", title: "Reviews auth" },
+      { agent_id: "b", status: "dormant" },
+    ]);
+  });
+
+  test("260905 (alias/park/cap): prompt is omitted by default and included only when include_prompt is set", () => {
+    const record = freshRpcRecord({ agentId: "a", prompt: "review src/auth.ts" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "dormant" }], "off by default");
+    assert.deepEqual(listAgents(registry, { includePrompt: true }), [{ agent_id: "a", status: "dormant", prompt: "review src/auth.ts" }]);
+  });
+
+  test("260905 (alias/park/cap): include_prompt on a record with no stored prompt adds no prompt key", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.deepEqual(listAgents(registry, { includePrompt: true }), [{ agent_id: "a", status: "dormant" }]);
   });
 });
 
@@ -1887,6 +2093,17 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
     const registry: RpcAgentRegistry = new Map();
     await assert.rejects(() => sendToAgent(registry, { cwd: "/tmp" }, "missing", "hi"), /unknown agentId/);
   });
+
+  test("260905 (alias/park/cap): resolves by alias — ws-agent-send <alias> drives the aliased holder", async () => {
+    const { client, calls } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", alias: "scout", client, streaming: false });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const result = await sendToAgent(registry, { cwd: "/tmp" }, "scout", "hello");
+
+    assert.deepEqual(result, { agent_id: "a" }, "the canonical uuid is returned, not the alias");
+    assert.deepEqual(calls, [["prompt", "hello"]]);
+  });
 });
 
 describe("handleAgentEvent", () => {
@@ -1934,6 +2151,43 @@ describe("getAgentTranscriptPath", () => {
   test("unknown agent id throws matching /unknown agentId/", () => {
     const registry: RpcAgentRegistry = new Map();
     assert.throws(() => getAgentTranscriptPath(registry, "missing"), /unknown agentId/);
+  });
+
+  test("260905 (alias/park/cap): resolves by alias on an already-dormant record", () => {
+    const record = freshRpcRecord({ agentId: "a", alias: "scout", sessionPath: "/tmp/ws-pi-agent-x/session.jsonl" });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(getAgentTranscriptPath(registry, "scout"), { transcript_path: "/tmp/ws-pi-agent-x/session.jsonl" });
+  });
+
+  test("260905 review relay #1 (Important, test case 3): park -> resume -> ws-agent-transcript still resolves the exact same session file, by alias", async () => {
+    // Case 3 of the ticket's Tests bullet. The park half runs the REAL
+    // production `stopAgent`; the resume half simulates only the one thing
+    // `sendToAgent`'s dormant branch does before it becomes live-gate-only
+    // (constructing a real `RpcClient` and calling `client.start()`, see
+    // that describe block's own doc comment) — reassigning `record.client`.
+    // What this proves end-to-end: `record.sessionPath` (the field
+    // `getAgentTranscriptPath` reads) is never touched by park or by the
+    // start of a resume, so the on-disk transcript file a real resume would
+    // `--session` back into is provably the SAME file the parked turn wrote
+    // to — "the parked turn" is not lost or swapped out from under it.
+    const sessionPath = "/tmp/ws-pi-agent-x/session.jsonl";
+    const client = {
+      abort: async () => {},
+      stop: async () => {},
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", alias: "scout", client, running: true, sessionPath });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    await stopAgent(registry, "a", undefined, { silent: true });
+    assert.equal(record.client, undefined, "parked: dormant");
+    assert.deepEqual(getAgentTranscriptPath(registry, "scout"), { transcript_path: sessionPath }, "readable while parked");
+
+    record.client = {} as RpcClient; // simulates the moment sendToAgent's dormant branch sets record.client, pre-start()
+    assert.deepEqual(
+      getAgentTranscriptPath(registry, "scout"),
+      { transcript_path: sessionPath },
+      "resumed: identical path — park/resume never swaps or truncates the transcript file",
+    );
   });
 });
 
@@ -2023,5 +2277,289 @@ describe("buildChildProcessEnv (WS_PI_SPAWN_ROLE_ENV placement for spawnPiProces
   test("an existing WS_PI_SPAWN_ROLE value in the base env is overwritten to \"explore\"", () => {
     const env = buildChildProcessEnv({ [WS_PI_SPAWN_ROLE_ENV]: "stale" });
     assert.equal(env[WS_PI_SPAWN_ROLE_ENV], "explore");
+  });
+});
+
+/**
+ * 260905 (alias/park/cap ticket): the alias-or-uuid resolution helper every
+ * `agent_id` param goes through (`sendToAgent`, `stopAgent`,
+ * `getAgentTranscriptPath`, `ws-approve`).
+ */
+describe("resolveAgentId (alias-or-uuid, single resolution helper)", () => {
+  test("a raw uuid already present resolves to itself, even if some other record happens to share it as an alias", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["uuid-1", freshRpcRecord({ agentId: "uuid-1" })],
+      ["uuid-2", freshRpcRecord({ agentId: "uuid-2", alias: "uuid-1" })],
+    ]);
+    assert.equal(resolveAgentId(registry, "uuid-1"), "uuid-1", "the direct registry.has() uuid path wins first");
+  });
+
+  test("an alias resolves to its holder's agentId", () => {
+    const registry: RpcAgentRegistry = new Map([["uuid-1", freshRpcRecord({ agentId: "uuid-1", alias: "scout" })]]);
+    assert.equal(resolveAgentId(registry, "scout"), "uuid-1");
+  });
+
+  test("an unresolvable input (neither a known uuid nor a known alias) returns undefined", () => {
+    const registry: RpcAgentRegistry = new Map([["uuid-1", freshRpcRecord({ agentId: "uuid-1" })]]);
+    assert.equal(resolveAgentId(registry, "nope"), undefined);
+  });
+});
+
+describe("resolveAgentRegistryCap", () => {
+  test("defaults to DEFAULT_AGENT_REGISTRY_CAP (256) when the env var is unset", () => {
+    assert.equal(resolveAgentRegistryCap({}), DEFAULT_AGENT_REGISTRY_CAP);
+    assert.equal(DEFAULT_AGENT_REGISTRY_CAP, 256);
+  });
+
+  test("a positive numeric override is honored", () => {
+    assert.equal(resolveAgentRegistryCap({ [WS_PI_AGENT_REGISTRY_CAP_ENV]: "10" }), 10);
+  });
+
+  test("a non-numeric, empty, zero or negative override falls back to the default rather than producing an unusable cap", () => {
+    assert.equal(resolveAgentRegistryCap({ [WS_PI_AGENT_REGISTRY_CAP_ENV]: "not-a-number" }), DEFAULT_AGENT_REGISTRY_CAP);
+    assert.equal(resolveAgentRegistryCap({ [WS_PI_AGENT_REGISTRY_CAP_ENV]: "" }), DEFAULT_AGENT_REGISTRY_CAP);
+    assert.equal(resolveAgentRegistryCap({ [WS_PI_AGENT_REGISTRY_CAP_ENV]: "0" }), DEFAULT_AGENT_REGISTRY_CAP);
+    assert.equal(resolveAgentRegistryCap({ [WS_PI_AGENT_REGISTRY_CAP_ENV]: "-5" }), DEFAULT_AGENT_REGISTRY_CAP);
+  });
+
+  test("a fractional override is floored", () => {
+    assert.equal(resolveAgentRegistryCap({ [WS_PI_AGENT_REGISTRY_CAP_ENV]: "10.7" }), 10);
+  });
+});
+
+describe("truncatePromptForStorage (byte-safe head-truncation for stored prompts)", () => {
+  test("a prompt at or under the cap round-trips unchanged", () => {
+    assert.equal(truncatePromptForStorage("short prompt", 4096), "short prompt");
+    assert.equal(truncatePromptForStorage("x".repeat(PROMPT_STORAGE_CAP_BYTES)).length, PROMPT_STORAGE_CAP_BYTES);
+  });
+
+  test("a prompt over the cap is cut and gets a truncation marker appended", () => {
+    const prompt = "y".repeat(20);
+    const truncated = truncatePromptForStorage(prompt, 10);
+    assert.ok(truncated.startsWith("y".repeat(10)));
+    assert.ok(truncated.includes("truncated"), "a cut-marker line must say the prompt was cut");
+  });
+
+  test("a byte-boundary cut never splits a multibyte UTF-8 codepoint — the partial trailing sequence is dropped cleanly", () => {
+    // Each "🙂" is 4 UTF-8 bytes; cutting at 10 bytes lands mid-emoji (byte 8
+    // is the second byte of the third emoji).
+    const prompt = "🙂🙂🙂🙂🙂";
+    const truncated = truncatePromptForStorage(prompt, 10);
+    // The two complete emoji (8 bytes) must survive; nothing corrupt (no
+    // replacement character, no half-codepoint) may appear before the marker.
+    assert.ok(truncated.startsWith("🙂🙂"));
+    assert.ok(!truncated.slice(0, truncated.indexOf("\n")).includes("�"), "no replacement character from a split codepoint");
+  });
+
+  test("default cap is PROMPT_STORAGE_CAP_BYTES (4096)", () => {
+    assert.equal(PROMPT_STORAGE_CAP_BYTES, 4096);
+    const prompt = "z".repeat(5000);
+    const truncated = truncatePromptForStorage(prompt);
+    assert.ok(truncated.length < prompt.length);
+  });
+});
+
+/**
+ * 260905 (alias/park/cap ticket): the alias half of `spawnAgent`'s guard
+ * clauses, extracted for direct coverage since `spawnAgent` itself
+ * constructs a real `RpcClient` and is live-gate only.
+ *
+ * Review relay #1 (Critical fix): `reserveAgentAlias` itself no longer
+ * mutates a holder's `alias` — it only locates and validates, returning the
+ * holder (when one is found and not blocked) for the caller to clear. The
+ * actual clear-and-commit is `runSpawnGuards`'s job (see its own describe
+ * block below), run only after every guard has succeeded.
+ */
+describe("reserveAgentAlias", () => {
+  test("no alias requested is always a no-op ok", () => {
+    const registry: RpcAgentRegistry = new Map();
+    assert.deepEqual(reserveAgentAlias(registry, undefined), { ok: true });
+  });
+
+  test("an alias with no current holder is a no-op ok (fresh alias)", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.deepEqual(reserveAgentAlias(registry, "scout"), { ok: true });
+  });
+
+  test("a dormant holder is returned as `holder`, unmutated — title AND alias both untouched by this function alone", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", title: "keep me" });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    const result = reserveAgentAlias(registry, "scout");
+    assert.deepEqual(result, { ok: true, holder });
+    assert.equal(holder.alias, "scout", "reserveAgentAlias alone never clears it — that's runSpawnGuards's job");
+    assert.equal(holder.title, "keep me");
+  });
+
+  test("an idle (live but not running) holder is also returned as `holder`, unmutated", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", client: {} as RpcClient, running: false });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    assert.deepEqual(reserveAgentAlias(registry, "scout"), { ok: true, holder });
+    assert.equal(holder.alias, "scout");
+  });
+
+  test("a RUNNING holder's alias rejects the spawn — reused, not silently skipped", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    const result = reserveAgentAlias(registry, "scout");
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.error, /scout/);
+      assert.match(result.error, /running/);
+    }
+    assert.equal(holder.alias, "scout", "a rejected spawn leaves the holder's alias untouched");
+  });
+
+  test("a threadBound holder's alias also rejects the spawn", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", threadBound: true });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    const result = reserveAgentAlias(registry, "scout");
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.error, /threadBound/);
+    }
+  });
+});
+
+/**
+ * 260905 (alias/park/cap ticket): the cap half of `spawnAgent`'s guard
+ * clauses, extracted for direct coverage for the same reason as
+ * `reserveAgentAlias`.
+ */
+describe("evictForCapacity", () => {
+  test("under the cap is a no-op ok with no eviction", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    assert.deepEqual(evictForCapacity(registry, 5), { ok: true });
+    assert.equal(registry.size, 1);
+  });
+
+  test("at the cap evicts the dormant record with the OLDEST last-activity stamp", () => {
+    const oldest = freshRpcRecord({ agentId: "old", lastLeadPromptAt: 1_000 });
+    const newer = freshRpcRecord({ agentId: "new", lastLeadPromptAt: 5_000 });
+    const registry: RpcAgentRegistry = new Map([
+      ["old", oldest],
+      ["new", newer],
+    ]);
+    const result = evictForCapacity(registry, 2);
+    assert.deepEqual(result, { ok: true, evictedLabel: "old" });
+    assert.equal(registry.has("old"), false);
+    assert.equal(registry.has("new"), true);
+  });
+
+  test("last-activity is max(lastLeadPromptAt, newest reportLog entry) — a quiet-but-recently-reported record is not the oldest", () => {
+    const staleReport = freshRpcRecord({ agentId: "stale", lastLeadPromptAt: 1_000, reportLog: [{ at: 1_500 }] });
+    const freshlyReported = freshRpcRecord({ agentId: "fresh", lastLeadPromptAt: 1_000, reportLog: [{ at: 9_000 }] });
+    const registry: RpcAgentRegistry = new Map([
+      ["stale", staleReport],
+      ["fresh", freshlyReported],
+    ]);
+    const result = evictForCapacity(registry, 2);
+    assert.deepEqual(result, { ok: true, evictedLabel: "stale" });
+  });
+
+  test("evicted label prefers the record's alias over its bare uuid", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a", alias: "scout" })]]);
+    assert.deepEqual(evictForCapacity(registry, 1), { ok: true, evictedLabel: "scout" });
+  });
+
+  test("running and threadBound records are never evicted", () => {
+    const running = freshRpcRecord({ agentId: "running-one", running: true });
+    const threadBound = freshRpcRecord({ agentId: "bound-one", threadBound: true });
+    const registry: RpcAgentRegistry = new Map([
+      ["running-one", running],
+      ["bound-one", threadBound],
+    ]);
+    const result = evictForCapacity(registry, 2);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.error, /cap/);
+    }
+    assert.equal(registry.size, 2, "a rejected eviction must not remove anything");
+  });
+
+  test("a live (client-holding) idle record is never evicted either — only a fully dormant record is a candidate", () => {
+    const live = freshRpcRecord({ agentId: "live-one", client: {} as RpcClient, running: false });
+    const registry: RpcAgentRegistry = new Map([["live-one", live]]);
+    const result = evictForCapacity(registry, 1);
+    assert.equal(result.ok, false);
+  });
+
+  test("a cap of 1 with 3 dormant entries evicts all of them, oldest-first, and joins the labels — the spawn itself will occupy the sole slot", () => {
+    const a = freshRpcRecord({ agentId: "a", lastLeadPromptAt: 1_000 });
+    const b = freshRpcRecord({ agentId: "b", lastLeadPromptAt: 2_000 });
+    const c = freshRpcRecord({ agentId: "c", lastLeadPromptAt: 3_000 });
+    const registry: RpcAgentRegistry = new Map([
+      ["a", a],
+      ["b", b],
+      ["c", c],
+    ]);
+    const result = evictForCapacity(registry, 1);
+    assert.deepEqual(result, { ok: true, evictedLabel: "a, b, c" });
+    assert.equal(registry.size, 0);
+  });
+
+  test("eviction only forgets the registry entry — it never touches anything on disk (no side effect to assert here, by construction: evictForCapacity takes no filesystem argument)", () => {
+    const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
+    evictForCapacity(registry, 1);
+    assert.equal(registry.size, 0);
+  });
+});
+
+/**
+ * 260905 review relay #1 (Critical fix): `runSpawnGuards` is the single gate
+ * `spawnAgent` calls — it runs `reserveAgentAlias` then `evictForCapacity`
+ * and commits the alias clear only once BOTH succeed, so a guard rejection
+ * never leaves a previous holder's alias half-cleared. This is the direct
+ * regression test for the bug: the original code cleared the alias as a
+ * side effect of `reserveAgentAlias` itself, so a subsequent cap rejection
+ * still left that holder's alias destroyed even though the spawn never
+ * registered.
+ */
+describe("runSpawnGuards (260905 review relay #1: alias-clear-then-cap-reject ordering)", () => {
+  test("both guards pass: the previous holder's alias IS cleared", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", title: "keep me" });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    const result = runSpawnGuards(registry, "scout", 10);
+    assert.deepEqual(result, { ok: true });
+    assert.equal(holder.alias, undefined);
+    assert.equal(holder.title, "keep me");
+  });
+
+  test("alias reservation rejects (running holder): nothing is touched, cap eviction never even runs", () => {
+    const holder = freshRpcRecord({ agentId: "a", alias: "scout", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    const result = runSpawnGuards(registry, "scout", 1);
+    assert.equal(result.ok, false);
+    assert.equal(holder.alias, "scout");
+    assert.equal(registry.size, 1, "the cap guard never ran, so nothing was evicted either");
+  });
+
+  test("CRITICAL regression: a dormant holder's alias reservation succeeds but cap eviction then rejects — the holder's alias is left completely intact, still resolvable by ws-agent-send <alias>", () => {
+    // The exact reachable scenario from the review: a registry at cap whose
+    // only non-running/non-threadBound member is LIVE-idle (excluded from
+    // eviction, but would have been alias-cleared by the old ordering) and
+    // holds the reused alias.
+    const liveIdleHolder = freshRpcRecord({ agentId: "a", alias: "scout", client: {} as RpcClient, running: false });
+    const runningOther = freshRpcRecord({ agentId: "b", running: true });
+    const registry: RpcAgentRegistry = new Map([
+      ["a", liveIdleHolder],
+      ["b", runningOther],
+    ]);
+    // cap === registry.size: evictForCapacity must evict someone to fit, but
+    // neither "a" (live) nor "b" (running) is a legal candidate.
+    const result = runSpawnGuards(registry, "scout", 2);
+    assert.equal(result.ok, false, "the cap guard correctly rejects the spawn");
+    if (!result.ok) {
+      assert.match(result.error, /cap/);
+    }
+    assert.equal(liveIdleHolder.alias, "scout", "the previous holder's alias survives a downstream guard rejection");
+    assert.equal(resolveAgentId(registry, "scout"), "a", "still resolvable by alias — ws-agent-send <alias> works unchanged");
+    assert.equal(registry.size, 2, "nothing was evicted or removed");
+  });
+
+  test("no alias requested: cap guard still runs on its own", () => {
+    const holder = freshRpcRecord({ agentId: "a", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", holder]]);
+    const result = runSpawnGuards(registry, undefined, 1);
+    assert.equal(result.ok, false);
   });
 });

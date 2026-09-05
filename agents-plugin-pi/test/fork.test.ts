@@ -775,4 +775,44 @@ describe("armForkRoleWiring (fresh spawn and sidecar revival)", () => {
     armForkRoleWiring(pi, new Map([["fork-1", live]]), live);
     assert.equal(subscriptions, 2, "an already-live record is wired straight away");
   });
+
+  test("260905 review relay #1 (Important, test case 2): a parked-then-resumed fork can still be nudged — onResume re-arms wireAntiBleedLoop on the NEW client", () => {
+    // Case 2 of the ticket's Tests bullet. `sendToAgent`'s dormant-resume
+    // branch itself (constructing a real `RpcClient`) is live-gate only —
+    // see that describe block's own doc comment — but the thing the "nudge
+    // path survives a park/resume cycle" claim actually depends on is this
+    // seam: `onResume` re-arming `wireAntiBleedLoop` on whatever client
+    // shows up next, and that re-armed loop firing on it exactly like it
+    // would on a never-parked fork. Both are duck-typed/offline-testable and
+    // exercised here end-to-end.
+    const dormant = dormantForkRecord();
+    const registry: RpcAgentRegistry = new Map([["fork-1", dormant]]);
+    armForkRoleWiring(pi, registry, dormant);
+    assert.equal(typeof dormant.onResume, "function", "parked (no client yet): wireAntiBleedLoop is deferred to onResume");
+
+    // Simulate the moment `sendToAgent`'s dormant branch resumes this
+    // record: a fresh client is assigned, then `onResume` fires.
+    let listener: ((evt: unknown) => void) | undefined;
+    const prompts: string[] = [];
+    const resumedClient = {
+      onEvent(l: (evt: unknown) => void) {
+        listener = l;
+        return () => {};
+      },
+      prompt(message: string) {
+        prompts.push(message);
+        return Promise.resolve();
+      },
+    } as unknown as RpcClient;
+    dormant.client = resumedClient;
+    dormant.onResume?.(dormant);
+
+    // The resumed fork's first turn ends with no report and no tool call —
+    // the "no-signal" bleed condition — and the re-armed loop must nudge it
+    // on the client resume created, not the one that was parked away.
+    listener?.({ type: "agent_start" });
+    listener?.({ type: "agent_settled" });
+    assert.equal(prompts.length, 1, "the nudge fired through the re-armed loop on the resumed client");
+    assert.equal(dormant.running, true, "promptAgent (inside the nudge) latched running on the resumed record");
+  });
 });

@@ -74,15 +74,17 @@ describe("sidecarPath", () => {
 });
 
 describe("captureOrphans", () => {
-  test("captures only records with a LIVE client", () => {
+  test("260905 (alias/park/cap): captures both LIVE and dormant/parked records — automatic parking means a settled child is routinely dormant well before shutdown", () => {
     const registry: RpcAgentRegistry = new Map([
       ["live", record({ agentId: "live", client: {} as RpcClient })],
       ["dormant", record({ agentId: "dormant" })],
     ]);
     assert.deepEqual(
-      captureOrphans(registry).map((o) => o.agentId),
-      ["live"],
-      "a dormant record was already stopped deliberately — it is not an orphan",
+      captureOrphans(registry)
+        .map((o) => o.agentId)
+        .sort(),
+      ["dormant", "live"],
+      "a dormant record is still resumable — capturing it too keeps the roll-call complete",
     );
   });
 
@@ -109,12 +111,15 @@ describe("captureOrphans", () => {
     assert.equal(quiet.lastReportAt, undefined, "a child that never reported carries no time at all");
   });
 
-  test("carries exactly the resume fields plus spawnRole, and nothing runtime-only", () => {
+  test("carries exactly the resume fields plus spawnRole/alias/title/prompt, and nothing runtime-only", () => {
     const registry: RpcAgentRegistry = new Map([
       [
         "a1",
         record({
           client: {} as RpcClient,
+          alias: "scout",
+          title: "Reviews the auth module",
+          prompt: "Please review src/auth.ts for bugs",
           modelBase: "prov/model",
           modelEffort: "high",
           explicitTools: "bash,ws-report-to-lead",
@@ -128,6 +133,9 @@ describe("captureOrphans", () => {
     assert.deepEqual(captureOrphans(registry), [
       {
         agentId: "a1",
+        alias: "scout",
+        title: "Reviews the auth module",
+        prompt: "Please review src/auth.ts for bugs",
         sessionPath: "/tmp/ws-pi-agent-x/session.jsonl",
         systemPromptPath: "/tmp/ws-pi-agent-x/prompt.md",
         modelBase: "prov/model",
@@ -154,6 +162,9 @@ describe("serializeOrphans / parseOrphans", () => {
   const orphans: PersistedOrphan[] = [
     {
       agentId: "a1",
+      alias: "scout",
+      title: "Reviews the auth module",
+      prompt: "Please review src/auth.ts for bugs",
       sessionPath: "/tmp/s1.jsonl",
       systemPromptPath: "/tmp/p1.md",
       modelBase: "prov/model",
@@ -167,8 +178,25 @@ describe("serializeOrphans / parseOrphans", () => {
     },
   ];
 
-  test("round-trips a full orphan set unchanged, state and last-report time included", () => {
+  test("round-trips a full orphan set unchanged, state, last-report time and alias/title/prompt included", () => {
     assert.deepEqual(parseOrphans(serializeOrphans(orphans)), orphans);
+  });
+
+  test("260905 (alias/park/cap): an old-shape orphan with no alias/title/prompt still round-trips (they parse as undefined, not invented)", () => {
+    const oldShape: PersistedOrphan[] = [
+      {
+        agentId: "a2",
+        sessionPath: "/tmp/s2.jsonl",
+        systemPromptPath: "/tmp/p2.md",
+        wsToolNames: [],
+        toolGroup: "full-worker",
+        state: "idle",
+      },
+    ];
+    const [parsed] = parseOrphans(serializeOrphans(oldShape));
+    assert.equal(parsed.alias, undefined);
+    assert.equal(parsed.title, undefined);
+    assert.equal(parsed.prompt, undefined);
   });
 
   test("relay #2: an idle orphan with no reports round-trips with lastReportAt absent, not invented", () => {

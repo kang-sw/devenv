@@ -94,7 +94,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
-import { GATED_EXEC_TOOL_NAME, WS_PI_APPROVAL_DIR_ENV, inheritModelFromToolCtx, pushToLead, spawnAgent, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
+import {
+  GATED_EXEC_TOOL_NAME,
+  WS_PI_APPROVAL_DIR_ENV,
+  inheritModelFromToolCtx,
+  pushToLead,
+  resolveAgentId,
+  spawnAgent,
+  type RpcAgentRecord,
+  type RpcAgentRegistry,
+} from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/execute-gateway.test.ts) with no
@@ -592,7 +601,11 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
     } as never,
     async execute(_toolCallId, params) {
       const p = params as { agent_id: string; cmd_id: string; decision: "approve" | "deny" | "run-instead"; reason?: string; command?: string };
-      const record = rpcRegistry.get(p.agent_id);
+      // 260905 (alias/park/cap ticket): the fourth alias-or-uuid resolution
+      // call site, alongside sendToAgent/stopAgent/getAgentTranscriptPath in
+      // spawner.ts.
+      const resolvedAgentId = resolveAgentId(rpcRegistry, p.agent_id) ?? p.agent_id;
+      const record = rpcRegistry.get(resolvedAgentId);
       const validation = validatePendingApproval(record?.pendingApproval, p.cmd_id);
       if (!validation.ok || !record) {
         const reason = validation.ok ? "unknown agent_id" : validation.reason;
