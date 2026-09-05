@@ -257,9 +257,9 @@ report channel" below):
   the worker runs in the background. Every child is launched with an explicit
   CLI path, so it resolves the installed `pi` entry with no bare-`pi` fallback.
 - `ws-agent-send(agent_id, message, interrupt?)` — send a message into a child.
-  `agent_id` accepts either the alias or the raw uuid, resolved through one
-  shared helper shared with `ws-agent-stop`, `ws-agent-transcript` and
-  `ws-approve` (260905). The delivery mechanism is chosen from the child's
+  `agent_id` accepts either the alias or the raw uuid; `ws-agent-stop`,
+  `ws-agent-transcript` and `ws-approve` resolve it the same way, through one
+  shared helper (260905). The delivery mechanism is chosen from the child's
   state: a message starts a new turn on an idle child, `interrupt: true` steers
   an actively streaming child mid-run, and a non-interrupt message during an
   active run queues after the current turn. A message to a **dormant** child
@@ -337,11 +337,13 @@ Because a worker is now a persistent RPC child rather than a one-shot process, a
 turn's completion is signalled by the child reaching **idle** (its RPC
 `agent_settled` event), not by the child process closing its stdio. As the
 last step of settle handling — after the idle/final push described below and
-after the anti-bleed nudge (fork.ts) has had its chance to re-prompt the
-child synchronously — the adapter automatically parks a settled child that is
-neither thread-bound nor already running again: it is silently stopped
-(the same as `ws-agent-stop`, but with no `ws-agent-settled` push of its
-own) and becomes dormant. So a settled child does **not** stay alive
+after the fork anti-bleed nudge has had its chance to re-prompt the child —
+the adapter automatically parks a settled child that is neither thread-bound
+nor already running again: it is silently stopped (the same as
+`ws-agent-stop`, but with no `ws-agent-settled` push of its own) and becomes
+dormant. The park clears the record's live state before the process
+teardown begins, so a send that lands mid-park takes the dormant-resume path
+rather than racing the stop. So a settled child does **not** stay alive
 indefinitely waiting for the next `ws-agent-send`; it is transparently
 resumed from its on-disk session the moment one arrives, exactly like a
 sidecar-revived orphan. A settle that
@@ -496,9 +498,11 @@ pushes, its only delegate being the explore leaf. Six families:
   sidecar and only when a child was cut off mid-turn (see "Process
   lifecycle"). `followUp`.
 
-In a TUI process the six families are drawn by an adapter-registered message
-renderer (one `[family] agent <id>` label, the payload lines, the status line
-dimmed) so the transcript does not repeat Pi's default `[customType]` header;
+Every pushed message names its sender as `<alias> (<id>)` when an alias was
+given and as the bare uuid otherwise; the orphan roll-call and `ws-agent-list`
+use the same form. In a TUI process the six families are drawn by an
+adapter-registered message renderer (one `[family] agent <sender>` label, the
+payload lines, the status line dimmed) so the transcript does not repeat Pi's default `[customType]` header;
 the message content the model reads is unchanged, and the default rendering
 stands wherever the TUI modules cannot be loaded.
 
