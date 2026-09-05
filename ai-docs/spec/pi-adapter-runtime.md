@@ -493,6 +493,27 @@ relays the decision back to the paused worker, which resumes (or re-plans, on
 `deny`). This prompt-injection relay is the documented baseline; a harness-native
 pause/resume is a later optimization.
 
+The out-of-band injected turn assumes the lead reaches a turn boundary to receive
+it — the injected approval request is turn-boundary-only. That assumption breaks
+when the lead is blocked inside a synchronous `ws-agent-wait` on the very worker
+that just paused for approval: the worker cannot proceed until approved, the wait
+cannot return until the worker proceeds, and the injected approval request queues
+behind the unfinished wait turn — a circular deadlock broken only by the wait
+timeout. Because the documented harvest pattern is spawn-then-`ws-agent-wait`,
+this is the common path, not an edge case.
+
+The adapter closes it by waking the wait: when a worker enters a pending-approval
+state, any `ws-agent-wait` on that agent returns immediately with
+`reason:"approval-pending"` and a `pending_approval: { cmd_id, command,
+rationale }` payload, handing the lead back to a turn boundary. The lead calls
+`ws-approve` with that `cmd_id`, then calls `ws-agent-wait` again to harvest the
+eventual report — it must not keep blocking. The wake reuses the same
+waiter machinery as the settle and report wakes; pending-approval is not an
+edge-consumed flag (it is real state cleared by `ws-approve`), so a re-wait
+before approving correctly re-reports `approval-pending` rather than looping. A
+pending approval takes priority over a same-agent settle or buffered report at
+harvest time, and buffered reports are still drained alongside it.
+
 ## Lead native tool-surface reshaping {#260905-pi-lead-tool-surface-execute-gateway}
 
 So the structural "no raw exec for the lead" guarantee holds by construction and

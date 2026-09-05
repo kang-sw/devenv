@@ -42,7 +42,9 @@
  * `RpcClient.onEvent()` stream's `tool_execution_start` events — no new
  * transport (see `applyRpcEvent`'s doc comment for the full trace).
  * `ws-agent-wait` now also wakes on a report and drains the full buffer FIFO
- * on any wake (`reason: "idle" | "report"`, D-D — see `harvestWinner`).
+ * on any wake (`reason: "idle" | "report" | "approval-pending"`, D-D — see
+ * `harvestWinner`; the approval-pending wake, 260905, hands a lead blocked in a
+ * wait back to a turn boundary so it can ws-approve a stuck child then re-wait).
  * `ws-agent-transcript` (lead-side, not in any `TOOL_GROUPS`) returns the
  * already-tracked `sessionPath` with no RPC round-trip.
  */
@@ -937,6 +939,12 @@ export function applyRpcEvent(record: RpcAgentRecord, evt: { type?: string; tool
         rationale: typeof args?.rationale === "string" ? args.rationale : undefined,
         cwd: typeof args?.cwd === "string" ? args.cwd : undefined,
       };
+      // 260905 (approval-relay deadlock fix): wake any lead already blocked in
+      // ws-agent-wait on this agent, exactly like the agent_settled/report
+      // branches above. Without this the lead stays blocked, and the
+      // turn-boundary-only approval steer queues behind the unfinished wait
+      // turn — a circular deadlock broken only by the wait timeout.
+      settleWaiters(record);
     }
   }
 }
@@ -1164,6 +1172,17 @@ export function firstIdlePendingAgentId(records: ReadonlyArray<{ id: string; rec
 }
 
 /**
+ * Pure selection helper mirroring `firstIdlePendingAgentId`: the first entry
+ * (in caller-given order) whose `pendingApproval` is set, or `undefined` when
+ * none is (260905). Unlike `idlePending` this is not an edge-consume flag —
+ * it is real state cleared by `ws-approve`, so a re-wait before approving
+ * correctly re-selects the same agent.
+ */
+export function firstPendingApprovalAgentId(records: ReadonlyArray<{ id: string; record: RpcAgentRecord }>): string | undefined {
+  return records.find(({ record }) => record.pendingApproval)?.id;
+}
+
+/**
  * Pure selection helper mirroring `firstIdlePendingAgentId`'s shape: the
  * first entry (in caller-given order) with at least one undrained buffered
  * report, or `undefined` when none has any. A dormant record can still carry
@@ -1177,8 +1196,10 @@ export function firstReportPendingAgentId(records: ReadonlyArray<{ id: string; r
 export interface WaitForAgentsResult {
   agent_id?: string;
   last_message?: string;
-  /** Present only on a non-timeout harvest: "idle" when the agent settled, "report" when only a buffered report woke the wait. */
-  reason?: "idle" | "report";
+  /** Present only on a non-timeout harvest: "idle" when the agent settled, "report" when only a buffered report woke the wait, "approval-pending" when the agent is blocked awaiting a lead approval (260905). */
+  reason?: "idle" | "report" | "approval-pending";
+  /** Present only on reason:"approval-pending": the gated command the agent is blocked on. The lead calls ws-approve with this cmd_id, then re-waits to harvest the eventual report. */
+  pending_approval?: { cmd_id: string; command: string; rationale?: string };
   /** Buffered `ws-report-to-lead` messages drained for the woken agent, FIFO order. Always present ([] when nothing was harvested, e.g. on timeout). */
   reports: AgentReport[];
   /** Count of reports dropped from the buffer due to overflow since the last drain. Always present (0 when nothing was harvested). */
@@ -1208,6 +1229,25 @@ async function harvestLastMessage(record: RpcAgentRecord): Promise<string | unde
  * regardless of what triggered the wake).
  */
 async function harvestWinner(record: RpcAgentRecord, agentId: string): Promise<WaitForAgentsResult> {
+  // 260905: a pending approval takes priority — the agent is actively blocked
+  // waiting for the lead, so surface it first so the lead can ws-approve and
+  // unblock it. Not edge-consumed: record.pendingApproval is cleared by
+  // ws-approve itself (execute-gateway.ts), so a re-wait before approving
+  // correctly re-reports approval-pending rather than looping forever. Reports
+  // are still drained (mirroring the idle branch) so a report buffered before
+  // the gate is not stranded. An agent cannot be simultaneously mid-gated-call
+  // and idlePending, so this never races the idle branch on the same record.
+  if (record.pendingApproval) {
+    const { cmdId, command, rationale } = record.pendingApproval;
+    const drained = drainReports(record);
+    return {
+      agent_id: agentId,
+      reason: "approval-pending",
+      pending_approval: { cmd_id: cmdId, command, rationale },
+      ...drained,
+      timed_out: false,
+    };
+  }
   if (record.idlePending) {
     record.idlePending = false;
     const drained = drainReports(record);
@@ -1246,6 +1286,17 @@ export async function waitForAgents(registry: RpcAgentRegistry, agentIds: string
     }
     return { id, record };
   });
+
+  // 260905: an agent already blocked on a lead approval is the most urgent
+  // fast path — it is holding up a child and (unlike idle/report) cannot make
+  // any progress until the lead acts. Checked before idle/report; the three
+  // states never co-occur on one record (a mid-gated-call agent is neither
+  // settled nor, for that call, reporting), so ordering only picks among
+  // distinct agents, and unblocking a stuck child first is the right choice.
+  const alreadyPendingApproval = firstPendingApprovalAgentId(records);
+  if (alreadyPendingApproval) {
+    return harvestWinner(registry.get(alreadyPendingApproval) as RpcAgentRecord, alreadyPendingApproval);
+  }
 
   const alreadyIdle = firstIdlePendingAgentId(records);
   if (alreadyIdle) {
@@ -1520,7 +1571,7 @@ export function registerAgentTools(
     name: "ws-agent-wait",
     label: "ws-agent-wait",
     description:
-      "Wait for the first of the given agent_ids to settle (agent_settled) OR report (a child calling ws-report-to-lead), returning agent_id, reason (idle|report), and all buffered reports for that agent drained in FIFO order (plus reports_dropped if the buffer overflowed). On reason:idle, last_message is also included. Never kills a running agent on timeout.",
+      "Wait for the first of the given agent_ids to settle (agent_settled) OR report (a child calling ws-report-to-lead) OR need a lead approval, returning agent_id, reason (idle|report|approval-pending), and all buffered reports for that agent drained in FIFO order (plus reports_dropped if the buffer overflowed). On reason:idle, last_message is also included. On reason:approval-pending, pending_approval:{cmd_id,command,rationale} is included — call ws-approve with that cmd_id, then call ws-agent-wait again to harvest the result (do not keep blocking). Never kills a running agent on timeout.",
     parameters: {
       type: "object",
       properties: {

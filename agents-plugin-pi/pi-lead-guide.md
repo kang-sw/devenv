@@ -32,7 +32,7 @@ Route a task to the right primitive by what you actually need done:
 | --- | --- |
 | Delegate a task to a persistent subagent | `ws-agent-spawn` (pass an already-rendered `system_prompt_path`, e.g. via `ws__playbook_render`) |
 | Send a follow-up or steer a running subagent | `ws-agent-send` |
-| Wait for a subagent to finish or report progress | `ws-agent-wait` |
+| Wait for a subagent to finish or report progress | `ws-agent-wait` — returns `reason` `idle`/`report`/`approval-pending`. On `approval-pending` it hands you `pending_approval:{cmd_id,command,rationale}`: call `ws-approve` with that `cmd_id`, then call `ws-agent-wait` again to harvest — do NOT keep blocking (an un-approved worker cannot progress). |
 | See every subagent's status (running/idle/dormant) | `ws-agent-list` |
 | Gracefully stop a subagent (keeps it resumable) | `ws-agent-stop` |
 | Read a subagent's full session transcript | `ws-agent-transcript` |

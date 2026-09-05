@@ -69,6 +69,7 @@ import {
   resolveModelForAlias,
   applyRpcEvent,
   firstIdlePendingAgentId,
+  firstPendingApprovalAgentId,
   firstReportPendingAgentId,
   enqueueReport,
   drainReports,
@@ -514,6 +515,25 @@ describe("firstIdlePendingAgentId", () => {
   });
 });
 
+describe("firstPendingApprovalAgentId (260905)", () => {
+  test("returns undefined when no record has a pendingApproval", () => {
+    const records = [
+      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b", idlePending: true }) },
+    ];
+    assert.equal(firstPendingApprovalAgentId(records), undefined);
+  });
+
+  test("returns the first (in given order) record whose pendingApproval is set", () => {
+    const records = [
+      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
+      { id: "b", record: freshRpcRecord({ agentId: "b", pendingApproval: { cmdId: "c1", command: "echo hi" } }) },
+      { id: "c", record: freshRpcRecord({ agentId: "c", pendingApproval: { cmdId: "c2", command: "echo bye" } }) },
+    ];
+    assert.equal(firstPendingApprovalAgentId(records), "b");
+  });
+});
+
 describe("applyRpcEvent: ws-report-to-lead", () => {
   test("a tool_execution_start for ws-report-to-lead with a string message enqueues it and settles a waiter", () => {
     const record = freshRpcRecord();
@@ -616,6 +636,28 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
       args: { command: "echo hi", cwd: "/repo/subdir" },
     });
     assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "echo hi", rationale: undefined, cwd: "/repo/subdir" });
+  });
+
+  test("260905 (deadlock fix): setting pendingApproval drains/resolves pending waiters, exactly like agent_settled/report", () => {
+    const record = freshRpcRecord();
+    let woken = false;
+    record.waiters.push(() => {
+      woken = true;
+    });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo hi" } });
+    assert.equal(woken, true, "a gated-exec event must wake a lead blocked in ws-agent-wait, or the approval steer deadlocks behind the wait");
+    assert.deepEqual(record.waiters, [], "waiters array must be drained after waking");
+  });
+
+  test("260905 (deadlock fix): an ignored gated-exec event (no cmd_id/command) does NOT wake waiters — nothing is pending to approve", () => {
+    const record = freshRpcRecord();
+    let woken = false;
+    record.waiters.push(() => {
+      woken = true;
+    });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, args: { command: "echo hi" } }); // missing toolCallId
+    assert.equal(woken, false, "no pendingApproval was set, so no waiter should be woken");
+    assert.equal(record.waiters.length, 1, "the un-woken waiter stays armed");
   });
 
   test("cwd is omitted (undefined) when args.cwd is missing or not a string", () => {
@@ -840,6 +882,58 @@ describe("waitForAgents", () => {
     assert.equal(result.agent_id, "fast");
     assert.equal(result.last_message, "fast agent done");
     assert.equal(registry.has("slow"), true, "the non-winning agent must stay registered");
+  });
+
+  test("260905: already-pending-approval fast path harvests immediately with reason:approval-pending, bypassing the all-dormant guard", async () => {
+    const record = freshRpcRecord({ agentId: "a", pendingApproval: { cmdId: "c1", command: "echo hi", rationale: "why" } }); // no client
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    const result = await waitForAgents(registry, ["a"]);
+    assert.deepEqual(result, {
+      agent_id: "a",
+      reason: "approval-pending",
+      pending_approval: { cmd_id: "c1", command: "echo hi", rationale: "why" },
+      reports: [],
+      reports_dropped: 0,
+      timed_out: false,
+    });
+  });
+
+  test("260905: pendingApproval is NOT edge-consumed — a re-wait before ws-approve still returns approval-pending (cleared only by ws-approve)", async () => {
+    const record = freshRpcRecord({ agentId: "a", pendingApproval: { cmdId: "c1", command: "echo hi" } });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    const first = await waitForAgents(registry, ["a"]);
+    assert.equal(first.reason, "approval-pending");
+    const second = await waitForAgents(registry, ["a"]);
+    assert.equal(second.reason, "approval-pending", "a re-wait while still un-approved must re-report, not loop or fall through");
+    assert.ok(record.pendingApproval, "waitForAgents must not clear pendingApproval — only ws-approve does");
+  });
+
+  test("260905: a gated-exec approval arriving while a wait is already pending resolves it with reason:approval-pending", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const resultPromise = waitForAgents(registry, ["a"]);
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "c9", args: { command: "rm -rf x", rationale: "cleanup" } });
+
+    const result = await resultPromise;
+    assert.deepEqual(result, {
+      agent_id: "a",
+      reason: "approval-pending",
+      pending_approval: { cmd_id: "c9", command: "rm -rf x", rationale: "cleanup" },
+      reports: [],
+      reports_dropped: 0,
+      timed_out: false,
+    });
+  });
+
+  test("260905: approval-pending takes priority over a buffered report on the same agent, but still drains the report", async () => {
+    const record = freshRpcRecord({ agentId: "a", pendingApproval: { cmdId: "c1", command: "echo hi" } });
+    enqueueReport(record, "a question before the gate");
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    const result = await waitForAgents(registry, ["a"]);
+    assert.equal(result.reason, "approval-pending", "the blocking approval wins the harvest reason");
+    assert.deepEqual(result.reports, [{ message: "a question before the gate" }], "a report buffered before the gate is still drained, not stranded");
   });
 });
 
