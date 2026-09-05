@@ -388,6 +388,39 @@ describe("/done (the single fixed round-trip)", () => {
     assert.deepEqual(h.summaries, ["the actual summary"]);
   });
 
+  test("C2: summarizeOnDone:false closes immediately — nothing is sent to the fork and no settle is awaited", async () => {
+    const summaries: string[] = [];
+    let doneCalls = 0;
+    const sent: string[] = [];
+    const component = new OverlayChatComponent(
+      { requestRender: () => {} },
+      {
+        title: "t",
+        threadId: "q1",
+        summarizeOnDone: false,
+        channel: {
+          onEvent: () => () => {},
+          isStreaming: () => false,
+          async send(text) {
+            sent.push(text);
+          },
+        },
+        onDone: (summary) => summaries.push(summary),
+      },
+      () => {
+        doneCalls += 1;
+      },
+    );
+
+    for (const char of DONE_COMMAND) component.handleInput(char);
+    component.handleInput("\r");
+    await flush();
+
+    assert.deepEqual(sent, [], "a live task fork must not be asked to summarize mid-task");
+    assert.deepEqual(summaries, [""], "onDone fires immediately, with no summary to carry");
+    assert.equal(doneCalls, 1, "the overlay closes on the spot");
+  });
+
   test("the summary request text asks for a summary now, with no questions back", () => {
     const prompt = buildDoneSummaryPrompt();
     assert.match(prompt, /summary/i);

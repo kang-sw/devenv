@@ -64,8 +64,20 @@ export interface OverlayChatOptions {
   question?: string;
   /** ISO timestamp the thread was registered at, rendered in the header (review relay #1 I4). */
   createdAt?: string;
+  /**
+   * Whether `/done` asks the fork for a closing summary first (review relay
+   * #2 C2). True for a discussion fork this surface spawned; FALSE for a live
+   * task fork that merely raised a question mid-task — asking that one to
+   * summarize would derail the task the lead is waiting on, so `/done` just
+   * closes the view. Defaults to true.
+   */
+  summarizeOnDone?: boolean;
   channel: ForkChannel;
-  /** Called once, with the fork's own summary, when the owner ends the thread with `/done`. */
+  /**
+   * Called once when the owner ends the thread with `/done`, with the fork's
+   * own summary — or with an empty string when `summarizeOnDone` is false and
+   * no summary was ever requested.
+   */
   onDone: (summary: string) => void;
 }
 
@@ -260,6 +272,13 @@ export class OverlayChatComponent {
     }
 
     if (text === DONE_COMMAND) {
+      if (this.options.summarizeOnDone === false) {
+        // Review relay #2 C2: nothing is sent to the fork and nothing is
+        // waited for — this thread's respondent is a live task fork that
+        // keeps working; `/done` only closes the owner's view of it.
+        this.finish("");
+        return;
+      }
       this.donePending = true;
       // Any half-streamed turn belongs to the exchange the owner just ended;
       // leaving it in the buffer would make it the leading text of the
@@ -397,7 +416,10 @@ export class OverlayChatComponent {
 
     lines.push("");
     lines.push(...wrapLine(`> ${this.input}`, w));
-    lines.push(...wrapLine(`${DONE_COMMAND} to end the thread · Esc closes this view (the thread keeps running)`, w));
+    // Deliberately generic about what `/done` does beyond closing: the two
+    // thread origins close differently (review relay #2 C2), and the footer
+    // is not the place to explain the difference.
+    lines.push(...wrapLine(`${DONE_COMMAND} closes the thread · Esc closes this view (the thread keeps running)`, w));
 
     this.cachedLines = lines;
     this.cachedWidth = w;

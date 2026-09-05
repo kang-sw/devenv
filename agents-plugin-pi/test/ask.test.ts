@@ -59,6 +59,8 @@ import {
   handleForkRaisedQuestion,
   registerAsk,
   injectDiscussionSummary,
+  closeThreadOnDone,
+  normalizeThreadOrigin,
   checkContextLength,
   buildForkQuestionLeadNotice,
   MAX_CONTEXT_CHARS,
@@ -73,6 +75,7 @@ function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
     threadId: "q1",
     title: "a question",
     status: "pending",
+    origin: "fork-raised",
     createdAt: "2026-09-05T10:00:00.000Z",
     touchedAt: "2026-09-05T10:00:00.000Z",
     ...overrides,
@@ -149,6 +152,30 @@ describe("threadRegistryPath / serialize / parse", () => {
 
   test("an unknown status value is rejected (status drives every downstream branch)", () => {
     assert.deepEqual(parseThreadRegistry(JSON.stringify({ threads: [{ threadId: "q1", title: "t", status: "weird" }] })), []);
+  });
+
+  test("C2: origin round-trips, and an unknown/absent one defaults to fork-raised (never stop a task fork by mistake)", () => {
+    const leadAsk = thread({ threadId: "q1", origin: "lead-ask" });
+    assert.equal(parseThreadRegistry(serializeThreadRegistry([leadAsk]))[0].origin, "lead-ask");
+
+    const raw = JSON.stringify({
+      threads: [
+        { threadId: "q1", title: "t", status: "pending", createdAt: "x", touchedAt: "x" },
+        { threadId: "q2", title: "t", status: "pending", origin: "nonsense", createdAt: "x", touchedAt: "x" },
+      ],
+    });
+    assert.deepEqual(
+      parseThreadRegistry(raw).map((r) => r.origin),
+      ["fork-raised", "fork-raised"],
+    );
+  });
+
+  test("C2: normalizeThreadOrigin accepts only the lead-ask literal", () => {
+    assert.equal(normalizeThreadOrigin("lead-ask"), "lead-ask");
+    assert.equal(normalizeThreadOrigin("fork-raised"), "fork-raised");
+    assert.equal(normalizeThreadOrigin(undefined), "fork-raised");
+    assert.equal(normalizeThreadOrigin(""), "fork-raised");
+    assert.equal(normalizeThreadOrigin(42), "fork-raised");
   });
 });
 
@@ -379,12 +406,17 @@ describe("Entry B texts (deliberately NOT wrapped in Entry A's structural frame)
 });
 
 describe("buildInjectionMessage (§6 payload: context + original question + summary)", () => {
-  test("carries all three parts and marks itself as a discussion outcome, not an owner instruction", () => {
+  test("carries all three parts, presented as the owner's own decisions but labeled a thread summary", () => {
     const message = buildInjectionMessage("the background", "the question", "we picked merge");
     assert.ok(message.includes("the background"));
     assert.ok(message.includes("the question"));
     assert.ok(message.includes("we picked merge"));
-    assert.match(message, /not a new instruction from the owner/i);
+    // §6: the summary carries owner authority (the owner was present), so it
+    // must not be demoted to "not an instruction from the owner"…
+    assert.match(message, /owner's decisions/i);
+    assert.match(message, /owner's authority/i);
+    // …while still being distinguishable from a fresh owner turn.
+    assert.match(message, /rather than as a new owner turn/i);
   });
 
   test("omits absent context/question sections rather than emitting empty labels", () => {
@@ -489,6 +521,7 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     assert.equal(record.question, "Should I rebase?\nDetail follows.");
     assert.equal(record.respondentAgentId, "agent-7");
     assert.equal(record.status, "pending");
+    assert.equal(record.origin, "fork-raised", "C2: the origin decides whether /done may stop this respondent");
     assert.equal(record.entryId, undefined, "the lead never authored an entry for a fork-raised question");
     assert.equal(handle.threads.get("q1"), record);
   });
@@ -601,6 +634,7 @@ describe("registerAsk (fake pi)", () => {
     assert.equal(record.question, "Which?");
     assert.equal(record.context, "short");
     assert.equal(record.status, "pending");
+    assert.equal(record.origin, "lead-ask", "C2: ws-ask owns its (lazily spawned) discussion fork, so /done may stop it");
     assert.equal(ui.widgets.length, 1, "§8: the widget is the TUI branch's own signal");
     assert.equal(ui.widgets[0].key, PENDING_WIDGET_KEY);
     assert.match(ui.widgets[0].content![0], /1 pending question/);
@@ -666,17 +700,40 @@ describe("registerAsk (fake pi)", () => {
   });
 });
 
-describe("injectDiscussionSummary (fake pi)", () => {
-  function setup() {
+describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
+  function setup(origin: "lead-ask" | "fork-raised" = "lead-ask") {
     const sent: Array<{ message: unknown; options: unknown }> = [];
     const pi = { sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }) } as unknown as ExtensionAPI;
     const handle = createThreadRegistryHandle();
     const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
     const path = join(dir, "session.jsonl.ws-threads.json");
     hydrateThreadRegistry(handle, path);
-    const record = thread({ threadId: "q1", question: "Which anchor?", context: "background" });
+    const record = thread({ threadId: "q1", question: "Which anchor?", context: "background", origin });
     handle.threads.set(record.threadId, record);
     return { pi, sent, handle, path, record };
+  }
+
+  /** A live respondent on the shared registry, with a stop-observing fake client. */
+  function liveRespondent(stops: string[]): RpcAgentRecord {
+    return {
+      agentId: "agent-7",
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      idlePending: false,
+      waiters: [],
+      pendingReports: [],
+      reportsDropped: 0,
+      overlayAttached: true,
+      client: {
+        abort: async () => {},
+        stop: async () => {
+          stops.push("agent-7");
+        },
+      },
+    } as unknown as RpcAgentRecord;
   }
 
   test("§6: one custom message, delivered via followUp, carrying the thread id", () => {
@@ -705,26 +762,8 @@ describe("injectDiscussionSummary (fake pi)", () => {
   test("I5: snapshots the resume fields BEFORE stopping the respondent, and clears the overlay flag", async () => {
     const { pi, handle, record } = setup();
     record.respondentAgentId = "agent-7";
-    let stopped = false;
-    const live = {
-      agentId: "agent-7",
-      sessionPath: "/tmp/s.jsonl",
-      systemPromptPath: "/tmp/p.md",
-      wsToolNames: [],
-      toolGroup: "full-worker",
-      streaming: false,
-      idlePending: false,
-      waiters: [],
-      pendingReports: [],
-      reportsDropped: 0,
-      overlayAttached: true,
-      client: {
-        abort: async () => {},
-        stop: async () => {
-          stopped = true;
-        },
-      },
-    } as unknown as RpcAgentRecord;
+    const stops: string[] = [];
+    const live = liveRespondent(stops);
     const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
 
     injectDiscussionSummary(pi, handle, registry, record, "decided");
@@ -732,7 +771,7 @@ describe("injectDiscussionSummary (fake pi)", () => {
     assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "captured while the record was still live");
     assert.equal(live.overlayAttached, false);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(stopped, true, "260903 ws-agent-stop semantics: the child process is actually stopped");
+    assert.deepEqual(stops, ["agent-7"], "260903 ws-agent-stop semantics: the child process is actually stopped");
     assert.ok(registry.has("agent-7"), "stopAgent retains the entry — the thread stays rehydratable");
   });
 
@@ -741,6 +780,48 @@ describe("injectDiscussionSummary (fake pi)", () => {
     record.respondentAgentId = "gone";
     injectDiscussionSummary(pi, handle, new Map(), record, "decided");
     assert.equal(sent.length, 1);
+    assert.equal(record.status, "dormant");
+  });
+
+  test("C2: a lead-ask thread routes through the full §6/§9 close (summary injected, respondent stopped)", async () => {
+    const { pi, sent, handle, record } = setup("lead-ask");
+    record.respondentAgentId = "agent-7";
+    const stops: string[] = [];
+    const registry: RpcAgentRegistry = new Map([["agent-7", liveRespondent(stops)]]);
+
+    closeThreadOnDone(pi, handle, registry, record, "we take the second anchor");
+
+    assert.equal(sent.length, 1, "this surface owns the discussion fork, so its summary is the lead's channel");
+    assert.equal(record.status, "dormant");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(stops, ["agent-7"]);
+  });
+
+  test("C2: a fork-raised thread only detaches — no summary injected and the live task fork keeps running", async () => {
+    const { pi, sent, handle, path, record } = setup("fork-raised");
+    record.respondentAgentId = "agent-7";
+    const stops: string[] = [];
+    const live = liveRespondent(stops);
+    const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
+
+    closeThreadOnDone(pi, handle, registry, record, "");
+
+    assert.deepEqual(sent, [], "§1: the lead is not part of a fork-raised exchange — it learns the outcome from the fork's final report");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(stops, [], "stopping a live task fork would destroy its task and hang the lead's ws-agent-wait");
+    assert.ok(live.client, "the fork's client is untouched");
+    assert.equal(live.overlayAttached, false, "the overlay is detached, so the anti-bleed loop is armed again");
+    assert.equal(record.status, "dormant", "dormant means reopenable while the fork lives");
+    assert.ok(handle.threads.has("q1"));
+    assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant", "the detach is persisted like every other transition");
+    assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "the resume snapshot is refreshed on detach");
+  });
+
+  test("C2: detaching a fork-raised thread whose respondent is gone is a no-op, not a throw", () => {
+    const { pi, sent, handle, record } = setup("fork-raised");
+    record.respondentAgentId = "gone";
+    closeThreadOnDone(pi, handle, new Map(), record, "");
+    assert.deepEqual(sent, []);
     assert.equal(record.status, "dormant");
   });
 });
@@ -761,5 +842,9 @@ describe("checkContextLength / buildForkQuestionLeadNotice", () => {
     assert.match(notice, /\/answer q3/);
     assert.match(notice, /ws-agent-wait/i);
     assert.match(notice, /do not relay/i);
+    // C2: the decision comes back on the fork's own final report, not as a
+    // thread-summary message — /done never injects one for this origin.
+    assert.match(notice, /Decisions:/);
+    assert.ok(!/thread-summary/i.test(notice), notice);
   });
 });

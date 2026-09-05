@@ -125,7 +125,7 @@ export function buildForkQuestionLeadNotice(agentId: string, threadId: string): 
   return [
     `[ws] Agent ${agentId} raised a question for the OWNER, registered as thread ${threadId}.`,
     "The owner answers it directly in their own discussion overlay (/answer " + threadId + "); you are not part of that exchange.",
-    "Do NOT relay this question, answer it yourself, or ask the owner about it. Keep waiting on this agent (ws-agent-wait) — the decision reaches you as a separate thread-summary message when the owner closes the thread.",
+    "Do NOT relay this question, answer it yourself, or ask the owner about it. Keep waiting on this agent (ws-agent-wait) — it resumes its task once the owner replies, and what was decided reaches you in its own final report's Decisions: line.",
   ].join("\n");
 }
 
@@ -149,6 +149,12 @@ export interface ThreadRecord {
    */
   entryId?: string;
   status: ThreadStatus;
+  /**
+   * Which of §1's two entries registered this thread. Load-bearing at
+   * `/done` time (review relay #2 C2): the two entries have opposite
+   * respondent lifecycles — see `ThreadOrigin`.
+   */
+  origin: ThreadOrigin;
   /** The agent_id of the fork answering this thread, once one exists. */
   respondentAgentId?: string;
   /** Denormalized resume fields for `respondentAgentId` — see this file's header. */
@@ -166,6 +172,32 @@ export interface ThreadRecord {
  * already knows the answer.
  */
 export type ThreadStatus = "pending" | "open" | "dormant" | "closed";
+
+/**
+ * §1's two entries, recorded at registration because they own their
+ * respondent differently (review relay #2 C2):
+ *
+ * - `"lead-ask"` — Entry B. `ws-ask` registered it and `ensureRespondent`
+ *   LAZILY SPAWNED the discussion fork this surface owns end to end. `/done`
+ *   is that fork's whole purpose: ask it for a summary, inject the summary
+ *   into the lead, then stop it (§6/§9 `ws-agent-stop` semantics).
+ * - `"fork-raised"` — Entry A. A live `ws-fork` TASK fork raised the question
+ *   mid-task via `ws-report-to-lead(kind:"question")`; its lifecycle belongs
+ *   to `ws-fork`/`ws-agent-wait`/`ws-agent-stop`, not to this surface. `/done`
+ *   therefore only detaches the overlay: no summary request, no stop, no
+ *   injection. The fork resumes its task and the lead learns the outcome from
+ *   its own `kind:"final"` report's `Decisions:` line (§1/§4).
+ *
+ * A record parsed without this field is treated as `"fork-raised"`: the
+ * conservative default, since that is the origin whose respondent must never
+ * be stopped by mistake.
+ */
+export type ThreadOrigin = "lead-ask" | "fork-raised";
+
+/** Normalizes a persisted/unknown `origin` value; see `ThreadOrigin` for why the default is the conservative one. */
+export function normalizeThreadOrigin(value: unknown): ThreadOrigin {
+  return value === "lead-ask" ? "lead-ask" : "fork-raised";
+}
 
 /**
  * Everything needed to hand-reconstruct an `RpcAgentRecord` for a dormant
@@ -248,15 +280,20 @@ export function parseThreadRegistry(raw: string): ThreadRecord[] {
   }
   const threads = (parsed as { threads?: unknown } | null)?.threads;
   if (!Array.isArray(threads)) return [];
-  return threads.filter((entry): entry is ThreadRecord => {
-    const candidate = entry as Partial<ThreadRecord> | null;
-    return (
-      typeof candidate?.threadId === "string" &&
-      candidate.threadId.length > 0 &&
-      typeof candidate.title === "string" &&
-      (candidate.status === "pending" || candidate.status === "open" || candidate.status === "dormant" || candidate.status === "closed")
-    );
-  });
+  return threads
+    .filter((entry): entry is ThreadRecord => {
+      const candidate = entry as Partial<ThreadRecord> | null;
+      return (
+        typeof candidate?.threadId === "string" &&
+        candidate.threadId.length > 0 &&
+        typeof candidate.title === "string" &&
+        (candidate.status === "pending" || candidate.status === "open" || candidate.status === "dormant" || candidate.status === "closed")
+      );
+    })
+    // `origin` is normalized rather than validated away: an entry written
+    // before the field existed is still a usable thread, and defaulting it to
+    // "fork-raised" is the safe direction (see `ThreadOrigin`).
+    .map((entry) => ({ ...entry, origin: normalizeThreadOrigin(entry.origin) }));
 }
 
 /** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. */
@@ -432,9 +469,16 @@ export function buildDiscussionForkInitialMessage(context: string | undefined, q
  * §6 injection payload: `context + original question + summary`, delivered as
  * a Pi CUSTOM message (`pi.sendMessage`, not `sendUserMessage`) so the lead
  * can tell it apart from a real owner turn.
+ *
+ * Review relay #2 (co-located Minor): the opening line must not demote the
+ * summary. §6 is explicit that it "carries owner authority: the owner was
+ * present" — so it reads as the owner's own decisions, while still being
+ * labeled a thread summary rather than a fresh owner turn.
  */
 export function buildInjectionMessage(context: string | undefined, question: string | undefined, summary: string): string {
-  const lines: string[] = ["A side discussion with the owner has closed. This is its outcome, not a new instruction from the owner."];
+  const lines: string[] = [
+    "A side discussion with the owner has closed. These are the owner's decisions from that thread — they carry the owner's authority, delivered as a thread summary rather than as a new owner turn.",
+  ];
   if (context && context.trim().length > 0) {
     lines.push("", `Context: ${context.trim()}`);
   }
@@ -619,6 +663,7 @@ export function handleForkRaisedQuestion(
     title: deriveThreadTitle(message),
     question: message,
     status: "pending",
+    origin: "fork-raised",
     respondentAgentId: agentId,
     createdAt: now,
     touchedAt: now,
@@ -669,6 +714,7 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle): voi
         context: p.context,
         entryId: getLeafEntryId(toolCtx),
         status: "pending",
+        origin: "lead-ask",
         createdAt: now,
         touchedAt: now,
       };
@@ -724,7 +770,57 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle): voi
 }
 
 /**
- * §6 injection, called from the overlay's `/done` exit: the fork's summary
+ * The overlay's `/done` exit, routed on the thread's `origin` — the two
+ * entries own their respondent differently (review relay #2 C2, see
+ * `ThreadOrigin`):
+ *
+ * - `"lead-ask"`: this surface spawned the discussion fork, so `/done` runs
+ *   the full §6/§9 close — summary into the lead, then stop the fork.
+ * - `"fork-raised"`: the respondent is a LIVE Entry A task fork the lead is
+ *   parked on. Stopping it would destroy its in-flight task and hang the
+ *   lead's `ws-agent-wait` (`stopAgent` settles no waiters), so `/done` only
+ *   detaches: the thread goes dormant and the fork carries on, reporting what
+ *   was decided through its own `kind:"final"` report (§1/§4).
+ */
+export function closeThreadOnDone(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  rpcRegistry: RpcAgentRegistry,
+  thread: ThreadRecord,
+  summary: string,
+): void {
+  if (thread.origin === "lead-ask") {
+    injectDiscussionSummary(pi, handle, rpcRegistry, thread, summary);
+    return;
+  }
+  detachForkRaisedThread(handle, rpcRegistry, thread);
+}
+
+/**
+ * `/done` on a fork-raised thread: close the overlay, keep the task fork
+ * running. No summary was ever requested from it, nothing is injected into
+ * the lead (§1 keeps the lead out of this exchange entirely), and the thread
+ * stays dormant-and-reopenable for as long as the fork lives.
+ */
+export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, thread: ThreadRecord): void {
+  const agentId = thread.respondentAgentId;
+  if (agentId) {
+    const record = rpcRegistry.get(agentId);
+    if (record) {
+      record.overlayAttached = false;
+      // Refresh the resume snapshot while the record is still live, so a
+      // reopen after a lead restart can rehydrate it.
+      thread.forkResume = captureForkResume(record);
+    }
+  }
+  thread.status = "dormant";
+  thread.touchedAt = nowIso();
+  persistThreads(handle);
+  refreshPendingWidget(handle.ctxRef.current, handle);
+}
+
+/**
+ * §6 injection, the `"lead-ask"` half of `/done`: the fork's summary
  * reaches the lead as a Pi CUSTOM message (distinguishable from an owner
  * turn) delivered via `followUp` — never `steer` — so it lands when the lead
  * is idle and multiple closes queue in order. The lead session is never
@@ -737,7 +833,9 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle): voi
  * session. `stopAgent` keeps the registry entry (it only drops `client`), and
  * the resume snapshot is captured BEFORE the stop, while the record still
  * carries its live fields, so `/answer` can rehydrate and `sendToAgent`'s
- * dormant branch can relaunch from the same `--session` file.
+ * dormant branch can relaunch from the same `--session` file. Review relay #2
+ * C2 narrowed that stop to `"lead-ask"` threads — it is `closeThreadOnDone`'s
+ * job to keep an Entry A task fork out of here.
  */
 export function injectDiscussionSummary(
   pi: ExtensionAPI,
@@ -973,8 +1071,13 @@ async function openThread(
       threadId: thread.threadId,
       question: thread.question,
       createdAt: thread.createdAt,
+      // Review relay #2 C2: only a discussion fork this surface owns is asked
+      // for a summary. A live task fork is mid-task — asking it to summarize
+      // (and then acting on that turn) would derail the work the lead is
+      // waiting on.
+      summarizeOnDone: thread.origin === "lead-ask",
       channel: createForkChannel(rpcRegistry, sessionCtx.cwd, agentId),
-      onDone: (summary) => injectDiscussionSummary(pi, handle, rpcRegistry, thread, summary),
+      onDone: (summary) => closeThreadOnDone(pi, handle, rpcRegistry, thread, summary),
       onOpened: (close) => {
         activeOverlay = { token, close };
       },
