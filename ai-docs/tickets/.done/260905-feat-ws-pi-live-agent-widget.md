@@ -15,6 +15,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: efa51a1840b28444
 sage-review-completeness-reviewed: efa51a1840b28444
+completed: 2026-09-05
 ---
 
 # Pi adapter: always-visible list of live agents and threads in the lead TUI
@@ -114,3 +115,54 @@ carrying the `/answer` hint, the footer segment with and without a pending
 question. Live
 check: spawn two workers and a fork, open a thread, confirm the rows update
 without a lead turn and vanish when everything settles.
+
+### Result (07d24cdc) - 2026-09-05
+
+Behavioral delta (commits `ae03bcc2`, `07d24cdc`):
+
+- `agents-plugin-pi/src/agent-widget.ts` (new): pure `buildAgentRows`,
+  `buildWidgetLines`, `buildStatusSegment`, `shouldArmAgentWidget`, and the
+  `createAgentWidgetController` IO glue. Rows come from the union of the RPC
+  registry and the thread registry: a pending or open thread with no
+  thread-bound respondent (a `ws-ask` before `/answer`, or a fork-raised
+  question whose respondent was revived dormant after a restart) stands as
+  its own `thread · awaiting owner` row; a thread-bound respondent collapses
+  the thread onto its own row. The `/answer <id>` hint and `touchedAt` clock
+  follow the `awaiting owner` state for either origin; only the `thread` role
+  label is lead-ask-only.
+- `setWidget` receives the `(tui, theme) => Component` factory so
+  `render(width)` sees the real terminal width; `buildWidgetLines` stays pure
+  and width-agnostic. The repaint is guarded so a throwing surface loses one
+  paint, not the process. The 10 s timer is armed only while rows exist and
+  is stopped on `session_shutdown` and before re-arming on `/reload`.
+- `spawner.ts`: `runStartedAt` stamped unconditionally in `promptAgent`;
+  `agentWidgetRefreshRef` (same seam as `leadIdleRef`) fires on spawn, spawn
+  failure, exit, stop, `agent_start`, settle and auto-park, and the
+  gated-exec/report branch, so neither `spawner.ts` nor `ask.ts` imports the
+  widget module.
+- `ask.ts`: standalone `aboveEditor` pending-question widget removed; all six
+  former `refreshPendingWidget` sites route through the shared refresh ref;
+  headless `notify` baseline unchanged.
+- `index.ts`: controller armed on `session_start` via `shouldArmAgentWidget`
+  (lead-or-fork spawn role and TUI mode), stopped on shutdown.
+
+Verification: `npm test` in `agents-plugin-pi` at `07d24cdc`, 725 passing,
+0 failing (baseline 696). Reviews: partitioned correctness/fit/test on
+`ae03bcc2` found one Critical (rows built from the RPC registry alone) and
+four Important (fork-raised rows lacked the hint and thread clock, fixed
+80-column width, unguarded timer repaint, lost TUI-only arming coverage), all
+fixed in relay #1; a fresh Critical-scoped re-review on `07d24cdc` returned
+clean. The fit Important (spec not updated in the implementer's range) was
+resolved by the lead's doc pre-pass in the same branch.
+
+Minor findings recorded, not acted on: `ws: 1 agents` is not singularized;
+`ws-approve`, the `leadSend` thread-bound release, and the streaming
+steer/followUp branch fire no refresh (the timer self-heals within 10 s);
+the auto-park path fires the refresh twice; the arming gate uses the
+lead-or-fork role check rather than the ticket's literal `isChildProcess`
+wording, matching the existing push-renderer precedent.
+
+Owner-run live check (outstanding): spawn two workers and a fork, open a
+thread, and confirm the rows update without a lead turn, render at the real
+terminal width, tick every 10 s, survive `/reload`, and vanish when
+everything settles.

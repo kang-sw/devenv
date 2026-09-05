@@ -728,6 +728,19 @@ export interface RpcAgentRecord {
    */
   running: boolean;
   /**
+   * 260905 (live-agent widget ticket): epoch-ms stamp of the most recent
+   * prompt ISSUED to this child, stamped unconditionally by `promptAgent` —
+   * including the anti-bleed nudge (`isLeadPrompt: false`), unlike
+   * `lastLeadPromptAt` below, because the widget's "running" row is meant to
+   * show how long THIS turn has been going, and a nudge starts a new turn on
+   * the wire even though it is not a new lead-issued task boundary. Read by
+   * `agent-widget.ts`'s `buildAgentRows` as the running-row elapsed clock;
+   * left untouched by `sendToAgent`'s `steer`/`followUp` join (see that
+   * function's doc comment) — a mid-stream steer keeps ticking from the
+   * turn's original start, by design.
+   */
+  runStartedAt?: number;
+  /**
    * 260905: `true` once this child has sent a `kind:"final"` or
    * `kind:"question"` report during the current turn; cleared by the next
    * `promptAgent`. Two uses: it removes the sender from N on its own push (a
@@ -1122,6 +1135,35 @@ export function buildPushContent(
  */
 export const leadIdleRef: { current: (() => boolean) | undefined } = { current: undefined };
 
+/**
+ * 260905 (live-agent widget ticket): the same mutable-ref seam as
+ * `leadIdleRef`, filled by `index.ts`'s `session_start` (TUI lead only) with
+ * a closure that recomputes `agent-widget.ts`'s rows and repaints the
+ * `belowEditor` widget + `setStatus` segment. Lets every registry-transition
+ * point in this module (spawn, settle, stop, exit, spawn-failed, an approval
+ * or report event) trigger a re-render WITHOUT importing `agent-widget.ts` or
+ * `ask.ts` — this module must stay the lower layer, mirroring `ask.ts`'s own
+ * "imports FROM spawner.ts, never the reverse" rule. `undefined` outside a
+ * TUI lead session (a worker/explore child, a headless lead, a test), in
+ * which case `triggerAgentWidgetRefresh` is a silent no-op.
+ */
+export const agentWidgetRefreshRef: { current: (() => void) | undefined } = { current: undefined };
+
+/**
+ * Best-effort fire of `agentWidgetRefreshRef`, swallowing a throw — matches
+ * every other push call site's swallow-and-continue convention. Called from
+ * every registry-transition point a live-agent-widget row depends on: a
+ * throwing or absent refresh must never turn a routine spawn/settle/stop into
+ * a crashed event listener.
+ */
+function triggerAgentWidgetRefresh(): void {
+  try {
+    agentWidgetRefreshRef.current?.();
+  } catch {
+    // best effort — see doc comment above.
+  }
+}
+
 /** Whether the owning session's agent is between turns right now. See `leadIdleRef`. */
 function isOwningAgentIdle(): boolean {
   const isIdle = leadIdleRef.current;
@@ -1312,6 +1354,11 @@ export function pushToLead(
  * anti-bleed nudge — because an internal re-prompt is not a new task
  * boundary: moving `lastLeadPromptAt` there would hide a stale
  * idle-without-final from the very check the nudge exists to serve.
+ *
+ * 260905 (live-agent widget ticket): `runStartedAt` is stamped
+ * unconditionally, unlike `lastLeadPromptAt` — the widget's elapsed clock
+ * resets on a nudge too, since the nudge really did start a fresh turn on
+ * the wire even though it is not a new lead-issued task boundary.
  */
 export async function promptAgent(
   record: RpcAgentRecord,
@@ -1324,6 +1371,7 @@ export async function promptAgent(
   // A final that never reached a settle belongs to the task being replaced,
   // not to the one starting now.
   record.pendingFinal = undefined;
+  record.runStartedAt = Date.now();
   if (opts?.isLeadPrompt !== false) {
     record.lastLeadPromptAt = Date.now();
   }
@@ -1384,6 +1432,7 @@ export function markAgentExited(
 ): void {
   if (!record.client) return;
   clearLiveState(record);
+  triggerAgentWidgetRefresh();
   // A child that filed a final and then died before settling still answered;
   // `settled_reason: "exited"` is what tells the lead the death, not silence.
   if (flushPendingFinal(pi, registry, record, "exited")) return;
@@ -1434,6 +1483,7 @@ export function pushSpawnFailed(
 ): void {
   clearLiveState(record);
   pushToLead(pi, registry, record, "ws-agent-settled", { reason: "spawn-failed", error: err instanceof Error ? err.message : String(err) }, "followUp");
+  triggerAgentWidgetRefresh();
 }
 
 export interface SpawnAgentParams {
@@ -1846,6 +1896,11 @@ export function attachEventListener(
     if (outcome.push) {
       pushToLead(pi, registry, record, outcome.push.family, outcome.push.payload, outcome.push.deliverAs);
     }
+    if (e.type === "agent_start") {
+      // 260905 (live-agent widget ticket): streaming just flipped true — a
+      // fresh "running" row transition.
+      triggerAgentWidgetRefresh();
+    }
     if (outcome.settled) {
       void (async () => {
         // The deferred final, if this turn filed one, IS the settle message.
@@ -1864,7 +1919,18 @@ export function attachEventListener(
             // best effort — a park failure must not crash the settle handler.
           }
         }
+        // 260905 (live-agent widget ticket): fired after the liveness probe
+        // and the possible automatic park above, so the widget's re-render
+        // sees the record's fully-settled state (dormant if parked, still
+        // running if a synchronous nudge re-prompted it first).
+        triggerAgentWidgetRefresh();
       })();
+    }
+    if (e.type === "tool_execution_start" && (e.toolName === GATED_EXEC_TOOL_NAME || e.toolName === REPORT_TO_LEAD_TOOL_NAME)) {
+      // 260905 (live-agent widget ticket): a gated command just went pending
+      // approval, or a report (progress/question/final) was just observed —
+      // both are widget-relevant transitions per the ticket's own list.
+      triggerAgentWidgetRefresh();
     }
     // Ctx callback first, per-record fallback second (see
     // `RpcAgentRecord.onApprovalPending`).
@@ -2107,6 +2173,9 @@ export async function spawnAgent(
     throw err;
   }
 
+  // 260905 (live-agent widget ticket): a brand-new registry member, live and
+  // running from its initial prompt — the widget's first sighting of it.
+  triggerAgentWidgetRefresh();
   return { agent_id: agentId, alias: record.alias, evicted: eviction.evictedLabel };
 }
 
@@ -2354,6 +2423,9 @@ export async function stopAgent(
     } else if (!flushPendingFinal(pi, registry, record, "stopped")) {
       pushToLead(pi, registry, record, "ws-agent-settled", { reason: "stopped" }, "followUp");
     }
+    // 260905 (live-agent widget ticket): the record just left the live state
+    // (or lost its thread bind) — either way a widget-relevant transition.
+    triggerAgentWidgetRefresh();
   }
   return { agent_id: record.agentId };
 }

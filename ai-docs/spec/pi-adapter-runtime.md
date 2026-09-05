@@ -832,14 +832,17 @@ channel for an owner question: it registers and carries on.
   adapter re-captures its UI context on every `session_start` and keeps only
   plain data in the registry, since Pi invalidates captured contexts across
   new-session/fork/reload.
-- **Owner surface (TUI lead).** An `aboveEditor` widget shows
-  `ws: N pending question(s)` while any thread is pending; `/thread` lists
-  pending, open and dormant threads; `/answer <id>` opens one (a bare
-  `/answer`, or the `ctrl+shift+a` shortcut where the terminal can deliver it,
-  reopens the most recent reopenable thread). The overlay **never auto-pops**:
-  registration notifies and updates the widget, nothing more. One overlay is
-  attached at a time; the overlay header shows the thread title and the time
-  it was opened, so two lead-voiced agents cannot be mistaken for one.
+- **Owner surface (TUI lead).** A pending or open thread is a row in the
+  live-agent widget (see "Live-agent widget" below): the row reads
+  `awaiting owner` and carries the `/answer <id>` hint, and the footer
+  segment counts the pending questions. There is no separate
+  pending-question widget. `/thread` lists pending, open and dormant threads;
+  `/answer <id>` opens one (a bare `/answer`, or the `ctrl+shift+a` shortcut
+  where the terminal can deliver it, reopens the most recent reopenable
+  thread). The overlay **never auto-pops**: registration notifies and
+  refreshes the widget, nothing more. One overlay is attached at a time; the
+  overlay header shows the thread title and the time it was opened, so two
+  lead-voiced agents cannot be mistaken for one.
 - **Lazy discussion fork at the lead's tip (lead-ask threads).** A registered
   question costs nothing until the owner opens it. Opening a `lead-ask` thread
   for the first time forks a **discussion** fork from the lead's *current* tip
@@ -913,6 +916,66 @@ channel for an owner question: it registers and carries on.
 > are packaged as a one-shot owner runbook in the ticket's Phase 2 Result. The
 > `ctrl+shift+a` shortcut is distinguishable from `ctrl+a` only under a terminal
 > that reports CSI-u extended keys.
+
+## Live-agent widget {#260905-pi-live-agent-widget}
+
+The owner of a TUI lead sees every live child and every open owner question in
+one compact `belowEditor` widget, one row each, plus a footer count. The widget
+is a projection over the two registries the adapter already keeps — the RPC
+agent registry and the owner-question thread registry — and never owns state
+of its own: every repaint rebuilds the rows from those registries.
+
+- **Rows.** Each row reads `name · role · state · elapsed`, with the
+  `/answer <id>` hint appended when the row awaits the owner. `name` is the
+  agent's alias, else its title, else the first eight characters of its id; a
+  thread with no live respondent is named by the thread title. `role` is
+  `worker`, `execute`, `fork`, or `thread` (a lead-ask discussion respondent,
+  or a thread with no live respondent yet). `state` is `awaiting owner`,
+  `awaiting approval`, or `running`; there is no idle, dormant, or explore
+  row, since an idle child is parked and a one-shot explore never enters the
+  registry. `elapsed` counts from the record's last prompt (`runStartedAt`,
+  stamped by every prompt including the anti-bleed nudge), or from the
+  thread's `touchedAt` for a row that awaits the owner on a thread.
+- **Which records are rows.** An RPC record is a row while it has a live
+  client, a pending approval, or is thread-bound (a thread-bound record stays
+  a row while parked between messages — it is the owner's action cue). A
+  thread is a row while it is `pending` or `open`; it collapses onto its
+  respondent's row when that respondent is a thread-bound record, and
+  otherwise stands alone (a `ws-ask` question before `/answer` spawns its
+  fork, or a fork-raised question whose respondent was revived dormant after
+  a lead restart). `dormant` and `closed` threads produce no row.
+- **Order and cap.** Rows sort `awaiting owner`, then `awaiting approval`,
+  then `running`, longest elapsed first within a state. At most five rows
+  render; only `running` rows are folded into a trailing `+N more` line, so
+  every awaiting row is always visible. Each line is bounded to the terminal
+  width the host passes at render time (`visibleWidth(line) <= width`,
+  truncated with an ellipsis), and the widget is hidden when there are no
+  rows.
+- **Footer segment.** A `setStatus` segment reads `ws: N agents` where `N` is
+  the uncapped row count, with ` · M question(s)` appended while any thread
+  is pending; it clears when both are zero. This segment is separate from
+  the goal loop's own yield segment.
+- **Refresh.** The widget repaints on every registry transition (spawn,
+  spawn failure, prompt, settle and automatic park, stop, exit, gated-exec
+  approval request, thread registration, open, and close) and on a 10-second
+  timer that runs only while at least one row exists. A repaint that throws
+  against a torn-down surface loses that repaint only. The controller is
+  armed on `session_start` only for a TUI lead (`shouldArmAgentWidget`:
+  lead-or-fork spawn role and `mode === "tui"`), a prior controller is
+  stopped before a new one is created on `/reload`, and `session_shutdown`
+  stops the timer and clears both the widget and the segment. Off the TUI
+  there is no widget; the headless baselines in the owner-question section
+  above are unchanged.
+
+> [!note] Live verification · 2026-09-05
+> Offline coverage: row shape and states, name precedence, ordering and the
+> cap, union of the two registries (pending `ws-ask`, post-restart dormant
+> respondent, dedupe onto a thread-bound respondent, no dormant/closed rows),
+> hide-on-empty, width bound at 40/80/120, the `/answer` hint, the footer
+> segment, `runStartedAt` stamping, and the arming predicate. Not yet
+> exercised live: the real-width render through the host's widget factory,
+> the 10-second clock under a running child, and `/reload` re-arming — these
+> are owner-run checks recorded in the ticket's Phase 1 Result.
 
 ## Goal loop {#260904-pi-goal-loop-arming-settled-levers}
 

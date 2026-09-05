@@ -1,8 +1,15 @@
 /**
  * 260904 Phase 2 (`260904-feat-ws-pi-side-thread-fork-question-surface`):
  * the OWNER-question surface — `ws-ask`/`ws-resolve`, the persisted thread
- * registry, the `N pending` widget, `/thread`, `/answer <id>`, the lazy
- * discussion fork, and the `/done` summary injection.
+ * registry, `/thread`, `/answer <id>`, the lazy discussion fork, and the
+ * `/done` summary injection.
+ *
+ * 260905 (`260905-feat-ws-pi-live-agent-widget`): this module's own `N
+ * pending` `aboveEditor` widget is gone — a pending/open thread is now a row
+ * in `agent-widget.ts`'s merged `belowEditor` live-agent panel. Every former
+ * widget-refresh call site here now fires `spawner.ts`'s
+ * `agentWidgetRefreshRef` instead (see `refreshAgentWidget` below), so this
+ * module stays free of any direct `agent-widget.ts` import.
  *
  * Two entries reach the same registry (§1):
  *   - Entry B (`ws-ask`): the lead registers a question and returns
@@ -58,6 +65,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
 import {
+  agentWidgetRefreshRef,
   inheritModelFromToolCtx,
   sendToAgent,
   spawnAgent,
@@ -83,9 +91,6 @@ export const RESOLVE_TOOL_NAME = "ws-resolve";
 
 /** `pi.sendMessage` custom-message type for a closed discussion thread's summary (§6). */
 export const THREAD_SUMMARY_CUSTOM_TYPE = "ws-thread-summary";
-
-/** `ctx.ui.setWidget` key for the `N pending` counter above the editor. */
-export const PENDING_WIDGET_KEY = "ws-threads";
 
 /** Ancestor entries rendered into a post-compaction verbatim excerpt (§7). */
 export const EXCERPT_WINDOW = 4;
@@ -329,15 +334,9 @@ export function parseThreadRegistry(raw: string): ThreadRecord[] {
     });
 }
 
-/** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. */
+/** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. Also feeds `agent-widget.ts`'s `buildStatusSegment` question count. */
 export function countPending(records: readonly ThreadRecord[]): number {
   return records.filter((record) => record.status === "pending").length;
-}
-
-/** Widget content for `ctx.ui.setWidget`; `undefined` clears the widget entirely at zero pending. */
-export function buildWidgetLines(count: number): string[] | undefined {
-  if (count <= 0) return undefined;
-  return [`ws: ${count} pending question${count === 1 ? "" : "s"} — /answer <id>, /thread to list`];
 }
 
 /** `/thread`'s rendering: every thread except lead-self-resolved (`"closed"`) ones, newest touch first. */
@@ -599,7 +598,6 @@ export function getLeafEntryId(toolCtx: unknown): string | undefined {
 export interface AskUiCtx {
   mode?: string;
   ui?: {
-    setWidget?(key: string, content: string[] | undefined, options?: { placement?: string }): void;
     notify?(message: string, type?: "info" | "warning" | "error"): void;
   };
 }
@@ -656,14 +654,24 @@ function persistThreads(handle: ThreadRegistryHandle): void {
 }
 
 /**
- * Repaints the `N pending` widget above the editor. A guarded no-op outside
- * TUI mode (§8: headless never grows a widget) and whenever no `ctx` has been
- * captured yet — the race window between a lead restart and its first
- * `session_start`, which the ticket's own captured-`ctx` note calls out.
+ * 260905 (live-agent widget ticket): the standalone `N pending` `aboveEditor`
+ * widget this function used to repaint is gone — a pending/open question is
+ * now a row in `agent-widget.ts`'s merged `belowEditor` panel instead. Every
+ * former call site now fires the merged refresh through
+ * `spawner.ts`'s `agentWidgetRefreshRef` — the same ref `spawner.ts`'s own
+ * registry-transition points use — so this module never has to import
+ * `agent-widget.ts` directly (golden rule: this module imports FROM
+ * `spawner.ts`, never the reverse). A guarded no-op outside a TUI lead
+ * session (`ref.current` is only ever filled there) and best-effort
+ * (swallows a throw), matching every other push/refresh call site's
+ * convention.
  */
-export function refreshPendingWidget(ctx: AskUiCtx | undefined, handle: ThreadRegistryHandle): void {
-  if (!ctx || ctx.mode !== "tui") return;
-  ctx.ui?.setWidget?.(PENDING_WIDGET_KEY, buildWidgetLines(countPending([...handle.threads.values()])), { placement: "aboveEditor" });
+function refreshAgentWidget(): void {
+  try {
+    agentWidgetRefreshRef.current?.();
+  } catch {
+    // best effort — see doc comment above.
+  }
 }
 
 function notify(ctx: AskUiCtx | undefined, message: string, type?: "info" | "warning" | "error"): void {
@@ -734,7 +742,7 @@ export function handleForkRaisedQuestion(
   // involvement (`handleRespondentFinalReport` -> `detachForkRaisedThread`).
   if (pi) armFinalReportHook(pi, handle, rpcRegistry, record.threadId, agentId);
   persistThreads(handle);
-  refreshPendingWidget(handle.ctxRef.current, handle);
+  refreshAgentWidget();
   return record;
 }
 
@@ -792,7 +800,7 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcR
       if (overage) notify(ctx, overage, "warning");
 
       if (ctx?.mode === "tui") {
-        refreshPendingWidget(ctx, handle);
+        refreshAgentWidget();
       } else {
         // §8 headless baseline: no widget, no discussion fork — just a
         // fire-and-forget notify. The owner's answer then arrives as an
@@ -816,7 +824,7 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcR
       },
       required: ["question_id"],
     } as never,
-    async execute(_toolCallId, params, _signal, _onUpdate, toolCtx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _toolCtx) {
       const p = params as { question_id: string };
       const record = handle.threads.get(p.question_id);
       if (!record) {
@@ -829,7 +837,7 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcR
       // the lead's fan-in).
       if (record.respondentAgentId && rpcRegistry) bindThread(rpcRegistry, record.respondentAgentId, false);
       persistThreads(handle);
-      refreshPendingWidget((toolCtx as AskUiCtx | undefined) ?? handle.ctxRef.current, handle);
+      refreshAgentWidget();
       return { content: [{ type: "text", text: JSON.stringify({ question_id: record.threadId, status: record.status }) }] };
     },
   });
@@ -888,7 +896,7 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
   thread.status = "dormant";
   thread.touchedAt = nowIso();
   persistThreads(handle);
-  refreshPendingWidget(handle.ctxRef.current, handle);
+  refreshAgentWidget();
 }
 
 /**
@@ -953,7 +961,7 @@ export function injectDiscussionSummary(
   thread.status = "dormant";
   thread.touchedAt = nowIso();
   persistThreads(handle);
-  refreshPendingWidget(handle.ctxRef.current, handle);
+  refreshAgentWidget();
 }
 
 /**
@@ -1245,7 +1253,7 @@ async function openThread(
   thread.status = "open";
   thread.touchedAt = nowIso();
   persistThreads(handle);
-  refreshPendingWidget(ctx, handle);
+  refreshAgentWidget();
 
   // One overlay at a time (§5): the previous one is closed first; its own
   // fork is untouched and its thread stays reopenable.
