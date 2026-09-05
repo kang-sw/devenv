@@ -299,6 +299,54 @@ Verification:
 8. Packaged install: `npm pack` → install the tarball → the system prompt
    carries the guide (the `files` whitelist ships `pi-lead-guide.md`).
 
+### Result (06299445) - 2026-09-05
+
+All four pieces landed in one phase across five commits on
+`impl/goal/track/pi-agent/amber-otter-canyon/study-juice-kiwi`
+(`17f20c2a` normalization → `9d308627` role marker + `process-role.ts` +
+before_agent_start gate → `55f36adb` `workflow_manual`→`workflow_state` mapping →
+`be6ce39e` system-prompt injection + `pi-lead-guide.md` → `06299445` review
+relay #1). Behavior delta and contract are captured in
+`spec/pi-adapter-runtime.md` `{#260905-pi-lead-bootstrap-system-prompt}`,
+`{#260905-pi-workflow-manual-state-mapping}`, and the amended
+`{#260903-pi-bridge-session-key-fill-forward}` /
+`{#260903-pi-delegation-spawner-tools}` (spec commit `2afaf2c7`).
+
+Deviations from the plan/ticket:
+
+- **Drift reconciliation.** The ticket assumed it lands *first* in the Pi drain
+  order, but siblings `260903` (subagent-rpc-ux, goal-loop) had already landed
+  earlier in this drain run. So (a) the process-role marker is `WS_PI_SPAWN_ROLE`
+  in a new dependency-free `agents-plugin-pi/src/process-role.ts` that
+  **subsumes** the already-landed `WS_PI_AGENT_CHILD` boolean marker (a clean
+  consolidation, not a policy change — `goal-loop.ts` `isChildProcess` widens to
+  "any role present", preserving the child no-op); and (b) `pi-lead-guide.md` was
+  seeded with the **actual current tool set**
+  (`ws-agent-spawn`/`send`/`wait`/`list`/`stop`/`transcript`,
+  `ws-report-to-lead`, `explore`, `/goal` + its three levers), not the stale
+  `ws-agent-continue` row the ticket text named.
+- **Commit order.** Role marker landed before the mapping (ticket suggested
+  mapping first) so each commit builds in isolation — a sound reordering, no
+  behavior change.
+- **Review relay #1 (test partition, Important).** The `workflow_manual`→
+  `workflow_state` role gate was inlined in `execute()` with no unit test; it was
+  extracted into a pure, unit-tested `shouldMapWorkflowManual(rawName,
+  hasSnapshot, role)` predicate (`06299445`), mirroring the already-extracted
+  `computeBeforeAgentStartResult` seam.
+
+Verification: `cd agents-plugin-pi && npm test` → **235/235 pass** (from a 227
+baseline; +8 for the extracted predicate). The 8-point live `pi -e` gate
+(system-prompt inspection, live sentinel single-mint, worker/explore spawn
+inspection, compaction round-trip, fill-or-forward regression, live static-body
+cut, forced-degraded self-heal, `npm pack` install) is **deferred**: it is
+subprocess/model/packaging-dependent and this sandbox has no provider
+credentials. Outstanding as manual verification before any release cut.
+
+Findings dispositioned: 1 Important fixed (relay #1 above). 3 Minor record-only
+— correctness's degraded-sentinel spec-wording reconciliation was applied in the
+spec (`2afaf2c7`); fit's `isError`→throw triplication and a fractional-percent
+rounding note were left as-is (pre-existing style, low value).
+
 ## Non-goals
 
 - Editing canonical skill text or adding Pi-specific skill shims.

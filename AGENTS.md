@@ -295,10 +295,18 @@ ai-docs/tickets/.dropped/
   `260429-research-host-neutral-ws-plugin` anchor is absorbed and archived.
 - Active direction: **Pi-native framework** (branch `feat/ws-pi-plugin`,
   research anchor `260802-research-ws-pi-native-framework`). A Pi extension
-  bridges ws-mcp (harness-neutral; Go source untouched) onto Pi via a stdio MCP
+  bridges ws-mcp (harness-neutral; no host-specific logic in its Go source)
+  onto Pi via a stdio MCP
   client, composing skills + playbook + tier/subagent + goal-loop as the
   opinionated framework layer; dependency stays one-directional (Pi extension ->
-  ws-mcp). The earlier opencode adapter direction is dropped
+  ws-mcp). One clause (owner, 2026-09-05): ws-mcp may change so that a host
+  becomes a peer of Codex/Claude in the harness-keyed config surfaces (the
+  closed harness enum, `agents.tier`, prompt overrides, rsrc harness variants,
+  a harness-neutral tier read tool). Such changes carry no host-specific
+  logic, land through the normal `develop` release flow, and apply to any
+  later host as much as to Pi; the adapter then consumes the released ws.
+  Mercenary is a deprecated path: not modified for Pi, and not exposed by the
+  Pi adapter. The earlier opencode adapter direction is dropped
   (`260801-feat-ws-opencode-adapter`, `.dropped/`).
 - Existing historical Claude workflow notes may mention `ws-*` on `PATH`; new
   shared guidance should use MCP tools and bundled runtime documents.

@@ -14,6 +14,7 @@ sage-review-design: completed
 sage-review-design-reviewed: d1adbf443f708c3e
 sage-review-completeness: completed
 sage-review-completeness-reviewed: c97852f5cf200bc5
+completed: 2026-09-05
 ---
 
 # Pi lead-execute approval gateway: delegated mutation via ws.execute + per-mutation ws.approve
@@ -345,6 +346,52 @@ hard removal of the lead's native bash (structural) or the soft-convention
 fallback (§8)**. Race/registry/select logic unit-tested where seam-extractable.
 Depends on 260903 Phase 1.
 
+### Result (69672092) - 2026-09-05
+
+Phase 1 landed the whole gateway through the prompt-injection fallback relay on
+`impl/goal/track/pi-agent/amber-otter-canyon/plus-wife-purse` (`b073586e` plan →
+`d35b1b4f` tool-group threading → `4455ec78` gateway → `69672092` review relay
+#1). The contract is captured in `spec/pi-adapter-runtime.md`
+`{#260905-pi-execute-approval-gateway}`, `{#260905-pi-worker-gated-exec}`, and
+`{#260905-pi-lead-tool-surface-execute-gateway}` (spec commit `81297c33`).
+
+Landed behavior: `ws-execute`/`ws-approve` lead verbs; the `execute-worker` tool
+group (read-only native family + `ws-worker-exec` gated exec + report + explore,
+no native bash); the prompt-injection approval relay over a per-agent filesystem
+decision channel using Pi's own `toolCallId` as `cmd_id`; the §7 adapter-scraped
+context header (now honoring a worker `cwd` override); `approve`/`deny(reason)`/
+`run-instead(command)` with per-decision field validation and `cmd_id`
+race-binding; abort via `ws-agent-stop` (unblock "aborted", dormant+retain); and
+the lead tool-surface reshaping (native bash/read removed, ugly-read retained,
+`ws-worker-exec` excluded from the lead's active set via `computeLeadActiveTools`).
+
+§8 linchpin resolved: `pi.setActiveTools`/`getActiveTools` on `ExtensionAPI`
+reshape the one registry holding built-ins and extension tools alike, so **hard
+removal** of native bash from the host lead session is achieved (not the
+soft-convention fallback) — verified against the installed pi package source.
+
+Deviations: (1) a from-scratch minimal mutation-incapable file-read tool was
+registered for the ugly-read name (no Pi API exposes invoking a built-in tool's
+impl from extension code) — fit-reviewed as justified; (2) `WS_PI_APPROVAL_DIR`
+derived from `dirname(sessionPath)` rather than a threaded param (inert for
+non-execute-worker spawns) — fit-reviewed as justified.
+
+Verification: `cd agents-plugin-pi && npm test` → **292/292 pass** (235 baseline
++ 57). Reviews (partitioned correctness/fit/test): gate-integrity core clean;
+5 Important findings fixed in relay #1 (`69672092`) — approval header cwd-override
+(correctness), `run-instead`/`deny` field validation (correctness), and three
+test-coverage gaps (tautological toolGroup default, ugly-read slicing,
+`waitForDecisionFile` abort/cleanup); the fit "missing spec anchors" Important was
+lead-dispositioned as deferred-to-doc-pre-pass (spec is lead-owned) and authored
+in `81297c33`. One correctness Minor recorded: the tool-surface exclusion's
+`/reload` durability relies on the session-start handler re-firing — captured as
+an Implementation Gap in the spec and folded into the outstanding manual gate.
+
+Outstanding: the live `pi --mode rpc` end-to-end gate (all eight Phase 1
+verification items, incl. the post-`/reload` tool-surface check) is deferred —
+no provider credentials in the build sandbox — and stands as the manual
+verification step before release.
+
 ### Phase 2: Harness-native pause/resume + escalation refinements
 
 If Pi exposes pausing an in-flight worker and injecting the decision via
@@ -357,6 +404,131 @@ Verification: a live run showing an in-flight worker paused at a mutation and
 resumed by a lead `ws.approve` without a separate injected lead turn; a light
 worker escalating a task that exceeded its tier; an approval request expanded on
 demand. Depends on Phase 1.
+
+#### Re-scope (2026-09-05) — headline achieved by 260905; Phase 2 narrowed
+
+Owner-approved re-scope. The headline deliverable above (replace the
+prompt-injection relay with a harness-native pause/resume so a worker pauses at
+a mutation and resumes on `ws.approve` **without a separate injected lead
+turn**) is **already achieved** by the approval-relay deadlock fix landed under
+`260905-bug-ws-pi-approval-relay-deadlocks-under-agent-wait` (commit
+`10cc4c01`), and live-verified:
+
+- The worker already pauses at the mutation at the tool level — the gated exec
+  blocks on the decision file (`waitForDecisionFile`) — independent of any Pi
+  harness pause capability.
+- A lead parked in `ws-agent-wait` now receives `reason:"approval-pending"`
+  with `pending_approval:{cmd_id,command,rationale}` **as the wait's own return
+  value**, approves via `ws-approve` (writing the decision file = resume), and
+  re-waits to harvest. No injected lead turn is on the critical path.
+
+The Pi in-flight pause/resume capability probe therefore no longer decides the
+headline and is dropped. What remains of Phase 2 is one small refinement:
+
+- **Suppress the redundant approval steer.** `createApprovalRelay`
+  (`execute-gateway.ts`) still injects the approval request via
+  `pi.sendUserMessage(..., {deliverAs:"steer"})` unconditionally, in parallel
+  with the waiter wake. When a waiter was woken (the lead already learned of the
+  request through `ws-agent-wait`), the steer arrives at the next turn boundary
+  as a stale duplicate notice (the observed "steering: queued message"). It is
+  harmless but noisy. Refine so the steer is emitted only when **no** waiter was
+  woken by the request (the lead was not blocked in a wait), preserving the
+  relay as the fallback path for a non-waiting lead. Add unit coverage for both
+  branches (waiter-woken → no steer; no waiter → steer).
+
+Verification (re-scoped): unit tests for both branches; a live run where a lead
+in `ws-agent-wait` handles an approval via the wait return and receives **no**
+trailing stale steer, and a second run where a non-waiting lead still receives
+the steer relay.
+
+The secondary items (mid-task `complex` escalation; on-demand approval-context
+expand) are **dropped from this ticket** — the plan itself rates them low-value
+on their own; re-raise as a separate ticket if a concrete need appears.
+
+### Result (bc8bc669) - 2026-09-05
+
+Landed the re-scoped Phase 2 on `impl/goal/track/pi-agent/amber-otter-canyon/plus-wife-purse`
+(`0a138c68` + `bc8bc669`; spec `30722aba`). Behavioral delta: a pending-approval
+event now notifies the lead through exactly one path. `settleWaiters` reports how
+many waiters it drained, `applyRpcEvent` surfaces that as `{ waiterWoken }`,
+`attachEventListener` threads it into `onApprovalPending(record, info)`, and
+`createApprovalRelay` skips the `steer` injection when a live `ws-agent-wait` was
+woken by the same event; a non-waiting lead still receives the steer as the sole
+fallback path. `enqueueReport` stays `void`.
+
+Review (single full-scope, opus): review #1 returned one **Critical** — the
+`waiterWoken` count included dead resolvers that `waitForAgents` left behind on
+its timeout path and on the losers of a multi-agent race, so a lead that had
+timed out and moved on would have had its steer suppressed with nobody
+listening, and the worker's decision wait has no timeout (the 260905 deadlock
+class through a different door). Relay #1 (`bc8bc669`) fixed it: `waitForAgents`
+keeps a handle to every resolver it pushes and splices them out by identity in a
+`finally`, covering the timeout return and unregistering losers on a win. Review
+#2 (Critical-scoped): `[resolved]`, clean with 2 Minor remaining, recorded only:
+(a) the `attachEventListener` wiring seam is untested end-to-end (both ends are
+covered independently); (b) a theoretical same-tick race in a multi-agent wait
+where another agent's settle wins and a loser's gated-exec event is processed
+before the `finally` runs — judged practically unreachable (distinct child
+processes deliver events in separate I/O callbacks with the microtask queue
+drained between them) and self-recovering via the pending-approval fast path on
+the next wait; no change requested.
+
+Verification: `cd agents-plugin-pi && npm test` → **358/358** (350 baseline + 8:
+2 `applyRpcEvent` return-value tests, 3 `createApprovalRelay` branch tests with a
+fake `pi` and a non-git tmpdir, 3 `waitForAgents`-driven tests — timeout → no
+suppression; race loser → no suppression; live wait → suppression and the wait
+resolves `approval-pending`). Spec: `{#260905-pi-worker-gated-exec}` gained the
+single-notification rule and dropped the "harness-native pause/resume is a later
+optimization" line; `spec_index.verify` ok.
+
+Outstanding (manual, owner-run): the re-scoped live two-run check — a lead
+parked in `ws-agent-wait` handles an approval via the wait return and sees no
+trailing stale steer; a non-waiting lead still receives the steer relay. No
+credentials in the build sandbox; the owner drives live `pi` sessions with the
+user-scope-installed adapter.
+
+#### Live verification (2026-09-05) — both runs PASS
+
+Owner-run on a fresh `pi` session with the user-scope-installed adapter after
+`e5f0e697`, using a paste-in two-run script (each run: `ws-execute` spawns a
+worker that creates one file under a scratch directory, then reports `final`).
+
+- Run A (waiting lead): `ws-agent-wait` returned `approval-pending` with the
+  worker's `cmd_id`; `ws-approve` + re-wait harvested the `run-a done` report;
+  **no** injected approval message appeared after the lead ended its turn.
+- Run B (non-waiting lead): the lead ended its turn without waiting; the
+  injected approval request ("A spawned execute-worker … needs your approval.")
+  arrived as the steered message on the next turn; `ws-approve` + wait harvested
+  `run-b done`.
+- Both worker-created files verified on disk. Nothing unexpected reported.
+
+The manual gate above is closed; the ticket has no outstanding verification.
+
+## Blocked (2026-09-05)
+
+Phase 2 is not autonomously advanceable in the current build sandbox. Its
+headline deliverable — replacing the prompt-injection relay with a
+harness-native pause/resume path — is *conditional* on Pi exposing in-flight
+worker pause/resume, and both that capability probe and every Phase 2
+verification item require a live `pi --mode rpc` session with provider
+credentials, which this environment does not have. The secondary items
+(mid-task `complex` escalation, on-demand approval-context expand) are
+lower-value on their own and share the same live-verification wall. Unblock when
+a live Pi environment with credentials is available; a human may also choose to
+accept Phase 1's relay as sufficient and drop Phase 2. Phase 1 is complete and
+merged; nothing in Phase 2 blocks the rest of the Pi drain.
+
+### Unblocked (2026-09-05) — re-scoped Phase 2 is advanceable
+
+The live wall is gone: the owner is driving the user-scope-installed adapter in
+live `pi` sessions (`openai-codex` subscription provider), and the approval
+flow has been live-verified end-to-end (approve-before-wait round trip and the
+approval-pending wake under a blocked `ws-agent-wait`). The headline Phase 2
+deliverable was found to be achieved by `260905` (see the Phase 2 Re-scope
+above), so the remaining phase is a small, self-contained refinement (suppress
+the redundant approval steer when a waiter was woken) with no dependency on a
+Pi pause/resume capability probe. The selector should **no longer skip** this
+ticket; dispatch the re-scoped Phase 2.
 
 ## Non-goals
 

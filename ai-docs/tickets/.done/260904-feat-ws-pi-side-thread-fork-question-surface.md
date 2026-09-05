@@ -19,6 +19,7 @@ sage-review-design: completed
 sage-review-design-reviewed: c3cf97dd3b2030ba
 sage-review-completeness: completed
 sage-review-completeness-reviewed: c04a2e0f41765757
+completed: 2026-09-05
 ---
 
 # Pi lead side-thread: context-inheriting fork (`ws.fork`) + owner-facing question surface (`ws.ask` / `/answer` overlay chat)
@@ -232,6 +233,39 @@ mechanism; none is prompt text.
   speak as the lead — persona continuity is the feature — and the owner is
   present in real time.
 
+#### Re-decision (2026-09-05) — structural initial-message frame
+
+The **Directive-style / "no identity framing"** decision above holds for the
+*system-prompt directive* but was found insufficient in live Pi dogfooding: a
+task fork whose inherited context contained a lead-orchestration script role-bled
+— it re-ran the lead's plan and reported "unable to start the requested fork"
+instead of doing its own task. Root cause (audited): a fork is pushed toward
+lead-identity by **two** inherited signals — the cloned `--fork` conversation AND
+the `pi-lead-guide.md` block the `before_agent_start` hook appends to a fork's
+own system prompt (`isLeadOrFork` treats fork == lead) — against only a soft
+"work laterally alongside the lead" line.
+
+The `260723` finding that "bleed is not mitigated by prompt text" was established
+on the **Claude host (Opus 4.8 / Sonnet)**; it does not transfer wholesale to
+Pi. The rejected prompt-strength ladder was re-run empirically on Pi's actual
+models (owner-approved):
+
+| variant | luna (weak) | astra (top frontier) | wording |
+| --- | --- | --- | --- |
+| natural (prior shipped) | role-bled | — | none |
+| strong-header (all-caps identity) | fixed | — | aggressive |
+| **framed (structural)** | **fixed** | **fixed** | **calm** |
+
+**Adopted:** the fork's **initial user message** is now a structural frame
+(`buildForkInitialMessage`) that demotes the inherited conversation to
+reference-only and fences the task as an explicit "message from the lead" — no
+all-caps/identity override. The system-prompt directive stays framing-free (the
+original decision), so this is an *additive message-level* mechanism, not a
+reversal of the directive-style rule. `framed` is chosen over `strong-header`
+because it stops the bleed on both weak and top-frontier models with the calmest
+wording. This complements, and does not replace, the §4 anti-bleed mechanical
+loop.
+
 ### 5. Owner-facing surface (TUI lead)
 
 - Overlay chat via `ctx.ui.custom({ overlay: true })` rendering a pi-tui
@@ -265,6 +299,10 @@ mechanism; none is prompt text.
   (session_key lineage decision) `agent_id → session` mapping (which must already persist for dormant
   resume), so pending `ws.ask` questions and dormant threads survive a lead
   restart.
+  > Note (2026-09-05, Phase 2): the "must already persist" premise was wrong —
+  > the `260903` RPC registry is in-memory only. Phase 2 persists the thread
+  > records in their own `<lead session>.ws-threads.json` with a denormalized
+  > fork-resume snapshot per thread instead; see the Phase 2 Result.
 
 ### 6. Injection back into the lead session
 
@@ -436,6 +474,59 @@ Verification (report which mode was achieved, as `260904` Phase 1 does):
    `capability: lead` + `parent_session_key` mint so `session.children` on
    the lead lists the fork.
 
+### Result (ecaa86c8) - 2026-09-05
+
+Landed the `ws-fork` task-thread mechanism and the anti-bleed completion loop
+(offline-implementable surface; the two live-only verification items are
+deferred, see the Blocked note below).
+
+- **Spawn seam** (`agents-plugin-pi/src/spawner.ts`): `RpcSpawnCtx`/
+  `RpcAgentRecord` gained `forkFrom`/`explicitTools`/`parentSessionKey`;
+  `buildRpcClientOptions` emits `--fork <leadSession>` (role marker `"fork"`,
+  `WS_PI_PARENT_SESSION_KEY` when both present) on the initial spawn vs
+  `--session` on resume; `spawnAgent` overwrites `record.sessionPath` from
+  `getState().sessionFile` post-`start()` and fails loud if absent. Dormant
+  resume never re-passes `--fork` (uses the discovered `--session` path,
+  tools rebuilt from cached `explicitTools`). `ws-report-to-lead` gained an
+  optional `kind: "question" | "final"`, changing `pendingReports`/
+  `WaitForAgentsResult.reports` to `Array<{message, kind?}>` (additive;
+  existing worker/execute-worker callers unaffected).
+- **New `agents-plugin-pi/src/fork.ts`**: `FORK_TOOL_NAME`,
+  `computeForkToolSurface` (lead surface − fork verbs + `ws-report-to-lead`;
+  Phase 1 excludes only `ws-fork`), the role-differentiated `addForkToolIfLead`
+  (adds `ws-fork` for `role === undefined` only — the fix that also blocks
+  fork recursion at the tool layer and keeps `ws-fork` off a fork's own
+  surface), the anti-bleed pure predicates (`shouldNudge`,
+  `classifyForkTurnOutcome`, `isIdleWithoutFinal`, `validateFinalReportShape`,
+  `checkExpectsCommitCompletion`), and `registerFork`'s IO glue wiring a second
+  `RpcClient.onEvent()` listener. `index.ts` wires `registerFork` after the
+  execute gateway and applies `addForkToolIfLead` as a separate
+  role-differentiated `setActiveTools` step. `pi-lead-guide.md` gained a
+  `ws-fork` verb row. Approval-routing-to-the-spawning-parent needed no new
+  code — it is emergent from the per-process session-start registration.
+- **Verification**: `cd agents-plugin-pi && npm test` → 340/340 pass. Offline
+  coverage: tool-surface arithmetic incl. the role-differentiation fix, all
+  anti-bleed predicates, report-shape + `expects_commit` checks, and the
+  `--fork`/`--session` arg branch. Golden rule held (no `agents-plugin-tool/`
+  or `agents-plugin/skills/` change).
+- **Review**: partitioned (correctness=large, test). Review #1 found 1 Critical
+  + 2 Important; all `[fixed]` in relay #1 (`ecaa86c8`) — Critical (nudge was
+  mis-targeted to the lead session; now delivered to the fork via
+  `record.client`) verified `[resolved]` by a Critical-scoped review #2
+  (clean). Importants: `isIdleWithoutFinal` now enforced (idle-without-final
+  surfaced to the lead as incomplete, never harvested); the spawn directive's
+  identity-framing opener removed and negative assertions added. 4 Minors
+  recorded, not fixed (substring-test discrimination; listener-attach ordering;
+  resumed-fork role marker on dormant resume — a Phase 2 concern; orphaned
+  registry entry on the `getState` fail-loud throw — consistent with
+  pre-existing non-fork behavior).
+- **Deviations**: none in scope. `isIdleWithoutFinal`'s `"acknowledge-and-return"`
+  case (a tool call was made but no `kind:"final"`) is not auto-nudged — a tool
+  call is treated as real progress — but is surfaced to the lead as an
+  incomplete-run advisory, so §4 is enforced directly with no silent residual.
+- **Spec**: `ai-docs/spec/pi-adapter-runtime.md`
+  `{#260905-pi-side-thread-fork-task-thread}` (commit `af4a8683`).
+
 ### Phase 2: Owner question surface (`ws.ask`, registry, overlay chat, lazy discussion fork, injection)
 
 Depends on Phase 1.
@@ -491,6 +582,123 @@ Verification:
 6. Overlay hygiene: never auto-pops; close/reopen leaves the fork running;
    header shows title + spawn time.
 
+### Result (dce59483) - 2026-09-05
+
+Landed the owner question surface end to end on the offline-implementable
+side; the live/TUI verification items are packaged as a one-shot owner runbook
+(below) rather than claimed.
+
+- **New `agents-plugin-pi/src/ask.ts`**: the thread registry (`ThreadRecord`
+  with `origin: "lead-ask" | "fork-raised"`, status `pending|open|dormant|
+  closed`, denormalized `forkResume` snapshot), persisted at
+  `<lead session>.ws-threads.json` on every transition and rehydrated on
+  `session_start` (load/save never throw; a missing `origin` normalizes to
+  `fork-raised`); `ws-ask` (register-only, returns `{question_id}`, warns
+  above `MAX_CONTEXT_CHARS = 400` without truncating) and `ws-resolve`;
+  `addAskToolsIfLead` as a third role-differentiated `setActiveTools` step;
+  `handleForkRaisedQuestion` hooked at the report-enqueue site so a TUI lead
+  sees a "do not relay, keep waiting" notice instead of the question text
+  (headless: byte-identical Phase 1 relay); `/thread`, `/answer [<id>]`, and
+  the `ctrl+shift+a` reopen shortcut; lazy discussion fork at the lead tip via
+  `spawnAgent` + `forkFrom` with `entry_id` anchoring and a verbatim
+  post-compaction excerpt (`EXCERPT_WINDOW = 4`, 400 chars per entry); no
+  structural frame and no anti-bleed loop on discussion forks;
+  `closeThreadOnDone` routed on origin — `lead-ask` → summary turn →
+  `pi.sendMessage(customType: "ws-thread-summary", deliverAs: "followUp")` →
+  snapshot → `stopAgent` → dormant; `fork-raised` → detach only (no stop, no
+  summary, no injection), fork keeps running and reports via `Decisions:`.
+- **New `agents-plugin-pi/src/overlay-chat.ts`**: `OverlayChatComponent` for
+  `ctx.ui.custom({overlay: true})` — width-keyed render cache, local
+  `visibleWidth`/`wrapLine` (pi-tui is not resolvable from the package at
+  test time; Pi aliases it only under its jiti loader), bracketed-paste
+  unwrapping, prompt-vs-steer on `streaming`, `/done` interception with
+  `summarizeOnDone`, header `title · opened <UTC minute>`, Esc = close view
+  only.
+- **`fork.ts` / `spawner.ts` / `index.ts`**: `FORK_EXCLUDED_TOOL_NAMES` now
+  lists `ws-ask`/`ws-resolve` (literal, drift-guarded by test, to avoid an
+  import cycle); `RpcAgentRecord.overlayAttached` suppresses the nudge/
+  fail-loud loop while an owner overlay is attached and re-arms on detach;
+  `RpcAgentRecord.onQuestionReport` hook; `askCtxRef` re-captured on every
+  `session_start`. `pi-lead-guide.md` gained the `ws-ask`/`ws-resolve` rows
+  and the owner-side / fork-raised paragraphs.
+- **Verification**: `cd agents-plugin-pi && npm test` → 474/474 pass
+  (+116 over the Phase 1 baseline: `test/ask.test.ts`, `test/overlay-chat.test.ts`,
+  `test/fork.test.ts` additions). Golden rule held (no `agents-plugin-tool/`
+  or `agents-plugin/skills/` change). Unit tier of verification item 1(a) is
+  met; items 1(b)–6 are live/TUI and are in the runbook below.
+- **Review**: partitioned (correctness, fit, test). Review #1: 1 Critical
+  (anti-bleed loop armed during overlay attach → `overlayAttached`), 6
+  Important (incl. §7 context-length warning missing, `ws-ask`/`ws-resolve`
+  tool bodies untested, lead notice still inviting relay) — all `[fixed]` in
+  relay #1 (`9d89652f`, `1b6326b6`). Critical-scoped review #2: C1
+  `[resolved]`, 1 new Critical (`/done` on a fork-raised thread stopped the
+  live task fork and stranded `ws-agent-wait`) → `[fixed]` in relay #2
+  (`dce59483`, origin routing). Critical-scoped review #3: C2 `[resolved]`,
+  clean. Minors recorded, not fixed: `wrapLine` counts width-1 for wide
+  glyphs; cursor not rendered in the overlay input; `ctrl+shift+a` is CSI-u
+  only (cast `as never`); overlay swap unreachable while an overlay holds
+  focus; `hydrateThreadRegistry` rebuilds the map on reload (an open overlay's
+  record is orphaned); `sendMessage` omits `triggerTurn` (an idle lead does not
+  start a turn on injection); dormant-resume listener ordering;
+  `overlayAttached` is agent-scoped not overlay-scoped; a pre-origin
+  `lead-ask` record normalizes to `fork-raised` (decision dropped silently, an
+  `entryId`-based back-compat hint would close it); `detachForkRaisedThread`
+  refreshes `forkResume` for a never-stopped child (double-writer risk on a
+  same-session restart); the overlay footer's `/done` vs Esc contrast is wrong
+  for fork-raised threads; a chmod-based write-failure test is root-insensitive.
+- **Deviations / ticket discrepancies**: §5's claim that the `agent_id →
+  session` mapping "must already persist for dormant resume" is false — the
+  RPC registry is in-memory; resolved by denormalizing a `forkResume` snapshot
+  onto the thread record and lazily rehydrating a plain dormant
+  `RpcAgentRecord` through `sendToAgent`'s existing resume branch. §5's
+  "pi-tui component" is implemented with a locally wrapped component (see
+  above). `registerShortcut` needs a KeyId cast for `ctrl+shift+a`.
+  Fork-raised threads register as `pending` (not `open`) so the widget count
+  increments, per verification item 2. `ws-resolve`'d threads are `closed`
+  (not reopenable), distinct from `/done`'s `dormant`.
+- **Spec**: `ai-docs/spec/pi-adapter-runtime.md`
+  `{#260905-pi-side-thread-owner-question-surface}` (`d9d89f22`); cross-doc
+  Spec Impact items (depth anchor, epic bullet, `workflow-skills` spec +
+  mental-model exception) in `6097de6d`.
+
+#### Owner runbook — live items not exercised by the agent loop
+
+Run on the user-scope-installed adapter (`pi install <abs path>`), one
+interactive `pi` session as the lead. Each item is pass/fail on the stated
+observation.
+
+1. **Lead-ask round trip (items 1b, 6).** Have the lead call `ws-ask` (any
+   decision). Expect: widget line `ws: 1 pending question(s) — /answer <id>,
+   /thread to list` above the editor, no overlay. `/thread` lists it as
+   pending. `/answer <id>` opens the overlay (header: title + `opened …`); a
+   new fork process starts (`ws-agent-list` or `ps`). Exchange two turns.
+   `Esc` closes the view; `/answer` reopens onto the same fork (no new
+   process). Type `/done`: the fork writes a summary, the overlay closes, and
+   once the lead is idle a distinct injected message
+   (`context + question + summary`) appears in the lead transcript. Fail if
+   the message appears mid-turn or never (M14: if the lead is idle, send one
+   trivial turn to observe it).
+2. **Fork-raised attach (item 2).** `ws-fork` a task whose prompt says to
+   ask the owner one question via `ws-report-to-lead(kind:"question")` and
+   then finish. Expect: widget count increments with no lead turn; the lead
+   sees only the notice naming the thread id and keeps waiting. `/answer <id>`
+   attaches to the running fork (no new process). Reply; `/done`. Expect the
+   fork to continue and its `kind:"final"` report's `Decisions:` to reflect the
+   in-overlay answer; the lead's `ws-agent-wait` returns normally.
+3. **Post-compaction anchoring (item 3).** Register a `ws-ask`, then run
+   `/compact` on the lead, then `/answer` it. Inspect the fork's first user
+   message (its session file): it should carry a verbatim excerpt of the
+   lead-session entries around the question.
+4. **Headless baseline (item 4).** `pi --mode rpc` lead: a fork-raised
+   question arrives as the plain relay (no notice); a lead `ws-ask` emits a
+   `notify` `extension_ui_request` and spawns nothing.
+5. **Restart survival (item 5).** With one pending `ws-ask` and one dormant
+   thread, quit and resume the same lead session. `/thread` still lists both;
+   `/answer` on the dormant one resumes it on its own session file.
+6. **Polish (human judgment).** CJK/IME input placement in the overlay, wide
+   glyph wrapping (M7), whether `ctrl+shift+a` reaches Pi in your terminal
+   (CSI-u; otherwise use `/answer`).
+
 ## Non-goals
 
 - Thread rebase onto a newer lead tip; in-process `createAgentSession` forks;
@@ -498,3 +706,82 @@ Verification:
   path; overlay auto-pop; using side threads for heavy reading with a clear
   question (that is `ws.execute(complex)` / fresh reviewers); any change to
   ws-mcp Go.
+
+## Blocked (2026-09-05)
+
+Phase 1 landed (see its `### Result`). Phase 2 is not autonomously advanceable
+in the current build environment:
+
+- The ticket makes the **bleed proof-of-concept** (Phase 1 verification item 2)
+  the explicit **go/no-go for Phase 2** — whether the structural anti-bleed
+  mitigation actually works must be measured on a real lead session before the
+  owner-question surface is built on top of forks. That measurement needs a live
+  `pi --mode rpc` run with provider credentials, absent from the sandbox.
+- Phase 2's surface (overlay chat `Component`, `/answer`/`/thread` shortcuts,
+  the `aboveEditor` widget, lazy discussion fork at the lead tip) and its
+  verification are TUI-and-live dependent: the two-tier agent-driven TUI loop
+  needs a tmux probe on an isolated socket plus a live `pi` process.
+
+Unblock when a live `pi` environment with provider credentials is available:
+run the Phase 1 live gate (`--fork` composition + bleed PoC), and if the PoC
+clears its go/no-go, proceed to Phase 2. Until then the selector should skip
+this ticket.
+
+### Live gate cleared (2026-09-05) — bleed PoC go/no-go = GO
+
+The Phase 1 live gate was run on `pi 0.84.4` with the `openai-codex`
+subscription provider (user-scope installed adapter). Confirmed end-to-end:
+`--fork` copy-on-fork inherits the lead's full context; the fork's surface
+carries `ws-report-to-lead` and excludes `ws-fork`; the fork emits a
+`kind:"final"` report in the required shape, harvested by the lead via
+`ws-agent-wait`; the anti-bleed nudge lands in the fork's own session (not the
+lead's) with no lead-context pollution. **The bleed PoC clears its go/no-go
+(GO):** the structural loop is sufficient to drive the fork to a report, so
+Phase 2 may build the owner-question surface on top of forks.
+
+Operational precondition surfaced by the run: spawned children (workers and
+forks alike) load the adapter extension **only when it is user-scope installed**
+(`pi install <path>`) — RPC children re-run the Pi CLI via `process.argv[1]`
+without `-e`, and Pi does not auto-discover a project `package.json`'s
+`pi.extensions`, so an ad-hoc `-e` lead run leaves children without the report
+channel. Documented in `pi-adapter-runtime.md`
+(`260905-pi-side-thread-fork-task-thread` Live-verification note).
+
+**Remaining Phase 2 blocker is now narrowed to the TUI overlay only:** the
+owner-question overlay `Component`, `/answer`/`/thread` shortcuts, and
+`aboveEditor` widget need a live *interactive* TUI (tmux probe on an isolated
+socket) — not exercised by the `--print` non-interactive path used for the gate.
+The fork-mechanism prerequisite is no longer blocking.
+
+### Unblocked (2026-09-05) — Phase 2 is advanceable
+
+Both original gate conditions are now met, and the narrowed TUI-only blocker
+above is met as well:
+
+- **Bleed PoC go/no-go = GO** (Live gate above), reinforced by the §4
+  re-decision: the residual role-bleed seen under an inherited lead-orchestration
+  script is fixed by the structural initial-message frame (`50e685be`),
+  live-verified on both a weak model (gpt-5.6-luna) and a top-frontier model
+  (astra).
+- **Live interactive TUI is available**: the owner has been driving the
+  user-scope-installed adapter in interactive `pi` sessions (not `--print`), so
+  the overlay `Component`, `/answer`/`/thread` shortcuts, and `aboveEditor`
+  widget can be built and exercised against a real TUI.
+
+The selector should **no longer skip** this ticket. Next action: dispatch Phase
+2 (`ws.ask`/`ws.resolve`, thread registry, `aboveEditor` widget, `/answer`/
+`/thread`/reopen, overlay chat, lazy discussion fork at the lead tip with
+`entry_id` anchoring, `/done` → summary → injection). Preconditions the
+implementer must honor: the adapter must stay user-scope installed
+(`pi install <abs path>`) for spawned children to load `ws-report-to-lead`; the
+structural frame applies to **Entry A task threads only** — Entry B discussion
+forks are meant to speak as the lead (§4 "Discussion threads run no loop"), so
+do not wrap their initial message with it. Human-judgment verification items
+(visual polish, IME/CJK candidate placement, cross-emulator quirks) are to be
+packaged as a one-shot owner runbook at closeout, per Phase 2 verification
+item 1.
+
+
+## Resolution (2026-09-05)
+
+Both phases landed on the Pi track: the `ws-fork` task-thread mechanism with its anti-bleed loop (Phase 1, live-verified) and the owner question surface — `ws-ask`/`ws-resolve`, persisted thread registry, overlay chat, origin-routed `/done`, and `ws-thread-summary` injection (Phase 2, offline-verified; live/TUI items handed to the owner as a one-shot runbook in the Phase 2 Result). Spec anchors `260905-pi-side-thread-fork-task-thread` and `260905-pi-side-thread-owner-question-surface`; cross-doc Spec Impact items recorded.

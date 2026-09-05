@@ -173,6 +173,11 @@ subagents. Direction, decisions, and evidence live in
   depth ≤ 2**: a worker may spawn the read-only, ephemeral, self-reaping `explore`
   leaf, which cannot spawn `explore` (non-recursive), so the tree terminates at
   the leaf; all full driving/spawn tools stay excluded from worker `--tools`.
+  Amended 2026-09-05 (`260904-feat-ws-pi-side-thread-fork-question-surface`):
+  the bound is measured from the tree's root, and a Pi side-thread fork is
+  lateral — it is a root of its own worker → explore-leaf tree and consumes no
+  depth budget of the lead's; it cannot fork again (`ws-fork` is off its
+  surface).
 - Retained agent = fast path; fresh spawn + resume brief = recovery path.
   Reuse guarantees end at lead-context lifetime (tip-only continuity).
 - Harness differences ship as data (terminology/model tables, overlays);
