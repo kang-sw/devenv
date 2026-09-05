@@ -3,9 +3,12 @@ title: "Add `pi` as a first-class harness bucket in ws-mcp and unify the Pi adap
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260802-research-ws-pi-native-framework: research anchor — the Pi adapter is a harness peer of Claude/Codex, so the harness-keyed config layer should know it
-  260903-feat-ws-pi-subagent-rpc-ux: sibling — introduced the adapter-side model catalog (`model-catalog.json` alias → provider model) that Phase 4 of this ticket retires in favour of ws config
+  260903-feat-ws-pi-subagent-rpc-ux: sibling — introduced the adapter-side model catalog (`model-catalog.json`, a translation shim from tier names to Pi model strings) that Phase 4 of this ticket deletes once ws config holds a `pi` tier table
 related-mental-model:
   - mcp-runtime
+spec:
+  - mcp-tools
+  - pi-adapter-runtime
 sage-review-design: blocked
 ---
 
@@ -128,6 +131,19 @@ ws side can answer the same lookup.
 - Adding a harness bucket must not change the stored key shape for existing
   `prompt.<point>.<harness>` overrides (`*` is stored as `all`).
 
+## Spec Impact
+
+- `mcp-tools`: one new read tool (Phase 3) returning `{backend, model,
+  effort, resolved_from}` for a fixed tier under the session's detected
+  harness; `config.tune`/`config.list` harness enum gains `pi`.
+- `pi-adapter-runtime`: harness detection from `clientInfo.name` (if the
+  bridge name changes, note it); the bridged-tool inventory gains the
+  `mercenary.*` filter (Phase 1); the three model-resolution anchors ("Model
+  resolution: name alias, not tier", "Model catalog data file",
+  "Unset-catalog advisory") are rewritten in Phase 4 to tier-through-ws-mcp,
+  and the "no Pi model strings in the ws-mcp core" sentence becomes "user
+  config may carry Pi model strings; adapter and core code may not".
+
 ## Phases
 
 ### Phase 1: `ws-execute complex:true` inherits the lead model (Pi track)
@@ -141,6 +157,12 @@ on `"small"`, delete the `"complex"` alias from `resolveExecuteModelAlias`,
 the tool description, `pi-lead-guide.md`, and the `pi-adapter-runtime`
 `ws-execute` wording ("a light-model default; the lead's own model when
 set"). Update the tests. Verify with `npm test`.
+
+Also in this phase (Open Decisions #3, adapter half): the bridge filters
+`mercenary.*` out of the ws-mcp tool list before registering tools with Pi,
+so no Pi process — lead or child — can see or call the mercenary surface.
+Record the filter in `pi-adapter-runtime` next to the bridged-tool inventory
+and cover it with a bridge test.
 
 ### Phase 2: `pi` harness bucket end to end
 
@@ -233,6 +255,9 @@ recorded for the owner to accept or overrule:
    exactly as today. Alternative: exempt `pi` from the chain server-side (a
    `pi` lookup never falls to `default`) — simpler for the adapter but bakes a
    harness special case into the resolver.
+   **Settled 2026-09-05 (owner): the recommendation.** The read tool reports
+   `resolved_from`; the adapter inherits on any non-`pi` answer; the resolver
+   gains no harness special case.
 3. **`backend` is load-bearing and `normalizedHarness` doubles as the backend
    normalizer.** Adding `pi` there also creates a `pi` *backend* key, and a
    mercenary spawn from a detected `pi` session would resolve the `pi` bucket
@@ -243,6 +268,18 @@ recorded for the owner to accept or overrule:
    mercenary path reject a `pi`-backend resolution with a clear error rather
    than attempting a launch. Alternative: keep one normalizer and document the
    mercenary-from-Pi path as unsupported — smaller diff, sharper edge.
+   **Settled 2026-09-05 (owner): mercenary is a deprecated path and is not
+   touched.** No normalizer split and no new error branch in ws-mcp. The
+   harness enum gains `pi` for every harness-keyed surface (prompt overrides,
+   `agents.tier`, rsrc harness variants, `config.list`), and whatever backend
+   key that incidentally creates stays inert because the Pi adapter never
+   exposes the mercenary surface: the bridge drops `mercenary.*` from the
+   tool list it registers with Pi (adapter-side filter after `tools/list`,
+   independent of the global `workflow.prefer_mercenary` knob, so Codex and
+   Claude sessions are unaffected). Playbook blocks tagged mercenary-only
+   already render under the same knob; the Pi guide names no mercenary
+   route. Mercenary-from-Pi is therefore unreachable by construction, not
+   rejected at runtime. The adapter half lands in Phase 1.
 4. **Golden-rule exception and spec territory.** Phases 2–3 are ws-mcp Go
    changes motivated solely by Pi; branch sequencing does not answer whether
    that is an exception to "ws-mcp Go is never modified for Pi". The live spec
@@ -253,6 +290,15 @@ recorded for the owner to accept or overrule:
    strings while *code* may not. Add `spec:` frontmatter and a `## Spec Impact`
    section naming `mcp-tools` (new read tool) and the three `pi-adapter-runtime`
    model-resolution anchors once this is accepted.
+   **Settled 2026-09-05 (owner): not an exception but a clause.** The Pi
+   track's rule ("ws-mcp Go source untouched") exists to keep the dependency
+   one-directional and to keep host-specific logic out of the core. Adding a
+   harness to a closed enum and exposing a harness-neutral read tool does
+   neither, and the same clause covers any later host (opencode or another)
+   that needs to be a peer of Codex/Claude in the harness-keyed surfaces. The
+   clause is recorded in `AGENTS.md` (Project Knowledge, Pi direction) and
+   the `pi-adapter-runtime` anchor amendment lands with Phase 4. `spec:` and
+   `## Spec Impact` added.
 
 ## Blocked (2026-09-05)
 
