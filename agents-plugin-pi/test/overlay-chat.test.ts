@@ -25,13 +25,16 @@ import {
   visibleWidth,
   wrapLine,
   formatSpawnTime,
+  isEscapeKey,
+  BOX_MIN_WIDTH,
   PASTE_START,
   PASTE_END,
   type ForkChannel,
+  type OverlayTheme,
 } from "../src/overlay-chat.ts";
 import { resolveOwnerSendInterrupt } from "../src/ask.ts";
 
-function harness(options: { question?: string; streaming?: boolean; createdAt?: string } = {}) {
+function harness(options: { question?: string; streaming?: boolean; createdAt?: string; theme?: OverlayTheme } = {}) {
   const sent: string[] = [];
   const listeners = new Set<(evt: unknown) => void>();
   let unsubscribed = 0;
@@ -67,6 +70,7 @@ function harness(options: { question?: string; streaming?: boolean; createdAt?: 
     () => {
       doneCalls += 1;
     },
+    options.theme,
   );
 
   function type(text: string): void {
@@ -152,6 +156,48 @@ describe("render(width)", () => {
     for (const width of [20, 40, 80, 120, 20]) {
       for (const line of h.component.render(width)) {
         assert.ok(visibleWidth(line) <= width, `line ${JSON.stringify(line)} exceeds width ${width}`);
+      }
+    }
+  });
+
+  test("the view is a rounded box: with a theme, every line is exactly the requested width and the corners are present", () => {
+    const fgCalls: string[] = [];
+    // Identity stub: records the color requests but returns the text
+    // unchanged, so the local `visibleWidth` still measures the padded lines.
+    const theme: OverlayTheme = {
+      fg: (color, text) => {
+        fgCalls.push(color);
+        return text;
+      },
+    };
+    const h = harness({ question: "Should we rebase onto develop, or merge it in and keep both histories intact?", createdAt: "2026-09-05T11:52:30.000Z", theme });
+    h.delta("A long streamed answer that will certainly need wrapping at narrow widths. ".repeat(3));
+    h.type("한글 input");
+    for (const width of [20, 40, 80, 120]) {
+      const lines = h.component.render(width);
+      for (const line of lines) {
+        assert.equal(visibleWidth(line), width, `line ${JSON.stringify(line)} is not exactly width ${width}`);
+      }
+      assert.ok(lines[0].startsWith("╭") && lines[0].endsWith("╮"), `top border at width ${width}: ${lines[0]}`);
+      assert.ok(lines.at(-1)!.startsWith("╰") && lines.at(-1)!.endsWith("╯"), `bottom border at width ${width}: ${lines.at(-1)}`);
+      for (const line of lines.slice(1, -1)) {
+        assert.ok(line.startsWith("│ ") && line.endsWith(" │"), `interior row at width ${width}: ${JSON.stringify(line)}`);
+      }
+    }
+    assert.ok(fgCalls.includes("border"), "the border is colored with the theme's border color");
+    assert.ok(fgCalls.includes("dim"), "the footer is colored with the theme's dim color");
+  });
+
+  test("without a theme the box is drawn unstyled, and tiny widths degrade to bare content that still fits", () => {
+    const h = harness({ question: "Rebase or merge?" });
+    const lines = h.component.render(40);
+    assert.ok(lines[0].startsWith("╭") && lines.at(-1)!.startsWith("╰"));
+    for (const line of lines) assert.equal(visibleWidth(line), 40);
+
+    for (const width of [1, 2, BOX_MIN_WIDTH - 1]) {
+      for (const line of h.component.render(width)) {
+        assert.ok(visibleWidth(line) <= width, `line ${JSON.stringify(line)} exceeds width ${width}`);
+        assert.ok(!line.includes("│"), "no box below the minimum box width");
       }
     }
   });
@@ -428,6 +474,20 @@ describe("/done (the single fixed round-trip)", () => {
   });
 });
 
+describe("isEscapeKey", () => {
+  test("accepts bare ESC, the kitty CSI-u forms with no modifier, and the modifyOtherKeys form", () => {
+    for (const data of ["\x1b", "\x1b[27u", "\x1b[27;1u", "\x1b[27;1:1u", "\x1b[27;1:3u", "\x1b[27::27;1u", "\x1b[27;1;27~"]) {
+      assert.equal(isEscapeKey(data), true, JSON.stringify(data));
+    }
+  });
+
+  test("rejects modified Escapes, other keys, and text", () => {
+    for (const data of ["\x1b[27;2u", "\x1b[27;5u", "\x1b[27;2:1u", "\x1b[27;2;27~", "\x1b[97u", "\x1b[A", "\x1b[200~", "", "a", "\x1b\x1b"]) {
+      assert.equal(isEscapeKey(data), false, JSON.stringify(data));
+    }
+  });
+});
+
 describe("closing without /done (§5: no effect on the fork)", () => {
   test("Escape closes the view, releases the subscription, and never reports a summary", () => {
     const h = harness();
@@ -435,6 +495,25 @@ describe("closing without /done (§5: no effect on the fork)", () => {
     assert.equal(h.doneCalls, 1, "the overlay closes");
     assert.deepEqual(h.summaries, [], "no summary is injected — the thread stays open and reopenable");
     assert.equal(h.unsubscribed, 1);
+  });
+
+  test("Escape under the kitty keyboard protocol / modifyOtherKeys closes the view too (dogfood: Pi 0.84.4 sends CSI-u)", () => {
+    for (const data of ["\x1b[27u", "\x1b[27;1u", "\x1b[27;1:1u", "\x1b[27;1;27~"]) {
+      const h = harness();
+      h.component.handleInput(data);
+      assert.equal(h.doneCalls, 1, `${JSON.stringify(data)} closes the overlay exactly once`);
+      assert.deepEqual(h.summaries, []);
+      assert.equal(h.unsubscribed, 1);
+    }
+  });
+
+  test("a modified Escape (Shift+Esc) is dropped whole: the view stays open and nothing leaks into the input", () => {
+    const h = harness();
+    h.component.handleInput("\x1b[27;2u");
+    assert.equal(h.doneCalls, 0, "the overlay stays open");
+    h.type("ok");
+    assert.ok(h.component.render(80).join("\n").includes("> ok"), "the input box holds only what was typed");
+    assert.ok(!h.component.render(80).join("\n").includes("27;2u"), "the sequence's tail is not pasted in");
   });
 
   test("close() from outside (a second /answer swapping overlays) behaves the same way", () => {

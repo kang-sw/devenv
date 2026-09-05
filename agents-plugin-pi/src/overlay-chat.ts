@@ -25,9 +25,17 @@
  *   - No `@earendil-works/pi-tui` import: that package is not resolvable from
  *     this one (it is nested inside `pi-coding-agent`'s own `node_modules`),
  *     so the `Component` contract is satisfied structurally and the input
- *     box, wrapping and width measurement are small local implementations.
- *     Rendering stays plain, unstyled text, which is also why width
- *     assertions in the tests are exact rather than ANSI-tolerant.
+ *     box, wrapping, width measurement and the Escape-key matcher are small
+ *     local implementations. The only styling is the theme's `fg` on the box
+ *     border and the footer, applied AFTER padding — content is measured and
+ *     padded as plain text, which is why width assertions in the tests are
+ *     exact rather than ANSI-tolerant (the tests pass no theme, or an
+ *     identity stub).
+ *   - Escape is matched by `isEscapeKey`, not by `data === "\x1b"`: Pi runs
+ *     the terminal with the kitty keyboard protocol / modifyOtherKeys
+ *     enabled, so a real Escape press arrives as `\x1b[27u`, `\x1b[27;1u`
+ *     (optionally with `:<event>` suffixes) or `\x1b[27;1;27~` — none of
+ *     which the bare-ESC comparison ever saw (dogfood 2026-09-05, Pi 0.84.4).
  *
  * Never auto-popped: only `/answer` (or the reopen shortcut) in `ask.ts`
  * constructs one of these. No child-side `ctx.ui.*` dialog is involved
@@ -86,6 +94,44 @@ export const PASTE_START = "\x1b[200~";
 export const PASTE_END = "\x1b[201~";
 
 /**
+ * Kitty keyboard-protocol CSI-u key report: `ESC [ <codepoint>[:<shifted>[:<base>]] [; <modifier>[:<event>]] u`.
+ * Same shape `pi-tui`'s `parseKittySequence` accepts (that package is not
+ * importable from here — see the file header); only the codepoint and
+ * modifier groups are consulted.
+ */
+const KITTY_CSI_U = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
+
+/** modifyOtherKeys (xterm) report of an unmodified Escape press. */
+const MODIFY_OTHER_KEYS_ESCAPE = "\x1b[27;1;27~";
+
+/**
+ * Whether one input chunk is an UNMODIFIED Escape press, in any of the
+ * encodings a Pi-driven terminal produces: bare `\x1b`, the kitty CSI-u form
+ * with codepoint 27 and either no modifier field or modifier `1` (= none),
+ * any `:<event>` suffix allowed, and the modifyOtherKeys form. A modified
+ * Escape (`\x1b[27;2u` = Shift+Esc, ...) is deliberately NOT an Escape here:
+ * it is somebody else's chord, and the catch-all in `handleInput` drops it
+ * whole.
+ */
+export function isEscapeKey(data: string): boolean {
+  if (data === "\x1b" || data === MODIFY_OTHER_KEYS_ESCAPE) return true;
+  const match = KITTY_CSI_U.exec(data);
+  if (!match || match[1] !== "27") return false;
+  const modifier = match[4];
+  return modifier === undefined || modifier === "1";
+}
+
+/**
+ * Optional duck-typed slice of Pi's theme (`ctx.ui.custom`'s second factory
+ * argument): `fg(color, text)` wraps `text` in the ANSI color named
+ * `color`. Only `"border"` and `"dim"` are used. Absent in tests, where the
+ * rendered lines must stay plain so `visibleWidth` can measure them.
+ */
+export interface OverlayTheme {
+  fg?: (color: string, text: string) => string;
+}
+
+/**
  * Review relay #1 I4: owner-facing rendering of a thread's registration time.
  * Deliberately UTC-and-labeled rather than locale-formatted so the header is
  * identical in a test run, a CI container and the owner's terminal.
@@ -110,6 +156,9 @@ export function buildDoneSummaryPrompt(): string {
 
 /** Fallback when the fork settles the `/done` turn without producing any text. */
 export const EMPTY_SUMMARY_TEXT = "(the discussion ended without a summary from the thread)";
+
+/** Narrowest width that still fits a box (two border glyphs, two padding spaces, one content column). */
+export const BOX_MIN_WIDTH = 5;
 
 /**
  * Display width of a string: code points, counting the common East-Asian
@@ -181,6 +230,7 @@ export class OverlayChatComponent {
   private readonly tui: OverlayTui;
   private readonly options: OverlayChatOptions;
   private readonly done: (result: undefined) => void;
+  private readonly theme: OverlayTheme | undefined;
   private readonly unsubscribe: () => void;
 
   private entries: TranscriptEntry[] = [];
@@ -197,10 +247,11 @@ export class OverlayChatComponent {
   /** Inside a bracketed paste whose start marker arrived in an earlier chunk (review relay #1 I3). */
   private pasting = false;
 
-  constructor(tui: OverlayTui, options: OverlayChatOptions, done: (result: undefined) => void) {
+  constructor(tui: OverlayTui, options: OverlayChatOptions, done: (result: undefined) => void, theme?: OverlayTheme) {
     this.tui = tui;
     this.options = options;
     this.done = done;
+    this.theme = theme;
     if (options.question) {
       this.entries.push({ who: "note", text: options.question });
     }
@@ -358,8 +409,10 @@ export class OverlayChatComponent {
       }
       return;
     }
-    if (data === "\x1b") {
-      // Bare escape: close the view. §5 — this has no effect on the fork.
+    if (isEscapeKey(data)) {
+      // Escape (bare, kitty CSI-u, or modifyOtherKeys): close the view. §5 —
+      // this has no effect on the fork. Must run before the `\x1b` catch-all
+      // below, which would otherwise swallow the CSI-u encodings.
       this.close();
       return;
     }
@@ -395,31 +448,57 @@ export class OverlayChatComponent {
     this.insertText(data);
   }
 
+  /**
+   * Draws the view as a rounded box (`╭─╮ │ │ ╰─╯`, the shape Pi's own
+   * `overlay-test` example uses) so the overlay is visibly distinct from the
+   * transcript it floats over. Every emitted line is EXACTLY `width` columns:
+   * the interior is `width - 4` (one space of padding inside each border
+   * glyph), content is wrapped to that interior and space-padded with the
+   * local `visibleWidth`, and theme colors are applied only after padding.
+   * Below `BOX_MIN_WIDTH` there is no room for a box, so the content renders
+   * bare — still never wider than `width`.
+   */
   render(width: number): string[] {
     const w = Math.max(1, width);
     // The cache is keyed on width: every line here is wrapped to `w`, so a
     // resize between renders must re-wrap rather than replay lines built for
     // the old width (review relay #1 I2).
     if (this.cachedLines && this.cachedWidth === w) return this.cachedLines;
+
+    const boxed = w >= BOX_MIN_WIDTH;
+    const inner = boxed ? w - 4 : w;
+    const fg = (color: string, text: string): string => this.theme?.fg?.(color, text) ?? text;
+    const pad = (text: string): string => text + " ".repeat(Math.max(0, inner - visibleWidth(text)));
+    const row = (text: string, color?: string): string => {
+      const padded = pad(text);
+      const content = color ? fg(color, padded) : padded;
+      return boxed ? `${fg("border", "│")} ${content} ${fg("border", "│")}` : content;
+    };
+
     const lines: string[] = [];
+    if (boxed) lines.push(fg("border", `╭${"─".repeat(inner + 2)}╮`));
 
     // §5: the header names the thread explicitly, so the two lead-voiced
     // agents (the lead itself and this discussion fork) can never be
     // confused for one another on screen. The registration time (I4) sits
     // with it, so a reopened dormant thread is placeable in time.
-    lines.push(...wrapLine(`── ws thread ${this.options.threadId} · ${this.options.title}`, w));
+    for (const line of wrapLine(`ws thread ${this.options.threadId} · ${this.options.title}`, inner)) lines.push(row(line));
     const opened = formatSpawnTime(this.options.createdAt);
-    if (opened) lines.push(...wrapLine(`   opened ${opened}`, w));
-    lines.push("");
+    if (opened) for (const line of wrapLine(`  opened ${opened}`, inner)) lines.push(row(line));
+    lines.push(row(""));
 
-    for (const line of this.transcriptLines(w)) lines.push(line);
+    for (const line of this.transcriptLines(inner)) lines.push(row(line));
 
-    lines.push("");
-    lines.push(...wrapLine(`> ${this.input}`, w));
+    lines.push(row(""));
+    for (const line of wrapLine(`> ${this.input}`, inner)) lines.push(row(line));
     // Deliberately generic about what `/done` does beyond closing: the two
     // thread origins close differently (review relay #2 C2), and the footer
     // is not the place to explain the difference.
-    lines.push(...wrapLine(`${DONE_COMMAND} closes the thread · Esc closes this view (the thread keeps running)`, w));
+    for (const line of wrapLine(`${DONE_COMMAND} closes the thread · Esc closes this view (the thread keeps running)`, inner)) {
+      lines.push(row(line, "dim"));
+    }
+
+    if (boxed) lines.push(fg("border", `╰${"─".repeat(inner + 2)}╯`));
 
     this.cachedLines = lines;
     this.cachedWidth = w;
@@ -449,7 +528,7 @@ export class OverlayChatComponent {
 export interface OverlayCustomCtx {
   ui: {
     custom<T>(
-      factory: (tui: OverlayTui, theme: unknown, keybindings: unknown, done: (result: T) => void) => OverlayChatComponent,
+      factory: (tui: OverlayTui, theme: OverlayTheme | undefined, keybindings: unknown, done: (result: T) => void) => OverlayChatComponent,
       options?: { overlay?: boolean; overlayOptions?: unknown },
     ): Promise<T>;
   };
@@ -466,8 +545,8 @@ export async function openOverlayChat(
   options: OverlayChatOptions & { onOpened?: (close: () => void) => void },
 ): Promise<void> {
   await ctx.ui.custom<undefined>(
-    (tui, _theme, _keybindings, done) => {
-      const component = new OverlayChatComponent(tui, options, done);
+    (tui, theme, _keybindings, done) => {
+      const component = new OverlayChatComponent(tui, options, done, theme);
       options.onOpened?.(() => component.close());
       return component;
     },

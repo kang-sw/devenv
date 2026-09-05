@@ -736,7 +736,7 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     } as unknown as RpcAgentRecord;
   }
 
-  test("§6: one custom message, delivered via followUp, carrying the thread id", () => {
+  test("§6: one custom message, delivered via followUp and triggering a turn, carrying the thread id", () => {
     const { pi, sent, handle, record } = setup();
     injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
 
@@ -747,7 +747,11 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     assert.equal(msg.details.threadId, "q1");
     assert.equal(msg.details.title, record.title);
     assert.ok(msg.content.includes("we take the second anchor"));
-    assert.deepEqual(sent[0].options, { deliverAs: "followUp" }, "never steer — §6 requires the lead's own idle boundary");
+    assert.deepEqual(
+      sent[0].options,
+      { deliverAs: "followUp", triggerTurn: true },
+      "never steer (§6 requires the lead's own turn boundary), and triggerTurn so an idle lead acts on the decision instead of queueing it",
+    );
   });
 
   test("§9: the thread goes dormant (retained, not deleted) and is persisted", () => {

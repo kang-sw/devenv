@@ -822,10 +822,12 @@ export function detachForkRaisedThread(handle: ThreadRegistryHandle, rpcRegistry
 /**
  * §6 injection, the `"lead-ask"` half of `/done`: the fork's summary
  * reaches the lead as a Pi CUSTOM message (distinguishable from an owner
- * turn) delivered via `followUp` — never `steer` — so it lands when the lead
- * is idle and multiple closes queue in order. The lead session is never
- * rewound. The thread itself goes `"dormant"`: retained and reopenable (§9),
- * not deleted.
+ * turn) delivered via `followUp` — never `steer` — so a streaming lead only
+ * sees it after its current turn and multiple closes queue in order, and
+ * with `triggerTurn: true` so an IDLE lead starts a turn on it at once rather
+ * than leaving the owner's decision queued until their next prompt. The lead
+ * session is never rewound. The thread itself goes `"dormant"`: retained and
+ * reopenable (§9), not deleted.
  *
  * Review relay #1 I5: "dormant" is 260903's `ws-agent-stop` semantics —
  * dormant AND retained — so the respondent's child process is actually
@@ -851,7 +853,11 @@ export function injectDiscussionSummary(
       display: true,
       details: { threadId: thread.threadId, title: thread.title },
     },
-    { deliverAs: "followUp" },
+    // `triggerTurn` is what makes an IDLE lead act on the decision: without
+    // it Pi only queues the message and nothing starts a turn until the
+    // owner's next prompt (dogfood 2026-09-05, Pi 0.84.4). `followUp` keeps
+    // the ordering contract for a lead mid-turn — delivered after that turn.
+    { deliverAs: "followUp", triggerTurn: true },
   );
 
   const agentId = thread.respondentAgentId;
