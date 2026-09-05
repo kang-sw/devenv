@@ -931,6 +931,29 @@ is not resolver-backed and only writes project scope (an explicit non-project
 `scope:` is rejected). Available in both full and agentless product modes.
 {#260513-harness-local-agent-tier-config}
 
+`config.resolve_agent(tier, harness?)` is a read-only tool that resolves one
+fixed capability tier (`small`/`medium`/`large`/`xlarge`) to its
+`{backend, model, effort, resolved_from}` for a harness, applying the exact
+same fallback chain `agents.tier` and `playbook.render` use (harness bucket,
+then `default`, then `codex`) rather than re-deriving it — see
+`#260513-harness-local-agent-tier-config` for that chain. `harness` is
+optional and defaults to the detected MCP session harness, or `default` when
+none is known; unlike `agents.tier`'s harness selector, it is not validated
+against a closed enum here, since an unrecognized value degrades gracefully to
+the `default` bucket rather than needing a hard rejection on a read. `tier` is
+required and validated against the same fixed four-tier set `agents.tier`
+accepts (plus its read-compat synonyms); an unrecognized tier is rejected.
+`resolved_from` names the bucket that actually answered (e.g. `pi`, `default`,
+`codex`), letting a caller distinguish a harness-local hit from a
+cross-harness fallback without re-deriving the chain; a caller that switches
+on the value should treat anything other than a harness bucket name (the
+legacy per-tier table answers as `tiers`) as "not harness-local". `backend`
+is the stored value or, when absent, the family inferred from the model name,
+and stays empty when neither is available (this read does not apply the
+`codex` backstop the render path uses). No `session_key` is required.
+Available in both full and agentless product modes.
+{#260905-tier-resolution-read-tool}
+
 `config.tune(key: "workflow.prefer_subagent", value: "on"|"off", session_key)`
 sets the global `"workflow.prefer_subagent"` item, whose builtin default is
 `off`. `config.tune(key: "workflow.prefer_mercenary", value: "on"|"off"|"hide",

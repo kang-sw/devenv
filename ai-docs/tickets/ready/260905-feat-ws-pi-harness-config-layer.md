@@ -320,6 +320,55 @@ no-agent/harness applicability the other config tools carry, document it in
 fallback to `default` with the answering bucket reported, and an unknown
 tier rejected.
 
+### Result (5767d7b4) - 2026-09-06
+
+Landed as `65b59ece` (survey plan), `5767d7b4` (Go source, tests, runtime
+manifests), plus one doc-only closeout commit (spec paragraph and this
+Result), on the implementation branch under the goal branch. Golden-rule exception exercised again: host-neutral Go in
+`agents-plugin-tool/`, nothing under `agents-plugin-pi/`.
+
+Design choice recorded: a dedicated read tool `config.resolve_agent(tier,
+harness?)`, not a machine-readable mode on `config.list`. The repo's
+convention for a narrow read is one tool per question (`git.status`,
+`git.diff`, ...), and `config.list`'s catalog JSON has no per-call
+tier/harness selector to extend cleanly.
+
+Behavioral delta:
+
+- `config.resolve_agent` returns `{backend, model, effort, resolved_from}`
+  for one fixed tier under the explicit or detected harness (`default` when
+  none is known), through the same alias fallback chain `agents.tier` and
+  `playbook.render` use; `resolved_from` names the answering bucket. An
+  unknown tier is rejected with the `agents.tier` wording; tier read-compat
+  synonyms are accepted. An unrecognized `harness` value is not rejected on
+  this read and degrades to `default`. The schema declares no
+  `session_key`; the tool is read-only and visible in full and agentless
+  modes.
+- `wsconfig` gains a strict-tier resolver (`ResolveAgentTierForHarness`)
+  and the alias resolver now also returns the answering key; the existing
+  render-path resolver keeps its unknown-tier coercion for its callers.
+- `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json` list
+  the new tool (required by the launcher-contract tests; a packaging
+  manifest, not skill or rsrc text, so no mirror regen).
+- Tests: full Go module green. New coverage at both layers: each tier under
+  `pi`; `default` fallback with `resolved_from`; unknown tier; explicit
+  harness override; no detected harness; no-agent visibility.
+- Spec: `{#260905-tier-resolution-read-tool}` in `mcp-tools`.
+
+Review (partitioned correctness/fit): fit clean; correctness clean with
+five Minor, recorded only. Two closed by spec wording in the doc pass
+(`backend` may be empty when not inferable, `resolved_from` may carry the
+non-bucket `tiers` value); untested extras noted (harness case-folding,
+tier synonyms, compact text rendering, unrecognized harness).
+
+Forward (Phase 4): (a) a partial `config.tune agents.tier harness:pi` write
+that supplies neither backend nor model seeds the `pi` bucket from the
+codex default, so `resolved_from: "pi"` can carry a codex model string; the
+adapter should not treat `resolved_from == "pi"` alone as proof of a Pi
+model string, or the writer should stop seeding. (b) A misspelled harness
+argument silently resolves at `default`; if that proves hard to debug,
+echo the effective harness in the payload.
+
 ### Phase 4: Pi adapter resolves models through ws-mcp; catalog retires
 
 Depends on Phase 3 being on the same branch; the adapter is verified against
