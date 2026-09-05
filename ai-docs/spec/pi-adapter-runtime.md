@@ -441,7 +441,8 @@ never hard-fails.
 
 `model_effort` follows the same "explicit caller wins" rule: a caller-supplied
 `model_effort` on the spawn call always overrides whatever the config
-resolution returned. When the caller passes none, a genuine `pi` hit's own
+resolution returned (an empty string is not an explicit choice and counts as
+"none"). When the caller passes none, a genuine `pi` hit's own
 non-empty `effort` field (`low`/`medium`/`high`/`xhigh`) is applied as
 `modelEffort`; an empty resolved effort passes no `modelEffort` at all,
 leaving the child's own default effort untouched. A non-genuine hit never
@@ -449,7 +450,9 @@ contributes an effort value, even if its raw payload happened to carry one.
 
 `explore` is a **role**, not a caller-facing model choice: it resolves its own
 model through the same `config.resolve_agent` path, implicitly keyed on the
-fixed tier name `small`, and exposes no `model_name` parameter.
+fixed tier name `small`, and exposes no `model_name` parameter. Only the
+model half of that answer reaches the explore leaf: it has no effort
+surface, so a `small` tier's configured `effort` is not applied to explores.
 
 ### Model resolution via ws-mcp config, not an adapter data file {#260903-pi-model-catalog-config-file}
 
@@ -482,7 +485,9 @@ session. The condition itself is sourced from the same `config.resolve_agent`
 tool the spawn path uses: the adapter calls it once per fixed tier
 (`small`/`medium`/`large`/`xlarge`, four local stdio round-trips), applying
 the identical genuine-`pi`-hit guard, and fires the advisory only when none of
-the four comes back as a real Pi model. The advisory is appended after the
+the four comes back as a real Pi model. A failed lookup counts as a miss, so
+four failed round-trips (a server without the tool, a broken stdio) also fire
+the advisory rather than suppressing it. The advisory is appended after the
 tool's own content (never prepended, never mutating the original in place)
 and is added only on a successful `workflow_manual` result, never on an error
 response. Spawns and explores still degrade silently to inherit while every
