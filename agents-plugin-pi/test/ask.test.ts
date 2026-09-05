@@ -60,12 +60,16 @@ import {
   registerAsk,
   injectDiscussionSummary,
   closeThreadOnDone,
+  handleRespondentFinalReport,
   normalizeThreadOrigin,
+  normalizeTranscript,
+  THREAD_TRANSCRIPT_CAP,
   checkContextLength,
   buildForkQuestionLeadNotice,
   MAX_CONTEXT_CHARS,
   type ThreadRecord,
 } from "../src/ask.ts";
+import type { OverlayHandle } from "../src/overlay-chat.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -152,6 +156,40 @@ describe("threadRegistryPath / serialize / parse", () => {
 
   test("an unknown status value is rejected (status drives every downstream branch)", () => {
     assert.deepEqual(parseThreadRegistry(JSON.stringify({ threads: [{ threadId: "q1", title: "t", status: "weird" }] })), []);
+  });
+
+  test("a persisted transcript round-trips (dogfood: Esc/reopen and restart must not open an empty view)", () => {
+    const record = thread({
+      threadId: "q1",
+      status: "open",
+      transcript: [
+        { who: "note", text: "Rebase or merge?" },
+        { who: "you", text: "merge" },
+        { who: "thread", text: "Merging keeps both histories." },
+      ],
+    });
+    assert.deepEqual(parseThreadRegistry(serializeThreadRegistry([record])), [record]);
+  });
+
+  test("an absent transcript stays absent, and a malformed one degrades to only its well-formed entries", () => {
+    const [absent] = parseThreadRegistry(JSON.stringify({ threads: [thread({ threadId: "q1" })] }));
+    assert.ok(!("transcript" in absent), "no field is invented for a record written before transcripts existed");
+    const [notArray] = parseThreadRegistry(JSON.stringify({ threads: [{ ...thread({ threadId: "q2" }), transcript: "nope" }] }));
+    assert.ok(!("transcript" in notArray));
+    const [mixed] = parseThreadRegistry(
+      JSON.stringify({ threads: [{ ...thread({ threadId: "q3" }), transcript: [{ who: "you", text: "ok" }, { who: "alien", text: "x" }, { who: "note" }, null, 7] }] }),
+    );
+    assert.deepEqual(mixed.transcript, [{ who: "you", text: "ok" }]);
+  });
+
+  test("normalizeTranscript caps at the newest THREAD_TRANSCRIPT_CAP entries", () => {
+    const many = Array.from({ length: THREAD_TRANSCRIPT_CAP + 25 }, (_, i) => ({ who: "thread" as const, text: `turn ${i}` }));
+    const capped = normalizeTranscript(many)!;
+    assert.equal(capped.length, THREAD_TRANSCRIPT_CAP);
+    assert.equal(capped[0].text, "turn 25", "the oldest entries are the ones dropped");
+    assert.equal(capped.at(-1)!.text, `turn ${THREAD_TRANSCRIPT_CAP + 24}`);
+    assert.equal(normalizeTranscript(undefined), undefined);
+    assert.equal(normalizeTranscript({}), undefined);
   });
 
   test("C2: origin round-trips, and an unknown/absent one defaults to fork-raised (never stop a task fork by mistake)", () => {
@@ -388,10 +426,13 @@ describe("Entry B texts (deliberately NOT wrapped in Entry A's structural frame)
     }
   });
 
-  test("the directive names no report contract (a discussion thread exits via /done, not a report)", () => {
+  test("the directive names both exits: the owner's /done, and the fork's own kind:\"final\" report once a decision is stated", () => {
     const directive = buildDiscussionForkDirectiveText();
-    assert.ok(!directive.includes("ws-report-to-lead"));
-    assert.ok(!directive.includes('kind:"final"'));
+    assert.ok(directive.includes("/done"));
+    assert.ok(directive.includes("ws-report-to-lead"));
+    assert.ok(directive.includes('kind:"final"'));
+    assert.match(directive, /decision/i);
+    assert.match(directive, /delivered to the lead/);
     for (const marker of framedMarkers) {
       assert.ok(!directive.includes(marker));
     }
@@ -827,6 +868,103 @@ describe("closeThreadOnDone / injectDiscussionSummary (fake pi)", () => {
     closeThreadOnDone(pi, handle, new Map(), record, "");
     assert.deepEqual(sent, []);
     assert.equal(record.status, "dormant");
+  });
+
+  describe("handleRespondentFinalReport (the fork ends the thread itself)", () => {
+    /** An overlay stub whose `closeWithSummary` does what the real component does: fire `onDone` (= closeThreadOnDone) with the text. */
+    function overlayStub(onDone: (summary: string) => void) {
+      const calls: { close: number; summaries: string[] } = { close: 0, summaries: [] };
+      const handle: OverlayHandle = {
+        close: () => {
+          calls.close += 1;
+        },
+        closeWithSummary: (summary) => {
+          calls.summaries.push(summary);
+          onDone(summary);
+        },
+      };
+      return { handle, calls };
+    }
+
+    test("lead-ask, no overlay attached (owner pressed Esc): injects the report as the summary, stops the fork, goes dormant", async () => {
+      const { pi, sent, handle, path, record } = setup("lead-ask");
+      record.status = "open";
+      record.respondentAgentId = "agent-7";
+      const stops: string[] = [];
+      const live = liveRespondent(stops);
+      const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
+
+      handleRespondentFinalReport(pi, handle, registry, record, "Decided: merge, keep both histories.", undefined);
+
+      assert.equal(sent.length, 1, "no summary turn is requested — the report text is the summary");
+      const msg = sent[0].message as { content: string };
+      assert.ok(msg.content.includes("Decided: merge, keep both histories."));
+      assert.equal(record.status, "dormant");
+      assert.equal(live.overlayAttached, false);
+      assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(stops, ["agent-7"]);
+    });
+
+    test("lead-ask with the overlay attached: the overlay is closed with the report text, and that close runs the same /done path", async () => {
+      const { pi, sent, handle, record } = setup("lead-ask");
+      record.status = "open";
+      record.respondentAgentId = "agent-7";
+      const stops: string[] = [];
+      const registry: RpcAgentRegistry = new Map([["agent-7", liveRespondent(stops)]]);
+      const overlay = overlayStub((summary) => closeThreadOnDone(pi, handle, registry, record, summary));
+
+      handleRespondentFinalReport(pi, handle, registry, record, "We go with the second anchor.", overlay.handle);
+
+      assert.deepEqual(overlay.calls.summaries, ["We go with the second anchor."]);
+      assert.equal(overlay.calls.close, 0, "closed through closeWithSummary, never the bare close");
+      assert.equal(sent.length, 1);
+      assert.equal(record.status, "dormant");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(stops, ["agent-7"]);
+    });
+
+    test("fork-raised with the overlay attached: closes the overlay and detaches only — no injection, no stop", async () => {
+      const { pi, sent, handle, record } = setup("fork-raised");
+      record.status = "open";
+      record.respondentAgentId = "agent-7";
+      const stops: string[] = [];
+      const live = liveRespondent(stops);
+      const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
+      const overlay = overlayStub((summary) => closeThreadOnDone(pi, handle, registry, record, summary));
+
+      handleRespondentFinalReport(pi, handle, registry, record, "Task done. Decisions: rebase.", overlay.handle);
+
+      assert.deepEqual(overlay.calls.summaries, [""], "a task fork's final is not a thread summary");
+      assert.deepEqual(sent, [], "the lead reads the fork's own final report; nothing is injected");
+      assert.equal(record.status, "dormant");
+      assert.equal(live.overlayAttached, false);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(stops, []);
+    });
+
+    test("fork-raised with no overlay attached: nothing changes", () => {
+      const { pi, sent, handle, record } = setup("fork-raised");
+      record.status = "open";
+      record.respondentAgentId = "agent-7";
+      const live = liveRespondent([]);
+      handleRespondentFinalReport(pi, handle, new Map([["agent-7", live]]), record, "Task done.", undefined);
+      assert.deepEqual(sent, []);
+      assert.equal(record.status, "open");
+      assert.equal(live.overlayAttached, true, "untouched — the flag belongs to whatever attached it");
+    });
+
+    test("a final report on a thread that is not open (pending, dormant, closed) is ignored — no duplicate injection", () => {
+      for (const status of ["pending", "dormant", "closed"] as const) {
+        const { pi, sent, handle, record } = setup("lead-ask");
+        record.status = status;
+        const overlay = overlayStub(() => {});
+        handleRespondentFinalReport(pi, handle, new Map(), record, "late", overlay.handle);
+        assert.deepEqual(sent, [], status);
+        assert.deepEqual(overlay.calls.summaries, [], status);
+        assert.equal(record.status, status);
+      }
+    });
   });
 });
 

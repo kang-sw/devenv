@@ -29,17 +29,33 @@ import {
   BOX_MIN_WIDTH,
   PASTE_START,
   PASTE_END,
+  OWNER_LINE_BG,
+  stripAnsi,
+  loadMarkdownRenderer,
+  openOverlayChat,
   type ForkChannel,
   type OverlayTheme,
+  type OverlayHandle,
+  type TranscriptEntry,
 } from "../src/overlay-chat.ts";
 import { resolveOwnerSendInterrupt } from "../src/ask.ts";
 
-function harness(options: { question?: string; streaming?: boolean; createdAt?: string; theme?: OverlayTheme } = {}) {
+function harness(
+  options: {
+    question?: string;
+    streaming?: boolean;
+    createdAt?: string;
+    theme?: OverlayTheme;
+    initialEntries?: TranscriptEntry[];
+    renderMarkdown?: (text: string, width: number) => string[];
+  } = {},
+) {
   const sent: string[] = [];
   const listeners = new Set<(evt: unknown) => void>();
   let unsubscribed = 0;
   let renders = 0;
   const summaries: string[] = [];
+  const transcripts: TranscriptEntry[][] = [];
   let doneCalls = 0;
   let streaming = options.streaming ?? false;
 
@@ -66,6 +82,9 @@ function harness(options: { question?: string; streaming?: boolean; createdAt?: 
       createdAt: options.createdAt,
       channel,
       onDone: (summary) => summaries.push(summary),
+      initialEntries: options.initialEntries,
+      onTranscriptChange: (entries) => transcripts.push(entries),
+      renderMarkdown: options.renderMarkdown,
     },
     () => {
       doneCalls += 1;
@@ -81,6 +100,7 @@ function harness(options: { question?: string; streaming?: boolean; createdAt?: 
     component,
     sent,
     summaries,
+    transcripts,
     type,
     enter: () => component.handleInput("\r"),
     emit: (evt: unknown) => {
@@ -527,5 +547,259 @@ describe("closing without /done (§5: no effect on the fork)", () => {
     const h = harness();
     h.component.dispose();
     assert.equal(h.unsubscribed, 1);
+  });
+});
+
+describe("transcript persistence (dogfood: Esc then /answer must not open an empty view)", () => {
+  test("every append is reported with the full transcript, in order; the streaming tail never is", () => {
+    const h = harness({ question: "Rebase or merge?" });
+    assert.deepEqual(h.transcripts, [[{ who: "note", text: "Rebase or merge?" }]], "the seeded question is an append too");
+    h.delta("partial");
+    assert.equal(h.transcripts.length, 1, "a text_delta is not a transcript change");
+    h.settle();
+    h.type("merge");
+    h.enter();
+    assert.deepEqual(h.transcripts.at(-1), [
+      { who: "note", text: "Rebase or merge?" },
+      { who: "thread", text: "partial" },
+      { who: "you", text: "merge" },
+    ]);
+  });
+
+  test("a restored transcript is rendered and the question note is NOT seeded a second time", () => {
+    const restored: TranscriptEntry[] = [
+      { who: "note", text: "Rebase or merge?" },
+      { who: "you", text: "merge" },
+      { who: "thread", text: "Merging keeps both histories." },
+    ];
+    const h = harness({ question: "Rebase or merge?", initialEntries: restored });
+    const text = h.component.render(80).join("\n");
+    assert.ok(text.includes("you: merge"));
+    assert.ok(text.includes("Merging keeps both histories."));
+    assert.equal(text.split("Rebase or merge?").length - 1, 2, "once in the header title, once as the restored note — not a third time");
+    assert.deepEqual(h.transcripts, [], "restoring is not an append");
+  });
+
+  test("an empty initial transcript behaves like none: the question is seeded", () => {
+    const h = harness({ question: "Rebase or merge?", initialEntries: [] });
+    assert.deepEqual(h.transcripts, [[{ who: "note", text: "Rebase or merge?" }]]);
+  });
+
+  test("the reported array is a copy — later appends do not mutate what was handed out", () => {
+    const h = harness({ question: "q" });
+    const first = h.transcripts[0];
+    h.type("a");
+    h.enter();
+    assert.equal(first.length, 1);
+  });
+});
+
+describe("owner lines (dogfood: visually distinct from thread text)", () => {
+  /** Identity theme that marks bg-wrapped spans so the test can see the block boundaries; widths stay measurable. */
+  function markingTheme() {
+    const bgCalls: Array<{ color: string; text: string }> = [];
+    const theme: OverlayTheme = {
+      fg: (_color, text) => text,
+      bg: (color, text) => {
+        bgCalls.push({ color, text });
+        return `«${text}»`;
+      },
+    };
+    return { theme, bgCalls };
+  }
+
+  test("with a theme that can paint a background, an owner turn is a solid block: padded to the interior with one space of inner padding, no `you:` prefix", () => {
+    const { theme, bgCalls } = markingTheme();
+    const h = harness({ theme });
+    h.type("let's merge");
+    h.enter();
+    h.delta("Merging keeps history.");
+    h.settle();
+    const lines = h.component.render(40);
+    const inner = 40 - 4;
+    const ownerLines = lines.filter((line) => line.includes("«"));
+    assert.equal(ownerLines.length, 1);
+    assert.ok(!ownerLines[0].includes("you:"), "the prefix is replaced by the background");
+    assert.equal(bgCalls.length, 1);
+    assert.equal(bgCalls[0].color, OWNER_LINE_BG);
+    assert.equal(bgCalls[0].text, ` let's merge${" ".repeat(inner - 2 - "let's merge".length)} `, "the whole interior is painted, text inset by one space");
+    assert.ok(ownerLines[0].startsWith("│ «") && ownerLines[0].endsWith("» │"));
+    const threadLine = lines.find((line) => line.includes("Merging keeps history."))!;
+    assert.ok(!threadLine.includes("«"), "thread text stays unpadded and unpainted");
+    assert.ok(threadLine.startsWith("│ Merging"), "thread text is not inset");
+  });
+
+  test("a long owner turn wraps inside the block, every wrapped row painted to the full interior", () => {
+    const { theme, bgCalls } = markingTheme();
+    const h = harness({ theme });
+    h.type("a decision long enough to wrap onto several rows of a narrow overlay box");
+    h.enter();
+    h.component.render(30);
+    assert.ok(bgCalls.length >= 2);
+    for (const call of bgCalls) {
+      assert.equal(call.text.length, 30 - 4, `every painted row spans the interior: ${JSON.stringify(call.text)}`);
+      assert.ok(call.text.startsWith(" ") && call.text.endsWith(" "));
+    }
+  });
+
+  test("with a theme that has only fg (or no theme), the `you:` prefix fallback is kept", () => {
+    const fgOnly = harness({ theme: { fg: (_c, t) => t } });
+    fgOnly.type("merge");
+    fgOnly.enter();
+    assert.ok(fgOnly.component.render(80).join("\n").includes("you: merge"));
+    const bare = harness();
+    bare.type("merge");
+    bare.enter();
+    assert.ok(bare.component.render(80).join("\n").includes("you: merge"));
+  });
+
+  test("styled lines still measure and pad correctly: visibleWidth ignores ANSI sequences", () => {
+    assert.equal(visibleWidth("\x1b[44m padded \x1b[0m"), 8);
+    assert.equal(visibleWidth("\x1b]8;;http://x\x07link\x1b]8;;\x07"), 4);
+    assert.equal(stripAnsi("\x1b[1mbold\x1b[22m"), "bold");
+    const theme: OverlayTheme = { fg: (_c, t) => `\x1b[2m${t}\x1b[22m`, bg: (_c, t) => `\x1b[44m${t}\x1b[49m` };
+    const h = harness({ theme });
+    h.type("merge");
+    h.enter();
+    for (const line of h.component.render(50)) assert.equal(visibleWidth(line), 50, JSON.stringify(line));
+  });
+});
+
+describe("markdown rendering for thread text", () => {
+  test("a supplied renderMarkdown is used for thread entries and the streaming tail only — never for owner lines or notes", () => {
+    const calls: Array<{ text: string; width: number }> = [];
+    const renderMarkdown = (text: string, width: number): string[] => {
+      calls.push({ text, width });
+      return [`MD<${text}>`];
+    };
+    const h = harness({ question: "Rebase or merge?", renderMarkdown });
+    h.type("merge");
+    h.enter();
+    h.delta("**Merging** keeps history.");
+    const streaming = h.component.render(80).join("\n");
+    assert.ok(streaming.includes("MD<**Merging** keeps history.>"), "the streaming tail goes through the renderer");
+    h.settle();
+    const settled = h.component.render(80).join("\n");
+    assert.ok(settled.includes("MD<**Merging** keeps history.>"));
+    assert.ok(settled.includes("· Rebase or merge?"), "notes keep their plain rendering");
+    assert.ok(settled.includes("you: merge"), "owner lines keep their plain rendering");
+    assert.deepEqual(
+      calls.map((c) => c.text),
+      ["**Merging** keeps history.", "**Merging** keeps history."],
+    );
+    assert.ok(calls.every((c) => c.width === 80 - 4), "rendered to the box interior");
+  });
+
+  test("without a renderer, thread text falls back to plain wrapping", () => {
+    const h = harness();
+    h.delta("**Merging** keeps history.");
+    h.settle();
+    assert.ok(h.component.render(80).join("\n").includes("**Merging** keeps history."));
+  });
+
+  test("a renderer line wider than the interior is re-wrapped from its plain text, so the box stays aligned", () => {
+    const wide = "x".repeat(100);
+    const h = harness({ theme: { fg: (_c, t) => t }, renderMarkdown: () => [`\x1b[1m${wide}\x1b[22m`, "short"] });
+    h.delta("anything");
+    h.settle();
+    const lines = h.component.render(40);
+    for (const line of lines) assert.equal(visibleWidth(line), 40, JSON.stringify(line));
+    assert.ok(lines.join("\n").includes("short"));
+    assert.ok(!lines.join("\n").includes("\x1b[1m"), "the over-wide styled line was replaced by its plain re-wrap");
+  });
+
+  test("a throwing or non-array renderer degrades to plain wrapping rather than breaking the view", () => {
+    const throwing = harness({
+      renderMarkdown: () => {
+        throw new Error("renderer broke");
+      },
+    });
+    throwing.delta("still visible");
+    throwing.settle();
+    assert.ok(throwing.component.render(80).join("\n").includes("still visible"));
+
+    const bogus = harness({ renderMarkdown: () => "nope" as unknown as string[] });
+    bogus.delta("also visible");
+    bogus.settle();
+    assert.ok(bogus.component.render(80).join("\n").includes("also visible"));
+  });
+
+  test("loadMarkdownRenderer resolves to undefined under node --test (pi-tui is not resolvable here) instead of throwing", async () => {
+    assert.equal(await loadMarkdownRenderer(), undefined);
+  });
+
+  test("openOverlayChat falls back to plain thread text and hands back an OverlayHandle", async () => {
+    let handle: OverlayHandle | undefined;
+    let built: OverlayChatComponent | undefined;
+    const listeners = new Set<(evt: unknown) => void>();
+    const ctx = {
+      ui: {
+        custom<T>(factory: (tui: { requestRender(): void }, theme: undefined, kb: unknown, done: (r: T) => void) => OverlayChatComponent) {
+          return new Promise<T>((resolve) => {
+            built = factory({ requestRender: () => {} }, undefined, undefined, resolve);
+          });
+        },
+      },
+    };
+    const summaries: string[] = [];
+    const opened = openOverlayChat(ctx, {
+      title: "t",
+      threadId: "q1",
+      channel: {
+        onEvent: (l) => {
+          listeners.add(l);
+          return () => listeners.delete(l);
+        },
+        isStreaming: () => false,
+        send: async () => {},
+      },
+      onDone: (summary) => summaries.push(summary),
+      onOpened: (h) => {
+        handle = h;
+      },
+    });
+    await flush();
+    assert.ok(handle && built);
+    for (const l of listeners) l({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "**plain**" } });
+    assert.ok(built!.render(60).join("\n").includes("**plain**"), "no renderer under node --test: markdown source shows as-is");
+    handle!.closeWithSummary("decided");
+    await opened;
+    assert.deepEqual(summaries, ["decided"]);
+  });
+});
+
+describe("closeWithSummary (the fork ended the thread itself)", () => {
+  test("fires onDone with the supplied text, appends it to the transcript, closes the view, and never sends the /done prompt", async () => {
+    const h = harness({ question: "q" });
+    h.delta("half-streamed turn");
+    h.component.closeWithSummary("Decided: merge.");
+    await flush();
+    assert.deepEqual(h.sent, [], "no summary turn is requested");
+    assert.deepEqual(h.summaries, ["Decided: merge."]);
+    assert.equal(h.doneCalls, 1);
+    assert.equal(h.unsubscribed, 1);
+    assert.deepEqual(h.transcripts.at(-1)!.at(-1), { who: "thread", text: "Decided: merge." }, "the decision is persisted for a later reopen");
+  });
+
+  test("an empty summary (fork-raised detach) appends nothing and still fires onDone with the empty string", () => {
+    const h = harness({ question: "q" });
+    h.component.closeWithSummary("");
+    assert.deepEqual(h.summaries, [""]);
+    assert.equal(h.transcripts.length, 1, "only the seeded question");
+    assert.equal(h.doneCalls, 1);
+  });
+
+  test("is a no-op once the view has finished, and a later settle cannot fire onDone again", () => {
+    const h = harness();
+    h.type(DONE_COMMAND);
+    h.enter();
+    // The fork answered the summary request with its own final report instead
+    // of a text turn: the external close wins, the pending /done is dropped.
+    h.component.closeWithSummary("via report");
+    h.delta("late text");
+    h.settle();
+    h.component.closeWithSummary("again");
+    assert.deepEqual(h.summaries, ["via report"]);
+    assert.equal(h.doneCalls, 1);
   });
 });

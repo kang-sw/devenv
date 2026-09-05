@@ -22,15 +22,26 @@
  *     table §5 describes. The channel also makes this whole file drivable
  *     from a plain fake object in `node --test` with no subprocess — the
  *     ticket's own unit tier.
- *   - No `@earendil-works/pi-tui` import: that package is not resolvable from
- *     this one (it is nested inside `pi-coding-agent`'s own `node_modules`),
- *     so the `Component` contract is satisfied structurally and the input
- *     box, wrapping, width measurement and the Escape-key matcher are small
- *     local implementations. The only styling is the theme's `fg` on the box
- *     border and the footer, applied AFTER padding — content is measured and
- *     padded as plain text, which is why width assertions in the tests are
- *     exact rather than ANSI-tolerant (the tests pass no theme, or an
- *     identity stub).
+ *   - No static `@earendil-works/pi-tui` import: that package is not
+ *     resolvable from this one under `node --test` (it is nested inside
+ *     `pi-coding-agent`'s own `node_modules`), so the `Component` contract is
+ *     satisfied structurally and the input box, wrapping, width measurement
+ *     and the Escape-key matcher are small local implementations. Pi's own
+ *     Markdown renderer IS reachable when Pi loads this extension (jiti), so
+ *     `openOverlayChat` tries a guarded dynamic `import()` of `pi-tui` +
+ *     `pi-coding-agent` and, when both resolve, hands the component a
+ *     `renderMarkdown` for thread text; otherwise thread text wraps as plain
+ *     text (the path the tests exercise). Theme colors are applied AFTER
+ *     padding, and `visibleWidth` ignores ANSI sequences, so a styled line
+ *     still measures and pads correctly.
+ *   - The transcript is NOT owned by the component (dogfood 2026-09-05: Esc
+ *     then `/answer` opened an empty view). It is seeded from
+ *     `initialEntries` and every append is reported through
+ *     `onTranscriptChange`, so `ask.ts` can persist it on the thread record
+ *     and restore it across reopen and restart.
+ *   - Owner lines render as a padded block under the theme's
+ *     `userMessageBg` (the way Pi paints its own user messages) when the
+ *     theme offers `bg`; the no-theme fallback keeps the `you: ` prefix.
  *   - Escape is matched by `isEscapeKey`, not by `data === "\x1b"`: Pi runs
  *     the terminal with the kitty keyboard protocol / modifyOtherKeys
  *     enabled, so a real Escape press arrives as `\x1b[27u`, `\x1b[27;1u`
@@ -82,11 +93,32 @@ export interface OverlayChatOptions {
   summarizeOnDone?: boolean;
   channel: ForkChannel;
   /**
-   * Called once when the owner ends the thread with `/done`, with the fork's
-   * own summary — or with an empty string when `summarizeOnDone` is false and
-   * no summary was ever requested.
+   * Called once when the thread ends — the owner's `/done` (with the fork's
+   * own summary, or an empty string when `summarizeOnDone` is false and no
+   * summary was ever requested), or an external `closeWithSummary(text)`
+   * (with that text).
    */
   onDone: (summary: string) => void;
+  /**
+   * Transcript to restore on (re)open. When non-empty, the registered
+   * `question` is NOT seeded again — it is already the first note in there.
+   */
+  initialEntries?: readonly TranscriptEntry[];
+  /** Reported with the full transcript after every append (never for the streaming tail). */
+  onTranscriptChange?: (entries: TranscriptEntry[]) => void;
+  /**
+   * Host Markdown renderer for `thread` entries and the streaming tail:
+   * returns already-styled lines for `width` columns. Absent under
+   * `node --test` (see the file header), in which case thread text wraps as
+   * plain text via `wrapLine`.
+   */
+  renderMarkdown?: (text: string, width: number) => string[];
+}
+
+/** One transcript line-group: an owner turn, a settled thread turn, or an adapter note. Plain data — persisted on the thread record. */
+export interface TranscriptEntry {
+  who: "you" | "thread" | "note";
+  text: string;
 }
 
 /** Terminal bracketed-paste markers (`\x1b[?2004h` mode), which Pi enables on the real TTY. */
@@ -123,13 +155,18 @@ export function isEscapeKey(data: string): boolean {
 
 /**
  * Optional duck-typed slice of Pi's theme (`ctx.ui.custom`'s second factory
- * argument): `fg(color, text)` wraps `text` in the ANSI color named
- * `color`. Only `"border"` and `"dim"` are used. Absent in tests, where the
- * rendered lines must stay plain so `visibleWidth` can measure them.
+ * argument): `fg(color, text)` wraps `text` in the ANSI foreground color
+ * named `color` (`"border"`, `"dim"`), `bg(color, text)` in the background
+ * named `color` (`"userMessageBg"` — Pi's own user-message ground). Absent in
+ * tests, or supplied as identity stubs.
  */
 export interface OverlayTheme {
   fg?: (color: string, text: string) => string;
+  bg?: (color: string, text: string) => string;
 }
+
+/** The theme background Pi paints its own user messages with; owner lines reuse it so they read as the owner's. */
+export const OWNER_LINE_BG = "userMessageBg";
 
 /**
  * Review relay #1 I4: owner-facing rendering of a thread's registration time.
@@ -160,16 +197,25 @@ export const EMPTY_SUMMARY_TEXT = "(the discussion ended without a summary from 
 /** Narrowest width that still fits a box (two border glyphs, two padding spaces, one content column). */
 export const BOX_MIN_WIDTH = 5;
 
+/** CSI (`ESC [ ... final`) and OSC (`ESC ] ... BEL|ST`) sequences — what theme `fg`/`bg` and the host Markdown renderer emit. */
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+/** Removes ANSI CSI/OSC sequences, leaving the printable text. */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_SEQUENCE, "");
+}
+
 /**
  * Display width of a string: code points, counting the common East-Asian
- * wide ranges as two columns. A local approximation of `pi-tui`'s own
- * `visibleWidth` (that package is not resolvable from here — see the file
- * header); exact per-emulator behavior for CJK/IME input is a human-runbook
- * verification item, not something this adapter can assert offline.
+ * wide ranges as two columns and ANSI escape sequences as zero. A local
+ * approximation of `pi-tui`'s own `visibleWidth` (that package is not
+ * statically resolvable from here — see the file header); exact
+ * per-emulator behavior for CJK/IME input is a human-runbook verification
+ * item, not something this adapter can assert offline.
  */
 export function visibleWidth(text: string): number {
   let width = 0;
-  for (const char of text) {
+  for (const char of stripAnsi(text)) {
     const code = char.codePointAt(0) ?? 0;
     width += isWideCodePoint(code) ? 2 : 1;
   }
@@ -216,9 +262,14 @@ export function wrapLine(text: string, width: number): string[] {
   return lines;
 }
 
-interface TranscriptEntry {
-  who: "you" | "thread" | "note";
+/**
+ * One row of the transcript area, before box padding: `text` is measured
+ * with `visibleWidth`; `ownerBlock` rows are padded to the full interior and
+ * wrapped in the owner background AFTER padding, so the block is solid.
+ */
+interface TranscriptRow {
   text: string;
+  ownerBlock?: boolean;
 }
 
 /**
@@ -252,10 +303,34 @@ export class OverlayChatComponent {
     this.options = options;
     this.done = done;
     this.theme = theme;
-    if (options.question) {
-      this.entries.push({ who: "note", text: options.question });
+    if (options.initialEntries && options.initialEntries.length > 0) {
+      // Restored transcript (reopen after Esc, or after a lead restart): the
+      // question note is already its first entry, so it is not seeded twice.
+      this.entries = options.initialEntries.map((entry) => ({ who: entry.who, text: entry.text }));
+    } else if (options.question) {
+      this.append({ who: "note", text: options.question });
     }
     this.unsubscribe = options.channel.onEvent((evt) => this.handleEvent(evt));
+  }
+
+  /** The only transcript write path: every append is reported to `onTranscriptChange` so the owner of the thread record can persist it. */
+  private append(entry: TranscriptEntry): void {
+    this.entries.push(entry);
+    this.options.onTranscriptChange?.([...this.entries]);
+  }
+
+  /**
+   * External finish (the thread's own `kind:"final"` report, routed here by
+   * `ask.ts`): closes the view and reports `summary` through `onDone` WITHOUT
+   * sending `buildDoneSummaryPrompt()` — the fork already said what was
+   * decided. Any half-streamed turn is discarded. A no-op once finished.
+   */
+  closeWithSummary(summary: string): void {
+    if (this.finished) return;
+    this.streaming = "";
+    this.donePending = false;
+    if (summary.trim().length > 0) this.append({ who: "thread", text: summary.trim() });
+    this.finish(summary);
   }
 
   /**
@@ -275,7 +350,7 @@ export class OverlayChatComponent {
     const settled = this.streaming.trim();
     this.streaming = "";
     if (settled.length > 0) {
-      this.entries.push({ who: "thread", text: settled });
+      this.append({ who: "thread", text: settled });
     }
     if (this.donePending) {
       this.donePending = false;
@@ -335,13 +410,13 @@ export class OverlayChatComponent {
       // leaving it in the buffer would make it the leading text of the
       // summary turn (review relay #1 M11).
       this.streaming = "";
-      this.entries.push({ who: "note", text: "ending the thread — asking for a summary…" });
+      this.append({ who: "note", text: "ending the thread — asking for a summary…" });
       this.deliver(buildDoneSummaryPrompt());
       this.refresh();
       return;
     }
 
-    this.entries.push({ who: "you", text });
+    this.append({ who: "you", text });
     this.deliver(text);
     this.refresh();
   }
@@ -350,7 +425,7 @@ export class OverlayChatComponent {
     // Fire-and-report: a delivery failure becomes a transcript note rather
     // than an unhandled rejection inside a keystroke handler.
     void this.options.channel.send(text).catch((err: unknown) => {
-      this.entries.push({ who: "note", text: `delivery failed: ${err instanceof Error ? err.message : String(err)}` });
+      this.append({ who: "note", text: `delivery failed: ${err instanceof Error ? err.message : String(err)}` });
       this.donePending = false;
       this.refresh();
     });
@@ -468,10 +543,11 @@ export class OverlayChatComponent {
     const boxed = w >= BOX_MIN_WIDTH;
     const inner = boxed ? w - 4 : w;
     const fg = (color: string, text: string): string => this.theme?.fg?.(color, text) ?? text;
+    const bg = (color: string, text: string): string => this.theme?.bg?.(color, text) ?? text;
     const pad = (text: string): string => text + " ".repeat(Math.max(0, inner - visibleWidth(text)));
-    const row = (text: string, color?: string): string => {
+    const row = (text: string, color?: string, ownerBlock?: boolean): string => {
       const padded = pad(text);
-      const content = color ? fg(color, padded) : padded;
+      const content = ownerBlock ? bg(OWNER_LINE_BG, padded) : color ? fg(color, padded) : padded;
       return boxed ? `${fg("border", "│")} ${content} ${fg("border", "│")}` : content;
     };
 
@@ -487,7 +563,7 @@ export class OverlayChatComponent {
     if (opened) for (const line of wrapLine(`  opened ${opened}`, inner)) lines.push(row(line));
     lines.push(row(""));
 
-    for (const line of this.transcriptLines(inner)) lines.push(row(line));
+    for (const line of this.transcriptRows(inner)) lines.push(row(line.text, undefined, line.ownerBlock));
 
     lines.push(row(""));
     for (const line of wrapLine(`> ${this.input}`, inner)) lines.push(row(line));
@@ -505,22 +581,62 @@ export class OverlayChatComponent {
     return lines;
   }
 
-  private transcriptLines(width: number): string[] {
-    const rendered: string[] = [];
+  /**
+   * Transcript rows for an interior of `width` columns. Owner turns become a
+   * solid block (one space of inner padding, so the text is wrapped to
+   * `width - 2`) when the theme can paint a background, and a `you: `-prefixed
+   * paragraph otherwise; thread turns and the streaming tail go through the
+   * host Markdown renderer when one was supplied; notes keep their `· ` mark.
+   */
+  private transcriptRows(width: number): TranscriptRow[] {
+    const rendered: TranscriptRow[] = [];
     const all = [...this.entries];
     if (this.streaming.trim().length > 0) {
       all.push({ who: "thread", text: this.streaming.trim() });
     }
+    const ownerBlocks = typeof this.theme?.bg === "function";
     for (const entry of all) {
-      const prefix = entry.who === "you" ? "you: " : entry.who === "thread" ? "" : "· ";
-      for (const paragraph of `${prefix}${entry.text}`.split("\n")) {
-        rendered.push(...wrapLine(paragraph, width));
+      if (entry.who === "you" && ownerBlocks) {
+        const textWidth = Math.max(1, width - 2);
+        for (const paragraph of entry.text.split("\n")) {
+          for (const line of wrapLine(paragraph, textWidth)) {
+            rendered.push({ text: ` ${line}${" ".repeat(Math.max(0, textWidth - visibleWidth(line)))} `, ownerBlock: true });
+          }
+        }
+      } else if (entry.who === "thread") {
+        for (const line of this.renderThreadText(entry.text, width)) rendered.push({ text: line });
+      } else {
+        const prefix = entry.who === "you" ? "you: " : "· ";
+        for (const paragraph of `${prefix}${entry.text}`.split("\n")) {
+          for (const line of wrapLine(paragraph, width)) rendered.push({ text: line });
+        }
       }
-      rendered.push("");
+      rendered.push({ text: "" });
     }
     // Tail truncation: the overlay is height-bounded by `overlayOptions`, so
     // the newest turns are the ones that must stay visible.
     return rendered.length > MAX_TRANSCRIPT_LINES ? rendered.slice(rendered.length - MAX_TRANSCRIPT_LINES) : rendered;
+  }
+
+  /**
+   * Thread text through `renderMarkdown` when present, else `wrapLine`. Every
+   * line the host renderer returns is re-checked against the local
+   * `visibleWidth` and, when too wide (or when the renderer throws), its plain
+   * text is re-wrapped — the box must stay aligned regardless of what the
+   * renderer does with a width it disagrees about.
+   */
+  private renderThreadText(text: string, width: number): string[] {
+    const plain = (source: string): string[] => source.split("\n").flatMap((paragraph) => wrapLine(paragraph, width));
+    const renderMarkdown = this.options.renderMarkdown;
+    if (!renderMarkdown) return plain(text);
+    let lines: string[];
+    try {
+      lines = renderMarkdown(text, width);
+    } catch {
+      return plain(text);
+    }
+    if (!Array.isArray(lines)) return plain(text);
+    return lines.flatMap((line) => (typeof line === "string" && visibleWidth(line) <= width ? [line] : plain(stripAnsi(String(line)))));
   }
 }
 
@@ -534,20 +650,65 @@ export interface OverlayCustomCtx {
   };
 }
 
+/** What `openOverlayChat` hands back through `onOpened`: the two external ways to end the view. */
+export interface OverlayHandle {
+  /** Close the view only (the thread is untouched). */
+  close(): void;
+  /** End the view with a supplied summary — see `OverlayChatComponent.closeWithSummary`. */
+  closeWithSummary(summary: string): void;
+}
+
+/** Structural slice of `pi-tui`'s `Markdown` component and `pi-coding-agent`'s theme export, as reached through the dynamic imports below. */
+interface MarkdownHostModules {
+  tui: { Markdown: new (text: string, paddingX: number, paddingY: number, theme: unknown) => { render(width: number): string[] } };
+  pi: { getMarkdownTheme(): unknown };
+}
+
+/**
+ * Pi's own Markdown renderer, when the host can supply it. Both packages are
+ * reached through guarded dynamic `import()`s: neither is resolvable from
+ * this package under `node --test` (`pi-tui` is nested inside
+ * `pi-coding-agent`'s own `node_modules`; `pi-coding-agent`'s runtime exports
+ * are only reachable once Pi loads this extension via jiti), so a failed
+ * import resolves to `undefined` and thread text falls back to plain
+ * wrapping. `pi-coding-agent` is only attempted after `pi-tui` resolved —
+ * the theme is useless without the component.
+ */
+export async function loadMarkdownRenderer(): Promise<((text: string, width: number) => string[]) | undefined> {
+  let tui: MarkdownHostModules["tui"] | undefined;
+  try {
+    tui = (await import("@earendil-works/pi-tui")) as unknown as MarkdownHostModules["tui"];
+  } catch {
+    return undefined;
+  }
+  let pi: MarkdownHostModules["pi"] | undefined;
+  try {
+    pi = (await import("@earendil-works/pi-coding-agent")) as unknown as MarkdownHostModules["pi"];
+  } catch {
+    return undefined;
+  }
+  if (typeof tui?.Markdown !== "function" || typeof pi?.getMarkdownTheme !== "function") return undefined;
+  const Markdown = tui.Markdown;
+  const theme = pi.getMarkdownTheme();
+  return (text, width) => new Markdown(text, 0, 0, theme).render(width);
+}
+
 /**
  * Shows one thread's overlay chat and resolves when it closes (by `/done`,
- * by Escape, or because another `/answer` closed it). `onOpened` hands the
- * caller a close function so `ask.ts` can enforce §5's one-overlay-at-a-time
- * rule without reaching into the component itself.
+ * by Escape, by `closeWithSummary`, or because another `/answer` closed it).
+ * `onOpened` hands the caller an `OverlayHandle` so `ask.ts` can enforce §5's
+ * one-overlay-at-a-time rule — and route a fork's own final report into the
+ * view — without reaching into the component itself.
  */
 export async function openOverlayChat(
   ctx: OverlayCustomCtx,
-  options: OverlayChatOptions & { onOpened?: (close: () => void) => void },
+  options: OverlayChatOptions & { onOpened?: (handle: OverlayHandle) => void },
 ): Promise<void> {
+  const renderMarkdown = options.renderMarkdown ?? (await loadMarkdownRenderer());
   await ctx.ui.custom<undefined>(
     (tui, theme, _keybindings, done) => {
-      const component = new OverlayChatComponent(tui, options, done, theme);
-      options.onOpened?.(() => component.close());
+      const component = new OverlayChatComponent(tui, { ...options, renderMarkdown }, done, theme);
+      options.onOpened?.({ close: () => component.close(), closeWithSummary: (summary) => component.closeWithSummary(summary) });
       return component;
     },
     {

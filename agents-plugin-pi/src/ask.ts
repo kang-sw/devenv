@@ -68,7 +68,7 @@ import {
 } from "./spawner.ts";
 import { computeForkToolSurface, getForkSourceSessionFile } from "./fork.ts";
 import type { SpawnRole } from "./process-role.ts";
-import { openOverlayChat, type ForkChannel } from "./overlay-chat.ts";
+import { openOverlayChat, type ForkChannel, type OverlayHandle, type TranscriptEntry } from "./overlay-chat.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/ask.test.ts) with no
@@ -159,6 +159,14 @@ export interface ThreadRecord {
   respondentAgentId?: string;
   /** Denormalized resume fields for `respondentAgentId` — see this file's header. */
   forkResume?: PersistedForkResume;
+  /**
+   * The overlay transcript (owner lines, settled thread turns, adapter notes),
+   * newest last and capped at `THREAD_TRANSCRIPT_CAP` entries. Persisted with
+   * the record so a reopen after Esc — or after a lead restart — shows the
+   * conversation so far instead of an empty view (dogfood 2026-09-05). Absent
+   * until the thread is first opened.
+   */
+  transcript?: TranscriptEntry[];
   createdAt: string;
   /** Last open/answer/close touch — orders the "reopen the most recent" shortcut. */
   touchedAt: string;
@@ -197,6 +205,26 @@ export type ThreadOrigin = "lead-ask" | "fork-raised";
 /** Normalizes a persisted/unknown `origin` value; see `ThreadOrigin` for why the default is the conservative one. */
 export function normalizeThreadOrigin(value: unknown): ThreadOrigin {
   return value === "lead-ask" ? "lead-ask" : "fork-raised";
+}
+
+/** Newest transcript entries kept per thread (`ThreadRecord.transcript`); older ones are dropped on write and on parse. */
+export const THREAD_TRANSCRIPT_CAP = 200;
+
+/**
+ * Tolerant read of a persisted `transcript`: a non-array is `undefined`
+ * (the field is simply absent), malformed entries are dropped, and the
+ * result is capped to the newest `THREAD_TRANSCRIPT_CAP` — a hand-edited or
+ * older registry file must never make a thread unopenable.
+ */
+export function normalizeTranscript(value: unknown): TranscriptEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value
+    .filter((entry): entry is TranscriptEntry => {
+      const candidate = entry as Partial<TranscriptEntry> | null;
+      return (candidate?.who === "you" || candidate?.who === "thread" || candidate?.who === "note") && typeof candidate.text === "string";
+    })
+    .map((entry) => ({ who: entry.who, text: entry.text }));
+  return entries.length > THREAD_TRANSCRIPT_CAP ? entries.slice(entries.length - THREAD_TRANSCRIPT_CAP) : entries;
 }
 
 /**
@@ -292,8 +320,13 @@ export function parseThreadRegistry(raw: string): ThreadRecord[] {
     })
     // `origin` is normalized rather than validated away: an entry written
     // before the field existed is still a usable thread, and defaulting it to
-    // "fork-raised" is the safe direction (see `ThreadOrigin`).
-    .map((entry) => ({ ...entry, origin: normalizeThreadOrigin(entry.origin) }));
+    // "fork-raised" is the safe direction (see `ThreadOrigin`). `transcript`
+    // likewise: absent or malformed simply means "no transcript yet".
+    .map((entry) => {
+      const { transcript, ...rest } = entry as ThreadRecord & { transcript?: unknown };
+      const normalized = normalizeTranscript(transcript);
+      return { ...rest, origin: normalizeThreadOrigin(entry.origin), ...(normalized ? { transcript: normalized } : {}) };
+    });
 }
 
 /** §5 widget wording counts PENDING threads only — an already-open thread is not something the owner still owes an answer to. */
@@ -419,11 +452,15 @@ export function addAskToolsIfLead(activeTools: readonly string[], role: SpawnRol
 /**
  * Entry B's system-prompt directive (`--append-system-prompt`, ephemeral
  * per-spawn file, same as `fork.ts`'s own). Short natural language,
- * conversation constraints only — and deliberately NO `kind:"final"` report
- * instruction: a discussion thread's exit is the owner's `/done` in the
- * overlay, not a report. Framing-free on purpose (§4's directive-style rule):
- * a discussion fork is meant to speak as the lead, so nothing here tries to
- * give it a separate identity.
+ * conversation constraints only. Framing-free on purpose (§4's
+ * directive-style rule): a discussion fork is meant to speak as the lead, so
+ * nothing here tries to give it a separate identity.
+ *
+ * The thread has two exits: the owner's `/done` (which asks for a summary
+ * turn), and — post-close dogfood 2026-09-05 — the fork's own
+ * `ws-report-to-lead(kind:"final")` once the owner has stated a decision,
+ * whose text IS the summary (`handleRespondentFinalReport`). No progress
+ * reports, no task frame.
  */
 export function buildDiscussionForkDirectiveText(): string {
   return [
@@ -431,9 +468,9 @@ export function buildDiscussionForkDirectiveText(): string {
     "",
     "Reply conversationally and briefly, in the same voice as the rest of this conversation. Answer what is asked, say plainly when something is genuinely undecided, and ask back only when the answer actually depends on it.",
     "",
-    "There is no task to complete and no report to file here. Do not start editing files or running work unless the owner explicitly asks for it in this thread.",
+    "There is no task to complete and no progress report to file here. Do not start editing files or running work unless the owner explicitly asks for it in this thread.",
     "",
-    "The owner ends the thread themselves; when they do, you will be asked once for a short summary of what was decided.",
+    'The owner may end the thread themselves with /done, in which case you will be asked once for a short summary. When the owner states a decision, or says they will go a certain way, end the thread yourself: call ws-report-to-lead with kind:"final" and a short summary of what was decided — 2 to 4 sentences, the decision first. That summary is delivered to the lead.',
   ].join("\n");
 }
 
@@ -770,9 +807,11 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle): voi
 }
 
 /**
- * The overlay's `/done` exit, routed on the thread's `origin` — the two
- * entries own their respondent differently (review relay #2 C2, see
- * `ThreadOrigin`):
+ * The thread's close, routed on its `origin` — reached from the overlay's
+ * `/done` (with the fork's summary turn) and from the respondent's own
+ * `kind:"final"` report (`handleRespondentFinalReport`, with the report
+ * text). The two entries own their respondent differently (review relay #2
+ * C2, see `ThreadOrigin`):
  *
  * - `"lead-ask"`: this surface spawned the discussion fork, so `/done` runs
  *   the full §6/§9 close — summary into the lead, then stop the fork.
@@ -939,9 +978,65 @@ function createForkChannel(rpcRegistry: RpcAgentRegistry, cwd: string, agentId: 
  * and the thread stays reopenable (the doom-overlay example's own
  * persistent-state-vs-disposable-view split).
  */
-let activeOverlay: { token: number; close: () => void } | undefined;
+let activeOverlay: { token: number; threadId: string; handle: OverlayHandle } | undefined;
 /** Identifies one overlay INSTANCE, not one thread: reopening the same thread must not let the closing instance clear its successor's entry. */
 let overlayToken = 0;
+
+/** The live overlay handle for `threadId`, if the one open overlay is attached to that thread. */
+function attachedOverlayFor(threadId: string): OverlayHandle | undefined {
+  return activeOverlay?.threadId === threadId ? activeOverlay.handle : undefined;
+}
+
+/**
+ * A respondent's own `kind:"final"` report (post-close dogfood 2026-09-05):
+ * the discussion fork ends the thread itself once the owner has stated a
+ * decision, and the report text is the summary. Routed exactly like `/done`
+ * — through the attached overlay's `closeWithSummary` (whose `onDone` is
+ * `closeThreadOnDone`) when one is open, directly through `closeThreadOnDone`
+ * when the owner had already pressed Esc — so a `lead-ask` thread gets the
+ * §6 injection, the stop, `dormant`, persistence and the widget refresh in
+ * one place, with no summary turn. A `fork-raised` thread's final report only
+ * closes an attached overlay and detaches (its lifecycle belongs to
+ * `ws-fork`, and the lead reads the report itself); with no overlay attached
+ * nothing happens. Ignored unless the thread is `open` — a late duplicate
+ * from an already-closed thread must not re-inject.
+ *
+ * `overlay` is injectable for tests; the default is the module-scope active
+ * overlay.
+ */
+export function handleRespondentFinalReport(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  rpcRegistry: RpcAgentRegistry,
+  thread: ThreadRecord,
+  message: string,
+  overlay: OverlayHandle | undefined = attachedOverlayFor(thread.threadId),
+): void {
+  if (thread.status !== "open") return;
+  if (thread.origin === "lead-ask") {
+    if (overlay) {
+      overlay.closeWithSummary(message);
+      return;
+    }
+    closeThreadOnDone(pi, handle, rpcRegistry, thread, message);
+    return;
+  }
+  overlay?.closeWithSummary("");
+}
+
+/**
+ * Arms `handleRespondentFinalReport` on the thread's respondent record. The
+ * thread is re-read from the registry by id at fire time, since a
+ * `session_start` re-hydration replaces the record objects.
+ */
+function armFinalReportHook(pi: ExtensionAPI, handle: ThreadRegistryHandle, rpcRegistry: RpcAgentRegistry, threadId: string, agentId: string): void {
+  const record = rpcRegistry.get(agentId);
+  if (!record) return;
+  record.onFinalReport = (_record, message) => {
+    const thread = handle.threads.get(threadId);
+    if (thread) handleRespondentFinalReport(pi, handle, rpcRegistry, thread, message);
+  };
+}
 
 /**
  * Ensures the thread has a live-or-resumable respondent fork on the shared
@@ -954,6 +1049,7 @@ async function ensureRespondent(
   ctx: AskUiCtx & { sessionManager?: unknown },
   bridge: BridgeHandle,
   rpcRegistry: RpcAgentRegistry,
+  handle: ThreadRegistryHandle,
   thread: ThreadRecord,
   sessionCtx: AskSessionCtx,
 ): Promise<string | undefined> {
@@ -969,6 +1065,9 @@ async function ensureRespondent(
       }
       rpcRegistry.set(agentId, rehydrateForkRecord(agentId, thread.forkResume));
     }
+    // Idempotent: a live or rehydrated respondent (either origin) reports its
+    // own final into this thread — see `handleRespondentFinalReport`.
+    armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, agentId);
     return agentId;
   }
 
@@ -1020,6 +1119,7 @@ async function ensureRespondent(
   thread.respondentAgentId = result.agent_id;
   const record = rpcRegistry.get(result.agent_id);
   if (record) thread.forkResume = captureForkResume(record);
+  armFinalReportHook(pi, handle, rpcRegistry, thread.threadId, result.agent_id);
   return result.agent_id;
 }
 
@@ -1043,7 +1143,7 @@ async function openThread(
 
   let agentId: string | undefined;
   try {
-    agentId = await ensureRespondent(pi, ctx, bridge, rpcRegistry, thread, sessionCtx);
+    agentId = await ensureRespondent(pi, ctx, bridge, rpcRegistry, handle, thread, sessionCtx);
   } catch (err) {
     notify(ctx, `ws: could not open thread ${thread.threadId}: ${err instanceof Error ? err.message : String(err)}`, "error");
     return;
@@ -1057,7 +1157,7 @@ async function openThread(
 
   // One overlay at a time (§5): the previous one is closed first; its own
   // fork is untouched and its thread stays reopenable.
-  activeOverlay?.close();
+  activeOverlay?.handle.close();
   activeOverlay = undefined;
   const token = ++overlayToken;
 
@@ -1084,8 +1184,16 @@ async function openThread(
       summarizeOnDone: thread.origin === "lead-ask",
       channel: createForkChannel(rpcRegistry, sessionCtx.cwd, agentId),
       onDone: (summary) => closeThreadOnDone(pi, handle, rpcRegistry, thread, summary),
-      onOpened: (close) => {
-        activeOverlay = { token, close };
+      // The transcript lives on the record, not in the view: restored here,
+      // and persisted on every append so Esc/reopen and a lead restart both
+      // show the conversation so far.
+      initialEntries: thread.transcript,
+      onTranscriptChange: (entries) => {
+        thread.transcript = entries.length > THREAD_TRANSCRIPT_CAP ? entries.slice(entries.length - THREAD_TRANSCRIPT_CAP) : entries;
+        persistThreads(handle);
+      },
+      onOpened: (overlay) => {
+        activeOverlay = { token, threadId: thread.threadId, handle: overlay };
       },
     });
   } finally {

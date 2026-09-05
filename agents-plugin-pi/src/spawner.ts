@@ -733,6 +733,18 @@ export interface RpcAgentRecord {
    * `onApprovalPending`'s existing callback-injection convention.
    */
   onQuestionReport?: (record: RpcAgentRecord, message: string) => string | undefined;
+  /**
+   * 260904 Phase 2 (post-close dogfood, 2026-09-05): consulted by
+   * `applyRpcEvent` the instant a `kind:"final"` report is observed on this
+   * record, BEFORE the report is enqueued exactly as before (the hook never
+   * rewrites or suppresses it — `ws-agent-wait` semantics are untouched). A
+   * throwing hook is swallowed. `ask.ts` sets it on a thread's respondent so
+   * a discussion fork can end its own thread by reporting the decision; the
+   * report text is then the thread summary. Same callback-injection
+   * convention as `onQuestionReport`/`onApprovalPending`: `spawner.ts`
+   * supplies no implementation.
+   */
+  onFinalReport?: (record: RpcAgentRecord, message: string) => void;
 }
 
 /**
@@ -994,6 +1006,16 @@ export function applyRpcEvent(
           relayed = record.onQuestionReport(record, message) ?? message;
         } catch {
           relayed = message;
+        }
+      }
+      // A kind:"final" report is observed by `record.onFinalReport` (see that
+      // field's doc comment) and then enqueued unchanged — the hook is a
+      // side-channel, never a rewrite.
+      if (kind === "final" && record.onFinalReport) {
+        try {
+          record.onFinalReport(record, message);
+        } catch {
+          // swallowed: a hook failure must not drop the report
         }
       }
       enqueueReport(record, relayed, kind);

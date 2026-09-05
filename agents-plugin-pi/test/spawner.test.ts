@@ -576,6 +576,31 @@ describe("applyRpcEvent: ws-report-to-lead", () => {
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "more progress", kind: 42 } });
     assert.deepEqual(record.pendingReports, [{ message: "progress" }, { message: "more progress" }]);
   });
+
+  test('260904 Phase 2 (post-close dogfood): onFinalReport sees exactly the kind:"final" reports, and the report is still enqueued unchanged', () => {
+    const seen: string[] = [];
+    const record = freshRpcRecord({ onFinalReport: (_rec, message) => seen.push(message) });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "need input", kind: "question" } });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "plain progress" } });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "decided: merge", kind: "final" } });
+    assert.deepEqual(seen, ["decided: merge"]);
+    assert.deepEqual(record.pendingReports, [{ message: "need input", kind: "question" }, { message: "plain progress" }, { message: "decided: merge", kind: "final" }]);
+  });
+
+  test("a throwing onFinalReport is swallowed and the final report is enqueued anyway", () => {
+    const record = freshRpcRecord({
+      onFinalReport: () => {
+        throw new Error("hook exploded");
+      },
+    });
+    let settled = false;
+    record.waiters.push(() => {
+      settled = true;
+    });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
+    assert.deepEqual(record.pendingReports, [{ message: "all done", kind: "final" }]);
+    assert.equal(settled, true, "the waiter wake is unchanged by the hook");
+  });
 });
 
 describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture)", () => {

@@ -717,9 +717,14 @@ channel for an owner question: it registers and carries on.
   fail-loud) and re-arms the moment the overlay detaches.
 - **Overlay chat.** Owner text goes to the respondent as a `prompt` when it is
   idle and as a `steer` when it is streaming; child text deltas render into the
-  overlay. Pasted input is delivered as one message. `Esc` closes the view only:
-  the thread stays `open` and the fork keeps running, reattachable at any time.
-  `/done` typed in the overlay closes the **thread**, on its origin:
+  overlay. Pasted input is delivered as one message. The transcript is
+  persisted per thread (on the thread record, newest 200 entries), so a reopen
+  after `Esc` or after a lead restart shows the conversation so far; owner
+  lines are styled with the host's user-message background; thread text is
+  rendered as Markdown when the host's renderer is available (plain wrapped
+  text otherwise). `Esc` closes the view only: the thread stays `open` and the
+  fork keeps running, reattachable at any time. `/done` typed in the overlay
+  closes the **thread**, on its origin:
   - `lead-ask` — the discussion fork is asked for a summary turn; on settle the
     adapter injects `context + question + summary` into the lead session as a
     custom message (type `ws-thread-summary`, delivered `followUp` so it lands
@@ -727,7 +732,11 @@ channel for an owner question: it registers and carries on.
     message carries **owner authority**. The fork's resume snapshot is captured,
     the fork is stopped (`ws-agent-stop` semantics: dormant, retained), and the
     thread goes `dormant` — reopenable later, rehydrated into a plain dormant
-    record and resumed on its own session file.
+    record and resumed on its own session file. The fork may also end the
+    thread itself: once the owner states a decision, its own
+    `ws-report-to-lead(kind:"final")` closes the thread through the same path,
+    with the report text as the summary and no summary turn (the attached
+    overlay, if any, closes with it).
   - `fork-raised` — no summary, no injection, no stop: the overlay closes at
     once and the thread goes `dormant` while the task fork carries on. What was
     decided reaches the lead through that fork's own `kind:"final"` report under
