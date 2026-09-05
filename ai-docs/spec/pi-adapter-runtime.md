@@ -892,12 +892,27 @@ this surface.
   (sibling to `model-catalog.json`), read **fresh** per settle; a missing or
   malformed file, or a non-positive / non-finite `runaway_threshold`, falls back
   to the default rather than erroring.
+- **Yield to live children.** While armed, a settle that finds any delegated
+  child still running (the same predicate that drives the
+  `N delegated agents still running` status line of the "Child→lead report
+  channel" entry: a registry member with a live client that is mid-turn and
+  not thread-bound) neither re-injects the reminder nor advances the runaway
+  streak; goal state is otherwise unchanged. The footer shows
+  `Goal loop: yielding to running agents` under the adapter's own status key
+  until the next lead turn starts, whatever starts it — an owner prompt or a
+  pushed child message — and the key is cleared unconditionally then. The
+  child's own pushed `ws-agent-settled`/`ws-agent-report` (or, if it died, the
+  liveness probe's `ws-agent-settled` with reason `exited`) is what wakes the
+  lead, and that turn's settle re-evaluates the loop normally. Idle, dormant, or stopped children,
+  a child whose `final` already landed this turn, and thread-bound respondents
+  do not hold the loop. The footer's agent count is not part of this entry.
 - **Lead-session-only.** The goal loop runs on the lead session only. Every
-  spawned child (persistent RPC worker or one-shot explore leaf) is launched with
-  a `WS_PI_AGENT_CHILD=1` environment marker, and the `agent_settled` handler
-  no-ops when that marker is present — so a child's own settles never arm a loop or
-  a reminder, matching the delegation model where children are driven by the lead
-  through `ws-agent-send`, with their reports pushed back into the lead session.
+  spawned child (persistent RPC worker, one-shot explore leaf, or fork) is
+  launched with a `WS_PI_SPAWN_ROLE` environment marker carrying its role, and
+  the `agent_settled` handler no-ops whenever any role is present — so a
+  child's own settles never arm a loop or a reminder, matching the delegation
+  model where children are driven by the lead through `ws-agent-send`, with
+  their reports pushed back into the lead session.
 
 ### Model-driven compaction {#260904-pi-goal-loop-model-driven-compaction}
 
