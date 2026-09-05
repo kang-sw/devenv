@@ -6,6 +6,10 @@ related:
 parent: 260605-epic-ws-playbook-factory-pivot
 spec:
   - pi-adapter-runtime
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 062509868d6e73d0
+sage-review-completeness-reviewed: 062509868d6e73d0
 ---
 
 # A fork-raised owner question never reaches the lead as the promised thread notice
@@ -28,6 +32,17 @@ handed back to the child's tool call and reached the lead; the push-model
 rewrite kept the flag semantics and lost the delivery. No unit test asserts
 that the notice is pushed; `test/ask.test.ts` only pins the notice's wording.
 
+This is a reversal of a stated decision, not a purely additive fix: the
+push-only ticket specified "in TUI the question is consumed by the
+`onQuestionReport` hook and not pushed", the comment block above the
+question branch in `applyRpcEvent` documents that suppression as the 260904
+review-relay contract, and three landed tests assert it
+(`test/spawner.test.ts` at the "question consumed" cases, and
+`test/fork.test.ts`'s TUI question case). The tension resolves because the
+notice is not the question: the lead gets a non-actionable "a thread was
+opened" statement, so the side-thread rule that the lead is not the
+answering channel still holds.
+
 Consequence: the lead sees nothing when a fork hands a question to the
 owner. The fork also leaves the fan-in count (thread-bound), so the lead's
 next status line silently drops one running agent with no explanation, and
@@ -40,10 +55,21 @@ a lead that was waiting on that fork has no cue to end its turn.
   empty outcome. Delivery is `followUp` (the lead must not be interrupted
   mid-turn for something it cannot act on), sender labeled as the fork in
   the usual `<alias> (<id>)` form.
-- **Family.** Reuse `ws-agent-advisory` with the notice as `detail`, since the
+- **Family.** Reuse `ws-agent-advisory` with the notice as `detail` and the
+  discriminator `advisory: "fork-question-thread"`, matching every existing
+  advisory push (`final-report-shape`, `expects-commit`, `stalled`, ...) so
+  the family table's "`details.advisory` names which" stays true. The
   message is the adapter's own statement about the child rather than the
   child's text. Rejected: a new push family for one message; rejected:
   `ws-agent-question`, whose renderer and `steer` delivery mean "answer this".
+- **The one advisory a thread-bound record pushes.** The record becomes
+  thread-bound inside the hook, before the notice is returned, so this push
+  is emitted for a record that is already thread-bound. The spec's
+  "thread-bound records push no settle or advisory" rule is amended with
+  this single carve-out: the registration notice is the one advisory a
+  thread-bound record pushes; all later settles and advisories for it stay
+  suppressed (the settle-branch gate in `attachEventListener` and the
+  anti-bleed loop in `fork.ts` are untouched).
 - **Headless unchanged.** `undefined` from the hook still yields the
   `ws-agent-question`/`steer` baseline.
 
@@ -51,17 +77,22 @@ a lead that was waiting on that fork has no cue to end its turn.
 
 `pi-adapter-runtime`: the owner-question surface anchor already promises the
 notice; add the delivery form (advisory family, `followUp`) to the "Attach to
-a live task fork" bullet and to the report-channel anchor's family table.
+a live task fork" bullet and to the report-channel anchor's family table, and
+amend the two "thread-bound pushes no settle or advisory" sentences (report-
+channel anchor and side-thread anchor) with the registration-notice
+carve-out.
 
 ## Phases
 
 ### Phase 1: Deliver the notice
 
 In `spawner.ts`'s `applyRpcEvent`, return
-`{ push: { family: "ws-agent-advisory", payload: { detail: notice }, deliverAs: "followUp" } }`
-when the hook returns a string. Tests: a stubbed `onQuestionReport` returning
-text yields exactly that push and no `ws-agent-question`; returning
-`undefined` yields the headless baseline; a throwing hook still degrades to
-the baseline. Amend the two spec anchors. Live check (owner-run): repeat
-acceptance scenario E and confirm the lead sees the notice before the owner
-opens `/answer`.
+`{ push: { family: "ws-agent-advisory", payload: { advisory: "fork-question-thread", detail: notice }, deliverAs: "followUp" } }`
+when the hook returns a string, and rewrite the comment block above the
+question branch so it describes the notice push instead of the suppression.
+Invert the three landed tests that assert the suppression. Tests: a stubbed
+`onQuestionReport` returning text yields exactly that push and no
+`ws-agent-question`; returning `undefined` yields the headless baseline; a
+throwing hook still degrades to the baseline. Amend the spec passages listed
+above. Live check (owner-run): repeat acceptance scenario E and confirm the
+lead sees the notice before the owner opens `/answer`.
