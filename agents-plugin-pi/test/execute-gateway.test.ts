@@ -22,16 +22,17 @@
  * Exercised only by the plan's documented manual verification gate (no
  * provider credentials in this sandbox — deferred, not faked).
  *
- * 260904 Phase 2 (re-scoped 2026-09-05): `createApprovalRelay`'s
- * `info.waiterWoken` skip/no-skip branching IS covered below (`describe
+ * 260905 (push model): `createApprovalRelay` IS covered below (`describe
  * ("createApprovalRelay")`) — it takes `pi: ExtensionAPI` as a plain
- * parameter, so a minimal fake `{sendUserMessage}` object is sufficient to
- * assert whether the steer fires, with a non-git tmpdir as `sessionCtx.cwd`
- * so `scrapeWorkingContext`'s real `git` calls degrade to `undefined` fields
+ * parameter, so a minimal fake `{sendMessage}` object is sufficient to assert
+ * the `ws-agent-approval` push, with a non-git tmpdir as `sessionCtx.cwd` so
+ * `scrapeWorkingContext`'s real `git` calls degrade to `undefined` fields
  * (execute-gateway.ts's own documented non-git-cwd behavior) rather than
- * needing a live session. The two-branch LIVE `pi --mode rpc` run (a waiting
- * lead sees no stale steer; a non-waiting lead still gets one) remains the
- * manual gate named in the plan's Verification Plan.
+ * needing a live session. The former `info.waiterWoken` skip branch is gone
+ * with `ws-agent-wait`: the push is now unconditional and is the lead's ONLY
+ * notification path, so the tests assert exactly that. A LIVE `pi --mode rpc`
+ * approve/deny round-trip remains the manual gate named in the plan's
+ * Verification Plan.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -59,7 +60,7 @@ import {
   type PendingApproval,
   type WorkingContext,
 } from "../src/execute-gateway.ts";
-import { GATED_EXEC_TOOL_NAME, type RpcAgentRecord } from "../src/spawner.ts";
+import { GATED_EXEC_TOOL_NAME, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 describe("buildExecuteWorkerPrompt", () => {
@@ -340,7 +341,7 @@ describe("waitForDecisionFile (review fix, relay #1, TEST finding #5)", () => {
   });
 });
 
-describe("createApprovalRelay (260904 Phase 2, re-scoped 2026-09-05: waiterWoken steer suppression)", () => {
+describe("createApprovalRelay (260905: unconditional ws-agent-approval push)", () => {
   function freshRecord(pending: PendingApproval): RpcAgentRecord {
     return {
       agentId: "rpc-agent-1",
@@ -348,20 +349,39 @@ describe("createApprovalRelay (260904 Phase 2, re-scoped 2026-09-05: waiterWoken
       systemPromptPath: "/tmp/ws-pi-agent-x/prompt.md",
       wsToolNames: [],
       toolGroup: "execute-worker",
+      spawnRole: "execute-worker",
       streaming: false,
-      idlePending: false,
-      waiters: [],
-      pendingReports: [],
-      reportsDropped: 0,
+      running: true,
+      // A live client is what puts the record in the fan-in denominator M
+      // (review relay #1, I3: M is "not dormant/stopped/exited", not
+      // "running"). Never a real `RpcClient` — nothing here calls into it.
+      client: {} as RpcAgentRecord["client"],
+      reportLog: [],
       pendingApproval: pending,
     };
+  }
+
+  function fakePi(): {
+    api: ExtensionAPI;
+    sent: Array<{ message: { customType?: string; content?: string; details?: Record<string, unknown> }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
+  } {
+    const sent: Array<{ message: { customType?: string; content?: string; details?: Record<string, unknown> }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
+    const api = {
+      sendMessage: (message: unknown, options?: unknown) => {
+        sent.push({ message: message as never, options: options as never });
+      },
+      sendUserMessage: () => {
+        throw new Error("the approval relay must push a custom message, never a bare user message");
+      },
+    } as unknown as ExtensionAPI;
+    return { api, sent };
   }
 
   function withTempCwd<T>(fn: (cwd: string) => T): T {
     // Non-git tmpdir: scrapeWorkingContext's real `git` subprocess calls
     // degrade to undefined fields rather than throwing (execute-gateway.ts's
     // own documented behavior) — no live pi/RpcClient session is needed to
-    // exercise createApprovalRelay's skip/no-skip branching.
+    // exercise the relay.
     const dir = mkdtempSync(join(tmpdir(), "ws-pi-agent-approval-relay-test-"));
     try {
       return fn(dir);
@@ -370,46 +390,56 @@ describe("createApprovalRelay (260904 Phase 2, re-scoped 2026-09-05: waiterWoken
     }
   }
 
-  test("waiter-woken branch: sendUserMessage is NOT called — the lead already learned via the woken ws-agent-wait", () => {
+  test("pushes exactly one ws-agent-approval message carrying the cmd_id and the §7 request text, delivered as steer", () => {
     withTempCwd((cwd) => {
-      const calls: Array<{ text: string; opts: unknown }> = [];
-      const fakePi = { sendUserMessage: (text: string, opts: unknown) => calls.push({ text, opts }) } as unknown as ExtensionAPI;
-      const relay = createApprovalRelay(fakePi, { cwd });
-      const record = freshRecord({ cmdId: "call-1", command: "echo hi" });
-
-      relay(record, { waiterWoken: true });
-
-      assert.equal(calls.length, 0, "a woken waiter already delivered the approval request; a parallel steer would be a stale duplicate");
-    });
-  });
-
-  test("no-waiter branch: sendUserMessage IS called exactly once, with the pending command/cmd_id in the steer text", () => {
-    withTempCwd((cwd) => {
-      const calls: Array<{ text: string; opts: unknown }> = [];
-      const fakePi = { sendUserMessage: (text: string, opts: unknown) => calls.push({ text, opts }) } as unknown as ExtensionAPI;
-      const relay = createApprovalRelay(fakePi, { cwd });
+      const pi = fakePi();
       const record = freshRecord({ cmdId: "call-2", command: "rm -rf build", rationale: "clean stale output" });
+      const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+      const relay = createApprovalRelay(pi.api, { cwd }, { current: registry });
 
-      relay(record, { waiterWoken: false });
+      relay(record);
 
-      assert.equal(calls.length, 1, "no waiter was woken, so the relay must fall through to the steer fallback");
-      assert.deepEqual(calls[0].opts, { deliverAs: "steer" });
-      assert.ok(calls[0].text.includes("call-2"), "steer text must carry the pending cmd_id");
-      assert.ok(calls[0].text.includes("rm -rf build"), "steer text must carry the pending command");
+      assert.equal(pi.sent.length, 1, "this push is the lead's only notification path — there is no wait return to duplicate");
+      const [{ message, options }] = pi.sent;
+      assert.equal(message.customType, "ws-agent-approval");
+      assert.deepEqual(options, { deliverAs: "steer", triggerTurn: true }, "an approval request must interrupt, not queue — the child cannot progress until it is answered");
+      assert.equal(message.details?.cmd_id, "call-2");
+      assert.equal(message.details?.agent_id, "rpc-agent-1");
+      assert.ok(String(message.details?.request).includes("rm -rf build"), "the request text must carry the pending command");
+      assert.ok(String(message.details?.request).includes("call-2"), "the request text must carry the pending cmd_id");
     });
   });
 
-  test("no pendingApproval on the record: sendUserMessage is never called, regardless of waiterWoken", () => {
+  test("the push carries the fan-in status line, and an approval-blocked child is still counted as running", () => {
     withTempCwd((cwd) => {
-      const calls: Array<{ text: string; opts: unknown }> = [];
-      const fakePi = { sendUserMessage: (text: string, opts: unknown) => calls.push({ text, opts }) } as unknown as ExtensionAPI;
-      const relay = createApprovalRelay(fakePi, { cwd });
+      const pi = fakePi();
+      const record = freshRecord({ cmdId: "call-1", command: "echo hi" });
+      const registry: RpcAgentRegistry = new Map([[record.agentId, record]]);
+      createApprovalRelay(pi.api, { cwd }, { current: registry })(record);
+
+      assert.equal(pi.sent[0].message.details?.status, "1 of 1 delegated agent still running");
+    });
+  });
+
+  test("no pendingApproval on the record: nothing is pushed", () => {
+    withTempCwd((cwd) => {
+      const pi = fakePi();
       const record = freshRecord({ cmdId: "call-3", command: "echo hi" });
       record.pendingApproval = undefined;
 
-      relay(record, { waiterWoken: false });
+      createApprovalRelay(pi.api, { cwd }, { current: new Map() })(record);
 
-      assert.equal(calls.length, 0, "nothing is pending to relay");
+      assert.deepEqual(pi.sent, [], "nothing is pending to relay");
+    });
+  });
+
+  test("an unfilled registry ref (the relay is built BEFORE registerAgentTools) degrades to 0 of 0 rather than throwing", () => {
+    withTempCwd((cwd) => {
+      const pi = fakePi();
+      const record = freshRecord({ cmdId: "call-4", command: "echo hi" });
+
+      assert.doesNotThrow(() => createApprovalRelay(pi.api, { cwd }, { current: undefined })(record));
+      assert.equal(pi.sent[0].message.details?.status, "0 of 0 delegated agents still running");
     });
   });
 });

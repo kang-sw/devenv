@@ -37,21 +37,17 @@
  *     `spawner.ts`'s `attachEventListener` invokes right after that capture:
  *     it scrapes ground-truth working-directory context
  *     (`scrapeWorkingContext`, adapter-side, NOT worker-reported, per §7),
- *     formats the §7 payload (`buildApprovalPromptText`), and injects it into
- *     the LEAD's own running session via `pi.sendUserMessage(text,
- *     {deliverAs: "steer"})` — the same injection mechanism goal-loop.ts's
- *     `agent_settled` re-fire already uses, generalized to a different
- *     trigger. `steer` (not `followUp`) is used for this fallback path
- *     because this callback fires from a raw `RpcClient.onEvent()` listener
- *     with no `ExtensionContext` available to check `isIdle()`, and `steer`
- *     is valid whether or not the lead is currently streaming (docs/rpc.md).
- *     260904 Phase 2 (re-scoped 2026-09-05): the steer is now skipped
- *     whenever `attachEventListener`/`applyRpcEvent` report a waiter was
- *     already woken by the same event (`info.waiterWoken`, spawner.ts's
- *     `settleWaiters`) — the lead already learns of the request via
- *     `ws-agent-wait`'s `pending_approval` return (260905's deadlock fix), so
- *     the parallel steer would just be a stale duplicate notice. It remains
- *     the sole notification path for a non-waiting lead.
+ *     formats the §7 payload (`buildApprovalPromptText`), and pushes it into
+ *     the LEAD's own running session as a `ws-agent-approval` custom message
+ *     (`pushToLead`, spawner.ts) delivered as `steer`. `steer` (not
+ *     `followUp`) is used because this callback fires from a raw
+ *     `RpcClient.onEvent()` listener with no `ExtensionContext` available to
+ *     check `isIdle()`, and `steer` is valid whether or not the lead is
+ *     currently streaming (docs/rpc.md) — an approval request is the one
+ *     child signal that must interrupt rather than queue, since the child
+ *     cannot progress at all until it is answered. 260905: this push is now
+ *     unconditional (the `info.waiterWoken` suppression is gone along with
+ *     `ws-agent-wait`); it is the sole notification path for the lead.
  *   - The decision relay (lead -> child): `ws-approve` writes
  *     `<sessionDir>/approvals/<cmd_id>.decision.json`
  *     (`approvalDecisionPath`); `ws-worker-exec`'s blocked `execute()` polls
@@ -98,7 +94,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BridgeHandle } from "./bridge.ts";
-import { GATED_EXEC_TOOL_NAME, WS_PI_APPROVAL_DIR_ENV, inheritModelFromToolCtx, spawnAgent, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
+import { GATED_EXEC_TOOL_NAME, WS_PI_APPROVAL_DIR_ENV, inheritModelFromToolCtx, pushToLead, spawnAgent, type RpcAgentRecord, type RpcAgentRegistry } from "./spawner.ts";
 
 // ---------------------------------------------------------------------------
 // Pure helpers. Unit-tested directly (test/execute-gateway.test.ts) with no
@@ -426,36 +422,39 @@ export interface ExecuteGatewaySessionCtx {
   /** Fixed, adapter-authored execute-worker system prompt (execute-worker-guide.md) — NOT lead-rendered, see that file's header comment. */
   executeWorkerPromptPath: string;
   /** See spawner.ts's `RpcSpawnCtx.onApprovalPending` — threaded into every `spawnAgent` call this module makes for `ws-execute`. */
-  onApprovalPending?: (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void;
+  onApprovalPending?: (record: RpcAgentRecord) => void;
 }
 
 /**
  * Builds the approval-request-relay callback: reacts to a freshly-set
  * `record.pendingApproval` (spawner.ts's `applyRpcEvent`) by scraping ground-
- * truth working-directory context, formatting the §7 payload, and injecting
- * it into the LEAD's own running session via `pi.sendUserMessage(text,
- * {deliverAs: "steer"})` — see this file's header comment for the full
- * design trace. Constructed once in index.ts's `session_start` handler
- * (before `registerAgentTools`, so it can be threaded into that call too —
- * see spawner.ts's `registerAgentTools` doc comment) and passed to both
+ * truth working-directory context, formatting the §7 payload, and pushing it
+ * into the LEAD's own running session as a `ws-agent-approval` custom message
+ * delivered as `steer` — see this file's header comment for the full design
+ * trace. Constructed once in index.ts's `session_start` handler (before
+ * `registerAgentTools`, so it can be threaded into that call too — see
+ * spawner.ts's `registerAgentTools` doc comment) and passed to both
  * `registerAgentTools` and `registerExecuteGateway`.
  *
- * 260904 Phase 2 (re-scoped 2026-09-05): skips the steer entirely when
- * `info.waiterWoken` is true — the same `applyRpcEvent`/`settleWaiters` call
- * that set `record.pendingApproval` already woke a lead blocked in
- * `ws-agent-wait` (260905's deadlock fix), which returns `pending_approval`
- * and lets the lead learn of the request that way. Injecting the steer too
- * would just be a stale duplicate notice arriving at the next turn boundary.
- * The steer remains the fallback path for a non-waiting lead.
+ * `registryRef` is a mutable holder rather than the registry itself because
+ * the relay must exist BEFORE `registerAgentTools` creates that registry; the
+ * ref is filled immediately afterwards. Its only use is the fan-in status
+ * line every push carries, so a still-empty ref degrades to `0 of 0`, never
+ * to a crash.
+ *
+ * 260905: the push is unconditional. The former `info.waiterWoken`
+ * suppression existed only because a blocked `ws-agent-wait` was a second
+ * notification path; with that tool deleted, this push is the only way the
+ * lead ever learns a child is blocked on approval.
  */
 export function createApprovalRelay(
   pi: ExtensionAPI,
   sessionCtx: { cwd: string },
-): (record: RpcAgentRecord, info: { waiterWoken: boolean }) => void {
-  return (record, info) => {
+  registryRef?: { current: RpcAgentRegistry | undefined },
+): (record: RpcAgentRecord) => void {
+  return (record) => {
     const pending = record.pendingApproval;
     if (!pending) return;
-    if (info.waiterWoken) return; // lead already learned via a woken ws-agent-wait; steering here would be a stale duplicate notice
     const context = scrapeWorkingContext(resolveApprovalContextCwd(pending, sessionCtx.cwd));
     const text = buildApprovalPromptText({
       agent_id: record.agentId,
@@ -464,7 +463,7 @@ export function createApprovalRelay(
       rationale: pending.rationale,
       context,
     });
-    pi.sendUserMessage(text, { deliverAs: "steer" });
+    pushToLead(pi, registryRef?.current, record, "ws-agent-approval", { cmd_id: pending.cmdId, request: text }, "steer");
   };
 }
 
@@ -533,7 +532,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
     name: EXECUTE_TOOL_NAME,
     label: EXECUTE_TOOL_NAME,
     description:
-      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a general ws-agent-spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true selects a stronger model. Returns {agent_id} immediately — harvest progress with ws-agent-wait/ws-agent-list like any other spawned agent.",
+      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a general ws-agent-spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true selects a stronger model. Returns {agent_id} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
     parameters: {
       type: "object",
       properties: {
@@ -557,6 +556,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
       const result = await spawnAgent(
         rpcRegistry,
         {
+          pi,
           cwd: sessionCtx.cwd,
           inheritModel: inheritModelFromToolCtx(toolCtx),
           wsToolNames: bridge.wsToolNames,

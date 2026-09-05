@@ -373,6 +373,73 @@ one `ws-agent-orphaned` message naming it as `running`, after which
 worker is running pushes nothing into the new session, and a later
 `/resume` of the old session gets the orphan message.
 
+### Result (68150a2c) - 2026-09-05
+
+Landed as `654f2fe4` (feature), `01dd2824` (tests), `ab9832a4` (review
+relay #1), `c37f920e` (spec), `68150a2c` (sidecar state, relay #2), on the
+implementation branch under the goal branch.
+
+Behavioral delta:
+
+- `ws-agent-wait`, `pendingReports`, `idlePending`, the settle waiters and
+  the approval-pending wake are gone. Every child signal is a
+  `pi.sendMessage` custom message from one `pushToLead` helper: the six
+  families with the `deliverAs` per family as decided, gated on
+  `isLeadOrFork`. The status line reads `N of M delegated agents still
+  running` (no id list; ids are in each message's `details.agent_id`). M is
+  every registry record with a live client that is not thread-bound; N is
+  the `running && !terminalThisTurn` subset, so a fan-out of three finals
+  reads `2 of 3`, `1 of 3`, `0 of 3`.
+- `promptAgent` wraps every `client.prompt` site; `record.threadBound` is
+  set on every thread open/reopen and on fork-raised question registration
+  and cleared on `/done`, fork final, `ws-resolve` and (addition beyond the
+  plan) on a lead `ws-agent-send` to the record and on `stopAgent`;
+  `record.reportLog` + `lastLeadPromptAt` drive `isIdleWithoutFinal` and
+  `ws-agent-list`'s `last_report_at`; the `getState()` liveness probe runs
+  on registry transitions and on a ~30 s timer while N > 0.
+- `agent-sidecar.ts`: `session_shutdown` writes
+  `<leadSessionFile>.ws-agents.json` before `stopAll()` with the resume set,
+  `spawnRole`, `state` (`running`/`idle`) and `lastReportAt`; `session_start`
+  consumes it once, re-registers dormant records with role wiring re-armed
+  (`fork` → `armForkRoleWiring`, `execute-worker` → the per-record
+  `onApprovalPending` relay) and pushes one `ws-agent-orphaned` roll-call,
+  one line per agent, with the mid-turn re-issue caveat on `running`
+  entries. Thread-bound records are not captured (the `.ws-threads.json`
+  registry already persists them).
+- `pi-lead-guide.md` maps "wait for the reviewer" to "end your turn; the
+  report arrives as a message" and documents the settle reasons, the
+  approval message and the orphan row. No custom message renderer was
+  registered: Pi's default custom-message rendering shows the plain-text
+  body `buildPushContent` builds (`[family] agent <id>` head, payload,
+  status line last); readability is confirmed at the live gate below.
+
+Deviations from the plan: `sendToAgent` and `stopAgent` also clear
+`threadBound` (review #2 minor: a lead send into an owner-open thread
+briefly unbinds it until the next `/answer` re-binds; left as is). A revived
+fork loses `expects_commit` (not persisted in the sidecar; the revival
+defaults it to `false`). A task fork whose `final` lands while its
+fork-raised question is still `pending` detaches that thread to dormant, so
+the pending count drops without the owner having answered. The suggested
+`tsc --noEmit` gate was not added (new dev dependency; owner decision).
+
+Verification: `cd agents-plugin-pi && npm test` → 593/593. Review #1
+(correctness 1C/3I, fit 1I, test 4C/5I) → relay #1 fixed all Critical and
+Important items; review #2 (Critical-scoped, fresh reviewers): correctness
+`clean with 4 minor remaining`, test `clean`. Findings under
+`~/.cache/ws@kang-sw-devenv/proj/17da6bdc@657b050c/review-paths/f34fec99-*`
+and `511e2b2d-01-*` / `16155c3e-01-*`.
+
+Not yet exercised live (owner-run, needs the adapter user-scope installed;
+record results as an Edition): the three-worker fan-out status lines and the
+`0 of 3` synthesis; a worker approval reaching a mid-turn lead; a TUI
+fork-raised question routing to the overlay with nothing pushed for the
+owner↔fork exchange and the fork's final waking the lead; an externally
+killed worker surfacing as `exited`; `/reload` with a running worker →
+one `ws-agent-orphaned` naming it `running`, `ws-agent-send <id>` resuming
+it, and a second `/reload` pushing nothing; `/new` then `/resume` of the old
+session receiving the orphan message; and default rendering readability of
+the pushed messages.
+
 ### Phase 2: Goal loop yields to live children
 
 Depends on Phase 1. In `goal-loop.ts`, the armed `agent_settled` handler

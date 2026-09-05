@@ -4,22 +4,42 @@
  * multibyte-split safety, handleAgentEvent's state-non-mutation invariant
  * (one-shot `explore` path), resolveModelForAlias (Phase 1's alias-first,
  * inherit-fallback resolution, replacing the old tier-based
- * resolveModelForTier), applyRpcEvent's streaming/idlePending bookkeeping,
- * firstIdlePendingAgentId's idle-edge-consume selection, listAgents's status
- * mapping, waitForAgents's consume/race/timeout/guard logic (never
- * constructs a real `RpcClient` — it only reads `record.client`/
- * `idlePending`/`waiters` and, on the winning path, `harvestLastMessage`
- * degrades to a plain field read when `record.client` is unset), and
- * sendToAgent's three LIVE branches (streaming+interrupt->steer,
- * streaming+no-interrupt->followUp, idle->prompt) via a duck-typed
- * `steer`/`followUp`/`prompt` stub cast as `RpcClient` — the RPC-backed
- * registry's seam-extractable pure/duck-typeable logic (Phase 1 ticket
- * verification boundary: "Registry/select logic unit-tested where
- * seam-extractable").
+ * resolveModelForTier), applyRpcEvent's streaming/report bookkeeping and its
+ * push OUTCOMES, listAgents's status mapping, and sendToAgent's three LIVE
+ * branches (streaming+interrupt->steer, streaming+no-interrupt->followUp,
+ * idle->prompt) via a duck-typed `steer`/`followUp`/`prompt` stub cast as
+ * `RpcClient` — the RPC-backed registry's seam-extractable pure/duck-typeable
+ * logic (Phase 1 ticket verification boundary: "Registry/select logic
+ * unit-tested where seam-extractable").
+ *
+ * 260905 (push-only child reports) replaced the whole pull-side surface this
+ * file used to cover. `ws-agent-wait` and its `waitForAgents` consume/race/
+ * timeout logic, the `idlePending`/`waiters` latch, the `pendingReports` FIFO
+ * (`enqueueReport`/`drainReports`/`REPORT_BUFFER_CAP`), and the three
+ * `first*AgentId` selectors are all DELETED, not deprecated — their tests are
+ * gone with them rather than rewritten, because nothing selects a winner any
+ * more. In their place this file covers the push model's own seams:
+ * `shouldPushToLead` (the role gate), `computeRunningStatusLine` (the `N of
+ * M` fan-in arithmetic), `buildPushContent`/`pushToLead` (message shape and
+ * best-effort delivery), `promptAgent` (the single `running`/
+ * `terminalThisTurn`/`lastLeadPromptAt` funnel), `recordReport`/
+ * `reportKindsSinceLeadPrompt` (the bounded report log that replaced
+ * `pendingReports`), `probeAgentLiveness`/`markAgentExited`/
+ * `startLivenessProbe` (the `getState()`-rejection exit detector), and
+ * `stopAgent`'s new push + `silent` contract.
+ *
+ * Review relay #1 (test partition C2/C3, I7) widened that set: the settle
+ * suppression the ticket names lives in `attachEventListener`, not in the pure
+ * `applyRpcEvent`, so that listener is now exported and driven here against a
+ * duck-typed `onEvent`/`getState`/`getLastAssistantText` client; `spawnAgent`'s
+ * launch-failure push was extracted into `pushSpawnFailed` and covered
+ * directly; and `pushToLead`'s role gate is exercised through the real call
+ * path under a mutated `WS_PI_SPAWN_ROLE_ENV`, not only through the
+ * `shouldPushToLead` predicate.
  *
  * NOT covered here — genuinely live-gate only, because each path
  * constructs a real `RpcClient` and calls `.start()`: `spawnAgent`,
- * `sendToAgent`'s dormant-auto-resume branch, `stopAgent`, and the one-shot
+ * `sendToAgent`'s dormant-auto-resume branch, and the one-shot
  * `exploreLeaf`. Exercised only by a lead-scoped Pi session spawning a real
  * `pi` child process, per the plan's Verification Plan split between unit
  * and live coverage.
@@ -45,14 +65,9 @@
  *
  * 260904 Phase 1 (side-thread fork) additionally covers: `buildRpcClientOptions`'s
  * new `forkFrom`/`parentSessionKey` params (the `--fork` vs `--session` arg
- * branch and the `"fork"` vs `"worker"` role marker); `applyRpcEvent`'s/
- * `enqueueReport`'s new optional `kind` carry-through onto
- * `pendingReports`'/`WaitForAgentsResult.reports`'s new `{message, kind?}`
- * element shape (every PRE-existing assertion in this file that used to
- * compare a bare report string is updated to the new object shape here, not
- * rewritten). `fork.ts`'s own pure predicates/IO glue are covered by
- * test/fork.test.ts instead — see that file's header comment for its own
- * pure/live-gate split.
+ * branch and the `"fork"` vs `"worker"` role marker). `fork.ts`'s own pure
+ * predicates/IO glue are covered by test/fork.test.ts instead — see that
+ * file's header comment for its own pure/live-gate split.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -68,18 +83,25 @@ import {
   handleAgentEvent,
   resolveModelForAlias,
   applyRpcEvent,
-  firstIdlePendingAgentId,
-  firstPendingApprovalAgentId,
-  firstReportPendingAgentId,
-  enqueueReport,
-  drainReports,
+  attachEventListener,
+  buildPushContent,
+  computeRunningStatusLine,
+  markAgentExited,
+  probeAgentLiveness,
+  promptAgent,
+  pushSpawnFailed,
+  pushToLead,
+  recordReport,
+  reportKindsSinceLeadPrompt,
+  shouldPushToLead,
+  startLivenessProbe,
+  stopAgent,
+  REPORT_LOG_CAP,
   REPORT_TO_LEAD_TOOL_NAME,
   GATED_EXEC_TOOL_NAME,
   WS_PI_APPROVAL_DIR_ENV,
-  REPORT_BUFFER_CAP,
   getAgentTranscriptPath,
   listAgents,
-  waitForAgents,
   sendToAgent,
   buildRpcClientOptions,
   buildChildProcessEnv,
@@ -459,97 +481,79 @@ function freshRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord
     wsToolNames: [],
     toolGroup: "full-worker",
     streaming: false,
-    idlePending: false,
-    waiters: [],
-    pendingReports: [],
-    reportsDropped: 0,
+    running: false,
+    reportLog: [],
     ...overrides,
   };
 }
 
+/**
+ * A record in the LIVE resting state: `client` present is what
+ * `computeRunningStatusLine` reads for M (a dormant/stopped/exited record has
+ * none), so every fan-in fixture needs one. Never a real `RpcClient`.
+ */
+function liveRpcRecord(overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
+  return freshRpcRecord({ client: {} as RpcClient, ...overrides });
+}
+
+/**
+ * Duck-typed `ExtensionAPI` stand-in exposing only `sendMessage` — the one
+ * method `pushToLead` touches. Every push assertion below reads `sent`
+ * rather than a live Pi session, the same plain-object convention the rest
+ * of this file uses for `RpcClient`.
+ */
+function fakePi(overrides: { sendMessage?: (message: unknown, options?: unknown) => void } = {}): {
+  api: Parameters<typeof pushToLead>[0];
+  sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }>;
+} {
+  const sent: Array<{ message: { customType?: string; content?: string; display?: boolean; details?: unknown }; options?: { deliverAs?: string; triggerTurn?: boolean } }> = [];
+  const api = {
+    sendMessage:
+      overrides.sendMessage ??
+      ((message: unknown, options?: unknown) => {
+        sent.push({ message: message as never, options: options as never });
+      }),
+  };
+  return { api: api as unknown as Parameters<typeof pushToLead>[0], sent };
+}
+
 describe("applyRpcEvent", () => {
-  test("agent_start flips streaming true, leaves idlePending untouched", () => {
-    const record = freshRpcRecord({ idlePending: true });
-    applyRpcEvent(record, { type: "agent_start" });
+  test("agent_start flips streaming true and returns an empty outcome (no push)", () => {
+    const record = freshRpcRecord({ running: true });
+    assert.deepEqual(applyRpcEvent(record, { type: "agent_start" }), {});
     assert.equal(record.streaming, true);
-    assert.equal(record.idlePending, true, "agent_start must not clear a still-latched idlePending flag");
+    assert.equal(record.running, true, "agent_start must not disturb the fan-in latch set at prompt time");
   });
 
-  test("agent_settled flips streaming false, latches idlePending, and settles waiters", () => {
-    const record = freshRpcRecord({ streaming: true });
-    let settled = false;
-    record.waiters.push(() => {
-      settled = true;
-    });
-    applyRpcEvent(record, { type: "agent_settled" });
+  test("agent_settled flips streaming false, clears running, and reports settled so the caller can decide on the push", () => {
+    const record = freshRpcRecord({ streaming: true, running: true });
+    assert.deepEqual(applyRpcEvent(record, { type: "agent_settled" }), { settled: true });
     assert.equal(record.streaming, false);
-    assert.equal(record.idlePending, true);
-    assert.equal(settled, true, "agent_settled must drain and resolve pending waiters");
-    assert.deepEqual(record.waiters, [], "waiters array must be drained after settling");
+    assert.equal(record.running, false, "the run is over — the child stops counting toward the fan-in whatever the caller pushes");
   });
 
-  test("other event types (e.g. message_update) are ignored — no streaming/idlePending mutation", () => {
-    const record = freshRpcRecord({ streaming: true, idlePending: false });
-    applyRpcEvent(record, { type: "message_update" });
+  test("other event types (e.g. message_update) are ignored — no streaming/running mutation, no push", () => {
+    const record = freshRpcRecord({ streaming: true, running: true });
+    assert.deepEqual(applyRpcEvent(record, { type: "message_update" }), {});
     assert.equal(record.streaming, true);
-    assert.equal(record.idlePending, false);
+    assert.equal(record.running, true);
   });
 });
 
-describe("firstIdlePendingAgentId", () => {
-  test("returns undefined when no record has idlePending latched", () => {
-    const records = [
-      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b" }) },
-    ];
-    assert.equal(firstIdlePendingAgentId(records), undefined);
-  });
-
-  test("returns the first (in given order) record with idlePending latched", () => {
-    const records = [
-      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b", idlePending: true }) },
-      { id: "c", record: freshRpcRecord({ agentId: "c", idlePending: true }) },
-    ];
-    assert.equal(firstIdlePendingAgentId(records), "b");
-  });
-});
-
-describe("firstPendingApprovalAgentId (260905)", () => {
-  test("returns undefined when no record has a pendingApproval", () => {
-    const records = [
-      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b", idlePending: true }) },
-    ];
-    assert.equal(firstPendingApprovalAgentId(records), undefined);
-  });
-
-  test("returns the first (in given order) record whose pendingApproval is set", () => {
-    const records = [
-      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b", pendingApproval: { cmdId: "c1", command: "echo hi" } }) },
-      { id: "c", record: freshRpcRecord({ agentId: "c", pendingApproval: { cmdId: "c2", command: "echo bye" } }) },
-    ];
-    assert.equal(firstPendingApprovalAgentId(records), "b");
-  });
-});
-
-describe("applyRpcEvent: ws-report-to-lead", () => {
-  test("a tool_execution_start for ws-report-to-lead with a string message enqueues it and settles a waiter", () => {
+describe("applyRpcEvent: ws-report-to-lead (260905 push outcomes)", () => {
+  test("a plain progress report logs an entry and returns a ws-agent-report push delivered as followUp", () => {
     const record = freshRpcRecord();
-    let settled = false;
-    record.waiters.push(() => {
-      settled = true;
-    });
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "halfway done" } });
-    assert.deepEqual(record.pendingReports, [{ message: "halfway done" }]);
-    assert.equal(settled, true, "a report must settle any pending waiter, same as agent_settled");
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "halfway done" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-report", payload: { report: "halfway done" }, deliverAs: "followUp" } });
+    assert.equal(record.reportLog.length, 1);
+    assert.equal(record.reportLog[0].kind, undefined);
+    assert.equal(record.terminalThisTurn, undefined, "a plain progress update is not terminal — the child is still running");
   });
 
-  test("a tool_execution_start for a different toolName is ignored (no mutation)", () => {
+  test("a tool_execution_start for a different toolName is ignored (no push, no log entry)", () => {
     const record = freshRpcRecord();
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: "bash", args: { message: "not a report" } });
-    assert.deepEqual(record.pendingReports, []);
+    assert.deepEqual(applyRpcEvent(record, { type: "tool_execution_start", toolName: "bash", args: { message: "not a report" } }), {});
+    assert.deepEqual(record.reportLog, []);
   });
 
   test("a missing or non-string args.message is ignored", () => {
@@ -557,49 +561,99 @@ describe("applyRpcEvent: ws-report-to-lead", () => {
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: {} });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: 42 } });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME });
-    assert.deepEqual(record.pendingReports, []);
+    assert.deepEqual(record.reportLog, []);
   });
 
-  test('260904 Phase 1 (side-thread fork): a valid kind ("question"/"final") is carried through onto the enqueued entry', () => {
+  test('a kind:"final" report pushes ws-agent-report with the kind, and marks the sender terminal for this turn', () => {
     const record = freshRpcRecord();
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "need input", kind: "question" } });
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
-    assert.deepEqual(record.pendingReports, [
-      { message: "need input", kind: "question" },
-      { message: "all done", kind: "final" },
-    ]);
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-report", payload: { kind: "final", report: "all done" }, deliverAs: "followUp" } });
+    assert.equal(record.reportLog[0].kind, "final");
+    assert.equal(record.terminalThisTurn, true, "the sender removes itself from N on its own push, and suppresses the redundant settle");
   });
 
-  test("an unrecognized or non-string kind is dropped (entry carries no kind key at all, same as omitted)", () => {
+  test('a kind:"question" report with no hook pushes ws-agent-question as STEER — the headless lead must act on it mid-turn', () => {
     const record = freshRpcRecord();
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "progress", kind: "bogus" } });
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "more progress", kind: 42 } });
-    assert.deepEqual(record.pendingReports, [{ message: "progress" }, { message: "more progress" }]);
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "which branch?", kind: "question" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-question", payload: { question: "which branch?" }, deliverAs: "steer" } });
+    assert.equal(record.terminalThisTurn, true);
   });
 
-  test('260904 Phase 2 (post-close dogfood): onFinalReport sees exactly the kind:"final" reports, and the report is still enqueued unchanged', () => {
+  test("an unrecognized or non-string kind is dropped — logged and pushed as a plain progress report", () => {
+    const record = freshRpcRecord();
+    const bogus = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "progress", kind: "bogus" } });
+    const numeric = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "more progress", kind: 42 } });
+    assert.deepEqual(bogus, { push: { family: "ws-agent-report", payload: { report: "progress" }, deliverAs: "followUp" } });
+    assert.deepEqual(numeric, { push: { family: "ws-agent-report", payload: { report: "more progress" }, deliverAs: "followUp" } });
+    assert.deepEqual(record.reportLog.map((e) => e.kind), [undefined, undefined]);
+  });
+
+  test("onQuestionReport returning a string SUPPRESSES the push entirely — the TUI owner surface consumed the question (§1)", () => {
     const seen: string[] = [];
-    const record = freshRpcRecord({ onFinalReport: (_rec, message) => seen.push(message) });
+    const record = freshRpcRecord({
+      onQuestionReport: (_rec, message) => {
+        seen.push(message);
+        return "[ws] registered as thread q1";
+      },
+    });
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "which branch?", kind: "question" } });
+    assert.deepEqual(seen, ["which branch?"]);
+    assert.deepEqual(result, {}, "the lead is not part of a fork-raised question exchange");
+    assert.equal(record.reportLog.length, 1, "the report is still logged — suppression is about the push, not the bookkeeping");
+  });
+
+  test("onQuestionReport returning undefined (headless) keeps the ws-agent-question push", () => {
+    const record = freshRpcRecord({ onQuestionReport: () => undefined });
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "which branch?", kind: "question" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-question", payload: { question: "which branch?" }, deliverAs: "steer" } });
+  });
+
+  test("a throwing onQuestionReport degrades to the headless baseline rather than dropping the question", () => {
+    const record = freshRpcRecord({
+      onQuestionReport: () => {
+        throw new Error("hook exploded");
+      },
+    });
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "which branch?", kind: "question" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-question", payload: { question: "which branch?" }, deliverAs: "steer" } });
+  });
+
+  test('onFinalReport returning true SUPPRESSES the ws-agent-report push (a lead-ask thread already sends its own summary message)', () => {
+    const seen: string[] = [];
+    const record = freshRpcRecord({
+      onFinalReport: (_rec, message) => {
+        seen.push(message);
+        return true;
+      },
+    });
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "decided: merge", kind: "final" } });
+    assert.deepEqual(seen, ["decided: merge"]);
+    assert.deepEqual(result, {});
+  });
+
+  test("onFinalReport returning falsy (a fork-raised task fork) keeps the push — its final IS the completion signal", () => {
+    const record = freshRpcRecord({ onFinalReport: () => false });
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-report", payload: { kind: "final", report: "all done" }, deliverAs: "followUp" } });
+  });
+
+  test("onFinalReport never sees a question or a plain progress report", () => {
+    const seen: string[] = [];
+    const record = freshRpcRecord({ onFinalReport: (_rec, message) => void seen.push(message) });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "need input", kind: "question" } });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "plain progress" } });
     applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "decided: merge", kind: "final" } });
     assert.deepEqual(seen, ["decided: merge"]);
-    assert.deepEqual(record.pendingReports, [{ message: "need input", kind: "question" }, { message: "plain progress" }, { message: "decided: merge", kind: "final" }]);
   });
 
-  test("a throwing onFinalReport is swallowed and the final report is enqueued anyway", () => {
+  test("a throwing onFinalReport is swallowed and the report is pushed anyway", () => {
     const record = freshRpcRecord({
       onFinalReport: () => {
         throw new Error("hook exploded");
       },
     });
-    let settled = false;
-    record.waiters.push(() => {
-      settled = true;
-    });
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
-    assert.deepEqual(record.pendingReports, [{ message: "all done", kind: "final" }]);
-    assert.equal(settled, true, "the waiter wake is unchanged by the hook");
+    const result = applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "all done", kind: "final" } });
+    assert.deepEqual(result, { push: { family: "ws-agent-report", payload: { kind: "final", report: "all done" }, deliverAs: "followUp" } });
   });
 });
 
@@ -662,51 +716,25 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
     });
     assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "echo hi", rationale: undefined, cwd: "/repo/subdir" });
   });
-
-  test("260905 (deadlock fix): setting pendingApproval drains/resolves pending waiters, exactly like agent_settled/report", () => {
+  test("260905: the gated-exec branch returns an empty outcome — the approval PUSH is createApprovalRelay's job, not applyRpcEvent's", () => {
     const record = freshRpcRecord();
-    let woken = false;
-    record.waiters.push(() => {
-      woken = true;
-    });
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo hi" } });
-    assert.equal(woken, true, "a gated-exec event must wake a lead blocked in ws-agent-wait, or the approval steer deadlocks behind the wait");
-    assert.deepEqual(record.waiters, [], "waiters array must be drained after waking");
-  });
-
-  test("260905 (deadlock fix): an ignored gated-exec event (no cmd_id/command) does NOT wake waiters — nothing is pending to approve", () => {
-    const record = freshRpcRecord();
-    let woken = false;
-    record.waiters.push(() => {
-      woken = true;
-    });
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, args: { command: "echo hi" } }); // missing toolCallId
-    assert.equal(woken, false, "no pendingApproval was set, so no waiter should be woken");
-    assert.equal(record.waiters.length, 1, "the un-woken waiter stays armed");
-  });
-
-  test("260904 Phase 2 (re-scoped 2026-09-05): a gated-exec event returns {waiterWoken: true} when a waiter was pending beforehand", () => {
-    const record = freshRpcRecord();
-    record.waiters.push(() => {});
     const result = applyRpcEvent(record, {
       type: "tool_execution_start",
       toolName: GATED_EXEC_TOOL_NAME,
       toolCallId: "call-1",
       args: { command: "echo hi" },
     });
-    assert.deepEqual(result, { waiterWoken: true }, "attachEventListener/createApprovalRelay rely on this to skip the redundant steer");
+    assert.deepEqual(result, {}, "execute-gateway.ts owns the §7 payload and the working-context scrape");
+    assert.deepEqual(record.pendingApproval, { cmdId: "call-1", command: "echo hi", rationale: undefined, cwd: undefined });
   });
 
-  test("260904 Phase 2 (re-scoped 2026-09-05): a gated-exec event returns {waiterWoken: false} when no waiter was pending", () => {
-    const record = freshRpcRecord();
-    const result = applyRpcEvent(record, {
-      type: "tool_execution_start",
-      toolName: GATED_EXEC_TOOL_NAME,
-      toolCallId: "call-2",
-      args: { command: "echo hi" },
-    });
-    assert.deepEqual(result, { waiterWoken: false }, "no waiter was woken, so the relay must fall through to its steer fallback");
+  test("260905: an approval request does NOT mark the child terminal — it is still outstanding, and the lead is what unblocks it", () => {
+    const record = freshRpcRecord({ running: true });
+    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-1", args: { command: "echo hi" } });
+    assert.equal(record.terminalThisTurn, undefined);
+    assert.equal(record.running, true);
   });
+
 
   test("cwd is omitted (undefined) when args.cwd is missing or not a string", () => {
     const record = freshRpcRecord();
@@ -714,67 +742,6 @@ describe("applyRpcEvent: ws-worker-exec (260904 Phase 1 approval-request capture
     assert.equal(record.pendingApproval?.cwd, undefined);
     applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "call-2", args: { command: "echo hi", cwd: 42 } });
     assert.equal(record.pendingApproval?.cwd, undefined);
-  });
-});
-
-describe("enqueueReport / drainReports", () => {
-  test("pushing REPORT_BUFFER_CAP + 1 messages keeps exactly the most recent REPORT_BUFFER_CAP and sets reportsDropped to 1", () => {
-    const record = freshRpcRecord();
-    for (let i = 0; i < REPORT_BUFFER_CAP + 1; i++) {
-      enqueueReport(record, `report-${i}`);
-    }
-    assert.equal(record.pendingReports.length, REPORT_BUFFER_CAP);
-    assert.equal(record.pendingReports[0].message, "report-1", "the oldest (report-0) must be dropped, not the newest");
-    assert.equal(record.pendingReports[record.pendingReports.length - 1].message, `report-${REPORT_BUFFER_CAP}`);
-    assert.equal(record.reportsDropped, 1);
-  });
-
-  test("drainReports returns buffered messages in FIFO (push) order plus the dropped count, and resets both", () => {
-    const record = freshRpcRecord();
-    enqueueReport(record, "first");
-    enqueueReport(record, "second");
-    const drained = drainReports(record);
-    assert.deepEqual(drained, { reports: [{ message: "first" }, { message: "second" }], reports_dropped: 0 });
-    assert.deepEqual(record.pendingReports, []);
-    assert.equal(record.reportsDropped, 0);
-  });
-
-  test("260904 Phase 1 (side-thread fork): enqueueReport's optional kind param is carried onto the pushed entry", () => {
-    const record = freshRpcRecord();
-    enqueueReport(record, "need input", "question");
-    enqueueReport(record, "plain progress");
-    enqueueReport(record, "all done", "final");
-    assert.deepEqual(record.pendingReports, [{ message: "need input", kind: "question" }, { message: "plain progress" }, { message: "all done", kind: "final" }]);
-  });
-
-  test("drainReports surfaces a non-zero reports_dropped after overflow, then resets it", () => {
-    const record = freshRpcRecord();
-    for (let i = 0; i < REPORT_BUFFER_CAP + 3; i++) {
-      enqueueReport(record, `r${i}`);
-    }
-    const drained = drainReports(record);
-    assert.equal(drained.reports.length, REPORT_BUFFER_CAP);
-    assert.equal(drained.reports_dropped, 3);
-    assert.equal(record.reportsDropped, 0, "reportsDropped must reset after drain");
-  });
-});
-
-describe("firstReportPendingAgentId", () => {
-  test("returns undefined when no record has a pending report", () => {
-    const records = [
-      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b" }) },
-    ];
-    assert.equal(firstReportPendingAgentId(records), undefined);
-  });
-
-  test("returns the first (in given order) record with a pending report", () => {
-    const records = [
-      { id: "a", record: freshRpcRecord({ agentId: "a" }) },
-      { id: "b", record: freshRpcRecord({ agentId: "b", pendingReports: [{ message: "x" }] }) },
-      { id: "c", record: freshRpcRecord({ agentId: "c", pendingReports: [{ message: "y" }] }) },
-    ];
-    assert.equal(firstReportPendingAgentId(records), "b");
   });
 });
 
@@ -801,258 +768,574 @@ function fakeRpcClient(overrides: {
   return { client: client as unknown as RpcClient, calls };
 }
 
-describe("waitForAgents", () => {
-  test("empty agentIds throws (fail-fast, never races zero promises)", async () => {
-    const registry: RpcAgentRegistry = new Map();
-    await assert.rejects(() => waitForAgents(registry, []), /requires at least one agentId/);
+describe("shouldPushToLead (the push gate)", () => {
+  test("the host lead (no role marker) and a fork push; a worker and an explore leaf do not", () => {
+    assert.equal(shouldPushToLead({}), true, "no marker = host lead");
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "fork" }), true);
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "worker" }), false, "a worker's reports travel to ITS parent over RPC, not into its own transcript");
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "explore" }), false);
+  });
+
+  test("an unrecognized role value is treated as no marker (host lead), same as readSpawnRole", () => {
+    assert.equal(shouldPushToLead({ [WS_PI_SPAWN_ROLE_ENV]: "bogus" }), true);
+  });
+});
+
+describe("computeRunningStatusLine (fan-in N of M)", () => {
+  test("an empty/absent registry reads 0 of 0", () => {
+    assert.equal(computeRunningStatusLine(new Map()), "0 of 0 delegated agents still running");
+    assert.equal(computeRunningStatusLine(undefined), "0 of 0 delegated agents still running");
+  });
+
+  test("M counts every live, non-threadBound record; N is the subset with no terminal report this turn", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["a", liveRpcRecord({ agentId: "a", running: true })],
+      ["b", liveRpcRecord({ agentId: "b", running: true, terminalThisTurn: true })],
+      ["c", liveRpcRecord({ agentId: "c", running: true })],
+    ]);
+    assert.equal(computeRunningStatusLine(registry), "2 of 3 delegated agents still running");
+  });
+
+  test("I3: the denominator holds across a real 3-way fan-out — 2 of 3, 1 of 3, 0 of 3", () => {
+    // The event order the runtime actually produces: each worker files its
+    // final (terminalThisTurn) and then settles (running cleared) BEFORE the
+    // next one reports. Keying M on `running` made this read 2 of 3 -> 1 of 2
+    // -> 0 of 1, so the ticket's "0 of 3" completion cue could never occur.
+    const ids = ["a", "b", "c"];
+    const registry: RpcAgentRegistry = new Map(ids.map((id) => [id, liveRpcRecord({ agentId: id, running: true })] as const));
+    const lines: string[] = [];
+    for (const id of ids) {
+      const record = registry.get(id)!;
+      applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: x" } });
+      lines.push(computeRunningStatusLine(registry));
+      applyRpcEvent(record, { type: "agent_settled" });
+    }
+    assert.deepEqual(lines, [
+      "2 of 3 delegated agents still running",
+      "1 of 3 delegated agents still running",
+      "0 of 3 delegated agents still running",
+    ]);
+  });
+
+  test("I3: a live child that settled idle stays in M and only leaves N", () => {
+    const idle = liveRpcRecord({ agentId: "idle", running: true });
+    const registry: RpcAgentRegistry = new Map([
+      ["busy", liveRpcRecord({ agentId: "busy", running: true })],
+      ["idle", idle],
+    ]);
+    applyRpcEvent(idle, { type: "agent_settled" });
+    assert.equal(computeRunningStatusLine(registry), "1 of 2 delegated agents still running");
+  });
+
+  test("stopped/exited/dormant records (no client) are absent from M entirely", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["live", liveRpcRecord({ agentId: "live", running: true })],
+      ["stopped", freshRpcRecord({ agentId: "stopped", running: false })],
+      ["dormant", freshRpcRecord({ agentId: "dormant" })],
+    ]);
+    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running");
+  });
+
+  test("a threadBound agent is excluded from BOTH N and M — the owner exchange is not the lead's fan-in", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["worker", liveRpcRecord({ agentId: "worker", running: true })],
+      ["discussing", liveRpcRecord({ agentId: "discussing", running: true, threadBound: true })],
+    ]);
+    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running");
+  });
+
+  test("an approval-blocked child is still counted — it is outstanding, and the lead is what unblocks it", () => {
+    const registry: RpcAgentRegistry = new Map([
+      ["a", liveRpcRecord({ agentId: "a", running: true, pendingApproval: { cmdId: "c1", command: "echo hi" } })],
+    ]);
+    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running");
+  });
+
+  test("a child counts from the prompt-issue instant, before any agent_start event has arrived", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ agentId: "a", client });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    await promptAgent(record, client, "go");
+    assert.equal(record.streaming, false, "no agent_start has been observed yet");
+    assert.equal(computeRunningStatusLine(registry), "1 of 1 delegated agent still running");
+  });
+
+  test("singular/plural agreement follows M", () => {
+    assert.equal(computeRunningStatusLine(new Map([["a", liveRpcRecord({ agentId: "a", running: true })]])), "1 of 1 delegated agent still running");
+  });
+});
+
+describe("buildPushContent", () => {
+  test("renders a head line naming the family and agent, one key: value line per payload field, and the status line last", () => {
+    const content = buildPushContent("ws-agent-report", "a1", { kind: "final", report: "done" }, "0 of 1 delegated agent still running");
+    assert.equal(content, ["[ws-agent-report] agent a1", "kind: final", "report: done", "0 of 1 delegated agent still running"].join("\n"));
+  });
+
+  test("an agent-less family (ws-agent-orphaned) drops the agent from the head line", () => {
+    const content = buildPushContent("ws-agent-orphaned", undefined, { count: 2 }, "0 of 0 delegated agents still running");
+    assert.equal(content, ["[ws-agent-orphaned]", "count: 2", "0 of 0 delegated agents still running"].join("\n"));
+  });
+
+  test("undefined/null/empty payload fields are omitted rather than rendered as blanks", () => {
+    const content = buildPushContent("ws-agent-settled", "a1", { reason: "idle", last_message: undefined, error: "" }, "status");
+    assert.equal(content, ["[ws-agent-settled] agent a1", "reason: idle", "status"].join("\n"));
+  });
+
+  test("a non-string value is JSON-stringified so an object payload never renders as [object Object]", () => {
+    const content = buildPushContent("ws-agent-advisory", "a1", { detail: { a: 1 } }, "status");
+    assert.match(content, /detail: \{"a":1\}/);
+  });
+});
+
+describe("pushToLead", () => {
+  test("sends one custom message per family, with details carrying agent_id, the payload, and the status line", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    pushToLead(pi.api, registry, record, "ws-agent-report", { report: "halfway" }, "followUp");
+
+    assert.equal(pi.sent.length, 1);
+    const [{ message, options }] = pi.sent;
+    assert.equal(message.customType, "ws-agent-report");
+    assert.equal(message.display, true);
+    assert.deepEqual(message.details, { agent_id: "a", report: "halfway", status: "1 of 1 delegated agent still running" });
+    assert.deepEqual(options, { deliverAs: "followUp", triggerTurn: true }, "triggerTurn is what makes an IDLE lead act on the signal at once");
+  });
+
+  test("an absent record still pushes (the orphan roll-call), with no agent_id in details", () => {
+    const pi = fakePi();
+    pushToLead(pi.api, new Map(), undefined, "ws-agent-orphaned", { count: 2 }, "followUp");
+    assert.deepEqual(pi.sent[0].message.details, { count: 2, status: "0 of 0 delegated agents still running" });
+  });
+
+  test("no pi (a resume driven from a call site with no push channel) is a silent no-op, not a throw", () => {
+    assert.doesNotThrow(() => pushToLead(undefined, new Map(), undefined, "ws-agent-report", { report: "x" }, "followUp"));
+  });
+
+  test("a throwing sendMessage is swallowed — a torn-down session must not crash a child's event listener", () => {
+    const pi = fakePi({
+      sendMessage: () => {
+        throw new Error("session is gone");
+      },
+    });
+    assert.doesNotThrow(() => pushToLead(pi.api, new Map(), undefined, "ws-agent-report", { report: "x" }, "followUp"));
+  });
+
+  test("review relay #1 (I7): a worker-role process pushes NOTHING through the real call path, not just through the predicate", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    const previous = process.env[WS_PI_SPAWN_ROLE_ENV];
+    process.env[WS_PI_SPAWN_ROLE_ENV] = "worker";
+    try {
+      pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
+    } finally {
+      if (previous === undefined) delete process.env[WS_PI_SPAWN_ROLE_ENV];
+      else process.env[WS_PI_SPAWN_ROLE_ENV] = previous;
+    }
+    assert.deepEqual(pi.sent, [], "a worker's reports travel to ITS parent over RPC, never into its own transcript");
+  });
+
+  test("the same call from the host lead (no role marker) does push — the gate is the role, not the arguments", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    pushToLead(pi.api, new Map([["a", record]]), record, "ws-agent-report", { report: "halfway" }, "followUp");
+    assert.equal(pi.sent.length, 1);
+  });
+});
+
+/**
+ * Review relay #1, test partition C2: the settle-push suppression the ticket
+ * names lives HERE, in the IO listener, not in the pure `applyRpcEvent` — so
+ * it needs coverage here or the `!threadBound && !terminalThisTurn` guard
+ * could be deleted with the suite still green. Driven with a duck-typed client
+ * (`onEvent`/`getState`/`getLastAssistantText`); never a real `RpcClient`.
+ */
+describe("attachEventListener (the settle-suppression IO gate)", () => {
+  function listenerHarness() {
+    let listener: ((evt: unknown) => void) | undefined;
+    const client = {
+      onEvent(l: (evt: unknown) => void) {
+        listener = l;
+        return () => {};
+      },
+      getState: async () => ({ sessionFile: "/tmp/s.jsonl" }),
+      getLastAssistantText: async () => "the last thing it said",
+    } as unknown as RpcClient;
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true, client });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    attachEventListener(pi.api, registry, record, client);
+    return { pi, record, registry, emit: (evt: unknown) => listener?.(evt) };
+  }
+
+  /** The settle push is async (it awaits `harvestLastMessage`), so drain the microtask queue. */
+  const settleDrain = () => new Promise((resolve) => setImmediate(resolve));
+
+  const families = (pi: ReturnType<typeof fakePi>) => pi.sent.map((s) => s.message.customType);
+
+  test("a plain settle pushes ws-agent-settled reason:idle carrying the harvested last message", async () => {
+    const h = listenerHarness();
+    h.emit({ type: "agent_settled" });
+    await settleDrain();
+    assert.deepEqual(families(h.pi), ["ws-agent-settled"]);
+    assert.deepEqual(h.pi.sent[0].message.details, {
+      agent_id: "a",
+      reason: "idle",
+      last_message: "the last thing it said",
+      status: "0 of 1 delegated agent still running",
+    });
+    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
+  });
+
+  test("a settle right after a final pushes the report only — the settle notice would be the same event twice", async () => {
+    const h = listenerHarness();
+    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "final", message: "Outcome: done" } });
+    h.emit({ type: "agent_settled" });
+    await settleDrain();
+    assert.deepEqual(families(h.pi), ["ws-agent-report"], "terminalThisTurn suppresses the settle push");
+  });
+
+  test("a settle right after a headless question pushes the question only", async () => {
+    const h = listenerHarness();
+    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "which anchor?" } });
+    h.emit({ type: "agent_settled" });
+    await settleDrain();
+    assert.deepEqual(families(h.pi), ["ws-agent-question"]);
+    assert.equal(h.pi.sent[0].options?.deliverAs, "steer");
+  });
+
+  test("a threadBound record settles SILENTLY — the owner exchange's turn boundaries are not the lead's business", async () => {
+    const h = listenerHarness();
+    h.record.threadBound = true;
+    h.emit({ type: "agent_settled" });
+    await settleDrain();
+    assert.deepEqual(h.pi.sent, []);
+  });
+
+  test("the same record settles loudly once the thread closes — suppression is scoped to the bind, not permanent", async () => {
+    const h = listenerHarness();
+    h.record.threadBound = true;
+    h.emit({ type: "agent_settled" });
+    await settleDrain();
+    assert.deepEqual(h.pi.sent, []);
+    h.record.threadBound = false;
+    h.emit({ type: "agent_settled" });
+    await settleDrain();
+    assert.deepEqual(families(h.pi), ["ws-agent-settled"]);
+  });
+
+  test("a plain progress report is pushed as ws-agent-report/followUp with no settle involved", () => {
+    const h = listenerHarness();
+    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "halfway" } });
+    assert.deepEqual(families(h.pi), ["ws-agent-report"]);
+    assert.equal(h.pi.sent[0].options?.deliverAs, "followUp");
+  });
+
+  test("a hook-consumed question (the TUI owner surface) is not pushed at all", () => {
+    const h = listenerHarness();
+    h.record.onQuestionReport = () => "[ws] thread q1 — the owner answers this.";
+    h.emit({ type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { kind: "question", message: "which anchor?" } });
+    assert.deepEqual(h.pi.sent, []);
+  });
+
+  test("a dead child's settle transitions it to exited and pushes once (the liveness probe on the transition)", async () => {
+    let listener: ((evt: unknown) => void) | undefined;
+    const client = {
+      onEvent(l: (evt: unknown) => void) {
+        listener = l;
+        return () => {};
+      },
+      getState: async () => {
+        throw new Error("client is not running");
+      },
+      getLastAssistantText: async () => null,
+    } as unknown as RpcClient;
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a", running: true, client, terminalThisTurn: true });
+    attachEventListener(pi.api, new Map([["a", record]]), record, client);
+    listener?.({ type: "agent_settled" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      pi.sent.map((s) => (s.message.details as { reason?: string }).reason),
+      ["exited"],
+    );
+    assert.equal(record.client, undefined);
+    assert.equal(record.running, false);
+  });
+
+  test("the ctx approval callback wins over the per-record fallback, and the fallback fires when there is no ctx one", () => {
+    const ctxCalls: string[] = [];
+    const recordCalls: string[] = [];
+    let listener: ((evt: unknown) => void) | undefined;
+    const client = {
+      onEvent(l: (evt: unknown) => void) {
+        listener = l;
+        return () => {};
+      },
+      getState: async () => ({}),
+    } as unknown as RpcClient;
+    const approvalEvent = { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "c1", args: { command: "echo hi" } };
+
+    const withCtx = liveRpcRecord({ agentId: "a", client, onApprovalPending: (r) => recordCalls.push(r.agentId) });
+    attachEventListener(fakePi().api, new Map(), withCtx, client, (r) => ctxCalls.push(r.agentId));
+    listener?.(approvalEvent);
+    assert.deepEqual(ctxCalls, ["a"]);
+    assert.deepEqual(recordCalls, [], "the ctx callback is preferred — never both");
+
+    const fallbackOnly = liveRpcRecord({ agentId: "b", client, onApprovalPending: (r) => recordCalls.push(r.agentId) });
+    attachEventListener(fakePi().api, new Map(), fallbackOnly, client);
+    listener?.(approvalEvent);
+    assert.deepEqual(recordCalls, ["b"], "a resume with no ctx relay still reaches the record's own");
+  });
+});
+
+/**
+ * Review relay #1, test partition C3: `spawnAgent`'s launch-failure branch is
+ * live-gate only (it constructs a real `RpcClient`), so its push half was
+ * extracted into `pushSpawnFailed` and is covered here.
+ */
+describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
+  test("parks the half-registered record and pushes ws-agent-settled reason:spawn-failed with the error text", () => {
+    const pi = fakePi();
+    let unsubscribed = 0;
+    const record = liveRpcRecord({ agentId: "a", running: true, streaming: true, unsubscribe: () => void (unsubscribed += 1) });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    pushSpawnFailed(pi.api, registry, record, new Error("spawn ENOENT"));
+
+    assert.equal(pi.sent.length, 1);
+    assert.equal(pi.sent[0].message.customType, "ws-agent-settled");
+    assert.deepEqual(pi.sent[0].message.details, {
+      agent_id: "a",
+      reason: "spawn-failed",
+      error: "spawn ENOENT",
+      status: "0 of 0 delegated agents still running",
+    });
+    assert.equal(record.client, undefined, "a failed spawn leaves no live client behind");
+    assert.equal(record.running, false, "and stops counting toward the fan-in immediately");
+    assert.equal(unsubscribed, 1);
+  });
+
+  test("a non-Error throw is stringified rather than dropped", () => {
+    const pi = fakePi();
+    const record = liveRpcRecord({ agentId: "a" });
+    pushSpawnFailed(pi.api, new Map(), record, "boom");
+    assert.equal((pi.sent[0].message.details as { error?: string }).error, "boom");
+  });
+});
+
+describe("promptAgent (the single prompt funnel)", () => {
+  test("latches running, clears terminalThisTurn, stamps lastLeadPromptAt, and forwards the message to prompt()", async () => {
+    const { client, calls } = fakeRpcClient();
+    const record = freshRpcRecord({ terminalThisTurn: true });
+    const before = Date.now();
+
+    await promptAgent(record, client, "do the thing");
+
+    assert.equal(record.running, true);
+    assert.equal(record.terminalThisTurn, false);
+    assert.ok((record.lastLeadPromptAt ?? 0) >= before);
+    assert.deepEqual(calls, [["prompt", "do the thing"]]);
+  });
+
+  test("isLeadPrompt:false (the anti-bleed nudge) still latches running but must NOT move lastLeadPromptAt", async () => {
+    const { client } = fakeRpcClient();
+    const record = freshRpcRecord({ lastLeadPromptAt: 1_000 });
+
+    await promptAgent(record, client, "nudge", { isLeadPrompt: false });
+
+    assert.equal(record.running, true);
+    assert.equal(record.lastLeadPromptAt, 1_000, "moving the watermark would hide the very stale idle-without-final the nudge exists to serve");
+  });
+});
+
+describe("recordReport / reportKindsSinceLeadPrompt", () => {
+  test("a kind-less report round-trips as {at} with no kind key at all", () => {
+    const record = freshRpcRecord();
+    recordReport(record, undefined, 5);
+    assert.deepEqual(record.reportLog, [{ at: 5 }]);
+  });
+
+  test("appending past REPORT_LOG_CAP drops the OLDEST entry, never the newest", () => {
+    const record = freshRpcRecord();
+    for (let i = 0; i <= REPORT_LOG_CAP; i += 1) recordReport(record, undefined, i);
+    assert.equal(record.reportLog.length, REPORT_LOG_CAP);
+    assert.equal(record.reportLog[0].at, 1, "at:0 must be the one dropped");
+    assert.equal(record.reportLog[record.reportLog.length - 1].at, REPORT_LOG_CAP);
+  });
+
+  test("only reports at or after lastLeadPromptAt are returned — a final from a PREVIOUS task stops counting", () => {
+    const record = freshRpcRecord({ lastLeadPromptAt: 100 });
+    recordReport(record, "final", 50);
+    recordReport(record, undefined, 150);
+    recordReport(record, "question", 200);
+    assert.deepEqual(reportKindsSinceLeadPrompt(record), [undefined, "question"]);
+  });
+
+  test("with no lastLeadPromptAt ever stamped, the whole log is in scope", () => {
+    const record = freshRpcRecord();
+    recordReport(record, "final", 1);
+    assert.deepEqual(reportKindsSinceLeadPrompt(record), ["final"]);
+  });
+});
+
+describe("markAgentExited / probeAgentLiveness", () => {
+  test("a getState() rejection transitions the record to exited and pushes ws-agent-settled reason:exited", async () => {
+    const pi = fakePi();
+    const client = {
+      getState: async () => {
+        throw new Error("process exited");
+      },
+    } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", client, running: true, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    const alive = await probeAgentLiveness(pi.api, registry, record);
+
+    assert.equal(alive, false);
+    assert.equal(record.client, undefined);
+    assert.equal(record.running, false);
+    assert.equal(record.streaming, false);
+    assert.equal(pi.sent.length, 1);
+    assert.equal((pi.sent[0].message.details as { reason?: string }).reason, "exited");
+  });
+
+  test("a resolving getState() leaves the record alone and pushes nothing", async () => {
+    const pi = fakePi();
+    const client = { getState: async () => ({ sessionFile: "/tmp/s.jsonl" }) } as unknown as RpcClient;
+    const record = freshRpcRecord({ agentId: "a", client, running: true });
+
+    assert.equal(await probeAgentLiveness(pi.api, new Map([["a", record]]), record), true);
+    assert.equal(record.client, client);
+    assert.deepEqual(pi.sent, []);
+  });
+
+  test("probing a record with no client reports not-alive and pushes nothing (it was already stopped)", async () => {
+    const pi = fakePi();
+    const record = freshRpcRecord({ agentId: "a" });
+    assert.equal(await probeAgentLiveness(pi.api, new Map(), record), false);
+    assert.deepEqual(pi.sent, []);
+  });
+
+  test("markAgentExited is idempotent — a second call on an already-cleared record pushes nothing", () => {
+    const pi = fakePi();
+    const record = freshRpcRecord({ agentId: "a", client: {} as RpcClient, running: true });
+    markAgentExited(pi.api, new Map(), record);
+    markAgentExited(pi.api, new Map(), record);
+    assert.equal(pi.sent.length, 1, "a dead child is announced once, not once per observation");
+  });
+
+  test("the record's unsubscribe is called when its live state is cleared, so a dead client's listener is detached", () => {
+    const pi = fakePi();
+    let detached = false;
+    const record = freshRpcRecord({
+      agentId: "a",
+      client: {} as RpcClient,
+      running: true,
+      unsubscribe: () => {
+        detached = true;
+      },
+    });
+    markAgentExited(pi.api, new Map(), record);
+    assert.equal(detached, true);
+    assert.equal(record.unsubscribe, undefined);
+  });
+});
+
+describe("stopAgent (260905 push + silent)", () => {
+  function stoppableClient(): { client: RpcClient; calls: string[] } {
+    const calls: string[] = [];
+    return {
+      client: {
+        abort: async () => void calls.push("abort"),
+        stop: async () => void calls.push("stop"),
+      } as unknown as RpcClient,
+      calls,
+    };
+  }
+
+  test("a live stop aborts, stops, clears live state, and pushes ws-agent-settled reason:stopped", async () => {
+    const pi = fakePi();
+    const { client, calls } = stoppableClient();
+    const record = freshRpcRecord({ agentId: "a", client, running: true, streaming: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+
+    assert.deepEqual(await stopAgent(registry, "a", pi.api), { agent_id: "a" });
+
+    assert.deepEqual(calls, ["abort", "stop"]);
+    assert.equal(record.client, undefined);
+    assert.equal(record.running, false);
+    assert.equal(registry.has("a"), true, "D-C: a stopped agent stays registered as dormant/resumable");
+    assert.equal(pi.sent.length, 1);
+    assert.equal((pi.sent[0].message.details as { reason?: string }).reason, "stopped");
+  });
+
+  test("silent:true (ask.ts's thread close, stopAll's shutdown sweep) suppresses the push but still stops the child", async () => {
+    const pi = fakePi();
+    const { client, calls } = stoppableClient();
+    const record = freshRpcRecord({ agentId: "a", client, running: true });
+
+    await stopAgent(new Map([["a", record]]), "a", pi.api, { silent: true });
+
+    assert.deepEqual(calls, ["abort", "stop"]);
+    assert.equal(record.client, undefined);
+    assert.deepEqual(pi.sent, [], "the owner's summary is the signal there, not a stop notice");
+  });
+
+  test("stopping an already-dormant record is a no-op with no push", async () => {
+    const pi = fakePi();
+    const record = freshRpcRecord({ agentId: "a" });
+    await stopAgent(new Map([["a", record]]), "a", pi.api);
+    assert.deepEqual(pi.sent, []);
   });
 
   test("unknown agentId throws", async () => {
-    const registry: RpcAgentRegistry = new Map();
-    await assert.rejects(() => waitForAgents(registry, ["missing"]), /unknown agentId/);
+    await assert.rejects(() => stopAgent(new Map(), "missing"), /unknown agentId/);
   });
+});
 
-  test("already-idle fast path harvests a clientless (dormant) record immediately, with no race", async () => {
-    const record = freshRpcRecord({ agentId: "a", idlePending: true, lastText: "cached final answer" });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, { agent_id: "a", reason: "idle", last_message: "cached final answer", reports: [], reports_dropped: 0, timed_out: false });
-    assert.equal(record.idlePending, false, "the fast path must consume (clear) idlePending, not just read it");
-  });
-
-  test("timeout-no-finisher returns a timed_out marker and leaves the agent registered/untouched", async () => {
-    const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    const result = await waitForAgents(registry, ["a"], 15);
-    assert.deepEqual(result, { timed_out: true, reports: [], reports_dropped: 0 });
-    assert.equal(registry.has("a"), true, "a timed-out agent must stay registered, never killed/removed");
-    assert.equal(record.streaming, true, "timeout must not mutate the agent's tracked state");
-  });
-
-  test("guards against an all-dormant/clientless agent set with no timeout instead of hanging forever", async () => {
-    const record = freshRpcRecord({ agentId: "a" }); // no client, idlePending false
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    await assert.rejects(() => waitForAgents(registry, ["a"]), /dormant.*no timeout|no timeout.*dormant/i);
-  });
-
-  test("an all-dormant set WITH a timeout still returns a timed_out marker instead of throwing", async () => {
-    const record = freshRpcRecord({ agentId: "a" });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    const result = await waitForAgents(registry, ["a"], 15);
-    assert.deepEqual(result, { timed_out: true, reports: [], reports_dropped: 0 });
-  });
-
-  test("winning race: applyRpcEvent's agent_settled resolves the pending wait with the settled agent's last message", async () => {
-    const { client } = fakeRpcClient({ getLastAssistantText: async () => "the final answer" });
-    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const resultPromise = waitForAgents(registry, ["a"]);
-    // waitForAgents synchronously registers its waiter (via the winner
-    // Promise executor) before its first `await`, so the settle below is
-    // guaranteed to land on an already-armed waiter — same technique
-    // applyRpcEvent's own waiter-drain test above uses.
-    applyRpcEvent(record, { type: "agent_settled" });
-
-    const result = await resultPromise;
-    assert.deepEqual(result, { agent_id: "a", reason: "idle", last_message: "the final answer", reports: [], reports_dropped: 0, timed_out: false });
-    assert.equal(record.idlePending, false, "the winning path must also consume idlePending");
-  });
-
-  test("dormant-but-reported: a report enqueued on a clientless agent is harvested via the report fast path without hitting the all-dormant rejection", async () => {
-    const record = freshRpcRecord({ agentId: "a" }); // no client
-    enqueueReport(record, "buffered while dormant");
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: [{ message: "buffered while dormant" }], reports_dropped: 0, timed_out: false });
-  });
-
-  test("a report arriving while a waitForAgents call is already pending resolves the wait with reason:report and the message", async () => {
-    const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const resultPromise = waitForAgents(registry, ["a"]);
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: REPORT_TO_LEAD_TOOL_NAME, args: { message: "mid-run update" } });
-
-    const result = await resultPromise;
-    assert.deepEqual(result, { agent_id: "a", reason: "report", reports: [{ message: "mid-run update" }], reports_dropped: 0, timed_out: false });
-  });
-
-  test("multiple reports enqueued before any wait call are all drained in one response, FIFO order", async () => {
-    const record = freshRpcRecord({ agentId: "a" });
-    enqueueReport(record, "first");
-    enqueueReport(record, "second");
-    enqueueReport(record, "third");
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, {
-      agent_id: "a",
-      reason: "report",
-      reports: [{ message: "first" }, { message: "second" }, { message: "third" }],
-      reports_dropped: 0,
-      timed_out: false,
+describe("startLivenessProbe", () => {
+  test("probes every running record on each tick and reports a dead one as exited", async () => {
+    const pi = fakePi();
+    const dead = freshRpcRecord({
+      agentId: "dead",
+      running: true,
+      client: {
+        getState: async () => {
+          throw new Error("gone");
+        },
+      } as unknown as RpcClient,
     });
-  });
-
-  test("tie-break: an idle-settled agent with a pending report on the SAME agent reports reason:idle but still returns the buffered report(s)", async () => {
-    const record = freshRpcRecord({ agentId: "a", idlePending: true, lastText: "final answer" });
-    enqueueReport(record, "report before settle");
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, {
-      agent_id: "a",
-      reason: "idle",
-      last_message: "final answer",
-      reports: [{ message: "report before settle" }],
-      reports_dropped: 0,
-      timed_out: false,
-    });
-  });
-
-  test("winning race among multiple agentIds: the one that settles first wins, others stay pending/registered", async () => {
-    const slow = freshRpcRecord({ agentId: "slow", client: fakeRpcClient().client, streaming: true });
-    const { client: fastClient } = fakeRpcClient({ getLastAssistantText: async () => "fast agent done" });
-    const fast = freshRpcRecord({ agentId: "fast", client: fastClient, streaming: true });
+    const dormant = freshRpcRecord({ agentId: "dormant", running: true }); // no client — never probed
     const registry: RpcAgentRegistry = new Map([
-      ["slow", slow],
-      ["fast", fast],
+      ["dead", dead],
+      ["dormant", dormant],
     ]);
 
-    const resultPromise = waitForAgents(registry, ["slow", "fast"]);
-    applyRpcEvent(fast, { type: "agent_settled" });
+    const stop = startLivenessProbe(pi.api, registry, 1);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    stop();
 
-    const result = await resultPromise;
-    assert.equal(result.agent_id, "fast");
-    assert.equal(result.last_message, "fast agent done");
-    assert.equal(registry.has("slow"), true, "the non-winning agent must stay registered");
+    assert.equal(dead.client, undefined, "the dead child was detected by the sweep");
+    assert.ok(pi.sent.length >= 1);
+    assert.equal((pi.sent[0].message.details as { reason?: string }).reason, "exited");
   });
 
-  test("260905: already-pending-approval fast path harvests immediately with reason:approval-pending, bypassing the all-dormant guard", async () => {
-    const record = freshRpcRecord({ agentId: "a", pendingApproval: { cmdId: "c1", command: "echo hi", rationale: "why" } }); // no client
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    const result = await waitForAgents(registry, ["a"]);
-    assert.deepEqual(result, {
-      agent_id: "a",
-      reason: "approval-pending",
-      pending_approval: { cmd_id: "c1", command: "echo hi", rationale: "why" },
-      reports: [],
-      reports_dropped: 0,
-      timed_out: false,
+  test("the returned stopper clears the timer — no further probes after stopAll()", async () => {
+    const pi = fakePi();
+    let probes = 0;
+    const record = freshRpcRecord({
+      agentId: "a",
+      running: true,
+      client: { getState: async () => void (probes += 1) } as unknown as RpcClient,
     });
-  });
-
-  test("260905: pendingApproval is NOT edge-consumed — a re-wait before ws-approve still returns approval-pending (cleared only by ws-approve)", async () => {
-    const record = freshRpcRecord({ agentId: "a", pendingApproval: { cmdId: "c1", command: "echo hi" } });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    const first = await waitForAgents(registry, ["a"]);
-    assert.equal(first.reason, "approval-pending");
-    const second = await waitForAgents(registry, ["a"]);
-    assert.equal(second.reason, "approval-pending", "a re-wait while still un-approved must re-report, not loop or fall through");
-    assert.ok(record.pendingApproval, "waitForAgents must not clear pendingApproval — only ws-approve does");
-  });
-
-  test("260905: a gated-exec approval arriving while a wait is already pending resolves it with reason:approval-pending", async () => {
-    const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const resultPromise = waitForAgents(registry, ["a"]);
-    applyRpcEvent(record, { type: "tool_execution_start", toolName: GATED_EXEC_TOOL_NAME, toolCallId: "c9", args: { command: "rm -rf x", rationale: "cleanup" } });
-
-    const result = await resultPromise;
-    assert.deepEqual(result, {
-      agent_id: "a",
-      reason: "approval-pending",
-      pending_approval: { cmd_id: "c9", command: "rm -rf x", rationale: "cleanup" },
-      reports: [],
-      reports_dropped: 0,
-      timed_out: false,
-    });
-  });
-
-  test("260905: approval-pending takes priority over a buffered report on the same agent, but still drains the report", async () => {
-    const record = freshRpcRecord({ agentId: "a", pendingApproval: { cmdId: "c1", command: "echo hi" } });
-    enqueueReport(record, "a question before the gate");
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-    const result = await waitForAgents(registry, ["a"]);
-    assert.equal(result.reason, "approval-pending", "the blocking approval wins the harvest reason");
-    assert.deepEqual(result.reports, [{ message: "a question before the gate" }], "a report buffered before the gate is still drained, not stranded");
-  });
-
-  test("review fix (relay #1, CRITICAL): a timed-out waitForAgents unregisters its resolver — a later gated-exec event reports waiterWoken:false, not a stale true", async () => {
-    const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const timedOut = await waitForAgents(registry, ["a"], 15);
-    assert.equal(timedOut.timed_out, true, "sanity: the wait must actually time out before the event below fires");
-    assert.deepEqual(record.waiters, [], "the timed-out wait's resolver must be unregistered, not left as a dead waiter");
-
-    const eventResult = applyRpcEvent(record, {
-      type: "tool_execution_start",
-      toolName: GATED_EXEC_TOOL_NAME,
-      toolCallId: "call-after-timeout",
-      args: { command: "echo hi" },
-    });
-    assert.deepEqual(
-      eventResult,
-      { waiterWoken: false },
-      "the lead that timed out and moved on is a non-waiting lead — the relay's steer fallback must still fire for it",
-    );
-  });
-
-  test("review fix (relay #1, CRITICAL): a multi-agent race's loser has its resolver unregistered on the winner's settle — a later gated-exec event on the loser reports waiterWoken:false", async () => {
-    const { client: aClient } = fakeRpcClient();
-    const a = freshRpcRecord({ agentId: "a", client: aClient, streaming: true });
-    const { client: bClient } = fakeRpcClient({ getLastAssistantText: async () => "a settled first" });
-    const b = freshRpcRecord({ agentId: "b", client: bClient, streaming: true });
-    const registry: RpcAgentRegistry = new Map([
-      ["a", a],
-      ["b", b],
-    ]);
-
-    const resultPromise = waitForAgents(registry, ["a", "b"]);
-    applyRpcEvent(b, { type: "agent_settled" }); // b wins the race, not a
-
-    const result = await resultPromise;
-    assert.equal(result.agent_id, "b", "sanity: b must be the winner for this scenario");
-    assert.deepEqual(a.waiters, [], "the losing agent's resolver must be spliced out once the race concludes, not left as a dead waiter");
-
-    const eventResult = applyRpcEvent(a, {
-      type: "tool_execution_start",
-      toolName: GATED_EXEC_TOOL_NAME,
-      toolCallId: "call-on-loser",
-      args: { command: "echo hi" },
-    });
-    assert.deepEqual(
-      eventResult,
-      { waiterWoken: false },
-      "a's resolver was already dead from b's win — a later event on a must not falsely report a live waiter",
-    );
-  });
-
-  test("review fix (relay #1, CRITICAL): a live wait still reports waiterWoken:true and resolves with reason:approval-pending", async () => {
-    const { client } = fakeRpcClient();
-    const record = freshRpcRecord({ agentId: "a", client, streaming: true });
-    const registry: RpcAgentRegistry = new Map([["a", record]]);
-
-    const resultPromise = waitForAgents(registry, ["a"]);
-    const eventResult = applyRpcEvent(record, {
-      type: "tool_execution_start",
-      toolName: GATED_EXEC_TOOL_NAME,
-      toolCallId: "call-live",
-      args: { command: "echo hi" },
-    });
-    assert.deepEqual(eventResult, { waiterWoken: true }, "a genuinely blocked ws-agent-wait must still be reported as woken");
-
-    const result = await resultPromise;
-    assert.equal(result.reason, "approval-pending");
-    assert.deepEqual(result.pending_approval, { cmd_id: "call-live", command: "echo hi", rationale: undefined });
+    const stop = startLivenessProbe(pi.api, new Map([["a", record]]), 1);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    stop();
+    const after = probes;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.equal(probes, after, "the interval must be cleared, not merely unref'd");
   });
 });
 
@@ -1084,6 +1367,25 @@ describe("listAgents", () => {
       { agent_id: "running-one", status: "running" },
     ]);
   });
+
+  test("260905: last_report_at carries the newest reportLog entry as ISO, and the key is omitted entirely when nothing was ever reported", () => {
+    const quiet = freshRpcRecord({ agentId: "quiet" });
+    const chatty = freshRpcRecord({ agentId: "chatty", reportLog: [{ at: 1_700_000_000_000 }, { kind: "final", at: 1_700_000_060_000 }] });
+    const registry: RpcAgentRegistry = new Map([
+      ["quiet", quiet],
+      ["chatty", chatty],
+    ]);
+    assert.deepEqual(listAgents(registry), [
+      { agent_id: "quiet", status: "dormant" },
+      { agent_id: "chatty", status: "dormant", last_report_at: new Date(1_700_000_060_000).toISOString() },
+    ]);
+  });
+
+  test("260905: status still derives from `streaming`, not the narrower fan-in `running` flag", () => {
+    const record = freshRpcRecord({ agentId: "a", client: {} as RpcClient, streaming: false, running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.deepEqual(listAgents(registry), [{ agent_id: "a", status: "idle" }], "a just-prompted-but-not-yet-started child displays as idle, and is still counted as running by computeRunningStatusLine");
+  });
 });
 
 describe("sendToAgent (live branches only — dormant auto-resume is live-gate only, see module doc comment)", () => {
@@ -1096,6 +1398,7 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
 
     assert.deepEqual(result, { agent_id: "a" });
     assert.deepEqual(calls, [["steer", "interrupt this"]]);
+    assert.equal(record.running, true, "a steer joins the run already in flight — the child is outstanding again");
   });
 
   test("live + streaming + interrupt falsy -> followUp(), never steer/prompt", async () => {
@@ -1107,6 +1410,7 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
 
     assert.deepEqual(result, { agent_id: "a" });
     assert.deepEqual(calls, [["followUp", "queue this"]]);
+    assert.equal(record.running, true);
   });
 
   test("live + idle (streaming:false) -> prompt(), regardless of interrupt", async () => {
@@ -1120,18 +1424,36 @@ describe("sendToAgent (live branches only — dormant auto-resume is live-gate o
     assert.deepEqual(calls, [["prompt", "new message"]], "interrupt must be ignored while idle — nothing is running to interrupt");
   });
 
-  test("REGRESSION (C2 fix): live-idle send clears a stale idlePending latched by the PREVIOUS run before starting the new one", async () => {
+  test("260905: a live send goes through promptAgent — running latches and terminalThisTurn from the PREVIOUS turn is cleared", async () => {
     const { client, calls } = fakeRpcClient();
-    // Simulates: an earlier run already settled (idlePending latched by
-    // applyRpcEvent's agent_settled handler) but nothing has consumed it via
-    // ws-agent-wait yet — then a new send starts a fresh run.
-    const record = freshRpcRecord({ agentId: "a", client, streaming: false, idlePending: true });
+    const record = freshRpcRecord({ agentId: "a", client, streaming: false, terminalThisTurn: true });
     const registry: RpcAgentRegistry = new Map([["a", record]]);
 
-    await sendToAgent(registry, { cwd: "/tmp" }, "a", "follow-up while stale-idle");
+    await sendToAgent(registry, { cwd: "/tmp" }, "a", "next task");
 
-    assert.equal(record.idlePending, false, "idlePending from the PREVIOUS run must be cleared before/at the new prompt() call");
-    assert.deepEqual(calls, [["prompt", "follow-up while stale-idle"]]);
+    assert.equal(record.running, true, "the child counts toward the fan-in from the moment the prompt is issued");
+    assert.equal(record.terminalThisTurn, false, "last turn's terminal report must not suppress this turn's settle push");
+    assert.ok((record.lastLeadPromptAt ?? 0) > 0, "a lead send stamps the watermark reportKindsSinceLeadPrompt filters on");
+    assert.deepEqual(calls, [["prompt", "next task"]]);
+  });
+
+  test("260905: a rejecting live client is treated as an exited child (markAgentExited) and the error still propagates", async () => {
+    const { client } = fakeRpcClient({
+      prompt: async () => {
+        throw new Error("child is gone");
+      },
+    });
+    const record = freshRpcRecord({ agentId: "a", client, streaming: false, running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    const pi = fakePi();
+
+    await assert.rejects(() => sendToAgent(registry, { pi: pi.api, cwd: "/tmp" }, "a", "hi"), /child is gone/);
+
+    assert.equal(record.client, undefined, "the dead child's client is cleared, so the next send takes the resume branch");
+    assert.equal(record.running, false, "a dead child must stop counting toward the fan-in");
+    assert.equal(pi.sent.length, 1);
+    assert.equal(pi.sent[0].message.customType, "ws-agent-settled");
+    assert.equal((pi.sent[0].message.details as { reason?: string }).reason, "exited");
   });
 
   test("unknown agentId throws", async () => {
