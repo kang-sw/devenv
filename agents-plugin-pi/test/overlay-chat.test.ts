@@ -248,11 +248,13 @@ describe("render(width)", () => {
     assert.ok(text.includes("Rebase or merge?"));
   });
 
-  test("the footer names /done and says Esc leaves the thread running", () => {
+  test("the header (not a footer) states the Esc//done hint exactly once, in the header block", () => {
     const h = harness();
     const text = h.component.render(80).join("\n");
-    assert.ok(text.includes(DONE_COMMAND));
-    assert.match(text, /keeps running/);
+    assert.ok(text.includes(`Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`), text);
+    assert.equal((text.match(/Esc/g) ?? []).length, 1, "exactly one line states what Esc does");
+    assert.ok(!text.includes("closes the thread"), "the old footer phrasing is gone");
+    assert.ok(!text.includes("keeps running"), "the old footer phrasing is gone");
   });
 
   test("the registered question is seeded into the transcript", () => {
@@ -293,6 +295,67 @@ describe("render(width)", () => {
     h.component.handleInput("\x00");
     h.type("ok");
     assert.ok(h.component.render(80).join("\n").includes("> ok"));
+  });
+
+  test("the header hint is present exactly once and every line stays width-bounded, at 40/80/120", () => {
+    for (const width of [40, 80, 120]) {
+      const h = harness();
+      const lines = h.component.render(width);
+      const text = lines.join("\n");
+      const occurrences = (text.match(/Esc: close view/g) ?? []).length;
+      assert.equal(occurrences, 1, `width ${width}: hint must appear exactly once, got ${occurrences}`);
+      for (const line of lines) assert.ok(visibleWidth(line) <= width, `width ${width}: line ${JSON.stringify(line)} exceeds it`);
+    }
+  });
+});
+
+describe("working marker (260905: activity while the respondent thinks)", () => {
+  test("shows while the channel reports streaming and the tail is empty", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("the first text delta replaces the marker", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+    h.delta("Merging keeps history.");
+    const text = h.component.render(80).join("\n");
+    assert.ok(!text.includes("working…"), "the marker is replaced once real text streams");
+    assert.ok(text.includes("Merging keeps history."));
+  });
+
+  test("settle clears it once the channel reports not streaming", () => {
+    const h = harness();
+    h.setStreaming(true);
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+    h.settle();
+    h.setStreaming(false);
+    assert.ok(!h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("shows on the very first render when the channel is already streaming (attach-mid-turn / dormant-relaunch — no start event ever reaches the component)", () => {
+    const h = harness({ streaming: true });
+    // No emit()/delta()/settle() call before this render: the channel simply
+    // already reports streaming, which is exactly the attach-mid-turn and
+    // dormant-relaunch shapes — neither ever delivers an `agent_start`-shaped
+    // event to this component.
+    assert.ok(h.component.render(80).join("\n").includes("working…"));
+  });
+
+  test("never appears in the persisted transcript", () => {
+    const h = harness({ question: "Rebase or merge?" });
+    h.setStreaming(true);
+    h.component.invalidate();
+    h.component.render(80);
+    h.delta("Merging keeps history.");
+    h.settle();
+    h.setStreaming(false);
+    h.component.render(80);
+    for (const snapshot of h.transcripts) {
+      for (const entry of snapshot) assert.ok(!entry.text.includes("working…"), JSON.stringify(entry));
+    }
   });
 });
 

@@ -561,18 +561,21 @@ export class OverlayChatComponent {
     for (const line of wrapLine(`ws thread ${this.options.threadId} · ${this.options.title}`, inner)) lines.push(row(line));
     const opened = formatSpawnTime(this.options.createdAt);
     if (opened) for (const line of wrapLine(`  opened ${opened}`, inner)) lines.push(row(line));
+    // Moved here from the footer (260905): the overlay is height-bounded and
+    // caps at 24 transcript rows, so on a short terminal the footer was the
+    // first line pushed out of view — the header is always on screen. Still
+    // deliberately generic about what `/done` does beyond closing: the two
+    // thread origins close differently (review relay #2 C2), and this line is
+    // not the place to explain the difference.
+    for (const line of wrapLine(`Esc: close view (thread stays open) · ${DONE_COMMAND}: end thread`, inner)) {
+      lines.push(row(line, "dim"));
+    }
     lines.push(row(""));
 
     for (const line of this.transcriptRows(inner)) lines.push(row(line.text, undefined, line.ownerBlock));
 
     lines.push(row(""));
     for (const line of wrapLine(`> ${this.input}`, inner)) lines.push(row(line));
-    // Deliberately generic about what `/done` does beyond closing: the two
-    // thread origins close differently (review relay #2 C2), and the footer
-    // is not the place to explain the difference.
-    for (const line of wrapLine(`${DONE_COMMAND} closes the thread · Esc closes this view (the thread keeps running)`, inner)) {
-      lines.push(row(line, "dim"));
-    }
 
     if (boxed) lines.push(fg("border", `╰${"─".repeat(inner + 2)}╯`));
 
@@ -612,6 +615,19 @@ export class OverlayChatComponent {
         }
       }
       rendered.push({ text: "" });
+    }
+    // 260905: the working marker lives ONLY in this render-time slot — it is
+    // never pushed to `this.entries`/`all` above, so it can never reach
+    // `append()`/`onTranscriptChange` and therefore never the persisted
+    // transcript. Read fresh from `channel.isStreaming()` (the registry's
+    // streaming flag, not `agent_start`/`agent_settled` events this component
+    // receives) so it is already correct on the very first `render()` call
+    // for a channel that was already mid-turn when the overlay attached
+    // (fork-raised mid-turn, dormant-relaunch first message) — two paths that
+    // never deliver a start event here. Pushed as a plain row, bypassing
+    // `renderThreadText`/Markdown: "working…" is not thread content.
+    if (this.streaming.trim().length === 0 && this.options.channel.isStreaming()) {
+      rendered.push({ text: "working…" });
     }
     // Tail truncation: the overlay is height-bounded by `overlayOptions`, so
     // the newest turns are the ones that must stay visible.
