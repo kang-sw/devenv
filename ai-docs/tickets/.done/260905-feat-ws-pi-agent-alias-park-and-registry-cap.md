@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5aea625fddd7e749
 sage-review-completeness-reviewed: 5aea625fddd7e749
+completed: 2026-09-05
 ---
 
 # Pi adapter: agent alias and title, park idle children, cap the registry
@@ -214,3 +215,64 @@ N is unchanged, so that is wording only, adjusted when Phase 2 lands.
   aliased workers checking the push heads, that `ws-agent-list` shows them
   dormant after their finals, that `ws-agent-send <alias>` resumes one, and
   that a `/reload` keeps all of them in the list.
+
+### Result (a8566a79) - 2026-09-05
+
+Landed as `c5e6f9e2` (survey plan), `4060bc59` (feature), `e033c56d`
+(guide and spec), `a8566a79` (review relay #1), `b17e56cf` (spec tidy), on
+the implementation branch under the goal branch.
+
+Behavioral delta:
+
+- `ws-agent-spawn` takes optional `alias` and `title`, stores them and the
+  head-truncated (4 KB, marker line) initial `prompt` on the record, and
+  returns `{agent_id, alias?, evicted?}`. `runSpawnGuards` runs the alias
+  guard (overwrite a dormant/idle holder, reject a running or thread-bound
+  one) and the cap guard (`WS_PI_AGENT_REGISTRY_CAP`, default 256, dormant
+  LRU on last send/report, running and thread-bound never evicted) and
+  clears the previous holder's alias only after both pass, so a rejected
+  spawn leaves no trace (review relay #1, Critical).
+- One `resolveAgentId` helper resolves uuid-or-alias for `ws-agent-send`,
+  `ws-agent-stop`, `ws-agent-transcript` and `ws-approve`.
+- Automatic park: the last step of the spawner's settle handling stops a
+  settled record that is neither `threadBound` nor running again, silently
+  (no `ws-agent-settled`), after `flushPendingFinal` and the advisory
+  judgment; the fork nudge runs synchronously ahead of it, so a re-prompted
+  fork is not parked. `stopAgent` now clears live state before its awaits,
+  so a send that lands mid-park takes the dormant-resume branch (relay #1,
+  Important).
+- `computeFanIn` presence keys on any non-thread-bound registry member
+  (dormant included); N is unchanged, and `hasRunningAgents` still counts
+  only running children. Sidecar capture keeps only the `threadBound` skip
+  and persists `alias`/`title`/`prompt`; old-shape entries still revive; the
+  roll-call names `alias (uuid)`. Pushed heads use the same `alias (uuid)`
+  form and the TUI renderer draws it unchanged.
+- `ws-agent-list` rows carry `alias`/`title` when set and the stored prompt
+  under `include_prompt: true`. `pi-lead-guide.md` recommends alias and
+  title on every spawn, explains parking and the cap notice, and no longer
+  claims the status line is absent whenever nothing is running.
+- Tests 694/694 (+46 over the 648 baseline): alias guards and
+  `runSpawnGuards` ordering, cap parsing and eviction order, truncation,
+  resolution on send/stop/transcript, park after settle with the `final`
+  still delivered and the `0 …` line present, no park for thread-bound and
+  nudge-re-prompted records, the mid-park send race, park → resume by alias
+  → transcript holds the parked turn, nudge-path resume of a parked fork,
+  sidecar round-trip for old and new shapes, list rows with and without
+  `include_prompt`, head rendering.
+
+Deferred: the overlay `ForkChannel` resume test is [not fixed] — the
+channel is a one-line delegation into `sendToAgent`'s dormant branch, which
+constructs a real `RpcClient` with no offline substitute; the `ws-agent-send`
+and nudge paths pin the same seam. `ws-approve` alias resolution has no
+dedicated test (two-line delegation to the tested helper). The three-worker
+live run is owner-run.
+
+Review: correctness 1 Critical [fixed, re-review resolved] + 1 Important
+[fixed]; fit 1 Important [fixed] (JSDoc placement); test 1 Important, two of
+its three cases [fixed], the overlay case [not fixed] as above. Minor
+findings recorded in the review files only.
+
+
+## Resolution (2026-09-05)
+
+Phase 1 landed on the goal branch: alias/title on spawn with overwrite-or-reject semantics, alias resolution on every `agent_id` parameter, silent park at idle, registry-keyed status-line presence, sidecar persistence of dormant entries, `ws-agent-list` alias/title/include_prompt, and the 256-entry LRU-capped registry. Owner-run: the three-aliased-worker live run (push heads, dormant after finals, resume by alias, `/reload` keeps the list).
