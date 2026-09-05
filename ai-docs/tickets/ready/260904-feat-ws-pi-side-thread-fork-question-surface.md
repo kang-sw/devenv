@@ -630,3 +630,31 @@ owner-question overlay `Component`, `/answer`/`/thread` shortcuts, and
 `aboveEditor` widget need a live *interactive* TUI (tmux probe on an isolated
 socket) — not exercised by the `--print` non-interactive path used for the gate.
 The fork-mechanism prerequisite is no longer blocking.
+
+### Unblocked (2026-09-05) — Phase 2 is advanceable
+
+Both original gate conditions are now met, and the narrowed TUI-only blocker
+above is met as well:
+
+- **Bleed PoC go/no-go = GO** (Live gate above), reinforced by the §4
+  re-decision: the residual role-bleed seen under an inherited lead-orchestration
+  script is fixed by the structural initial-message frame (`50e685be`),
+  live-verified on both a weak model (gpt-5.6-luna) and a top-frontier model
+  (astra).
+- **Live interactive TUI is available**: the owner has been driving the
+  user-scope-installed adapter in interactive `pi` sessions (not `--print`), so
+  the overlay `Component`, `/answer`/`/thread` shortcuts, and `aboveEditor`
+  widget can be built and exercised against a real TUI.
+
+The selector should **no longer skip** this ticket. Next action: dispatch Phase
+2 (`ws.ask`/`ws.resolve`, thread registry, `aboveEditor` widget, `/answer`/
+`/thread`/reopen, overlay chat, lazy discussion fork at the lead tip with
+`entry_id` anchoring, `/done` → summary → injection). Preconditions the
+implementer must honor: the adapter must stay user-scope installed
+(`pi install <abs path>`) for spawned children to load `ws-report-to-lead`; the
+structural frame applies to **Entry A task threads only** — Entry B discussion
+forks are meant to speak as the lead (§4 "Discussion threads run no loop"), so
+do not wrap their initial message with it. Human-judgment verification items
+(visual polish, IME/CJK candidate placement, cross-emulator quirks) are to be
+packaged as a one-shot owner runbook at closeout, per Phase 2 verification
+item 1.
