@@ -21,9 +21,9 @@
  *     since the lead itself already supplied this exact string as a
  *     tool-call param, already at lead/user-consensus trust per §2) and
  *     handing `{command, output}` to the worker as context. `complex?`
- *     selects the `"complex"` model alias instead of the default `"small"`
- *     one. Returns `{agent_id}` immediately — never awaits worker
- *     completion (fire-and-return, §3).
+ *     inherits the lead's own model (no `model_name` passed) instead of the
+ *     default `"small"` alias. Returns `{agent_id}` immediately — never
+ *     awaits worker completion (fire-and-return, §3).
  *   - `ws-approve`: lead-facing. `{agent_id, cmd_id, decision, reason?,
  *     command?}` -> `approve`/`deny(reason)`/`run-instead(command)`. Race-
  *     binds against the SAME agent's `record.pendingApproval` (`cmd_id`
@@ -158,12 +158,16 @@ export function buildExecuteWorkerPrompt(input: ExecuteWorkerPromptInput): strin
 
 /**
  * Pure model-alias selection for `ws-execute`'s `complex?` param: `true`
- * picks the `"complex"` alias, `false`/omitted picks the existing `"small"`
+ * returns `undefined` (no `model_name` at all), so `spawnAgent`'s existing
+ * inherit-fallback path (`resolveModelForAlias` in spawner.ts) resolves to
+ * the lead's own model instead of reading any catalog alias — `complex:true`
+ * was always meant to inherit the lead's model deliberately, not by
+ * catalog-miss accident. `false`/omitted still picks the existing `"small"`
  * alias (the same key `explore` already resolves through, model-catalog.ts)
  * — zero new curation burden for a user who already set up `small`.
  */
-export function resolveExecuteModelAlias(complex?: boolean): string {
-  return complex ? "complex" : "small";
+export function resolveExecuteModelAlias(complex?: boolean): string | undefined {
+  return complex ? undefined : "small";
 }
 
 export interface PendingApproval {
@@ -541,7 +545,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
     name: EXECUTE_TOOL_NAME,
     label: EXECUTE_TOOL_NAME,
     description:
-      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a general ws-agent-spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true selects a stronger model. Returns {agent_id} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
+      "Spawn an execute-worker to carry out `prompt`; every shell command it runs elevates through a lead-approval gate (see ws-approve) because it proxies lead-consensus-caliber actions, unlike a general ws-agent-spawn worker. Optionally runs `command` verbatim FIRST, in your own trusted context (no gate), and hands its output to the worker. complex:true inherits your own model instead of the default light one. Returns {agent_id} immediately — end your turn afterwards; its approval requests, reports and settles arrive as pushed messages.",
     parameters: {
       type: "object",
       properties: {
@@ -550,7 +554,7 @@ export function registerExecuteGateway(pi: ExtensionAPI, bridge: BridgeHandle, r
           description: "Optional shell command to run verbatim FIRST, in your own trusted process (no approval gate) — its {command, output} is handed to the worker as context.",
         },
         prompt: { type: "string", description: "Task prompt for the spawned execute-worker." },
-        complex: { type: "boolean", description: "true selects the 'complex' model alias instead of the default 'small' alias." },
+        complex: { type: "boolean", description: "true inherits your own model instead of the default 'small' alias." },
       },
       required: ["prompt"],
     } as never,

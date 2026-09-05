@@ -17,6 +17,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   sanitizeToolName,
+  filterOutMercenaryTools,
   withOptionalSessionKey,
   resolveSessionKey,
   normalizeSessionKey,
@@ -83,6 +84,30 @@ describe("sanitizeToolName", () => {
     const sanitized = LIVE_TOOL_NAMES.map(sanitizeToolName);
     const unique = new Set(sanitized);
     assert.equal(unique.size, sanitized.length, "sanitizeToolName produced a name collision over the live tool set");
+  });
+});
+
+describe("filterOutMercenaryTools", () => {
+  test("drops every mercenary.* raw name, keeps the rest in original order", () => {
+    const fixture = [
+      { name: "playbook.print" },
+      { name: "mercenary.register" },
+      { name: "ferrule" },
+      { name: "mercenary.call" },
+      { name: "mercenary.debug.tail" },
+      { name: "tickets.list" },
+    ];
+    const filtered = filterOutMercenaryTools(fixture);
+    assert.deepEqual(
+      filtered.map((tool) => tool.name),
+      ["playbook.print", "ferrule", "tickets.list"],
+    );
+  });
+
+  test("no mercenary.* present: list passes through unchanged", () => {
+    const fixture = [{ name: "playbook.print" }, { name: "ferrule" }, { name: "tickets.list" }];
+    const filtered = filterOutMercenaryTools(fixture);
+    assert.deepEqual(filtered.map((tool) => tool.name), ["playbook.print", "ferrule", "tickets.list"]);
   });
 });
 

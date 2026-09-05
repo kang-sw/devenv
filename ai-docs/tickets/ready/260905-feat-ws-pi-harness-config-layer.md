@@ -176,6 +176,42 @@ so no Pi process — lead or child — can see or call the mercenary surface.
 Record the filter in `pi-adapter-runtime` next to the bridged-tool inventory
 and cover it with a bridge test.
 
+### Result (bfa2cbb6) - 2026-09-05
+
+Landed as `87a9961d` (survey plan), `dbc9e05b` (complex:true inherit),
+`bfa2cbb6` (mercenary filter), on the implementation branch under the goal
+branch.
+
+Behavioral delta:
+
+- `ws-execute complex:true` passes no `model_name`, so the execute worker
+  inherits the lead's model through the spawner's existing inherit path;
+  `complex:false` and omitted stay on `"small"`. The `"complex"` alias is
+  gone from `resolveExecuteModelAlias`, the tool description and parameter
+  schema, `pi-lead-guide.md`, and the `ws-execute` wording in
+  `pi-adapter-runtime` ("the lead's own model when set"). The three Phase 4
+  model-resolution anchors are untouched, as scheduled.
+- The bridge drops every raw tool name starting with `mercenary.` right
+  after `tools/list`, before Pi registration and before `wsToolNames` is
+  built, so neither the lead nor any spawned child sees the mercenary
+  surface regardless of the server-side `workflow.prefer_mercenary` knob.
+  Recorded in `pi-adapter-runtime` next to the bridged-tool inventory.
+- Tests 696/696 (+2): the filter is exercised by a fixture that contains
+  mercenary names (the live 60-tool fixture has none); the execute-gateway
+  tests assert `undefined` for `complex:true` and `"small"` otherwise.
+
+Review (single, full scope): one Important — the two implementation
+commits lacked `## Spec` and `## Ticket Updates` sections — [fixed] by
+rewording the local commits (tree unchanged). No Critical.
+
+## Blocked (2026-09-05)
+
+Phases 2 and 3 are ws-mcp Go changes that land on `develop` through the
+normal ws release flow, and Phase 4 is gated on a released ws that carries
+them. None of the three can advance on the Pi-track goal branch this run
+is draining; the next step is a `develop`-based run (or the owner) picking
+up Phase 2. Phase 1 is complete.
+
 ### Phase 2: `pi` harness bucket end to end
 
 Add `pi` to the harness enum and detection, wire it through `config.tune`
