@@ -255,6 +255,57 @@ playbook tell the lead to read the selector enum from `config.list` before
 proposing a harness value. The playbook change goes through the wsflow
 mirroring check.
 
+### Result (0bd5d65e) - 2026-09-06
+
+Landed as `b2313996` (survey plan), `07e75de3` (Go source and tests),
+`05620b45` (spec), `6ac01f4e` (lead-tune playbook plus regenerated rsrc
+manifest and wsflow mirror), `0bd5d65e` (review relay #1 fixes), `14b60deb`
+(spec: `agents.tier` option set), on the implementation branch under the
+goal branch. Golden-rule exception exercised: `agents-plugin-tool/` changed
+on the Pi track; every change is host-neutral (`pi` added only where
+`codex`/`claude` were already spelled, plus the one `clientInfo.name`
+match the Decisions authorize).
+
+Behavioral delta:
+
+- `initialize` parses `params.clientInfo.name` first; an exact
+  `ws-pi-bridge` yields harness `pi` before the substring detector runs.
+  The substring detector and the `_meta` path are unchanged. The Pi
+  bridge's clientInfo name did **not** need to change (already
+  `ws-pi-bridge`); nothing landed under `agents-plugin-pi/`.
+- `pi` is a member of both `normalizedHarness` copies, `promptHarnessEnum`,
+  the prompt-override listing buckets, `aliasTargetKey`'s error text, the
+  `config.tune` schema description, and the CLI help text. The
+  `agents.tier` harness selector now declares the enum
+  `claude|codex|pi|default`, so `config.list` lists it.
+- `config.tune` lowercases the harness before the enum check, normalizes an
+  empty harness to `default` only when the key's enum contains `default`
+  (so `prompt.*` still rejects an unresolved empty harness), and rejects an
+  unknown value with a message naming that key's full enum.
+- No `internal/wsrsrc` change was needed: `.pi.md` overlay selection and
+  `playbook.render`'s tier resolution were already harness-generic and only
+  needed a detectable `pi`. The terminology table stays Claude/Codex with
+  neutral fallback for `pi`.
+- Tests: full Go module green (`go test ./...`). New coverage: pi detection
+  and its precedence over decoy `claude`/`codex` text; `config.tune`
+  `harness: "pi"` for a prompt override and for `agents.tier`; the
+  `agents.tier` selector enum in both catalog modes; `config.list` showing a
+  pi prompt override; case-insensitive harness acceptance; `prompt.*`
+  empty-harness rejection; pi-keyed tier model when set and default when
+  not; `.pi.md` overlay selected only under `pi`; neutral terminology for
+  `pi`; wsconfig-level pi round trip. Rsrc manifest and wsflow mirror
+  regenerated and drift tests green.
+
+Review (partitioned correctness/fit/test): no Critical. Four Important,
+all [fixed] in relay #1: prompt-override listing buckets lacked `pi`
+(reported by two reviewers); the new enum check was case-sensitive where
+the CLI and `aliasTargetKey` were not; no precedence test; no
+empty-harness `prompt.*` rejection test. Minor findings recorded only.
+
+Forward: Phase 3 builds on the `pi` bucket now resolving through
+`aliasResolutionKeys` (`pi` -> `default` -> ...); the read tool must report
+the answering bucket since no `pi` tier is ever auto-seeded.
+
 ### Phase 3: Tier resolution read tool for adapters
 
 Depends on Phase 2. Expose one MCP read tool (working name

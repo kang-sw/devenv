@@ -920,7 +920,12 @@ backend is omitted, ws infers it from the model family where possible. Empty
 effort, omitted effort, and `none` store the no-override state; supported
 non-empty effort values are visible through configuration output. The update
 applies to the explicit harness when provided, otherwise the detected MCP session
-harness when available, and otherwise the default tier mapping. This makes
+harness when available, and otherwise the default tier mapping. The `harness`
+selector is a closed set, `claude`, `codex`, `pi`, and `default`, which
+`config.list` reports as the selector's options; a value is matched
+case-insensitively, an unknown value is rejected with a message naming that
+key's full option set, and an empty selector with no detected harness lands in
+`default`. This makes
 `backend` mean the execution backend rather than the tier-table key. `agents.tier`
 is not resolver-backed and only writes project scope (an explicit non-project
 `scope:` is rejected). Available in both full and agentless product modes.
@@ -1113,7 +1118,11 @@ by `prompt.<point id>` config keys.
 `config.tune(key: "prompt.<point id>", value: <text>, harness?, scope?,
 session_key)` stores a prompt override keyed by `(point id, harness)`, where
 `harness` is `claude`, `codex`, `pi`, or `*` (the cross-harness `all` bucket; `*` is
-stored under the `all` key). The override text travels in the generic `value`
+stored under the `all` key). The value is matched case-insensitively; an unknown
+value, or an omitted one when no session harness was detected, is rejected with
+a message naming that key's full option set (this key has no `default`
+member, so an unresolved harness is never silently widened to the cross-harness
+bucket). The override text travels in the generic `value`
 argument. The value is written through the layered config scope model
 (`#260619-layered-config-scope-model`) under the key `prompt.<point id>.<harness>`:
 with no `scope`, the write lands in the item's declared default scope (`project`
@@ -2126,7 +2135,7 @@ idiom, model aliases), with structural divergence expressed only through
 per-harness overlay files. The detected-harness set for structural
 `<name>.<harness>.md` overlay selection is `claude`, `codex`, and `pi`
 (`#260508-mcp-payload-harness-detection`); the bundled terminology table
-(`playbookTerminologyTable`) covers Claude and Codex only, and any other
+covers Claude and Codex only, and any other
 detected harness — `pi` included — falls back to the host-neutral
 terminology row rather than getting a dedicated row. Structural overlay
 selection and terminology-table coverage are independent: a harness can
