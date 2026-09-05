@@ -316,13 +316,23 @@ export interface ForkSessionCtx {
 }
 
 /**
- * 260904 Phase 2 seam: fired with `(agentId, message)` the moment a fork's
- * turn ends classified as `"question"` (`classifyForkTurnOutcome`), carrying
- * the `ws-report-to-lead` report's own free-text `message`. `ask.ts` supplies
- * the real behavior (register a thread whose respondent is this live fork,
- * refresh the pending widget); `fork.ts` stays generic and never imports it.
+ * 260904 Phase 2 seam: fired with `(agentId, message)` the moment a fork
+ * enqueues a `kind:"question"` `ws-report-to-lead` report, carrying that
+ * report's own free-text `message`. `ask.ts` supplies the real behavior
+ * (register a thread whose respondent is this live fork, refresh the pending
+ * widget); `fork.ts` stays generic and never imports it.
+ *
+ * Review relay #1 I6: the return value REPLACES the message the lead sees on
+ * that report. In TUI mode `ask.ts` returns a short notice naming the thread
+ * id and telling the lead the owner answers it (§1: the lead is not involved
+ * in a fork-raised question); in headless mode it returns `undefined`, so the
+ * lead relay stays byte-identical to Phase 1 (§8). This is invoked from
+ * `spawner.ts`'s report-enqueue site rather than from `wireAntiBleedLoop`'s
+ * settle handler, because a lead blocked in `ws-agent-wait` wakes at enqueue
+ * time — the thread must already exist (and the message already be rewritten)
+ * before that wake.
  */
-export type ForkQuestionCallback = (agentId: string, message: string) => void;
+export type ForkQuestionCallback = (agentId: string, message: string) => string | undefined;
 
 /**
  * Wires the §4 anti-bleed mechanical loop onto `record.client`'s OWN
@@ -365,28 +375,23 @@ export type ForkQuestionCallback = (agentId: string, message: string) => void;
  * `pi.sendUserMessage` notices to the lead, or a nudge `prompt()` to the
  * fork itself; it never blocks or rewrites the report).
  *
- * 260904 Phase 2: `onQuestion` (optional) fires once per `"question"`-
- * classified turn end, carrying the report's own `message` text — the seam
- * `ask.ts` uses to register a thread whose `respondent` is already this live
- * fork (Entry A meets Entry B). Callback injection, mirroring
- * `RpcSpawnCtx.onApprovalPending`'s existing convention, keeps `fork.ts`
- * generic: it never imports `ask.ts` (see `FORK_EXCLUDED_TOOL_NAMES`'s own
- * cycle note). Omitting it leaves Phase 1 behavior byte-identical.
+ * 260904 Phase 2 (review relay #1 C1): every branch that would nudge the fork
+ * or declare it stalled is suppressed while `record.overlayAttached` is set —
+ * an owner is mid-conversation with this fork in the overlay chat, where a
+ * text-only turn is the NORMAL shape, not §4's bleed signal. Without this the
+ * loop re-prompts the fork mid-discussion (the owner watches a machine nudge
+ * appear in their own conversation) and, one exchange later, steers a false
+ * "this fork stalled — do NOT harvest a result from it" verdict into the
+ * lead. The `"question"`/`"final"` branches need no guard: they already
+ * return early as valid stops.
  */
-export function wireAntiBleedLoop(
-  pi: ExtensionAPI,
-  agentId: string,
-  record: RpcAgentRecord,
-  expectsCommit: boolean,
-  onQuestion?: ForkQuestionCallback,
-): void {
+export function wireAntiBleedLoop(pi: ExtensionAPI, agentId: string, record: RpcAgentRecord, expectsCommit: boolean): void {
   const client = record.client;
   if (!client) return;
 
   let nudgeCount = 0;
   let hadToolCallThisTurn = false;
   let turnReportKind: "question" | "final" | undefined;
-  let turnReportMessage: string | undefined;
 
   client.onEvent((evt) => {
     const e = evt as { type?: string; toolName?: string; args?: unknown };
@@ -394,7 +399,6 @@ export function wireAntiBleedLoop(
     if (e.type === "agent_start") {
       hadToolCallThisTurn = false;
       turnReportKind = undefined;
-      turnReportMessage = undefined;
       return;
     }
 
@@ -404,7 +408,6 @@ export function wireAntiBleedLoop(
         const args = e.args as { kind?: unknown; message?: unknown } | undefined;
         const kind = args?.kind === "question" || args?.kind === "final" ? args.kind : undefined;
         turnReportKind = kind;
-        turnReportMessage = typeof args?.message === "string" ? args.message : undefined;
 
         if (kind === "final" && typeof args?.message === "string") {
           const shape = validateFinalReportShape(args.message);
@@ -434,19 +437,15 @@ export function wireAntiBleedLoop(
 
     if (outcome === "question" || outcome === "final") {
       nudgeCount = 0;
-      if (outcome === "question" && onQuestion) {
-        // 260904 Phase 2: hand the fork-raised question to the owner-question
-        // surface (`ask.ts`), which registers a thread with `respondent`
-        // already set to this live fork. Guarded so a throwing callback can
-        // never take down this event listener (and with it the anti-bleed
-        // loop) — the fork's own Phase 1 behavior must not depend on Phase 2
-        // wiring succeeding.
-        try {
-          onQuestion(agentId, turnReportMessage ?? "");
-        } catch {
-          // best effort — see above.
-        }
-      }
+      return;
+    }
+
+    // 260904 Phase 2 (review relay #1 C1): an owner overlay is attached — a
+    // text-only turn is this thread's normal shape, so neither the nudge nor
+    // the fail-loud path applies. Reset the counter so a later, un-attached
+    // stall is still judged from zero.
+    if (record.overlayAttached) {
+      nudgeCount = 0;
       return;
     }
 
@@ -594,7 +593,14 @@ export function registerFork(
 
       const record = rpcRegistry.get(result.agent_id);
       if (record) {
-        wireAntiBleedLoop(pi, result.agent_id, record, p.expects_commit ?? false, onQuestion);
+        if (onQuestion) {
+          // 260904 Phase 2 (review relay #1 I6): armed at the report-enqueue
+          // site rather than on turn settle, so the thread exists before a
+          // lead blocked in `ws-agent-wait` wakes. The returned string (TUI
+          // only) replaces the lead-visible report message.
+          record.onQuestionReport = (_rec, message) => onQuestion(result.agent_id, message);
+        }
+        wireAntiBleedLoop(pi, result.agent_id, record, p.expects_commit ?? false);
       }
 
       return { content: [{ type: "text", text: JSON.stringify(result) }] };

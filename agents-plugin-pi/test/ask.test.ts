@@ -8,11 +8,17 @@
  * injection texts (asserting Entry A's structural frame is ABSENT), and the
  * dormant-rehydration record shape.
  *
+ * Also covered (review relay #1, test-Important): `registerAsk`'s two tool
+ * `execute()` bodies and `injectDiscussionSummary`, driven against a fake
+ * `pi` + duck-typed `toolCtx` — neither spawns anything (§1 "registers only,
+ * NO spawn"), so both are offline-testable in the `createApprovalRelay` mold
+ * (test/execute-gateway.test.ts).
+ *
  * NOT covered here — genuinely live-gate only, mirroring test/fork.test.ts's
- * own pure/IO split: `registerAsk`'s tool `execute()` bodies,
- * `registerThreadCommands`'s handlers, the lazy discussion-fork spawn and
- * the overlay attach (all need a live `pi` session or a real `RpcClient`).
- * Those are the plan's tmux-probe and owner-runbook tiers.
+ * own pure/IO split: `registerThreadCommands`'s handlers, the lazy
+ * discussion-fork spawn and the overlay attach (all need a live `pi` session
+ * or a real `RpcClient`). Those are the plan's tmux-probe and owner-runbook
+ * tiers.
  *
  * Run with: node --test test/  (from agents-plugin-pi/).
  */
@@ -51,10 +57,16 @@ import {
   rehydrateForkRecord,
   getLeafEntryId,
   handleForkRaisedQuestion,
+  registerAsk,
+  injectDiscussionSummary,
+  checkContextLength,
+  buildForkQuestionLeadNotice,
+  MAX_CONTEXT_CHARS,
   type ThreadRecord,
 } from "../src/ask.ts";
 import { FORK_EXCLUDED_TOOL_NAMES } from "../src/fork.ts";
 import type { RpcAgentRecord, RpcAgentRegistry } from "../src/spawner.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 function thread(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   return {
@@ -519,5 +531,235 @@ describe("handleForkRaisedQuestion (Entry A meets Entry B)", () => {
     hydrateThreadRegistry(handle, path);
     handleForkRaisedQuestion(handle, new Map(), "agent-7", "persisted?");
     assert.equal(loadThreadRegistryFile(path)[0]?.question, "persisted?");
+  });
+});
+
+/**
+ * Review relay #1 (test-Important): `registerAsk`'s two tool bodies and
+ * `injectDiscussionSummary` need no live session — neither spawns anything
+ * (§1: "registers only, NO spawn") — so both are driven here against a fake
+ * `pi` + duck-typed `toolCtx`, exactly the `createApprovalRelay` convention
+ * in test/execute-gateway.test.ts.
+ */
+describe("registerAsk (fake pi)", () => {
+  interface FakeTool {
+    name: string;
+    execute(
+      id: string,
+      params: unknown,
+      signal: unknown,
+      onUpdate: unknown,
+      toolCtx: unknown,
+    ): Promise<{ content: Array<{ type: string; text: string }> }>;
+  }
+
+  function setup() {
+    const tools = new Map<string, FakeTool>();
+    const pi = { registerTool: (t: FakeTool) => tools.set(t.name, t) } as unknown as ExtensionAPI;
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "session.jsonl.ws-threads.json");
+    hydrateThreadRegistry(handle, path);
+    registerAsk(pi, handle);
+    return { tools, handle, path };
+  }
+
+  function uiCtx(mode: string) {
+    const widgets: Array<{ key: string; content: string[] | undefined }> = [];
+    const notices: Array<{ message: string; type?: string }> = [];
+    return {
+      ctx: {
+        mode,
+        ui: {
+          setWidget: (key: string, content: string[] | undefined) => widgets.push({ key, content }),
+          notify: (message: string, type?: string) => notices.push({ message, type }),
+        },
+      },
+      widgets,
+      notices,
+    };
+  }
+
+  async function callAsk(tools: Map<string, FakeTool>, params: unknown, ctx: unknown) {
+    const res = await tools.get(ASK_TOOL_NAME)!.execute("call-1", params, undefined, undefined, ctx);
+    return JSON.parse(res.content[0].text) as { question_id: string };
+  }
+
+  test("registers both tools declaratively (so a fork's exclusion set has them to exclude)", () => {
+    const { tools } = setup();
+    assert.deepEqual([...tools.keys()].sort(), [ASK_TOOL_NAME, RESOLVE_TOOL_NAME].sort());
+  });
+
+  test("tui: returns {question_id}, stores the thread, and refreshes the pending widget", async () => {
+    const { tools, handle } = setup();
+    const ui = uiCtx("tui");
+    const out = await callAsk(tools, { title: "rebase or merge?", question: "Which?", context: "short" }, ui.ctx);
+
+    assert.equal(out.question_id, "q1");
+    const record = handle.threads.get("q1")!;
+    assert.equal(record.title, "rebase or merge?");
+    assert.equal(record.question, "Which?");
+    assert.equal(record.context, "short");
+    assert.equal(record.status, "pending");
+    assert.equal(ui.widgets.length, 1, "§8: the widget is the TUI branch's own signal");
+    assert.equal(ui.widgets[0].key, PENDING_WIDGET_KEY);
+    assert.match(ui.widgets[0].content![0], /1 pending question/);
+    assert.deepEqual(ui.notices, [], "the TUI branch must not also fire the headless notify");
+  });
+
+  test("headless: notifies instead of setting a widget (§8 baseline)", async () => {
+    const { tools } = setup();
+    const ui = uiCtx("print");
+    await callAsk(tools, { title: "rebase or merge?", question: "Which?" }, ui.ctx);
+
+    assert.deepEqual(ui.widgets, [], "no widget outside tui");
+    assert.equal(ui.notices.length, 1);
+    assert.equal(ui.notices[0].type, "info");
+    assert.match(ui.notices[0].message, /q1/);
+  });
+
+  test("wires entryId from toolCtx's own leaf id (§7 anchor)", async () => {
+    const { tools, handle } = setup();
+    const ui = uiCtx("tui");
+    await callAsk(tools, { title: "t", question: "q" }, { ...ui.ctx, sessionManager: { getLeafId: () => "entry-42" } });
+    assert.equal(handle.threads.get("q1")!.entryId, "entry-42");
+  });
+
+  test("§7 bound: an over-long context warns but is stored unchanged", async () => {
+    const { tools, handle } = setup();
+    const ui = uiCtx("tui");
+    const long = "x".repeat(MAX_CONTEXT_CHARS + 1);
+    await callAsk(tools, { title: "t", question: "q", context: long }, ui.ctx);
+
+    assert.equal(handle.threads.get("q1")!.context, long, "the lead's context is never truncated");
+    assert.equal(ui.notices.length, 1);
+    assert.equal(ui.notices[0].type, "warning");
+    assert.match(ui.notices[0].message, new RegExp(String(long.length)));
+  });
+
+  test("a context inside the bound warns about nothing", async () => {
+    const { tools } = setup();
+    const ui = uiCtx("tui");
+    await callAsk(tools, { title: "t", question: "q", context: "x".repeat(MAX_CONTEXT_CHARS) }, ui.ctx);
+    assert.deepEqual(ui.notices, []);
+  });
+
+  test("persists on register, and again on ws-resolve's close transition", async () => {
+    const { tools, handle, path } = setup();
+    const ui = uiCtx("tui");
+    await callAsk(tools, { title: "t", question: "q" }, ui.ctx);
+    assert.equal(loadThreadRegistryFile(path)[0]?.status, "pending", "restart survival: pending is on disk before any answer");
+
+    const res = await tools.get(RESOLVE_TOOL_NAME)!.execute("call-2", { question_id: "q1" }, undefined, undefined, ui.ctx);
+    assert.deepEqual(JSON.parse(res.content[0].text), { question_id: "q1", status: "closed" });
+    assert.equal(handle.threads.get("q1")!.status, "closed");
+    assert.equal(loadThreadRegistryFile(path)[0]?.status, "closed");
+    assert.equal(ui.widgets.at(-1)!.content, undefined, "resolving the last pending question clears the widget");
+  });
+
+  test("ws-resolve throws on an unknown question_id rather than silently closing nothing", async () => {
+    const { tools } = setup();
+    await assert.rejects(
+      () => tools.get(RESOLVE_TOOL_NAME)!.execute("call-2", { question_id: "nope" }, undefined, undefined, uiCtx("tui").ctx),
+      /unknown question_id "nope"/,
+    );
+  });
+});
+
+describe("injectDiscussionSummary (fake pi)", () => {
+  function setup() {
+    const sent: Array<{ message: unknown; options: unknown }> = [];
+    const pi = { sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }) } as unknown as ExtensionAPI;
+    const handle = createThreadRegistryHandle();
+    const dir = mkdtempSync(join(tmpdir(), "ws-pi-ask-test-"));
+    const path = join(dir, "session.jsonl.ws-threads.json");
+    hydrateThreadRegistry(handle, path);
+    const record = thread({ threadId: "q1", question: "Which anchor?", context: "background" });
+    handle.threads.set(record.threadId, record);
+    return { pi, sent, handle, path, record };
+  }
+
+  test("§6: one custom message, delivered via followUp, carrying the thread id", () => {
+    const { pi, sent, handle, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "we take the second anchor");
+
+    assert.equal(sent.length, 1);
+    const msg = sent[0].message as { customType: string; content: string; display: boolean; details: { threadId: string; title: string } };
+    assert.equal(msg.customType, "ws-thread-summary");
+    assert.equal(msg.display, true);
+    assert.equal(msg.details.threadId, "q1");
+    assert.equal(msg.details.title, record.title);
+    assert.ok(msg.content.includes("we take the second anchor"));
+    assert.deepEqual(sent[0].options, { deliverAs: "followUp" }, "never steer — §6 requires the lead's own idle boundary");
+  });
+
+  test("§9: the thread goes dormant (retained, not deleted) and is persisted", () => {
+    const { pi, handle, path, record } = setup();
+    injectDiscussionSummary(pi, handle, new Map(), record, "decided");
+
+    assert.equal(record.status, "dormant");
+    assert.ok(handle.threads.has("q1"), "dormant means retained and reopenable");
+    assert.equal(loadThreadRegistryFile(path)[0]?.status, "dormant");
+  });
+
+  test("I5: snapshots the resume fields BEFORE stopping the respondent, and clears the overlay flag", async () => {
+    const { pi, handle, record } = setup();
+    record.respondentAgentId = "agent-7";
+    let stopped = false;
+    const live = {
+      agentId: "agent-7",
+      sessionPath: "/tmp/s.jsonl",
+      systemPromptPath: "/tmp/p.md",
+      wsToolNames: [],
+      toolGroup: "full-worker",
+      streaming: false,
+      idlePending: false,
+      waiters: [],
+      pendingReports: [],
+      reportsDropped: 0,
+      overlayAttached: true,
+      client: {
+        abort: async () => {},
+        stop: async () => {
+          stopped = true;
+        },
+      },
+    } as unknown as RpcAgentRecord;
+    const registry: RpcAgentRegistry = new Map([["agent-7", live]]);
+
+    injectDiscussionSummary(pi, handle, registry, record, "decided");
+
+    assert.equal(record.forkResume?.sessionPath, "/tmp/s.jsonl", "captured while the record was still live");
+    assert.equal(live.overlayAttached, false);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(stopped, true, "260903 ws-agent-stop semantics: the child process is actually stopped");
+    assert.ok(registry.has("agent-7"), "stopAgent retains the entry — the thread stays rehydratable");
+  });
+
+  test("a respondent missing from the registry does not throw or block the summary", () => {
+    const { pi, sent, handle, record } = setup();
+    record.respondentAgentId = "gone";
+    injectDiscussionSummary(pi, handle, new Map(), record, "decided");
+    assert.equal(sent.length, 1);
+    assert.equal(record.status, "dormant");
+  });
+});
+
+describe("checkContextLength / buildForkQuestionLeadNotice", () => {
+  test("returns undefined at or below the bound, a warning above it", () => {
+    assert.equal(checkContextLength(undefined), undefined);
+    assert.equal(checkContextLength(""), undefined);
+    assert.equal(checkContextLength("x".repeat(MAX_CONTEXT_CHARS)), undefined);
+    const warn = checkContextLength("x".repeat(MAX_CONTEXT_CHARS + 5));
+    assert.ok(warn && warn.includes(String(MAX_CONTEXT_CHARS + 5)) && warn.includes(String(MAX_CONTEXT_CHARS)));
+  });
+
+  test("I6 notice names the thread, the owner channel, and tells the lead to keep waiting", () => {
+    const notice = buildForkQuestionLeadNotice("agent-7", "q3");
+    assert.ok(notice.includes("agent-7"));
+    assert.ok(notice.includes("q3"));
+    assert.match(notice, /\/answer q3/);
+    assert.match(notice, /ws-agent-wait/i);
+    assert.match(notice, /do not relay/i);
   });
 });

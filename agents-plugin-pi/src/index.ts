@@ -128,6 +128,7 @@ import { computeLeadActiveTools, createApprovalRelay, registerExecuteGateway } f
 import { addForkToolIfLead, registerFork } from "./fork.ts";
 import {
   addAskToolsIfLead,
+  buildForkQuestionLeadNotice,
   createThreadRegistryHandle,
   handleForkRaisedQuestion,
   hydrateThreadRegistry,
@@ -229,9 +230,16 @@ export default function wsPiBridgeExtension(pi: ExtensionAPI) {
     // ws-report-to-lead(kind:"question") land in the owner-question registry
     // with `respondent` already set to that live fork (Entry A meets Entry B)
     // — fork.ts stays generic and never imports ask.ts.
-    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, (agentId, message) =>
-      handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message),
-    );
+    //
+    // Review relay #1 I6: its return value replaces what the LEAD sees on that
+    // report. In TUI the owner surface is the only answering channel (§1), so
+    // the lead gets a notice naming the thread and telling it to keep waiting;
+    // in headless there is no owner surface, so `undefined` keeps the Phase 1
+    // relay byte-identical (§8).
+    registerFork(pi, handle, agentTools.rpcRegistry, { cwd: ctx.cwd, modelCatalogPath }, (agentId, message) => {
+      const thread = handleForkRaisedQuestion(threadHandle, agentTools!.rpcRegistry, agentId, message);
+      return threadHandle.ctxRef.current?.mode === "tui" ? buildForkQuestionLeadNotice(agentId, thread.threadId) : undefined;
+    });
 
     // 260904 Phase 2 (owner question surface), same declarative/global
     // registration placement as registerFork above: ws-ask/ws-resolve must

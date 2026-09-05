@@ -44,9 +44,12 @@
  * text are untouched.
  *
  * Pure helpers below are unit-tested directly (`test/ask.test.ts`) with no
- * filesystem/subprocess/live `pi` session; the IO glue (`registerAsk`,
- * `registerThreadCommands`, the spawn/attach path) needs a live session and
- * is covered by the plan's tmux/owner-runbook gates instead.
+ * filesystem/subprocess/live `pi` session, and so are `registerAsk`'s two
+ * tool bodies and `injectDiscussionSummary` (neither spawns anything — a
+ * fake `pi` plus a duck-typed `toolCtx` is enough, the same shape
+ * `createApprovalRelay` is tested in). Only the genuinely live glue
+ * (`registerThreadCommands`, the lazy discussion-fork spawn, the overlay
+ * attach) is left to the plan's tmux/owner-runbook gates.
  */
 
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -58,6 +61,7 @@ import {
   inheritModelFromToolCtx,
   sendToAgent,
   spawnAgent,
+  stopAgent,
   type RpcAgentRecord,
   type RpcAgentRegistry,
   type ToolGroup,
@@ -88,6 +92,42 @@ export const EXCERPT_WINDOW = 4;
 
 /** Per-entry character budget inside a verbatim excerpt — keeps a compacted anchor cheap. */
 export const EXCERPT_ENTRY_CHARS = 400;
+
+/**
+ * §7's "context is bounded" budget for `ws-ask`'s own `context` argument,
+ * expressed the way §7 asks for it: an ADAPTER-side length warning, not a
+ * truncation. The lead's text is always stored unchanged — silently clipping
+ * a question's background would corrupt the very thing the owner needs to
+ * answer it — so an over-budget context only produces a `ctx.ui.notify`
+ * warning naming the overage.
+ */
+export const MAX_CONTEXT_CHARS = 400;
+
+/**
+ * Pure half of the §7 bound: returns the owner-facing warning text when
+ * `context` is over `MAX_CONTEXT_CHARS`, `undefined` otherwise. Never
+ * rewrites the context (see `MAX_CONTEXT_CHARS`).
+ */
+export function checkContextLength(context: string | undefined, limit = MAX_CONTEXT_CHARS): string | undefined {
+  if (!context || context.length <= limit) return undefined;
+  return `ws: question context is ${context.length} chars (over the ${limit}-char guideline) — it is stored in full, but a shorter one is easier for the owner to answer.`;
+}
+
+/**
+ * Review relay #1 I6: what the LEAD sees in place of a fork-raised question's
+ * own report text, in TUI mode only. Ticket §1 keeps the lead out of a
+ * fork-raised question entirely and §8 scopes the lead relay to headless, so
+ * in TUI the owner surface is the only answering channel: the lead is told
+ * the thread id, who answers it, and to keep waiting rather than relay or
+ * answer it itself.
+ */
+export function buildForkQuestionLeadNotice(agentId: string, threadId: string): string {
+  return [
+    `[ws] Agent ${agentId} raised a question for the OWNER, registered as thread ${threadId}.`,
+    "The owner answers it directly in their own discussion overlay (/answer " + threadId + "); you are not part of that exchange.",
+    "Do NOT relay this question, answer it yourself, or ask the owner about it. Keep waiting on this agent (ws-agent-wait) — the decision reaches you as a separate thread-summary message when the owner closes the thread.",
+  ].join("\n");
+}
 
 /**
  * §1 thread record. Plain data only (no `RpcClient`, no captured `ctx`) so
@@ -636,6 +676,13 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle): voi
       persistThreads(handle);
 
       const ctx = toolCtx as AskUiCtx | undefined;
+
+      // §7: the context is bounded by an adapter-side warning, never by
+      // truncation — `record.context` above already stored the lead's text
+      // unchanged.
+      const overage = checkContextLength(p.context);
+      if (overage) notify(ctx, overage, "warning");
+
       if (ctx?.mode === "tui") {
         refreshPendingWidget(ctx, handle);
       } else {
@@ -683,8 +730,22 @@ export function registerAsk(pi: ExtensionAPI, handle: ThreadRegistryHandle): voi
  * is idle and multiple closes queue in order. The lead session is never
  * rewound. The thread itself goes `"dormant"`: retained and reopenable (§9),
  * not deleted.
+ *
+ * Review relay #1 I5: "dormant" is 260903's `ws-agent-stop` semantics —
+ * dormant AND retained — so the respondent's child process is actually
+ * stopped here rather than left running idle for the rest of the lead
+ * session. `stopAgent` keeps the registry entry (it only drops `client`), and
+ * the resume snapshot is captured BEFORE the stop, while the record still
+ * carries its live fields, so `/answer` can rehydrate and `sendToAgent`'s
+ * dormant branch can relaunch from the same `--session` file.
  */
-export function injectDiscussionSummary(pi: ExtensionAPI, handle: ThreadRegistryHandle, thread: ThreadRecord, summary: string): void {
+export function injectDiscussionSummary(
+  pi: ExtensionAPI,
+  handle: ThreadRegistryHandle,
+  rpcRegistry: RpcAgentRegistry,
+  thread: ThreadRecord,
+  summary: string,
+): void {
   pi.sendMessage(
     {
       customType: THREAD_SUMMARY_CUSTOM_TYPE,
@@ -694,6 +755,21 @@ export function injectDiscussionSummary(pi: ExtensionAPI, handle: ThreadRegistry
     },
     { deliverAs: "followUp" },
   );
+
+  const agentId = thread.respondentAgentId;
+  if (agentId) {
+    const record = rpcRegistry.get(agentId);
+    if (record) {
+      record.overlayAttached = false;
+      // Snapshot first: `stopAgent` clears `client`, and a later reopen needs
+      // the session/tool fields this copy carries.
+      thread.forkResume = captureForkResume(record);
+    }
+    // Best effort — a failed stop must not lose the summary the owner just
+    // produced, nor strand the thread in "open".
+    void stopAgent(rpcRegistry, agentId).catch(() => undefined);
+  }
+
   thread.status = "dormant";
   thread.touchedAt = nowIso();
   persistThreads(handle);
@@ -881,18 +957,35 @@ async function openThread(
   activeOverlay = undefined;
   const token = ++overlayToken;
 
-  await openOverlayChat(ctx as never, {
-    title: thread.title,
-    threadId: thread.threadId,
-    question: thread.question,
-    channel: createForkChannel(rpcRegistry, sessionCtx.cwd, agentId),
-    onDone: (summary) => injectDiscussionSummary(pi, handle, thread, summary),
-    onOpened: (close) => {
-      activeOverlay = { token, close };
-    },
-  });
+  // Review relay #1 C1: mark the respondent as owner-attached for as long as
+  // this overlay lives. An Entry-A task fork still runs `wireAntiBleedLoop`
+  // on the same record, and every owner exchange is a text-only turn — §4's
+  // bleed signal — so without this the loop would nudge the fork mid-
+  // conversation and then steer a false "stalled, do not harvest" verdict
+  // into the lead. Read (not imported) by `fork.ts`: the reverse import would
+  // cycle.
+  const attachedRecord = rpcRegistry.get(agentId);
+  if (attachedRecord) attachedRecord.overlayAttached = true;
 
-  if (activeOverlay?.token === token) activeOverlay = undefined;
+  try {
+    await openOverlayChat(ctx as never, {
+      title: thread.title,
+      threadId: thread.threadId,
+      question: thread.question,
+      createdAt: thread.createdAt,
+      channel: createForkChannel(rpcRegistry, sessionCtx.cwd, agentId),
+      onDone: (summary) => injectDiscussionSummary(pi, handle, rpcRegistry, thread, summary),
+      onOpened: (close) => {
+        activeOverlay = { token, close };
+      },
+    });
+  } finally {
+    // Cleared on every exit path — `/done` (which also stops the fork), a
+    // plain close, or a throw out of the overlay.
+    const record = rpcRegistry.get(agentId);
+    if (record) record.overlayAttached = false;
+    if (activeOverlay?.token === token) activeOverlay = undefined;
+  }
 }
 
 /**

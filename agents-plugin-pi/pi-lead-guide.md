@@ -55,5 +55,12 @@ tip at that moment), `/thread` lists pending, open and dormant threads, and
 distinct injected message, not as an owner turn. Never prompt the owner to run
 these; just register the question and carry on.
 
+The same applies when a `ws-fork` you spawned raises a question of its own: in
+an interactive session you receive only a notice naming the thread id, and the
+owner answers that fork directly in their overlay. Do not relay it, do not
+answer it yourself, and do not ask the owner about it — keep waiting on the
+fork (`ws-agent-wait`); the decision reaches you as that thread's summary
+message.
+
 This table grows as later tickets land more primitives — treat any verb not
 listed here as not yet available, not as a naming mismatch to guess around.
