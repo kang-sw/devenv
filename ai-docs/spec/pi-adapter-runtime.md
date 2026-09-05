@@ -461,7 +461,7 @@ mid-turn arrivals one per loop iteration in arrival order, so a fan-out burst
 yields one lead run that sees the messages in order.
 
 **Fan-in stays with the model.** Every push carries a status line
-`N of M spawned agents still running: <ids>`, where M is this process's
+`N of M delegated agents still running`, where M is this process's
 registry members that are neither dormant nor stopped/exited and not
 thread-bound (workers, execute workers, task forks), and N is the subset that is
 running and has not yet sent `final` or `question` this turn. A child blocked on
