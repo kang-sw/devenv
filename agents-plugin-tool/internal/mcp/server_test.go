@@ -1292,6 +1292,85 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 }
 
+// TestServeStdioConfigAgentsTierUsesDetectedPiHarness mirrors
+// TestServeStdioConfigAgentsTierUsesDetectedHarness for the Pi harness: an
+// `initialize` request whose clientInfo.name is exactly "ws-pi-bridge" must
+// be detected via the structured clientInfo check
+// (detectHarnessFromInitializeParams) and used as the config.tune harness
+// default. Unlike the Claude-detection sibling test, this does not exercise
+// mercenary.register: Open Decision #3 keeps mercenary untouched and
+// unreachable from Pi in this phase.
+func TestServeStdioConfigAgentsTierUsesDetectedPiHarness(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"ws-pi-bridge","version":"test"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+
+	out.Reset()
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","value":{"tier":"medium","backend":"pi","model":"pi-model","effort":"medium"}}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
+		t.Fatalf("ServeStdio config returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	configText := toolText(t, byID["2"])
+	if !strings.Contains(configText, `"pi":{"backend":"pi","model":"pi-model","effort":"medium"}`) {
+		t.Fatalf("config response missing pi harness mapping: %s", byID["2"])
+	}
+}
+
+// TestServeStdioConfigAgentsTierAcceptsHarnessCaseInsensitively is a
+// review-relay regression test: before this diff, agents.tier's harness
+// selector had no Enum, so an arbitrary-case value reached
+// wsconfig.aliasTargetKey unchecked, which lowercases before matching. Once
+// this phase gave the selector an explicit Enum, the config.tune guard
+// started exact-matching (case-sensitive) against it, silently narrowing
+// previously-accepted input such as "Claude"/"CODEX"/"Default". The guard
+// must lowercase the trimmed harness before the enum check so this input
+// keeps working, matching wsconfig's and the CLI's case-insensitive
+// behavior.
+func TestServeStdioConfigAgentsTierAcceptsHarnessCaseInsensitively(t *testing.T) {
+	cases := []struct {
+		name      string
+		harness   string
+		bucketKey string
+	}{
+		{"mixed-case-claude", "Claude", "claude"},
+		{"upper-case-codex", "CODEX", "codex"},
+		{"mixed-case-default", "Default", "default"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+			server := NewServer(root, "test")
+			var out bytes.Buffer
+			uniqueModel := "case-test-model-" + tc.bucketKey
+			configInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.tune","arguments":{"key":"agents.tier","harness":%q,"value":{"tier":"medium","backend":"custom-backend","model":%q}}}}`, tc.harness, uniqueModel)
+			if err := server.ServeStdio(context.Background(), strings.NewReader(configInput+"\n"), &out); err != nil {
+				t.Fatalf("ServeStdio config returned error: %v", err)
+			}
+			byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+			resp := byID["2"]
+			if strings.Contains(resp, `"isError":true`) {
+				t.Fatalf("config.tune rejected case-variant harness %q (should accept case-insensitively): %s", tc.harness, resp)
+			}
+			configText := toolText(t, resp)
+			expected := fmt.Sprintf(`"%s":{"backend":"custom-backend","model":%q}`, tc.bucketKey, uniqueModel)
+			if !strings.Contains(configText, expected) {
+				t.Fatalf("expected lowercase bucket key %q with stored mapping in response, got: %s", tc.bucketKey, configText)
+			}
+		})
+	}
+}
+
 // TestServeStdioConfigAgentsTierAcceptsTierSynonyms guards the 260814 config
 // surface swap against a regression: config.tune must NOT enum-validate the
 // agents.tier `tier` up front. The removed config.agents_tier passed the raw
@@ -1626,6 +1705,38 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	status := toolText(t, byID["2"])
 	if !strings.Contains(status, "harness: codex") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.6-terra") {
 		t.Fatalf("status missing codex alias resolution:\n%s", status)
+	}
+}
+
+// TestDetectHarnessFromInitializeParamsPrecedence is a review-relay
+// regression test for the Decision "Harness identity comes from a
+// structured clientInfo parse, not the substring matcher": the structured
+// clientInfo.name == "ws-pi-bridge" check must win even when other fields in
+// the same initialize params blob contain the literal substrings "claude"
+// and "codex" that detectHarnessFromRaw would otherwise match. A future
+// refactor that reorders detectHarnessFromInitializeParams (e.g. tries
+// detectHarnessFromRaw first and only falls back to the structured check on
+// an empty result) would silently violate this precedence while every other
+// test in this suite stays green, since none of them plant a decoy
+// substring alongside the Pi clientInfo name.
+func TestDetectHarnessFromInitializeParamsPrecedence(t *testing.T) {
+	raw := json.RawMessage(`{
+		"clientInfo": {"name": "ws-pi-bridge", "version": "codex-compat-1.0-claude-shim"},
+		"capabilities": {"note": "this client emulates codex and claude tooling"}
+	}`)
+	if got := detectHarnessFromInitializeParams(raw); got != "pi" {
+		t.Fatalf("detectHarnessFromInitializeParams with decoy codex/claude substrings = %q, want \"pi\"", got)
+	}
+
+	// Sanity check: with the structured name removed, the same decoy text
+	// falls through to the substring detector as before (codex wins first in
+	// detectHarnessFromRaw's if/else chain).
+	rawWithoutPiName := json.RawMessage(`{
+		"clientInfo": {"name": "some-other-client", "version": "codex-compat-1.0-claude-shim"},
+		"capabilities": {"note": "this client emulates codex and claude tooling"}
+	}`)
+	if got := detectHarnessFromInitializeParams(rawWithoutPiName); got != "codex" {
+		t.Fatalf("detectHarnessFromInitializeParams fallback without pi clientInfo = %q, want \"codex\" (substring fallback)", got)
 	}
 }
 
