@@ -879,6 +879,30 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, fmt.Sprintf("%s: %s [scope:%s]\n", entry.Key, value, resolvedScope), nil)
 		}
 
+	case "config.resolve_agent":
+		// Read-only tier resolution for adapters (260905 Phase 3): resolves a
+		// fixed tier's {backend, model, effort} under a harness through the
+		// same fallback chain playbook.render/agents.tier use, and reports
+		// which aliasResolutionKeys bucket answered (resolved_from) so a
+		// caller (the Pi adapter) can distinguish a harness-local hit from a
+		// cross-harness fallback. No session_key required — callable early in
+		// an adapter's own resolution path, before a lead session exists.
+		tier, _ := params.Arguments["tier"].(string)
+		harness, _ := params.Arguments["harness"].(string)
+		harness = strings.ToLower(strings.TrimSpace(harness))
+		if harness == "" {
+			harness = s.currentHarness()
+		}
+		backend, model, effort, resolvedFrom, err := wsconfig.ResolveAgentTierForHarness(wsconfig.Options{}, tier, harness)
+		if err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.resolve_agent: %w", err))
+		}
+		result := resolveAgentTierResult{Backend: backend, Model: model, Effort: effort, ResolvedFrom: resolvedFrom}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, nil)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("backend: %s\nmodel: %s\neffort: %s\nresolved_from: %s\n", backend, model, effort, resolvedFrom), nil)
+
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2007,6 +2031,18 @@ func formatConfigView(view wsconfig.View) string {
 type configListView struct {
 	wsconfig.View
 	Knobs []tuningKnob `json:"knobs"`
+}
+
+// resolveAgentTierResult is the config.resolve_agent JSON payload (260905
+// Phase 3): the resolved backend/model/effort for a fixed tier under a
+// harness, plus which alias bucket answered (Open Decisions #2) so a
+// caller (the Pi adapter) can tell a real pi-bucket hit from a
+// cross-harness fallback without re-deriving the resolution chain itself.
+type resolveAgentTierResult struct {
+	Backend      string `json:"backend"`
+	Model        string `json:"model"`
+	Effort       string `json:"effort"`
+	ResolvedFrom string `json:"resolved_from"`
 }
 
 // promptOverrideValue is one resolved override for a declared point: the harness
@@ -3886,6 +3922,19 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms) and for prompt.* keys; also the target session for a session-scope write."),
 				},
 				"required": []string{"key"},
+			},
+		},
+		{
+			"name":        "config.resolve_agent",
+			"description": "Read-only: resolve a fixed agent tier (small, medium, large, or xlarge) to its {backend, model, effort} under a harness, applying the same fallback chain (harness bucket, then default, then codex) agents.tier/playbook.render use. Reports resolved_from — the bucket that actually answered — so a caller can tell a harness-local hit from a cross-harness fallback. harness defaults to the current session's detected harness (or default when none is detected) when omitted. No session_key required.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tier":    stringProperty("Fixed tier to resolve: small, medium, large, or xlarge."),
+					"harness": stringProperty("Optional harness selector (e.g. codex, claude, pi). When omitted, defaults to the current session's detected harness, or default when none is known."),
+					"format":  stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"tier"},
 			},
 		},
 		{

@@ -252,10 +252,12 @@ func configKeyEntryForTool(toolName string) (configKeyEntry, bool) {
 	// mark config.tune lead-only / no-agent-hidden. The tool-name-keyed gating
 	// tables must not resolve an entry for them — authority, no-agent, and
 	// session-key requirements are enforced per resolved key inside config.tune's
-	// dispatch instead. Every other config.* tool name was removed with the ten,
-	// so this function now returns false for every live config.* tool; it is kept
+	// dispatch instead. config.resolve_agent (260905 Phase 3) is the same kind
+	// of generic, non-per-key-writer tool, so it gets the same early return.
+	// Every other config.* tool name was removed with the ten, so this
+	// function now returns false for every live config.* tool; it is kept
 	// because the gating tables still call it for arbitrary tool names.
-	if toolName == "config.list" || toolName == "config.tune" {
+	if toolName == "config.list" || toolName == "config.tune" || toolName == "config.resolve_agent" {
 		return configKeyEntry{}, false
 	}
 	for _, entry := range configRegistry {

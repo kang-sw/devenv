@@ -893,6 +893,17 @@ func TestPlaybookToolsNotNoAgentHidden(t *testing.T) {
 	}
 }
 
+// TestConfigResolveAgentNotNoAgentHidden covers config.resolve_agent's
+// no-agent applicability (260905 Phase 3): like config.list/config.tune, it
+// is a generic tool with no configRegistry entry, so configKeyEntryForTool
+// resolves not-found and noAgentHiddenTool's config.* branch falls through
+// to "not hidden" — the tool stays visible in agentless/wsflow mode.
+func TestConfigResolveAgentNotNoAgentHidden(t *testing.T) {
+	if noAgentHiddenTool("config.resolve_agent") {
+		t.Error("config.resolve_agent is incorrectly hidden in no-agent mode")
+	}
+}
+
 func TestPlaybookToolsVisibleInToolsList(t *testing.T) {
 	listed := map[string]bool{}
 	for _, tool := range tools() {

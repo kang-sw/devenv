@@ -235,7 +235,7 @@ func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness st
 		return "", "", "", err
 	}
 	effort := ""
-	if mapping, ok := resolveAliasMapping(cfg, tier, backend, harness); ok {
+	if mapping, _, ok := resolveAliasMapping(cfg, tier, backend, harness); ok {
 		if useAliasMappingForBackend(backend, mapping) {
 			if model == "" {
 				model = strings.TrimSpace(mapping.Model)
@@ -253,6 +253,36 @@ func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness st
 		backend = "codex"
 	}
 	return backend, model, effort, nil
+}
+
+// ResolveAgentTierForHarness resolves a fixed tier's {backend, model, effort}
+// under a given harness, applying the same alias-resolution fallback chain
+// ResolveAgentForHarnessConfig uses, and reports which aliasResolutionKeys
+// bucket answered (resolvedFrom) so a caller can distinguish a harness-local
+// hit from a cross-harness fallback without re-deriving the chain itself.
+// Unlike ResolveAgentForHarnessConfig (which silently coerces an
+// empty/unrecognized tier to "medium" for its existing callers), this
+// function rejects an unknown tier outright.
+func ResolveAgentTierForHarness(opts Options, tier, harness string) (backend, model, effort, resolvedFrom string, err error) {
+	normalized := normalizedTier(tier)
+	if normalized == "" {
+		return "", "", "", "", fmt.Errorf("tier must be small, medium, large, or xlarge; got %q", tier)
+	}
+	cfg, err := Load(opts)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	mapping, source, ok := resolveAliasMapping(cfg, normalized, "", harness)
+	if !ok {
+		return "", "", "", "", fmt.Errorf("no configuration found for tier %q", normalized)
+	}
+	backend = strings.TrimSpace(mapping.Backend)
+	model = strings.TrimSpace(mapping.Model)
+	effort = strings.TrimSpace(mapping.Effort)
+	if backend == "" {
+		backend = InferBackend(model)
+	}
+	return backend, model, effort, source, nil
 }
 
 func ModelAlias(value string) string {
@@ -365,25 +395,25 @@ func tierOrDefault(tiers map[string]AgentTier, tier string, fallback AgentTier) 
 	return fallback
 }
 
-func resolveAliasMapping(cfg Config, alias, backend, harness string) (AgentTier, bool) {
+func resolveAliasMapping(cfg Config, alias, backend, harness string) (AgentTier, string, bool) {
 	value := alias
 	alias = ModelAlias(value)
 	if alias == "" {
 		alias = normalizedTier(value)
 	}
 	if alias == "" {
-		return AgentTier{}, false
+		return AgentTier{}, "", false
 	}
 	byHarness := cfg.Agents.ModelAliases[alias]
 	for _, key := range aliasResolutionKeys(backend, harness) {
 		if mapping, ok := byHarness[key]; ok {
-			return mapping, true
+			return mapping, key, true
 		}
 	}
 	if mapping, ok := cfg.Agents.Tiers[alias]; ok {
-		return mapping, true
+		return mapping, "tiers", true
 	}
-	return AgentTier{}, false
+	return AgentTier{}, "", false
 }
 
 func aliasResolutionKeys(backend, harness string) []string {
