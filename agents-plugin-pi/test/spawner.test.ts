@@ -918,12 +918,17 @@ describe("hasRunningAgents (goal-loop yield predicate)", () => {
     assert.equal(hasRunningAgents(registry), true);
   });
 
-  test("a dormant record (no client) is false", () => {
+  test("a dormant record (never spawned live, no client) is false", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a" })]]);
     assert.equal(hasRunningAgents(registry), false);
   });
 
-  test("a stopped record (running: false, no client) is false", () => {
+  test("an idle record (live client, settled: running/streaming false, per listAgents's own 'idle' vocabulary) is false", () => {
+    const registry: RpcAgentRegistry = new Map([["a", liveRpcRecord({ agentId: "a", running: false, streaming: false })]]);
+    assert.equal(hasRunningAgents(registry), false);
+  });
+
+  test("a stopped/exited record (previously live, client cleared by clearLiveState) is false", () => {
     const registry: RpcAgentRegistry = new Map([["a", freshRpcRecord({ agentId: "a", running: false })]]);
     assert.equal(hasRunningAgents(registry), false);
   });
@@ -944,6 +949,41 @@ describe("hasRunningAgents (goal-loop yield predicate)", () => {
       ["worker", liveRpcRecord({ agentId: "worker", running: true })],
     ]);
     assert.equal(hasRunningAgents(registry), true);
+  });
+
+  test("Phase 2 ticket case: a child found dead by the probe while yielding ends the yield through its exited push — probeAgentLiveness's getState() rejection clears hasRunningAgents (mirrors computeRunningStatusLine's I3 fan-out chaining through the same computeFanIn walk)", async () => {
+    const client = {
+      getState: async () => {
+        throw new Error("process exited");
+      },
+    } as unknown as RpcClient;
+    const record = liveRpcRecord({ agentId: "a", running: true, client });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.equal(hasRunningAgents(registry), true, "yielding while the child is believed alive and running");
+
+    const alive = await probeAgentLiveness(undefined, registry, record);
+
+    assert.equal(alive, false, "the probe detected the dead child");
+    assert.equal(hasRunningAgents(registry), false, "the probe's exited transition (clearLiveState) ends the yield — the next settle re-fires normally");
+  });
+
+  test("Phase 2 ticket case (registry-state half only): a pushed ws-agent-settled/ws-agent-report's normal completion also clears hasRunningAgents — the offline-expressible part of 'starts the turn that continues the goal'", () => {
+    // NOT FIXED (offline) for the full ticket bullet: Pi actually scheduling a
+    // new turn from pushToLead's `triggerTurn: true` is live-only — nothing in
+    // this suite mocks Pi's own turn scheduler. What IS offline-expressible,
+    // and asserted here, is the registry-state transition the bullet depends
+    // on: once the running child's normal completion clears `running` (the
+    // same `applyRpcEvent("agent_settled")` transition `computeRunningStatusLine`'s
+    // own I3 fan-out test chains through), the lead's NEXT `agent_settled`
+    // sees `hasRunningAgents(registry) === false` and re-fires normally
+    // instead of yielding again.
+    const record = liveRpcRecord({ agentId: "a", running: true });
+    const registry: RpcAgentRegistry = new Map([["a", record]]);
+    assert.equal(hasRunningAgents(registry), true, "yielding while the child is still running");
+
+    applyRpcEvent(record, { type: "agent_settled" });
+
+    assert.equal(hasRunningAgents(registry), false, "the child's own settle clears the fan-in — the lead's next settle re-fires normally");
   });
 });
 

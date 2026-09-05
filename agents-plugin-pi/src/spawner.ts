@@ -934,6 +934,25 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
 }
 
 /**
+ * The shared registry walk behind both `computeRunningStatusLine` (below) and
+ * the goal-loop yield predicate (`hasRunningAgents`, 260905 Phase 2): skips
+ * `threadBound`/no-`client` records, and reports whether anything counts as
+ * "present" (live, non-threadBound) at all plus how many of those are still
+ * `running` and not `terminalThisTurn`. Extracted so the two call sites can
+ * never drift apart in what they count as fan-in.
+ */
+function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolean; running: number } {
+  let present = false;
+  let running = 0;
+  for (const record of registry?.values() ?? []) {
+    if (record.threadBound || !record.client) continue;
+    present = true;
+    if (record.running && !record.terminalThisTurn) running += 1;
+  }
+  return { present, running };
+}
+
+/**
  * The fan-in status line every pushed message carries: `N delegated agents
  * still running`, computed fresh at push time over the shared registry.
  *
@@ -961,25 +980,6 @@ export function shouldPushToLead(env: NodeJS.ProcessEnv = process.env): boolean 
  * delegation fan-in — a `ws-agent-orphaned` roll-call at session start, a
  * `spawn-failed` for the only child — never ends with a contentless zero line.
  */
-/**
- * The shared registry walk behind both `computeRunningStatusLine` (below) and
- * the goal-loop yield predicate (`hasRunningAgents`, 260905 Phase 2): skips
- * `threadBound`/no-`client` records, and reports whether anything counts as
- * "present" (live, non-threadBound) at all plus how many of those are still
- * `running` and not `terminalThisTurn`. Extracted so the two call sites can
- * never drift apart in what they count as fan-in.
- */
-function computeFanIn(registry: RpcAgentRegistry | undefined): { present: boolean; running: number } {
-  let present = false;
-  let running = 0;
-  for (const record of registry?.values() ?? []) {
-    if (record.threadBound || !record.client) continue;
-    present = true;
-    if (record.running && !record.terminalThisTurn) running += 1;
-  }
-  return { present, running };
-}
-
 export function computeRunningStatusLine(registry: RpcAgentRegistry | undefined): string | undefined {
   const { present, running } = computeFanIn(registry);
   if (!present) return undefined;

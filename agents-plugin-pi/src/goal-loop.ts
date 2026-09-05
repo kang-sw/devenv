@@ -433,8 +433,22 @@ export function registerGoalLoop(pi: ExtensionAPI, opts: RegisterGoalLoopOptions
   // Factory scope, registered once — never inside `session_start`, matching
   // this file's own no-duplicate-handlers-across-`/reload` convention (see
   // the `tool_call` listener above).
+  //
+  // Review fix (relay 1, minor): `!state.active` is guarded here because the
+  // status key can only ever have been SET while a goal is active (the
+  // `agent_settled` handler above returns "ignore" before the yield branch
+  // when `!state.active`), so this listener has nothing to clear for the
+  // common case of a session that never armed a goal. Without this guard,
+  // `--mode rpc` would emit one no-op `extension_ui_request` notification per
+  // turn forever on every headless session. Safe against a same-turn
+  // goal-achieved/goal-blocked disarm: `agent_start` fires before any tool
+  // call in its turn, so `state.active` here reflects the state as of the
+  // PREVIOUS turn's settle, and a yield never flips `active` — only a
+  // terminal lever or force-stop does, both of which run inside a turn whose
+  // own `agent_start` already cleared the key on entry.
   pi.on("agent_start", (_event, ctx) => {
     if (isChildProcess(process.env)) return;
+    if (!state.active) return;
     ctx.ui.setStatus(GOAL_LOOP_YIELD_STATUS_KEY, undefined);
   });
 
